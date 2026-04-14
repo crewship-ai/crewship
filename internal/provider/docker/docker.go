@@ -679,15 +679,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"runtime", runtime,
 	)
 
-	// Sanity-check the bind-mounted sidecar on custom base images only.
-	// When the user brings their own image (team.Image set, no CachedImage),
-	// we can't assume glibc/musl compatibility — confirm the binary is
-	// actually reachable inside the container before the agent tries to use it.
-	if team.Image != "" && team.CachedImage == "" {
+	// Sanity-check the bind-mounted sidecar on any BYOI crew (user-provided
+	// base image, with or without a cached derivative). Runs the binary with
+	// --version so an ABI mismatch (musl base vs. glibc sidecar) surfaces as
+	// a clear error instead of a cryptic runtime crash once the agent starts.
+	//
+	// Previously scoped to `team.CachedImage == ""` only, meaning a cached
+	// image originally built from a musl base would silently ship a broken
+	// sidecar. Now fires whenever team.Image is set.
+	if team.Image != "" {
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		execCfg := container.ExecOptions{
-			Cmd:          []string{"ls", "/usr/local/bin/crewship-sidecar"},
+			Cmd:          []string{"/usr/local/bin/crewship-sidecar", "--version"},
 			User:         "0:0",
 			AttachStdout: true,
 			AttachStderr: true,
@@ -703,9 +707,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					}
 					if !inspect.Running {
 						if inspect.ExitCode != 0 {
-							p.logger.Error("bind-mounted sidecar binary not reachable inside custom image — " +
-								"verify the base image has glibc (Alpine/musl is incompatible with the CGO-free Go binary at runtime when the host is glibc)")
-							return "", fmt.Errorf("sidecar bind mount sanity check failed (exit %d) — custom base image %q may be musl-based; use a glibc base (debian, ubuntu, alpine-glibc)", inspect.ExitCode, team.Image)
+							p.logger.Error("sidecar binary incompatible with container libc — " +
+								"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
+							return "", fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", inspect.ExitCode, team.Image)
 						}
 						break
 					}

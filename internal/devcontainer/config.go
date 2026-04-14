@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -232,44 +233,82 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 	return json.Marshal(c.canonicalMap())
 }
 
-// ValidateFeatureRef validates that a feature reference matches the format
-// {registry}/{repo}:{tag}. Both registry and tag are required.
+// ValidateFeatureRef validates that a feature reference is well-formed in
+// either tag form ({registry}/{repo}:{tag}) or digest form
+// ({registry}/{repo}@sha256:{64 hex}).
 func ValidateFeatureRef(ref string) error {
-	_, _, _, err := ParseFeatureRef(ref)
+	_, _, _, _, err := ParseFeatureRef(ref)
 	return err
 }
 
+// sha256HexRe matches the digest body after "sha256:" (exactly 64 hex chars).
+var sha256HexRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 // ParseFeatureRef parses an OCI feature reference into its components.
-// Expected format: {registry}/{repo}:{tag}
-// Example: ghcr.io/devcontainers/features/python:1
-func ParseFeatureRef(ref string) (registry, repo, tag string, err error) {
-	// Must contain at least one "/" and exactly one ":".
+//
+// Accepts two forms:
+//
+//   - Tag form:    {registry}/{repo}:{tag}     → digest = ""
+//     Example:     ghcr.io/devcontainers/features/python:1
+//
+//   - Digest form: {registry}/{repo}@sha256:{64 hex chars}   → tag = ""
+//     Example:     ghcr.io/devcontainers/features/python@sha256:abc...def
+//
+// The registry component is normalized to lowercase (OCI registry names are
+// case-insensitive per distribution spec). The repo and tag/digest parts are
+// preserved case-sensitive.
+//
+// Exactly one of `tag` and `digest` is non-empty for a valid ref.
+func ParseFeatureRef(ref string) (registry, repo, tag, digest string, err error) {
+	// Digest form takes precedence — look for "@sha256:" anchor first.
+	if atIdx := strings.LastIndex(ref, "@"); atIdx >= 0 {
+		path := ref[:atIdx]
+		dig := ref[atIdx+1:]
+		if !strings.HasPrefix(dig, "sha256:") {
+			return "", "", "", "", fmt.Errorf("%w: only sha256 digest form is supported: %q", ErrInvalidFeatureRef, ref)
+		}
+		hex := strings.TrimPrefix(dig, "sha256:")
+		if !sha256HexRe.MatchString(hex) {
+			return "", "", "", "", fmt.Errorf("%w: malformed sha256 digest in %q", ErrInvalidFeatureRef, ref)
+		}
+		registry, repo, err = splitRegistryRepo(path, ref)
+		if err != nil {
+			return "", "", "", "", err
+		}
+		return strings.ToLower(registry), repo, "", dig, nil
+	}
+
+	// Tag form.
 	colonIdx := strings.LastIndex(ref, ":")
 	if colonIdx < 0 {
-		return "", "", "", fmt.Errorf("%w: missing tag in %q", ErrInvalidFeatureRef, ref)
+		return "", "", "", "", fmt.Errorf("%w: missing tag in %q", ErrInvalidFeatureRef, ref)
 	}
-
 	path := ref[:colonIdx]
 	tag = ref[colonIdx+1:]
-
 	if tag == "" {
-		return "", "", "", fmt.Errorf("%w: empty tag in %q", ErrInvalidFeatureRef, ref)
+		return "", "", "", "", fmt.Errorf("%w: empty tag in %q", ErrInvalidFeatureRef, ref)
 	}
 
+	registry, repo, err = splitRegistryRepo(path, ref)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return strings.ToLower(registry), repo, tag, "", nil
+}
+
+// splitRegistryRepo splits "<registry>/<repo>" honouring the first slash.
+func splitRegistryRepo(path, fullRef string) (registry, repo string, err error) {
 	slashIdx := strings.Index(path, "/")
 	if slashIdx < 0 {
-		return "", "", "", fmt.Errorf("%w: missing registry in %q", ErrInvalidFeatureRef, ref)
+		return "", "", fmt.Errorf("%w: missing registry in %q", ErrInvalidFeatureRef, fullRef)
 	}
-
 	registry = path[:slashIdx]
 	repo = path[slashIdx+1:]
-
 	if registry == "" {
-		return "", "", "", fmt.Errorf("%w: empty registry in %q", ErrInvalidFeatureRef, ref)
+		return "", "", fmt.Errorf("%w: empty registry in %q", ErrInvalidFeatureRef, fullRef)
 	}
 	if repo == "" {
-		return "", "", "", fmt.Errorf("%w: empty repo in %q", ErrInvalidFeatureRef, ref)
+		return "", "", fmt.Errorf("%w: empty repo in %q", ErrInvalidFeatureRef, fullRef)
 	}
-
-	return registry, repo, tag, nil
+	return registry, repo, nil
 }

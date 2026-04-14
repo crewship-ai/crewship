@@ -21,7 +21,17 @@ import (
 type FeatureRef struct {
 	Registry string
 	Repo     string
-	Tag      string
+	Tag      string // set for tag form; empty when Digest is set
+	Digest   string // set for digest form (e.g. "sha256:abc..."); empty when Tag is set
+}
+
+// Reference returns the canonical OCI reference string for this FeatureRef.
+// Uses digest form if Digest is set, otherwise tag form.
+func (f FeatureRef) Reference() string {
+	if f.Digest != "" {
+		return f.Registry + "/" + f.Repo + "@" + f.Digest
+	}
+	return f.Registry + "/" + f.Repo + ":" + f.Tag
 }
 
 // ResolvedFeature represents a downloaded and extracted feature ready for use.
@@ -159,10 +169,10 @@ func NewFeatureDownloader(cacheDir string, logger *slog.Logger) *FeatureDownload
 	}
 }
 
-// ToFeatureRef converts the 4-return-value ParseFeatureRef into a FeatureRef
-// struct for convenience.
+// ToFeatureRef converts the 5-return-value ParseFeatureRef into a FeatureRef
+// struct for convenience. Exactly one of Tag / Digest is populated.
 func ToFeatureRef(ref string) (FeatureRef, error) {
-	registry, repo, tag, err := ParseFeatureRef(ref)
+	registry, repo, tag, digest, err := ParseFeatureRef(ref)
 	if err != nil {
 		return FeatureRef{}, err
 	}
@@ -170,6 +180,7 @@ func ToFeatureRef(ref string) (FeatureRef, error) {
 		Registry: registry,
 		Repo:     repo,
 		Tag:      tag,
+		Digest:   digest,
 	}, nil
 }
 
@@ -242,14 +253,15 @@ func (d *FeatureDownloader) resolveFromCache(ref, dir string) (*ResolvedFeature,
 // its first layer (the feature tarball) into destDir. Extraction is atomic:
 // content is written to a temporary directory first, then renamed into place.
 func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error {
-	tag, err := name.NewTag(ref, name.StrictValidation)
+	// ParseReference accepts both tag form (":1") and digest form ("@sha256:...").
+	parsed, err := name.ParseReference(ref, name.StrictValidation)
 	if err != nil {
-		return fmt.Errorf("parsing OCI tag %q: %w", ref, err)
+		return fmt.Errorf("parsing OCI reference %q: %w", ref, err)
 	}
 
 	d.logger.Info("pulling feature", "ref", ref)
 
-	img, err := remote.Image(tag, remote.WithContext(ctx))
+	img, err := remote.Image(parsed, remote.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("fetching image %q: %w", ref, err)
 	}

@@ -167,7 +167,7 @@ func TestValidateInvalidImage(t *testing.T) {
 }
 
 func TestParseFeatureRefValid(t *testing.T) {
-	registry, repo, tag, err := ParseFeatureRef("ghcr.io/devcontainers/features/python:1")
+	registry, repo, tag, digest, err := ParseFeatureRef("ghcr.io/devcontainers/features/python:1")
 	if err != nil {
 		t.Fatalf("ParseFeatureRef: %v", err)
 	}
@@ -180,6 +180,38 @@ func TestParseFeatureRefValid(t *testing.T) {
 	if tag != "1" {
 		t.Errorf("tag = %q, want 1", tag)
 	}
+	if digest != "" {
+		t.Errorf("digest = %q, want empty for tag form", digest)
+	}
+}
+
+func TestParseFeatureRefDigest(t *testing.T) {
+	const sha = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	ref := "ghcr.io/devcontainers/features/python@" + sha
+	registry, repo, tag, digest, err := ParseFeatureRef(ref)
+	if err != nil {
+		t.Fatalf("ParseFeatureRef: %v", err)
+	}
+	if registry != "ghcr.io" || repo != "devcontainers/features/python" {
+		t.Errorf("registry/repo = %q/%q", registry, repo)
+	}
+	if tag != "" {
+		t.Errorf("tag = %q, want empty for digest form", tag)
+	}
+	if digest != sha {
+		t.Errorf("digest = %q, want %q", digest, sha)
+	}
+}
+
+func TestParseFeatureRefCaseInsensitiveRegistry(t *testing.T) {
+	// OCI registry component is case-insensitive; we normalize to lowercase.
+	registry, _, _, _, err := ParseFeatureRef("GHCR.IO/devcontainers/features/python:1")
+	if err != nil {
+		t.Fatalf("ParseFeatureRef: %v", err)
+	}
+	if registry != "ghcr.io" {
+		t.Errorf("registry = %q, want normalized lowercase 'ghcr.io'", registry)
+	}
 }
 
 func TestParseFeatureRefInvalid(t *testing.T) {
@@ -189,9 +221,12 @@ func TestParseFeatureRefInvalid(t *testing.T) {
 		"ghcr.io/python:",  // empty tag
 		"/repo:1",          // empty registry
 		"ghcr.io/:1",       // empty repo
+		"ghcr.io/python@sha256:xyz",                       // non-hex digest body
+		"ghcr.io/python@sha256:abc",                       // too-short digest body
+		"ghcr.io/python@md5:0123456789abcdef0123456789abcd", // wrong algorithm
 	}
 	for _, ref := range cases {
-		_, _, _, err := ParseFeatureRef(ref)
+		_, _, _, _, err := ParseFeatureRef(ref)
 		if !errors.Is(err, ErrInvalidFeatureRef) {
 			t.Errorf("ParseFeatureRef(%q) = %v, want ErrInvalidFeatureRef", ref, err)
 		}

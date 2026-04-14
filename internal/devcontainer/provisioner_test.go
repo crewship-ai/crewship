@@ -2,6 +2,7 @@ package devcontainer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	dockerclient "github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -17,6 +19,8 @@ import (
 type mockCommitClient struct {
 	// Existing images (by RepoTag).
 	existingImages []string
+	// Optional RepoDigests per ref, keyed by the inspected reference.
+	inspectDigests map[string][]string
 
 	// Recorded calls.
 	createdContainers []mockCreateCall
@@ -90,6 +94,15 @@ func (m *mockCommitClient) ImageList(_ context.Context, _ image.ListOptions) ([]
 
 func (m *mockCommitClient) ImagePull(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...dockerclient.ImageInspectOption) (image.InspectResponse, error) {
+	for _, tag := range m.existingImages {
+		if tag == ref {
+			return image.InspectResponse{RepoDigests: m.inspectDigests[ref]}, nil
+		}
+	}
+	return image.InspectResponse{}, errors.New("no such image")
 }
 
 func TestIsCached_Hit(t *testing.T) {

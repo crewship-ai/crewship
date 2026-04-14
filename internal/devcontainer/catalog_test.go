@@ -7,7 +7,7 @@ import (
 
 func TestCatalogRefsAreValid(t *testing.T) {
 	for _, entry := range FallbackCatalog {
-		_, _, _, err := ParseFeatureRef(entry.Ref)
+		_, _, _, _, err := ParseFeatureRef(entry.Ref)
 		if err != nil {
 			t.Errorf("catalog entry %q has invalid ref %q: %v", entry.Name, entry.Ref, err)
 		}

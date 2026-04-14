@@ -11,9 +11,14 @@ import (
 	"sort"
 	"strings"
 
+	dockerclient "github.com/docker/docker/client"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -27,6 +32,7 @@ type CommitClient interface {
 	ContainerCommit(ctx context.Context, containerID string, options container.CommitOptions) (container.CommitResponse, error)
 	ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error)
 	ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
+	ImageInspect(ctx context.Context, imageID string, inspectOpts ...dockerclient.ImageInspectOption) (image.InspectResponse, error)
 }
 
 // Provisioner orchestrates the full devcontainer provisioning flow: create a
@@ -281,23 +287,39 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 }
 
 // createTempContainer creates a temporary container from the base image,
-// configured for provisioning (root user, writable filesystem). If the image
-// is not present locally, it is pulled first.
+// configured for provisioning (root user, writable filesystem).
+//
+// Deliberate asymmetry vs. runtime (EnsureCrewRuntime):
+//   - Provisioning runs as root with mutable rootfs — install.sh scripts must
+//     write to /usr, /etc, /var. The committed image then runs read-only at
+//     runtime.
+//   - ExtraHosts mirrors the runtime HostConfig so features that probe the
+//     host (npm proxy, mise's internal registry lookups, curl-based download
+//     scripts) behave consistently between provision and runtime.
+//
+// If a feature's FeatureMetadata requires ReadonlyRootfs we ignore it for the
+// provisioning phase (contradicts the write-phase goal); the flag is honoured
+// at runtime via AggregatedRequirements instead.
+//
+// Note: do NOT mount /tmp as tmpfs — Docker's CopyToContainer has issues
+// finding paths created via exec inside tmpfs mounts. The container's normal
+// /tmp (union filesystem layer) works correctly with both exec and
+// CopyToContainer.
 func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string) (string, error) {
 	if err := p.ensureImage(ctx, baseImage); err != nil {
 		return "", fmt.Errorf("pull base image %q: %w", baseImage, err)
 	}
-	// Note: do NOT mount /tmp as tmpfs — Docker's CopyToContainer has issues
-	// finding paths created via exec inside tmpfs mounts. The container's
-	// normal /tmp (union filesystem layer) works correctly with both exec
-	// and CopyToContainer.
 	resp, err := p.docker.ContainerCreate(ctx,
 		&container.Config{
 			Image: baseImage,
 			Cmd:   []string{"sleep", "infinity"},
 			User:  "0:0",
 		},
-		&container.HostConfig{},
+		&container.HostConfig{
+			// Parity with runtime — some feature install scripts dial the host
+			// (local registry mirrors, air-gapped package servers).
+			ExtraHosts: []string{"host.docker.internal:host-gateway"},
+		},
 		nil, // networkingConfig
 		nil, // platform
 		"",  // no name (Docker assigns one)
@@ -309,32 +331,88 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 }
 
 
-// ensureImage pulls the given image if it is not already present locally.
-// Uses ImageList to check existence (matches docker.go pattern of avoiding
-// filters that Docker Desktop sometimes blocks).
+// ensureImage makes sure the given image reference is present locally and, if
+// reachable, matches the current remote digest. This replaces the previous
+// "ImageList + tag match" approach which could silently reuse a stale `:latest`
+// tag across hosts with identical configs — breaking reproducibility.
+//
+// Resolution order:
+//  1. HEAD manifest on remote registry (best-effort, ≤imageValidateTimeout).
+//  2. ImageInspect locally for RepoDigests.
+//  3. If both succeed and local RepoDigests contain the remote digest → done.
+//  4. Otherwise (local missing, stale, or offline): attempt ImagePull. An
+//     offline registry with a locally present image is accepted (we trust
+//     the presence); a missing image is an error only if pull fails too.
 func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
-	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
-	if err == nil {
-		for _, img := range imgs {
-			for _, tag := range img.RepoTags {
-				if tag == ref {
-					return nil
-				}
-			}
-		}
+	remoteDigest := p.remoteImageDigest(ctx, ref)
+
+	inspect, inspectErr := p.docker.ImageInspect(ctx, ref)
+	localPresent := inspectErr == nil
+	if localPresent && remoteDigest != "" && repoDigestsContain(inspect.RepoDigests, remoteDigest) {
+		return nil
 	}
-	p.logger.Info("pulling base image", "ref", ref)
+	if localPresent && remoteDigest == "" {
+		// Offline or auth-gated registry; trust local presence.
+		p.logger.Debug("image present locally; skipping pull (remote digest unavailable)", "ref", ref)
+		return nil
+	}
+
+	action := "pulling base image"
+	if localPresent {
+		action = "local image stale, re-pulling"
+	}
+	p.logger.Info(action, "ref", ref, "remote_digest", remoteDigest)
 	rc, err := p.docker.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
+		// If pull fails but image exists locally, proceed with stale copy and
+		// warn. Otherwise surface the error.
+		if localPresent {
+			p.logger.Warn("pull failed; proceeding with local (possibly stale) image", "ref", ref, "error", err)
+			return nil
+		}
 		return err
 	}
 	defer rc.Close()
-	// Drain the pull output stream (Docker requires the stream to be fully
-	// read for the pull to complete).
+	// Docker requires the stream to be fully read for the pull to complete.
 	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return fmt.Errorf("read pull stream: %w", err)
 	}
 	return nil
+}
+
+// remoteImageDigest returns the manifest digest of ref from its registry via
+// HEAD. Best-effort: returns "" on auth errors, parse failures, or timeouts.
+// Reuses the 5-second ceiling already established for ValidateImageExists.
+func (p *Provisioner) remoteImageDigest(ctx context.Context, ref string) string {
+	parsed, err := name.ParseReference(ref)
+	if err != nil {
+		return ""
+	}
+	headCtx, cancel := context.WithTimeout(ctx, imageValidateTimeout)
+	defer cancel()
+	desc, err := remote.Head(parsed,
+		remote.WithContext(headCtx),
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+	)
+	if err != nil {
+		return ""
+	}
+	return desc.Digest.String()
+}
+
+// repoDigestsContain reports whether any entry in repoDigests refers to the
+// given manifest digest. Each repoDigest is formatted as "<repo>@sha256:<hex>".
+func repoDigestsContain(repoDigests []string, digest string) bool {
+	if digest == "" {
+		return false
+	}
+	for _, rd := range repoDigests {
+		at := strings.LastIndex(rd, "@")
+		if at > 0 && rd[at+1:] == digest {
+			return true
+		}
+	}
+	return false
 }
 
 // installFeatures downloads, sorts, and installs all features from the config.
@@ -511,9 +589,32 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 }
 
 // cleanupCaches removes package manager caches and temp files to reduce the
-// committed image size.
+// committed image size. Entries intentionally cover the paths commonly touched
+// by community feature install.sh scripts: apt, npm, pip, and the two tmp
+// directories which many scripts use as scratch space.
+//
+// Uses `2>/dev/null || true` so missing directories on exotic base images do
+// not fail the cleanup step.
 func (p *Provisioner) cleanupCaches(ctx context.Context, containerID string) error {
-	cmd := []string{"bash", "-c", "rm -rf /var/cache/apt /var/lib/apt/lists /tmp/*"}
+	const script = `set -u
+for path in \
+  /var/cache/apt \
+  /var/lib/apt/lists \
+  /var/tmp \
+  /tmp \
+  /root/.cache \
+  /root/.npm \
+  /root/.cargo/registry/cache \
+  /root/.cargo/registry/src \
+  /root/.yarn/cache \
+  /home/agent/.cache/pip \
+  /home/agent/.npm; do
+  rm -rf "$path"/* "$path"/.[!.]* 2>/dev/null || true
+done
+# Keep mountpoints /tmp and /var/tmp themselves; recreate if the rm wiped them.
+mkdir -p /tmp /var/tmp
+chmod 1777 /tmp /var/tmp`
+	cmd := []string{"bash", "-c", script}
 	_, exitCode, err := p.installer.execInContainer(ctx, containerID, cmd, nil)
 	if err != nil {
 		return err
