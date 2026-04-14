@@ -10,7 +10,7 @@ import (
 
 func TestConfigDefaults(t *testing.T) {
 	cfg := Config{
-		RuntimeImage:   "ghcr.io/crewship-ai/agent-runtime:latest",
+		RuntimeImage:   "debian:bookworm-slim",
 		DefaultRuntime: "runc",
 		Network:        "crewship-agents",
 		OutputBasePath: "/var/lib/crewship",

@@ -28,7 +28,7 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_CONTAINER_PROVIDER` | `docker` | Container provider: `docker`, `apple`, `auto`, `k8s` |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge network name |
 | `CREWSHIP_CONTAINER_PREFIX` | (empty) | Container name prefix for multi-instance isolation |
-| `CREWSHIP_RUNTIME_IMAGE` | `ghcr.io/crewship-ai/agent-runtime:latest` | Agent runtime Docker image |
+| `CREWSHIP_RUNTIME_IMAGE` | `debian:bookworm-slim` | Agent runtime Docker image. Any glibc-based Linux image works — Crewship bind-mounts the sidecar and entrypoint at runtime. |
 | `CREWSHIP_SIDECAR_ENABLED` | `false` | Enable sidecar proxy (`true` or `1`) |
 
 <Note>
@@ -140,7 +140,7 @@ CREWSHIP_PORT=8080
 # Container
 CREWSHIP_CONTAINER_PROVIDER=docker
 CREWSHIP_SIDECAR_ENABLED=true
-CREWSHIP_RUNTIME_IMAGE=ghcr.io/crewship-ai/agent-runtime:latest
+CREWSHIP_RUNTIME_IMAGE=debian:bookworm-slim
 
 # Auth
 CREWSHIP_ALLOW_SIGNUP=true

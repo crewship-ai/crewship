@@ -220,29 +220,12 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 // ensureAgentUser creates the 'agent' user (UID 1001) and /home/agent with
 // correct permissions if they don't exist. Safe to run multiple times.
 // Required so mise and postCreateCommand can run as a non-root user.
+// Thin wrapper around the exported EnsureAgentUser helper.
 func (p *Provisioner) ensureAgentUser(ctx context.Context, containerID string) error {
-	// Idempotent shell script: create group+user if missing, ensure /home/agent
-	// exists and is owned by the agent user.
-	script := `set -e
-if ! getent group agent >/dev/null 2>&1; then
-    groupadd -g 1001 agent 2>/dev/null || addgroup --gid 1001 agent 2>/dev/null || true
-fi
-if ! id -u agent >/dev/null 2>&1; then
-    useradd -u 1001 -g 1001 -m -s /bin/bash agent 2>/dev/null || \
-        adduser --uid 1001 --gid 1001 --home /home/agent --shell /bin/bash --disabled-password --gecos "" agent 2>/dev/null || true
-fi
-mkdir -p /home/agent
-chown -R 1001:1001 /home/agent
-chmod 755 /home/agent
-`
-	output, exitCode, err := p.installer.execInContainer(ctx, containerID, []string{"sh", "-c", script}, nil)
-	if err != nil {
-		return fmt.Errorf("exec: %w", err)
+	if err := EnsureAgentUser(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
+		return err
 	}
-	if exitCode != 0 {
-		return fmt.Errorf("exit code %d: %s", exitCode, output)
-	}
-	p.logger.Debug("agent user ensured", "output", output)
+	p.logger.Debug("agent user ensured")
 	return nil
 }
 

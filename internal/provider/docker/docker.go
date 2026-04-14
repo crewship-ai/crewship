@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -374,6 +376,35 @@ func (p *Provider) RemoveCrewVolumes(ctx context.Context, slug string) error {
 	return nil
 }
 
+// dockerExecFunc wraps Docker SDK exec calls for use as devcontainer.ExecFunc.
+// Matches the signature expected by devcontainer.EnsureAgentUser and similar
+// provider-agnostic helpers.
+func (p *Provider) dockerExecFunc(ctx context.Context, containerID string, cmd []string, user string, env []string) (string, int, error) {
+	execCfg := container.ExecOptions{
+		Cmd:          cmd,
+		Env:          env,
+		User:         user,
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	exec, err := p.client.ContainerExecCreate(ctx, containerID, execCfg)
+	if err != nil {
+		return "", -1, fmt.Errorf("exec create: %w", err)
+	}
+	resp, err := p.client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	if err != nil {
+		return "", -1, fmt.Errorf("exec attach: %w", err)
+	}
+	defer resp.Close()
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, resp.Reader)
+	inspect, err := p.client.ContainerExecInspect(ctx, exec.ID)
+	if err != nil {
+		return buf.String(), -1, fmt.Errorf("exec inspect: %w", err)
+	}
+	return buf.String(), inspect.ExitCode, nil
+}
+
 // EnsureCrewRuntime creates or starts a Docker container for the given crew.
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
@@ -623,6 +654,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"container_id", resp.ID[:12],
 		"runtime", runtime,
 	)
+
+	// Ensure UID 1001 agent user exists. Custom/debian/ubuntu base images
+	// don't pre-provision it, and our bind-mounted entrypoint drops to UID
+	// 1001 before starting the agent. Idempotent: safe on provisioned cache
+	// images (which already have the user) and the legacy agent-runtime image.
+	if err := devcontainer.EnsureAgentUser(ctx, resp.ID, p.dockerExecFunc); err != nil {
+		p.logger.Warn("failed to ensure agent user — agent may fail to start",
+			"error", err, "container", resp.ID[:12])
+	}
 
 	// Sanity-check the bind-mounted sidecar on custom base images only.
 	// When the user brings their own image (team.Image set, no CachedImage),

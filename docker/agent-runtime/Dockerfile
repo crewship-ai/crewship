@@ -1,3 +1,10 @@
+# DEPRECATED (2026-04-14): This image is retained for backward compatibility only.
+# Crewship now defaults to `debian:bookworm-slim` as the base image and injects
+# the sidecar + entrypoint via bind mount from the host binary. Users bringing
+# their own custom images are supported out of the box.
+#
+# This image may be removed in a future release.
+#
 # Crewship Agent Runtime
 # Non-root, hardened container for running AI agents.
 # 1 container = 1 crew. Agents share the container via Docker exec.

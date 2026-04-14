@@ -134,7 +134,7 @@ func Default() *Config {
 		},
 		Container: ContainerConfig{
 			Provider:        "docker",
-			RuntimeImage:    "ghcr.io/crewship-ai/agent-runtime:latest",
+			RuntimeImage:    "debian:bookworm-slim",
 			DefaultRuntime:  "runc",
 			Network:         "crewship-agents",
 			DefaultMemoryMB: 512,
