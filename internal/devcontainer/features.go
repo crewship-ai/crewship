@@ -197,10 +197,18 @@ func (d *FeatureDownloader) cachePathFor(ref string) string {
 }
 
 // IsCached reports whether a usable cached copy of the feature exists.
+// Requires BOTH install.sh and devcontainer-feature.json — a partial
+// extraction that's missing metadata would fail later in readMetadata, so we
+// treat it as a cache miss and force a re-download.
 func (d *FeatureDownloader) IsCached(ref string) bool {
 	dir := d.cachePathFor(ref)
-	_, err := os.Stat(filepath.Join(dir, "install.sh"))
-	return err == nil
+	if _, err := os.Stat(filepath.Join(dir, "install.sh")); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "devcontainer-feature.json")); err != nil {
+		return false
+	}
+	return true
 }
 
 // ClearCache removes all cached features.

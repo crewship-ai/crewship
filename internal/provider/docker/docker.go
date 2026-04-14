@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -280,7 +281,9 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	defer reader.Close()
-	_, _ = io.Copy(io.Discard, reader)
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return fmt.Errorf("drain pull stream for %s: %w", ref, err)
+	}
 	p.logger.Info("agent runtime image pulled", "image", ref)
 	return nil
 }
@@ -459,9 +462,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
 					return "", fmt.Errorf("start existing container: %w", err)
 				}
-				// Re-run postStartCommand hooks on every restart — this is the
-				// spec-defined semantics. Warnings are non-fatal.
-				p.runPostStartCommands(ctx, c.ID, team.PostStartCommands)
+				// Note: postStartCommand runs ONCE when the container is
+				// freshly created (see the create-path call below). On warm
+				// restart of a stopped container, the hooks already ran at
+				// create time and the changes were persisted to the container
+				// filesystem — re-running them would cause issues for
+				// non-idempotent commands (e.g. "mysql start" would hit port
+				// conflicts, "mkdir /foo" would fail on EEXIST).
+				//
+				// This is a deliberate deviation from the devcontainer spec's
+				// "run on every start" semantics, but matches what most
+				// template authors actually want. If a future use case needs
+				// ephemeral hooks that re-run on each restart, add a
+				// per-feature opt-in flag rather than flipping this default.
 				return c.ID, nil
 			}
 		}
@@ -609,7 +622,18 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return "", err
 	}
 	// Apply feature-declared mounts (e.g. DinD needs /var/run/docker.sock).
+	// Feature metadata is user-controlled via devcontainer.json, so each
+	// mount source is validated against an allowlist to prevent malicious
+	// features from exposing arbitrary host paths (e.g. "/").
 	for _, m := range team.ExtraMounts {
+		if !devcontainer.IsAllowedMountSource(m.Source) {
+			p.logger.Warn("rejecting feature-declared mount with unsafe source",
+				"crew_id", team.ID,
+				"source", m.Source,
+				"target", m.Target,
+			)
+			continue
+		}
 		mt := mount.TypeBind
 		if strings.EqualFold(m.Type, "volume") {
 			mt = mount.TypeVolume
@@ -740,8 +764,9 @@ func (p *Provider) runPostStartCommands(ctx context.Context, containerID string,
 	}
 	for _, cmd := range cmds {
 		runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		// strict mode — fail loud on first error, matches install.sh behavior.
 		execCfg := container.ExecOptions{
-			Cmd:          []string{"bash", "-lc", cmd},
+			Cmd:          []string{"bash", "-lc", "set -e\n" + cmd},
 			User:         "1001:1001",
 			Env:          []string{"HOME=/home/agent", "USER=agent"},
 			AttachStdout: true,

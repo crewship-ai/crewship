@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -133,7 +134,7 @@ func NewProvisioningHandler(
 		installer := devcontainer.NewInstaller(docker, logger)
 		provisioner = devcontainer.NewProvisioner(docker, installer, featureDL, logger)
 	}
-	return &ProvisioningHandler{
+	h := &ProvisioningHandler{
 		db:             db,
 		logger:         logger,
 		catalogFetcher: catalogFetcher,
@@ -142,6 +143,45 @@ func NewProvisioningHandler(
 		provisioner:    provisioner,
 		jobs:           make(map[string]*ProvisionJob),
 		rateLimiter:    newProvisionRateLimiter(),
+	}
+	// Launch background cleanup so completed/failed jobs don't accumulate
+	// forever. Handler lives for the process lifetime; Background ctx is OK.
+	go h.startJobCleanupRoutine(context.Background())
+	return h
+}
+
+// cleanupOldJobs removes completed/failed jobs older than 1h from the jobs map.
+// Called periodically from the provisioning handler lifetime.
+func (h *ProvisioningHandler) cleanupOldJobs() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := time.Now()
+	const ttl = 1 * time.Hour
+	for crewID, job := range h.jobs {
+		if job.Status != "completed" && job.Status != "failed" {
+			continue
+		}
+		if job.CompletedAt == nil {
+			continue
+		}
+		if now.Sub(*job.CompletedAt) > ttl {
+			delete(h.jobs, crewID)
+		}
+	}
+}
+
+// startJobCleanupRoutine runs cleanupOldJobs every 10 minutes.
+// Shuts down when ctx is cancelled.
+func (h *ProvisioningHandler) startJobCleanupRoutine(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.cleanupOldJobs()
+		}
 	}
 }
 
@@ -345,6 +385,28 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	defer cancel()
 	// Release the rate-limit slot regardless of success/failure.
 	defer h.rateLimiter.release(workspaceID)
+
+	// Panic recovery — mark job as failed and log, don't crash the server.
+	// Registered AFTER rate-limit release so LIFO order runs this first:
+	// job state is updated, then the slot is freed.
+	defer func() {
+		if r := recover(); r != nil {
+			h.mu.Lock()
+			if j, ok := h.jobs[crewID]; ok {
+				j.Status = "failed"
+				j.Error = fmt.Sprintf("internal error: %v", r)
+				now := time.Now()
+				j.CompletedAt = &now
+			}
+			h.mu.Unlock()
+			h.logger.Error("provisioning panicked",
+				"crew_id", crewID,
+				"workspace_id", workspaceID,
+				"panic", r,
+				"stack", string(debug.Stack()),
+			)
+		}
+	}()
 
 	h.mu.Lock()
 	job.Status = "running"

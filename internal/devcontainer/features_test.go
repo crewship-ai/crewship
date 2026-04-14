@@ -111,7 +111,9 @@ func TestIsCached(t *testing.T) {
 		t.Fatal("expected not cached")
 	}
 
-	// Create a fake cache entry.
+	// Create a fake cache entry — IsCached now requires BOTH install.sh AND
+	// devcontainer-feature.json (a partial extraction missing metadata would
+	// fail later in readMetadata, so it's treated as cache miss).
 	cacheDir := d.cachePathFor(ref)
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -120,9 +122,19 @@ func TestIsCached(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Only install.sh → still cache miss (metadata required).
+	if d.IsCached(ref) {
+		t.Fatal("expected cache miss when devcontainer-feature.json missing")
+	}
+
+	// Add the metadata file.
+	if err := os.WriteFile(filepath.Join(cacheDir, "devcontainer-feature.json"), []byte(`{"id":"go","version":"1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// Now it should be cached.
 	if !d.IsCached(ref) {
-		t.Fatal("expected cached after creating install.sh")
+		t.Fatal("expected cached after creating install.sh + devcontainer-feature.json")
 	}
 }
 

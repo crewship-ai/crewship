@@ -392,6 +392,17 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ttlHours = req.ContainerTTLHours
 	}
 
+	// Fail-fast: catch typos like "debian:bogus" before the crew is persisted.
+	// Matches the validation performed on PATCH in Update.
+	if req.RuntimeImage != nil && *req.RuntimeImage != "" {
+		if err := devcontainer.ValidateImageExists(r.Context(), *req.RuntimeImage); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid runtime_image: " + err.Error(),
+			})
+			return
+		}
+	}
+
 	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, runtime_image, devcontainer_config, mise_config, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

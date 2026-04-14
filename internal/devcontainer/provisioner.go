@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	dockerclient "github.com/docker/docker/client"
 
@@ -43,7 +45,21 @@ type Provisioner struct {
 	installer  *Installer
 	downloader *FeatureDownloader
 	logger     *slog.Logger
+
+	// Cache of remote image digests to skip the HEAD request on every
+	// provision. Thread-safe via digestMu; keys are image refs, values include
+	// fetch time for TTL. Per-process (in-memory) — lost on restart, which is
+	// fine: a cold cache simply costs one extra HEAD per base image.
+	digestMu    sync.RWMutex
+	digestCache map[string]digestCacheEntry
 }
+
+type digestCacheEntry struct {
+	digest    string
+	fetchedAt time.Time
+}
+
+const remoteDigestTTL = 24 * time.Hour
 
 // ProvisionResult contains the output of a successful provisioning run.
 type ProvisionResult struct {
@@ -110,10 +126,11 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 		logger = slog.Default()
 	}
 	return &Provisioner{
-		docker:     docker,
-		installer:  installer,
-		downloader: downloader,
-		logger:     logger,
+		docker:      docker,
+		installer:   installer,
+		downloader:  downloader,
+		logger:      logger,
+		digestCache: make(map[string]digestCacheEntry),
 	}
 }
 
@@ -360,7 +377,7 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 //     offline registry with a locally present image is accepted (we trust
 //     the presence); a missing image is an error only if pull fails too.
 func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
-	remoteDigest := p.remoteImageDigest(ctx, ref)
+	remoteDigest := p.getCachedOrFreshDigest(ctx, ref)
 
 	inspect, inspectErr := p.docker.ImageInspect(ctx, ref)
 	localPresent := inspectErr == nil
@@ -394,6 +411,28 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 		return fmt.Errorf("read pull stream: %w", err)
 	}
 	return nil
+}
+
+// getCachedOrFreshDigest returns the cached remote digest for ref if it was
+// fetched within remoteDigestTTL, otherwise triggers a fresh HEAD and caches
+// the result. Empty fresh results are NOT cached — we want the next call to
+// retry transient registry failures.
+func (p *Provisioner) getCachedOrFreshDigest(ctx context.Context, ref string) string {
+	p.digestMu.RLock()
+	entry, ok := p.digestCache[ref]
+	p.digestMu.RUnlock()
+
+	if ok && time.Since(entry.fetchedAt) < remoteDigestTTL {
+		return entry.digest
+	}
+
+	fresh := p.remoteImageDigest(ctx, ref)
+	if fresh != "" {
+		p.digestMu.Lock()
+		p.digestCache[ref] = digestCacheEntry{digest: fresh, fetchedAt: time.Now()}
+		p.digestMu.Unlock()
+	}
+	return fresh
 }
 
 // remoteImageDigest returns the manifest digest of ref from its registry via
@@ -447,18 +486,63 @@ func (p *Provisioner) installFeatures(ctx context.Context, containerID string, c
 	}
 	sort.Strings(refs)
 
-	// Download all features.
-	var resolved []*ResolvedFeature
+	// Download features concurrently (max 3 at once) — conservative semaphore
+	// size balances wall-clock savings against Docker daemon + ghcr.io rate
+	// limits. Preserves deterministic ordering in `resolved` via indexed slice
+	// + WaitGroup; SortFeatures then re-orders by installsAfter dependencies,
+	// so the same input config always produces the same install order.
+	resolved := make([]*ResolvedFeature, len(refs))
 	optionsByRef := make(map[string]map[string]any, len(cfg.Features))
 	for _, ref := range refs {
-		opts := cfg.Features[ref]
-		feature, err := p.downloader.Download(ctx, ref, opts)
-		if err != nil {
-			return nil, fmt.Errorf("downloading feature %s: %w", ref, err)
-		}
-		resolved = append(resolved, feature)
-		optionsByRef[ref] = opts
+		optionsByRef[ref] = cfg.Features[ref]
 	}
+	sem := make(chan struct{}, 3)
+	var wg sync.WaitGroup
+	var downloadErr error
+	var errMu sync.Mutex
+	errCtx, errCancel := context.WithCancel(ctx)
+	defer errCancel()
+
+	for i, ref := range refs {
+		wg.Add(1)
+		go func(idx int, r string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-errCtx.Done():
+				return
+			}
+			defer func() { <-sem }()
+
+			opts := cfg.Features[r]
+			feature, err := p.downloader.Download(errCtx, r, opts)
+			if err != nil {
+				errMu.Lock()
+				if downloadErr == nil {
+					downloadErr = fmt.Errorf("downloading feature %s: %w", r, err)
+					errCancel()
+				}
+				errMu.Unlock()
+				return
+			}
+			resolved[idx] = feature
+		}(i, ref)
+	}
+	wg.Wait()
+
+	if downloadErr != nil {
+		return nil, downloadErr
+	}
+
+	// Filter out any nil entries (shouldn't happen given error handling above,
+	// but defensive in case a goroutine bailed out via errCtx before assigning).
+	nonNil := resolved[:0]
+	for _, f := range resolved {
+		if f != nil {
+			nonNil = append(nonNil, f)
+		}
+	}
+	resolved = nonNil
 
 	// Sort by dependency order.
 	sorted := SortFeatures(resolved)
@@ -486,8 +570,9 @@ func (p *Provisioner) runFeatureLifecycleCommands(ctx context.Context, container
 		for _, cmd := range cmds {
 			p.logger.Info("running feature postCreateCommand",
 				"feature", feature.Metadata.ID, "cmd", cmd)
+			// strict mode — fail loud on first error, matches install.sh behavior.
 			output, exitCode, err := p.installer.execInContainerAsUser(ctx, containerID,
-				[]string{"bash", "-c", cmd},
+				[]string{"bash", "-c", "set -e\n" + cmd},
 				"1001:1001",
 				[]string{"HOME=/home/agent", "USER=agent"},
 			)
@@ -546,8 +631,9 @@ func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID str
 	}
 
 	for _, cmd := range cmds {
+		// strict mode — fail loud on first error, matches install.sh behavior.
 		output, exitCode, err := p.installer.execInContainerAsUser(ctx, containerID,
-			[]string{"bash", "-c", cmd},
+			[]string{"bash", "-c", "set -e\n" + cmd},
 			"1001:1001",
 			[]string{"USER=agent", "HOME=/home/agent"},
 		)
