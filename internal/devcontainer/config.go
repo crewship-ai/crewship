@@ -1,0 +1,237 @@
+package devcontainer
+
+import (
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+)
+
+// Typed errors for validation failures.
+var (
+	ErrEmptyImage       = errors.New("devcontainer: image is required")
+	ErrInvalidImage     = errors.New("devcontainer: invalid image reference")
+	ErrInvalidFeatureRef = errors.New("devcontainer: invalid feature reference")
+)
+
+// Config represents the subset of devcontainer.json that Crewship supports.
+// Unsupported fields (build, dockerfile, forwardPorts, extensions, etc.) are
+// silently ignored during parsing.
+type Config struct {
+	Image             string                       `json:"image"`
+	Features          map[string]map[string]any     `json:"features,omitempty"`
+	PostCreateCommand any                           `json:"postCreateCommand,omitempty"`
+	ContainerEnv      map[string]string             `json:"containerEnv,omitempty"`
+	RemoteUser        string                        `json:"remoteUser,omitempty"`
+}
+
+// Parse reads a devcontainer.json from r and returns a validated Config.
+func Parse(r io.Reader) (*Config, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("devcontainer: reading input: %w", err)
+	}
+	return ParseBytes(data)
+}
+
+// ParseBytes parses a devcontainer.json from raw bytes.
+func ParseBytes(data []byte) (*Config, error) {
+	var raw struct {
+		Image             string                    `json:"image"`
+		Features          map[string]map[string]any `json:"features"`
+		PostCreateCommand json.RawMessage           `json:"postCreateCommand"`
+		ContainerEnv      map[string]string         `json:"containerEnv"`
+		RemoteUser        string                    `json:"remoteUser"`
+	}
+
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("devcontainer: invalid JSON: %w", err)
+	}
+
+	c := &Config{
+		Image:        raw.Image,
+		Features:     raw.Features,
+		ContainerEnv: raw.ContainerEnv,
+		RemoteUser:   raw.RemoteUser,
+	}
+
+	// Parse the polymorphic postCreateCommand field.
+	if len(raw.PostCreateCommand) > 0 && string(raw.PostCreateCommand) != "null" {
+		pcc, err := parsePostCreateCommand(raw.PostCreateCommand)
+		if err != nil {
+			return nil, err
+		}
+		c.PostCreateCommand = pcc
+	}
+
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+
+	return c, nil
+}
+
+// parsePostCreateCommand handles the polymorphic postCreateCommand field.
+// It accepts string, []string, or map[string]string.
+func parsePostCreateCommand(data json.RawMessage) (any, error) {
+	// Try string first.
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		return s, nil
+	}
+
+	// Try []string.
+	var arr []string
+	if err := json.Unmarshal(data, &arr); err == nil {
+		return arr, nil
+	}
+
+	// Try map[string]string.
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err == nil {
+		return m, nil
+	}
+
+	return nil, fmt.Errorf("devcontainer: postCreateCommand must be string, []string, or map[string]string")
+}
+
+// Validate checks that the Config is well-formed.
+func (c *Config) Validate() error {
+	if c.Image == "" {
+		return ErrEmptyImage
+	}
+
+	// Basic image format check: must not contain spaces or control characters.
+	if strings.ContainsAny(c.Image, " \t\n\r") {
+		return fmt.Errorf("%w: %q", ErrInvalidImage, c.Image)
+	}
+
+	for ref := range c.Features {
+		if err := ValidateFeatureRef(ref); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// NormalizedPostCreateCommands returns the postCreateCommand as a flat []string
+// regardless of its original form.
+//
+//   - string → []string{s}
+//   - []string → returned as-is
+//   - map[string]string → values sorted by key, returned as []string
+//   - nil → nil
+func (c *Config) NormalizedPostCreateCommands() []string {
+	if c.PostCreateCommand == nil {
+		return nil
+	}
+
+	switch v := c.PostCreateCommand.(type) {
+	case string:
+		return []string{v}
+	case []string:
+		return v
+	case map[string]string:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		cmds := make([]string, 0, len(v))
+		for _, k := range keys {
+			cmds = append(cmds, v[k])
+		}
+		return cmds
+	default:
+		return nil
+	}
+}
+
+// Hash returns a deterministic SHA-256 hex digest of the config's canonical
+// JSON representation. Keys are sorted to ensure stability.
+func (c *Config) Hash() string {
+	canonical := c.canonicalMap()
+	data, _ := json.Marshal(canonical)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum)
+}
+
+// canonicalMap builds a map with sorted keys suitable for deterministic JSON.
+func (c *Config) canonicalMap() map[string]any {
+	m := map[string]any{
+		"image": c.Image,
+	}
+
+	if c.RemoteUser != "" {
+		m["remoteUser"] = c.RemoteUser
+	}
+
+	if len(c.ContainerEnv) > 0 {
+		// json.Marshal already sorts map[string]string keys.
+		m["containerEnv"] = c.ContainerEnv
+	}
+
+	if len(c.Features) > 0 {
+		// Build sorted features map. json.Marshal sorts string keys in
+		// map[string]any, so we just need to ensure the inner maps use
+		// sortable key types (they do — map[string]any).
+		m["features"] = c.Features
+	}
+
+	if c.PostCreateCommand != nil {
+		m["postCreateCommand"] = c.NormalizedPostCreateCommands()
+	}
+
+	return m
+}
+
+// MarshalJSON implements json.Marshaler for deterministic DB storage.
+func (c *Config) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c.canonicalMap())
+}
+
+// ValidateFeatureRef validates that a feature reference matches the format
+// {registry}/{repo}:{tag}. Both registry and tag are required.
+func ValidateFeatureRef(ref string) error {
+	_, _, _, err := ParseFeatureRef(ref)
+	return err
+}
+
+// ParseFeatureRef parses an OCI feature reference into its components.
+// Expected format: {registry}/{repo}:{tag}
+// Example: ghcr.io/devcontainers/features/python:1
+func ParseFeatureRef(ref string) (registry, repo, tag string, err error) {
+	// Must contain at least one "/" and exactly one ":".
+	colonIdx := strings.LastIndex(ref, ":")
+	if colonIdx < 0 {
+		return "", "", "", fmt.Errorf("%w: missing tag in %q", ErrInvalidFeatureRef, ref)
+	}
+
+	path := ref[:colonIdx]
+	tag = ref[colonIdx+1:]
+
+	if tag == "" {
+		return "", "", "", fmt.Errorf("%w: empty tag in %q", ErrInvalidFeatureRef, ref)
+	}
+
+	slashIdx := strings.Index(path, "/")
+	if slashIdx < 0 {
+		return "", "", "", fmt.Errorf("%w: missing registry in %q", ErrInvalidFeatureRef, ref)
+	}
+
+	registry = path[:slashIdx]
+	repo = path[slashIdx+1:]
+
+	if registry == "" {
+		return "", "", "", fmt.Errorf("%w: empty registry in %q", ErrInvalidFeatureRef, ref)
+	}
+	if repo == "" {
+		return "", "", "", fmt.Errorf("%w: empty repo in %q", ErrInvalidFeatureRef, ref)
+	}
+
+	return registry, repo, tag, nil
+}

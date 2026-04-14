@@ -124,6 +124,11 @@ type crewResponse struct {
 	AllowedDomains    []string          `json:"allowed_domains"`
 	MCPConfigJSON     *string           `json:"mcp_config_json,omitempty"`
 	EscalationConfig  *string           `json:"escalation_config,omitempty"`
+	RuntimeImage      *string           `json:"runtime_image,omitempty"`
+	DevcontainerConfig *string          `json:"devcontainer_config,omitempty"`
+	MiseConfig        *string           `json:"mise_config,omitempty"`
+	CachedImage       *string           `json:"cached_image,omitempty"`
+	ConfigHash        *string           `json:"config_hash,omitempty"`
 	IssuePrefix       *string           `json:"issue_prefix"`
 	CreatedAt         string            `json:"created_at"`
 	UpdatedAt         string            `json:"updated_at"`
@@ -131,33 +136,39 @@ type crewResponse struct {
 }
 
 type createCrewRequest struct {
-	Name              string   `json:"name"`
-	Slug              string   `json:"slug"`
-	Description       *string  `json:"description"`
-	Color             *string  `json:"color"`
-	Icon              *string  `json:"icon"`
-	ContainerMemoryMB *int     `json:"container_memory_mb"`
-	ContainerCPUs     *float64 `json:"container_cpus"`
-	ContainerTTLHours *int     `json:"container_ttl_hours"`
-	NetworkMode       *string  `json:"network_mode"`
-	AllowedDomains    []string `json:"allowed_domains"`
+	Name               string   `json:"name"`
+	Slug               string   `json:"slug"`
+	Description        *string  `json:"description"`
+	Color              *string  `json:"color"`
+	Icon               *string  `json:"icon"`
+	ContainerMemoryMB  *int     `json:"container_memory_mb"`
+	ContainerCPUs      *float64 `json:"container_cpus"`
+	ContainerTTLHours  *int     `json:"container_ttl_hours"`
+	NetworkMode        *string  `json:"network_mode"`
+	AllowedDomains     []string `json:"allowed_domains"`
+	RuntimeImage       *string  `json:"runtime_image"`
+	DevcontainerConfig *string  `json:"devcontainer_config"`
+	MiseConfig         *string  `json:"mise_config"`
 }
 
 type updateCrewRequest struct {
-	Name              *string   `json:"name"`
-	Slug              *string   `json:"slug"`
-	Description       *string   `json:"description"`
-	Color             *string   `json:"color"`
-	Icon              *string   `json:"icon"`
-	AvatarStyle       *string   `json:"avatar_style"`
-	ContainerMemoryMB *int      `json:"container_memory_mb"`
-	ContainerCPUs     *float64  `json:"container_cpus"`
-	ContainerTTLHours *int      `json:"container_ttl_hours"`
-	NetworkMode       *string   `json:"network_mode"`
-	AllowedDomains    *[]string `json:"allowed_domains"`
-	MCPConfigJSON     *string   `json:"mcp_config_json"`
-	EscalationConfig  *string   `json:"escalation_config"`
-	IssuePrefix       *string   `json:"issue_prefix"`
+	Name               *string   `json:"name"`
+	Slug               *string   `json:"slug"`
+	Description        *string   `json:"description"`
+	Color              *string   `json:"color"`
+	Icon               *string   `json:"icon"`
+	AvatarStyle        *string   `json:"avatar_style"`
+	ContainerMemoryMB  *int      `json:"container_memory_mb"`
+	ContainerCPUs      *float64  `json:"container_cpus"`
+	ContainerTTLHours  *int      `json:"container_ttl_hours"`
+	NetworkMode        *string   `json:"network_mode"`
+	AllowedDomains     *[]string `json:"allowed_domains"`
+	MCPConfigJSON      *string   `json:"mcp_config_json"`
+	EscalationConfig   *string   `json:"escalation_config"`
+	IssuePrefix        *string   `json:"issue_prefix"`
+	RuntimeImage       *string   `json:"runtime_image"`
+	DevcontainerConfig *string   `json:"devcontainer_config"`
+	MiseConfig         *string   `json:"mise_config"`
 }
 
 // List returns all non-deleted crews in the workspace with member and agent counts.
@@ -175,6 +186,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
+			c.runtime_image, c.devcontainer_config, c.mise_config, c.cached_image, c.config_hash,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -201,6 +213,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 			&c.MCPConfigJSON, &c.EscalationConfig,
+			&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -357,9 +370,9 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, now, now)
+		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, runtime_image, devcontainer_config, mise_config, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, now, now)
 	if err != nil {
 		h.logger.Error("insert crew", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -367,20 +380,23 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, crewResponse{
-		ID:                crewID,
-		WorkspaceID:       workspaceID,
-		Name:              req.Name,
-		Slug:              req.Slug,
-		Description:       req.Description,
-		Color:             req.Color,
-		Icon:              req.Icon,
-		ContainerMemoryMB: memoryMB,
-		ContainerCPUs:     cpus,
-		ContainerTTLHours: ttlHours,
-		NetworkMode:       networkMode,
-		AllowedDomains:    allowedDomainsOut,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:                 crewID,
+		WorkspaceID:        workspaceID,
+		Name:               req.Name,
+		Slug:               req.Slug,
+		Description:        req.Description,
+		Color:              req.Color,
+		Icon:               req.Icon,
+		ContainerMemoryMB:  memoryMB,
+		ContainerCPUs:      cpus,
+		ContainerTTLHours:  ttlHours,
+		NetworkMode:        networkMode,
+		AllowedDomains:     allowedDomainsOut,
+		RuntimeImage:       req.RuntimeImage,
+		DevcontainerConfig: req.DevcontainerConfig,
+		MiseConfig:         req.MiseConfig,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 
 	h.broadcastCrewEvent("crew.created", workspaceID, map[string]string{
@@ -405,6 +421,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config, c.issue_prefix,
+			c.runtime_image, c.devcontainer_config, c.mise_config, c.cached_image, c.config_hash,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -414,6 +431,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig, &c.IssuePrefix,
+		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -578,6 +596,33 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.Set("escalation_config", *req.EscalationConfig)
 		}
 	}
+	if req.RuntimeImage != nil {
+		if *req.RuntimeImage == "" {
+			ub.Set("runtime_image", nil)
+		} else {
+			ub.Set("runtime_image", *req.RuntimeImage)
+		}
+	}
+	if req.DevcontainerConfig != nil {
+		if *req.DevcontainerConfig == "" {
+			ub.Set("devcontainer_config", nil)
+		} else {
+			ub.Set("devcontainer_config", *req.DevcontainerConfig)
+		}
+		// Invalidate cached image when devcontainer config changes
+		ub.Set("cached_image", nil)
+		ub.Set("config_hash", nil)
+	}
+	if req.MiseConfig != nil {
+		if *req.MiseConfig == "" {
+			ub.Set("mise_config", nil)
+		} else {
+			ub.Set("mise_config", *req.MiseConfig)
+		}
+		// Invalidate cached image when mise config changes
+		ub.Set("cached_image", nil)
+		ub.Set("config_hash", nil)
+	}
 	// Track whether the resolved mode is free — if so, always clear allowed_domains.
 	updatedModeFree := false
 	if req.NetworkMode != nil {
@@ -638,6 +683,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
+			c.runtime_image, c.devcontainer_config, c.mise_config, c.cached_image, c.config_hash,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -647,6 +693,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig,
+		&c.RuntimeImage, &c.DevcontainerConfig, &c.MiseConfig, &c.CachedImage, &c.ConfigHash,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)

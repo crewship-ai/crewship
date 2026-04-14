@@ -437,8 +437,17 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		cpus = 1.0
 	}
 
-	p.logger.Debug("ensuring image", "image", p.cfg.RuntimeImage)
-	if err := p.ensureImage(ctx, p.cfg.RuntimeImage); err != nil {
+	// Image selection chain: CachedImage > Image > default RuntimeImage
+	runtimeImage := p.cfg.RuntimeImage
+	if team.Image != "" {
+		runtimeImage = team.Image
+	}
+	if team.CachedImage != "" {
+		runtimeImage = team.CachedImage
+	}
+
+	p.logger.Debug("ensuring image", "image", runtimeImage)
+	if err := p.ensureImage(ctx, runtimeImage); err != nil {
 		return "", fmt.Errorf("ensure image: %w", err)
 	}
 
@@ -514,10 +523,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	pidsLimit := int64(200)
-	p.logger.Debug("calling ContainerCreate", "image", p.cfg.RuntimeImage, "name", containerName)
+	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
 	resp, err := p.client.ContainerCreate(ctx,
 		&container.Config{
-			Image: p.cfg.RuntimeImage,
+			Image: runtimeImage,
 			User:  "1001:1001",
 			Env: []string{
 				"CREWSHIP_CREW_ID=" + team.ID,
@@ -769,6 +778,11 @@ func (p *Provider) ExecResize(ctx context.Context, execID string, rows, cols uin
 // Docker injects "host.docker.internal" via ExtraHosts in container creation.
 func (p *Provider) HostAddress() string {
 	return "host.docker.internal"
+}
+
+// CopyToContainer copies a tar archive into the container filesystem at dstPath.
+func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error {
+	return p.client.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{})
 }
 
 // Close releases the Docker API client connection.

@@ -3,6 +3,7 @@ package chatbridge
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -169,6 +170,9 @@ func (f *failContainer) ContainerStats(_ context.Context, _ string) (*provider.C
 }
 func (f *failContainer) CrewContainerName(slug string) string {
 	return "crewship-team-" + slug
+}
+func (f *failContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
+	return fmt.Errorf("copy failed: container unavailable")
 }
 
 func testBridgeWithContainer(t *testing.T, resolver ChatResolver, ctr provider.ContainerProvider) *Bridge {

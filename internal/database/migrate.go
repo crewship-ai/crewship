@@ -142,6 +142,13 @@ var migrations = []migration{
 	// the backfill) and don't depend on each other.
 	{version: 44, name: "add_performance_indexes", sql: migrationAddPerformanceIndexes},
 	{version: 45, name: "backfill_legacy_timestamps", fn: migrationBackfillLegacyTimestamps},
+	{version: 46, name: "add_devcontainer_provisioning", sql: `
+ALTER TABLE crews ADD COLUMN runtime_image TEXT;
+ALTER TABLE crews ADD COLUMN devcontainer_config TEXT;
+ALTER TABLE crews ADD COLUMN mise_config TEXT;
+ALTER TABLE crews ADD COLUMN cached_image TEXT;
+ALTER TABLE crews ADD COLUMN config_hash TEXT;
+`},
 }
 
 const migrationAddKeeperObservability = `

@@ -18,6 +18,7 @@ type CrewConfig struct {
 	AllowedDomains []string // domains allowed when NetworkMode is "restricted"
 	TTLHours       int      // auto-stop after idle period; 0 = no TTL
 	Image          string   // custom runtime image; empty = provider default
+	CachedImage    string   // provisioned Docker image tag; empty = use Image or default
 }
 
 // ExecConfig describes a non-interactive command to execute inside a container.
@@ -67,6 +68,8 @@ type ContainerProvider interface {
 	ExecInspect(ctx context.Context, execID string) (bool, int, error)
 	// CrewContainerName returns the container name for a given crew slug.
 	CrewContainerName(slug string) string
+	// CopyToContainer copies a tar archive into the container filesystem at dstPath.
+	CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error
 }
 
 // HostAddressProvider is an optional interface that container providers can
