@@ -280,6 +280,154 @@ func TestReadContainerFile_TrimWhitespace(t *testing.T) {
 	}
 }
 
+// --- CRE-118: Crew shared memory context tests ---
+
+func TestBuildMemoryContext_WithCrewMemory(t *testing.T) {
+	today := time.Now().UTC().Format("2006-01-02")
+
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/agents/lead/.memory/AGENT.md":               "# Agent\nI am the lead.",
+		"/crew/agents/lead/.memory/daily/" + today + ".md": "# Today\nLed planning session.",
+		"/crew/shared/.memory/CREW.md":                     "# Crew\nDeploy via GitHub Actions.",
+		"/crew/shared/.memory/daily/" + today + ".md":      "# Crew Today\nShipped v1.5.",
+	})
+
+	o := New(mc, newMemState(), slog.Default())
+	req := AgentRunRequest{
+		AgentSlug:     "lead",
+		ContainerID:   "c1",
+		MemoryEnabled: true,
+		AgentRole:     "lead",
+		CrewID:        "crew-1",
+	}
+
+	result := o.buildMemoryContext(context.Background(), req, 0)
+
+	// Should contain both agent and crew blocks
+	if !strings.Contains(result, "[AGENT MEMORY]") {
+		t.Error("missing [AGENT MEMORY] block")
+	}
+	if !strings.Contains(result, "I am the lead") {
+		t.Error("missing agent memory content")
+	}
+	if !strings.Contains(result, "[CREW SHARED MEMORY]") {
+		t.Error("missing [CREW SHARED MEMORY] block")
+	}
+	if !strings.Contains(result, "Deploy via GitHub Actions") {
+		t.Error("missing crew memory content")
+	}
+	if !strings.Contains(result, "[MEMORY INSTRUCTIONS]") {
+		t.Error("missing memory instructions")
+	}
+}
+
+func TestBuildMemoryContext_CrewEmpty_FullBudgetToAgent(t *testing.T) {
+	// Big agent memory, no crew memory → agent should get full budget
+	bigAgent := strings.Repeat("Agent knowledge line. ", 400) // ~8400 chars
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/agents/lead/.memory/AGENT.md": bigAgent,
+		// No crew memory files
+	})
+
+	o := New(mc, newMemState(), slog.Default())
+	req := AgentRunRequest{
+		AgentSlug:     "lead",
+		ContainerID:   "c1",
+		MemoryEnabled: true,
+		AgentRole:     "lead",
+		CrewID:        "crew-1",
+	}
+
+	result := o.buildMemoryContext(context.Background(), req, 15000)
+
+	// Agent content should be substantial (not constrained to 60%)
+	if !strings.Contains(result, "[AGENT MEMORY]") {
+		t.Error("missing agent memory block")
+	}
+	// Should NOT have crew memory block when empty
+	if strings.Contains(result, "[CREW SHARED MEMORY]") {
+		t.Error("should not have crew memory block when no crew files exist")
+	}
+}
+
+func TestBuildMemoryContext_CrewCappedAt40Pct(t *testing.T) {
+	// Big crew memory + big agent memory → crew should be capped at 40%
+	bigCrew := strings.Repeat("Crew knowledge shared. ", 600) // ~13800 chars
+	bigAgent := strings.Repeat("Agent personal memory. ", 600)
+
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/agents/lead/.memory/AGENT.md": bigAgent,
+		"/crew/shared/.memory/CREW.md":       bigCrew,
+	})
+
+	o := New(mc, newMemState(), slog.Default())
+	req := AgentRunRequest{
+		AgentSlug:     "lead",
+		ContainerID:   "c1",
+		MemoryEnabled: true,
+		AgentRole:     "lead",
+		CrewID:        "crew-1",
+	}
+
+	budget := 15000
+	result := o.buildMemoryContext(context.Background(), req, budget)
+
+	// Both blocks should exist
+	if !strings.Contains(result, "[AGENT MEMORY]") {
+		t.Error("missing agent memory block")
+	}
+	if !strings.Contains(result, "[CREW SHARED MEMORY]") {
+		t.Error("missing crew memory block")
+	}
+
+	// Extract crew block and check it's capped
+	crewStart := strings.Index(result, "[CREW SHARED MEMORY]")
+	crewEnd := strings.Index(result, "[END CREW SHARED MEMORY]")
+	if crewStart >= 0 && crewEnd > crewStart {
+		crewBlock := result[crewStart:crewEnd]
+		maxCrewChars := budget * 40 / 100
+		if len(crewBlock) > maxCrewChars+200 { // 200 char margin for headers
+			t.Errorf("crew block too large: %d chars (max ~%d)", len(crewBlock), maxCrewChars)
+		}
+	}
+}
+
+func TestBuildMemoryInstructions_MentionsCrewMemory(t *testing.T) {
+	today := time.Now().UTC().Format("2006-01-02")
+	instructions := buildMemoryInstructions(today)
+
+	if !strings.Contains(instructions, "/crew/shared/.memory/") {
+		t.Error("instructions should mention crew shared memory path")
+	}
+	if !strings.Contains(instructions, "CREW") {
+		t.Error("instructions should mention CREW memory")
+	}
+}
+
+func TestBuildMemoryContext_NoCrewForSoloAgent(t *testing.T) {
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/agents/solo/.memory/AGENT.md": "# Solo agent\nI work alone.",
+	})
+
+	o := New(mc, newMemState(), slog.Default())
+	req := AgentRunRequest{
+		AgentSlug:     "solo",
+		ContainerID:   "c1",
+		MemoryEnabled: true,
+		AgentRole:     "agent",
+		CrewID:        "", // no crew
+	}
+
+	result := o.buildMemoryContext(context.Background(), req, 0)
+
+	if !strings.Contains(result, "I work alone") {
+		t.Error("should have agent memory")
+	}
+	if strings.Contains(result, "[CREW SHARED MEMORY]") {
+		t.Error("solo agent (no crew) should not have crew memory block")
+	}
+}
+
 func TestRunAgentWithMemoryEnabled(t *testing.T) {
 	today := time.Now().UTC().Format("2006-01-02")
 

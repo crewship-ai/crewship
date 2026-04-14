@@ -338,6 +338,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				Enabled:   true,
 				BasePath:  path.Join("/crew", "agents", req.AgentSlug, ".memory"),
 				AgentSlug: req.AgentSlug,
+				AgentRole: strings.ToLower(req.AgentRole),
+			}
+			// Lead agents own the crew shared memory FTS5 index
+			if req.CrewID != "" {
+				memoryCfg.CrewMemoryPath = "/crew/shared/.memory"
 			}
 		}
 		// Build IPC config for agents in a crew so the sidecar can forward
