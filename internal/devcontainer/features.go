@@ -38,13 +38,60 @@ type FeatureMetadata struct {
 	Name          string            `json:"name"`
 	Description   string            `json:"description,omitempty"`
 	Options       map[string]any    `json:"options,omitempty"`
-	InstallsAfter []InstallsAfter   `json:"installsAfter,omitempty"`
+	InstallsAfter []string          `json:"installsAfter,omitempty"`
 	ContainerEnv  map[string]string `json:"containerEnv,omitempty"`
 }
 
-// InstallsAfter declares a dependency ordering between features.
+// InstallsAfter is retained for backward compatibility — the canonical
+// type is now []string (per devcontainer spec). Struct-form arrays in the
+// wild are normalized into string IDs at unmarshal time via
+// UnmarshalJSON on FeatureMetadata (see below) if we encounter them.
 type InstallsAfter struct {
 	ID string `json:"id"`
+}
+
+// UnmarshalJSON allows installsAfter to be either []string (spec) or
+// []{id: string} (occasionally seen in the wild).
+func (m *FeatureMetadata) UnmarshalJSON(data []byte) error {
+	type raw struct {
+		ID            string          `json:"id"`
+		Version       string          `json:"version"`
+		Name          string          `json:"name"`
+		Description   string          `json:"description,omitempty"`
+		Options       map[string]any  `json:"options,omitempty"`
+		InstallsAfter json.RawMessage `json:"installsAfter,omitempty"`
+		ContainerEnv  map[string]string `json:"containerEnv,omitempty"`
+	}
+	var r raw
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+	m.ID = r.ID
+	m.Version = r.Version
+	m.Name = r.Name
+	m.Description = r.Description
+	m.Options = r.Options
+	m.ContainerEnv = r.ContainerEnv
+	if len(r.InstallsAfter) > 0 && string(r.InstallsAfter) != "null" {
+		// Try []string first.
+		var strs []string
+		if err := json.Unmarshal(r.InstallsAfter, &strs); err == nil {
+			m.InstallsAfter = strs
+		} else {
+			// Fall back to []{id: string}.
+			var objs []InstallsAfter
+			if err := json.Unmarshal(r.InstallsAfter, &objs); err == nil {
+				m.InstallsAfter = make([]string, 0, len(objs))
+				for _, o := range objs {
+					if o.ID != "" {
+						m.InstallsAfter = append(m.InstallsAfter, o.ID)
+					}
+				}
+			}
+			// If neither form works, silently skip (non-critical field).
+		}
+	}
+	return nil
 }
 
 // FeatureDownloader fetches devcontainer Features from OCI registries and
@@ -304,8 +351,8 @@ func SortFeatures(features []*ResolvedFeature) []*ResolvedFeature {
 	adjList := make([][]int, n)
 
 	for i, f := range features {
-		for _, dep := range f.Metadata.InstallsAfter {
-			if j, ok := idIndex[dep.ID]; ok {
+		for _, depID := range f.Metadata.InstallsAfter {
+			if j, ok := idIndex[depID]; ok {
 				adjList[j] = append(adjList[j], i)
 				inDegree[i]++
 			}

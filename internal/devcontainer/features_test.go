@@ -206,9 +206,9 @@ func TestSortFeatures(t *testing.T) {
 	t.Run("linear dependency chain", func(t *testing.T) {
 		// c depends on b, b depends on a  =>  a, b, c
 		features := []*ResolvedFeature{
-			{Metadata: FeatureMetadata{ID: "c", InstallsAfter: []InstallsAfter{{ID: "b"}}}},
+			{Metadata: FeatureMetadata{ID: "c", InstallsAfter: []string{"b"}}},
 			{Metadata: FeatureMetadata{ID: "a"}},
-			{Metadata: FeatureMetadata{ID: "b", InstallsAfter: []InstallsAfter{{ID: "a"}}}},
+			{Metadata: FeatureMetadata{ID: "b", InstallsAfter: []string{"a"}}},
 		}
 		sorted := SortFeatures(features)
 		ids := featureIDs(sorted)
@@ -220,7 +220,7 @@ func TestSortFeatures(t *testing.T) {
 
 	t.Run("dependency on feature not in set is ignored", func(t *testing.T) {
 		features := []*ResolvedFeature{
-			{Metadata: FeatureMetadata{ID: "b", InstallsAfter: []InstallsAfter{{ID: "external"}}}},
+			{Metadata: FeatureMetadata{ID: "b", InstallsAfter: []string{"external"}}},
 			{Metadata: FeatureMetadata{ID: "a"}},
 		}
 		sorted := SortFeatures(features)
