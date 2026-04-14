@@ -58,7 +58,7 @@ func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 
 	// Store state in DB for CSRF protection (single-use, validated on callback)
 	redirect := r.URL.Query().Get("redirect")
-	if redirect == "" {
+	if !isSafeRedirect(redirect) {
 		redirect = "/"
 	}
 	_, err := h.db.ExecContext(r.Context(),
@@ -183,9 +183,9 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   30 * 24 * 60 * 60,
 	})
 
-	// Redirect to dashboard
+	// Redirect to dashboard (validate again as defense-in-depth)
 	target := "/"
-	if redirectURI != "" {
+	if redirectURI != "" && isSafeRedirect(redirectURI) {
 		target = redirectURI
 	}
 	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
