@@ -50,7 +50,9 @@ EOF
 ```bash
 git fetch origin
 git checkout chore/overnight-maintenance 2>/dev/null || git checkout -b chore/overnight-maintenance
-git pull origin chore/overnight-maintenance 2>/dev/null || true
+if git ls-remote --exit-code --heads origin chore/overnight-maintenance >/dev/null 2>&1; then
+  git pull --ff-only origin chore/overnight-maintenance
+fi
 ```
 
 ### 2. Read the checklist
