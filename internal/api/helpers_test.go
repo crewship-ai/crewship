@@ -3,6 +3,8 @@ package api
 import (
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 // TestParsePagination_Clamping is a regression for a CodeRabbit finding on
@@ -37,6 +39,33 @@ func TestParsePagination_Clamping(t *testing.T) {
 			if gotOffset != tc.wantOffset {
 				t.Errorf("offset = %d, want %d", gotOffset, tc.wantOffset)
 			}
+		})
+	}
+}
+
+func TestIsSafeRedirect(t *testing.T) {
+	tests := []struct {
+		input string
+		safe  bool
+	}{
+		{"/", true},
+		{"/dashboard", true},
+		{"/settings?tab=profile", true},
+		{"/path/to/page#anchor", true},
+		{"", false},
+		{"https://evil.com", false},
+		{"http://evil.com", false},
+		{"//evil.com", false},
+		{"//evil.com/path", false},
+		{`/foo\bar`, false},
+		{`\/evil.com`, false},
+		{"ftp://evil.com", false},
+		{"javascript:alert(1)", false},
+		{"relative/path", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.safe, isSafeRedirect(tt.input))
 		})
 	}
 }

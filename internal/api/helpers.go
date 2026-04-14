@@ -34,6 +34,28 @@ func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
 	hub.BroadcastWorkspace(wsID, eventType, payload)
 }
 
+// isSafeRedirect validates that a redirect target is a relative path on the
+// same origin. It rejects empty strings, absolute URLs, protocol-relative
+// URLs (//evil.com), and paths with backslashes to prevent open redirects.
+func isSafeRedirect(target string) bool {
+	if target == "" {
+		return false
+	}
+	// Must start with "/" (relative path)
+	if !strings.HasPrefix(target, "/") {
+		return false
+	}
+	// Reject protocol-relative URLs like "//evil.com"
+	if strings.HasPrefix(target, "//") {
+		return false
+	}
+	// Reject backslash tricks (some browsers normalize "\/")
+	if strings.Contains(target, "\\") {
+		return false
+	}
+	return true
+}
+
 // parsePagination reads "limit" and "offset" query params, clamping limit to
 // [1, maxLimit] with the given default, and offset to >= 0.
 //
