@@ -4,14 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
+
+// version is overridden at build time via ldflags (-X main.version=...).
+// Defaults to "dev" for local builds.
+var version = "dev"
 
 // sidecarInput is the JSON payload piped via stdin from the orchestrator.
 // It carries credentials, optional memory configuration, and IPC config for assignment routing.
@@ -26,7 +32,19 @@ type sidecarInput struct {
 
 func main() {
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
+	showVersion := flag.Bool("version", false, "print version info and exit")
 	flag.Parse()
+
+	// --version is used by the Crewship container runtime as a sanity check
+	// after bind-mounting the sidecar binary into BYOI containers: running
+	// this flag exercises the Go runtime + libc, so a musl-vs-glibc ABI
+	// mismatch surfaces as a non-zero exit instead of a mysterious IPC
+	// timeout. Exit code must be 0 on success.
+	if *showVersion {
+		fmt.Printf("crewship-sidecar version %s (%s/%s, %s)\n",
+			version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+		os.Exit(0)
+	}
 
 	// Ignore SIGPIPE so writes to closed stdout/stderr (after Docker exec
 	// stream closes) return EPIPE errors instead of killing the process.

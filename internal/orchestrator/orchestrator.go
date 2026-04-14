@@ -962,11 +962,36 @@ func (o *Orchestrator) tmuxCacheLookup(containerID string) (bool, bool) {
 	return v, ok
 }
 
-// tmuxCacheStore records whether containerID has tmux installed.
+// tmuxCacheStore records whether containerID has tmux installed. A size cap
+// (tmuxCacheMaxEntries) prevents unbounded growth on long-running crewshipd
+// processes that churn containers (recreate on config change, TTL cycle,
+// etc.). On overflow the entire cache is flushed — cheaper than tracking
+// liveness against provider state, and the worst case is a one-time re-
+// probe of `command -v tmux` for each active crew (~50 ms per crew).
 func (o *Orchestrator) tmuxCacheStore(containerID string, has bool) {
 	o.tmuxCacheMu.Lock()
 	defer o.tmuxCacheMu.Unlock()
+	if len(o.tmuxCache) >= tmuxCacheMaxEntries {
+		// Reset rather than evict-oldest: we do not track access time and
+		// bulk clear costs nothing in Go.
+		o.tmuxCache = make(map[string]bool, tmuxCacheMaxEntries)
+	}
 	o.tmuxCache[containerID] = has
+}
+
+// tmuxCacheMaxEntries caps the number of remembered container IDs. A busy
+// workspace rarely exceeds a few dozen live containers; this cap is a safety
+// net against container-ID churn leaking into long-running server memory.
+const tmuxCacheMaxEntries = 1024
+
+// InvalidateTmuxCache removes a container's cached tmux-presence entry. Called
+// when a container is removed so the map does not grow unbounded across the
+// lifetime of the crewshipd process (container IDs are 64 hex chars each and
+// a busy workspace churns them). Safe to call for unknown IDs.
+func (o *Orchestrator) InvalidateTmuxCache(containerID string) {
+	o.tmuxCacheMu.Lock()
+	defer o.tmuxCacheMu.Unlock()
+	delete(o.tmuxCache, containerID)
 }
 
 // setupTmuxExec prepares a tmux-wrapped execution environment for an agent.
