@@ -7,9 +7,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/spf13/cobra"
 )
 
@@ -39,6 +43,8 @@ func init() {
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
 	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
+	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
+	seedCmd.Flags().Int("smoke-timeout", 60, "Per-agent timeout (seconds) for smoke test")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
@@ -46,6 +52,8 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
 	password, _ := cmd.Flags().GetString("password")
+	smokeTest, _ := cmd.Flags().GetBool("smoke-test")
+	smokeTimeout, _ := cmd.Flags().GetInt("smoke-timeout")
 	if password == "" {
 		password = devDefaultPassword
 		fmt.Fprintf(os.Stderr, "  Using dev default admin password: %s\n", password)
@@ -127,7 +135,183 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	// ── Phase 11: Summary ──
 	fmt.Fprintln(os.Stderr, "")
 	cli.PrintSuccess(fmt.Sprintf("Seed complete: %d crews, %d agents", len(crewIDs), len(agentIDs)))
+	fmt.Fprintln(os.Stderr, "Login: demo@crewship.ai / "+password)
+
+	// ── Phase 12: Smoke test (optional) ──
+	if smokeTest {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := runSmokeTest(ctx, agentIDs, time.Duration(smokeTimeout)*time.Second); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "To test that agents work end-to-end:")
+		fmt.Fprintln(os.Stderr, "  crewship seed --smoke-test")
+	}
 	return nil
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 12: Smoke test
+// ════════════════════════════════════════════════════════════════════════════
+
+// smokeTestResult captures the outcome of a single agent smoke test.
+type smokeTestResult struct {
+	CrewSlug  string
+	AgentSlug string
+	OK        bool
+	Timeout   bool
+	Elapsed   time.Duration
+	Output    string
+	ErrMsg    string
+}
+
+// runSmokeTest sends a simple prompt to every agent that was seeded and reports
+// per-agent success/failure. It execs the currently-running crewship binary as
+// a subprocess (via `crewship run --no-stream --quiet`) so the smoke test
+// exercises the real CLI path end-to-end rather than coupling to HTTP internals.
+func runSmokeTest(ctx context.Context, agentIDs map[string]string, timeout time.Duration) error {
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Running smoke test (per-agent timeout: "+timeout.String()+")...")
+
+	// Build slug → crew slug map from static seed data. Only test agents we
+	// both seeded AND successfully created (present in agentIDs).
+	crewBySlug := map[string]string{}
+	for _, a := range seeddata.Agents {
+		crewBySlug[a.Slug] = a.CrewSlug
+	}
+
+	// Stable ordering: crew slug, then agent slug.
+	slugs := make([]string, 0, len(agentIDs))
+	for slug := range agentIDs {
+		slugs = append(slugs, slug)
+	}
+	sort.Slice(slugs, func(i, j int) bool {
+		ci, cj := crewBySlug[slugs[i]], crewBySlug[slugs[j]]
+		if ci != cj {
+			return ci < cj
+		}
+		return slugs[i] < slugs[j]
+	})
+
+	server := cli.ResolveServer(flagServer, cliCfg)
+	crewshipBin := os.Args[0]
+
+	results := make([]smokeTestResult, 0, len(slugs))
+	for _, slug := range slugs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		res := smokeTestAgent(ctx, crewshipBin, slug, crewBySlug[slug], server, timeout)
+		results = append(results, res)
+		printSmokeLine(res)
+	}
+
+	return printSmokeSummary(results)
+}
+
+// smokeTestAgent invokes `crewship run` as a subprocess and collects its
+// stdout. Returns a result struct — errors are captured, not returned, so the
+// caller can keep iterating through the remaining agents.
+func smokeTestAgent(ctx context.Context, crewshipBin, agentSlug, crewSlug, serverURL string, timeout time.Duration) smokeTestResult {
+	start := time.Now()
+	res := smokeTestResult{CrewSlug: crewSlug, AgentSlug: agentSlug}
+
+	// Sub-context bounds the subprocess. When it expires the kernel delivers
+	// SIGKILL via exec.CommandContext, so we can distinguish timeouts from
+	// other failures by checking ctx2.Err() afterwards.
+	ctx2, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	args := []string{
+		"run", agentSlug,
+		"Hello, introduce yourself in one sentence.",
+		"--no-stream", "--quiet",
+		"--timeout", fmt.Sprintf("%d", int(timeout.Seconds())),
+		"--server", serverURL,
+	}
+	cmd := exec.CommandContext(ctx2, crewshipBin, args...)
+	out, err := cmd.CombinedOutput()
+	res.Elapsed = time.Since(start)
+	res.Output = strings.TrimSpace(string(out))
+
+	if ctx2.Err() == context.DeadlineExceeded {
+		res.Timeout = true
+		res.ErrMsg = fmt.Sprintf("exceeded %s", timeout)
+		return res
+	}
+	if err != nil {
+		res.ErrMsg = err.Error()
+		return res
+	}
+	if res.Output == "" {
+		res.ErrMsg = "empty response"
+		return res
+	}
+	res.OK = true
+	return res
+}
+
+// printSmokeLine renders a single fixed-width result line.
+func printSmokeLine(r smokeTestResult) {
+	const (
+		pathW   = 28
+		statusW = 10
+	)
+	path := r.CrewSlug + "/" + r.AgentSlug
+	if len(path) < pathW {
+		path = path + strings.Repeat(" ", pathW-len(path))
+	}
+
+	var status, detail string
+	switch {
+	case r.OK:
+		status = "OK"
+		detail = fmt.Sprintf("(%.1fs)  %q", r.Elapsed.Seconds(), truncateForSmoke(r.Output, 80))
+	case r.Timeout:
+		status = "TIMEOUT"
+		detail = "(" + r.ErrMsg + ")"
+	default:
+		status = "FAIL"
+		detail = "(" + r.ErrMsg + ")"
+	}
+	if len(status) < statusW {
+		status = status + strings.Repeat(" ", statusW-len(status))
+	}
+	fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", path, status, detail)
+}
+
+// printSmokeSummary writes a passed/failed tally and returns an error if any
+// agent failed so the process exits with a non-zero status.
+func printSmokeSummary(results []smokeTestResult) error {
+	passed, failed := 0, 0
+	for _, r := range results {
+		if r.OK {
+			passed++
+		} else {
+			failed++
+		}
+	}
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintf(os.Stderr, "%d passed, %d failed, 0 skipped\n", passed, failed)
+	if failed > 0 {
+		return fmt.Errorf("smoke test: %d/%d agents failed", failed, len(results))
+	}
+	return nil
+}
+
+// truncateForSmoke collapses whitespace and hard-truncates at n runes for the
+// one-line per-agent summary.
+func truncateForSmoke(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n-3]) + "..."
 }
 
 // ════════════════════════════════════════════════════════════════════════════
