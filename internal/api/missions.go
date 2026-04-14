@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/statuses"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -91,23 +92,10 @@ type taskStats struct {
 	AwaitingApproval int `json:"awaiting_approval"`
 }
 
-var validMissionTransitions = map[string][]string{
-	"PLANNING":    {"IN_PROGRESS", "CANCELLED"},
-	"IN_PROGRESS": {"REVIEW", "FAILED", "CANCELLED"},
-	"REVIEW":      {"COMPLETED", "IN_PROGRESS", "FAILED", "CANCELLED"},
-	// Issue tracker statuses (invisible to MissionEngine).
-	"BACKLOG": {"TODO", "IN_PROGRESS", "CANCELLED"},
-	"TODO":    {"BACKLOG", "IN_PROGRESS", "CANCELLED"},
-	"DONE":    {"BACKLOG"},
-	"FAILED":  {"BACKLOG", "TODO", "IN_PROGRESS"},
-}
-
-var validTaskTransitions = map[string][]string{
-	"PENDING":     {"IN_PROGRESS", "SKIPPED"},
-	"BLOCKED":     {"PENDING", "SKIPPED"},
-	"IN_PROGRESS": {"COMPLETED", "FAILED", "SKIPPED"},
-	// AWAITING_APPROVAL intentionally excluded — transitions only via dedicated /approve endpoint.
-}
+// validMissionTransitions and validTaskTransitions reference the canonical
+// transition maps from the statuses package.
+var validMissionTransitions = statuses.ValidMissionTransitions
+var validTaskTransitions = statuses.ValidTaskTransitions
 
 // parseDependencyJSON unmarshals a JSON string array of task dependency IDs.
 // Returns nil if the input is empty, invalid, or contains no entries.

@@ -166,7 +166,11 @@ func (cm *CredentialMonitor) persistStatus(ctx context.Context, connID string, s
 		update.LastError = &errMsg
 	}
 
-	body, _ := json.Marshal(update)
+	body, err := json.Marshal(update)
+	if err != nil {
+		cm.logger.Error("marshal status update failed", "error", err)
+		return
+	}
 	url := fmt.Sprintf("%s/api/v1/internal/credentials/%s", cm.nextjsURL, connID)
 
 	req, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(body))

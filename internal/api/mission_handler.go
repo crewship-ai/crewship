@@ -560,7 +560,7 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	if h.missionEngine != nil {
 		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
 			h.logger.Error("mission engine start failed, rolling back to PLANNING", "error", err, "mission_id", missionID)
-			if _, rbErr := h.db.ExecContext(context.Background(),
+			if _, rbErr := h.db.ExecContext(r.Context(),
 				`UPDATE missions SET status = 'PLANNING', updated_at = ? WHERE id = ?`,
 				now, missionID); rbErr != nil {
 				h.logger.Error("rollback mission status", "error", rbErr, "mission_id", missionID)
