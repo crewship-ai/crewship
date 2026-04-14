@@ -189,17 +189,17 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 	if err := p.ensureImage(ctx, baseImage); err != nil {
 		return "", fmt.Errorf("pull base image %q: %w", baseImage, err)
 	}
+	// Note: do NOT mount /tmp as tmpfs — Docker's CopyToContainer has issues
+	// finding paths created via exec inside tmpfs mounts. The container's
+	// normal /tmp (union filesystem layer) works correctly with both exec
+	// and CopyToContainer.
 	resp, err := p.docker.ContainerCreate(ctx,
 		&container.Config{
 			Image: baseImage,
 			Cmd:   []string{"sleep", "infinity"},
 			User:  "0:0",
 		},
-		&container.HostConfig{
-			Tmpfs: map[string]string{
-				"/tmp": "exec",
-			},
-		},
+		&container.HostConfig{},
 		nil, // networkingConfig
 		nil, // platform
 		"",  // no name (Docker assigns one)
