@@ -647,6 +647,9 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ub.Set("runtime_image", *req.RuntimeImage)
 		}
+		// Invalidate cached image when runtime image changes
+		ub.Set("cached_image", nil)
+		ub.Set("config_hash", nil)
 	}
 	if req.DevcontainerConfig != nil {
 		if *req.DevcontainerConfig == "" {

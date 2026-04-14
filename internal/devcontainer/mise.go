@@ -208,7 +208,7 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 	// Install tools as agent user.
 	stdout, exitCode, err = exec(ctx, containerID, []string{
 		"mise", "install", "--yes",
-	}, "1001:1001", nil)
+	}, "1001:1001", []string{"HOME=/home/agent", "XDG_CONFIG_HOME=/home/agent/.config"})
 	if err != nil {
 		return fmt.Errorf("mise: install tools: %v", err)
 	}
@@ -219,7 +219,7 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 	// Reshim to ensure shims are up to date.
 	stdout, exitCode, err = exec(ctx, containerID, []string{
 		"mise", "reshim",
-	}, "1001:1001", nil)
+	}, "1001:1001", []string{"HOME=/home/agent", "XDG_CONFIG_HOME=/home/agent/.config"})
 	if err != nil {
 		return fmt.Errorf("mise: reshim: %v", err)
 	}

@@ -99,6 +99,7 @@ export default function NewCrewPage() {
     devcontainerConfig: "",
     miseConfig: "",
   })
+  const [runtimeDirty, setRuntimeDirty] = useState(false)
 
   useEffect(() => {
     if (!slugManual) setSlug(slugify(name))
@@ -296,9 +297,9 @@ export default function NewCrewPage() {
       if (description) body.description = description
       if (color) body.color = color
       if (icon) body.icon = icon
-      if (runtimeConfig.runtimeImage) body.runtime_image = runtimeConfig.runtimeImage
-      if (runtimeConfig.devcontainerConfig) body.devcontainer_config = runtimeConfig.devcontainerConfig
-      if (runtimeConfig.miseConfig) body.mise_config = runtimeConfig.miseConfig
+      if (runtimeDirty && runtimeConfig.devcontainerConfig) body.devcontainer_config = runtimeConfig.devcontainerConfig
+      if (runtimeDirty && runtimeConfig.miseConfig) body.mise_config = runtimeConfig.miseConfig
+      if (runtimeDirty && runtimeConfig.runtimeImage && runtimeConfig.runtimeImage !== "debian:bookworm-slim") body.runtime_image = runtimeConfig.runtimeImage
 
       try {
         const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`, {
@@ -319,7 +320,7 @@ export default function NewCrewPage() {
         setSubmitting(false)
       }
     },
-    [workspaceId, name, slug, description, color, icon, runtimeConfig, router]
+    [workspaceId, name, slug, description, color, icon, runtimeConfig, runtimeDirty, router]
   )
 
   // ── Loading ──────────────────────────────────────────────────────────────────
@@ -710,7 +711,7 @@ export default function NewCrewPage() {
           >
             <CollapsibleContent>
               <div className="px-6 pb-6">
-                <RuntimeConfig value={runtimeConfig} onChange={setRuntimeConfig} />
+                <RuntimeConfig value={runtimeConfig} onChange={(val) => { setRuntimeConfig(val); setRuntimeDirty(true) }} />
               </div>
             </CollapsibleContent>
           </SectionCard>

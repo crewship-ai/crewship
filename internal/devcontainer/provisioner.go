@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -209,10 +210,18 @@ func (p *Provisioner) installFeatures(ctx context.Context, containerID string, c
 		return nil
 	}
 
+	// Sort feature refs for deterministic download order.
+	refs := make([]string, 0, len(cfg.Features))
+	for ref := range cfg.Features {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+
 	// Download all features.
 	var resolved []*ResolvedFeature
 	optionsByRef := make(map[string]map[string]any, len(cfg.Features))
-	for ref, opts := range cfg.Features {
+	for _, ref := range refs {
+		opts := cfg.Features[ref]
 		feature, err := p.downloader.Download(ctx, ref, opts)
 		if err != nil {
 			return fmt.Errorf("downloading feature %s: %w", ref, err)
@@ -274,8 +283,9 @@ func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID str
 	}
 
 	for _, cmd := range cmds {
-		output, exitCode, err := p.installer.execInContainer(ctx, containerID,
+		output, exitCode, err := p.installer.execInContainerAsUser(ctx, containerID,
 			[]string{"bash", "-c", cmd},
+			"1001:1001",
 			[]string{"USER=agent", "HOME=/home/agent"},
 		)
 		if err != nil {

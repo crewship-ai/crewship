@@ -224,10 +224,9 @@ func createTarFromDir(srcDir, prefix string) (*bytes.Buffer, error) {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
-
-		_, err = io.Copy(tw, f)
-		return err
+		_, copyErr := io.Copy(tw, f)
+		f.Close()
+		return copyErr
 	})
 	if err != nil {
 		return nil, err

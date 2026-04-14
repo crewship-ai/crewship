@@ -144,7 +144,8 @@ func (d *FeatureDownloader) resolveFromCache(ref, dir string) (*ResolvedFeature,
 }
 
 // pull fetches the OCI image for ref using go-containerregistry and extracts
-// its first layer (the feature tarball) into destDir.
+// its first layer (the feature tarball) into destDir. Extraction is atomic:
+// content is written to a temporary directory first, then renamed into place.
 func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error {
 	tag, err := name.NewTag(ref, name.StrictValidation)
 	if err != nil {
@@ -172,13 +173,37 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 	}
 	defer rc.Close()
 
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
-		return fmt.Errorf("creating cache dir: %w", err)
+	// Extract into a temporary directory first, then rename atomically.
+	tempDir := destDir + ".tmp-" + fmt.Sprintf("%x", sha256.Sum256([]byte(ref+fmt.Sprint(os.Getpid()))))[:12]
+	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		return fmt.Errorf("creating temp cache dir: %w", err)
 	}
+	// Ensure cleanup on failure.
+	success := false
+	defer func() {
+		if !success {
+			os.RemoveAll(tempDir)
+		}
+	}()
 
-	if err := extractTarGz(rc, destDir); err != nil {
+	if err := extractTarGz(rc, tempDir); err != nil {
 		return fmt.Errorf("extracting layer for %q: %w", ref, err)
 	}
+
+	// Validate that required files exist before committing.
+	if _, err := os.Stat(filepath.Join(tempDir, "install.sh")); err != nil {
+		return fmt.Errorf("extracted feature %q missing install.sh", ref)
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "devcontainer-feature.json")); err != nil {
+		return fmt.Errorf("extracted feature %q missing devcontainer-feature.json", ref)
+	}
+
+	// Remove any existing destination before atomic rename.
+	_ = os.RemoveAll(destDir)
+	if err := os.Rename(tempDir, destDir); err != nil {
+		return fmt.Errorf("atomically placing cache dir: %w", err)
+	}
+	success = true
 
 	return nil
 }
@@ -221,6 +246,11 @@ func extractTarGz(r io.Reader, destDir string) error {
 				return err
 			}
 		case tar.TypeReg:
+			// Limit extraction to 50 MB per file as a safety measure.
+			const maxFileSize = 50 << 20
+			if hdr.Size > maxFileSize {
+				return fmt.Errorf("tar entry %q exceeds max size (%d > %d)", hdr.Name, hdr.Size, maxFileSize)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
@@ -232,8 +262,6 @@ func extractTarGz(r io.Reader, destDir string) error {
 			if err != nil {
 				return err
 			}
-			// Limit extraction to 50 MB per file as a safety measure.
-			const maxFileSize = 50 << 20
 			if _, err := io.Copy(f, io.LimitReader(tr, maxFileSize)); err != nil {
 				f.Close()
 				return err

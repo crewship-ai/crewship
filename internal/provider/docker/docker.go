@@ -503,7 +503,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 		initResp, initErr := p.client.ContainerCreate(ctx,
 			&container.Config{
-				Image:      p.cfg.RuntimeImage,
+				Image:      runtimeImage,
 				User:       "0:0",
 				Entrypoint: []string{"sh", "-c", chownCmd},
 			},

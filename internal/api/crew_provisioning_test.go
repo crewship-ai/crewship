@@ -67,6 +67,10 @@ func TestCatalogListSearch(t *testing.T) {
 
 	h.CatalogList(rr2, req2)
 
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr2.Code, http.StatusOK)
+	}
+
 	var resp2 struct {
 		Features []json.RawMessage `json:"features"`
 	}

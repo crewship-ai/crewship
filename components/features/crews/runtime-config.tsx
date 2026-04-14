@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Search, Copy, Check, Code, Pencil, X,
   Wrench, Hexagon, ArrowRight, Cog, Hash, Cloud, Ship, Blocks, Container,
@@ -158,6 +158,24 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // Mise tools (tool name -> version)
   const [miseTools, setMiseTools] = useState<Record<string, string>>(initialMise)
 
+  // Ref to break sync cycles: when we resync internal state from props,
+  // the propagate effect must not call onChange again.
+  const syncingRef = useRef(false)
+
+  // Resync internal state when the parent updates value (e.g. after async load)
+  useEffect(() => {
+    syncingRef.current = true
+    const dc = parseDevcontainerConfig(value.devcontainerConfig)
+    const mc = parseMiseConfig(value.miseConfig)
+    setSelectedFeatures(dc.features)
+    setBaseImage(dc.image)
+    const isCustom = !BASE_IMAGES.some((b) => b.value === dc.image)
+    setIsCustomImage(isCustom)
+    if (isCustom) setCustomImage(dc.image)
+    setMiseTools(mc)
+    requestAnimationFrame(() => { syncingRef.current = false })
+  }, [value.devcontainerConfig, value.miseConfig])
+
   // Raw editing mode
   const [editRaw, setEditRaw] = useState(false)
   const [rawDevcontainer, setRawDevcontainer] = useState("")
@@ -171,7 +189,10 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
     setCatalogLoading(true)
     setCatalogError(false)
     fetch("/api/v1/features/catalog")
-      .then((r) => (r.ok ? r.json() : { features: [] }))
+      .then((r) => {
+        if (!r.ok) throw new Error(`Catalog fetch failed: ${r.status}`)
+        return r.json()
+      })
       .then((data) => setCatalog(Array.isArray(data.features) ? data.features : []))
       .catch(() => { setCatalog([]); setCatalogError(true) })
       .finally(() => setCatalogLoading(false))
@@ -205,6 +226,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
 
   // Effect: propagate on structured changes
   useEffect(() => {
+    if (syncingRef.current) return
     if (!editRaw) {
       propagate(devcontainerJSON, miseJSON, effectiveImage)
     }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/spf13/cobra"
 
@@ -24,7 +25,7 @@ var featuresListCmd = &cobra.Command{
 		client := newAPIClient()
 		path := "/api/v1/features/catalog"
 		if search, _ := cmd.Flags().GetString("search"); search != "" {
-			path += "?search=" + search
+			path += "?search=" + url.QueryEscape(search)
 		}
 
 		resp, err := client.Get(path)

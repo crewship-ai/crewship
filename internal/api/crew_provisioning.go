@@ -133,8 +133,8 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 	h.logger.Info("provisioning triggered", "crew_id", crewID)
 
 	writeJSON(w, http.StatusAccepted, map[string]string{
-		"status":  "started",
-		"message": "provisioning started",
+		"status":  "cache_invalidated",
+		"message": "Provisioning cache cleared. Container will be re-provisioned on next agent start.",
 	})
 }
 
