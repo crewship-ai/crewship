@@ -55,6 +55,7 @@ type AgentRunRequest struct {
 	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
+	WorkspaceMemPath   string            // Host path to workspace memory dir (for COORDINATOR)
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.
@@ -375,6 +376,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				Enabled:   true,
 				BasePath:  path.Join("/crew", "agents", req.AgentSlug, ".memory"),
 				AgentSlug: req.AgentSlug,
+				AgentRole: strings.ToLower(req.AgentRole),
+			}
+			// Lead agents own the crew shared memory FTS5 index
+			if req.CrewID != "" {
+				memoryCfg.CrewMemoryPath = "/crew/shared/.memory"
 			}
 		}
 		// Build IPC config for agents in a crew so the sidecar can forward
@@ -540,6 +546,25 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		} else {
 			io.Copy(io.Discard, mkMemResult.Reader)
 			mkMemResult.Reader.Close()
+		}
+
+		// Create crew shared memory dirs for lead agents (if in a crew)
+		if req.CrewID != "" {
+			crewMemDir := "/crew/shared/.memory"
+			crewMemDailyDir := path.Join(crewMemDir, "daily")
+			crewMemTopicsDir := path.Join(crewMemDir, "topics")
+			mkCrewMemCfg := provider.ExecConfig{
+				ContainerID: req.ContainerID,
+				Cmd:         []string{"mkdir", "-p", crewMemDir, crewMemDailyDir, crewMemTopicsDir},
+				User:        "1001:1001",
+			}
+			mkCrewMemResult, err := o.container.Exec(ctx, mkCrewMemCfg)
+			if err != nil {
+				o.logger.Warn("failed to create crew memory dirs", "error", err)
+			} else {
+				io.Copy(io.Discard, mkCrewMemResult.Reader)
+				mkCrewMemResult.Reader.Close()
+			}
 		}
 
 		// One-time migration: copy memory from old location (/output/{slug}/.memory/)

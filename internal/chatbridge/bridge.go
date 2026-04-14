@@ -58,6 +58,8 @@ type ChatInfo struct {
 	MCPServers         []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
+	PreferredLanguage  string
+	WorkspaceMemPath   string // Host path to workspace memory (for COORDINATOR)
 }
 
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
@@ -258,6 +260,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		MCPServers:         info.MCPServers,
 		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
+		PreferredLanguage:  info.PreferredLanguage,
+		WorkspaceMemPath:   info.WorkspaceMemPath,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
