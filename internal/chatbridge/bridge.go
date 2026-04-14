@@ -210,8 +210,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// image, the agent will start with the base image. The user should run
 	// `crewship crew provision <slug>` to build the custom image first.
 	if info.DevcontainerConfig != "" && info.CachedImage == "" {
-		b.logger.Warn("crew has devcontainer config but no cached image — run `crewship crew provision` first",
+		msg := fmt.Sprintf("Crew %q has devcontainer configuration but no provisioned image. Run `crewship crew provision %s` first.", info.CrewSlug, info.CrewSlug)
+		b.logger.Error("agent start blocked: devcontainer not provisioned",
 			"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
+		streamFn(ws.ChatEvent{Type: "error", Content: msg})
+		return fmt.Errorf("%s", msg)
 	}
 
 	if containerID == "" && b.container != nil {

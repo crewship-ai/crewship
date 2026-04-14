@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build test lint security sbom notices e2e e2e\:ui validate
+.PHONY: up down restart status dev dev\:go dev\:next build build\:go build\:sidecar test lint security sbom notices e2e e2e\:ui validate
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -40,13 +40,22 @@ dev\:go-once:
 
 # === Build ===
 
-build:
+build: build\:sidecar
 	pnpm build
 	rm -rf web/out && cp -r out web/out
 	go build $(LDFLAGS) -o crewship ./cmd/crewship
 
-build\:go:
+build\:go: build\:sidecar
 	go build $(LDFLAGS) -o crewship ./cmd/crewship
+
+# Build the crewship-sidecar binary as a standalone executable and stage
+# entrypoint.sh next to it. This lets users bring their own base image
+# (debian, ubuntu, alpine-glibc, etc.) while reusing the baked-in sidecar
+# via a host bind mount. See internal/provider/docker/docker.go buildMounts.
+build\:sidecar:
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
+	cp docker/agent-runtime/entrypoint.sh ./entrypoint.sh
+	chmod +x ./entrypoint.sh
 
 # === Test & Lint ===
 

@@ -33,6 +33,17 @@ type Config struct {
 	Network         string
 	OutputBasePath  string
 	ContainerPrefix string // Container name prefix (e.g. "crewship" -> "crewship-team-{slug}"). Allows multi-instance isolation.
+
+	// SidecarBinaryPath is the host path to crewship-sidecar to bind-mount
+	// into crew containers at /usr/local/bin/crewship-sidecar. Empty = no
+	// bind mount (fall back to baked-in binary in the default image).
+	SidecarBinaryPath string
+
+	// EntrypointPath is the host path to entrypoint.sh to bind-mount into
+	// crew containers at /usr/local/bin/entrypoint.sh. When set, the
+	// container's Entrypoint is forced to that path so custom base images
+	// (debian, ubuntu, etc.) use our init script instead of /bin/sh.
+	EntrypointPath string
 }
 
 // DetectResult contains info about the detected container runtime.
@@ -219,6 +230,13 @@ func (p *Provider) Detected() DetectResult {
 	return p.detected
 }
 
+// DockerClient returns the underlying Docker SDK client. Used for low-level
+// operations (image commits, container create/start/commit/remove during
+// provisioning) that aren't part of the ContainerProvider interface.
+func (p *Provider) DockerClient() *client.Client {
+	return p.client
+}
+
 // ensureNetwork creates the Docker bridge network if it doesn't already exist.
 func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	networks, err := p.client.NetworkList(ctx, dockernetwork.ListOptions{})
@@ -308,6 +326,26 @@ func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secret
 			mount.Mount{Type: mount.TypeVolume, Source: p.homeVolumeName(slug), Target: "/home/agent"},
 			mount.Mount{Type: mount.TypeVolume, Source: p.toolsVolumeName(slug), Target: "/opt/crew-tools"},
 		)
+	}
+	// Bind-mount sidecar + entrypoint from host when configured. This lets
+	// users bring their own base image (debian, ubuntu, etc.) without having
+	// to rebuild with the sidecar baked in. When unset, we rely on the
+	// default runtime image where these paths are already populated.
+	if p.cfg.SidecarBinaryPath != "" {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   p.cfg.SidecarBinaryPath,
+			Target:   "/usr/local/bin/crewship-sidecar",
+			ReadOnly: true,
+		})
+	}
+	if p.cfg.EntrypointPath != "" {
+		mounts = append(mounts, mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   p.cfg.EntrypointPath,
+			Target:   "/usr/local/bin/entrypoint.sh",
+			ReadOnly: true,
+		})
 	}
 	return mounts
 }
@@ -524,20 +562,29 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	pidsLimit := int64(200)
 	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
-	resp, err := p.client.ContainerCreate(ctx,
-		&container.Config{
-			Image: runtimeImage,
-			User:  "1001:1001",
-			Env: []string{
-				"CREWSHIP_CREW_ID=" + team.ID,
-			},
-			Healthcheck: &container.HealthConfig{
-				Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
-				Interval: 30_000_000_000,
-				Timeout:  5_000_000_000,
-				Retries:  3,
-			},
+	containerCfg := &container.Config{
+		Image: runtimeImage,
+		User:  "1001:1001",
+		Env: []string{
+			"CREWSHIP_CREW_ID=" + team.ID,
 		},
+		Healthcheck: &container.HealthConfig{
+			Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
+			Interval: 30_000_000_000,
+			Timeout:  5_000_000_000,
+			Retries:  3,
+		},
+	}
+	// When we bind-mount our entrypoint.sh, force it as the Entrypoint so
+	// custom base images (debian, ubuntu) use our init script instead of
+	// whatever their default is (typically /bin/sh). Clear Cmd because the
+	// entrypoint script ends with `exec sleep infinity` — no CMD needed.
+	if p.cfg.EntrypointPath != "" {
+		containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
+		containerCfg.Cmd = nil
+	}
+	resp, err := p.client.ContainerCreate(ctx,
+		containerCfg,
 		&container.HostConfig{
 			Runtime:        runtime,
 			ReadonlyRootfs: true,
@@ -576,6 +623,42 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"container_id", resp.ID[:12],
 		"runtime", runtime,
 	)
+
+	// Sanity-check the bind-mounted sidecar on custom base images only.
+	// When the user brings their own image (team.Image set, no CachedImage),
+	// we can't assume glibc/musl compatibility — confirm the binary is
+	// actually reachable inside the container before the agent tries to use it.
+	if p.cfg.SidecarBinaryPath != "" && team.Image != "" && team.CachedImage == "" {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		execCfg := container.ExecOptions{
+			Cmd:          []string{"ls", "/usr/local/bin/crewship-sidecar"},
+			User:         "0:0",
+			AttachStdout: true,
+			AttachStderr: true,
+		}
+		ex, execErr := p.client.ContainerExecCreate(checkCtx, resp.ID, execCfg)
+		if execErr == nil {
+			if startErr := p.client.ContainerExecStart(checkCtx, ex.ID, container.ExecStartOptions{}); startErr == nil {
+				// Poll exit code briefly.
+				for i := 0; i < 20; i++ {
+					inspect, ierr := p.client.ContainerExecInspect(checkCtx, ex.ID)
+					if ierr != nil {
+						break
+					}
+					if !inspect.Running {
+						if inspect.ExitCode != 0 {
+							p.logger.Error("bind-mounted sidecar binary not reachable inside custom image — " +
+								"verify the base image has glibc (Alpine/musl is incompatible with the CGO-free Go binary at runtime when the host is glibc)")
+							return "", fmt.Errorf("sidecar bind mount sanity check failed (exit %d) — custom base image %q may be musl-based; use a glibc base (debian, ubuntu, alpine-glibc)", inspect.ExitCode, team.Image)
+						}
+						break
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
+			}
+		}
+	}
 
 	return resp.ID, nil
 }

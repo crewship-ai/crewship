@@ -27,6 +27,53 @@ func TestConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
+	p := &Provider{cfg: Config{
+		SidecarBinaryPath: "/host/path/crewship-sidecar",
+		EntrypointPath:    "/host/path/entrypoint.sh",
+	}}
+	mounts := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets")
+
+	var haveSidecar, haveEntrypoint bool
+	for _, m := range mounts {
+		if m.Target == "/usr/local/bin/crewship-sidecar" {
+			haveSidecar = true
+			if m.Source != "/host/path/crewship-sidecar" {
+				t.Errorf("sidecar mount source: got %q", m.Source)
+			}
+			if !m.ReadOnly {
+				t.Error("sidecar mount should be read-only")
+			}
+		}
+		if m.Target == "/usr/local/bin/entrypoint.sh" {
+			haveEntrypoint = true
+			if m.Source != "/host/path/entrypoint.sh" {
+				t.Errorf("entrypoint mount source: got %q", m.Source)
+			}
+			if !m.ReadOnly {
+				t.Error("entrypoint mount should be read-only")
+			}
+		}
+	}
+	if !haveSidecar {
+		t.Error("expected sidecar bind mount when SidecarBinaryPath is set")
+	}
+	if !haveEntrypoint {
+		t.Error("expected entrypoint bind mount when EntrypointPath is set")
+	}
+}
+
+func TestBuildMountsOmitsSidecarBindsWhenUnset(t *testing.T) {
+	p := &Provider{cfg: Config{}}
+	mounts := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets")
+	for _, m := range mounts {
+		if m.Target == "/usr/local/bin/crewship-sidecar" ||
+			m.Target == "/usr/local/bin/entrypoint.sh" {
+			t.Errorf("unexpected bind mount when paths are empty: %s", m.Target)
+		}
+	}
+}
+
 func TestProviderImplementsInterface(t *testing.T) {
 	// Compile-time check via var _ line in docker.go
 	// This test just documents the contract

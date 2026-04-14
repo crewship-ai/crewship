@@ -252,11 +252,13 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 			break
 		}
 		d, err := docker.New(ctx, docker.Config{
-			RuntimeImage:    cfg.Container.RuntimeImage,
-			DefaultRuntime:  cfg.Container.DefaultRuntime,
-			Network:         cfg.Container.Network,
-			OutputBasePath:  cfg.Storage.BasePath,
-			ContainerPrefix: cfg.Container.ContainerPrefix,
+			RuntimeImage:      cfg.Container.RuntimeImage,
+			DefaultRuntime:    cfg.Container.DefaultRuntime,
+			Network:           cfg.Container.Network,
+			OutputBasePath:    cfg.Storage.BasePath,
+			ContainerPrefix:   cfg.Container.ContainerPrefix,
+			SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
+			EntrypointPath:    cfg.Container.EntrypointPath,
 		}, logger)
 		if err != nil {
 			logger.Warn("docker provider unavailable, running without containers", "error", err)
@@ -300,11 +302,13 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 		}
 		logger.Debug("apple containers not available, trying docker", "error", appleErr)
 		d, dockerErr := docker.New(ctx, docker.Config{
-			RuntimeImage:    cfg.Container.RuntimeImage,
-			DefaultRuntime:  cfg.Container.DefaultRuntime,
-			Network:         cfg.Container.Network,
-			OutputBasePath:  cfg.Storage.BasePath,
-			ContainerPrefix: cfg.Container.ContainerPrefix,
+			RuntimeImage:      cfg.Container.RuntimeImage,
+			DefaultRuntime:    cfg.Container.DefaultRuntime,
+			Network:           cfg.Container.Network,
+			OutputBasePath:    cfg.Storage.BasePath,
+			ContainerPrefix:   cfg.Container.ContainerPrefix,
+			SidecarBinaryPath: cfg.Container.SidecarBinaryPath,
+			EntrypointPath:    cfg.Container.EntrypointPath,
 		}, logger)
 		if dockerErr == nil {
 			logger.Info("auto-detected Docker as container provider")

@@ -2,6 +2,11 @@
 # Non-root, hardened container for running AI agents.
 # 1 container = 1 crew. Agents share the container via Docker exec.
 # Rootfs is readonly at runtime; /workspace, /output, /tmp, /home/agent are writable mounts.
+#
+# Note: If users bring their own base image, the sidecar binary and entrypoint
+# are bind-mounted from the host at runtime (see internal/provider/docker/docker.go
+# buildMounts). This Dockerfile produces the DEFAULT image with sidecar baked in
+# for convenience — it works equally well with or without bind mount override.
 
 # Stage 1: Build crewship-sidecar binary
 FROM golang:1.26-alpine AS sidecar-builder

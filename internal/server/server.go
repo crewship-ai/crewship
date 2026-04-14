@@ -27,6 +27,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/terminal"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -275,6 +276,22 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		runtimeFetcher := devcontainer.NewRuntimeFetcher(catalogCacheDir, logger)
 		opts = append(opts, goapi.WithCatalogFetcher(catalogFetcher))
 		opts = append(opts, goapi.WithRuntimeFetcher(runtimeFetcher))
+
+		// Wire Docker SDK client into the provisioning handler so the
+		// /api/v1/crews/{id}/provision trigger endpoint can actually run
+		// the devcontainer provisioner (download features, exec installs,
+		// docker commit). If the container provider isn't Docker (or
+		// doesn't expose its client), provisioning returns 503 at runtime.
+		if dp, ok := ctr.(*dockerprovider.Provider); ok {
+			if dc := dp.DockerClient(); dc != nil {
+				opts = append(opts, goapi.WithDockerClient(dc))
+				featureCacheDir := ""
+				if cfg.Storage.BasePath != "" {
+					featureCacheDir = cfg.Storage.BasePath + "/feature-cache"
+				}
+				opts = append(opts, goapi.WithFeatureCacheDir(featureCacheDir))
+			}
+		}
 
 		// Kick off initial + periodic refresh without blocking startup.
 		startCatalogRefresh(catalogFetcher, runtimeFetcher, logger)

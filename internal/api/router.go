@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/services"
 	"github.com/crewship-ai/crewship/internal/ws"
+	dockerclient "github.com/docker/docker/client"
 )
 
 // keeperWSBroadcaster adapts ws.Hub to the KeeperBroadcaster interface.
@@ -60,6 +61,8 @@ type Router struct {
 	storagePath          string // base path for crew file storage
 	catalogFetcher       *devcontainer.CatalogFetcher
 	runtimeFetcher       *devcontainer.RuntimeFetcher
+	dockerClient         *dockerclient.Client
+	featureCacheDir      string
 	authRateLimitedMux http.Handler // mux wrapped with auth rate limiter
 	apiRateLimitedMux  http.Handler // mux wrapped with general API rate limiter
 }
@@ -207,6 +210,23 @@ func WithCatalogFetcher(f *devcontainer.CatalogFetcher) RouterOption {
 func WithRuntimeFetcher(f *devcontainer.RuntimeFetcher) RouterOption {
 	return func(r *Router) {
 		r.runtimeFetcher = f
+	}
+}
+
+// WithDockerClient attaches a Docker SDK client used by the devcontainer
+// provisioner (image commits, temp containers). If unset, the provision
+// trigger endpoint returns 503.
+func WithDockerClient(c *dockerclient.Client) RouterOption {
+	return func(r *Router) {
+		r.dockerClient = c
+	}
+}
+
+// WithFeatureCacheDir sets the on-disk cache directory for downloaded
+// devcontainer feature tarballs.
+func WithFeatureCacheDir(path string) RouterOption {
+	return func(r *Router) {
+		r.featureCacheDir = path
 	}
 }
 
@@ -644,7 +664,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
 	// Devcontainer feature catalog (auth required, no workspace context needed)
-	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher)
+	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.featureCacheDir)
 	r.mux.Handle("GET /api/v1/features/catalog", authed(http.HandlerFunc(provisioning.CatalogList)))
 	r.mux.Handle("GET /api/v1/runtimes/catalog", authed(http.HandlerFunc(provisioning.RuntimeCatalogList)))
 

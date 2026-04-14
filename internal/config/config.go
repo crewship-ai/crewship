@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -56,6 +57,21 @@ type ContainerConfig struct {
 	DefaultMemoryMB int     `yaml:"default_memory_mb"`
 	DefaultCPUs     float64 `yaml:"default_cpus"`
 	SidecarEnabled  bool    `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
+
+	// SidecarBinaryPath is the host path to the crewship-sidecar binary to
+	// bind-mount into crew containers. When set, it overrides whatever the
+	// base image has baked in at /usr/local/bin/crewship-sidecar.
+	// Empty = autodetect next to the crewship binary, then /usr/local/bin.
+	// If nothing is found, no bind mount is added (falls back to baked-in
+	// sidecar in the default runtime image).
+	SidecarBinaryPath string `yaml:"sidecar_binary_path"`
+
+	// EntrypointPath is the host path to entrypoint.sh to bind-mount into
+	// crew containers. When set, the container's Entrypoint is forced to
+	// /usr/local/bin/entrypoint.sh so custom base images (debian, ubuntu)
+	// use our init script instead of their default /bin/sh.
+	// Empty = autodetect; see SidecarBinaryPath for the same semantics.
+	EntrypointPath string `yaml:"entrypoint_path"`
 }
 
 // StorageConfig holds file storage settings for agent outputs and logs.
@@ -168,6 +184,10 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+
+	// Autodetect sidecar binary + entrypoint.sh paths when not explicitly set.
+	// Silent on miss — falls back to baked-in defaults in the runtime image.
+	autodetectSidecarPaths(cfg)
 
 	// Auto-derive NextjsURL from server port if not explicitly overridden.
 	// In single binary mode, the internal resolver calls itself on the same port.
@@ -293,6 +313,12 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_SIDECAR_ENABLED"); v == "true" || v == "1" {
 		cfg.Container.SidecarEnabled = true
 	}
+	if v := os.Getenv("CREWSHIP_SIDECAR_PATH"); v != "" {
+		cfg.Container.SidecarBinaryPath = v
+	}
+	if v := os.Getenv("CREWSHIP_ENTRYPOINT_PATH"); v != "" {
+		cfg.Container.EntrypointPath = v
+	}
 	if v := os.Getenv("CREWSHIP_NEXTJS_URL"); v != "" {
 		cfg.Auth.NextjsURL = v
 	}
@@ -323,6 +349,58 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_LICENSE_FILE"); v != "" {
 		cfg.License.FilePath = v
+	}
+}
+
+// autodetectSidecarPaths fills in SidecarBinaryPath and EntrypointPath when
+// they were not set explicitly (via YAML or env var). The detection is silent:
+// if nothing is found the fields stay empty and the docker provider skips the
+// bind mount, letting the baked-in sidecar in the default runtime image take
+// over. This preserves backward compatibility exactly.
+func autodetectSidecarPaths(cfg *Config) {
+	// Resolve the directory containing the crewship binary. If os.Executable
+	// fails for some reason, fall back to the current working directory.
+	var binDir string
+	if exe, err := os.Executable(); err == nil {
+		if abs, err := filepath.Abs(exe); err == nil {
+			binDir = filepath.Dir(abs)
+		}
+	}
+
+	if cfg.Container.SidecarBinaryPath == "" {
+		candidates := []string{}
+		if binDir != "" {
+			candidates = append(candidates, filepath.Join(binDir, "crewship-sidecar"))
+		}
+		candidates = append(candidates, "/usr/local/bin/crewship-sidecar")
+		for _, c := range candidates {
+			c = filepath.Clean(c)
+			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+				cfg.Container.SidecarBinaryPath = c
+				slog.Debug("autodetected sidecar binary", "path", c)
+				break
+			}
+		}
+	}
+
+	if cfg.Container.EntrypointPath == "" {
+		candidates := []string{}
+		if binDir != "" {
+			candidates = append(candidates, filepath.Join(binDir, "entrypoint.sh"))
+		}
+		if cwd, err := os.Getwd(); err == nil {
+			candidates = append(candidates, filepath.Join(cwd, "docker", "agent-runtime", "entrypoint.sh"))
+			candidates = append(candidates, filepath.Join(cwd, "entrypoint.sh"))
+		}
+		candidates = append(candidates, "/usr/local/share/crewship/entrypoint.sh")
+		for _, c := range candidates {
+			c = filepath.Clean(c)
+			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+				cfg.Container.EntrypointPath = c
+				slog.Debug("autodetected entrypoint.sh", "path", c)
+				break
+			}
+		}
 	}
 }
 

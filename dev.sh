@@ -216,6 +216,20 @@ start_go() {
     return 1
   fi
 
+  # Build the standalone sidecar binary + stage entrypoint.sh alongside the
+  # crewship binary so the docker provider's autodetect can pick them up and
+  # bind-mount into crew containers (CRE-123 Phase 1). Place them next to the
+  # dev binary so os.Executable()-based detection resolves correctly.
+  local bin_dir
+  bin_dir="$(dirname "$binary")"
+  log "Building crewship-sidecar..."
+  if ! (cd "$PROJECT_DIR" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${bin_dir}/crewship-sidecar" ./cmd/crewship-sidecar) 2>&1; then
+    err "Sidecar build failed -- check errors above"
+    return 1
+  fi
+  cp "$PROJECT_DIR/docker/agent-runtime/entrypoint.sh" "${bin_dir}/entrypoint.sh"
+  chmod +x "${bin_dir}/entrypoint.sh"
+
   (
     cd "$PROJECT_DIR"
     set -a && . ./.env.local && set +a

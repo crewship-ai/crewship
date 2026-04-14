@@ -13,7 +13,7 @@ func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
 	t.Helper()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewProvisioningHandler(db, logger, nil, nil)
+	return NewProvisioningHandler(db, logger, nil, nil, nil, "")
 }
 
 func TestCatalogList(t *testing.T) {
@@ -85,10 +85,50 @@ func TestCatalogListSearch(t *testing.T) {
 	}
 }
 
+func TestProvisionTrigger_NoDockerClient(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	// docker client == nil -> provisioner is nil -> trigger returns 503.
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "")
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	crewID := "crew-noprov"
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, name, slug, devcontainer_config)
+		 VALUES (?, ?, 'Devs', 'devs', ?)`,
+		crewID, wsID, `{"image":"ubuntu:22.04"}`,
+	); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/crews/{crewId}/provision", h.ProvisionTrigger)
+
+	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/provision", nil)
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error == "" {
+		t.Error("expected non-empty error message in 503 response")
+	}
+}
+
 func TestProvisionStatus_NoCrew(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "")
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)

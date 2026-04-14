@@ -72,3 +72,4 @@ ehthumbs.db
 data/
 internal/orchestrator/data/
 .claude/
+/entrypoint.sh
