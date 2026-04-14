@@ -595,8 +595,10 @@ Sidecar generuje config z:
 - Hardcoded deny patterns → denyRead /output, denyWrite /workspace
 - Skill.dependencies → povoleni pro instalacni cesty
 
-`srt` se nainstaluje do agent-runtime Docker image:
-`RUN npm install -g @anthropic-ai/sandbox-runtime`
+`srt` se nainstaluje jako devcontainer feature nebo přes `mise`
+v per-crew provisioning fázi (např. postCreateCommand
+`npm install -g @anthropic-ai/sandbox-runtime`). Legacy `agent-runtime`
+Docker image už neexistuje.
 
 **Dsledky:**
 - (+) MCP server pro GitHub NEMUZE volat Slack API

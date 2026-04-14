@@ -314,7 +314,19 @@ func (p *Provider) toolsVolumeName(slug string) string {
 
 // buildMounts returns the full list of mounts for a crew container, including
 // persistent bind mounts and named volumes for home/tools directories.
-func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secretsPath string) []mount.Mount {
+//
+// Sidecar + entrypoint bind mounts are mandatory: the legacy agent-runtime
+// image (which baked them in) was retired, so any user-provided base image
+// needs them injected from the host. Returns an error if the config is
+// missing either path — the operator should run 'make build:sidecar' or
+// set CREWSHIP_SIDECAR_PATH / CREWSHIP_ENTRYPOINT_PATH.
+func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secretsPath string) ([]mount.Mount, error) {
+	if p.cfg.SidecarBinaryPath == "" {
+		return nil, fmt.Errorf("docker provider: SidecarBinaryPath is required (run 'make build:sidecar' or set CREWSHIP_SIDECAR_PATH)")
+	}
+	if p.cfg.EntrypointPath == "" {
+		return nil, fmt.Errorf("docker provider: EntrypointPath is required (run 'make build:sidecar' or set CREWSHIP_ENTRYPOINT_PATH)")
+	}
 	mounts := []mount.Mount{
 		{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 		{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
@@ -327,27 +339,21 @@ func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secret
 			mount.Mount{Type: mount.TypeVolume, Source: p.toolsVolumeName(slug), Target: "/opt/crew-tools"},
 		)
 	}
-	// Bind-mount sidecar + entrypoint from host when configured. This lets
-	// users bring their own base image (debian, ubuntu, etc.) without having
-	// to rebuild with the sidecar baked in. When unset, we rely on the
-	// default runtime image where these paths are already populated.
-	if p.cfg.SidecarBinaryPath != "" {
-		mounts = append(mounts, mount.Mount{
+	mounts = append(mounts,
+		mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   p.cfg.SidecarBinaryPath,
 			Target:   "/usr/local/bin/crewship-sidecar",
 			ReadOnly: true,
-		})
-	}
-	if p.cfg.EntrypointPath != "" {
-		mounts = append(mounts, mount.Mount{
+		},
+		mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   p.cfg.EntrypointPath,
 			Target:   "/usr/local/bin/entrypoint.sh",
 			ReadOnly: true,
-		})
-	}
-	return mounts
+		},
+	)
+	return mounts, nil
 }
 
 // ensureVolume creates a Docker named volume if it doesn't already exist.
@@ -575,13 +581,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			Retries:  3,
 		},
 	}
-	// When we bind-mount our entrypoint.sh, force it as the Entrypoint so
-	// custom base images (debian, ubuntu) use our init script instead of
-	// whatever their default is (typically /bin/sh). Clear Cmd because the
-	// entrypoint script ends with `exec sleep infinity` — no CMD needed.
-	if p.cfg.EntrypointPath != "" {
-		containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
-		containerCfg.Cmd = nil
+	// Force the bind-mounted entrypoint.sh so custom base images (debian,
+	// ubuntu) use our init script instead of their default (typically
+	// /bin/sh). Clear Cmd because the entrypoint ends with `exec sleep
+	// infinity` — no CMD needed. Paths are guaranteed non-empty by
+	// buildMounts below (it errors out otherwise).
+	containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
+	containerCfg.Cmd = nil
+	crewMounts, err := p.buildMounts(team.Slug, workspacePath, outputPath, crewPath, secretsPath)
+	if err != nil {
+		return "", err
 	}
 	resp, err := p.client.ContainerCreate(ctx,
 		containerCfg,
@@ -600,7 +609,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				NanoCPUs:  int64(cpus * 1e9),
 				PidsLimit: &pidsLimit,
 			},
-			Mounts: p.buildMounts(team.Slug, workspacePath, outputPath, crewPath, secretsPath),
+			Mounts: crewMounts,
 			Tmpfs: map[string]string{
 				"/tmp": "rw,size=500m",
 			},
@@ -628,7 +637,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// When the user brings their own image (team.Image set, no CachedImage),
 	// we can't assume glibc/musl compatibility — confirm the binary is
 	// actually reachable inside the container before the agent tries to use it.
-	if p.cfg.SidecarBinaryPath != "" && team.Image != "" && team.CachedImage == "" {
+	if team.Image != "" && team.CachedImage == "" {
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		execCfg := container.ExecOptions{

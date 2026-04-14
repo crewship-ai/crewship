@@ -50,7 +50,7 @@
         <mxCell id="crew_a" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFECB3;strokeColor=#FF8F00;strokeWidth=3;arcSize=5;" vertex="1" parent="1">
           <mxGeometry x="140" y="340" width="1100" height="700" as="geometry" />
         </mxCell>
-        <mxCell id="crew_a_label" value="&lt;b&gt;CREW CONTAINER: crewship-team-marketing&lt;/b&gt;&lt;br&gt;Base image: ghcr.io/crewship-ai/agent-runtime:latest (Ubuntu 24.04)&lt;br&gt;Runtime: runc (default) or runsc/gVisor (optional)&lt;br&gt;Resource limits: 1GB RAM, 0.5 CPU (configurable)" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#E65100;" vertex="1" parent="1">
+        <mxCell id="crew_a_label" value="&lt;b&gt;CREW CONTAINER: crewship-team-marketing&lt;/b&gt;&lt;br&gt;Base image: user-provided (debian/ubuntu/mcr devcontainers, sidecar bind-mounted)&lt;br&gt;Runtime: runc (default) or runsc/gVisor (optional)&lt;br&gt;Resource limits: 1GB RAM, 0.5 CPU (configurable)" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#E65100;" vertex="1" parent="1">
           <mxGeometry x="160" y="345" width="450" height="70" as="geometry" />
         </mxCell>
 

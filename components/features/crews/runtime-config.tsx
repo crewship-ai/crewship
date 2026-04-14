@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { IconType } from "react-icons"
 import {
   Search, Copy, Check, Pencil, X,
-  Package, Cloud, AlertCircle,
+  Package, Cloud, AlertCircle, Sparkles,
 } from "lucide-react"
 import {
+  SiDebian, SiUbuntu, SiAlpinelinux,
   SiPython, SiNodedotjs, SiGo, SiRust, SiRuby, SiPhp,
   SiOpenjdk, SiElixir, SiErlang, SiDeno, SiBun,
   SiDotnet, SiKotlin, SiScala, SiSwift, SiZig, SiCrystal,
@@ -198,10 +199,68 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_FILTERS: CategoryFilter[] = ["all", "languages", "tools", "cloud", "databases"]
 
-const BASE_IMAGES = [
-  { value: "debian:bookworm-slim", label: "Debian Bookworm (slim)" },
-  { value: "ubuntu:24.04", label: "Ubuntu 24.04" },
-  { value: "custom", label: "Custom image..." },
+const BASE_IMAGES: Array<{
+  value: string
+  label: string
+  description: string
+  icon: IconType
+  recommended?: boolean
+}> = [
+  {
+    value: "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+    label: "Node 22 (Debian) — recommended",
+    description: "Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.",
+    icon: SiNodedotjs,
+    recommended: true,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/base:bookworm",
+    label: "Debian 12 (bookworm)",
+    description: "Minimal Debian with common utilities. Add features/runtimes as needed.",
+    icon: SiDebian,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+    label: "Ubuntu 24.04",
+    description: "Ubuntu LTS with common utilities.",
+    icon: SiUbuntu,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+    label: "Python 3.12 (Debian)",
+    description: "Python 3.12 + pip + venv pre-installed on Debian.",
+    icon: SiPython,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
+    label: "Go 1.23 (Debian)",
+    description: "Go 1.23 toolchain on Debian.",
+    icon: SiGo,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/rust:bookworm",
+    label: "Rust (Debian)",
+    description: "Rust stable + cargo on Debian.",
+    icon: SiRust,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/java:21-bookworm",
+    label: "Java 21 (OpenJDK)",
+    description: "OpenJDK 21 + Maven/Gradle on Debian.",
+    icon: SiOpenjdk,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/universal:2",
+    label: "Universal (kitchen sink)",
+    description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
+    icon: Sparkles,
+  },
+  {
+    value: "mcr.microsoft.com/devcontainers/base:alpine-3.20",
+    label: "Alpine 3.20 (experimental)",
+    description: "Tiny (~7MB). WARNING: musl incompatible with Claude Code.",
+    icon: SiAlpinelinux,
+  },
 ]
 
 // ---- Helpers --------------------------------------------------------------
@@ -578,38 +637,59 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
           {/* Base Image */}
           <div className="space-y-2">
             <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Base Image</Label>
-            <div className="flex items-center gap-2">
-              <Select
-                value={isCustomImage ? "custom" : baseImage}
-                onValueChange={(v) => {
-                  if (v === "custom") {
-                    setIsCustomImage(true)
-                  } else {
-                    setIsCustomImage(false)
-                    setBaseImage(v)
-                  }
-                }}
-              >
-                <SelectTrigger className="h-7 text-xs w-64">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BASE_IMAGES.map((img) => (
-                    <SelectItem key={img.value} value={img.value} className="text-xs">
-                      {img.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {isCustomImage && (
+            {isCustomImage ? (
+              <div className="flex gap-2">
                 <Input
                   value={customImage}
                   onChange={(e) => setCustomImage(e.target.value)}
-                  placeholder="e.g. mcr.microsoft.com/devcontainers/base:ubuntu"
-                  className="h-7 text-xs flex-1"
+                  placeholder="e.g., myregistry/myimage:tag"
+                  className="flex-1 h-8 text-xs"
                 />
-              )}
-            </div>
+                <Button variant="ghost" size="sm" onClick={() => setIsCustomImage(false)}>
+                  Preset
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                  {BASE_IMAGES.map((img) => {
+                    const Icon = img.icon
+                    const isSelected = baseImage === img.value
+                    return (
+                      <button
+                        key={img.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => setBaseImage(img.value)}
+                        className={cn(
+                          "flex items-start gap-2 px-3 py-2 text-left rounded-md border text-xs transition-colors",
+                          isSelected
+                            ? "border-primary bg-accent/50"
+                            : "border-border/40 hover:bg-accent/30"
+                        )}
+                      >
+                        <Icon className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium flex items-center gap-1.5">
+                            {img.label}
+                            {img.recommended && (
+                              <span className="text-[9px] px-1 py-0 rounded bg-primary/20 text-primary">RECOMMENDED</span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5">
+                            {img.description}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setIsCustomImage(true)}>
+                  Use custom image
+                </Button>
+              </>
+            )}
           </div>
 
           {/* Selected summary */}

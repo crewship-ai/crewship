@@ -7,6 +7,14 @@ import (
 	"time"
 )
 
+// TestMain bypasses sidecar/entrypoint autodetect for the whole package —
+// these tests run in environments without a built sidecar binary, and none
+// of them exercise container startup.
+func TestMain(m *testing.M) {
+	_ = os.Setenv("CREWSHIP_SKIP_SIDECAR", "1")
+	os.Exit(m.Run())
+}
+
 func TestDefault(t *testing.T) {
 	cfg := Default()
 
@@ -126,6 +134,50 @@ func TestLoadEmptyPath(t *testing.T) {
 	}
 	if cfg.Server.Port != 8080 {
 		t.Errorf("expected default port, got %d", cfg.Server.Port)
+	}
+}
+
+func TestAutodetectSidecarPaths_FailFastWhenMissing(t *testing.T) {
+	// Disable the package-wide skip so we see the real failure path.
+	t.Setenv("CREWSHIP_SKIP_SIDECAR", "")
+	t.Setenv("CREWSHIP_SIDECAR_PATH", "")
+	t.Setenv("CREWSHIP_ENTRYPOINT_PATH", "")
+	// Point to an isolated CWD so autodetect's scripts/entrypoint.sh
+	// lookup cannot accidentally succeed from the repo tree.
+	t.Chdir(t.TempDir())
+
+	cfg := Default()
+	err := autodetectSidecarPaths(cfg)
+	if err == nil {
+		t.Fatal("expected error when sidecar + entrypoint cannot be autodetected")
+	}
+}
+
+func TestAutodetectSidecarPaths_HonorsExplicitPaths(t *testing.T) {
+	t.Setenv("CREWSHIP_SKIP_SIDECAR", "")
+	dir := t.TempDir()
+	sidecar := filepath.Join(dir, "crewship-sidecar")
+	entry := filepath.Join(dir, "entrypoint.sh")
+	if err := os.WriteFile(sidecar, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entry, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Container.SidecarBinaryPath = sidecar
+	cfg.Container.EntrypointPath = entry
+	if err := autodetectSidecarPaths(cfg); err != nil {
+		t.Fatalf("autodetect should succeed with explicit paths: %v", err)
+	}
+}
+
+func TestAutodetectSidecarPaths_SkipEnvBypassesCheck(t *testing.T) {
+	t.Setenv("CREWSHIP_SKIP_SIDECAR", "1")
+	t.Chdir(t.TempDir())
+	cfg := Default()
+	if err := autodetectSidecarPaths(cfg); err != nil {
+		t.Fatalf("CREWSHIP_SKIP_SIDECAR=1 must bypass check, got: %v", err)
 	}
 }
 

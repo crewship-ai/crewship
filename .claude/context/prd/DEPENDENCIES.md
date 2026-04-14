@@ -35,7 +35,7 @@
 | Utility | 2 | nanoid, pg |
 | Dev | 16 | TypeScript, Vitest, ESLint, Prisma CLI, PostCSS, testing-library, ... |
 | Go (crewshipd) | 5 | Docker SDK, bbolt, fsnotify, go-jose, yaml |
-| CLI tools (agent-runtime) | 4 | Claude Code, OpenCode, Codex CLI, Gemini CLI |
+| CLI tools (devcontainer features) | 4 | Claude Code, OpenCode, Codex CLI, Gemini CLI |
 
 > **Poznamka:** Node.js NEOBSAHUJE zadne infrastrukturni deps (zadne WebSocket, job queue, logging, Docker).
 > Veskerá infra je v Go service `crewshipd`.
@@ -213,20 +213,23 @@
 
 ---
 
-## 5. CLI NASTROJE (AGENT RUNTIME IMAGE)
+## 5. CLI NASTROJE (DEVCONTAINER FEATURES)
 
-> Tyto balicky se instaluji GLOBALNE v `crewship/agent-runtime` Docker image.
-> VZDY pinovat konkretni verze -- nikdy `latest`.
+> Legacy `crewship/agent-runtime` Docker image byl odstraněn (commit `dd86356`).
+> CLI adaptéry se nyní instalují přes community devcontainer features během
+> provisioning fáze a bakují se do per-crew `crewship-cache:{hash}` image.
+> Sidecar + `entrypoint.sh` jsou bind-mountované z hostu, ne součást image.
 
 | Balicek | Verze | Ucel | Licence | Zdroj |
 |---|---|---|---|---|
-| `@anthropic-ai/claude-code` | pinned | Claude Code CLI adapter | Proprietary | npm |
-| `opencode` | pinned | OpenCode CLI adapter (75+ provideru) | MIT | GitHub release |
-| `@openai/codex` | pinned | Codex CLI adapter | MIT | npm |
-| `@google/gemini-cli` | pinned | Gemini CLI adapter (experimentalni) | Apache-2.0 | npm |
+| `@anthropic-ai/claude-code` | pinned | Claude Code CLI adapter | Proprietary | `ghcr.io/devcontainers-extra/features/claude-code:2` |
+| `opencode` | pinned | OpenCode CLI adapter (75+ provideru) | MIT | GitHub release / feature |
+| `@openai/codex` | pinned | Codex CLI adapter | MIT | npm / feature |
+| `@google/gemini-cli` | pinned | Gemini CLI adapter (experimentalni) | Apache-2.0 | npm / feature |
 
-> **Verze se pinuji v Dockerfile** (viz DEPLOYMENT.md sekce 4.4).
-> Update postup: novy release → update Dockerfile → build → test → rolling deploy.
+> **Verze se pinuji v `devcontainer_config` per-crew** (crew wizard UI nebo
+> `crewship crew config --devcontainer <file>`). Update postup: bump feature
+> verze v crew config → `crewship crew provision <slug>` → test.
 
 ### Phase 2 SDK (volitelne)
 
@@ -249,14 +252,22 @@
 
 > **Zadne Redis!** Job queue + PubSub + cache jsou reseny v Go (bbolt + in-memory).
 
-### 6.2 System packages (agent-runtime image)
+### 6.2 System packages (crew container base image)
+
+> Uživatel si přiveze vlastní base image (default `debian:bookworm-slim`,
+> seed demos `mcr.microsoft.com/devcontainers/base:bookworm`). Prerekvizity
+> pro community devcontainer features by měly zahrnovat:
 
 | Balicek | Ucel |
 |---|---|
 | `ca-certificates` | TLS certifikaty pro HTTPS |
 | `git` | Git operace v workspace (agenti) |
-| `curl` | HTTP requesty (health checks, CLI install) |
+| `curl` | HTTP requesty (health checks, feature installers) |
 | `jq` | JSON parsovani v shell skriptech |
+
+> Feature `ghcr.io/devcontainers/features/common-utils:2` vytváří agent usera
+> (UID 1001) a instaluje většinu prerekvizit. MS devcontainers base image je má
+> předinstalované — proto ho demo crews preferují před čistým `debian-slim`.
 
 ---
 
