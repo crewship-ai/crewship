@@ -6,6 +6,7 @@ import {
   ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2, FolderOpen, TerminalSquare, Blocks,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -329,11 +330,15 @@ export default function CrewDetailPage() {
                 <div className="flex items-center gap-2">
                   <Blocks className="h-4 w-4 text-muted-foreground" />
                   <span className="text-body font-medium">Runtime Configuration</span>
-                  <span className="text-label text-muted-foreground">
-                    {crew.devcontainer_config || crew.mise_config
-                      ? crew.cached_image ? "(provisioned)" : "(configured)"
-                      : "(not configured)"}
-                  </span>
+                  {crew.devcontainer_config || crew.mise_config ? (
+                    crew.cached_image ? (
+                      <Badge variant="outline" className="text-xs text-green-600">Provisioned</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs text-amber-600">Configured</Badge>
+                    )
+                  ) : (
+                    <Badge variant="outline" className="text-xs text-muted-foreground">Not configured</Badge>
+                  )}
                 </div>
                 <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
               </button>

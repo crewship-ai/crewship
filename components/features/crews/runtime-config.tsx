@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Search, Copy, Check, Code, Pencil, X,
   Wrench, Hexagon, ArrowRight, Cog, Hash, Cloud, Ship, Blocks, Container,
+  AlertCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 // ---- Types ----------------------------------------------------------------
 
@@ -138,6 +140,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // Feature catalog
   const [catalog, setCatalog] = useState<CatalogFeature[]>([])
   const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogError, setCatalogError] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
 
   // Selected features (ref -> options)
@@ -164,14 +167,19 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   const [copied, setCopied] = useState(false)
 
   // Fetch catalog
-  useEffect(() => {
+  const fetchCatalog = useCallback(() => {
     setCatalogLoading(true)
+    setCatalogError(false)
     fetch("/api/v1/features/catalog")
       .then((r) => (r.ok ? r.json() : { features: [] }))
       .then((data) => setCatalog(Array.isArray(data.features) ? data.features : []))
-      .catch(() => setCatalog([]))
+      .catch(() => { setCatalog([]); setCatalogError(true) })
       .finally(() => setCatalogLoading(false))
   }, [])
+
+  useEffect(() => {
+    fetchCatalog()
+  }, [fetchCatalog])
 
   // Compute effective image
   const effectiveImage = isCustomImage ? customImage || "debian:bookworm-slim" : baseImage
@@ -299,7 +307,8 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
       )
       setEditRaw(false)
     } catch {
-      // Invalid JSON, do not apply
+      toast.error("Invalid JSON syntax. Please check your configuration.")
+      return
     }
   }
 
@@ -364,8 +373,12 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
     <div className="space-y-6">
       <Tabs defaultValue="features" className="w-full">
         <TabsList className="w-full justify-start">
-          <TabsTrigger value="features">Features</TabsTrigger>
-          <TabsTrigger value="mise">Mise Runtimes</TabsTrigger>
+          <TabsTrigger value="features">
+            Features{Object.keys(selectedFeatures).length > 0 ? ` (${Object.keys(selectedFeatures).length})` : ""}
+          </TabsTrigger>
+          <TabsTrigger value="mise">
+            Mise Runtimes{Object.keys(miseTools).length > 0 ? ` (${Object.keys(miseTools).length})` : ""}
+          </TabsTrigger>
           <TabsTrigger value="preview">Preview</TabsTrigger>
         </TabsList>
 
@@ -418,6 +431,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search features..."
+              aria-label="Search features"
               className="h-8 pl-8 text-xs"
             />
           </div>
@@ -443,6 +457,9 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                       <button
                         key={feature.ref}
                         type="button"
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        aria-label={`${feature.name}: ${feature.description}`}
                         onClick={() => toggleFeature(feature.ref)}
                         className={cn(
                           "flex items-start gap-3 rounded-lg border p-3 text-left transition-all",
@@ -490,7 +507,17 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
             ))
           )}
 
-          {!catalogLoading && filteredCatalog.length === 0 && (
+          {!catalogLoading && catalogError && (
+            <div className="flex flex-col items-center gap-2 py-6">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              <p className="text-xs text-destructive">Failed to load feature catalog.</p>
+              <Button size="sm" variant="outline" onClick={fetchCatalog}>
+                Retry
+              </Button>
+            </div>
+          )}
+
+          {!catalogLoading && !catalogError && filteredCatalog.length === 0 && (
             <p className="text-xs text-muted-foreground text-center py-6">
               No features found{searchQuery ? ` for "${searchQuery}"` : ""}.
             </p>
@@ -521,6 +548,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                       size="sm"
                       checked={isEnabled}
                       onCheckedChange={() => toggleMiseTool(tool.name, tool.defaultVersion)}
+                      aria-label={tool.label}
                     />
                     <span className="text-xs font-medium">{tool.label}</span>
                   </div>
@@ -550,26 +578,26 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
           <div className="flex items-center justify-between">
             <Label className="text-xs font-medium">Generated devcontainer.json</Label>
             <div className="flex gap-1.5">
-              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleCopy}>
+              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleCopy} aria-label="Copy to clipboard">
                 {copied ? (
                   <Check className="h-3.5 w-3.5 text-emerald-500" />
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={enterRawEdit}>
+              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={enterRawEdit} aria-label="Edit raw configuration">
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
-          <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+          <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
             {devcontainerJSON}
           </pre>
 
           {miseJSON && (
             <>
               <Label className="text-xs font-medium">Mise Config</Label>
-              <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
+              <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap max-h-[300px] overflow-y-auto">
                 {miseJSON}
               </pre>
             </>

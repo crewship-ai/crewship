@@ -56,7 +56,7 @@ export function CrewRuntimeConfig({
     value.miseConfig !== (miseConfig || "")
 
   const isProvisioned = Boolean(cachedImage)
-  const hasConfig = Boolean(devcontainerConfig || miseConfig)
+  const hasConfig = Boolean(devcontainerConfig || miseConfig || runtimeImage)
 
   const handleSave = useCallback(async () => {
     setSaving(true)
@@ -140,7 +140,8 @@ export function CrewRuntimeConfig({
                 variant="outline"
                 className="h-7 text-xs"
                 onClick={handleProvision}
-                disabled={provisioning}
+                disabled={provisioning || hasChanges}
+                title={hasChanges ? "Save changes before provisioning" : undefined}
               >
                 {provisioning ? (
                   <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
@@ -173,9 +174,11 @@ export function CrewRuntimeConfig({
         <>
           <RuntimeConfig value={value} onChange={setValue} />
           {hasChanges && (
-            <Button size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save Runtime Config"}
-            </Button>
+            <div className="border-t mt-4 pt-4">
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : "Save Runtime Config"}
+              </Button>
+            </div>
           )}
         </>
       ) : (
