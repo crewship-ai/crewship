@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -353,6 +354,28 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		allowedDomainsOut = []string{}
 	}
 
+	// Validate devcontainer_config and mise_config size and syntax.
+	if req.DevcontainerConfig != nil && len(*req.DevcontainerConfig) > 102400 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "devcontainer_config exceeds 100KB limit"})
+		return
+	}
+	if req.MiseConfig != nil && len(*req.MiseConfig) > 10240 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mise_config exceeds 10KB limit"})
+		return
+	}
+	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
+		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid devcontainer_config: " + err.Error()})
+			return
+		}
+	}
+	if req.MiseConfig != nil && *req.MiseConfig != "" {
+		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mise_config: " + err.Error()})
+			return
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	crewID := generateCUID()
 
@@ -507,6 +530,28 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if err != sql.ErrNoRows {
 			h.logger.Error("check crew slug", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
+
+	// Validate devcontainer_config and mise_config size and syntax.
+	if req.DevcontainerConfig != nil && len(*req.DevcontainerConfig) > 102400 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "devcontainer_config exceeds 100KB limit"})
+		return
+	}
+	if req.MiseConfig != nil && len(*req.MiseConfig) > 10240 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mise_config exceeds 10KB limit"})
+		return
+	}
+	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
+		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid devcontainer_config: " + err.Error()})
+			return
+		}
+	}
+	if req.MiseConfig != nil && *req.MiseConfig != "" {
+		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mise_config: " + err.Error()})
 			return
 		}
 	}

@@ -9,11 +9,15 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 )
+
+var featureIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,49}$`)
 
 // DockerClient is the subset of the Docker API needed for feature installation.
 // A real *client.Client satisfies this interface.
@@ -48,8 +52,18 @@ func NewInstaller(docker DockerClient, logger *slog.Logger) *Installer {
 // environment variables (e.g., option key "version" becomes VERSION=value).
 func (inst *Installer) InstallFeature(ctx context.Context, containerID string, feature *ResolvedFeature, options map[string]any) error {
 	featureID := feature.Metadata.ID
+
+	// Validate feature ID is safe for filesystem paths.
+	if !featureIDRe.MatchString(featureID) {
+		return fmt.Errorf("invalid feature ID %q: must be alphanumeric with dots/hyphens/underscores", featureID)
+	}
+
 	destBase := "/tmp/devcontainer-features"
 	destDir := destBase + "/" + featureID
+
+	// Apply a 30-minute timeout for the entire feature installation.
+	installCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
 
 	inst.logger.Info("installing feature", "id", featureID, "container", containerID)
 
@@ -60,7 +74,7 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 	}
 
 	// 2. Copy into container.
-	if err := inst.docker.CopyToContainer(ctx, containerID, destBase, tarBuf, container.CopyToContainerOptions{}); err != nil {
+	if err := inst.docker.CopyToContainer(installCtx, containerID, destBase, tarBuf, container.CopyToContainerOptions{}); err != nil {
 		return fmt.Errorf("copying feature %s to container: %w", featureID, err)
 	}
 
@@ -69,7 +83,7 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 
 	// 4. Execute install.sh as root.
 	installScript := destDir + "/install.sh"
-	output, exitCode, err := inst.execInContainer(ctx, containerID, []string{"bash", installScript}, env)
+	output, exitCode, err := inst.execInContainer(installCtx, containerID, []string{"bash", installScript}, env)
 	if err != nil {
 		return fmt.Errorf("executing install.sh for feature %s: %w", featureID, err)
 	}
@@ -83,7 +97,7 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 	}
 
 	// 5. Clean up feature files inside the container.
-	_, _, cleanupErr := inst.execInContainer(ctx, containerID, []string{"rm", "-rf", destDir}, nil)
+	_, _, cleanupErr := inst.execInContainer(installCtx, containerID, []string{"rm", "-rf", destDir}, nil)
 	if cleanupErr != nil {
 		inst.logger.Warn("failed to clean up feature directory", "id", featureID, "error", cleanupErr)
 	}

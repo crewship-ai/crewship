@@ -114,6 +114,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return &ProvisionResult{CachedImage: tag, ConfigHash: hash}, nil
 	}
 
+	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
+	if len(cfg.Features) == 0 && cfg.PostCreateCommand == nil && len(cfg.ContainerEnv) == 0 && miseConfig == "" {
+		p.logger.Debug("skipping provisioning - config has no customizations")
+		return &ProvisionResult{CachedImage: "", ConfigHash: hash}, nil
+	}
+
 	p.logger.Info("provisioning devcontainer image", "base", baseImage, "tag", tag)
 
 	// 2. Create temporary container.

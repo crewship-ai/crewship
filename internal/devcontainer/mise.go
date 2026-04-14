@@ -112,6 +112,15 @@ func (c *MiseConfig) Validate() error {
 		if strings.ContainsRune(value, 0) {
 			return fmt.Errorf("%w: contains null byte", ErrMiseInvalidEnvValue)
 		}
+		if strings.ContainsAny(value, "\n\r") {
+			return fmt.Errorf("mise: env value for %q contains newline characters", key)
+		}
+		if strings.Contains(value, "MISE_EOF") {
+			return fmt.Errorf("mise: env value for %q contains reserved delimiter", key)
+		}
+		if strings.Contains(value, "\"") {
+			return fmt.Errorf("mise: env value for %q contains unescaped quotes", key)
+		}
 	}
 
 	return nil

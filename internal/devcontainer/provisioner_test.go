@@ -174,8 +174,32 @@ func TestProvision_CacheHit(t *testing.T) {
 	}
 }
 
-func TestProvision_NoFeatures(t *testing.T) {
+func TestProvision_EmptyConfig(t *testing.T) {
 	cfg := &Config{Image: "ubuntu:22.04"}
+
+	commitMock := &mockCommitClient{}
+	p := NewProvisioner(commitMock, nil, nil, testLogger())
+
+	result, err := p.Provision(context.Background(), "ubuntu:22.04", cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if result.CachedImage != "" {
+		t.Errorf("expected empty CachedImage for no-op config, got %q", result.CachedImage)
+	}
+	if result.ConfigHash == "" {
+		t.Error("expected non-empty ConfigHash")
+	}
+
+	// Should NOT create any containers when config has no customizations.
+	if len(commitMock.createdContainers) != 0 {
+		t.Errorf("expected no container creation for empty config, got %d", len(commitMock.createdContainers))
+	}
+}
+
+func TestProvision_NoFeatures(t *testing.T) {
+	cfg := &Config{Image: "ubuntu:22.04", ContainerEnv: map[string]string{"FOO": "bar"}}
 
 	// Mock docker client that also satisfies DockerClient for the installer.
 	dockerMock := &mockDockerClient{exitCode: 0}
@@ -223,7 +247,7 @@ func TestProvision_NoFeatures(t *testing.T) {
 }
 
 func TestProvision_CreateContainerError(t *testing.T) {
-	cfg := &Config{Image: "ubuntu:22.04"}
+	cfg := &Config{Image: "ubuntu:22.04", ContainerEnv: map[string]string{"FOO": "bar"}}
 
 	commitMock := &mockCommitClient{
 		createErr: fmt.Errorf("no such image"),
@@ -240,7 +264,7 @@ func TestProvision_CreateContainerError(t *testing.T) {
 }
 
 func TestProvision_StartContainerError(t *testing.T) {
-	cfg := &Config{Image: "ubuntu:22.04"}
+	cfg := &Config{Image: "ubuntu:22.04", ContainerEnv: map[string]string{"FOO": "bar"}}
 
 	commitMock := &mockCommitClient{
 		startErr: fmt.Errorf("OCI runtime error"),
@@ -262,7 +286,7 @@ func TestProvision_StartContainerError(t *testing.T) {
 }
 
 func TestProvision_CommitError(t *testing.T) {
-	cfg := &Config{Image: "ubuntu:22.04"}
+	cfg := &Config{Image: "ubuntu:22.04", ContainerEnv: map[string]string{"FOO": "bar"}}
 
 	dockerMock := &mockDockerClient{exitCode: 0}
 	commitMock := &mockCommitClient{
