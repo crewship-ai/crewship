@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -180,6 +181,10 @@ func NewServer(cfg ServerConfig) *Server {
 		// Initialize crew shared memory engine for lead agents only.
 		// The lead sidecar owns the crew FTS5 index — single writer, zero contention.
 		if cfg.Memory.AgentRole == "lead" && cfg.Memory.CrewMemoryPath != "" {
+			// Ensure crew memory directory exists (may not on first run)
+			if err := os.MkdirAll(cfg.Memory.CrewMemoryPath, 0o755); err != nil {
+				cfg.Logger.Error("failed to create crew memory dir", "error", err, "path", cfg.Memory.CrewMemoryPath)
+			}
 			crewEngine, err := memory.New(cfg.Memory.CrewMemoryPath, memory.DefaultConfig())
 			if err != nil {
 				cfg.Logger.Error("failed to init crew memory engine", "error", err, "path", cfg.Memory.CrewMemoryPath)
@@ -432,6 +437,26 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		close(errCh)
 	}()
+
+	// Periodic reindex for crew shared memory — catches updates from other agents
+	// writing to /crew/shared/.memory/ via filesystem. 60s interval balances freshness
+	// vs SQLite write cost. Only the lead sidecar runs this (owns the index).
+	if s.crewMemoryEngine != nil {
+		go func() {
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := s.crewMemoryEngine.Reindex(); err != nil {
+						s.logger.Warn("crew memory periodic reindex failed", "error", err)
+					}
+				}
+			}
+		}()
+	}
 
 	// Connect to MCP servers in the background (don't block startup)
 	if s.mcpGateway != nil {

@@ -15,8 +15,15 @@ import (
 const (
 	defaultMemoryContextChars = 15000
 	memoryReadTimeout         = 5 * time.Second
-	crewMemoryMaxPct          = 40 // crew memory capped at 40% of total budget
+	crewMemoryMaxPct          = 40  // crew memory capped at 40% of total budget
+	minTruncationChars        = 100 // don't bother with sections smaller than this
 )
+
+// memorySection pairs a label with content for budget-aware assembly.
+type memorySection struct {
+	label   string // e.g. "AGENT.md (long-term memory)"
+	content string
+}
 
 // buildMemoryContext reads agent and crew memory files from the container and
 // returns a formatted block for system prompt injection. Caller should gate on
@@ -61,70 +68,25 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 // block with the [AGENT MEMORY] markers. Returns empty string if no files exist.
 func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRequest, budget int, today string) string {
 	memoryDir := path.Join("/crew", "agents", req.AgentSlug, ".memory")
-	agentMDPath := path.Join(memoryDir, "AGENT.md")
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
 	defer cancel()
 
-	agentMD, _ := o.readContainerFile(readCtx, req.ContainerID, agentMDPath)
+	agentMD, err := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "AGENT.md"))
+	if err != nil {
+		o.logger.Warn("failed to read agent memory", "error", err, "agent", req.AgentSlug)
+	}
+	yesterdayLog, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", yesterday+".md"))
+	todayLog, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(memoryDir, "daily", today+".md"))
 
-	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
-	todayPath := path.Join(memoryDir, "daily", today+".md")
-	yesterdayPath := path.Join(memoryDir, "daily", yesterday+".md")
-	todayLog, _ := o.readContainerFile(readCtx, req.ContainerID, todayPath)
-	yesterdayLog, _ := o.readContainerFile(readCtx, req.ContainerID, yesterdayPath)
-
-	if agentMD == "" && todayLog == "" && yesterdayLog == "" {
-		return ""
+	sections := []memorySection{
+		{"AGENT.md (long-term memory)", agentMD},
+		{fmt.Sprintf("Daily log: %s (yesterday)", yesterday), yesterdayLog},
+		{fmt.Sprintf("Daily log: %s (today)", today), todayLog},
 	}
 
-	var b strings.Builder
-	totalChars := 0
-
-	b.WriteString("[AGENT MEMORY]\n")
-
-	if agentMD != "" {
-		section := fmt.Sprintf("--- AGENT.md (long-term memory) ---\n%s\n", agentMD)
-		if totalChars+len(section) > budget {
-			section = section[:budget-totalChars] + "\n...(truncated)"
-		}
-		b.WriteString(section)
-		totalChars += len(section)
-	}
-
-	if yesterdayLog != "" && totalChars < budget {
-		section := fmt.Sprintf("\n--- Daily log: %s (yesterday) ---\n%s\n", yesterday, yesterdayLog)
-		if totalChars+len(section) > budget {
-			remaining := budget - totalChars
-			if remaining > 100 {
-				section = section[:remaining] + "\n...(truncated)"
-			} else {
-				section = ""
-			}
-		}
-		if section != "" {
-			b.WriteString(section)
-			totalChars += len(section)
-		}
-	}
-
-	if todayLog != "" && totalChars < budget {
-		section := fmt.Sprintf("\n--- Daily log: %s (today) ---\n%s\n", today, todayLog)
-		if totalChars+len(section) > budget {
-			remaining := budget - totalChars
-			if remaining > 100 {
-				section = section[:remaining] + "\n...(truncated)"
-			} else {
-				section = ""
-			}
-		}
-		if section != "" {
-			b.WriteString(section)
-		}
-	}
-
-	b.WriteString("[END AGENT MEMORY]\n\n")
-	return b.String()
+	return assembleSections("[AGENT MEMORY]", "[END AGENT MEMORY]", sections, budget)
 }
 
 // buildCrewMemoryBlock reads crew shared memory files and returns a formatted
@@ -132,51 +94,61 @@ func (o *Orchestrator) buildAgentMemoryBlock(ctx context.Context, req AgentRunRe
 // if no crew memory files exist.
 func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunRequest, budget int, today string) (string, int) {
 	crewMemDir := "/crew/shared/.memory"
-	crewMDPath := path.Join(crewMemDir, "CREW.md")
-	crewDailyPath := path.Join(crewMemDir, "daily", today+".md")
 
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
 	defer cancel()
 
-	crewMD, _ := o.readContainerFile(readCtx, req.ContainerID, crewMDPath)
-	crewDaily, _ := o.readContainerFile(readCtx, req.ContainerID, crewDailyPath)
+	crewMD, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(crewMemDir, "CREW.md"))
+	crewDaily, _ := o.readContainerFile(readCtx, req.ContainerID, path.Join(crewMemDir, "daily", today+".md"))
 
-	if crewMD == "" && crewDaily == "" {
-		return "", 0
+	sections := []memorySection{
+		{"CREW.md (crew-wide knowledge)", crewMD},
+		{fmt.Sprintf("Crew daily: %s", today), crewDaily},
+	}
+
+	block := assembleSections("[CREW SHARED MEMORY]", "[END CREW SHARED MEMORY]", sections, budget)
+	return block, len(block)
+}
+
+// assembleSections builds a memory block from sections with budget-aware truncation.
+// Returns empty string if all sections are empty.
+func assembleSections(startMarker, endMarker string, sections []memorySection, budget int) string {
+	// Check if any section has content
+	hasContent := false
+	for _, s := range sections {
+		if s.content != "" {
+			hasContent = true
+			break
+		}
+	}
+	if !hasContent {
+		return ""
 	}
 
 	var b strings.Builder
+	b.WriteString(startMarker + "\n")
 	totalChars := 0
 
-	b.WriteString("[CREW SHARED MEMORY]\n")
+	for _, s := range sections {
+		if s.content == "" || totalChars >= budget {
+			continue
+		}
 
-	if crewMD != "" {
-		section := fmt.Sprintf("--- CREW.md (crew-wide knowledge) ---\n%s\n", crewMD)
-		if totalChars+len(section) > budget {
-			section = section[:budget-totalChars] + "\n...(truncated)"
+		section := fmt.Sprintf("--- %s ---\n%s\n", s.label, s.content)
+		remaining := budget - totalChars
+		if len(section) > remaining {
+			if remaining > minTruncationChars {
+				section = section[:remaining] + "\n...(truncated)"
+			} else {
+				continue // skip — not enough room for meaningful content
+			}
 		}
 		b.WriteString(section)
 		totalChars += len(section)
 	}
 
-	if crewDaily != "" && totalChars < budget {
-		section := fmt.Sprintf("\n--- Crew daily: %s ---\n%s\n", today, crewDaily)
-		if totalChars+len(section) > budget {
-			remaining := budget - totalChars
-			if remaining > 100 {
-				section = section[:remaining] + "\n...(truncated)"
-			} else {
-				section = ""
-			}
-		}
-		if section != "" {
-			b.WriteString(section)
-			totalChars += len(section)
-		}
-	}
-
-	b.WriteString("[END CREW SHARED MEMORY]\n\n")
-	return b.String(), totalChars
+	b.WriteString(endMarker + "\n\n")
+	return b.String()
 }
 
 // buildMemoryInstructions returns the instruction block that teaches the agent

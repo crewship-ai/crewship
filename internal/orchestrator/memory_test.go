@@ -404,6 +404,58 @@ func TestBuildMemoryInstructions_MentionsCrewMemory(t *testing.T) {
 	}
 }
 
+func TestBuildMemoryContext_TinyBudgetNoPanic(t *testing.T) {
+	// Regression: ensure no panic when budget is smaller than any single section.
+	// Previously could panic with negative slice index.
+	bigContent := strings.Repeat("X", 5000)
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/agents/lead/.memory/AGENT.md": bigContent,
+		"/crew/shared/.memory/CREW.md":       bigContent,
+	})
+
+	o := New(mc, newMemState(), slog.Default())
+	req := AgentRunRequest{
+		AgentSlug:     "lead",
+		ContainerID:   "c1",
+		MemoryEnabled: true,
+		AgentRole:     "lead",
+		CrewID:        "crew-1",
+	}
+
+	// Should not panic with very small budgets
+	for _, budget := range []int{10, 50, 100, 200, 500} {
+		result := o.buildMemoryContext(context.Background(), req, budget)
+		if result == "" {
+			t.Errorf("budget=%d: expected non-empty result", budget)
+		}
+	}
+}
+
+func TestAssembleSections_EmptySections(t *testing.T) {
+	// All sections empty → empty string
+	sections := []memorySection{
+		{"Label1", ""},
+		{"Label2", ""},
+	}
+	result := assembleSections("[START]", "[END]", sections, 1000)
+	if result != "" {
+		t.Errorf("expected empty string for all-empty sections, got %q", result)
+	}
+}
+
+func TestAssembleSections_BudgetRespected(t *testing.T) {
+	sections := []memorySection{
+		{"File1", strings.Repeat("A", 500)},
+		{"File2", strings.Repeat("B", 500)},
+	}
+	result := assembleSections("[START]", "[END]", sections, 300)
+
+	// Should contain truncation marker, not exceed budget significantly
+	if !strings.Contains(result, "truncated") {
+		t.Error("expected truncation marker")
+	}
+}
+
 func TestBuildMemoryContext_NoCrewForSoloAgent(t *testing.T) {
 	mc := mockContainerForMemory(map[string]string{
 		"/crew/agents/solo/.memory/AGENT.md": "# Solo agent\nI work alone.",
