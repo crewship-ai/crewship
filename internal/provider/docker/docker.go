@@ -459,6 +459,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
 					return "", fmt.Errorf("start existing container: %w", err)
 				}
+				// Re-run postStartCommand hooks on every restart — this is the
+				// spec-defined semantics. Warnings are non-fatal.
+				p.runPostStartCommands(ctx, c.ID, team.PostStartCommands)
 				return c.ID, nil
 			}
 		}
@@ -719,7 +722,64 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
+	// Run postStartCommand hooks (feature-level + root-level, pre-merged by
+	// the bridge resolver). Non-fatal — failures log warnings but do not
+	// block the container from coming up.
+	p.runPostStartCommands(ctx, resp.ID, team.PostStartCommands)
+
 	return resp.ID, nil
+}
+
+// runPostStartCommands executes each post-start hook sequentially as the
+// agent user (UID 1001). Per-command timeout is 60 s. Non-fatal: a failing
+// hook is logged as a warning and we move on — agents can retry their own
+// logic.
+func (p *Provider) runPostStartCommands(ctx context.Context, containerID string, cmds []string) {
+	if len(cmds) == 0 {
+		return
+	}
+	for _, cmd := range cmds {
+		runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		execCfg := container.ExecOptions{
+			Cmd:          []string{"bash", "-lc", cmd},
+			User:         "1001:1001",
+			Env:          []string{"HOME=/home/agent", "USER=agent"},
+			AttachStdout: true,
+			AttachStderr: true,
+		}
+		ex, err := p.client.ContainerExecCreate(runCtx, containerID, execCfg)
+		if err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand exec create failed",
+				"container", shortID(containerID), "cmd", cmd, "error", err)
+			continue
+		}
+		if err := p.client.ContainerExecStart(runCtx, ex.ID, container.ExecStartOptions{}); err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand exec start failed",
+				"container", shortID(containerID), "cmd", cmd, "error", err)
+			continue
+		}
+		// Poll exit code briefly; cap at ~60s total via runCtx timeout.
+		for i := 0; i < 1200; i++ { // 1200 * 50ms = 60s
+			inspect, ierr := p.client.ContainerExecInspect(runCtx, ex.ID)
+			if ierr != nil {
+				break
+			}
+			if !inspect.Running {
+				if inspect.ExitCode != 0 {
+					p.logger.Warn("postStartCommand exited non-zero",
+						"container", shortID(containerID), "cmd", cmd, "exit_code", inspect.ExitCode)
+				} else {
+					p.logger.Debug("postStartCommand completed",
+						"container", shortID(containerID), "cmd", cmd)
+				}
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		cancel()
+	}
 }
 
 // shortID returns first 12 chars of a container ID, or the full string if shorter.

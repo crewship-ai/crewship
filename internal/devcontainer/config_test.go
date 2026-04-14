@@ -21,6 +21,73 @@ func TestParseMinimal(t *testing.T) {
 	if c.PostCreateCommand != nil {
 		t.Errorf("PostCreateCommand = %v, want nil", c.PostCreateCommand)
 	}
+	if c.PostStartCommand != nil {
+		t.Errorf("PostStartCommand = %v, want nil", c.PostStartCommand)
+	}
+}
+
+func TestParsePostStartCommandStringForm(t *testing.T) {
+	input := `{
+		"image": "debian:bookworm",
+		"postStartCommand": "service postgresql start"
+	}`
+	c, err := ParseBytes([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	got := c.NormalizedPostStartCommands()
+	if len(got) != 1 || got[0] != "service postgresql start" {
+		t.Errorf("NormalizedPostStartCommands = %v, want [service postgresql start]", got)
+	}
+}
+
+func TestParsePostStartCommandMapForm(t *testing.T) {
+	input := `{
+		"image": "debian:bookworm",
+		"postStartCommand": {
+			"2-db": "service postgresql start",
+			"1-net": "ip link set eth0 up",
+			"3-cache": "redis-server --daemonize yes"
+		}
+	}`
+	c, err := ParseBytes([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseBytes: %v", err)
+	}
+	got := c.NormalizedPostStartCommands()
+	// Map form preserves sorted-by-key ordering.
+	want := []string{
+		"ip link set eth0 up",
+		"service postgresql start",
+		"redis-server --daemonize yes",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (got %v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("[%d] = %q, want %q", i, got[i], w)
+		}
+	}
+}
+
+func TestPostStartCommandExcludedFromHash(t *testing.T) {
+	baseInput := `{"image": "debian:bookworm"}`
+	withPostStartInput := `{
+		"image": "debian:bookworm",
+		"postStartCommand": "echo hello"
+	}`
+	base, err := ParseBytes([]byte(baseInput))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withPostStart, err := ParseBytes([]byte(withPostStartInput))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Hash() != withPostStart.Hash() {
+		t.Errorf("Hash differs when only postStartCommand changes — got %s vs %s", base.Hash(), withPostStart.Hash())
+	}
 }
 
 func TestParseFull(t *testing.T) {

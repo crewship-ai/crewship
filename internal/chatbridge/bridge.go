@@ -64,7 +64,12 @@ type ChatInfo struct {
 	// capAdd, mounts, securityOpt) persisted at provision time and applied
 	// to the HostConfig. Nil means no extra requirements.
 	CachedRequirements *devcontainer.AggregatedRequirements
-	MCPServers         []orchestrator.MCPServerConfig
+	// RootPostStart is the normalized root-level postStartCommand parsed from
+	// the crew's devcontainer_config. Appended to feature-level post-start
+	// hooks (from CachedRequirements.PostStartCommands) so that user intent
+	// wins over feature defaults.
+	RootPostStart []string
+	MCPServers    []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
 }
@@ -250,7 +255,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					Type:   m.Type,
 				})
 			}
+			cc.PostStartCommands = append(cc.PostStartCommands, info.CachedRequirements.PostStartCommands...)
 		}
+		// Root-level postStartCommand runs after feature hooks so user intent
+		// (e.g. "start my app-specific DB") wins over feature defaults.
+		cc.PostStartCommands = append(cc.PostStartCommands, info.RootPostStart...)
 		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})

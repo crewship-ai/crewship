@@ -442,18 +442,22 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		mcpServers = append(mcpServers, cfg)
 	}
 
-	// Extract containerEnv from devcontainer_config so it can flow into
-	// CrewConfig.ContainerEnv and be injected at container create time.
-	// Use the shared parser to avoid drift. Parse failures are logged but
-	// non-fatal — the config was validated at write time, but stored configs
-	// from older schema versions may no longer validate.
+	// Extract containerEnv and postStartCommand from devcontainer_config so
+	// they can flow into CrewConfig at container create time. Use the shared
+	// parser to avoid drift. Parse failures are logged but non-fatal — the
+	// config was validated at write time, but stored configs from older
+	// schema versions may no longer validate.
 	var containerEnv map[string]string
+	var rootPostStart []string
 	if data.DevcontainerConfig != "" {
 		if cfg, err := devcontainer.ParseBytes([]byte(data.DevcontainerConfig)); err != nil {
-			r.logger.Warn("failed to parse stored devcontainer_config for containerEnv",
+			r.logger.Warn("failed to parse stored devcontainer_config for runtime fields",
 				"error", err)
-		} else if len(cfg.ContainerEnv) > 0 {
-			containerEnv = cfg.ContainerEnv
+		} else {
+			if len(cfg.ContainerEnv) > 0 {
+				containerEnv = cfg.ContainerEnv
+			}
+			rootPostStart = cfg.NormalizedPostStartCommands()
 		}
 	}
 
@@ -517,6 +521,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		DevcontainerConfig:  data.DevcontainerConfig,
 		ContainerEnv:        containerEnv,
 		CachedRequirements:  cachedReqs,
+		RootPostStart:       rootPostStart,
 		MCPServers:          mcpServers,
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,

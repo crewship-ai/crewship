@@ -32,6 +32,17 @@ type CrewConfig struct {
 	CapAdd      []string
 	SecurityOpt []string
 	ExtraMounts []CrewMount
+
+	// PostStartCommands are shell commands that run in the container on every
+	// start / restart, not only first create. Concatenation of feature-level
+	// postStartCommand hooks (install-order) followed by the root-level
+	// devcontainer.json postStartCommand. Providers that run these must
+	// execute as UID 1001:1001 (the agent user) with stdout/stderr captured
+	// for debugging. A failing post-start command logs a warning but does
+	// not prevent the container from coming up — agents may recover via
+	// retry. Intentionally excluded from the provisioning hash; mutating the
+	// list does not invalidate the cached image.
+	PostStartCommands []string
 }
 
 // CrewMount declares an additional bind or volume mount to apply to the crew

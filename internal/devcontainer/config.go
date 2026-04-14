@@ -22,10 +22,21 @@ var (
 // Config represents the subset of devcontainer.json that Crewship supports.
 // Unsupported fields (build, dockerfile, forwardPorts, extensions, etc.) are
 // silently ignored during parsing.
+//
+// Lifecycle commands are polymorphic (string | []string | map[string]string)
+// per the devcontainer spec. Supported semantics:
+//
+//   - PostCreateCommand: baked into the cached image during provisioning.
+//     Runs once per image hash, as UID 1001.
+//   - PostStartCommand: runs on every container start / restart, as UID 1001.
+//     Intentionally excluded from ConfigHash — it does not affect image
+//     content, only runtime behaviour. Template authors use this for
+//     "start my local DB" or "mount secrets from Vault" style init.
 type Config struct {
 	Image             string                       `json:"image"`
 	Features          map[string]map[string]any     `json:"features,omitempty"`
 	PostCreateCommand any                           `json:"postCreateCommand,omitempty"`
+	PostStartCommand  any                           `json:"postStartCommand,omitempty"`
 	ContainerEnv      map[string]string             `json:"containerEnv,omitempty"`
 	RemoteUser        string                        `json:"remoteUser,omitempty"`
 }
@@ -45,6 +56,7 @@ func ParseBytes(data []byte) (*Config, error) {
 		Image             string                    `json:"image"`
 		Features          map[string]map[string]any `json:"features"`
 		PostCreateCommand json.RawMessage           `json:"postCreateCommand"`
+		PostStartCommand  json.RawMessage           `json:"postStartCommand"`
 		ContainerEnv      map[string]string         `json:"containerEnv"`
 		RemoteUser        string                    `json:"remoteUser"`
 	}
@@ -60,13 +72,20 @@ func ParseBytes(data []byte) (*Config, error) {
 		RemoteUser:   raw.RemoteUser,
 	}
 
-	// Parse the polymorphic postCreateCommand field.
+	// Parse polymorphic lifecycle commands.
 	if len(raw.PostCreateCommand) > 0 && string(raw.PostCreateCommand) != "null" {
-		pcc, err := parsePostCreateCommand(raw.PostCreateCommand)
+		pcc, err := parsePolymorphicCommand(raw.PostCreateCommand, "postCreateCommand")
 		if err != nil {
 			return nil, err
 		}
 		c.PostCreateCommand = pcc
+	}
+	if len(raw.PostStartCommand) > 0 && string(raw.PostStartCommand) != "null" {
+		psc, err := parsePolymorphicCommand(raw.PostStartCommand, "postStartCommand")
+		if err != nil {
+			return nil, err
+		}
+		c.PostStartCommand = psc
 	}
 
 	if err := c.Validate(); err != nil {
@@ -76,9 +95,10 @@ func ParseBytes(data []byte) (*Config, error) {
 	return c, nil
 }
 
-// parsePostCreateCommand handles the polymorphic postCreateCommand field.
-// It accepts string, []string, or map[string]string.
-func parsePostCreateCommand(data json.RawMessage) (any, error) {
+// parsePolymorphicCommand handles devcontainer.json lifecycle fields which
+// may be string, []string, or map[string]string. field is the field name
+// (for error messages).
+func parsePolymorphicCommand(data json.RawMessage, field string) (any, error) {
 	// Try string first.
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
@@ -97,7 +117,7 @@ func parsePostCreateCommand(data json.RawMessage) (any, error) {
 		return m, nil
 	}
 
-	return nil, fmt.Errorf("devcontainer: postCreateCommand must be string, []string, or map[string]string")
+	return nil, fmt.Errorf("devcontainer: %s must be string, []string, or map[string]string", field)
 }
 
 // Validate checks that the Config is well-formed.
@@ -136,6 +156,12 @@ func (c *Config) Validate() error {
 //   - nil → nil
 func (c *Config) NormalizedPostCreateCommands() []string {
 	return NormalizeCommand(c.PostCreateCommand)
+}
+
+// NormalizedPostStartCommands returns postStartCommand as a flat []string
+// using the same normalization rules as NormalizedPostCreateCommands.
+func (c *Config) NormalizedPostStartCommands() []string {
+	return NormalizeCommand(c.PostStartCommand)
 }
 
 // NormalizeCommand converts a devcontainer command field (string | []string |
@@ -191,12 +217,23 @@ func NormalizeCommand(raw any) []string {
 }
 
 // Hash returns a deterministic SHA-256 hex digest of the config's canonical
-// JSON representation. Keys are sorted to ensure stability.
+// JSON representation. Keys are sorted to ensure stability. PostStartCommand
+// is excluded (see HashRelevantMap) since it only affects runtime behaviour.
 func (c *Config) Hash() string {
-	canonical := c.canonicalMap()
+	canonical := c.hashRelevantMap()
 	data, _ := json.Marshal(canonical)
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum)
+}
+
+// hashRelevantMap is canonicalMap minus runtime-only fields. Used by
+// ConfigHash so that "I tweaked postStartCommand" does not invalidate the
+// cached image — the image content is identical, only start-time behaviour
+// differs.
+func (c *Config) hashRelevantMap() map[string]any {
+	m := c.canonicalMap()
+	delete(m, "postStartCommand")
+	return m
 }
 
 // canonicalMap builds a map with sorted keys suitable for deterministic JSON.
@@ -223,6 +260,13 @@ func (c *Config) canonicalMap() map[string]any {
 
 	if c.PostCreateCommand != nil {
 		m["postCreateCommand"] = c.NormalizedPostCreateCommands()
+	}
+
+	// PostStartCommand is runtime-only — included in canonical form for
+	// storage/export but intentionally excluded from ConfigHash so that
+	// changing a start hook does not invalidate the cached image.
+	if c.PostStartCommand != nil {
+		m["postStartCommand"] = c.NormalizedPostStartCommands()
 	}
 
 	return m

@@ -27,10 +27,11 @@ Parser: `internal/devcontainer/config.go:Config`.
 | Field | Type | Required | Purpose |
 |---|---|---|---|
 | `image` | string | ✓ | Base image reference. Must equal `runtime_image` at the API boundary. |
-| `features` | `map[featureRef]options` | — | Community devcontainer features. |
-| `postCreateCommand` | `string` \| `[]string` \| `map[string]string` | — | Commands run as `agent` user (UID 1001) after feature install. |
+| `features` | `map[featureRef]options` | — | Community devcontainer features. Accepts tag form (`ghcr.io/…/python:1`) and SHA256 digest form (`ghcr.io/…/python@sha256:abc…`). Digest form pins the exact artifact — recommended for paid/shared templates where an upstream tag rewrite would silently ship new code to every customer. |
+| `postCreateCommand` | `string` \| `[]string` \| `map[string]string` | — | Commands run as `agent` user (UID 1001) **once** during provisioning. Baked into the cached image. Changes invalidate the cache. |
+| `postStartCommand` | `string` \| `[]string` \| `map[string]string` | — | Commands run as `agent` user (UID 1001) on **every** container start / restart. Not baked into the image; changes do **not** invalidate the cache. Use for "start local services" style init. Failures log a warning but do not block the container. |
 | `containerEnv` | `map[string]string` | — | Env vars baked into the cached image (via `ENV` on commit). |
-| `remoteUser` | string | — | Default user for `postCreateCommand`. Crewship forces `agent` regardless. |
+| `remoteUser` | string | — | Default user for commands. Only `"agent"` / `"1001"` / empty are accepted — other values are rejected with HTTP 400. Crewship always runs as UID 1001. |
 
 ### Allowed feature registries
 

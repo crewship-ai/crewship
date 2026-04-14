@@ -630,5 +630,6 @@ func isEmptyRequirements(r devcontainer.AggregatedRequirements) bool {
 		len(r.ContainerEnv) == 0 &&
 		len(r.Mounts) == 0 &&
 		len(r.CapAdd) == 0 &&
-		len(r.SecurityOpt) == 0
+		len(r.SecurityOpt) == 0 &&
+		len(r.PostStartCommands) == 0
 }

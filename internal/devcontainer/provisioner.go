@@ -55,19 +55,26 @@ type ProvisionResult struct {
 // AggregatedRequirements contains runtime requirements bubbled up from the
 // set of features a crew installs. These must reach the runtime HostConfig
 // for features like DinD to actually work (privileged + docker.sock mount).
+//
+// PostStartCommands are feature-declared postStartCommand hooks concatenated
+// in install order; the root-level postStartCommand is appended by the
+// runtime resolver (not here) so that root hooks run last — matching the
+// devcontainer spec where user customizations override feature defaults.
 type AggregatedRequirements struct {
-	ContainerEnv map[string]string `json:"containerEnv,omitempty"`
-	Mounts       []FeatureMount    `json:"mounts,omitempty"`
-	Privileged   bool              `json:"privileged,omitempty"`
-	Init         bool              `json:"init,omitempty"`
-	CapAdd       []string          `json:"capAdd,omitempty"`
-	SecurityOpt  []string          `json:"securityOpt,omitempty"`
+	ContainerEnv      map[string]string `json:"containerEnv,omitempty"`
+	Mounts            []FeatureMount    `json:"mounts,omitempty"`
+	Privileged        bool              `json:"privileged,omitempty"`
+	Init              bool              `json:"init,omitempty"`
+	CapAdd            []string          `json:"capAdd,omitempty"`
+	SecurityOpt       []string          `json:"securityOpt,omitempty"`
+	PostStartCommands []string          `json:"postStartCommands,omitempty"`
 }
 
 // aggregateFeatureRequirements merges runtime requirements across features.
 // Root-level containerEnv takes precedence over feature-declared values.
 // Privileged/Init are OR-ed; CapAdd/SecurityOpt are concatenated (callers may
-// dedupe when applying to HostConfig).
+// dedupe when applying to HostConfig). Feature-level postStartCommand hooks
+// are flattened in install order.
 func (p *Provisioner) aggregateFeatureRequirements(features []*ResolvedFeature, rootEnv map[string]string) AggregatedRequirements {
 	req := AggregatedRequirements{ContainerEnv: map[string]string{}}
 	for _, f := range features {
@@ -88,6 +95,7 @@ func (p *Provisioner) aggregateFeatureRequirements(features []*ResolvedFeature, 
 		}
 		req.CapAdd = append(req.CapAdd, f.Metadata.CapAdd...)
 		req.SecurityOpt = append(req.SecurityOpt, f.Metadata.SecurityOpt...)
+		req.PostStartCommands = append(req.PostStartCommands, NormalizeCommand(f.Metadata.PostStartCommand)...)
 	}
 	// Root-level containerEnv wins over feature-declared values.
 	for k, v := range rootEnv {
@@ -142,8 +150,10 @@ func configHash(baseImage string, cfg *Config, miseConfig string) string {
 	h.Write([]byte(baseImage))
 	h.Write([]byte("|"))
 
-	// Canonicalize cfg via MarshalJSON (sorted keys in canonicalMap).
-	cfgCanon, _ := json.Marshal(cfg)
+	// Canonicalize cfg via hashRelevantMap, which omits runtime-only fields
+	// like postStartCommand. Tweaking a start hook must not invalidate the
+	// cached image — only image content should.
+	cfgCanon, _ := json.Marshal(cfg.hashRelevantMap())
 	h.Write(cfgCanon)
 	h.Write([]byte("|"))
 
@@ -256,6 +266,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// 7. Write containerEnv (aggregated from features + root-level) to
 	// /etc/environment. Root-level wins on key conflict.
 	requirements := p.aggregateFeatureRequirements(resolvedFeatures, cfg.ContainerEnv)
+	// Append root-level postStartCommand hooks after feature hooks — user
+	// intent wins over feature defaults.
+	requirements.PostStartCommands = append(
+		requirements.PostStartCommands,
+		cfg.NormalizedPostStartCommands()...,
+	)
 	if err := p.writeAggregatedContainerEnv(ctx, containerID, requirements.ContainerEnv); err != nil {
 		return nil, err
 	}
