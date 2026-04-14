@@ -18,12 +18,15 @@ iptables -t mangle -F
 iptables -t mangle -X
 ipset destroy allowed-domains 2>/dev/null || true
 
-# 2. Restore Docker DNS rules
+# 2. Restore Docker DNS rules via iptables-restore (safer than xargs for
+# rules containing shell metacharacters; format is already iptables-save).
 if [ -n "$DOCKER_DNS_RULES" ]; then
     echo "Restoring Docker DNS rules..."
     iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
     iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
-    echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
+    printf "*nat\n%s\nCOMMIT\n" "$DOCKER_DNS_RULES" | iptables-restore --noflush 2>/dev/null || {
+        echo "WARN: failed to restore Docker DNS rules" >&2
+    }
 fi
 
 # 3. Allow DNS and localhost BEFORE restrictions
@@ -92,13 +95,15 @@ for domain in "${ALLOWED_DOMAINS[@]}"; do
     done <<< "$ips"
 done
 
-# 7. Allow host network (for host.docker.internal -> crewshipd)
+# 7. Allow host gateway only (for host.docker.internal -> crewshipd).
+# Use /32 on the gateway IP rather than a /24 around it — Docker bridge
+# networks are typically /16 and other containers sit on the same bridge,
+# so a /24 would silently open east-west traffic we don't need.
 HOST_IP=$(ip route | awk '/default/ {print $3; exit}')
 if [ -n "$HOST_IP" ]; then
-    HOST_NETWORK=$(echo "$HOST_IP" | sed 's/\.[0-9]*$/.0\/24/')
-    echo "Allowing host network: $HOST_NETWORK"
-    iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
-    iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
+    echo "Allowing host gateway: $HOST_IP"
+    iptables -A INPUT -s "$HOST_IP" -j ACCEPT
+    iptables -A OUTPUT -d "$HOST_IP" -j ACCEPT
 fi
 
 # 8. Default DROP policies

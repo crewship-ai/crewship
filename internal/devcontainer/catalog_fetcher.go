@@ -216,11 +216,28 @@ func (f *CatalogFetcher) writeDiskCache(entries []CatalogEntry, fetchedAt time.T
 		return fmt.Errorf("marshaling catalog cache: %w", err)
 	}
 	dst := filepath.Join(f.cacheDir, featureCatalogFile)
-	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// Use a unique temp file so concurrent RefreshCatalog calls don't
+	// clobber each other's in-flight writes before the rename.
+	tmpFile, err := os.CreateTemp(f.cacheDir, featureCatalogFile+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("creating catalog cache tmp in %s: %w", f.cacheDir, err)
+	}
+	tmp := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmp)
 		return fmt.Errorf("writing catalog cache tmp %s: %w", tmp, err)
 	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("closing catalog cache tmp %s: %w", tmp, err)
+	}
+	if err := os.Chmod(tmp, 0o644); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("chmod catalog cache tmp %s: %w", tmp, err)
+	}
 	if err := os.Rename(tmp, dst); err != nil {
+		os.Remove(tmp)
 		return fmt.Errorf("renaming catalog cache %s -> %s: %w", tmp, dst, err)
 	}
 	return nil
