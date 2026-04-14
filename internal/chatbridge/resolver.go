@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -62,9 +63,10 @@ type chatResolveResponse struct {
 	MemoryMB           int                      `json:"memory_mb"`
 	CPUs               float64                  `json:"cpus"`
 	TTLHours           int                      `json:"ttl_hours"`
-	RuntimeImage       string                   `json:"runtime_image"`
-	CachedImage        string                   `json:"cached_image"`
-	DevcontainerConfig string                   `json:"devcontainer_config"`
+	RuntimeImage        string                   `json:"runtime_image"`
+	CachedImage         string                   `json:"cached_image"`
+	CachedRequirements  string                   `json:"cached_requirements"`
+	DevcontainerConfig  string                   `json:"devcontainer_config"`
 	MCPServers         []mcpServerResponse      `json:"mcp_servers,omitempty"`
 	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
 	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
@@ -440,6 +442,53 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		mcpServers = append(mcpServers, cfg)
 	}
 
+	// Extract containerEnv from devcontainer_config so it can flow into
+	// CrewConfig.ContainerEnv and be injected at container create time.
+	// Use the shared parser to avoid drift. Parse failures are logged but
+	// non-fatal — the config was validated at write time, but stored configs
+	// from older schema versions may no longer validate.
+	var containerEnv map[string]string
+	if data.DevcontainerConfig != "" {
+		if cfg, err := devcontainer.ParseBytes([]byte(data.DevcontainerConfig)); err != nil {
+			r.logger.Warn("failed to parse stored devcontainer_config for containerEnv",
+				"error", err)
+		} else if len(cfg.ContainerEnv) > 0 {
+			containerEnv = cfg.ContainerEnv
+		}
+	}
+
+	// Parse cached_requirements — runtime requirements (privileged, capAdd,
+	// mounts, containerEnv) bubbled up from the devcontainer features that
+	// were installed at provision time. Without applying these at runtime,
+	// features like DinD silently don't work: the feature installs fine,
+	// but the container runs without privileged and without the docker.sock
+	// mount that the feature requires. Parse failures are logged but
+	// non-fatal — we fall back to "no extra requirements".
+	var cachedReqs *devcontainer.AggregatedRequirements
+	if data.CachedRequirements != "" {
+		var req devcontainer.AggregatedRequirements
+		if err := json.Unmarshal([]byte(data.CachedRequirements), &req); err != nil {
+			r.logger.Warn("failed to parse cached_requirements JSON",
+				"error", err)
+		} else {
+			cachedReqs = &req
+			// Merge feature-declared containerEnv with devcontainer.json
+			// root-level (already in containerEnv). Root-level wins, but
+			// feature env should still reach the container for features
+			// that rely on their own env (e.g. GOPATH).
+			if len(req.ContainerEnv) > 0 {
+				if containerEnv == nil {
+					containerEnv = map[string]string{}
+				}
+				for k, v := range req.ContainerEnv {
+					if _, exists := containerEnv[k]; !exists {
+						containerEnv[k] = v
+					}
+				}
+			}
+		}
+	}
+
 	return &ChatInfo{
 		AgentID:            data.AgentID,
 		AgentSlug:          data.AgentSlug,
@@ -463,10 +512,12 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		MemoryMB:           data.MemoryMB,
 		CPUs:               data.CPUs,
 		TTLHours:           data.TTLHours,
-		RuntimeImage:       data.RuntimeImage,
-		CachedImage:        data.CachedImage,
-		DevcontainerConfig: data.DevcontainerConfig,
-		MCPServers:         mcpServers,
+		RuntimeImage:        data.RuntimeImage,
+		CachedImage:         data.CachedImage,
+		DevcontainerConfig:  data.DevcontainerConfig,
+		ContainerEnv:        containerEnv,
+		CachedRequirements:  cachedReqs,
+		MCPServers:          mcpServers,
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,
 	}, nil

@@ -19,6 +19,27 @@ type CrewConfig struct {
 	TTLHours       int      // auto-stop after idle period; 0 = no TTL
 	Image          string   // custom runtime image; empty = provider default
 	CachedImage    string   // provisioned Docker image tag; empty = use Image or default
+	// ContainerEnv is extra env vars from devcontainer.json containerEnv.
+	// CREWSHIP_* keys are reserved for platform-managed vars and silently
+	// skipped. Providers merge these into the container's Env at create time.
+	ContainerEnv map[string]string
+
+	// Runtime requirements bubbled up from devcontainer features. Applied to
+	// the HostConfig at create time. Critical for features like DinD which
+	// need Privileged + a docker.sock bind mount.
+	Privileged  bool
+	Init        bool
+	CapAdd      []string
+	SecurityOpt []string
+	ExtraMounts []CrewMount
+}
+
+// CrewMount declares an additional bind or volume mount to apply to the crew
+// runtime, typically sourced from a devcontainer feature's metadata.
+type CrewMount struct {
+	Source string // host path (bind) or volume name (volume)
+	Target string // path inside the container
+	Type   string // "bind" (default) or "volume"
 }
 
 // ExecConfig describes a non-interactive command to execute inside a container.

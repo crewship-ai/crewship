@@ -12,9 +12,10 @@ import (
 
 // Typed errors for validation failures.
 var (
-	ErrEmptyImage       = errors.New("devcontainer: image is required")
-	ErrInvalidImage     = errors.New("devcontainer: invalid image reference")
+	ErrEmptyImage        = errors.New("devcontainer: image is required")
+	ErrInvalidImage      = errors.New("devcontainer: invalid image reference")
 	ErrInvalidFeatureRef = errors.New("devcontainer: invalid feature reference")
+	ErrUnsupportedField  = errors.New("devcontainer: unsupported field")
 )
 
 // Config represents the subset of devcontainer.json that Crewship supports.
@@ -115,6 +116,13 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Crewship enforces UID 1001 (agent) at runtime. Explicit overrides are
+	// rejected rather than silently ignored — templates that assume a
+	// different user would fail in confusing ways.
+	if c.RemoteUser != "" && c.RemoteUser != "agent" && c.RemoteUser != "1001" {
+		return fmt.Errorf("%w: remoteUser %q unsupported — Crewship runs containers as 'agent' (UID 1001); remove remoteUser or set to 'agent'", ErrUnsupportedField, c.RemoteUser)
+	}
+
 	return nil
 }
 
@@ -126,15 +134,32 @@ func (c *Config) Validate() error {
 //   - map[string]string → values sorted by key, returned as []string
 //   - nil → nil
 func (c *Config) NormalizedPostCreateCommands() []string {
-	if c.PostCreateCommand == nil {
+	return NormalizeCommand(c.PostCreateCommand)
+}
+
+// NormalizeCommand converts a devcontainer command field (string | []string |
+// map[string]string | []any | map[string]any as parsed from JSON) to a flat
+// []string. Returns nil for nil input or unknown types.
+func NormalizeCommand(raw any) []string {
+	if raw == nil {
 		return nil
 	}
-
-	switch v := c.PostCreateCommand.(type) {
+	switch v := raw.(type) {
 	case string:
+		if v == "" {
+			return nil
+		}
 		return []string{v}
 	case []string:
 		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
 	case map[string]string:
 		keys := make([]string, 0, len(v))
 		for k := range v {
@@ -144,6 +169,19 @@ func (c *Config) NormalizedPostCreateCommands() []string {
 		cmds := make([]string, 0, len(v))
 		for _, k := range keys {
 			cmds = append(cmds, v[k])
+		}
+		return cmds
+	case map[string]any:
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		cmds := make([]string, 0, len(v))
+		for _, k := range keys {
+			if s, ok := v[k].(string); ok {
+				cmds = append(cmds, s)
+			}
 		}
 		return cmds
 	default:

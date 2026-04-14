@@ -32,7 +32,7 @@ func TestParseFull(t *testing.T) {
 		},
 		"postCreateCommand": "pip install -r requirements.txt",
 		"containerEnv": {"GO_ENV": "development", "PORT": "8080"},
-		"remoteUser": "vscode"
+		"remoteUser": "agent"
 	}`
 
 	c, err := ParseBytes([]byte(input))
@@ -46,8 +46,8 @@ func TestParseFull(t *testing.T) {
 	if len(c.Features) != 2 {
 		t.Errorf("len(Features) = %d, want 2", len(c.Features))
 	}
-	if c.RemoteUser != "vscode" {
-		t.Errorf("RemoteUser = %q, want vscode", c.RemoteUser)
+	if c.RemoteUser != "agent" {
+		t.Errorf("RemoteUser = %q, want agent", c.RemoteUser)
 	}
 	if len(c.ContainerEnv) != 2 {
 		t.Errorf("len(ContainerEnv) = %d, want 2", len(c.ContainerEnv))
@@ -226,13 +226,24 @@ func TestParseEmptyFeatures(t *testing.T) {
 }
 
 func TestParseViaReader(t *testing.T) {
-	input := `{"image": "ubuntu:22.04", "remoteUser": "dev"}`
+	input := `{"image": "ubuntu:22.04", "remoteUser": "agent"}`
 	c, err := Parse(strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if c.RemoteUser != "dev" {
-		t.Errorf("RemoteUser = %q, want dev", c.RemoteUser)
+	if c.RemoteUser != "agent" {
+		t.Errorf("RemoteUser = %q, want agent", c.RemoteUser)
+	}
+}
+
+func TestParseRemoteUserRejected(t *testing.T) {
+	input := `{"image": "ubuntu:22.04", "remoteUser": "vscode"}`
+	_, err := ParseBytes([]byte(input))
+	if err == nil {
+		t.Fatal("ParseBytes: expected error for unsupported remoteUser, got nil")
+	}
+	if !errors.Is(err, ErrUnsupportedField) {
+		t.Errorf("ParseBytes: error = %v, want ErrUnsupportedField", err)
 	}
 }
 

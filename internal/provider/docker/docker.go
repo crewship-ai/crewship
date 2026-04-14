@@ -568,12 +568,25 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	pidsLimit := int64(200)
 	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
+	env := []string{
+		"CREWSHIP_CREW_ID=" + team.ID,
+	}
+	// Merge devcontainer containerEnv (from runtime config) if present.
+	// These come from the committed cached image's devcontainer_config,
+	// passed through from crew config. CREWSHIP_-prefixed keys are reserved
+	// for platform-managed vars and silently skipped.
+	if team.ContainerEnv != nil {
+		for k, v := range team.ContainerEnv {
+			if strings.HasPrefix(k, "CREWSHIP_") {
+				continue
+			}
+			env = append(env, k+"="+v)
+		}
+	}
 	containerCfg := &container.Config{
 		Image: runtimeImage,
 		User:  "1001:1001",
-		Env: []string{
-			"CREWSHIP_CREW_ID=" + team.ID,
-		},
+		Env:   env,
 		Healthcheck: &container.HealthConfig{
 			Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
 			Interval: 30_000_000_000,
@@ -592,29 +605,62 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err != nil {
 		return "", err
 	}
+	// Apply feature-declared mounts (e.g. DinD needs /var/run/docker.sock).
+	for _, m := range team.ExtraMounts {
+		mt := mount.TypeBind
+		if strings.EqualFold(m.Type, "volume") {
+			mt = mount.TypeVolume
+		}
+		crewMounts = append(crewMounts, mount.Mount{
+			Type:   mt,
+			Source: m.Source,
+			Target: m.Target,
+		})
+	}
+
+	// Build base HostConfig. Privileged features (DinD etc.) require
+	// dropping the default no-new-privileges and relaxing capability drops.
+	securityOpt := []string{"no-new-privileges"}
+	capAdd := []string{"NET_RAW"}
+	readonlyRoot := true
+	if team.Privileged {
+		// Privileged mode implies the security restrictions we normally
+		// enforce are unnecessary (and actually incompatible — dockerd
+		// can't run under no-new-privileges with ReadOnlyRootFS).
+		securityOpt = nil
+		readonlyRoot = false
+	}
+	// Additional feature-declared capabilities/security opts are appended
+	// after the defaults; Docker dedupes capAdd server-side.
+	capAdd = append(capAdd, team.CapAdd...)
+	securityOpt = append(securityOpt, team.SecurityOpt...)
+
+	hostConfig := &container.HostConfig{
+		Runtime:        runtime,
+		ReadonlyRootfs: readonlyRoot,
+		Privileged:     team.Privileged,
+		Init:           boolPtrIf(team.Init),
+		SecurityOpt:    securityOpt,
+		CapDrop:        []string{"ALL"},
+		CapAdd:         capAdd,
+		// ExtraHosts makes host.docker.internal resolve to the Docker host
+		// on both macOS and Linux, enabling containers to reach crewshipd
+		// for assignment IPC calls via the sidecar.
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+		Resources: container.Resources{
+			Memory:    int64(memoryMB) * 1024 * 1024,
+			NanoCPUs:  int64(cpus * 1e9),
+			PidsLimit: &pidsLimit,
+		},
+		Mounts: crewMounts,
+		Tmpfs: map[string]string{
+			"/tmp": "rw,size=500m",
+		},
+		NetworkMode: container.NetworkMode(p.cfg.Network),
+	}
 	resp, err := p.client.ContainerCreate(ctx,
 		containerCfg,
-		&container.HostConfig{
-			Runtime:        runtime,
-			ReadonlyRootfs: true,
-			SecurityOpt:    []string{"no-new-privileges"},
-			CapDrop:        []string{"ALL"},
-			CapAdd:         []string{"NET_RAW"},
-			// ExtraHosts makes host.docker.internal resolve to the Docker host
-			// on both macOS and Linux, enabling containers to reach crewshipd
-			// for assignment IPC calls via the sidecar.
-			ExtraHosts: []string{"host.docker.internal:host-gateway"},
-			Resources: container.Resources{
-				Memory:    int64(memoryMB) * 1024 * 1024,
-				NanoCPUs:  int64(cpus * 1e9),
-				PidsLimit: &pidsLimit,
-			},
-			Mounts: crewMounts,
-			Tmpfs: map[string]string{
-				"/tmp": "rw,size=500m",
-			},
-			NetworkMode: container.NetworkMode(p.cfg.Network),
-		},
+		hostConfig,
 		&dockernetwork.NetworkingConfig{},
 		nil,
 		containerName,
@@ -880,4 +926,13 @@ func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstP
 // Close releases the Docker API client connection.
 func (p *Provider) Close() error {
 	return p.client.Close()
+}
+
+// boolPtrIf returns a pointer to true if b is true, else nil. Used for
+// HostConfig.Init which accepts *bool (nil = default, true = force init).
+func boolPtrIf(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return &b
 }

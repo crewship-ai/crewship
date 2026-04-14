@@ -645,6 +645,15 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.RuntimeImage == "" {
 			ub.Set("runtime_image", nil)
 		} else {
+			// Fail-fast: catch typos like "debian:bogus" before provisioning.
+			// Uses anonymous auth with a short timeout; private images that
+			// require auth are allowed through (isAuthError path).
+			if err := devcontainer.ValidateImageExists(r.Context(), *req.RuntimeImage); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "invalid runtime_image: " + err.Error(),
+				})
+				return
+			}
 			ub.Set("runtime_image", *req.RuntimeImage)
 		}
 		// Invalidate cached image when runtime image changes

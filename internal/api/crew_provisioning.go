@@ -3,13 +3,16 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 )
 
@@ -42,6 +45,75 @@ type ProvisioningHandler struct {
 	// In-memory provisioning job state, keyed by crewID. MVP only.
 	mu   sync.RWMutex
 	jobs map[string]*ProvisionJob
+
+	// rateLimiter caps concurrent and recent provisions per workspace. Guards
+	// against runaway triggers (e.g. a buggy loop) exhausting Docker resources.
+	rateLimiter *provisionRateLimiter
+}
+
+// Rate limit constants. Per-workspace bucket.
+const (
+	maxConcurrentProvisionsPerWorkspace = 3
+	maxProvisionStartsPerMinute         = 10
+)
+
+// provisionRateLimiter tracks in-flight provisions per workspace and caps the
+// number of starts per sliding 1-minute window. In-memory only; single-instance
+// only (MVP). Horizontal scale would move this to Redis.
+type provisionRateLimiter struct {
+	mu           sync.Mutex
+	running      map[string]int         // workspace_id -> current concurrent count
+	recentStarts map[string][]time.Time // workspace_id -> start timestamps in last minute
+}
+
+func newProvisionRateLimiter() *provisionRateLimiter {
+	return &provisionRateLimiter{
+		running:      make(map[string]int),
+		recentStarts: make(map[string][]time.Time),
+	}
+}
+
+// tryAcquire attempts to reserve a provisioning slot for the given workspace.
+// Returns an error describing the limit hit when capacity is exhausted.
+// Successful acquires must be paired with release().
+func (r *provisionRateLimiter) tryAcquire(workspaceID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Prune stale timestamps (older than 1 minute).
+	now := time.Now()
+	cutoff := now.Add(-1 * time.Minute)
+	starts := r.recentStarts[workspaceID]
+	fresh := starts[:0]
+	for _, t := range starts {
+		if t.After(cutoff) {
+			fresh = append(fresh, t)
+		}
+	}
+	r.recentStarts[workspaceID] = fresh
+
+	if r.running[workspaceID] >= maxConcurrentProvisionsPerWorkspace {
+		return fmt.Errorf("rate limited: %d concurrent provisions already running (max %d)",
+			r.running[workspaceID], maxConcurrentProvisionsPerWorkspace)
+	}
+	if len(fresh) >= maxProvisionStartsPerMinute {
+		return fmt.Errorf("rate limited: %d provisions started in last minute (max %d)",
+			len(fresh), maxProvisionStartsPerMinute)
+	}
+
+	r.running[workspaceID]++
+	r.recentStarts[workspaceID] = append(fresh, now)
+	return nil
+}
+
+// release decrements the concurrent-provision counter. Safe to call multiple
+// times per workspace; will not go below zero.
+func (r *provisionRateLimiter) release(workspaceID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running[workspaceID] > 0 {
+		r.running[workspaceID]--
+	}
 }
 
 // NewProvisioningHandler creates a ProvisioningHandler with the given database and logger.
@@ -69,6 +141,7 @@ func NewProvisioningHandler(
 		docker:         docker,
 		provisioner:    provisioner,
 		jobs:           make(map[string]*ProvisionJob),
+		rateLimiter:    newProvisionRateLimiter(),
 	}
 }
 
@@ -241,6 +314,19 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 	h.jobs[crewID] = job
 	h.mu.Unlock()
 
+	// Rate limit per workspace. Acquired here (after the per-crew dedupe
+	// check) so the limit reflects actual provisioning starts, not rejected
+	// duplicates. runProvisioning must release the slot on every exit path.
+	if err := h.rateLimiter.tryAcquire(workspaceID); err != nil {
+		h.mu.Lock()
+		delete(h.jobs, crewID)
+		h.mu.Unlock()
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
 	// Kick off async provisioning. Never block the HTTP handler.
 	go h.runProvisioning(crewID, workspaceID, devcontainerCfg.String, miseCfg.String, runtimeImage.String, job)
 
@@ -257,6 +343,8 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, miseJSON, runtimeImg string, job *ProvisionJob) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+	// Release the rate-limit slot regardless of success/failure.
+	defer h.rateLimiter.release(workspaceID)
 
 	h.mu.Lock()
 	job.Status = "running"
@@ -292,14 +380,26 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		return
 	}
 
+	// Serialize aggregated feature requirements (privileged, capAdd, mounts,
+	// containerEnv) so the runtime can apply them when starting the crew
+	// container. Without this, features like DinD (privileged:true +
+	// docker.sock mount) would silently not work at runtime.
+	var reqJSON sql.NullString
+	if reqBytes, marshalErr := json.Marshal(result.Requirements); marshalErr != nil {
+		h.logger.Warn("marshal cached_requirements failed, storing NULL",
+			"crew_id", crewID, "error", marshalErr)
+	} else if !isEmptyRequirements(result.Requirements) {
+		reqJSON = sql.NullString{String: string(reqBytes), Valid: true}
+	}
+
 	// Persist the cached image reference on the crew row. Use a fresh context
 	// (not the 30-min provisioning ctx, which may be near its deadline).
 	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer updateCancel()
 	_, err = h.db.ExecContext(updateCtx,
-		`UPDATE crews SET cached_image = ?, config_hash = ?, updated_at = datetime('now')
+		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = ?, updated_at = datetime('now')
 		 WHERE id = ? AND workspace_id = ?`,
-		result.CachedImage, result.ConfigHash, crewID, workspaceID,
+		result.CachedImage, result.ConfigHash, reqJSON, crewID, workspaceID,
 	)
 	if err != nil {
 		h.markJobFailed(job, fmt.Errorf("update db: %w", err))
@@ -348,7 +448,7 @@ func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Re
 	}
 	// Clear cache so Provisioner won't short-circuit on the existing tag.
 	_, err := h.db.ExecContext(r.Context(),
-		`UPDATE crews SET cached_image = NULL, config_hash = NULL, updated_at = datetime('now')
+		`UPDATE crews SET cached_image = NULL, config_hash = NULL, cached_requirements = NULL, updated_at = datetime('now')
 		 WHERE id = ? AND workspace_id = ?`,
 		crewID, workspaceID,
 	)
@@ -358,4 +458,177 @@ func (h *ProvisioningHandler) ProvisionRebuild(w http.ResponseWriter, r *http.Re
 		return
 	}
 	h.ProvisionTrigger(w, r)
+}
+
+// cacheImagePrefix is the Docker repository name used for all provisioned
+// devcontainer caches. CacheList and CacheDelete refuse to touch anything
+// outside this namespace.
+const cacheImagePrefix = "crewship-cache:"
+
+// CacheImageInfo describes a cached devcontainer image for the CLI/UI.
+type CacheImageInfo struct {
+	Tag          string   `json:"tag"`
+	Size         int64    `json:"size"`
+	CreatedAt    int64    `json:"created_at"` // Unix seconds (Docker image.Summary.Created is int64).
+	ReferencedBy []string `json:"referenced_by"`
+}
+
+// referencedCacheImages returns the set of cached_image tags currently
+// referenced by live (non-deleted) crews, with the list of crew slugs that
+// reference each tag. Used by both the list and prune paths to prevent
+// deleting an image a crew still depends on.
+func (h *ProvisioningHandler) referencedCacheImages(ctx context.Context) (map[string][]string, error) {
+	rows, err := h.db.QueryContext(ctx,
+		`SELECT cached_image, slug FROM crews
+		 WHERE cached_image IS NOT NULL AND cached_image != '' AND deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := make(map[string][]string)
+	for rows.Next() {
+		var tag, slug string
+		if err := rows.Scan(&tag, &slug); err != nil {
+			return nil, err
+		}
+		refs[tag] = append(refs[tag], slug)
+	}
+	return refs, rows.Err()
+}
+
+// CacheList returns metadata for every crewship-cache:* image on the host,
+// annotated with the list of crew slugs referencing it.
+//
+// Workspace scoping: the image store is host-global (Docker has no concept
+// of workspaces), so this endpoint returns all cache images visible to the
+// daemon. The referenced_by field is filtered to crews in the requester's
+// workspace, matching how other provisioning endpoints behave.
+func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "read") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+	if h.docker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "cache management not available (Docker client not configured)",
+		})
+		return
+	}
+
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	// Build referenced_by map scoped to this workspace.
+	refRows, err := h.db.QueryContext(r.Context(),
+		`SELECT cached_image, slug FROM crews
+		 WHERE cached_image IS NOT NULL AND cached_image != ''
+		       AND deleted_at IS NULL AND workspace_id = ?`,
+		workspaceID)
+	if err != nil {
+		h.logger.Error("query referenced cache images", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer refRows.Close()
+	refs := make(map[string][]string)
+	for refRows.Next() {
+		var tag, slug string
+		if err := refRows.Scan(&tag, &slug); err != nil {
+			h.logger.Error("scan referenced cache image", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		refs[tag] = append(refs[tag], slug)
+	}
+
+	imgs, err := h.docker.ImageList(r.Context(), image.ListOptions{})
+	if err != nil {
+		h.logger.Error("docker image list", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	out := make([]CacheImageInfo, 0)
+	for _, img := range imgs {
+		for _, tag := range img.RepoTags {
+			if !strings.HasPrefix(tag, cacheImagePrefix) {
+				continue
+			}
+			out = append(out, CacheImageInfo{
+				Tag:          tag,
+				Size:         img.Size,
+				CreatedAt:    img.Created,
+				ReferencedBy: refs[tag],
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"images": out})
+}
+
+// CacheDelete removes a single crewship-cache:* image. Refuses if the image
+// is referenced by any crew (across all workspaces, not just the caller's —
+// we never want to delete a live crew's cache from another workspace).
+// Query param ?force=true bypasses the referenced check.
+func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "delete") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+	if h.docker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "cache management not available (Docker client not configured)",
+		})
+		return
+	}
+
+	tag := r.PathValue("tag")
+	if tag == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tag is required"})
+		return
+	}
+	// Hard-enforce the crewship-cache namespace — we never delete an
+	// arbitrary Docker image on behalf of a caller.
+	if !strings.HasPrefix(tag, cacheImagePrefix) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "only crewship-cache:* tags may be deleted",
+		})
+		return
+	}
+
+	force := r.URL.Query().Get("force") == "true"
+
+	if !force {
+		refs, err := h.referencedCacheImages(r.Context())
+		if err != nil {
+			h.logger.Error("query referenced cache images", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		if crews, ok := refs[tag]; ok && len(crews) > 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":         "image is referenced by live crews; pass ?force=true to delete anyway",
+				"referenced_by": crews,
+			})
+			return
+		}
+	}
+
+	_, err := h.docker.ImageRemove(r.Context(), tag, image.RemoveOptions{Force: force, PruneChildren: true})
+	if err != nil {
+		h.logger.Error("docker image remove", "tag", tag, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"tag": tag, "status": "deleted"})
+}
+
+// isEmptyRequirements reports whether an AggregatedRequirements value has no
+// runtime customizations. Used to store NULL instead of "{}" in the DB so the
+// absence of requirements is trivially distinguishable at query time.
+func isEmptyRequirements(r devcontainer.AggregatedRequirements) bool {
+	return !r.Privileged && !r.Init &&
+		len(r.ContainerEnv) == 0 &&
+		len(r.Mounts) == 0 &&
+		len(r.CapAdd) == 0 &&
+		len(r.SecurityOpt) == 0
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -58,6 +59,11 @@ type ChatInfo struct {
 	RuntimeImage       string
 	CachedImage        string
 	DevcontainerConfig string
+	ContainerEnv       map[string]string
+	// CachedRequirements are aggregated feature requirements (privileged,
+	// capAdd, mounts, securityOpt) persisted at provision time and applied
+	// to the HostConfig. Nil means no extra requirements.
+	CachedRequirements *devcontainer.AggregatedRequirements
 	MCPServers         []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
@@ -220,7 +226,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if containerID == "" && b.container != nil {
 		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
-		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
+		cc := provider.CrewConfig{
 			ID:             info.CrewID,
 			Slug:           info.CrewSlug,
 			MemoryMB:       memoryMB,
@@ -230,7 +236,22 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			NetworkMode:    info.NetworkMode,
 			AllowedDomains: info.AllowedDomains,
 			TTLHours:       info.TTLHours,
-		})
+			ContainerEnv:   info.ContainerEnv,
+		}
+		if info.CachedRequirements != nil {
+			cc.Privileged = info.CachedRequirements.Privileged
+			cc.Init = info.CachedRequirements.Init
+			cc.CapAdd = append(cc.CapAdd, info.CachedRequirements.CapAdd...)
+			cc.SecurityOpt = append(cc.SecurityOpt, info.CachedRequirements.SecurityOpt...)
+			for _, m := range info.CachedRequirements.Mounts {
+				cc.ExtraMounts = append(cc.ExtraMounts, provider.CrewMount{
+					Source: m.Source,
+					Target: m.Target,
+					Type:   m.Type,
+				})
+			}
+		}
+		cID, err := b.container.EnsureCrewRuntime(ctx, cc)
 		if err != nil {
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
 			return fmt.Errorf("ensure team runtime: %w", err)

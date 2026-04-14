@@ -40,6 +40,33 @@ type FeatureMetadata struct {
 	Options       map[string]any    `json:"options,omitempty"`
 	InstallsAfter []string          `json:"installsAfter,omitempty"`
 	ContainerEnv  map[string]string `json:"containerEnv,omitempty"`
+
+	// Mounts declares bind/volume mounts the feature needs at runtime (e.g. DinD
+	// needs /var/run/docker.sock bound from the host).
+	Mounts []FeatureMount `json:"mounts,omitempty"`
+
+	// Docker security requirements bubbled up into the runtime HostConfig.
+	Privileged  bool     `json:"privileged,omitempty"`
+	Init        bool     `json:"init,omitempty"`
+	CapAdd      []string `json:"capAdd,omitempty"`
+	SecurityOpt []string `json:"securityOpt,omitempty"`
+
+	// Feature-level lifecycle hooks. These run while the feature is being
+	// installed into the provisioning container — their effects are baked
+	// into the cached image. Use `any` because devcontainer spec allows
+	// string, []string, or map[string]string.
+	OnCreateCommand      any `json:"onCreateCommand,omitempty"`
+	PostCreateCommand    any `json:"postCreateCommand,omitempty"`
+	PostStartCommand     any `json:"postStartCommand,omitempty"`
+	PostAttachCommand    any `json:"postAttachCommand,omitempty"`
+	UpdateContentCommand any `json:"updateContentCommand,omitempty"`
+}
+
+// FeatureMount describes a bind or volume mount declared by a feature.
+type FeatureMount struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Type   string `json:"type,omitempty"` // "bind" or "volume"
 }
 
 // InstallsAfter is retained for backward compatibility — the canonical
@@ -54,13 +81,25 @@ type InstallsAfter struct {
 // []{id: string} (occasionally seen in the wild).
 func (m *FeatureMetadata) UnmarshalJSON(data []byte) error {
 	type raw struct {
-		ID            string          `json:"id"`
-		Version       string          `json:"version"`
-		Name          string          `json:"name"`
-		Description   string          `json:"description,omitempty"`
-		Options       map[string]any  `json:"options,omitempty"`
-		InstallsAfter json.RawMessage `json:"installsAfter,omitempty"`
+		ID            string            `json:"id"`
+		Version       string            `json:"version"`
+		Name          string            `json:"name"`
+		Description   string            `json:"description,omitempty"`
+		Options       map[string]any    `json:"options,omitempty"`
+		InstallsAfter json.RawMessage   `json:"installsAfter,omitempty"`
 		ContainerEnv  map[string]string `json:"containerEnv,omitempty"`
+
+		Mounts      []FeatureMount `json:"mounts,omitempty"`
+		Privileged  bool           `json:"privileged,omitempty"`
+		Init        bool           `json:"init,omitempty"`
+		CapAdd      []string       `json:"capAdd,omitempty"`
+		SecurityOpt []string       `json:"securityOpt,omitempty"`
+
+		OnCreateCommand      any `json:"onCreateCommand,omitempty"`
+		PostCreateCommand    any `json:"postCreateCommand,omitempty"`
+		PostStartCommand     any `json:"postStartCommand,omitempty"`
+		PostAttachCommand    any `json:"postAttachCommand,omitempty"`
+		UpdateContentCommand any `json:"updateContentCommand,omitempty"`
 	}
 	var r raw
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -72,6 +111,16 @@ func (m *FeatureMetadata) UnmarshalJSON(data []byte) error {
 	m.Description = r.Description
 	m.Options = r.Options
 	m.ContainerEnv = r.ContainerEnv
+	m.Mounts = r.Mounts
+	m.Privileged = r.Privileged
+	m.Init = r.Init
+	m.CapAdd = r.CapAdd
+	m.SecurityOpt = r.SecurityOpt
+	m.OnCreateCommand = r.OnCreateCommand
+	m.PostCreateCommand = r.PostCreateCommand
+	m.PostStartCommand = r.PostStartCommand
+	m.PostAttachCommand = r.PostAttachCommand
+	m.UpdateContentCommand = r.UpdateContentCommand
 	if len(r.InstallsAfter) > 0 && string(r.InstallsAfter) != "null" {
 		// Try []string first.
 		var strs []string

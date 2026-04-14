@@ -492,3 +492,128 @@ func featureIDs(features []*ResolvedFeature) string {
 	}
 	return result
 }
+
+// TestFeatureMetadataParsesRuntimeRequirements verifies the new privileged,
+// capAdd, mounts, and postCreateCommand fields round-trip through JSON.
+func TestFeatureMetadataParsesRuntimeRequirements(t *testing.T) {
+	raw := []byte(`{
+		"id": "docker-in-docker",
+		"version": "2.0.0",
+		"name": "Docker-in-Docker",
+		"privileged": true,
+		"init": true,
+		"capAdd": ["SYS_ADMIN"],
+		"securityOpt": ["seccomp=unconfined"],
+		"mounts": [
+			{"source": "/var/run/docker.sock", "target": "/var/run/docker.sock", "type": "bind"}
+		],
+		"containerEnv": {"DOCKER_HOST": "unix:///var/run/docker.sock"},
+		"postCreateCommand": "dockerd-rootless.sh &"
+	}`)
+
+	var meta FeatureMetadata
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !meta.Privileged {
+		t.Errorf("expected privileged=true")
+	}
+	if !meta.Init {
+		t.Errorf("expected init=true")
+	}
+	if len(meta.CapAdd) != 1 || meta.CapAdd[0] != "SYS_ADMIN" {
+		t.Errorf("capAdd = %v, want [SYS_ADMIN]", meta.CapAdd)
+	}
+	if len(meta.SecurityOpt) != 1 || meta.SecurityOpt[0] != "seccomp=unconfined" {
+		t.Errorf("securityOpt = %v", meta.SecurityOpt)
+	}
+	if len(meta.Mounts) != 1 {
+		t.Fatalf("mounts len = %d, want 1", len(meta.Mounts))
+	}
+	if meta.Mounts[0].Source != "/var/run/docker.sock" {
+		t.Errorf("mount source = %q", meta.Mounts[0].Source)
+	}
+	if meta.ContainerEnv["DOCKER_HOST"] == "" {
+		t.Errorf("expected DOCKER_HOST env")
+	}
+	// PostCreateCommand is any — NormalizeCommand should turn it into []string.
+	cmds := NormalizeCommand(meta.PostCreateCommand)
+	if len(cmds) != 1 || cmds[0] != "dockerd-rootless.sh &" {
+		t.Errorf("postCreate cmds = %v", cmds)
+	}
+}
+
+// TestAggregateFeatureRequirementsPrivilegedOR verifies that if any feature
+// declares privileged:true, the aggregate is also privileged.
+func TestAggregateFeatureRequirementsPrivilegedOR(t *testing.T) {
+	p := &Provisioner{}
+	features := []*ResolvedFeature{
+		{Metadata: FeatureMetadata{ID: "a"}}, // not privileged
+		{Metadata: FeatureMetadata{ID: "b", Privileged: true}},
+		{Metadata: FeatureMetadata{ID: "c"}},
+	}
+	req := p.aggregateFeatureRequirements(features, nil)
+	if !req.Privileged {
+		t.Errorf("expected aggregate privileged=true when any feature is privileged")
+	}
+}
+
+// TestAggregateFeatureRequirementsRootEnvWins verifies that root-level
+// containerEnv overrides feature-declared values for the same key.
+func TestAggregateFeatureRequirementsRootEnvWins(t *testing.T) {
+	p := &Provisioner{}
+	features := []*ResolvedFeature{
+		{Metadata: FeatureMetadata{
+			ID:           "a",
+			ContainerEnv: map[string]string{"TZ": "UTC", "FEATURE_VAR": "from-feature"},
+		}},
+		{Metadata: FeatureMetadata{
+			ID:           "b",
+			ContainerEnv: map[string]string{"TZ": "Europe/Prague"}, // should lose to feature "a" (first wins among features)
+		}},
+	}
+	rootEnv := map[string]string{
+		"TZ":       "America/New_York", // overrides all features
+		"ROOT_VAR": "root-only",
+	}
+	req := p.aggregateFeatureRequirements(features, rootEnv)
+
+	if got := req.ContainerEnv["TZ"]; got != "America/New_York" {
+		t.Errorf("root-level TZ should win: got %q, want America/New_York", got)
+	}
+	if got := req.ContainerEnv["ROOT_VAR"]; got != "root-only" {
+		t.Errorf("root-only var missing: got %q", got)
+	}
+	if got := req.ContainerEnv["FEATURE_VAR"]; got != "from-feature" {
+		t.Errorf("feature var should survive when root doesn't redeclare: got %q", got)
+	}
+}
+
+// TestAggregateFeatureRequirementsConcatsCapsAndMounts verifies capAdd,
+// securityOpt, and mounts aggregate by concatenation across features.
+func TestAggregateFeatureRequirementsConcatsCapsAndMounts(t *testing.T) {
+	p := &Provisioner{}
+	features := []*ResolvedFeature{
+		{Metadata: FeatureMetadata{
+			ID:     "a",
+			CapAdd: []string{"SYS_ADMIN"},
+			Mounts: []FeatureMount{{Source: "/a", Target: "/a", Type: "bind"}},
+		}},
+		{Metadata: FeatureMetadata{
+			ID:          "b",
+			CapAdd:      []string{"NET_ADMIN"},
+			SecurityOpt: []string{"seccomp=unconfined"},
+			Mounts:      []FeatureMount{{Source: "/b", Target: "/b", Type: "bind"}},
+		}},
+	}
+	req := p.aggregateFeatureRequirements(features, nil)
+	if len(req.CapAdd) != 2 {
+		t.Errorf("capAdd len = %d, want 2: %v", len(req.CapAdd), req.CapAdd)
+	}
+	if len(req.SecurityOpt) != 1 {
+		t.Errorf("securityOpt len = %d, want 1", len(req.SecurityOpt))
+	}
+	if len(req.Mounts) != 2 {
+		t.Errorf("mounts len = %d, want 2", len(req.Mounts))
+	}
+}

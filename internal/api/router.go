@@ -673,6 +673,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionTrigger))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/rebuild", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionRebuild))))
 
+	// Devcontainer image cache management (GC)
+	r.mux.Handle("GET /api/v1/cache/images", authed(wsCtx(http.HandlerFunc(provisioning.CacheList))))
+	r.mux.Handle("DELETE /api/v1/cache/images/{tag}", authed(wsCtx(http.HandlerFunc(provisioning.CacheDelete))))
+
 	// Crewshipd proxy + agent runtime routes (require IPC socket)
 	socketPath := r.socketPath
 	if socketPath == "" {

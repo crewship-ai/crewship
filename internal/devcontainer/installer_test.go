@@ -157,11 +157,14 @@ func TestInstallFeature_Success(t *testing.T) {
 		t.Errorf("exec User = %q, want 0:0", installExec.User)
 	}
 	wantCmd := "bash"
-	if len(installExec.Cmd) < 1 || installExec.Cmd[0] != wantCmd {
+	if len(installExec.Cmd) < 3 || installExec.Cmd[0] != wantCmd {
 		t.Errorf("exec Cmd[0] = %q, want %q", installExec.Cmd[0], wantCmd)
 	}
-	if !strings.Contains(installExec.Cmd[1], "python/install.sh") {
-		t.Errorf("exec Cmd[1] = %q, want path containing python/install.sh", installExec.Cmd[1])
+	if installExec.Cmd[1] != "-e" {
+		t.Errorf("exec Cmd[1] = %q, want -e (strict mode)", installExec.Cmd[1])
+	}
+	if !strings.Contains(installExec.Cmd[2], "python/install.sh") {
+		t.Errorf("exec Cmd[2] = %q, want path containing python/install.sh", installExec.Cmd[2])
 	}
 }
 

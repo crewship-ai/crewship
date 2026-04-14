@@ -149,6 +149,15 @@ ALTER TABLE crews ADD COLUMN mise_config TEXT;
 ALTER TABLE crews ADD COLUMN cached_image TEXT;
 ALTER TABLE crews ADD COLUMN config_hash TEXT;
 `},
+	// Aggregated runtime requirements bubbled up from devcontainer features
+	// (privileged, capAdd, mounts, containerEnv). Stored as JSON so the runtime
+	// can apply them to HostConfig when starting a crew container. Without this,
+	// features like DinD (which need privileged:true + /var/run/docker.sock)
+	// would silently not work — the feature installs fine, but the final
+	// container lacks the capabilities the feature requires.
+	{version: 47, name: "add_cached_requirements", sql: `
+ALTER TABLE crews ADD COLUMN cached_requirements TEXT;
+`},
 }
 
 const migrationAddKeeperObservability = `

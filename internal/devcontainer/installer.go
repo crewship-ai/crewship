@@ -93,9 +93,11 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 	// 3. Build environment variables from options.
 	env := buildFeatureEnv(containerID, featureID, options)
 
-	// 4. Execute install.sh as root.
+	// 4. Execute install.sh as root. `bash -e` stops on first error, so a
+	// failing command surfaces as non-zero exit instead of being silently
+	// ignored. Scripts that explicitly opt out with `set +e` still work.
 	installScript := destDir + "/install.sh"
-	output, exitCode, err = inst.execInContainer(installCtx, containerID, []string{"bash", installScript}, env)
+	output, exitCode, err = inst.execInContainer(installCtx, containerID, []string{"bash", "-e", installScript}, env)
 	if err != nil {
 		return fmt.Errorf("executing install.sh for feature %s: %w", featureID, err)
 	}
