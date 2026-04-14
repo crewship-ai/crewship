@@ -1,0 +1,132 @@
+#!/bin/bash
+# Crewship Sandbox: L3/L4 Network Firewall
+# Based on Claude Code devcontainer init-firewall.sh
+# https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh
+
+set -euo pipefail
+IFS=$'\n\t'
+
+# 1. Extract Docker DNS info BEFORE flushing
+DOCKER_DNS_RULES=$(iptables-save -t nat 2>/dev/null | grep "127\.0\.0\.11" || true)
+
+# Flush existing rules and sets
+iptables -F
+iptables -X
+iptables -t nat -F
+iptables -t nat -X
+iptables -t mangle -F
+iptables -t mangle -X
+ipset destroy allowed-domains 2>/dev/null || true
+
+# 2. Restore Docker DNS rules
+if [ -n "$DOCKER_DNS_RULES" ]; then
+    echo "Restoring Docker DNS rules..."
+    iptables -t nat -N DOCKER_OUTPUT 2>/dev/null || true
+    iptables -t nat -N DOCKER_POSTROUTING 2>/dev/null || true
+    echo "$DOCKER_DNS_RULES" | xargs -L 1 iptables -t nat
+fi
+
+# 3. Allow DNS and localhost BEFORE restrictions
+iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+iptables -A INPUT -p udp --sport 53 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+iptables -A INPUT -p tcp --sport 53 -m state --state ESTABLISHED -j ACCEPT
+iptables -A INPUT -i lo -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+
+# 4. Create ipset with CIDR support
+ipset create allowed-domains hash:net
+
+# 5. Add GitHub IP ranges (web + api + git)
+echo "Fetching GitHub IP ranges..."
+gh_ranges=$(curl -sf --max-time 10 https://api.github.com/meta) || {
+    echo "ERROR: Failed to fetch GitHub IP ranges" >&2
+    exit 1
+}
+
+echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null || {
+    echo "ERROR: GitHub API response malformed" >&2
+    exit 1
+}
+
+while read -r cidr; do
+    [[ "$cidr" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]] && ipset add allowed-domains "$cidr"
+done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' 2>/dev/null | aggregate -q 2>/dev/null || echo "$gh_ranges" | jq -r '(.web + .api + .git)[]')
+
+# 6. Resolve and allow specific domains
+ALLOWED_DOMAINS=(
+    # AI APIs
+    "api.anthropic.com"
+    "api.openai.com"
+    "generativelanguage.googleapis.com"
+    # Package registries
+    "registry.npmjs.org"
+    "registry.yarnpkg.com"
+    "pypi.org"
+    "pypi.python.org"
+    "files.pythonhosted.org"
+    # Linux package mirrors (Debian)
+    "deb.debian.org"
+    "security.debian.org"
+    # Container registries
+    "ghcr.io"
+    "pkg-containers.githubusercontent.com"
+    "registry-1.docker.io"
+    "auth.docker.io"
+    "production.cloudflare.docker.com"
+    # Telemetry (Anthropic/Claude Code)
+    "statsig.anthropic.com"
+    "statsig.com"
+    "sentry.io"
+)
+
+for domain in "${ALLOWED_DOMAINS[@]}"; do
+    echo "Resolving $domain..."
+    ips=$(dig +noall +answer +short A "$domain" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
+    if [ -z "$ips" ]; then
+        echo "WARN: Failed to resolve $domain, skipping" >&2
+        continue
+    fi
+    while read -r ip; do
+        ipset add allowed-domains "$ip" 2>/dev/null || true
+    done <<< "$ips"
+done
+
+# 7. Allow host network (for host.docker.internal -> crewshipd)
+HOST_IP=$(ip route | awk '/default/ {print $3; exit}')
+if [ -n "$HOST_IP" ]; then
+    HOST_NETWORK=$(echo "$HOST_IP" | sed 's/\.[0-9]*$/.0\/24/')
+    echo "Allowing host network: $HOST_NETWORK"
+    iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
+    iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
+fi
+
+# 8. Default DROP policies
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT DROP
+
+# 9. Allow established connections
+iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# 10. Allow outbound to allowed destinations
+iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
+
+# 11. REJECT all other outbound with clear error
+iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+
+# 12. Self-verify
+echo "Verifying firewall..."
+if curl -sf --connect-timeout 5 https://example.com >/dev/null 2>&1; then
+    echo "ERROR: Firewall LEAKING - can reach blocked example.com" >&2
+    exit 1
+fi
+if ! curl -sf --connect-timeout 5 https://api.github.com/zen >/dev/null 2>&1; then
+    echo "ERROR: Firewall BROKEN - cannot reach api.github.com (allowed)" >&2
+    exit 1
+fi
+
+echo "Crewship Sandbox firewall: ACTIVE"
+echo "  Allowed: Anthropic/OpenAI/Google AI, GitHub, npm/PyPI, Debian, OCI registries"
+echo "  Default: DROP (icmp-admin-prohibited)"

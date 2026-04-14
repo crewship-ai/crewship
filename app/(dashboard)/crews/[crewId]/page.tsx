@@ -320,45 +320,35 @@ export default function CrewDetailPage() {
 
       {/* Runtime Configuration */}
       {canEdit && workspaceId && (
-        <Collapsible>
-          <Card>
-            <CollapsibleTrigger asChild>
-              <button
-                type="button"
-                className="flex w-full items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors rounded-xl"
-              >
-                <div className="flex items-center gap-2">
-                  <Blocks className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-body font-medium">Runtime Configuration</span>
-                  {crew.devcontainer_config || crew.mise_config ? (
-                    crew.cached_image ? (
-                      <Badge variant="outline" className="text-xs text-green-600">Provisioned</Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-xs text-amber-600">Configured</Badge>
-                    )
-                  ) : (
-                    <Badge variant="outline" className="text-xs text-muted-foreground">Not configured</Badge>
-                  )}
-                </div>
-                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <CardContent className="px-4 pb-4 pt-0">
-                <CrewRuntimeConfig
-                  crewId={crew.id}
-                  workspaceId={workspaceId}
-                  runtimeImage={crew.runtime_image}
-                  devcontainerConfig={crew.devcontainer_config}
-                  miseConfig={crew.mise_config}
-                  cachedImage={crew.cached_image}
-                  canEdit={canEdit}
-                  onSave={handleRuntimeSave}
-                />
-              </CardContent>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
+        <Card>
+          <div className="flex w-full items-center justify-between p-4">
+            <div className="flex items-center gap-2">
+              <Blocks className="h-4 w-4 text-muted-foreground" />
+              <span className="text-body font-medium">Runtime Configuration</span>
+              {crew.devcontainer_config || crew.mise_config ? (
+                crew.cached_image ? (
+                  <Badge variant="outline" className="text-xs text-green-600">Provisioned</Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs text-amber-600">Configured</Badge>
+                )
+              ) : (
+                <Badge variant="outline" className="text-xs text-muted-foreground">Not configured</Badge>
+              )}
+            </div>
+          </div>
+          <CardContent className="px-4 pb-4 pt-0">
+            <CrewRuntimeConfig
+              crewId={crew.id}
+              workspaceId={workspaceId}
+              runtimeImage={crew.runtime_image}
+              devcontainerConfig={crew.devcontainer_config}
+              miseConfig={crew.mise_config}
+              cachedImage={crew.cached_image}
+              canEdit={canEdit}
+              onSave={handleRuntimeSave}
+            />
+          </CardContent>
+        </Card>
       )}
 
       {/* Advanced — Container Config */}

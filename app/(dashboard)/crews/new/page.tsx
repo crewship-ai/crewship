@@ -4,14 +4,13 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
-  ArrowLeft, Loader2, Users, Sparkles, Bot, RefreshCw, AlertTriangle, ChevronDown, Settings2,
+  ArrowLeft, Loader2, Users, Sparkles, Bot, RefreshCw, AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { PageShell } from "@/components/layout/page-shell"
 import { SectionCard } from "@/components/ui/section-card"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -690,32 +689,12 @@ export default function NewCrewPage() {
           </div>
         </SectionCard>
 
-        <Collapsible>
-          <SectionCard
-            bare
-            title={
-              <CollapsibleTrigger asChild>
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <Settings2 className="h-4 w-4 text-muted-foreground" />
-                    <span>Advanced: Runtime Configuration</span>
-                  </div>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
-                </button>
-              </CollapsibleTrigger>
-            }
-            description="Configure devcontainer features, language runtimes, and base image for the crew container."
-          >
-            <CollapsibleContent>
-              <div className="px-6 pb-6">
-                <RuntimeConfig value={runtimeConfig} onChange={(val) => { setRuntimeConfig(val); setRuntimeDirty(true) }} />
-              </div>
-            </CollapsibleContent>
-          </SectionCard>
-        </Collapsible>
+        <SectionCard
+          title="Runtime Configuration"
+          description="Configure devcontainer features, language runtimes, and base image for the crew container."
+        >
+          <RuntimeConfig value={runtimeConfig} onChange={(val) => { setRuntimeConfig(val); setRuntimeDirty(true) }} />
+        </SectionCard>
 
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting || !workspaceId} className="gap-2">
