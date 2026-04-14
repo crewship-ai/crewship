@@ -143,7 +143,14 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return nil, fmt.Errorf("starting temp container: %w", err)
 	}
 
-	// 4. Download and sort features.
+	// 4. Ensure `agent` user (UID 1001) and /home/agent exist.
+	// Custom base images (debian, ubuntu) typically don't have this user.
+	// mise and postCreateCommand run as UID 1001 and need a writable home.
+	if err := p.ensureAgentUser(ctx, containerID); err != nil {
+		return nil, fmt.Errorf("ensure agent user: %w", err)
+	}
+
+	// 5. Download and sort features.
 	if err := p.installFeatures(ctx, containerID, cfg); err != nil {
 		return nil, err
 	}
@@ -208,6 +215,35 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+// ensureAgentUser creates the 'agent' user (UID 1001) and /home/agent with
+// correct permissions if they don't exist. Safe to run multiple times.
+// Required so mise and postCreateCommand can run as a non-root user.
+func (p *Provisioner) ensureAgentUser(ctx context.Context, containerID string) error {
+	// Idempotent shell script: create group+user if missing, ensure /home/agent
+	// exists and is owned by the agent user.
+	script := `set -e
+if ! getent group agent >/dev/null 2>&1; then
+    groupadd -g 1001 agent 2>/dev/null || addgroup --gid 1001 agent 2>/dev/null || true
+fi
+if ! id -u agent >/dev/null 2>&1; then
+    useradd -u 1001 -g 1001 -m -s /bin/bash agent 2>/dev/null || \
+        adduser --uid 1001 --gid 1001 --home /home/agent --shell /bin/bash --disabled-password --gecos "" agent 2>/dev/null || true
+fi
+mkdir -p /home/agent
+chown -R 1001:1001 /home/agent
+chmod 755 /home/agent
+`
+	output, exitCode, err := p.installer.execInContainer(ctx, containerID, []string{"sh", "-c", script}, nil)
+	if err != nil {
+		return fmt.Errorf("exec: %w", err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("exit code %d: %s", exitCode, output)
+	}
+	p.logger.Debug("agent user ensured", "output", output)
+	return nil
 }
 
 // ensureImage pulls the given image if it is not already present locally.
