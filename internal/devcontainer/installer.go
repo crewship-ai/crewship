@@ -58,8 +58,12 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 		return fmt.Errorf("invalid feature ID %q: must be alphanumeric with dots/hyphens/underscores", featureID)
 	}
 
-	destBase := "/tmp/devcontainer-features"
-	destDir := destBase + "/" + featureID
+	// Copy into /tmp (always exists — tmpfs mount). The tar prefix
+	// "devcontainer-features/{featureID}/..." places the feature at
+	// /tmp/devcontainer-features/{featureID}/ after extraction.
+	destBase := "/tmp"
+	destDir := "/tmp/devcontainer-features/" + featureID
+	tarPrefix := "devcontainer-features/" + featureID
 
 	// Apply a 30-minute timeout for the entire feature installation.
 	installCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -67,19 +71,13 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 
 	inst.logger.Info("installing feature", "id", featureID, "container", containerID)
 
-	// 1. Ensure destBase exists in container (CopyToContainer requires the
-	//    target parent directory to exist).
-	if _, _, err := inst.execInContainer(installCtx, containerID, []string{"mkdir", "-p", destBase}, nil); err != nil {
-		return fmt.Errorf("creating %s in container: %w", destBase, err)
-	}
-
-	// 2. Create tar archive of the feature directory.
-	tarBuf, err := createTarFromDir(feature.Dir, featureID)
+	// 1. Create tar archive with a path prefix Docker will extract into /tmp.
+	tarBuf, err := createTarFromDir(feature.Dir, tarPrefix)
 	if err != nil {
 		return fmt.Errorf("creating tar for feature %s: %w", featureID, err)
 	}
 
-	// 3. Copy into container.
+	// 2. Copy into container at /tmp (always exists due to tmpfs mount).
 	if err := inst.docker.CopyToContainer(installCtx, containerID, destBase, tarBuf, container.CopyToContainerOptions{}); err != nil {
 		return fmt.Errorf("copying feature %s to container: %w", featureID, err)
 	}
