@@ -227,7 +227,7 @@ start_go() {
     err "Sidecar build failed -- check errors above"
     return 1
   fi
-  cp "$PROJECT_DIR/docker/agent-runtime/entrypoint.sh" "${bin_dir}/entrypoint.sh"
+  cp "$PROJECT_DIR/scripts/entrypoint.sh" "${bin_dir}/entrypoint.sh"
   chmod +x "${bin_dir}/entrypoint.sh"
 
   (
