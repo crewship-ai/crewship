@@ -137,6 +137,13 @@ type Orchestrator struct {
 	mu             sync.RWMutex
 	accepting      bool
 	crews          map[string]*crewState
+
+	// tmuxCache memoizes whether each container has tmux installed. Avoids a
+	// `command -v tmux` exec on every agent run (was ~50ms per call). Key is
+	// the container ID; value is true if tmux was found. Invalidated when the
+	// container is recreated (new ID) so stale entries are harmless.
+	tmuxCacheMu sync.RWMutex
+	tmuxCache   map[string]bool
 }
 
 // New creates an Orchestrator with the given container and state providers.
@@ -153,6 +160,7 @@ func New(
 		cooldown:  NewCooldownManager(),
 		accepting: true,
 		crews:     make(map[string]*crewState),
+		tmuxCache: make(map[string]bool),
 	}
 }
 
@@ -945,6 +953,22 @@ func TmuxSessionName(agentSlug string) string {
 	return "agent-" + agentSlug
 }
 
+// tmuxCacheLookup returns the cached tmux-present value for containerID and
+// whether the cache held an entry.
+func (o *Orchestrator) tmuxCacheLookup(containerID string) (bool, bool) {
+	o.tmuxCacheMu.RLock()
+	defer o.tmuxCacheMu.RUnlock()
+	v, ok := o.tmuxCache[containerID]
+	return v, ok
+}
+
+// tmuxCacheStore records whether containerID has tmux installed.
+func (o *Orchestrator) tmuxCacheStore(containerID string, has bool) {
+	o.tmuxCacheMu.Lock()
+	defer o.tmuxCacheMu.Unlock()
+	o.tmuxCache[containerID] = has
+}
+
 // setupTmuxExec prepares a tmux-wrapped execution environment for an agent.
 // It writes command args, env vars, and a script to files in the container
 // (avoiding shell quoting issues), then returns a wrapper command that starts
@@ -954,22 +978,35 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	// base images (debian:bookworm-slim, ubuntu:24.04) don't ship with tmux.
 	// Without this check, the outer wrapper runs anyway and produces noisy
 	// stderr output before falling back, which confuses users.
-	checkResult, checkErr := o.container.Exec(ctx, provider.ExecConfig{
-		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1"},
-		User:        "1001:1001",
-	})
-	if checkErr != nil {
-		return nil, fmt.Errorf("tmux check: %w", checkErr)
-	}
-	io.Copy(io.Discard, checkResult.Reader)
-	checkResult.Reader.Close()
-	_, tmuxExitCode, inspectErr := o.container.ExecInspect(ctx, checkResult.ExecID)
-	if inspectErr != nil {
-		return nil, fmt.Errorf("tmux check inspect: %w", inspectErr)
-	}
-	if tmuxExitCode != 0 {
-		return nil, fmt.Errorf("tmux not installed in container")
+	//
+	// Result is cached per container — tmux presence is fixed once the image
+	// is built, so repeating the probe on every run (every agent message) was
+	// a 50 ms tax for no information. Cache is invalidated naturally when the
+	// container is recreated with a new ID.
+	if has, ok := o.tmuxCacheLookup(containerID); ok {
+		if !has {
+			return nil, fmt.Errorf("tmux not installed in container")
+		}
+	} else {
+		checkResult, checkErr := o.container.Exec(ctx, provider.ExecConfig{
+			ContainerID: containerID,
+			Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1"},
+			User:        "1001:1001",
+		})
+		if checkErr != nil {
+			return nil, fmt.Errorf("tmux check: %w", checkErr)
+		}
+		io.Copy(io.Discard, checkResult.Reader)
+		checkResult.Reader.Close()
+		_, tmuxExitCode, inspectErr := o.container.ExecInspect(ctx, checkResult.ExecID)
+		if inspectErr != nil {
+			return nil, fmt.Errorf("tmux check inspect: %w", inspectErr)
+		}
+		has := tmuxExitCode == 0
+		o.tmuxCacheStore(containerID, has)
+		if !has {
+			return nil, fmt.Errorf("tmux not installed in container")
+		}
 	}
 
 	session := TmuxSessionName(agentSlug)

@@ -374,6 +374,13 @@ The parallel provisioning has a 5-minute timeout per crew and a 3-second poll in
 
 ---
 
+## Runtime bind-mount semantics
+
+- **`crewship-sidecar` + `entrypoint.sh`** are bind-mounted **read-only** from the host into every crew container. Host-side edits do **not** take effect in already-running containers — the mount is snapshotted at `docker create` time.
+- To roll out a new sidecar or entrypoint across existing crews, rebuild the sidecar (`make build:sidecar`) and then restart each crew's container (`docker rm -f crewship-team-<slug>` — it will be recreated on the next message). A future `crewship crew restart <slug>` will formalize this.
+- **`postStartCommand`** runs on *every* start, so it is the right hook for operations that must reflect host state at the moment of launch (e.g. refreshing a secret via `vault read`). Do not try to bake those into `postCreateCommand` — they'd freeze at provisioning time.
+- Cached images (`crewship-cache:{hash}`) live on the Docker host indefinitely. Run `crewship crew cache prune --older-than 30d` as part of your maintenance rotation; cached images referenced by live crews are protected automatically.
+
 ## Troubleshooting
 
 <AccordionGroup>
