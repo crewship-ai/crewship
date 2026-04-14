@@ -186,9 +186,11 @@ func checkSidecar(ctx context.Context, ctr provider.ContainerProvider, container
 // The sidecar runs as a background process and intercepts all agent HTTP traffic.
 // SidecarMemoryConfig is passed to the sidecar binary via stdin when memory is enabled.
 type SidecarMemoryConfig struct {
-	Enabled   bool   `json:"enabled"`
-	BasePath  string `json:"base_path"`
-	AgentSlug string `json:"agent_slug"`
+	Enabled        bool   `json:"enabled"`
+	BasePath       string `json:"base_path"`
+	AgentSlug      string `json:"agent_slug"`
+	AgentRole      string `json:"agent_role"`       // "lead" or "agent"
+	CrewMemoryPath string `json:"crew_memory_path"` // e.g. /crew/shared/.memory
 }
 
 // SidecarIPCConfig provides the crewshipd internal API address for the sidecar,
