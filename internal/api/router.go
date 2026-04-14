@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
@@ -56,6 +57,8 @@ type Router struct {
 	license              *license.License
 	agentHandler         *AgentHandler
 	storagePath          string // base path for crew file storage
+	authRateLimitedMux http.Handler // mux wrapped with auth rate limiter
+	apiRateLimitedMux  http.Handler // mux wrapped with general API rate limiter
 }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.
@@ -81,6 +84,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	}
 
 	r.registerRoutes()
+
+	// Pre-wrap mux with rate limiters (once, not per-request)
+	r.authRateLimitedMux = NewRateLimiter(10).Middleware(r.mux)  // 10 req/min per IP
+	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(r.mux)  // 120 req/min per IP
 
 	return r, nil
 }
@@ -215,7 +222,36 @@ func WithLicense(lic *license.License) RouterOption {
 }
 
 // ServeHTTP dispatches incoming requests to the registered route handlers.
+// It applies security headers to all responses and per-IP rate limiting:
+// stricter limits on auth endpoints, general limits on public API,
+// and no limits on internal IPC routes.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	SecurityHeaders(http.HandlerFunc(r.routeWithRateLimiting)).ServeHTTP(w, req)
+}
+
+// routeWithRateLimiting applies per-IP rate limiting based on the request path.
+func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request) {
+	path := req.URL.Path
+
+	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
+	if strings.HasPrefix(path, "/api/v1/internal/") {
+		r.mux.ServeHTTP(w, req)
+		return
+	}
+
+	// Stricter rate limiting for auth endpoints
+	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/bootstrap" {
+		r.authRateLimitedMux.ServeHTTP(w, req)
+		return
+	}
+
+	// General API rate limiting
+	if strings.HasPrefix(path, "/api/") {
+		r.apiRateLimitedMux.ServeHTTP(w, req)
+		return
+	}
+
+	// Static files / other paths — no rate limiting
 	r.mux.ServeHTTP(w, req)
 }
 
