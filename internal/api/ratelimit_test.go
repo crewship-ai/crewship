@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -104,7 +105,7 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	rl.getLimiter("10.0.0.1")
 	rl.mu.Lock()
 	// Backdate its lastSeen
-	rl.visitors["10.0.0.1"].lastSeen = rl.visitors["10.0.0.1"].lastSeen.Add(-10 * 60 * 1e9) // 10 minutes ago
+	rl.visitors["10.0.0.1"].lastSeen = rl.visitors["10.0.0.1"].lastSeen.Add(-10 * time.Minute)
 	rl.mu.Unlock()
 
 	rl.cleanup()

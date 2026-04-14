@@ -109,12 +109,16 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject states older than 15 minutes
-	if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
-		if time.Since(t) > 15*time.Minute {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state expired"})
-			return
-		}
+	// Reject states older than 15 minutes (fail closed on parse error)
+	t, parseErr := time.Parse(time.RFC3339, createdAt)
+	if parseErr != nil {
+		h.logger.Warn("invalid oauth state timestamp", "error", parseErr)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid state"})
+		return
+	}
+	if time.Since(t) > 15*time.Minute {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state expired"})
+		return
 	}
 
 	// Exchange code for token

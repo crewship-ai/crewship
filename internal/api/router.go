@@ -57,8 +57,8 @@ type Router struct {
 	license              *license.License
 	agentHandler         *AgentHandler
 	storagePath          string // base path for crew file storage
-	authRateLimiter      *RateLimiter
-	apiRateLimiter       *RateLimiter
+	authRateLimitedMux http.Handler // mux wrapped with auth rate limiter
+	apiRateLimitedMux  http.Handler // mux wrapped with general API rate limiter
 }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.
@@ -71,12 +71,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	authMw := NewAuthMiddleware(validator, db, logger)
 
 	r := &Router{
-		mux:             http.NewServeMux(),
-		db:              db,
-		logger:          logger,
-		authMw:          authMw,
-		authRateLimiter: NewRateLimiter(10),  // 10 req/min per IP for auth endpoints
-		apiRateLimiter:  NewRateLimiter(120), // 120 req/min per IP for general API
+		mux:    http.NewServeMux(),
+		db:     db,
+		logger: logger,
+		authMw: authMw,
 	}
 
 	// Apply options before registering routes so that internalToken,
@@ -86,6 +84,10 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	}
 
 	r.registerRoutes()
+
+	// Pre-wrap mux with rate limiters (once, not per-request)
+	r.authRateLimitedMux = NewRateLimiter(10).Middleware(r.mux)  // 10 req/min per IP
+	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(r.mux)  // 120 req/min per IP
 
 	return r, nil
 }
@@ -239,13 +241,13 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 
 	// Stricter rate limiting for auth endpoints
 	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/bootstrap" {
-		r.authRateLimiter.Middleware(r.mux).ServeHTTP(w, req)
+		r.authRateLimitedMux.ServeHTTP(w, req)
 		return
 	}
 
 	// General API rate limiting
 	if strings.HasPrefix(path, "/api/") {
-		r.apiRateLimiter.Middleware(r.mux).ServeHTTP(w, req)
+		r.apiRateLimitedMux.ServeHTTP(w, req)
 		return
 	}
 
