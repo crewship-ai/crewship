@@ -55,6 +55,7 @@ type AgentRunRequest struct {
 	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
+	WorkspaceMemPath   string            // Host path to workspace memory dir (for COORDINATOR)
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.

@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,20 +37,29 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	today := time.Now().UTC().Format("2006-01-02")
 
-	// --- Crew memory first (measure actual size, cap at 40%) ---
+	// --- Workspace memory for Coordinator (read from host FS, cap at 20%) ---
+	var wsBlock string
+	var wsUsed int
+	if req.AgentRole == "COORDINATOR" && req.WorkspaceMemPath != "" {
+		wsBudget := charBudget * 20 / 100
+		wsBlock, wsUsed = buildWorkspaceMemoryBlock(req.WorkspaceMemPath, wsBudget)
+	}
+
+	// --- Crew memory (cap at 40% of remaining) ---
+	remaining := charBudget - wsUsed
 	var crewBlock string
 	var crewUsed int
 	if req.CrewID != "" {
-		crewBudget := charBudget * crewMemoryMaxPct / 100
+		crewBudget := remaining * crewMemoryMaxPct / 100
 		crewBlock, crewUsed = o.buildCrewMemoryBlock(ctx, req, crewBudget, today)
 	}
 
-	// --- Agent memory gets remainder (dynamic reclaim from empty crew) ---
-	agentBudget := charBudget - crewUsed
+	// --- Agent memory gets remainder (dynamic reclaim from empty tiers) ---
+	agentBudget := remaining - crewUsed
 	agentBlock := o.buildAgentMemoryBlock(ctx, req, agentBudget, today)
 
 	// If no memory files at all, return just instructions
-	if agentBlock == "" && crewBlock == "" {
+	if agentBlock == "" && crewBlock == "" && wsBlock == "" {
 		return buildMemoryInstructions(today)
 	}
 
@@ -58,6 +69,9 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	if crewBlock != "" {
 		b.WriteString(crewBlock)
+	}
+	if wsBlock != "" {
+		b.WriteString(wsBlock)
 	}
 	b.WriteString(buildMemoryInstructions(today))
 
@@ -107,6 +121,38 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 	}
 
 	block := assembleSections("[CREW SHARED MEMORY]", "[END CREW SHARED MEMORY]", sections, budget)
+	return block, len(block)
+}
+
+// buildWorkspaceMemoryBlock reads workspace memory files from the host filesystem
+// (not from a container). Returns a formatted [WORKSPACE MEMORY] block.
+// This runs in the orchestrator process which has host FS access.
+func buildWorkspaceMemoryBlock(wsPath string, budget int) (string, int) {
+	var sections []memorySection
+
+	// Read all .md files in workspace memory dir
+	filepath.Walk(wsPath, func(fpath string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
+			return nil
+		}
+		// Skip SQLite index files
+		if strings.HasSuffix(info.Name(), ".sqlite") {
+			return nil
+		}
+		data, err := os.ReadFile(fpath)
+		if err != nil {
+			return nil
+		}
+		content := strings.TrimSpace(string(data))
+		if content == "" {
+			return nil
+		}
+		rel, _ := filepath.Rel(wsPath, fpath)
+		sections = append(sections, memorySection{label: rel, content: content})
+		return nil
+	})
+
+	block := assembleSections("[WORKSPACE MEMORY]", "[END WORKSPACE MEMORY]", sections, budget)
 	return block, len(block)
 }
 
