@@ -1,0 +1,92 @@
+---
+title: "crewship memory"
+description: "Inspect and search memory FTS5 indexes directly on the local filesystem."
+icon: "brain"
+---
+
+# crewship memory
+
+Access memory FTS5 indexes on the local filesystem without a running server. Useful for development, debugging, and scripting.
+
+## Subcommands
+
+### search
+
+FTS5 search across memory with scope control.
+
+```bash
+crewship memory search <query> [flags]
+```
+
+**Flags:**
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--path` | `-p` | (required) | Base path (meaning depends on scope) |
+| `--scope` | `-S` | `agent` | `agent`, `crew`, `workspace`, or `all` |
+| `--limit` | `-l` | `10` | Maximum results per scope |
+| `--format` | `-F` | `table` | Output format: `table` or `json` |
+
+**Examples:**
+
+```bash
+# Search agent memory
+crewship memory search "PostgreSQL" -p /path/to/agents/lead/.memory
+
+# Search crew shared memory
+crewship memory search "deployment" -p /path/to/crew-root -S crew
+
+# Search both scopes, JSON output
+crewship memory search "database" -p /path/to/agents/lead -S all -F json
+
+# Search workspace memory
+crewship memory search "budget" -p ~/.crewship/memory/ws-123 -S workspace
+```
+
+### status
+
+Show memory index statistics.
+
+```bash
+crewship memory status [flags]
+```
+
+**Example:**
+
+```bash
+crewship memory status -p /path/to/agents/lead/.memory
+# [agent] /path/to/agents/lead/.memory
+#   Files:   3
+#   Chunks:  12
+#   Size:    48 KB
+#   Indexed: 2026-04-14T10:15:52Z
+#   Ready:   true
+```
+
+### reindex
+
+Rebuild FTS5 index from markdown files. Signal-aware (responds to SIGINT/SIGTERM).
+
+```bash
+crewship memory reindex [flags]
+```
+
+**Example:**
+
+```bash
+crewship memory reindex -p /path/to/crew-root -S crew
+# [crew] reindexed 3 files (10 chunks) in 19ms
+```
+
+Returns non-zero exit code if all reindex operations fail.
+
+## Scope and Path Resolution
+
+The meaning of `--path` depends on the selected scope:
+
+| Scope | `--path` should point to |
+|-------|--------------------------|
+| `agent` | Agent `.memory/` dir or agent dir (auto-appends `.memory/`) |
+| `crew` | Crew root dir (resolves to `<path>/shared/.memory/`) |
+| `workspace` | Workspace memory dir (e.g. `~/.crewship/memory/<workspace-id>`) |
+| `all` | Crew root dir (searches agent + crew) |

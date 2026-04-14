@@ -1,236 +1,216 @@
 ---
-title: "Agent Memory"
-description: "Persistent memory system that lets agents remember facts, preferences, and context across sessions using file-based storage with FTS5 search."
+title: "Memory System"
+description: "4-tier persistent memory (agent, crew, workspace, session) with FTS5 search, dynamic budget allocation, and multi-scope queries."
 icon: "brain"
 ---
 
-# Agent Memory
+# Memory System
 
-Without persistent memory, every agent session starts from scratch. Users must re-explain context, preferences, and project details each time. Agent memory solves this by giving each agent a private, file-based memory store that persists across container restarts, host reboots, and session boundaries.
+Crewship has a 4-tier memory hierarchy that gives agents persistent knowledge across sessions, shared context within crews, and organization-wide visibility for coordinators.
 
-Memory is **local-first** with zero external dependencies. There are no API calls for embeddings, no vector databases, and no cloud services. Search is powered by SQLite FTS5 (BM25 ranking), which runs sub-millisecond on thousands of chunks.
+Memory is **local-first** with zero external dependencies. No embedding APIs, no vector databases, no cloud services. Search is powered by SQLite FTS5 (BM25 ranking), running sub-millisecond on thousands of chunks.
 
-## How It Works
+## Memory Tiers
 
 ```
-Agent writes ~/.memory/AGENT.md
-Agent writes ~/.memory/daily/2026-04-09.md
-        |
-        v
-Sidecar indexes .md files into FTS5 (index.sqlite)
-        |
-        v
-Orchestrator reads AGENT.md + today/yesterday logs
-        |
-        v
-Injected into system prompt as [AGENT MEMORY] block
-        |
-        v
-Agent sees its own past context at the start of every session
+WORKSPACE MEMORY (Coordinator/Captain)
+  Host: ~/.crewship/memory/{workspace-id}/
+  Who writes: Coordinator        Who reads: Coordinator only
+  Budget: 20% of system prompt
+
+CREW SHARED MEMORY (Lead-owned)
+  Container: /crew/shared/.memory/
+  Who writes: Lead               Who reads: all agents in crew
+  Budget: max 40% of system prompt
+  FTS5: Lead sidecar owns index (single writer, zero contention)
+
+AGENT MEMORY (per-agent, private)
+  Container: /crew/agents/{slug}/.memory/
+  Who writes: the agent itself   Who reads: only that agent
+  Budget: remainder (60-100%)
+
+SESSION MEMORY (ephemeral)
+  Lives in the LLM context window, not persisted
 ```
 
-When an agent session starts, the orchestrator reads the agent's memory files directly from the container and injects them into the system prompt. The agent can then search its memory via the sidecar API during execution.
+<Tip>
+Budget is **dynamic**. If crew memory is empty, the agent reclaims the full budget. If workspace memory is empty (non-coordinator), crew and agent split the whole budget.
+</Tip>
 
 ## Enabling Memory
 
 Set `memory_enabled` to `true` when creating or updating an agent:
 
 ```bash
-# CLI
 crewship agent create --name "My Agent" --memory-enabled
-
-# API
-curl -X POST http://localhost:8080/api/v1/agents \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My Agent", "crew_id": "...", "memory_enabled": true}'
 ```
 
 <Note>
-Memory is disabled by default. Each agent has its own isolated memory store -- agents cannot read each other's memory.
+Memory is disabled by default. Each agent has its own isolated memory store -- agents cannot read each other's personal memory.
 </Note>
 
 ## File Structure
 
-Agent memory lives in `~/.memory/` inside the agent's container workspace, which maps to `/crew/agents/{agent-slug}/.memory/` on the container filesystem.
+### Agent Memory
+
+Lives in `~/.memory/` inside the agent's container, mapped to `/crew/agents/{slug}/.memory/` on the filesystem.
 
 ```
 ~/.memory/
   AGENT.md              # Long-term curated facts (evergreen)
   daily/
-    2026-04-09.md       # Today's session notes
-    2026-04-08.md       # Yesterday's notes
-    2026-04-07.md       # Older daily logs
-  index.sqlite          # FTS5 search index (managed by sidecar)
+    2026-04-14.md       # Today's session notes
+    2026-04-13.md       # Yesterday's notes
+  index.sqlite          # FTS5 search index (sidecar manages)
 ```
 
-### AGENT.md -- Long-Term Memory
+**AGENT.md** is the agent's primary knowledge base -- identity, learned facts, user preferences, project context. The agent is instructed to add new information and only remove entries that are explicitly outdated.
 
-This is the agent's primary knowledge base. It contains curated, evergreen facts that should persist indefinitely. The agent is instructed to **add** new information and only remove entries that are explicitly outdated.
+**Daily logs** capture session-specific notes: what was done, decisions made, observations.
 
-Recommended structure:
+### Crew Shared Memory
 
-```markdown
-## Identity
-- I am the backend agent for the Crewship project
-- I specialize in Go, SQLite, and API design
-
-## Learned Facts
-- The project uses modernc.org/sqlite (driver name "sqlite", not "sqlite3")
-- All DB migrations are in internal/database/migrate.go
-- Prisma is for TypeScript type generation only -- never run prisma migrate
-
-## User Preferences
-- User prefers short, direct commit messages
-- User wants tests written before implementation
-- Error messages should include the operation that failed
-
-## Project Context
-- Single binary architecture: Go embeds Next.js static export
-- IPC uses HTTP-over-Unix-socket on /tmp/crewship.sock
-- Container per crew, not per agent
-```
-
-### Daily Logs -- Session Notes
-
-Daily files capture session-specific notes: what was done, decisions made, observations, and anything that might be useful for continuity but is not evergreen enough for AGENT.md.
-
-```markdown
-# 2026-04-09
-
-## Session 1 (morning)
-- Refactored the memory search handler to support pagination
-- Found a bug in FTS5 query sanitization -- fixed in commit abc1234
-- User asked me to remember: always run `go vet` after changes
-
-## Session 2 (afternoon)
-- Implemented rate limiting for the /memory/reindex endpoint
-- Decision: use 500-char chunks with paragraph-boundary splitting
-```
-
-The orchestrator loads **today's log** and **yesterday's log** on each session start, providing continuity across sessions without loading the entire history.
-
-## How Agents Write Memory
-
-The orchestrator injects a `[MEMORY INSTRUCTIONS]` block into every memory-enabled agent's system prompt. These instructions teach the agent how and when to write to its memory files:
+Lives at `/crew/shared/.memory/` inside every agent container in the crew. The Lead agent writes crew-wide knowledge; all agents can read it.
 
 ```
+/crew/shared/.memory/
+  CREW.md               # Crew conventions, decisions, policies
+  daily/
+    2026-04-14.md       # Crew daily log
+  topics/
+    deployment.md       # Domain-specific knowledge
+    security.md
+  index.sqlite          # FTS5 index (Lead sidecar owns)
+```
+
+**CREW.md** contains crew-level decisions, conventions, and shared context that all agents need. The Lead maintains this file.
+
+**topics/** holds domain-specific knowledge files that grow over time as the crew learns.
+
+<Note>
+The Lead's sidecar owns the crew FTS5 index and reindexes it every 60 seconds automatically. Non-lead agents search crew memory via the sidecar HTTP API.
+</Note>
+
+### Workspace Memory
+
+Lives on the host at `~/.crewship/memory/{workspace-id}/`. Only the Coordinator (Captain) agent reads and writes workspace memory.
+
+```
+~/.crewship/memory/{workspace-id}/
+  WORKSPACE.md          # Org-level strategy, KPIs, policies
+  crews/
+    dev.md              # Crew summaries
+    marketing.md
+  index.sqlite          # FTS5 index
+```
+
+## How It Works at Runtime
+
+### 1. Writing Memory
+
+Agents write memory by executing file operations inside their container -- shell commands, file tools, or editors. No special API needed.
+
+```bash
+# Agent writes to its personal memory
+echo "## New Fact\nUser prefers dark mode" >> ~/.memory/AGENT.md
+
+# Lead writes to crew shared memory
+echo "## Decision\nUse PostgreSQL 16 for all DBs" >> /crew/shared/.memory/CREW.md
+```
+
+### 2. Reading Memory (System Prompt Injection)
+
+When a session starts, the orchestrator reads memory files and injects them into the system prompt:
+
+```
+[AGENT MEMORY]
+--- AGENT.md (long-term memory) ---
+...agent's personal knowledge...
+--- Daily log: 2026-04-14 (today) ---
+...today's session notes...
+[END AGENT MEMORY]
+
+[CREW SHARED MEMORY]
+--- CREW.md (crew-wide knowledge) ---
+...crew conventions and decisions...
+[END CREW SHARED MEMORY]
+
+[WORKSPACE MEMORY]                    (Coordinator only)
+--- WORKSPACE.md ---
+...org-level strategy...
+[END WORKSPACE MEMORY]
+
 [MEMORY INSTRUCTIONS]
-You have persistent memory across sessions. Your long-term memory and recent daily
-logs are shown above (if any exist).
-
-WRITING MEMORY:
-- Write lasting facts, preferences, and project context to: ~/.memory/AGENT.md
-- Write daily session notes and decisions to: ~/.memory/daily/2026-04-09.md
-- Use today's date (2026-04-09) for the daily log filename.
-- Write early and often -- do not wait until the end of the session.
-
-GUIDELINES:
-- AGENT.md is for curated, evergreen facts (identity, learned facts, preferences).
-- Daily logs are for session-specific notes (what you did, decisions made, observations).
-- If the user says "remember this", write it to AGENT.md immediately.
-- Before starting complex tasks, check your memory for relevant past context.
-- When updating AGENT.md, ADD new information. Do not delete existing entries unless outdated.
+...instructions on how to write memory...
 [END MEMORY INSTRUCTIONS]
 ```
 
-<Warning>
-Agents write memory by executing file write operations inside their container (e.g., using shell commands or file tools). The sidecar does not provide a write endpoint -- the agent writes directly to the filesystem, and the sidecar indexes the results.
-</Warning>
+### 3. Searching Memory
 
-## Memory in the System Prompt
+Agents search memory via the sidecar HTTP API with a `scope` parameter:
 
-When `memory_enabled` is true, the orchestrator builds two blocks that are injected into the agent's system prompt:
+```bash
+# Search personal memory only
+curl localhost:9119/memory/search \
+  -d '{"query": "PostgreSQL", "scope": "agent"}'
 
-### \[AGENT MEMORY\] Block
+# Search crew shared memory
+curl localhost:9119/memory/search \
+  -d '{"query": "deployment", "scope": "crew"}'
 
-Contains the actual memory content, loaded in this order:
+# Search both (merged by relevance)
+curl localhost:9119/memory/search \
+  -d '{"query": "database", "scope": "both"}'
+```
 
-<Steps>
-  <Step title="AGENT.md">
-    The full contents of the long-term memory file. This is loaded first and given priority in the token budget.
-  </Step>
-  <Step title="Yesterday's daily log">
-    The daily log from the previous day, providing recent session continuity.
-  </Step>
-  <Step title="Today's daily log">
-    The current day's log, showing what has already happened in earlier sessions today.
-  </Step>
-</Steps>
+## Dynamic Budget Allocation
 
-Each section is truncated if it exceeds the remaining character budget. If no memory files exist yet, only the instructions block is included.
+The orchestrator allocates a character budget (default 15,000 chars) across memory tiers. Empty tiers reclaim their budget for lower tiers.
 
-### \[MEMORY INSTRUCTIONS\] Block
+| Agent Role | Workspace | Crew (max) | Agent (remainder) |
+|------------|-----------|------------|-------------------|
+| **Coordinator** | 20% | 40% of remaining | rest |
+| **Lead** (in crew) | -- | 40% | rest |
+| **Agent** (in crew) | -- | 40% | rest |
+| **Solo agent** | -- | -- | 100% |
 
-Always included for memory-enabled agents, even when no memory files exist yet. This teaches the agent how to use the memory system (see the exact text above).
+<Accordion title="Budget examples">
+**Coordinator with all tiers populated:**
+- Workspace: 3,000 chars (20%)
+- Crew: 4,800 chars (40% of 12,000 remaining)
+- Agent: 7,200 chars
 
-## Token Budget
+**Lead with small crew memory:**
+- Crew: 2,000 chars (actual content, under 40% cap)
+- Agent: 13,000 chars (reclaimed from crew)
 
-Memory context competes with conversation history for the available context window. The orchestrator uses a **60/40 split**:
-
-| Allocation | Percentage | Purpose |
-|-----------|-----------|---------|
-| Conversation history | 60% | Messages, tool calls, responses |
-| Memory context | 40% | AGENT.md + daily logs + instructions |
-
-The 40% memory budget translates to a character limit (via `tokenutil.CharsForTokens`). When memory content exceeds this budget, sections are truncated in reverse priority order: today's log is truncated last, yesterday's log is truncated next, and AGENT.md is truncated first if necessary.
-
-If no `charBudget` is passed to `buildMemoryContext`, a default of 15,000 characters is used.
-
-<Tip>
-Keep AGENT.md focused and concise. A well-organized 2-3 KB file is more useful than a sprawling 50 KB dump, and it leaves more budget for daily logs.
-</Tip>
-
-## FTS5 Search
-
-The sidecar runs a memory engine that indexes all `.md` files in the agent's memory directory into a SQLite FTS5 virtual table. This enables fast, ranked keyword search during agent execution.
-
-### Indexing
-
-Markdown files are chunked using a heading-aware splitter:
-
-1. Content is split on `##` headings as primary boundaries
-2. Sections larger than 500 characters are further split at paragraph boundaries (double newlines)
-3. Each chunk records its source file (relative path), line range, and content
-4. Chunks are stored in the `memory_chunks` FTS5 table with `unicode61` tokenization
-
-Reindexing clears the existing index and rebuilds from scratch by walking all `.md` files in the memory directory.
-
-### Search
-
-Search uses FTS5's built-in BM25 ranking. Queries support:
-
-- Simple terms: `deployment config` (each word is quoted for safety)
-- Boolean operators: `deployment AND config`, `docker OR kubernetes`
-- Prefix matching: `deploy*`
-- Quoted phrases: `"rate limiting"`
-
-Results include the source file, a snippet (truncated to 300 characters), and the BM25 relevance score. Maximum 50 results per query.
-
-<Note>
-Dangerous FTS5 syntax (column filters, NEAR operators, special characters) is automatically stripped by the query sanitizer to prevent information disclosure.
-</Note>
+**Solo agent (no crew):**
+- Agent: 15,000 chars (full budget)
+</Accordion>
 
 ## Sidecar API Endpoints
 
-The sidecar exposes three memory endpoints on the Unix socket (`/tmp/crewship.sock`). All endpoints return JSON.
+All endpoints are accessible on `localhost:9119` inside the container.
 
 ### POST /memory/search
 
-Search the agent's indexed memory.
+Search indexed memory with scope control.
 
 **Request:**
 
 ```json
 {
   "query": "database migration strategy",
-  "limit": 10
+  "limit": 10,
+  "scope": "both"
 }
 ```
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `query` | string | Yes | -- | Search terms (FTS5 syntax supported) |
+| `query` | string | Yes | -- | Search terms (FTS5 syntax) |
 | `limit` | int | No | 10 | Max results (capped at 50) |
+| `scope` | string | No | `"agent"` | `"agent"`, `"crew"`, or `"both"` |
 
 **Response (200):**
 
@@ -239,31 +219,32 @@ Search the agent's indexed memory.
   "results": [
     {
       "file": "AGENT.md",
-      "line_start": 0,
-      "line_end": 0,
-      "snippet": "All DB migrations are in internal/database/migrate.go. Never use prisma migrate...",
-      "score": -2.345
+      "snippet": "All DB migrations are in internal/database/migrate.go...",
+      "score": -2.345,
+      "source": "agent"
+    },
+    {
+      "file": "CREW.md",
+      "snippet": "Use PostgreSQL 16 for all new databases...",
+      "score": -1.437,
+      "source": "crew"
     }
   ],
-  "count": 1
+  "count": 2
 }
 ```
 
-<Note>
-FTS5 BM25 scores are negative -- lower (more negative) values indicate higher relevance.
-</Note>
-
-**Error responses:**
+When `scope=both`, results from both engines are merged and sorted by BM25 score. Each result includes a `source` field indicating its origin.
 
 | Status | Condition |
 |--------|-----------|
-| 400 | Missing or empty `query`, invalid JSON body |
-| 503 | Memory engine not available (memory not enabled for this agent) |
-| 500 | Search execution failed |
+| 400 | Missing query, invalid JSON, or invalid scope |
+| 503 | Requested memory engine not available |
+| 500 | Search execution failed (all scopes) |
 
-### GET /memory/status
+### GET /memory/status?scope=agent|crew
 
-Check the state of the memory index.
+Check the state of a memory index.
 
 **Response (200):**
 
@@ -271,79 +252,90 @@ Check the state of the memory index.
 {
   "total_files": 5,
   "total_chunks": 23,
-  "indexed_at": "2026-04-09T14:30:00Z",
+  "indexed_at": "2026-04-14T14:30:00Z",
   "total_size_kb": 48,
   "search_ready": true
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `total_files` | int | Number of distinct `.md` files indexed |
-| `total_chunks` | int | Total chunks in the FTS5 index |
-| `indexed_at` | string | ISO 8601 timestamp of last reindex |
-| `total_size_kb` | int | Total size of the `.memory/` directory in KB |
-| `search_ready` | bool | Whether FTS5 search is enabled |
+### POST /memory/reindex?scope=agent|crew
 
-### POST /memory/reindex
+Trigger a full reindex. Context-aware -- responds to client disconnect and SIGTERM.
 
-Trigger a full reindex of all memory files. The sidecar walks the `.memory/` directory, chunks all `.md` files, and rebuilds the FTS5 index.
+**Response (200):** Returns status object after reindexing.
 
-**Request:** No body required.
+## CLI (Development & Debugging)
 
-**Response (200):**
+The `crewship memory` command provides direct filesystem access to memory indexes without a running server.
 
-Returns the same status object as `/memory/status`, reflecting the state after reindexing.
+```bash
+# Reindex agent memory
+crewship memory reindex -p /path/to/agents/lead/.memory -S agent
 
-```json
-{
-  "total_files": 6,
-  "total_chunks": 28,
-  "indexed_at": "2026-04-09T14:35:12Z",
-  "total_size_kb": 52,
-  "search_ready": true
-}
+# Search crew shared memory
+crewship memory search "deployment" -p /path/to/crew-root -S crew
+
+# Check workspace memory status
+crewship memory status -p ~/.crewship/memory/ws-123 -S workspace
+
+# JSON output for scripting
+crewship memory search "PostgreSQL" -p /path -S crew -F json
 ```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--path` | `-p` | Base path (meaning depends on scope) |
+| `--scope` | `-S` | `agent`, `crew`, `workspace`, or `all` |
+| `--limit` | `-l` | Max results (search only, default 10) |
+| `--format` | `-F` | `table` or `json` (search only) |
+
+## Access Control
+
+| Operation | Agent | Lead | Coordinator |
+|-----------|-------|------|-------------|
+| Read own agent memory | Yes | Yes | Yes |
+| Write own agent memory | Yes | Yes | Yes |
+| Read crew shared memory | Yes | Yes | Yes |
+| Write crew shared memory | No | **Yes** | No |
+| Read workspace memory | No | No | **Yes** |
+| Write workspace memory | No | No | **Yes** |
+
+<Warning>
+Agents in one crew cannot access another crew's shared memory. Container bind mounts enforce this isolation at the filesystem level.
+</Warning>
 
 ## Limits
 
-<Warning>
-These limits are enforced by the sidecar to prevent disk exhaustion and abuse. They apply per agent.
-</Warning>
-
 | Limit | Value | Description |
 |-------|-------|-------------|
-| Total memory size | 10 MB per agent | Maximum size of the entire `.memory/` directory |
-| Daily log size | 100 KB per file | Maximum size of a single `daily/*.md` file |
-| Write rate | 60 writes/min | Rate limit on file writes to the memory directory |
-
-These defaults are configured in the memory engine (`Config` struct) and can be adjusted per deployment.
+| Total memory size | 10 MB per agent | Maximum `.memory/` directory size |
+| Daily log size | 100 KB per file | Maximum single `daily/*.md` file |
+| Crew memory reindex | Every 60 seconds | Automatic periodic reindex by Lead sidecar |
 
 ## Best Practices
 
-<Accordion title="Writing effective long-term memory (AGENT.md)">
-- **Use clear headings** (`## Identity`, `## Learned Facts`, `## User Preferences`, `## Project Context`) so chunks align with semantic sections.
-- **Be specific and actionable.** "User prefers short commit messages" is better than "User has preferences about commits."
-- **Add context for decisions.** Not just "use sqlite driver" but "use driver name `sqlite` (not `sqlite3`) because modernc.org/sqlite registers under that name."
-- **Prune regularly.** If a fact becomes outdated, remove or update it. Stale memory is worse than no memory.
-- **Keep it under 5 KB.** Concise, well-organized memory leaves more token budget for conversation.
+<Accordion title="Writing effective AGENT.md">
+- **Use clear headings** (`## Identity`, `## Learned Facts`, `## Preferences`, `## Project Context`)
+- **Be specific.** "Use driver name `sqlite` not `sqlite3`" beats "there's a sqlite driver thing"
+- **Keep it under 5 KB.** Concise memory leaves budget for daily logs and crew context
+- **Prune outdated facts.** Stale memory is worse than no memory
 </Accordion>
 
-<Accordion title="Writing effective daily logs">
-- **Start each session with a heading** (e.g., `## Session 1 (morning)`) for easy scanning.
-- **Record decisions, not just actions.** "Chose FTS5 over trigram because zero external deps" is more valuable than "implemented search."
-- **Note blockers and workarounds.** Future sessions benefit from knowing what went wrong and how it was resolved.
-- **Reference commits and file paths.** Concrete references are easier to search than vague descriptions.
+<Accordion title="Writing effective crew memory (CREW.md)">
+- **Lead curates CREW.md** with crew-wide conventions, architecture decisions, and policies
+- **Use topics/ for domains.** `topics/deployment.md`, `topics/security.md` keep CREW.md focused
+- **Agents don't write to crew memory** -- they write personal notes to their own AGENT.md
+- **Don't duplicate facts** across agent and crew memory. Crew memory is for shared knowledge only
 </Accordion>
 
-<Accordion title="Optimizing search recall">
-- **Use consistent terminology** across memory files. If you call it "memory engine" in one place, don't call it "recall system" elsewhere.
-- **Include keywords naturally.** FTS5 is keyword-based, not semantic. The exact words matter for search.
-- **Trigger reindex after bulk writes.** The sidecar does not auto-index on every write. Call `POST /memory/reindex` after writing multiple files.
+<Accordion title="Optimizing search">
+- **Use consistent terminology.** FTS5 is keyword-based, not semantic
+- **Trigger reindex after bulk writes.** Agent memory reindexes on startup; crew memory reindexes every 60s
+- **Use `scope=both`** to search across personal and crew knowledge simultaneously
 </Accordion>
 
 <Accordion title="Common pitfalls">
-- **Do not store secrets in memory files.** Memory is not encrypted at rest. Use the credential system for API keys, tokens, and passwords.
-- **Do not rely on memory for large datasets.** The 10 MB limit and token budget mean memory is for curated facts, not raw data dumps.
-- **Do not delete AGENT.md entries casually.** The instructions tell the agent to add, not replace. Only remove facts you are certain are outdated.
+- **Do not store secrets in memory files.** Memory is not encrypted at rest
+- **Do not rely on memory for large datasets.** 10 MB limit + token budget = curated facts only
+- **Do not delete AGENT.md entries casually.** Add new facts, only remove confirmed-outdated ones
 </Accordion>
