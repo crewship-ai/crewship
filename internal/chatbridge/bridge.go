@@ -57,6 +57,7 @@ type ChatInfo struct {
 	TTLHours           int
 	RuntimeImage       string
 	CachedImage        string
+	DevcontainerConfig string
 	MCPServers         []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
@@ -203,6 +204,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	cpuVal := info.CPUs
 	if cpuVal <= 0 {
 		cpuVal = b.cfg.DefaultCPUs
+	}
+
+	// Auto-provision warning: if crew has devcontainer config but no cached
+	// image, the agent will start with the base image. The user should run
+	// `crewship crew provision <slug>` to build the custom image first.
+	if info.DevcontainerConfig != "" && info.CachedImage == "" {
+		b.logger.Warn("crew has devcontainer config but no cached image — run `crewship crew provision` first",
+			"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
 	}
 
 	if containerID == "" && b.container != nil {

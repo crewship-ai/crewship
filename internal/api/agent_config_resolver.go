@@ -32,9 +32,10 @@ type agentConfigData struct {
 	crewMemoryMB       sql.NullInt64
 	crewCPUs           sql.NullFloat64
 	crewTTLHours       sql.NullInt64
-	crewRuntimeImage   sql.NullString
-	crewCachedImage    sql.NullString
-	crewMCPConfigJSON  sql.NullString
+	crewRuntimeImage       sql.NullString
+	crewCachedImage        sql.NullString
+	crewDevcontainerConfig sql.NullString
+	crewMCPConfigJSON      sql.NullString
 	agentMCPConfigJSON sql.NullString
 }
 
@@ -218,6 +219,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		"mcp_servers":           mcpServers,
 		"runtime_image":         data.crewRuntimeImage.String,
 		"cached_image":          data.crewCachedImage.String,
+		"devcontainer_config":   data.crewDevcontainerConfig.String,
 		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
 	}
@@ -264,7 +266,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
 			c2.network_mode, c2.allowed_domains,
 			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours,
-			c2.runtime_image, c2.cached_image,
+			c2.runtime_image, c2.cached_image, c2.devcontainer_config,
 			c2.mcp_config_json, a.mcp_config_json
 		FROM agents a
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
@@ -274,7 +276,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel,
 		&d.crewNetworkMode, &d.crewAllowedDomains,
 		&d.crewMemoryMB, &d.crewCPUs, &d.crewTTLHours,
-		&d.crewRuntimeImage, &d.crewCachedImage,
+		&d.crewRuntimeImage, &d.crewCachedImage, &d.crewDevcontainerConfig,
 		&d.crewMCPConfigJSON, &d.agentMCPConfigJSON)
 	return d, err
 }

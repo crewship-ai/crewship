@@ -1,6 +1,9 @@
 package devcontainer
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -288,6 +291,195 @@ func TestReadMetadataMissing(t *testing.T) {
 	_, err := readMetadata(dir)
 	if err == nil {
 		t.Fatal("expected error for missing metadata file")
+	}
+}
+
+func TestExtractTarGz_Normal(t *testing.T) {
+	destDir := t.TempDir()
+
+	// Build a tar.gz with two normal files and a subdirectory.
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Add a directory entry.
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeDir,
+		Name:     "subdir/",
+		Mode:     0o755,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a file at the root level.
+	rootContent := []byte("#!/bin/sh\necho hello")
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "install.sh",
+		Mode:     0o755,
+		Size:     int64(len(rootContent)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(rootContent); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a file inside the subdirectory.
+	subContent := []byte(`{"id":"test"}`)
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "subdir/meta.json",
+		Mode:     0o644,
+		Size:     int64(len(subContent)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(subContent); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	if err := extractTarGz(&buf, destDir); err != nil {
+		t.Fatalf("extractTarGz: %v", err)
+	}
+
+	// Verify root file.
+	data, err := os.ReadFile(filepath.Join(destDir, "install.sh"))
+	if err != nil {
+		t.Fatalf("read install.sh: %v", err)
+	}
+	if string(data) != string(rootContent) {
+		t.Errorf("install.sh content = %q, want %q", data, rootContent)
+	}
+
+	// Verify subdirectory file.
+	data, err = os.ReadFile(filepath.Join(destDir, "subdir", "meta.json"))
+	if err != nil {
+		t.Fatalf("read subdir/meta.json: %v", err)
+	}
+	if string(data) != string(subContent) {
+		t.Errorf("subdir/meta.json content = %q, want %q", data, subContent)
+	}
+}
+
+func TestExtractTarGz_PathTraversal(t *testing.T) {
+	destDir := t.TempDir()
+
+	// Build a tar.gz with a path-traversal entry and a normal entry.
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Malicious entry: tries to escape destDir.
+	malicious := []byte("pwned")
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "../../etc/passwd",
+		Mode:     0o644,
+		Size:     int64(len(malicious)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(malicious); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another traversal variant.
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "../escape.txt",
+		Mode:     0o644,
+		Size:     int64(len(malicious)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(malicious); err != nil {
+		t.Fatal(err)
+	}
+
+	// Normal entry that should be extracted.
+	safe := []byte("safe content")
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "safe.txt",
+		Mode:     0o644,
+		Size:     int64(len(safe)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(safe); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	if err := extractTarGz(&buf, destDir); err != nil {
+		t.Fatalf("extractTarGz: %v", err)
+	}
+
+	// The malicious entries should have been skipped.
+	if _, err := os.Stat(filepath.Join(destDir, "..", "escape.txt")); !os.IsNotExist(err) {
+		t.Error("path traversal entry ../escape.txt should not have been extracted")
+	}
+
+	// The safe file should exist.
+	data, err := os.ReadFile(filepath.Join(destDir, "safe.txt"))
+	if err != nil {
+		t.Fatalf("read safe.txt: %v", err)
+	}
+	if string(data) != string(safe) {
+		t.Errorf("safe.txt content = %q, want %q", data, safe)
+	}
+}
+
+func TestExtractTarGz_Subdirectories(t *testing.T) {
+	destDir := t.TempDir()
+
+	// Build a tar.gz with nested directories (no explicit dir entries — tests implicit mkdir).
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	content := []byte("deep file")
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "a/b/c/deep.txt",
+		Mode:     0o644,
+		Size:     int64(len(content)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	if err := extractTarGz(&buf, destDir); err != nil {
+		t.Fatalf("extractTarGz: %v", err)
+	}
+
+	// Verify the nested file was created.
+	data, err := os.ReadFile(filepath.Join(destDir, "a", "b", "c", "deep.txt"))
+	if err != nil {
+		t.Fatalf("read deep.txt: %v", err)
+	}
+	if string(data) != string(content) {
+		t.Errorf("deep.txt content = %q, want %q", data, content)
+	}
+
+	// Verify intermediate directories exist.
+	info, err := os.Stat(filepath.Join(destDir, "a", "b"))
+	if err != nil {
+		t.Fatalf("stat a/b: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("a/b should be a directory")
 	}
 }
 
