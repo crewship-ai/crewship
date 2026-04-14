@@ -66,7 +66,11 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := r.URL.Query().Get("user_id")
 	dateFrom := r.URL.Query().Get("date_from")
 	dateTo := r.URL.Query().Get("date_to")
+	search := r.URL.Query().Get("search")
 
+	// The count query also joins `users` so the `search` filter (which
+	// references u.email / u.full_name) can reuse the same clauses without
+	// diverging. LEFT JOIN keeps rows where user_id is NULL (system events).
 	query := `
 		SELECT a.id, a.workspace_id, a.user_id, a.action, a.entity_type, a.entity_id,
 			a.metadata, a.ip_address, a.user_agent, a.created_at,
@@ -74,45 +78,59 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		FROM audit_logs a
 		LEFT JOIN users u ON u.id = a.user_id
 		WHERE a.workspace_id = ?`
-	countQuery := `SELECT COUNT(*) FROM audit_logs WHERE workspace_id = ?`
+	countQuery := `
+		SELECT COUNT(*) FROM audit_logs a
+		LEFT JOIN users u ON u.id = a.user_id
+		WHERE a.workspace_id = ?`
 	args := []interface{}{workspaceID}
 	countArgs := []interface{}{workspaceID}
 
 	if action != "" {
 		query += " AND a.action = ?"
-		countQuery += " AND action = ?"
+		countQuery += " AND a.action = ?"
 		args = append(args, action)
 		countArgs = append(countArgs, action)
 	}
 	if entityType != "" {
 		query += " AND a.entity_type = ?"
-		countQuery += " AND entity_type = ?"
+		countQuery += " AND a.entity_type = ?"
 		args = append(args, entityType)
 		countArgs = append(countArgs, entityType)
 	}
 	if entityID != "" {
 		query += " AND a.entity_id = ?"
-		countQuery += " AND entity_id = ?"
+		countQuery += " AND a.entity_id = ?"
 		args = append(args, entityID)
 		countArgs = append(countArgs, entityID)
 	}
 	if userID != "" {
 		query += " AND a.user_id = ?"
-		countQuery += " AND user_id = ?"
+		countQuery += " AND a.user_id = ?"
 		args = append(args, userID)
 		countArgs = append(countArgs, userID)
 	}
 	if dateFrom != "" {
 		query += " AND a.created_at >= ?"
-		countQuery += " AND created_at >= ?"
+		countQuery += " AND a.created_at >= ?"
 		args = append(args, dateFrom)
 		countArgs = append(countArgs, dateFrom)
 	}
 	if dateTo != "" {
 		query += " AND a.created_at <= ?"
-		countQuery += " AND created_at <= ?"
+		countQuery += " AND a.created_at <= ?"
 		args = append(args, dateTo)
 		countArgs = append(countArgs, dateTo)
+	}
+	if search != "" {
+		// Case-insensitive LIKE across action, entity_type, and the joined
+		// user's email + full name. SQLite LIKE is case-insensitive for ASCII
+		// by default, which is fine for these fields.
+		pattern := "%" + search + "%"
+		clause := " AND (a.action LIKE ? OR a.entity_type LIKE ? OR u.email LIKE ? OR u.full_name LIKE ?)"
+		query += clause
+		countQuery += clause
+		args = append(args, pattern, pattern, pattern, pattern)
+		countArgs = append(countArgs, pattern, pattern, pattern, pattern)
 	}
 
 	query += " ORDER BY a.created_at DESC LIMIT ? OFFSET ?"

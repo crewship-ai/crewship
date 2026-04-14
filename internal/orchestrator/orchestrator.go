@@ -123,6 +123,14 @@ type crewState struct {
 // Orchestrator manages agent execution lifecycle: building CLI commands,
 // running them inside containers, streaming output, handling credential
 // failover, and managing container TTLs.
+// StatsRegisterFunc is an optional callback that the Orchestrator invokes
+// whenever it creates or reuses a crew container. Wired from server.go to
+// StatsCollector.Register so the dashboard's live resource tile can stream
+// container.stats events regardless of whether the container was created
+// via the direct-run path (server/routes.go handleAgentStart) or the
+// mission-orchestration path (this file's GetOrCreateContainer).
+type StatsRegisterFunc func(containerID, crewID, workspaceID string)
+
 type Orchestrator struct {
 	container      provider.ContainerProvider
 	state          provider.StateProvider
@@ -134,6 +142,7 @@ type Orchestrator struct {
 	keeperEnabled  bool
 	ipcBaseURL     string
 	ipcToken       string
+	statsRegister  StatsRegisterFunc
 	mu             sync.RWMutex
 	accepting      bool
 	crews          map[string]*crewState
@@ -154,6 +163,15 @@ func New(
 		accepting: true,
 		crews:     make(map[string]*crewState),
 	}
+}
+
+// SetStatsRegisterCallback wires a callback invoked on every crew container
+// create/reuse so the stats collector can start polling and broadcasting
+// container.stats WS events. Called once at server bootstrap.
+func (o *Orchestrator) SetStatsRegisterCallback(fn StatsRegisterFunc) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.statsRegister = fn
 }
 
 // SetSidecarEnabled enables the sidecar proxy for credential injection.
@@ -198,14 +216,33 @@ func (o *Orchestrator) ContainerProvider() provider.ContainerProvider {
 
 // GetOrCreateContainer returns the container ID for a crew, creating it if it doesn't exist.
 // Used by assignment goroutines to ensure the crew container is running before exec-ing the sub-agent.
-func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewID string) (string, error) {
+//
+// workspaceID is passed through to the stats-register callback so the dashboard's
+// container resources tile can scope its WS stream correctly. Pass empty string
+// if called from a context where workspace is unknown (the register callback
+// short-circuits on empty workspace).
+func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewID, workspaceID string) (string, error) {
 	if o.container == nil {
 		return "", fmt.Errorf("container provider not configured")
 	}
-	return o.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
+	containerID, err := o.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
 		ID:   crewID,
 		Slug: crewSlug,
 	})
+	if err != nil {
+		return "", fmt.Errorf("ensure crew runtime for crew %s (workspace %s): %w", crewID, workspaceID, err)
+	}
+	// Register for stats streaming. Without this, the direct-run path (server
+	// routes.go handleAgentStart) is the only thing that registers containers,
+	// which means mission-driven runs (the overwhelming majority) produce no
+	// container.stats WS events and the dashboard tile stays empty.
+	o.mu.RLock()
+	reg := o.statsRegister
+	o.mu.RUnlock()
+	if reg != nil && workspaceID != "" {
+		reg(containerID, crewID, workspaceID)
+	}
+	return containerID, nil
 }
 
 // RunAgentForAssignment runs a sub-agent as part of a mission assignment.

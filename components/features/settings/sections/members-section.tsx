@@ -17,10 +17,9 @@ import {
 } from "@/components/ui/collapsible"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { cn } from "@/lib/utils"
+import { SettingsCard, SettingsRow } from "../shared"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// ── Types ────────────────────────────────────────────────────────────
 
 interface Member {
   id: string
@@ -42,11 +41,9 @@ interface MembersSectionProps {
   onRefresh: () => void
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+// ── Constants ────────────────────────────────────────────────────────
 
-// Role badges all use the subtle muted treatment — differentiation comes
+// Role badges all use the same muted treatment — differentiation comes
 // from the label itself, not the color, matching orchestration's style.
 const roleCls: Record<string, string> = {
   OWNER: "bg-muted text-foreground border-border",
@@ -64,15 +61,12 @@ const roleSummaries: { role: string; summary: string }[] = [
   { role: "Viewer", summary: "Read only" },
 ]
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// ── Helpers ──────────────────────────────────────────────────────────
 
 function relativeTime(dateStr: string): string {
   const now = Date.now()
   const then = new Date(dateStr).getTime()
-  const diffMs = now - then
-  const diffSec = Math.floor(diffMs / 1000)
+  const diffSec = Math.floor((now - then) / 1000)
   if (diffSec < 60) return "just now"
   const diffMin = Math.floor(diffSec / 60)
   if (diffMin < 60) return `${diffMin}m ago`
@@ -95,34 +89,7 @@ function initials(name: string | null, email: string): string {
   return email.slice(0, 2).toUpperCase()
 }
 
-// ---------------------------------------------------------------------------
-// Row component
-// ---------------------------------------------------------------------------
-
-function Row({ label, description, children, border = true }: {
-  label?: string; description?: string; children: React.ReactNode; border?: boolean
-}) {
-  return (
-    <div className={cn(
-      "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
-      border && "border-b border-border/40 last:border-b-0",
-    )}>
-      {label ? (
-        <div className="shrink-0">
-          <div className="text-body text-foreground">{label}</div>
-          {description && <div className="text-label text-muted-foreground mt-0.5">{description}</div>}
-        </div>
-      ) : (
-        <div className="min-w-0 flex-1" />
-      )}
-      <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
+// ── Component ────────────────────────────────────────────────────────
 
 export function MembersSection({
   members,
@@ -157,157 +124,130 @@ export function MembersSection({
   }
 
   return (
-    <div className="space-y-6">
-      {/* ------------------------------------------------------------------ */}
-      {/* Members                                                             */}
-      {/* ------------------------------------------------------------------ */}
-      <div>
-        {/* Section title above card */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <h4 className="text-heading font-medium text-foreground">Members</h4>
-            <span className="font-mono text-label text-muted-foreground tabular-nums">
-              {members.length}
-            </span>
-          </div>
-          {canInvite && (
-            <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} />
-          )}
-        </div>
-
-        {/* Members card */}
-        <div className="bg-card border border-border rounded-lg">
-          {members.map((member, idx) => {
-            const isSelf = currentUserId === member.user.id
-            const isOwner = member.role === "OWNER"
-            const isLast = idx === members.length - 1
-
-            return (
-              <div
-                key={member.id}
-                className={cn(
-                  "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
-                  !isLast && "border-b border-border/40",
-                )}
-              >
-                {/* Left: avatar + name + email */}
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/80">
-                    <span className="text-micro font-semibold text-primary-foreground leading-none">
-                      {initials(member.user.full_name, member.user.email)}
-                    </span>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-body text-foreground truncate">
-                      {member.user.full_name ?? member.user.email}
-                    </div>
-                    {member.user.full_name && (
-                      <div className="text-label text-muted-foreground font-mono truncate mt-0.5">
-                        {member.user.email}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right: role badge + joined + remove */}
-                <div className="flex items-center gap-3 shrink-0">
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "text-micro font-medium",
-                      roleCls[member.role] ?? "",
-                    )}
-                  >
-                    {member.role}
-                  </Badge>
-                  <span className="text-label text-muted-foreground font-mono tabular-nums w-[52px] text-right">
-                    {relativeTime(member.created_at)}
+    <div className="space-y-5">
+      {/* ── Members ── */}
+      <SettingsCard
+        title="Members"
+        description={`${members.length} member${members.length === 1 ? "" : "s"} in this workspace`}
+        actions={canInvite ? <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} /> : undefined}
+      >
+        {members.map((member, idx) => {
+          const isSelf = currentUserId === member.user.id
+          const isOwner = member.role === "OWNER"
+          const isLast = idx === members.length - 1
+          return (
+            <div
+              key={member.id}
+              className={cn(
+                "flex items-center justify-between gap-4 px-4 py-2.5",
+                !isLast && "border-b border-border/40",
+              )}
+            >
+              {/* Left: avatar + name + email */}
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/80">
+                  <span className="text-[10px] font-semibold text-primary-foreground leading-none">
+                    {initials(member.user.full_name, member.user.email)}
                   </span>
-                  <div className="w-7 flex justify-center">
-                    {!isOwner && !isSelf ? (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            disabled={removingId === member.id}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            <span className="sr-only">Remove member</span>
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Remove member</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Are you sure you want to remove{" "}
-                              <span className="font-medium text-foreground">
-                                {member.user.full_name ?? member.user.email}
-                              </span>{" "}
-                              from this workspace? This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              onClick={() => handleRemove(member.id)}
-                            >
-                              Remove
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    ) : null}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs text-foreground truncate">
+                    {member.user.full_name ?? member.user.email}
                   </div>
+                  {member.user.full_name && (
+                    <div className="text-[10px] text-muted-foreground/80 font-mono truncate mt-0.5">
+                      {member.user.email}
+                    </div>
+                  )}
                 </div>
               </div>
-            )
-          })}
-        </div>
-      </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Roles & Permissions (collapsible)                                   */}
-      {/* ------------------------------------------------------------------ */}
-      <div>
-        <Collapsible open={rolesOpen} onOpenChange={setRolesOpen}>
-          {/* Section title above card */}
-          <CollapsibleTrigger asChild>
-            <button
-              type="button"
-              className="flex items-center gap-2 mb-3 group"
-            >
-              <motion.div
-                animate={{ rotate: rolesOpen ? 90 : 0 }}
-                transition={{ duration: 0.15 }}
-              >
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-              </motion.div>
-              <h4 className="text-heading font-medium text-muted-foreground group-hover:text-foreground transition-colors">
-                Roles &amp; Permissions
-              </h4>
-            </button>
-          </CollapsibleTrigger>
-
-          <CollapsibleContent>
-            <div className="bg-card border border-border rounded-lg">
-              {roleSummaries.map((item, idx) => (
-                <Row
-                  key={item.role}
-                  label={item.role}
-                  border={idx < roleSummaries.length - 1}
+              {/* Right: role badge + joined + remove */}
+              <div className="flex items-center gap-2.5 shrink-0">
+                <Badge
+                  variant="outline"
+                  className={cn("text-[10px] font-medium", roleCls[member.role] ?? "")}
                 >
-                  <span className="text-label font-mono text-muted-foreground">
-                    {item.summary}
-                  </span>
-                </Row>
-              ))}
+                  {member.role}
+                </Badge>
+                <span className="text-[10px] text-muted-foreground font-mono tabular-nums w-[52px] text-right">
+                  {relativeTime(member.created_at)}
+                </span>
+                <div className="w-6 flex justify-center">
+                  {!isOwner && !isSelf ? (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          disabled={removingId === member.id}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          <span className="sr-only">Remove member</span>
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle className="text-sm">Remove member</AlertDialogTitle>
+                          <AlertDialogDescription className="text-xs">
+                            Are you sure you want to remove{" "}
+                            <span className="font-medium text-foreground">
+                              {member.user.full_name ?? member.user.email}
+                            </span>{" "}
+                            from this workspace? This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={() => handleRemove(member.id)}
+                          >
+                            Remove
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  ) : null}
+                </div>
+              </div>
             </div>
-          </CollapsibleContent>
-        </Collapsible>
-      </div>
+          )
+        })}
+      </SettingsCard>
+
+      {/* ── Roles & Permissions (collapsible) ── */}
+      <Collapsible open={rolesOpen} onOpenChange={setRolesOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-2 mb-2.5 group"
+          >
+            <motion.div animate={{ rotate: rolesOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
+              <ChevronRight className="h-3 w-3 text-muted-foreground" />
+            </motion.div>
+            <span className="text-body font-medium text-muted-foreground group-hover:text-foreground/80 transition-colors leading-none">
+              Roles &amp; Permissions
+            </span>
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+            {roleSummaries.map((item, idx) => (
+              <SettingsRow
+                key={item.role}
+                label={item.role}
+                border={idx < roleSummaries.length - 1}
+              >
+                <span className="text-[11px] text-muted-foreground">
+                  {item.summary}
+                </span>
+              </SettingsRow>
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }

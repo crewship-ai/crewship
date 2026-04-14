@@ -220,17 +220,17 @@ export function SettingsLayout() {
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
-          <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 sm:py-8">
+          <div className="max-w-3xl mx-auto p-4 md:p-6 space-y-4">
             {/* Mobile nav trigger */}
             {isMobile && (
-              <div className="mb-4">
+              <div>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 gap-1.5 text-muted-foreground text-label"
+                  className="h-7 gap-1.5 text-muted-foreground text-xs"
                   onClick={() => setMobileNavOpen(true)}
                 >
-                  <Menu className="h-4 w-4" />
+                  <Menu className="h-3.5 w-3.5" />
                   {section?.title ?? "Settings"}
                 </Button>
               </div>

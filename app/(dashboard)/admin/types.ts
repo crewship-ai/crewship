@@ -61,8 +61,12 @@ export interface KeeperLogEntry {
   decided_at: string | null
 }
 
-/** Active tab identifier for the admin panel navigation. */
+/** Active tab identifier for the admin panel navigation.
+ *  Only real, wired tabs are listed here — placeholder/stub sections
+ *  were removed. Reintroduce a key when its backend lands. */
 export type TabKey =
-  | "overview" | "logs" | "workspaces" | "users"
-  | "providers" | "resources" | "networking" | "backups"
-  | "gateway" | "security" | "auth" | "flags" | "ratelimits"
+  | "overview"
+  | "workspaces"
+  | "users"
+  | "providers"
+  | "security"

@@ -1,0 +1,397 @@
+"use client"
+
+import * as React from "react"
+import * as RechartsPrimitive from "recharts"
+
+import { cn } from "@/lib/utils"
+
+// Format: { THEME_NAME: CSS_SELECTOR }
+const THEMES = { light: "", dark: ".dark" } as const
+
+export type ChartConfig = {
+  [k in string]: {
+    label?: React.ReactNode
+    icon?: React.ComponentType
+  } & (
+    | { color?: string; theme?: never }
+    | { color?: never; theme: Record<keyof typeof THEMES, string> }
+  )
+}
+
+type ChartContextProps = {
+  config: ChartConfig
+}
+
+const ChartContext = React.createContext<ChartContextProps | null>(null)
+
+function useChart() {
+  const context = React.useContext(ChartContext)
+  if (!context) {
+    throw new Error("useChart must be used within a <ChartContainer />")
+  }
+  return context
+}
+
+function ChartContainer({
+  id,
+  className,
+  children,
+  config,
+  ...props
+}: React.ComponentProps<"div"> & {
+  config: ChartConfig
+  children: React.ComponentProps<
+    typeof RechartsPrimitive.ResponsiveContainer
+  >["children"]
+}) {
+  const uniqueId = React.useId()
+  const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`
+
+  return (
+    <ChartContext.Provider value={{ config }}>
+      <div
+        data-slot="chart"
+        data-chart={chartId}
+        className={cn(
+          "[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border flex aspect-video justify-center text-xs [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden",
+          className
+        )}
+        {...props}
+      >
+        <ChartStyle id={chartId} config={config} />
+        <RechartsPrimitive.ResponsiveContainer>
+          {children}
+        </RechartsPrimitive.ResponsiveContainer>
+      </div>
+    </ChartContext.Provider>
+  )
+}
+
+// Validate a color string before it is interpolated into the <style> block.
+// Any value containing `;`, `{`, `}`, `<`, `>`, `*/`, `/*`, or a newline is
+// rejected up-front — those are the characters that would let a caller
+// break out of the `--color-key: <value>;` declaration. Then we delegate the
+// shape check to the browser's own CSS parser via `CSS.supports("color", v)`
+// instead of hand-rolling a regex for every valid color form (rgb, rgba, hsl,
+// oklch, color-mix, var(), named colors, …). On the server `CSS` is not
+// defined, so we fall back to the character-level screen alone; the style
+// tag only matters in the browser anyway since it has `data-chart=` scoping.
+function sanitizeCssColor(value: string | undefined): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (/[;{}<>]|\*\/|\/\*|[\r\n]/.test(trimmed)) return null
+  if (typeof CSS !== "undefined" && typeof CSS.supports === "function") {
+    if (!CSS.supports("color", trimmed)) return null
+  }
+  return trimmed
+}
+
+const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+  const colorConfig = Object.entries(config).filter(
+    ([, cfg]) => cfg.theme || cfg.color
+  )
+
+  if (!colorConfig.length) {
+    return null
+  }
+
+  // Escape the chart id before embedding it in a CSS attribute selector.
+  // Without this a caller-supplied id like `foo] .secret { color: red;` would
+  // break out of the selector and let arbitrary CSS rules through.
+  const safeChartId = CSS.escape(id)
+
+  const cssText = Object.entries(THEMES)
+    .map(
+      ([theme, prefix]) => `
+${prefix} [data-chart="${safeChartId}"] {
+${colorConfig
+  .map(([key, itemConfig]) => {
+    const rawColor =
+      itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
+      itemConfig.color
+    const color = sanitizeCssColor(rawColor)
+    return color ? `  --color-${key}: ${color};` : null
+  })
+  .filter(Boolean)
+  .join("\n")}
+}
+`
+    )
+    .join("\n")
+
+  return <style>{cssText}</style>
+}
+
+const ChartTooltip = RechartsPrimitive.Tooltip
+
+// Recharts v3 passes these as render-prop arguments when the consumer sets
+// `content={<ChartTooltipContent ... />}`. The TS types don't expose them on
+// the React props directly, so we declare a permissive interface here.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RechartsTooltipPayloadItem = any
+
+interface ChartTooltipContentProps {
+  active?: boolean
+  payload?: RechartsTooltipPayloadItem[]
+  label?: React.ReactNode
+  className?: string
+  indicator?: "line" | "dot" | "dashed"
+  hideLabel?: boolean
+  hideIndicator?: boolean
+  labelFormatter?: (value: React.ReactNode, payload: RechartsTooltipPayloadItem[]) => React.ReactNode
+  labelClassName?: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  formatter?: (value: any, name: React.ReactNode, item: RechartsTooltipPayloadItem, index: number, data: unknown) => React.ReactNode
+  color?: string
+  nameKey?: string
+  labelKey?: string
+}
+
+function ChartTooltipContent({
+  active,
+  payload,
+  className,
+  indicator = "dot",
+  hideLabel = false,
+  hideIndicator = false,
+  label,
+  labelFormatter,
+  labelClassName,
+  formatter,
+  color,
+  nameKey,
+  labelKey,
+}: ChartTooltipContentProps) {
+  const { config } = useChart()
+
+  const tooltipLabel = React.useMemo(() => {
+    if (hideLabel || !payload?.length) {
+      return null
+    }
+
+    const [item] = payload
+    const key = `${labelKey || item?.dataKey || item?.name || "value"}`
+    const itemConfig = getPayloadConfigFromPayload(config, item, key)
+    const value =
+      !labelKey && typeof label === "string"
+        ? config[label as keyof typeof config]?.label || label
+        : itemConfig?.label
+
+    if (labelFormatter) {
+      return (
+        <div className={cn("font-medium", labelClassName)}>
+          {labelFormatter(value, payload)}
+        </div>
+      )
+    }
+
+    if (!value) {
+      return null
+    }
+
+    return <div className={cn("font-medium", labelClassName)}>{value}</div>
+  }, [
+    label,
+    labelFormatter,
+    payload,
+    hideLabel,
+    labelClassName,
+    config,
+    labelKey,
+  ])
+
+  if (!active || !payload?.length) {
+    return null
+  }
+
+  const nestLabel = payload.length === 1 && indicator !== "dot"
+
+  return (
+    <div
+      className={cn(
+        "border-border/50 bg-background grid min-w-[8rem] items-start gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs shadow-xl",
+        className
+      )}
+    >
+      {!nestLabel ? tooltipLabel : null}
+      <div className="grid gap-1.5">
+        {payload.map((item, index) => {
+          const key = `${nameKey || item.name || item.dataKey || "value"}`
+          const itemConfig = getPayloadConfigFromPayload(config, item, key)
+          const indicatorColor = color || item.payload?.fill || item.color
+
+          return (
+            <div
+              key={item.dataKey}
+              // Setting `--color-bg`/`--color-border` on the row lets the
+              // indicator below consume them via Tailwind `bg-(--color-bg)` /
+              // `border-(--color-border)` classes. Runtime payload colors have
+              // no compile-time Tailwind class alternative, so the CSS var
+              // funnel lives on the parent instead of the indicator itself.
+              style={
+                {
+                  "--color-bg": indicatorColor,
+                  "--color-border": indicatorColor,
+                } as React.CSSProperties
+              }
+              className={cn(
+                "[&>svg]:text-muted-foreground flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5",
+                indicator === "dot" && "items-center"
+              )}
+            >
+              {formatter && item?.value !== undefined && item.name ? (
+                formatter(item.value, item.name, item, index, item.payload)
+              ) : (
+                <>
+                  {itemConfig?.icon ? (
+                    <itemConfig.icon />
+                  ) : (
+                    !hideIndicator && (
+                      <div
+                        className={cn(
+                          "shrink-0 rounded-[2px] border-(--color-border) bg-(--color-bg)",
+                          {
+                            "h-2.5 w-2.5": indicator === "dot",
+                            "w-1": indicator === "line",
+                            "w-0 border-[1.5px] border-dashed bg-transparent":
+                              indicator === "dashed",
+                            "my-0.5": nestLabel && indicator === "dashed",
+                          }
+                        )}
+                      />
+                    )
+                  )}
+                  <div
+                    className={cn(
+                      "flex flex-1 justify-between leading-none",
+                      nestLabel ? "items-end" : "items-center"
+                    )}
+                  >
+                    <div className="grid gap-1.5">
+                      {nestLabel ? tooltipLabel : null}
+                      <span className="text-muted-foreground">
+                        {itemConfig?.label || item.name}
+                      </span>
+                    </div>
+                    {item.value !== undefined && item.value !== null && (
+                      <span className="text-foreground font-mono font-medium tabular-nums">
+                        {typeof item.value === "number" ? item.value.toLocaleString() : String(item.value)}
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const ChartLegend = RechartsPrimitive.Legend
+
+interface ChartLegendContentProps {
+  className?: string
+  hideIcon?: boolean
+  payload?: RechartsTooltipPayloadItem[]
+  verticalAlign?: "top" | "middle" | "bottom"
+  nameKey?: string
+}
+
+function ChartLegendContent({
+  className,
+  hideIcon = false,
+  payload,
+  verticalAlign = "bottom",
+  nameKey,
+}: ChartLegendContentProps) {
+  const { config } = useChart()
+
+  if (!payload?.length) {
+    return null
+  }
+
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-center gap-4",
+        verticalAlign === "top" ? "pb-3" : "pt-3",
+        className
+      )}
+    >
+      {payload.map((item) => {
+        const key = `${nameKey || item.dataKey || "value"}`
+        const itemConfig = getPayloadConfigFromPayload(config, item, key)
+
+        return (
+          <div
+            key={item.value}
+            // Lift the payload color to a CSS var on the legend row so the
+            // swatch below can stay Tailwind-only via `bg-(--legend-color)`.
+            style={{ "--legend-color": item.color } as React.CSSProperties}
+            className={cn(
+              "[&>svg]:text-muted-foreground flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3"
+            )}
+          >
+            {itemConfig?.icon && !hideIcon ? (
+              <itemConfig.icon />
+            ) : (
+              <div className="h-2 w-2 shrink-0 rounded-[2px] bg-(--legend-color)" />
+            )}
+            {itemConfig?.label}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// Helper to extract item config from a payload.
+function getPayloadConfigFromPayload(
+  config: ChartConfig,
+  payload: unknown,
+  key: string
+) {
+  if (typeof payload !== "object" || payload === null) {
+    return undefined
+  }
+
+  const payloadPayload =
+    "payload" in payload &&
+    typeof payload.payload === "object" &&
+    payload.payload !== null
+      ? payload.payload
+      : undefined
+
+  let configLabelKey: string = key
+
+  if (
+    key in payload &&
+    typeof payload[key as keyof typeof payload] === "string"
+  ) {
+    configLabelKey = payload[key as keyof typeof payload] as string
+  } else if (
+    payloadPayload &&
+    key in payloadPayload &&
+    typeof payloadPayload[key as keyof typeof payloadPayload] === "string"
+  ) {
+    configLabelKey = payloadPayload[
+      key as keyof typeof payloadPayload
+    ] as string
+  }
+
+  return configLabelKey in config
+    ? config[configLabelKey]
+    : config[key as keyof typeof config]
+}
+
+export {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+  ChartStyle,
+}
