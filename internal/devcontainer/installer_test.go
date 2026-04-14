@@ -27,12 +27,16 @@ type mockDockerClient struct {
 	execAttachCalls int
 
 	// Configurable responses.
-	execCreateErr  error
-	execAttachErr  error
-	execInspectErr error
-	copyErr        error
-	exitCode       int
-	execOutput     string
+	// execCreateErr / exitCode / execOutput apply to the install.sh call
+	// (the 2nd exec — the 1st is always a mkdir for destBase and returns OK).
+	// Use execCreateErrAny for tests that need every exec to fail.
+	execCreateErr    error
+	execCreateErrAny bool
+	execAttachErr    error
+	execInspectErr   error
+	copyErr          error
+	exitCode         int
+	execOutput       string
 }
 
 type copiedTar struct {
@@ -43,7 +47,8 @@ type copiedTar struct {
 
 func (m *mockDockerClient) ContainerExecCreate(_ context.Context, _ string, config container.ExecOptions) (container.ExecCreateResponse, error) {
 	m.execCreated = append(m.execCreated, config)
-	if m.execCreateErr != nil {
+	// Error only on the install.sh call (index 1) unless execCreateErrAny.
+	if m.execCreateErr != nil && (m.execCreateErrAny || len(m.execCreated) == 2) {
 		return container.ExecCreateResponse{}, m.execCreateErr
 	}
 	return container.ExecCreateResponse{ID: "exec-123"}, nil
@@ -60,6 +65,10 @@ func (m *mockDockerClient) ContainerExecAttach(_ context.Context, _ string, _ co
 func (m *mockDockerClient) ContainerExecInspect(_ context.Context, _ string) (container.ExecInspect, error) {
 	if m.execInspectErr != nil {
 		return container.ExecInspect{}, m.execInspectErr
+	}
+	// Mkdir (1st exec) always returns 0; non-zero exitCode applies to install.sh.
+	if len(m.execCreated) == 1 {
+		return container.ExecInspect{ExitCode: 0}, nil
 	}
 	return container.ExecInspect{ExitCode: m.exitCode}, nil
 }
@@ -133,17 +142,17 @@ func TestInstallFeature_Success(t *testing.T) {
 	if mock.copiedTars[0].containerID != "container-abc" {
 		t.Errorf("CopyToContainer containerID = %q, want %q", mock.copiedTars[0].containerID, "container-abc")
 	}
-	if mock.copiedTars[0].dstPath != "/tmp" {
-		t.Errorf("CopyToContainer dstPath = %q, want /tmp", mock.copiedTars[0].dstPath)
+	if mock.copiedTars[0].dstPath != "/tmp/devcontainer-features" {
+		t.Errorf("CopyToContainer dstPath = %q, want /tmp/devcontainer-features", mock.copiedTars[0].dstPath)
 	}
 
-	// Verify exec calls: install.sh + rm -rf cleanup = 2 exec creates.
-	if len(mock.execCreated) != 2 {
-		t.Fatalf("expected 2 exec creates, got %d", len(mock.execCreated))
+	// Verify exec calls: mkdir destBase + install.sh + rm -rf cleanup = 3 exec creates.
+	if len(mock.execCreated) != 3 {
+		t.Fatalf("expected 3 exec creates, got %d", len(mock.execCreated))
 	}
 
-	// First exec: install.sh with env vars.
-	installExec := mock.execCreated[0]
+	// [0] = mkdir destBase, [1] = install.sh, [2] = rm cleanup.
+	installExec := mock.execCreated[1]
 	if installExec.User != "0:0" {
 		t.Errorf("exec User = %q, want 0:0", installExec.User)
 	}
@@ -214,12 +223,7 @@ func TestInstallFeature_TarContainsFiles(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	wantEntries := []string{
-		"devcontainer-features/myfeature/",
-		"devcontainer-features/myfeature/install.sh",
-		"devcontainer-features/myfeature/scripts/",
-		"devcontainer-features/myfeature/scripts/helper.sh",
-	}
+	wantEntries := []string{"myfeature/", "myfeature/install.sh", "myfeature/scripts/", "myfeature/scripts/helper.sh"}
 	sort.Strings(wantEntries)
 
 	if len(names) != len(wantEntries) {
@@ -258,12 +262,12 @@ func TestInstallFeature_EnvVars(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(mock.execCreated) < 1 {
-		t.Fatalf("expected at least 1 exec call (install.sh), got %d", len(mock.execCreated))
+	if len(mock.execCreated) < 2 {
+		t.Fatalf("expected at least 2 exec calls (mkdir + install.sh), got %d", len(mock.execCreated))
 	}
 
-	// execCreated[0] is the install.sh run with feature env vars.
-	env := mock.execCreated[0].Env
+	// [0] = mkdir destBase; [1] = install.sh with feature env vars.
+	env := mock.execCreated[1].Env
 	envMap := make(map[string]string)
 	for _, e := range env {
 		parts := strings.SplitN(e, "=", 2)

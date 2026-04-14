@@ -58,12 +58,8 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 		return fmt.Errorf("invalid feature ID %q: must be alphanumeric with dots/hyphens/underscores", featureID)
 	}
 
-	// Copy into /tmp (always exists — tmpfs mount). The tar prefix
-	// "devcontainer-features/{featureID}/..." places the feature at
-	// /tmp/devcontainer-features/{featureID}/ after extraction.
-	destBase := "/tmp"
-	destDir := "/tmp/devcontainer-features/" + featureID
-	tarPrefix := "devcontainer-features/" + featureID
+	destBase := "/tmp/devcontainer-features"
+	destDir := destBase + "/" + featureID
 
 	// Apply a 30-minute timeout for the entire feature installation.
 	installCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -71,13 +67,25 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 
 	inst.logger.Info("installing feature", "id", featureID, "container", containerID)
 
-	// 1. Create tar archive with a path prefix Docker will extract into /tmp.
-	tarBuf, err := createTarFromDir(feature.Dir, tarPrefix)
+	// 1. Pre-create destBase in the container via exec. CopyToContainer
+	// requires the target parent directory to exist. Verify exit code.
+	output, exitCode, err := inst.execInContainer(installCtx, containerID, []string{"mkdir", "-p", destBase}, nil)
+	if err != nil {
+		return fmt.Errorf("mkdir %s in container: %w", destBase, err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("mkdir %s in container: exit code %d: %s", destBase, exitCode, output)
+	}
+	inst.logger.Debug("destBase created", "path", destBase, "output", output)
+
+	// 2. Create tar archive of the feature directory (no prefix — tar entries
+	// are relative paths that Docker extracts into destBase).
+	tarBuf, err := createTarFromDir(feature.Dir, featureID)
 	if err != nil {
 		return fmt.Errorf("creating tar for feature %s: %w", featureID, err)
 	}
 
-	// 2. Copy into container at /tmp (always exists due to tmpfs mount).
+	// 3. Copy into container at destBase.
 	if err := inst.docker.CopyToContainer(installCtx, containerID, destBase, tarBuf, container.CopyToContainerOptions{}); err != nil {
 		return fmt.Errorf("copying feature %s to container: %w", featureID, err)
 	}
@@ -87,7 +95,7 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 
 	// 4. Execute install.sh as root.
 	installScript := destDir + "/install.sh"
-	output, exitCode, err := inst.execInContainer(installCtx, containerID, []string{"bash", installScript}, env)
+	output, exitCode, err = inst.execInContainer(installCtx, containerID, []string{"bash", installScript}, env)
 	if err != nil {
 		return fmt.Errorf("executing install.sh for feature %s: %w", featureID, err)
 	}
