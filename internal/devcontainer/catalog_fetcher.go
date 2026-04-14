@@ -10,22 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
-
-// CollectionEntry describes one devcontainer feature collection as listed in
-// the upstream collection-index.yml.
-type CollectionEntry struct {
-	Name         string `yaml:"name" json:"name"`
-	Maintainer   string `yaml:"maintainer" json:"maintainer"`
-	Contact      string `yaml:"contact" json:"contact"`
-	Repository   string `yaml:"repository" json:"repository"`
-	OCIReference string `yaml:"ociReference" json:"ociReference"`
-}
 
 // CatalogFetcher fetches and caches the devcontainer feature catalog with a
 // three-tier cache: memory (6h), disk (24h), and an embedded fallback.
@@ -49,16 +38,17 @@ type diskCacheFile struct {
 }
 
 const (
-	catalogMemTTL      = 6 * time.Hour
-	catalogDiskTTL     = 24 * time.Hour
-	catalogFetchTO     = 30 * time.Second
-	catalogPerItemTO   = 5 * time.Second
-	catalogWorkers     = 10
-	collectionIndexURL = "https://raw.githubusercontent.com/devcontainers/devcontainers.github.io/gh-pages/_data/collection-index.yml"
-	userAgent          = "crewship/1.0"
+	catalogMemTTL  = 6 * time.Hour
+	catalogDiskTTL = 24 * time.Hour
+	catalogFetchTO = 30 * time.Second
+	userAgent      = "crewship/1.0"
 
 	featureCatalogFile = "feature-catalog.json"
 )
+
+// catalogURL is the upstream HTML page listing published devcontainer
+// features. Declared as a var so tests can override it.
+var catalogURL = "https://containers.dev/features"
 
 // NewCatalogFetcher constructs a fetcher. cacheDir is created on first write.
 func NewCatalogFetcher(cacheDir string, logger *slog.Logger) *CatalogFetcher {
@@ -123,199 +113,70 @@ func (f *CatalogFetcher) RefreshCatalog(ctx context.Context) error {
 	return nil
 }
 
-// fetchUpstream downloads the collection index and builds a flat list of
-// catalog entries by pulling each collection's devcontainer-collection.json.
+// fetchUpstream scrapes the containers.dev/features HTML page and extracts
+// OCI refs via regex. The upstream devcontainer-collection.json files are OCI
+// artifacts (not git-tracked), so scraping the aggregated HTML page is the
+// only stable public source.
 func (f *CatalogFetcher) fetchUpstream(ctx context.Context) ([]CatalogEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, catalogFetchTO)
 	defer cancel()
 
-	collections, err := f.fetchCollectionIndex(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetch collection index: %w", err)
-	}
-	if len(collections) == 0 {
-		return nil, errors.New("empty collection index")
-	}
-
-	// Fan-out with bounded concurrency.
-	type result struct {
-		entries []CatalogEntry
-		err     error
-		name    string
-	}
-
-	jobs := make(chan CollectionEntry)
-	results := make(chan result)
-
-	var wg sync.WaitGroup
-	for i := 0; i < catalogWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for c := range jobs {
-				entries, err := f.fetchCollectionFeatures(ctx, c)
-				results <- result{entries: entries, err: err, name: c.Name}
-			}
-		}()
-	}
-
-	go func() {
-		for _, c := range collections {
-			select {
-			case <-ctx.Done():
-				close(jobs)
-				return
-			case jobs <- c:
-			}
-		}
-		close(jobs)
-	}()
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	var out []CatalogEntry
-	for r := range results {
-		if r.err != nil {
-			f.logger.Debug("collection fetch failed", "collection", r.name, "error", r.err)
-			continue
-		}
-		out = append(out, r.entries...)
-	}
-
-	// Deduplicate by Ref (in case multiple collections share features).
-	seen := make(map[string]bool, len(out))
-	uniq := out[:0]
-	for _, e := range out {
-		if seen[e.Ref] {
-			continue
-		}
-		seen[e.Ref] = true
-		uniq = append(uniq, e)
-	}
-	return uniq, nil
-}
-
-// fetchCollectionIndex downloads and parses collection-index.yml.
-func (f *CatalogFetcher) fetchCollectionIndex(ctx context.Context) ([]CollectionEntry, error) {
-	body, err := f.httpGet(ctx, collectionIndexURL)
-	if err != nil {
-		return nil, err
-	}
-	// The YAML file is a top-level list, or a map with a `collections` key —
-	// accept both forms defensively.
-	var direct []CollectionEntry
-	if err := yaml.Unmarshal(body, &direct); err == nil && len(direct) > 0 {
-		return direct, nil
-	}
-	var wrapper struct {
-		Collections []CollectionEntry `yaml:"collections"`
-	}
-	if err := yaml.Unmarshal(body, &wrapper); err != nil {
-		return nil, fmt.Errorf("parse collection index yaml: %w", err)
-	}
-	return wrapper.Collections, nil
-}
-
-// collectionManifest mirrors the devcontainer-collection.json format.
-type collectionManifest struct {
-	Features []struct {
-		ID          string `json:"id"`
-		Version     string `json:"version"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	} `json:"features"`
-}
-
-// fetchCollectionFeatures fetches devcontainer-collection.json for a single
-// collection via raw.githubusercontent.com and maps each feature to a
-// CatalogEntry.
-func (f *CatalogFetcher) fetchCollectionFeatures(ctx context.Context, c CollectionEntry) ([]CatalogEntry, error) {
-	owner, repo, ok := parseGitHubRepo(c.Repository)
-	if !ok {
-		return nil, fmt.Errorf("unparseable repository %q", c.Repository)
-	}
-
-	itemCtx, cancel := context.WithTimeout(ctx, catalogPerItemTO)
-	defer cancel()
-
-	var manifestBytes []byte
-	var lastErr error
-	for _, branch := range []string{"main", "master"} {
-		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/devcontainer-collection.json", owner, repo, branch)
-		body, err := f.httpGet(itemCtx, url)
-		if err == nil {
-			manifestBytes = body
-			break
-		}
-		lastErr = err
-	}
-	if manifestBytes == nil {
-		return nil, fmt.Errorf("fetch manifest: %w", lastErr)
-	}
-
-	var manifest collectionManifest
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return nil, fmt.Errorf("parse manifest: %w", err)
-	}
-
-	ociBase := strings.TrimSuffix(c.OCIReference, "/")
-	if ociBase == "" {
-		return nil, errors.New("missing OCI reference")
-	}
-
-	out := make([]CatalogEntry, 0, len(manifest.Features))
-	for _, feat := range manifest.Features {
-		if feat.ID == "" {
-			continue
-		}
-		majorVer := majorVersion(feat.Version)
-		ref := fmt.Sprintf("%s/%s:%s", ociBase, feat.ID, majorVer)
-
-		name := feat.Name
-		if name == "" {
-			name = feat.ID
-		}
-		category := inferFeatureCategory(feat.ID, feat.Name, feat.Description)
-		icon := featureIcon(feat.ID, category)
-
-		out = append(out, CatalogEntry{
-			Ref:         ref,
-			Name:        name,
-			Description: feat.Description,
-			Category:    category,
-			Icon:        icon,
-			SizeHint:    "",
-		})
-	}
-	return out, nil
-}
-
-// httpGet issues a GET with the configured client and returns the body for
-// 2xx responses.
-func (f *CatalogFetcher) httpGet(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "application/json, text/yaml, text/plain, */*")
+	req.Header.Set("Accept", "text/html")
+
 	resp, err := f.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fetch %s: %w", catalogURL, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("http %d for %s", resp.StatusCode, url)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("upstream returned status %d", resp.StatusCode)
 	}
-	// Cap body to 10 MB.
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read body: %w", err)
 	}
-	return body, nil
+
+	return extractFeaturesFromHTML(body), nil
+}
+
+var featureRefRegex = regexp.MustCompile(`ghcr\.io/[a-zA-Z0-9][a-zA-Z0-9/_.-]*:[0-9]+`)
+
+func extractFeaturesFromHTML(body []byte) []CatalogEntry {
+	matches := featureRefRegex.FindAllString(string(body), -1)
+	seen := make(map[string]bool, len(matches))
+	entries := make([]CatalogEntry, 0, len(matches))
+	for _, ref := range matches {
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		entries = append(entries, buildCatalogEntryFromRef(ref))
+	}
+	return entries
+}
+
+func buildCatalogEntryFromRef(ref string) CatalogEntry {
+	// ghcr.io/devcontainers/features/python:1
+	withoutTag := strings.SplitN(ref, ":", 2)[0]
+	pathParts := strings.Split(withoutTag, "/")
+	id := pathParts[len(pathParts)-1]
+
+	category := inferCategory(withoutTag)
+	return CatalogEntry{
+		Ref:         ref,
+		Name:        prettyName(id),
+		Description: "",
+		Category:    category,
+		Icon:        iconForCategory(category),
+		SizeHint:    "",
+	}
 }
 
 // readDiskCache reads the on-disk catalog file.
@@ -357,85 +218,94 @@ func (f *CatalogFetcher) writeDiskCache(entries []CatalogEntry, fetchedAt time.T
 
 // --- helpers ---------------------------------------------------------------
 
-// parseGitHubRepo extracts owner/repo from a GitHub URL.
-func parseGitHubRepo(raw string) (owner, repo string, ok bool) {
-	s := strings.TrimSpace(raw)
-	s = strings.TrimPrefix(s, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	s = strings.TrimPrefix(s, "github.com/")
-	s = strings.TrimSuffix(s, ".git")
-	s = strings.TrimSuffix(s, "/")
-	parts := strings.SplitN(s, "/", 3)
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", false
+// prettyName converts "aws-cli" -> "AWS CLI", "python" -> "Python", etc.
+func prettyName(id string) string {
+	specials := map[string]string{
+		"aws-cli":                  "AWS CLI",
+		"azure-cli":                "Azure CLI",
+		"github-cli":               "GitHub CLI",
+		"gitlab":                   "GitLab",
+		"google-cloud-cli":         "Google Cloud CLI",
+		"kubectl-helm-minikube":    "Kubectl, Helm & Minikube",
+		"docker-in-docker":         "Docker in Docker",
+		"docker-outside-of-docker": "Docker Outside of Docker",
+		"node":                     "Node.js",
+		"nodejs":                   "Node.js",
+		"dotnet":                   ".NET",
+		"postgres":                 "PostgreSQL",
+		"postgresql":               "PostgreSQL",
+		"php":                      "PHP",
+		"sshd":                     "SSH Server",
+		"oryx":                     "Oryx",
+		"nvidia-cuda":              "NVIDIA CUDA",
+		"git-lfs":                  "Git LFS",
 	}
-	return parts[0], parts[1], true
+	if v, ok := specials[id]; ok {
+		return v
+	}
+	parts := strings.FieldsFunc(id, func(r rune) bool {
+		return r == '-' || r == '_'
+	})
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
-// majorVersion returns the first segment of a semver-like version.
-func majorVersion(v string) string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return "1"
-	}
-	if i := strings.Index(v, "."); i > 0 {
-		return v[:i]
-	}
-	return v
-}
+// inferCategory categorizes based on the ref path.
+func inferCategory(path string) string {
+	lower := strings.ToLower(path)
 
-// inferFeatureCategory guesses a category from feature id/name/description.
-func inferFeatureCategory(id, name, desc string) string {
-	s := strings.ToLower(id + " " + name + " " + desc)
-	languages := []string{"python", "node", "golang", " go ", "rust", "ruby", "java", "php", "deno", "bun", "dotnet", ".net", "kotlin", "scala", "elixir", "erlang", "swift", "zig", "crystal", "haskell", "ocaml", "dart", "flutter", "lua"}
-	for _, k := range languages {
-		if strings.Contains(s, k) {
+	langPatterns := []string{
+		"python", "pypy", "anaconda", "conda", "node", "deno", "bun",
+		"go-", "/go:", "golang", "rust", "ruby", "java", "kotlin", "scala",
+		"groovy", "clojure", "dotnet", "csharp", "powershell", "/php", "perl",
+		"lua", "/r:", "julia", "elixir", "erlang", "ocaml", "haskell", "swift",
+		"zig", "crystal", "nim", "dart", "gleam", "v-lang", "hugo",
+	}
+	for _, p := range langPatterns {
+		if strings.Contains(lower, p) {
 			return "languages"
 		}
 	}
-	databases := []string{"postgres", "mysql", "mariadb", "redis", "mongodb", "sqlite", "cassandra", "clickhouse"}
-	for _, k := range databases {
-		if strings.Contains(s, k) {
+
+	dbPatterns := []string{
+		"postgres", "pgcli", "mysql", "mariadb", "redis", "mongo", "cassandra",
+		"dragonfly", "dynamodb", "couchdb", "elasticsearch", "meilisearch",
+		"duckdb", "sqlite", "cockroach", "surrealdb", "clickhouse", "influxdb",
+		"neo4j", "scylla", "minio",
+	}
+	for _, p := range dbPatterns {
+		if strings.Contains(lower, p) {
 			return "databases"
 		}
 	}
-	cloud := []string{"aws", "azure", "gcloud", "gcp", "terraform", "pulumi", "kubectl", "helm", "kubernetes", "doctl", "flyctl", "cloudflare"}
-	for _, k := range cloud {
-		if strings.Contains(s, k) {
+
+	cloudPatterns := []string{
+		"aws", "azure", "gcp", "gcloud", "google-cloud", "alibaba", "oci-cli",
+		"digitalocean", "do-cli", "pulumi", "terraform", "opentofu", "packer",
+		"vault", "consul", "nomad", "ansible", "cloudflare", "fly", "heroku",
+		"vercel", "render-cli", "openstack",
+	}
+	for _, p := range cloudPatterns {
+		if strings.Contains(lower, p) {
 			return "cloud"
 		}
 	}
+
 	return "tools"
 }
 
-// featureIcon returns a lucide icon hint for the given feature id/category.
-func featureIcon(id, category string) string {
-	id = strings.ToLower(id)
-	switch {
-	case strings.Contains(id, "node"):
-		return "hexagon"
-	case strings.Contains(id, "python"):
-		return "code"
-	case strings.Contains(id, "go"):
-		return "arrow-right"
-	case strings.Contains(id, "rust"):
-		return "cog"
-	case strings.Contains(id, "docker"):
-		return "container"
-	case strings.Contains(id, "kubectl") || strings.Contains(id, "helm"):
-		return "ship"
-	case strings.Contains(id, "github"):
-		return "github"
-	case strings.Contains(id, "terraform") || strings.Contains(id, "pulumi"):
-		return "blocks"
-	}
-	switch category {
+func iconForCategory(cat string) string {
+	switch cat {
 	case "languages":
 		return "code"
-	case "databases":
-		return "database"
 	case "cloud":
 		return "cloud"
+	case "databases":
+		return "database"
 	default:
 		return "wrench"
 	}

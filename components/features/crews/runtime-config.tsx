@@ -1,18 +1,37 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { IconType } from "react-icons"
 import {
-  Search, Copy, Check, Code, Pencil, X,
-  Wrench, Hexagon, ArrowRight, Cog, Hash, Cloud, Ship, Blocks, Container,
-  AlertCircle,
+  Search, Copy, Check, Pencil, X,
+  Package, Cloud, AlertCircle,
 } from "lucide-react"
+import {
+  SiPython, SiNodedotjs, SiGo, SiRust, SiRuby, SiPhp,
+  SiOpenjdk, SiElixir, SiErlang, SiDeno, SiBun,
+  SiDotnet, SiKotlin, SiScala, SiSwift, SiZig, SiCrystal,
+  SiDocker, SiKubernetes, SiTerraform, SiAnsible, SiHelm,
+  SiGooglecloud, SiDigitalocean,
+  SiGithub, SiGitlab, SiGit,
+  SiPostgresql, SiMysql, SiMariadb, SiRedis, SiMongodb, SiSqlite,
+  SiHashicorp, SiVault, SiPulumi,
+  SiVim, SiZsh, SiGnubash,
+  SiPnpm, SiYarn, SiNpm,
+  SiFirebase, SiSupabase,
+  SiNginx, SiApache,
+  SiFlutter, SiDart, SiElm,
+  SiHugo, SiVite, SiWebpack,
+  SiJulia, SiLua, SiPerl, SiR, SiHaskell,
+  SiGraphql,
+  SiOpenai, SiAnthropic,
+} from "react-icons/si"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -53,20 +72,122 @@ interface RuntimeEntry {
   backends?: string[]
 }
 
-// ---- Constants ------------------------------------------------------------
+type CategoryFilter = "all" | "languages" | "tools" | "cloud" | "databases"
 
-const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  wrench: Wrench,
-  code: Code,
-  hexagon: Hexagon,
-  "arrow-right": ArrowRight,
-  cog: Cog,
-  hash: Hash,
-  cloud: Cloud,
-  ship: Ship,
-  blocks: Blocks,
-  container: Container,
+// ---- Brand icon map -------------------------------------------------------
+
+const BRAND_ICONS: Record<string, IconType> = {
+  python: SiPython,
+  node: SiNodedotjs,
+  nodejs: SiNodedotjs,
+  "node.js": SiNodedotjs,
+  go: SiGo,
+  golang: SiGo,
+  rust: SiRust,
+  ruby: SiRuby,
+  php: SiPhp,
+  java: SiOpenjdk,
+  openjdk: SiOpenjdk,
+  jdk: SiOpenjdk,
+  elixir: SiElixir,
+  erlang: SiErlang,
+  deno: SiDeno,
+  bun: SiBun,
+  dotnet: SiDotnet,
+  "dotnet-core": SiDotnet,
+  kotlin: SiKotlin,
+  scala: SiScala,
+  swift: SiSwift,
+  zig: SiZig,
+  crystal: SiCrystal,
+  docker: SiDocker,
+  "docker-in-docker": SiDocker,
+  "docker-outside-of-docker": SiDocker,
+  "docker-from-docker": SiDocker,
+  kubectl: SiKubernetes,
+  "kubectl-helm-minikube": SiKubernetes,
+  kubernetes: SiKubernetes,
+  k8s: SiKubernetes,
+  minikube: SiKubernetes,
+  helm: SiHelm,
+  terraform: SiTerraform,
+  ansible: SiAnsible,
+  gcloud: SiGooglecloud,
+  "google-cloud": SiGooglecloud,
+  "google-cloud-cli": SiGooglecloud,
+  digitalocean: SiDigitalocean,
+  doctl: SiDigitalocean,
+  github: SiGithub,
+  "github-cli": SiGithub,
+  gh: SiGithub,
+  gitlab: SiGitlab,
+  "glab-cli": SiGitlab,
+  git: SiGit,
+  "git-lfs": SiGit,
+  postgres: SiPostgresql,
+  postgresql: SiPostgresql,
+  psql: SiPostgresql,
+  mysql: SiMysql,
+  mariadb: SiMariadb,
+  redis: SiRedis,
+  "redis-cli": SiRedis,
+  mongo: SiMongodb,
+  mongodb: SiMongodb,
+  mongosh: SiMongodb,
+  sqlite: SiSqlite,
+  sqlite3: SiSqlite,
+  hashicorp: SiHashicorp,
+  vault: SiVault,
+  pulumi: SiPulumi,
+  pnpm: SiPnpm,
+  yarn: SiYarn,
+  npm: SiNpm,
+  vim: SiVim,
+  neovim: SiVim,
+  nvim: SiVim,
+  zsh: SiZsh,
+  bash: SiGnubash,
+  sh: SiGnubash,
+  firebase: SiFirebase,
+  supabase: SiSupabase,
+  nginx: SiNginx,
+  apache: SiApache,
+  httpd: SiApache,
+  flutter: SiFlutter,
+  dart: SiDart,
+  elm: SiElm,
+  hugo: SiHugo,
+  vite: SiVite,
+  webpack: SiWebpack,
+  julia: SiJulia,
+  lua: SiLua,
+  perl: SiPerl,
+  r: SiR,
+  haskell: SiHaskell,
+  ghc: SiHaskell,
+  graphql: SiGraphql,
+  openai: SiOpenai,
+  anthropic: SiAnthropic,
+  claude: SiAnthropic,
 }
+
+function getBrandIcon(tool: string): IconType | null {
+  if (!tool) return null
+  const key = tool.toLowerCase()
+  if (BRAND_ICONS[key]) return BRAND_ICONS[key]
+  // Try stripping common suffixes/prefixes
+  const stripped = key.replace(/-cli$|^cli-/, "").replace(/\d+$/, "")
+  return BRAND_ICONS[stripped] || null
+}
+
+function featureRefToTool(ref: string): string {
+  // ghcr.io/devcontainers/features/python:1 -> "python"
+  const withoutTag = ref.split(":")[0]
+  const parts = withoutTag.split("/")
+  return parts[parts.length - 1] || ""
+}
+
+// ---- Constants ------------------------------------------------------------
 
 const CATEGORY_LABELS: Record<string, string> = {
   languages: "Languages",
@@ -75,7 +196,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   databases: "Databases",
 }
 
-const CATEGORY_ORDER = ["languages", "tools", "cloud", "databases"]
+const CATEGORY_FILTERS: CategoryFilter[] = ["all", "languages", "tools", "cloud", "databases"]
 
 const BASE_IMAGES = [
   { value: "debian:bookworm-slim", label: "Debian Bookworm (slim)" },
@@ -127,18 +248,6 @@ function buildMiseJSON(tools: Record<string, string>): string {
   return JSON.stringify({ tools }, null, 2)
 }
 
-function sortedCategoryKeys(groups: Record<string, unknown>): string[] {
-  const keys = Object.keys(groups)
-  return keys.sort((a, b) => {
-    const ia = CATEGORY_ORDER.indexOf(a)
-    const ib = CATEGORY_ORDER.indexOf(b)
-    const va = ia === -1 ? 999 : ia
-    const vb = ib === -1 ? 999 : ib
-    if (va !== vb) return va - vb
-    return a.localeCompare(b)
-  })
-}
-
 // ---- Component ------------------------------------------------------------
 
 export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
@@ -151,12 +260,14 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
+  const [featureCategoryFilter, setFeatureCategoryFilter] = useState<CategoryFilter>("all")
 
   // Runtime catalog
   const [runtimeCatalog, setRuntimeCatalog] = useState<RuntimeEntry[]>([])
   const [runtimeCatalogLoading, setRuntimeCatalogLoading] = useState(true)
   const [runtimeCatalogError, setRuntimeCatalogError] = useState(false)
   const [runtimeSearchQuery, setRuntimeSearchQuery] = useState("")
+  const [runtimeCategoryFilter, setRuntimeCategoryFilter] = useState<CategoryFilter>("all")
 
   // Selected features (ref -> options)
   const [selectedFeatures, setSelectedFeatures] = useState<Record<string, Record<string, unknown>>>(initialDC.features)
@@ -173,11 +284,8 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // Selected runtime tools (tool name -> version)
   const [miseTools, setMiseTools] = useState<Record<string, string>>(initialMise)
 
-  // Ref to break sync cycles: when we resync internal state from props,
-  // the propagate effect must not call onChange again.
   const syncingRef = useRef(false)
 
-  // Resync internal state when the parent updates value (e.g. after async load)
   useEffect(() => {
     syncingRef.current = true
     const dc = parseDevcontainerConfig(value.devcontainerConfig)
@@ -260,7 +368,6 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
     [onChange]
   )
 
-  // Effect: propagate on structured changes
   useEffect(() => {
     if (syncingRef.current) return
     if (!editRaw) {
@@ -270,48 +377,46 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
 
   // Filter feature catalog
   const filteredCatalog = useMemo(() => {
-    if (!searchQuery.trim()) return catalog
-    const q = searchQuery.toLowerCase()
-    return catalog.filter(
-      (f) =>
+    const q = searchQuery.trim().toLowerCase()
+    return catalog.filter((f) => {
+      if (featureCategoryFilter !== "all" && f.category !== featureCategoryFilter) return false
+      if (!q) return true
+      return (
         f.name.toLowerCase().includes(q) ||
         f.description.toLowerCase().includes(q) ||
-        f.category.toLowerCase().includes(q)
-    )
-  }, [catalog, searchQuery])
-
-  // Group features by category
-  const groupedCatalog = useMemo(() => {
-    const groups: Record<string, CatalogFeature[]> = {}
-    for (const f of filteredCatalog) {
-      if (!groups[f.category]) groups[f.category] = []
-      groups[f.category].push(f)
-    }
-    return groups
-  }, [filteredCatalog])
+        f.category.toLowerCase().includes(q) ||
+        f.ref.toLowerCase().includes(q)
+      )
+    })
+  }, [catalog, searchQuery, featureCategoryFilter])
 
   // Filter runtime catalog
   const filteredRuntimes = useMemo(() => {
-    if (!runtimeSearchQuery.trim()) return runtimeCatalog
-    const q = runtimeSearchQuery.toLowerCase()
-    return runtimeCatalog.filter(
-      (r) =>
+    const q = runtimeSearchQuery.trim().toLowerCase()
+    return runtimeCatalog.filter((r) => {
+      if (runtimeCategoryFilter !== "all" && r.category !== runtimeCategoryFilter) return false
+      if (!q) return true
+      return (
         r.name.toLowerCase().includes(q) ||
         r.tool.toLowerCase().includes(q) ||
         (r.description?.toLowerCase().includes(q) ?? false) ||
         r.category.toLowerCase().includes(q)
-    )
-  }, [runtimeCatalog, runtimeSearchQuery])
+      )
+    })
+  }, [runtimeCatalog, runtimeSearchQuery, runtimeCategoryFilter])
 
-  // Group runtimes by category
-  const groupedRuntimes = useMemo(() => {
-    const groups: Record<string, RuntimeEntry[]> = {}
-    for (const r of filteredRuntimes) {
-      if (!groups[r.category]) groups[r.category] = []
-      groups[r.category].push(r)
-    }
-    return groups
-  }, [filteredRuntimes])
+  // Counts per category for filter pills
+  const featureCategoryCounts = useMemo(() => {
+    const c: Record<string, number> = { all: catalog.length }
+    for (const f of catalog) c[f.category] = (c[f.category] || 0) + 1
+    return c
+  }, [catalog])
+
+  const runtimeCategoryCounts = useMemo(() => {
+    const c: Record<string, number> = { all: runtimeCatalog.length }
+    for (const r of runtimeCatalog) c[r.category] = (c[r.category] || 0) + 1
+    return c
+  }, [runtimeCatalog])
 
   // Toggle feature
   function toggleFeature(ref: string) {
@@ -339,26 +444,30 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
     })
   }
 
-  // Update runtime tool version
   function updateRuntimeVersion(toolName: string, version: string) {
     setMiseTools((prev) => ({ ...prev, [toolName]: version }))
   }
 
-  // Copy to clipboard
+  function clearAllFeatures() {
+    setSelectedFeatures({})
+  }
+
+  function clearAllRuntimes() {
+    setMiseTools({})
+  }
+
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(devcontainerJSON)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Clipboard API may not be available
+      // noop
     }
   }
 
-  // Apply raw edits
   function applyRawEdits() {
     try {
-      // Validate devcontainer JSON
       if (rawDevcontainer.trim()) {
         const parsed = JSON.parse(rawDevcontainer)
         const img = parsed.image || "debian:bookworm-slim"
@@ -373,7 +482,6 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
         }
       }
 
-      // Validate runtime config JSON
       if (rawMise.trim()) {
         const parsed = JSON.parse(rawMise)
         setMiseTools(parsed.tools || {})
@@ -393,12 +501,14 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
     }
   }
 
-  // Enter raw edit mode
   function enterRawEdit() {
     setRawDevcontainer(devcontainerJSON)
     setRawMise(miseJSON)
     setEditRaw(true)
   }
+
+  const selectedFeatureCount = Object.keys(selectedFeatures).length
+  const selectedRuntimeCount = Object.keys(miseTools).length
 
   // ---- Raw edit mode -------------------------------------------------------
 
@@ -451,23 +561,23 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // ---- Visual mode ---------------------------------------------------------
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <Tabs defaultValue="features" className="w-full">
         <TabsList className="w-full justify-start">
           <TabsTrigger value="features">
-            Features{Object.keys(selectedFeatures).length > 0 ? ` (${Object.keys(selectedFeatures).length})` : ""}
+            Features{selectedFeatureCount > 0 ? ` (${selectedFeatureCount})` : ""}
           </TabsTrigger>
           <TabsTrigger value="runtimes">
-            Language Runtimes{Object.keys(miseTools).length > 0 ? ` (${Object.keys(miseTools).length})` : ""}
+            Language Runtimes{selectedRuntimeCount > 0 ? ` (${selectedRuntimeCount})` : ""}
           </TabsTrigger>
           <TabsTrigger value="preview">Preview</TabsTrigger>
         </TabsList>
 
         {/* ---- Features tab ---- */}
-        <TabsContent value="features" className="space-y-4 pt-3">
+        <TabsContent value="features" className="space-y-3 pt-3">
           {/* Base Image */}
           <div className="space-y-2">
-            <Label className="text-xs font-medium">Base Image</Label>
+            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Base Image</Label>
             <div className="flex items-center gap-2">
               <Select
                 value={isCustomImage ? "custom" : baseImage}
@@ -480,12 +590,12 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                   }
                 }}
               >
-                <SelectTrigger className="h-8 text-xs w-64">
+                <SelectTrigger className="h-7 text-xs w-64">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {BASE_IMAGES.map((img) => (
-                    <SelectItem key={img.value} value={img.value}>
+                    <SelectItem key={img.value} value={img.value} className="text-xs">
                       {img.label}
                     </SelectItem>
                   ))}
@@ -496,14 +606,25 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                   value={customImage}
                   onChange={(e) => setCustomImage(e.target.value)}
                   placeholder="e.g. mcr.microsoft.com/devcontainers/base:ubuntu"
-                  className="h-8 text-xs flex-1"
+                  className="h-7 text-xs flex-1"
                 />
               )}
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              Base container image. Must be glibc-based (Debian/Ubuntu recommended).
-            </p>
           </div>
+
+          {/* Selected summary */}
+          {selectedFeatureCount > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
+              <Check className="w-3 h-3 text-emerald-500" />
+              <span className="font-medium">{selectedFeatureCount} selected</span>
+              <button
+                onClick={clearAllFeatures}
+                className="ml-auto text-muted-foreground hover:text-foreground text-[11px]"
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           {/* Search */}
           <div className="relative">
@@ -513,82 +634,97 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search features..."
               aria-label="Search features"
-              className="h-8 pl-8 text-xs"
+              className="h-7 pl-8 text-xs"
             />
           </div>
 
-          {/* Feature cards */}
+          {/* Category pills */}
+          <div className="flex flex-wrap gap-1 text-[11px]">
+            {CATEGORY_FILTERS.map((cat) => {
+              const count = featureCategoryCounts[cat] ?? 0
+              if (cat !== "all" && count === 0) return null
+              const active = featureCategoryFilter === cat
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setFeatureCategoryFilter(cat)}
+                  className={cn(
+                    "px-2 py-0.5 rounded-full border transition-colors",
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border/40 text-muted-foreground hover:bg-accent/50"
+                  )}
+                >
+                  {cat === "all" ? "All" : CATEGORY_LABELS[cat] || cat}
+                  {count > 0 && <span className="ml-1 opacity-60">{count}</span>}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* List */}
           {catalogLoading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-20 rounded-lg" />
+            <div className="space-y-1">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="h-7 rounded-md" />
               ))}
             </div>
           ) : (
-            sortedCategoryKeys(groupedCatalog).map((category) => {
-              const features = groupedCatalog[category]
-              return (
-                <div key={category} className="space-y-2">
-                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                    {CATEGORY_LABELS[category] || category}
-                  </Label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {features.map((feature) => {
-                      const isSelected = feature.ref in selectedFeatures
-                      const IconComp = ICON_MAP[feature.icon] || Code
-                      return (
-                        <button
-                          key={feature.ref}
-                          type="button"
-                          role="checkbox"
-                          aria-checked={isSelected}
-                          aria-label={`${feature.name}: ${feature.description}`}
-                          onClick={() => toggleFeature(feature.ref)}
-                          className={cn(
-                            "flex items-start gap-3 rounded-lg border p-3 text-left transition-all",
-                            isSelected
-                              ? "border-primary/60 bg-primary/5"
-                              : "border-border hover:border-border/80 hover:bg-accent/50"
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
-                              isSelected
-                                ? "bg-primary/10 text-primary"
-                                : "bg-muted text-muted-foreground"
-                            )}
-                          >
-                            <IconComp className="h-4 w-4" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-medium">{feature.name}</span>
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                                {feature.size_hint}
-                              </Badge>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
-                              {feature.description}
-                            </p>
-                          </div>
-                          <div
-                            className={cn(
-                              "mt-0.5 h-4 w-4 shrink-0 rounded border transition-colors",
-                              isSelected
-                                ? "border-primary bg-primary"
-                                : "border-muted-foreground/30"
-                            )}
-                          >
-                            {isSelected && <Check className="h-4 w-4 text-primary-foreground p-0.5" />}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })
+            <ScrollArea className="h-[420px] rounded-md border border-border/40 bg-card/30">
+              <div className="divide-y divide-border/40">
+                {filteredCatalog.map((feature) => {
+                  const isSelected = feature.ref in selectedFeatures
+                  const toolName = featureRefToTool(feature.ref)
+                  const BrandIcon = getBrandIcon(toolName) || getBrandIcon(feature.icon || "")
+                  const isCloud = feature.category === "cloud"
+                  return (
+                    <div
+                      key={feature.ref}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-1.5 text-xs hover:bg-accent/30 transition-colors",
+                        isSelected && "bg-accent/20"
+                      )}
+                    >
+                      <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
+                        {BrandIcon ? (
+                          <BrandIcon className="w-4 h-4" />
+                        ) : isCloud ? (
+                          <Cloud className="w-4 h-4" />
+                        ) : (
+                          <Package className="w-4 h-4" />
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0 flex items-center gap-2">
+                        <span className="font-medium text-foreground truncate">{feature.name}</span>
+                        <span className="text-muted-foreground/60 text-[10px] font-mono shrink-0">
+                          {toolName}
+                        </span>
+                        {feature.description && (
+                          <span className="text-muted-foreground/60 truncate hidden md:inline">
+                            {feature.description}
+                          </span>
+                        )}
+                      </div>
+
+                      {feature.size_hint && (
+                        <span className="shrink-0 text-[10px] text-muted-foreground/50 font-mono">
+                          {feature.size_hint}
+                        </span>
+                      )}
+
+                      <Switch
+                        checked={isSelected}
+                        onCheckedChange={() => toggleFeature(feature.ref)}
+                        aria-label={feature.name}
+                        className="scale-75"
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            </ScrollArea>
           )}
 
           {!catalogLoading && catalogError && (
@@ -609,11 +745,25 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
         </TabsContent>
 
         {/* ---- Language Runtimes tab ---- */}
-        <TabsContent value="runtimes" className="space-y-4 pt-3">
-          <p className="text-xs text-muted-foreground">
-            Select language runtimes and CLI tools to install in the crew container. Versions are managed per-crew
-            and installed on container start.
+        <TabsContent value="runtimes" className="space-y-3 pt-3">
+          <p className="text-[11px] text-muted-foreground">
+            Select language runtimes and CLI tools to install in the crew container. Versions are managed
+            per-crew and installed on container start.
           </p>
+
+          {/* Selected summary */}
+          {selectedRuntimeCount > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/30 text-xs">
+              <Check className="w-3 h-3 text-emerald-500" />
+              <span className="font-medium">{selectedRuntimeCount} selected</span>
+              <button
+                onClick={clearAllRuntimes}
+                className="ml-auto text-muted-foreground hover:text-foreground text-[11px]"
+              >
+                Clear
+              </button>
+            </div>
+          )}
 
           {/* Search */}
           <div className="relative">
@@ -623,109 +773,128 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
               onChange={(e) => setRuntimeSearchQuery(e.target.value)}
               placeholder="Search runtimes (node, python, terraform, kubectl...)"
               aria-label="Search language runtimes"
-              className="h-8 pl-8 text-xs"
+              className="h-7 pl-8 text-xs"
             />
           </div>
 
+          {/* Category pills */}
+          <div className="flex flex-wrap gap-1 text-[11px]">
+            {CATEGORY_FILTERS.map((cat) => {
+              const count = runtimeCategoryCounts[cat] ?? 0
+              if (cat !== "all" && count === 0) return null
+              const active = runtimeCategoryFilter === cat
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setRuntimeCategoryFilter(cat)}
+                  className={cn(
+                    "px-2 py-0.5 rounded-full border transition-colors",
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border/40 text-muted-foreground hover:bg-accent/50"
+                  )}
+                >
+                  {cat === "all" ? "All" : CATEGORY_LABELS[cat] || cat}
+                  {count > 0 && <span className="ml-1 opacity-60">{count}</span>}
+                </button>
+              )
+            })}
+          </div>
+
           {runtimeCatalogLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Skeleton key={i} className="h-12 rounded-lg" />
+            <div className="space-y-1">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="h-7 rounded-md" />
               ))}
             </div>
           ) : (
-            sortedCategoryKeys(groupedRuntimes).map((category) => {
-              const runtimes = groupedRuntimes[category]
-              return (
-                <div key={category} className="space-y-2">
-                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                    {CATEGORY_LABELS[category] || category}
-                  </Label>
-                  <div className="space-y-2">
-                    {runtimes.map((entry) => {
-                      const isEnabled = entry.tool in miseTools
-                      const IconComp = ICON_MAP[entry.icon] || Code
-                      const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0
-                      const defaultVersion = entry.default_version || (hasVersions ? entry.versions![0] : "latest")
-                      return (
-                        <div
-                          key={entry.tool}
-                          className={cn(
-                            "flex items-center justify-between gap-3 rounded-lg border p-3 transition-all",
-                            isEnabled
-                              ? "border-primary/60 bg-primary/5"
-                              : "border-border"
-                          )}
-                        >
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <Switch
-                              size="sm"
-                              checked={isEnabled}
-                              onCheckedChange={() => toggleRuntimeTool(entry.tool, defaultVersion)}
-                              aria-label={entry.name}
-                            />
-                            <div
-                              className={cn(
-                                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
-                                isEnabled
-                                  ? "bg-primary/10 text-primary"
-                                  : "bg-muted text-muted-foreground"
-                              )}
+            <ScrollArea className="h-[420px] rounded-md border border-border/40 bg-card/30">
+              <div className="divide-y divide-border/40">
+                {filteredRuntimes.map((entry) => {
+                  const isEnabled = entry.tool in miseTools
+                  const selectedVersion =
+                    miseTools[entry.tool] ||
+                    entry.default_version ||
+                    (entry.versions?.[0] ?? "latest")
+                  const BrandIcon = getBrandIcon(entry.tool) || getBrandIcon(entry.icon || "")
+                  const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0
+                  const defaultVersion = entry.default_version || (hasVersions ? entry.versions![0] : "latest")
+                  const isCloud = entry.category === "cloud"
+                  return (
+                    <div
+                      key={entry.tool}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-1.5 text-xs hover:bg-accent/30 transition-colors",
+                        isEnabled && "bg-accent/20"
+                      )}
+                    >
+                      <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
+                        {BrandIcon ? (
+                          <BrandIcon className="w-4 h-4" />
+                        ) : isCloud ? (
+                          <Cloud className="w-4 h-4" />
+                        ) : (
+                          <Package className="w-4 h-4" />
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0 flex items-center gap-2">
+                        <span className="font-medium text-foreground truncate">{entry.name}</span>
+                        <span className="text-muted-foreground/60 text-[10px] font-mono shrink-0">
+                          {entry.tool}
+                        </span>
+                        {entry.description && (
+                          <span className="text-muted-foreground/60 truncate hidden md:inline">
+                            {entry.description}
+                          </span>
+                        )}
+                      </div>
+
+                      {isEnabled && (
+                        <div className="shrink-0">
+                          {hasVersions ? (
+                            <Select
+                              value={selectedVersion}
+                              onValueChange={(v) => updateRuntimeVersion(entry.tool, v)}
                             >
-                              <IconComp className="h-3.5 w-3.5" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium truncate">{entry.name}</span>
-                                <code className="text-[10px] text-muted-foreground font-mono shrink-0">
-                                  {entry.tool}
-                                </code>
-                              </div>
-                              {entry.description && (
-                                <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">
-                                  {entry.description}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          {isEnabled && (
-                            hasVersions ? (
-                              <Select
-                                value={miseTools[entry.tool]}
-                                onValueChange={(v) => updateRuntimeVersion(entry.tool, v)}
-                              >
-                                <SelectTrigger className="h-7 text-xs w-28 shrink-0">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {/* If current value isn't in the list (custom input from previous state), still render it. */}
-                                  {!entry.versions!.includes(miseTools[entry.tool]) && (
-                                    <SelectItem value={miseTools[entry.tool]}>
-                                      {miseTools[entry.tool]}
-                                    </SelectItem>
-                                  )}
-                                  {entry.versions!.map((v) => (
-                                    <SelectItem key={v} value={v}>{v}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <Input
-                                value={miseTools[entry.tool]}
-                                onChange={(e) => updateRuntimeVersion(entry.tool, e.target.value)}
-                                placeholder="latest"
-                                className="h-7 text-xs w-28 shrink-0 font-mono"
-                                aria-label={`${entry.name} version`}
-                              />
-                            )
+                              <SelectTrigger className="h-6 w-24 text-[11px] px-2">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {!entry.versions!.includes(selectedVersion) && (
+                                  <SelectItem value={selectedVersion} className="text-[11px]">
+                                    {selectedVersion}
+                                  </SelectItem>
+                                )}
+                                {entry.versions!.map((v) => (
+                                  <SelectItem key={v} value={v} className="text-[11px]">{v}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Input
+                              value={selectedVersion}
+                              onChange={(e) => updateRuntimeVersion(entry.tool, e.target.value)}
+                              placeholder="latest"
+                              className="h-6 w-24 text-[11px] font-mono"
+                              aria-label={`${entry.name} version`}
+                            />
                           )}
                         </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })
+                      )}
+
+                      <Switch
+                        checked={isEnabled}
+                        onCheckedChange={() => toggleRuntimeTool(entry.tool, defaultVersion)}
+                        aria-label={entry.name}
+                        className="scale-75"
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            </ScrollArea>
           )}
 
           {!runtimeCatalogLoading && runtimeCatalogError && (
