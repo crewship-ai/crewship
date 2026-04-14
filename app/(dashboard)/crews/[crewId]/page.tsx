@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
-  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2, FolderOpen, TerminalSquare,
+  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2, FolderOpen, TerminalSquare, Blocks,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -22,6 +22,7 @@ import { CrewStandup } from "@/components/features/crews/crew-standup"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
 import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
 import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
+import { CrewRuntimeConfig } from "@/components/features/crews/crew-runtime-config"
 import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
@@ -51,6 +52,10 @@ interface Crew {
   container_cpus: number
   network_mode: string
   allowed_domains: string[]
+  runtime_image: string | null
+  devcontainer_config: string | null
+  mise_config: string | null
+  cached_image: string | null
   issue_prefix: string | null
   created_at: string
   _count: { agents: number; members: number }
@@ -216,6 +221,10 @@ export default function CrewDetailPage() {
     await patchCrew(config)
   }
 
+  async function handleRuntimeSave(config: { runtime_image: string | null; devcontainer_config: string | null; mise_config: string | null }) {
+    await patchCrew(config)
+  }
+
   return (
     <div className="p-6 space-y-6">
       <Button variant="ghost" size="sm" asChild>
@@ -306,6 +315,45 @@ export default function CrewDetailPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Runtime Configuration */}
+      {canEdit && workspaceId && (
+        <Collapsible>
+          <Card>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors rounded-xl"
+              >
+                <div className="flex items-center gap-2">
+                  <Blocks className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-body font-medium">Runtime Configuration</span>
+                  <span className="text-label text-muted-foreground">
+                    {crew.devcontainer_config || crew.mise_config
+                      ? crew.cached_image ? "(provisioned)" : "(configured)"
+                      : "(not configured)"}
+                  </span>
+                </div>
+                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="px-4 pb-4 pt-0">
+                <CrewRuntimeConfig
+                  crewId={crew.id}
+                  workspaceId={workspaceId}
+                  runtimeImage={crew.runtime_image}
+                  devcontainerConfig={crew.devcontainer_config}
+                  miseConfig={crew.mise_config}
+                  cachedImage={crew.cached_image}
+                  canEdit={canEdit}
+                  onSave={handleRuntimeSave}
+                />
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       )}
 
       {/* Advanced — Container Config */}

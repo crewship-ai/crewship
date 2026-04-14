@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
-  ArrowLeft, Loader2, Users, Sparkles, Bot, RefreshCw, AlertTriangle,
+  ArrowLeft, Loader2, Users, Sparkles, Bot, RefreshCw, AlertTriangle, ChevronDown, Settings2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { PageShell } from "@/components/layout/page-shell"
 import { SectionCard } from "@/components/ui/section-card"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -23,6 +24,7 @@ import { toast } from "sonner"
 import { CrewNameSlugFields } from "@/components/features/crews/crew-name-slug-fields"
 import { CrewAgentPreviewList } from "@/components/features/crews/crew-agent-preview-list"
 import { QuickStartTemplateGrid, TemplateGallery } from "@/components/features/crews/crew-template-picker"
+import { RuntimeConfig, type RuntimeConfigValue } from "@/components/features/crews/runtime-config"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +94,11 @@ export default function NewCrewPage() {
   // id to a Tailwind class, so any freeform hex would break them.
   const [color, setColor] = useState<CrewPaletteId>("blue")
   const [icon, setIcon] = useState("")
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigValue>({
+    runtimeImage: "",
+    devcontainerConfig: "",
+    miseConfig: "",
+  })
 
   useEffect(() => {
     if (!slugManual) setSlug(slugify(name))
@@ -289,6 +296,9 @@ export default function NewCrewPage() {
       if (description) body.description = description
       if (color) body.color = color
       if (icon) body.icon = icon
+      if (runtimeConfig.runtimeImage) body.runtime_image = runtimeConfig.runtimeImage
+      if (runtimeConfig.devcontainerConfig) body.devcontainer_config = runtimeConfig.devcontainerConfig
+      if (runtimeConfig.miseConfig) body.mise_config = runtimeConfig.miseConfig
 
       try {
         const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`, {
@@ -309,7 +319,7 @@ export default function NewCrewPage() {
         setSubmitting(false)
       }
     },
-    [workspaceId, name, slug, description, color, icon, router]
+    [workspaceId, name, slug, description, color, icon, runtimeConfig, router]
   )
 
   // ── Loading ──────────────────────────────────────────────────────────────────
@@ -678,6 +688,33 @@ export default function NewCrewPage() {
             </div>
           </div>
         </SectionCard>
+
+        <Collapsible>
+          <SectionCard
+            bare
+            title={
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="h-4 w-4 text-muted-foreground" />
+                    <span>Advanced: Runtime Configuration</span>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+                </button>
+              </CollapsibleTrigger>
+            }
+            description="Configure devcontainer features, mise runtimes, and base image for the crew container."
+          >
+            <CollapsibleContent>
+              <div className="px-6 pb-6">
+                <RuntimeConfig value={runtimeConfig} onChange={setRuntimeConfig} />
+              </div>
+            </CollapsibleContent>
+          </SectionCard>
+        </Collapsible>
 
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting || !workspaceId} className="gap-2">
