@@ -3,6 +3,7 @@ package devcontainer
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -85,6 +86,10 @@ func (m *mockCommitClient) ImageList(_ context.Context, _ image.ListOptions) ([]
 		})
 	}
 	return summaries, nil
+}
+
+func (m *mockCommitClient) ImagePull(_ context.Context, _ string, _ image.PullOptions) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
 }
 
 func TestIsCached_Hit(t *testing.T) {

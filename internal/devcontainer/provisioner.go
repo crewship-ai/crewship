@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"log/slog"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ type CommitClient interface {
 	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
 	ContainerCommit(ctx context.Context, containerID string, options container.CommitOptions) (container.CommitResponse, error)
 	ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error)
+	ImagePull(ctx context.Context, refStr string, options image.PullOptions) (io.ReadCloser, error)
 }
 
 // Provisioner orchestrates the full devcontainer provisioning flow: create a
@@ -181,8 +183,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 }
 
 // createTempContainer creates a temporary container from the base image,
-// configured for provisioning (root user, writable filesystem).
+// configured for provisioning (root user, writable filesystem). If the image
+// is not present locally, it is pulled first.
 func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string) (string, error) {
+	if err := p.ensureImage(ctx, baseImage); err != nil {
+		return "", fmt.Errorf("pull base image %q: %w", baseImage, err)
+	}
 	resp, err := p.docker.ContainerCreate(ctx,
 		&container.Config{
 			Image: baseImage,
@@ -202,6 +208,34 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 		return "", err
 	}
 	return resp.ID, nil
+}
+
+// ensureImage pulls the given image if it is not already present locally.
+// Uses ImageList to check existence (matches docker.go pattern of avoiding
+// filters that Docker Desktop sometimes blocks).
+func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
+	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
+	if err == nil {
+		for _, img := range imgs {
+			for _, tag := range img.RepoTags {
+				if tag == ref {
+					return nil
+				}
+			}
+		}
+	}
+	p.logger.Info("pulling base image", "ref", ref)
+	rc, err := p.docker.ImagePull(ctx, ref, image.PullOptions{})
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	// Drain the pull output stream (Docker requires the stream to be fully
+	// read for the pull to complete).
+	if _, err := io.Copy(io.Discard, rc); err != nil {
+		return fmt.Errorf("read pull stream: %w", err)
+	}
+	return nil
 }
 
 // installFeatures downloads, sorts, and installs all features from the config.
