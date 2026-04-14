@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { IconType } from "react-icons"
 import {
   Search, Copy, Check, Pencil, X,
-  Package, Cloud, AlertCircle, Sparkles,
+  Package, Cloud, AlertCircle, Boxes,
 } from "lucide-react"
 import {
   SiDebian, SiUbuntu, SiAlpinelinux,
@@ -25,6 +25,8 @@ import {
   SiJulia, SiLua, SiPerl, SiR, SiHaskell,
   SiGraphql,
   SiOpenai, SiAnthropic,
+  SiHeroku, SiVercel, SiCloudflare, SiFlydotio,
+  SiOllama, SiSentry, SiDatadog, SiRailway, SiNetlify,
 } from "react-icons/si"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -170,6 +172,41 @@ const BRAND_ICONS: Record<string, IconType> = {
   openai: SiOpenai,
   anthropic: SiAnthropic,
   claude: SiAnthropic,
+  // AWS family (no dedicated react-icons entry; use lucide Cloud fallback)
+  aws: Cloud,
+  "aws-cli": Cloud,
+  awscli: Cloud,
+  // Azure family (no dedicated react-icons entry; use lucide Cloud fallback)
+  azure: Cloud,
+  "azure-cli": Cloud,
+  az: Cloud,
+  // Heroku
+  heroku: SiHeroku,
+  "heroku-cli": SiHeroku,
+  // Vercel
+  vercel: SiVercel,
+  "vercel-cli": SiVercel,
+  // Cloudflare
+  cloudflare: SiCloudflare,
+  "cloudflare-cli": SiCloudflare,
+  wrangler: SiCloudflare,
+  flarectl: SiCloudflare,
+  // Fly.io
+  fly: SiFlydotio,
+  "fly-cli": SiFlydotio,
+  flyctl: SiFlydotio,
+  // Ollama
+  ollama: SiOllama,
+  // Sentry
+  sentry: SiSentry,
+  "sentry-cli": SiSentry,
+  // Datadog
+  datadog: SiDatadog,
+  "datadog-ci": SiDatadog,
+  // Railway
+  railway: SiRailway,
+  // Netlify
+  netlify: SiNetlify,
 }
 
 function getBrandIcon(tool: string): IconType | null {
@@ -253,7 +290,7 @@ const BASE_IMAGES: Array<{
     value: "mcr.microsoft.com/devcontainers/universal:2",
     label: "Universal (kitchen sink)",
     description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
-    icon: Sparkles,
+    icon: Boxes,
   },
   {
     value: "mcr.microsoft.com/devcontainers/base:alpine-3.20",

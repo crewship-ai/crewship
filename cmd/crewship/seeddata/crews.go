@@ -26,30 +26,50 @@ const seedBaseImage = "mcr.microsoft.com/devcontainers/javascript-node:22-bookwo
 
 var Crews = []CrewDef{
 	{
+		// Engineering: backend/frontend work. GitHub + Node + Python.
 		Name: "Engineering", Slug: "engineering",
 		Color: "#3B82F6", Icon: "terminal",
-		RuntimeImage:       seedBaseImage,
-		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures + `,"ghcr.io/devcontainers/features/github-cli:1":{}}}`,
-		MiseConfig:         `{"tools":{"node":"22","python":"3.12"}}`,
+		RuntimeImage: seedBaseImage,
+		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures +
+			`,"ghcr.io/devcontainers/features/github-cli:1":{}` +
+			`}}`,
+		MiseConfig: `{"tools":{"node":"22","python":"3.12"}}`,
 	},
 	{
+		// Quality: testing + security audits. Python for scripting, jq/yq via common-utils.
 		Name: "Quality", Slug: "quality",
 		Color: "#10B981", Icon: "shield-check",
-		RuntimeImage:       seedBaseImage,
-		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures + `,"ghcr.io/devcontainers/features/python:1":{}}}`,
+		RuntimeImage: seedBaseImage,
+		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures +
+			`,"ghcr.io/devcontainers/features/python:1":{}` +
+			`,"ghcr.io/devcontainers/features/github-cli:1":{}` +
+			`}}`,
 	},
 	{
+		// DevOps: infra + cloud management. Full cloud CLI suite.
 		Name: "DevOps", Slug: "devops",
 		Color: "#EF4444", Icon: "server",
-		RuntimeImage:       seedBaseImage,
-		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures + `,"ghcr.io/devcontainers/features/docker-in-docker:2":{},"ghcr.io/devcontainers/features/kubectl-helm-minikube:1":{}}}`,
-		MiseConfig:         `{"tools":{"terraform":"1.9"}}`,
+		RuntimeImage: seedBaseImage,
+		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures +
+			`,"ghcr.io/devcontainers/features/docker-in-docker:2":{}` +
+			`,"ghcr.io/devcontainers/features/kubectl-helm-minikube:1":{}` +
+			`,"ghcr.io/devcontainers/features/aws-cli:1":{}` +
+			`,"ghcr.io/devcontainers/features/azure-cli:1":{}` +
+			`,"ghcr.io/dhoeric/features/google-cloud-cli:1":{}` +
+			`,"ghcr.io/devcontainers/features/terraform:1":{}` +
+			`,"ghcr.io/devcontainers/features/github-cli:1":{}` +
+			`}}`,
+		MiseConfig: `{"tools":{"terraform":"1.9"}}`,
 	},
 	{
+		// Research: data analysis + scraping. Python + Node for web work.
 		Name: "Research", Slug: "research",
 		Color: "#06B6D4", Icon: "telescope",
-		RuntimeImage:       seedBaseImage,
-		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures + `,"ghcr.io/devcontainers/features/python:1":{}}}`,
-		MiseConfig:         `{"tools":{"python":"3.12"}}`,
+		RuntimeImage: seedBaseImage,
+		DevcontainerConfig: `{"image":"` + seedBaseImage + `","features":{` + baseFeatures +
+			`,"ghcr.io/devcontainers/features/python:1":{}` +
+			`,"ghcr.io/devcontainers/features/github-cli:1":{}` +
+			`}}`,
+		MiseConfig: `{"tools":{"python":"3.12"}}`,
 	},
 }
