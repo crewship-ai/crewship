@@ -143,21 +143,10 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return nil, fmt.Errorf("starting temp container: %w", err)
 	}
 
-	// 4. Ensure `agent` user (UID 1001) and /home/agent exist.
-	// Custom base images (debian, ubuntu) typically don't have this user.
-	// mise and postCreateCommand run as UID 1001 and need a writable home.
-	if err := p.ensureAgentUser(ctx, containerID); err != nil {
-		return nil, fmt.Errorf("ensure agent user: %w", err)
-	}
-
-	// 5. Install Claude Code CLI if missing (required by CLAUDE_CODE adapter).
-	// Bake it into the cached image so all agents in this crew can use it.
-	if err := EnsureClaudeCode(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
-		p.logger.Warn("failed to install Claude Code CLI", "error", err)
-		// Don't fail provisioning — user may use a different CLI adapter.
-	}
-
-	// 6. Download and sort features.
+	// 4. Download and sort features. Both the agent user (via common-utils
+	// feature with username/userUid options) and the Claude Code CLI (via
+	// devcontainers-extra/claude-code feature) come from the devcontainer
+	// configuration — no custom Go installers needed.
 	if err := p.installFeatures(ctx, containerID, cfg); err != nil {
 		return nil, err
 	}
@@ -224,17 +213,6 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 	return resp.ID, nil
 }
 
-// ensureAgentUser creates the 'agent' user (UID 1001) and /home/agent with
-// correct permissions if they don't exist. Safe to run multiple times.
-// Required so mise and postCreateCommand can run as a non-root user.
-// Thin wrapper around the exported EnsureAgentUser helper.
-func (p *Provisioner) ensureAgentUser(ctx context.Context, containerID string) error {
-	if err := EnsureAgentUser(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
-		return err
-	}
-	p.logger.Debug("agent user ensured")
-	return nil
-}
 
 // ensureImage pulls the given image if it is not already present locally.
 // Uses ImageList to check existence (matches docker.go pattern of avoiding

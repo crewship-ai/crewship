@@ -54,7 +54,7 @@ build\:go: build\:sidecar
 # via a host bind mount. See internal/provider/docker/docker.go buildMounts.
 build\:sidecar:
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
-	cp docker/agent-runtime/entrypoint.sh ./entrypoint.sh
+	cp scripts/entrypoint.sh ./entrypoint.sh
 	chmod +x ./entrypoint.sh
 
 # === Test & Lint ===

@@ -389,7 +389,7 @@ func autodetectSidecarPaths(cfg *Config) {
 			candidates = append(candidates, filepath.Join(binDir, "entrypoint.sh"))
 		}
 		if cwd, err := os.Getwd(); err == nil {
-			candidates = append(candidates, filepath.Join(cwd, "docker", "agent-runtime", "entrypoint.sh"))
+			candidates = append(candidates, filepath.Join(cwd, "scripts", "entrypoint.sh"))
 			candidates = append(candidates, filepath.Join(cwd, "entrypoint.sh"))
 		}
 		candidates = append(candidates, "/usr/local/share/crewship/entrypoint.sh")
