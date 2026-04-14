@@ -140,9 +140,10 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	// 5. Handle mise configuration.
-	// TODO: implement mise provisioning in a separate mise.go file.
 	if miseConfig != "" {
-		p.logger.Debug("mise config provided but mise provisioning not yet implemented")
+		if err := p.installMise(ctx, containerID, miseConfig); err != nil {
+			return nil, fmt.Errorf("mise provisioning: %w", err)
+		}
 	}
 
 	// 6. Run postCreateCommand as agent user (1001:1001).
@@ -223,6 +224,37 @@ func (p *Provisioner) installFeatures(ctx context.Context, containerID string, c
 		if err := p.installer.InstallFeature(ctx, containerID, feature, opts); err != nil {
 			return fmt.Errorf("installing feature %s: %w", feature.Metadata.ID, err)
 		}
+	}
+
+	return nil
+}
+
+// installMise parses the mise config, installs the mise binary, and installs
+// the configured tools inside the container.
+func (p *Provisioner) installMise(ctx context.Context, containerID string, miseConfig string) error {
+	cfg, err := ParseMiseConfig(miseConfig)
+	if err != nil {
+		return err
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if cfg.IsEmpty() {
+		p.logger.Debug("mise config has no tools, skipping")
+		return nil
+	}
+
+	// Build an ExecFunc adapter from the installer's docker client.
+	execFn := p.installer.execInContainerAsUser
+
+	p.logger.Info("installing mise binary", "container", containerID)
+	if err := InstallMise(ctx, containerID, execFn); err != nil {
+		return err
+	}
+
+	p.logger.Info("installing mise tools", "container", containerID, "tools", len(cfg.Tools))
+	if err := InstallMiseTools(ctx, containerID, cfg, execFn); err != nil {
+		return err
 	}
 
 	return nil

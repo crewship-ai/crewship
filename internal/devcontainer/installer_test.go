@@ -266,8 +266,8 @@ func TestInstallFeature_EnvVars(t *testing.T) {
 		}
 	}
 
-	if envMap["_CONTAINER_ID"] != "node" {
-		t.Errorf("_CONTAINER_ID = %q, want node", envMap["_CONTAINER_ID"])
+	if envMap["_CONTAINER_ID"] != "ctr" {
+		t.Errorf("_CONTAINER_ID = %q, want ctr", envMap["_CONTAINER_ID"])
 	}
 	if envMap["_REMOTE_USER"] != "agent" {
 		t.Errorf("_REMOTE_USER = %q, want agent", envMap["_REMOTE_USER"])
@@ -366,7 +366,7 @@ func TestInstallFeature_CopyError(t *testing.T) {
 }
 
 func TestBuildFeatureEnv(t *testing.T) {
-	env := buildFeatureEnv("python", map[string]any{
+	env := buildFeatureEnv("container-abc", "python", map[string]any{
 		"version": "3.11",
 		"tools":   "pip",
 	})
@@ -379,8 +379,8 @@ func TestBuildFeatureEnv(t *testing.T) {
 		}
 	}
 
-	if envMap["_CONTAINER_ID"] != "python" {
-		t.Errorf("_CONTAINER_ID = %q", envMap["_CONTAINER_ID"])
+	if envMap["_CONTAINER_ID"] != "container-abc" {
+		t.Errorf("_CONTAINER_ID = %q, want container-abc", envMap["_CONTAINER_ID"])
 	}
 	if envMap["_REMOTE_USER"] != "agent" {
 		t.Errorf("_REMOTE_USER = %q", envMap["_REMOTE_USER"])
@@ -394,7 +394,7 @@ func TestBuildFeatureEnv(t *testing.T) {
 }
 
 func TestBuildFeatureEnv_NilOptions(t *testing.T) {
-	env := buildFeatureEnv("node", nil)
+	env := buildFeatureEnv("container-xyz", "node", nil)
 	if len(env) != 2 {
 		t.Errorf("expected 2 env vars (_CONTAINER_ID, _REMOTE_USER), got %d", len(env))
 	}
