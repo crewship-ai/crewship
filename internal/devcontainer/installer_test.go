@@ -137,13 +137,14 @@ func TestInstallFeature_Success(t *testing.T) {
 		t.Errorf("CopyToContainer dstPath = %q, want /tmp/devcontainer-features", mock.copiedTars[0].dstPath)
 	}
 
-	// Verify exec calls: install.sh + rm -rf cleanup = 2 exec creates.
-	if len(mock.execCreated) != 2 {
-		t.Fatalf("expected 2 exec creates, got %d", len(mock.execCreated))
+	// Verify exec calls: mkdir destBase + install.sh + rm -rf cleanup = 3 exec creates.
+	if len(mock.execCreated) != 3 {
+		t.Fatalf("expected 3 exec creates, got %d", len(mock.execCreated))
 	}
 
-	// First exec: install.sh with env vars.
-	installExec := mock.execCreated[0]
+	// First exec: mkdir -p /tmp/devcontainer-features.
+	// Second exec: install.sh with env vars.
+	installExec := mock.execCreated[1]
 	if installExec.User != "0:0" {
 		t.Errorf("exec User = %q, want 0:0", installExec.User)
 	}
@@ -253,11 +254,13 @@ func TestInstallFeature_EnvVars(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(mock.execCreated) == 0 {
-		t.Fatal("no exec calls")
+	if len(mock.execCreated) < 2 {
+		t.Fatalf("expected at least 2 exec calls (mkdir + install.sh), got %d", len(mock.execCreated))
 	}
 
-	env := mock.execCreated[0].Env
+	// execCreated[0] is the mkdir for /tmp/devcontainer-features.
+	// execCreated[1] is the install.sh run with feature env vars.
+	env := mock.execCreated[1].Env
 	envMap := make(map[string]string)
 	for _, e := range env {
 		parts := strings.SplitN(e, "=", 2)
@@ -303,8 +306,10 @@ func TestInstallFeature_ExecCreateError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "executing install.sh") {
-		t.Errorf("error = %q, want it to contain 'executing install.sh'", err)
+	// The first exec call (mkdir for destBase) will fail since the mock
+	// is configured to fail all exec create calls.
+	if !strings.Contains(err.Error(), "docker daemon unavailable") {
+		t.Errorf("error = %q, want it to contain 'docker daemon unavailable'", err)
 	}
 }
 

@@ -67,13 +67,19 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 
 	inst.logger.Info("installing feature", "id", featureID, "container", containerID)
 
-	// 1. Create tar archive of the feature directory.
+	// 1. Ensure destBase exists in container (CopyToContainer requires the
+	//    target parent directory to exist).
+	if _, _, err := inst.execInContainer(installCtx, containerID, []string{"mkdir", "-p", destBase}, nil); err != nil {
+		return fmt.Errorf("creating %s in container: %w", destBase, err)
+	}
+
+	// 2. Create tar archive of the feature directory.
 	tarBuf, err := createTarFromDir(feature.Dir, featureID)
 	if err != nil {
 		return fmt.Errorf("creating tar for feature %s: %w", featureID, err)
 	}
 
-	// 2. Copy into container.
+	// 3. Copy into container.
 	if err := inst.docker.CopyToContainer(installCtx, containerID, destBase, tarBuf, container.CopyToContainerOptions{}); err != nil {
 		return fmt.Errorf("copying feature %s to container: %w", featureID, err)
 	}
