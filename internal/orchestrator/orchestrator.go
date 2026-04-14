@@ -950,6 +950,28 @@ func TmuxSessionName(agentSlug string) string {
 // (avoiding shell quoting issues), then returns a wrapper command that starts
 // tmux and streams output via FIFO. Falls back gracefully if setup fails.
 func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cmd []string, agentSlug string, env []string) ([]string, error) {
+	// Pre-check: fail fast if tmux is not installed in the container. Custom
+	// base images (debian:bookworm-slim, ubuntu:24.04) don't ship with tmux.
+	// Without this check, the outer wrapper runs anyway and produces noisy
+	// stderr output before falling back, which confuses users.
+	checkResult, checkErr := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1"},
+		User:        "1001:1001",
+	})
+	if checkErr != nil {
+		return nil, fmt.Errorf("tmux check: %w", checkErr)
+	}
+	io.Copy(io.Discard, checkResult.Reader)
+	checkResult.Reader.Close()
+	_, tmuxExitCode, inspectErr := o.container.ExecInspect(ctx, checkResult.ExecID)
+	if inspectErr != nil {
+		return nil, fmt.Errorf("tmux check inspect: %w", inspectErr)
+	}
+	if tmuxExitCode != 0 {
+		return nil, fmt.Errorf("tmux not installed in container")
+	}
+
 	session := TmuxSessionName(agentSlug)
 	argsFile := fmt.Sprintf("/tmp/%s.args", session)
 	scriptFile := fmt.Sprintf("/tmp/%s.sh", session)
