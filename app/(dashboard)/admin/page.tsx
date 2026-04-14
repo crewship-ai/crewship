@@ -3,14 +3,10 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
-  LayoutDashboard, ScrollText, Building, Users, Server, Gauge,
-  Globe, Archive, Brain, Lock, Key, ToggleRight, Activity, Shield,
+  LayoutDashboard, Building, Users, Server, Shield,
 } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { PageHeader } from "@/components/layout/page-header"
 import { cn } from "@/lib/utils"
 
 import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry } from "./types"
@@ -21,35 +17,50 @@ import { KeeperTab } from "./tabs/keeper-tab"
 import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
 
-interface TabDef {
-  type?: "section"
-  key?: TabKey
+/**
+ * Admin sidebar sections — ONLY real, wired tabs.
+ *
+ * The previous revision listed 12 extra placeholder sections ("System Logs",
+ * "Networking", "Backups", "LLM Gateway", "Auth & SSO", "Feature Flags",
+ * "Rate Limits", "Resources") that all rendered a "Coming Soon" card.
+ * Those were removed on the user's explicit instruction that the UI must
+ * only surface what actually works. Reintroduce them one at a time when
+ * each has a real backend to talk to.
+ */
+interface NavSection {
   label: string
-  icon?: React.ElementType
+  items: { key: TabKey; label: string; icon: React.ElementType }[]
 }
 
-const sections: TabDef[] = [
-  { type: "section", label: "PLATFORM" },
-  { key: "overview", label: "Overview", icon: LayoutDashboard },
-  { key: "logs", label: "System Logs", icon: ScrollText },
-  { type: "section", label: "ORGANIZATIONS" },
-  { key: "workspaces", label: "Workspaces", icon: Building },
-  { key: "users", label: "All Users", icon: Users },
-  { type: "section", label: "INFRASTRUCTURE" },
-  { key: "providers", label: "Providers", icon: Server },
-  { key: "resources", label: "Resources", icon: Gauge },
-  { key: "networking", label: "Networking", icon: Globe },
-  { key: "backups", label: "Backups", icon: Archive },
-  { type: "section", label: "AI & ORCHESTRATION" },
-  { key: "gateway", label: "LLM Gateway", icon: Brain },
-  { type: "section", label: "SECURITY & ACCESS" },
-  { key: "security", label: "Security", icon: Lock },
-  { key: "auth", label: "Auth & SSO", icon: Key },
-  { key: "flags", label: "Feature Flags", icon: ToggleRight },
-  { key: "ratelimits", label: "Rate Limits", icon: Activity },
+const sections: NavSection[] = [
+  {
+    label: "Platform",
+    items: [
+      { key: "overview", label: "Overview", icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: "Organizations",
+    items: [
+      { key: "workspaces", label: "Workspaces", icon: Building },
+      { key: "users", label: "Users", icon: Users },
+    ],
+  },
+  {
+    label: "Infrastructure",
+    items: [
+      { key: "providers", label: "Providers", icon: Server },
+    ],
+  },
+  {
+    label: "Security",
+    items: [
+      { key: "security", label: "Keeper", icon: Shield },
+    ],
+  },
 ]
 
-const realTabs: TabKey[] = ["overview", "workspaces", "users", "providers", "security"]
+const ALL_TABS: TabKey[] = sections.flatMap((s) => s.items.map((i) => i.key))
 
 export default function AdminPage() {
   const router = useRouter()
@@ -163,15 +174,15 @@ export default function AdminPage() {
 
   if (wsLoading || role !== "OWNER") {
     return (
-      <div className="p-6">
-        <Skeleton className="h-8 w-48 mb-4" />
+      <div className="p-4 md:p-6">
+        <Skeleton className="h-8 w-48 mb-3" />
         <Skeleton className="h-[300px] rounded-xl" />
       </div>
     )
   }
 
   function renderContent() {
-    if (loading && realTabs.includes(tab)) {
+    if (loading && ALL_TABS.includes(tab)) {
       return <Skeleton className="h-[200px] rounded-xl" />
     }
 
@@ -221,76 +232,59 @@ export default function AdminPage() {
       )
     }
 
-    // Placeholder for other tabs
-    return (
-      <Card>
-        <CardContent className="p-6 text-center space-y-2">
-          <Badge variant="outline">Coming Soon</Badge>
-          <p className="text-body text-muted-foreground">
-            This section will be available in a future release.
-          </p>
-        </CardContent>
-      </Card>
-    )
+    return null
   }
 
-  const activeSection = sections.find((s) => s.key === tab)
+  const activeItem = sections.flatMap((s) => s.items).find((i) => i.key === tab)
 
   return (
-    <div className="flex h-full">
-      {/* Admin left nav */}
-      <aside className="w-52 border-r border-border bg-card flex flex-col flex-shrink-0 overflow-y-auto">
-        <div className="p-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Shield className="h-4 w-4 text-muted-foreground" />
-            <span className="text-label font-semibold">Admin Console</span>
-            <Badge variant="outline" className="text-micro ml-auto">
-              OWNER
-            </Badge>
-          </div>
+    <div className="flex h-[calc(100vh-48px)]">
+      {/* ── Left nav ─────────────────────────────────────────────── */}
+      <aside className="w-[200px] shrink-0 border-r border-border bg-sidebar flex flex-col overflow-y-auto">
+        <div className="flex items-center gap-2 px-3 h-9 border-b border-sidebar-border">
+          <Shield className="h-3.5 w-3.5 text-sidebar-foreground/60" />
+          <span className="text-xs font-semibold text-sidebar-foreground/80">Admin Console</span>
+          <span className="ml-auto text-[10px] font-mono text-sidebar-foreground/40 uppercase tracking-wide">Owner</span>
         </div>
-        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto" aria-label="Admin sections">
-          {sections.map((s, i) => {
-            if (s.type === "section") {
-              return (
-                <div
-                  key={i}
-                  className="text-micro font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1"
-                >
-                  {s.label}
-                </div>
-              )
-            }
-            const Icon = s.icon!
-            const isActive = s.key === tab
-            return (
-              <button
-                key={s.key}
-                aria-current={isActive ? "page" : undefined}
-                className={cn(
-                  "flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-label transition-colors",
-                  isActive
-                    ? "bg-accent text-foreground font-medium"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-                onClick={() => setTab(s.key!)}
-              >
-                <Icon className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">{s.label}</span>
-              </button>
-            )
-          })}
+        <nav className="flex-1 px-2 pt-3 pb-4" aria-label="Admin sections">
+          {sections.map((section) => (
+            <div key={section.label} className="mb-1">
+              <div className="px-2 pt-3 pb-1 text-[10px] font-semibold text-sidebar-foreground/50 uppercase tracking-wider">
+                {section.label}
+              </div>
+              {section.items.map((item) => {
+                const Icon = item.icon
+                const isActive = item.key === tab
+                return (
+                  <button
+                    key={item.key}
+                    onClick={() => setTab(item.key)}
+                    aria-current={isActive ? "page" : undefined}
+                    className={cn(
+                      "flex items-center gap-2 w-full h-7 px-2 rounded-md text-xs transition-colors",
+                      isActive
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                        : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
+                    )}
+                  >
+                    <Icon className={cn("h-3 w-3 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </nav>
       </aside>
 
-      {/* Admin content */}
+      {/* ── Content ─────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto p-6 space-y-6">
-          {activeSection && !activeSection.type && (
-            <PageHeader
-              title={activeSection.label}
-              description="Platform administration"
-            />
+        <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
+          {activeItem && (
+            <div className="flex items-center gap-2">
+              <activeItem.icon className="h-3.5 w-3.5 text-foreground/50" />
+              <h1 className="text-body font-medium text-foreground/80">{activeItem.label}</h1>
+            </div>
           )}
           {renderContent()}
         </div>
