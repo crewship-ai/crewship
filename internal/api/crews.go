@@ -670,6 +670,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// Invalidate cached image when runtime image changes
 		ub.Set("cached_image", nil)
 		ub.Set("config_hash", nil)
+		ub.Set("cached_requirements", nil)
 	}
 	if req.DevcontainerConfig != nil {
 		if *req.DevcontainerConfig == "" {
@@ -680,6 +681,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// Invalidate cached image when devcontainer config changes
 		ub.Set("cached_image", nil)
 		ub.Set("config_hash", nil)
+		ub.Set("cached_requirements", nil)
 	}
 	if req.MiseConfig != nil {
 		if *req.MiseConfig == "" {
@@ -690,6 +692,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// Invalidate cached image when mise config changes
 		ub.Set("cached_image", nil)
 		ub.Set("config_hash", nil)
+		ub.Set("cached_requirements", nil)
 	}
 	// Track whether the resolved mode is free — if so, always clear allowed_domains.
 	updatedModeFree := false

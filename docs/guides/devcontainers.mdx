@@ -215,7 +215,12 @@ mise is installed as the `agent` user (UID 1001), so tools land under `/home/age
     }
     ```
 
-    Server-side validation rejects blobs with whitespace/control chars in the image ref, non-allowlisted feature IDs, or JSON > 64 KB.
+    Server-side validation rejects blobs with whitespace/control chars in the image ref or non-allowlisted feature IDs. JSON config has per-field size limits enforced by the API:
+
+    - `devcontainer_config`: 100 KB max
+    - `mise_config`: 10 KB max
+
+    Configs larger than these limits are rejected at the API layer with HTTP 400. This prevents accidentally storing huge configs (often a sign of pasted-in log output or wrong field).
   </Tab>
 </Tabs>
 

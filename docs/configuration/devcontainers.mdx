@@ -15,8 +15,8 @@ Stored on the `crews` table, settable via UI wizard, REST PATCH, or `crewship cr
 | Column | Type | Default | Notes |
 |---|---|---|---|
 | `runtime_image` | string | `debian:bookworm-slim` (global default) / `mcr.microsoft.com/devcontainers/base:bookworm` (seeds) | OCI reference. Glibc Linux only. Whitespace/control chars rejected. |
-| `devcontainer_config` | JSON string | `NULL` | Subset of `devcontainer.json`. Max 64 KB. Validated at write time. |
-| `mise_config` | JSON string | `NULL` | `{"tools":{…}}` map. |
+| `devcontainer_config` | JSON string | `NULL` | Subset of `devcontainer.json`. Max 100 KB. Validated at write time. |
+| `mise_config` | JSON string | `NULL` | `{"tools":{…}}` map. Max 10 KB. |
 | `cached_image` | string | `NULL` | Populated by the provisioner on success: `crewship-cache:{hash[:12]}`. |
 | `config_hash` | string | `NULL` | SHA-256 of `(runtime_image, devcontainer_config, mise_config)`. |
 
@@ -154,7 +154,8 @@ Enforced in `internal/api/crews.go` write paths and `devcontainer.Config.Validat
 - `postCreateCommand`: ≤ 4096 chars per entry, no null bytes.
 - `containerEnv`: ≤ 32 keys, each key `[A-Z_][A-Z0-9_]*`.
 - `mise_config`: well-formed JSON, `tools` map only, ≤ 32 entries.
-- Total `devcontainer_config` blob ≤ 64 KB.
+- Total `devcontainer_config` blob ≤ 100 KB.
+- Total `mise_config` blob ≤ 10 KB.
 
 ## Code of record
 

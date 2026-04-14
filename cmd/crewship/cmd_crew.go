@@ -43,9 +43,12 @@ var crewListCmd = &cobra.Command{
 			MemoryMB     int     `json:"container_memory_mb"`
 			CPUs         float64 `json:"container_cpus"`
 			NetworkMode  string  `json:"network_mode"`
-			AgentCount   int     `json:"_count_agents"`
 			RuntimeImage *string `json:"runtime_image"`
 			CachedImage  *string `json:"cached_image"`
+			Count        struct {
+				Agents  int `json:"agents"`
+				Members int `json:"members"`
+			} `json:"_count"`
 		}
 		if err := cli.ReadJSON(resp, &crews); err != nil {
 			return err
@@ -66,7 +69,7 @@ var crewListCmd = &cobra.Command{
 			}
 			row := []string{
 				c.Slug, c.Name,
-				fmt.Sprintf("%d", c.AgentCount),
+				fmt.Sprintf("%d", c.Count.Agents),
 				nm,
 				fmt.Sprintf("%dMB", c.MemoryMB),
 				fmt.Sprintf("%.1f", c.CPUs),

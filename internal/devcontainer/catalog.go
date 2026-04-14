@@ -144,6 +144,7 @@ func FilterCatalog(entries []CatalogEntry, query string) []CatalogEntry {
 	for _, e := range entries {
 		if strings.Contains(strings.ToLower(e.Name), q) ||
 			strings.Contains(strings.ToLower(e.Description), q) ||
+			strings.Contains(strings.ToLower(e.Ref), q) ||
 			strings.Contains(strings.ToLower(e.Category), q) {
 			results = append(results, e)
 		}

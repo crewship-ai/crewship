@@ -59,6 +59,7 @@ type ChatInfo struct {
 	RuntimeImage       string
 	CachedImage        string
 	DevcontainerConfig string
+	MiseConfig         string
 	ContainerEnv       map[string]string
 	// CachedRequirements are aggregated feature requirements (privileged,
 	// capAdd, mounts, securityOpt) persisted at provision time and applied
@@ -132,6 +133,26 @@ func truncateID(id string, n int) string {
 	return id[:n]
 }
 
+// devcontainerNeedsProvision reports whether the given devcontainer/mise
+// configuration requires a provisioning pass before the crew can start.
+// Configs that only set container metadata (e.g. containerEnv) are no-ops at
+// provision time and the crew can launch directly from runtime_image.
+func devcontainerNeedsProvision(cfgJSON, miseJSON string) bool {
+	if strings.TrimSpace(miseJSON) != "" {
+		return true
+	}
+	if strings.TrimSpace(cfgJSON) == "" {
+		return false
+	}
+	cfg, err := devcontainer.ParseBytes([]byte(cfgJSON))
+	if err != nil {
+		// Unparseable config can't be provisioned either — don't block
+		// the crew on something we can't act on.
+		return false
+	}
+	return len(cfg.Features) > 0 || cfg.PostCreateCommand != nil
+}
+
 func generateMsgID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
@@ -145,6 +166,40 @@ func generateMsgID() string {
 // agent's response back to the client.
 func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent)) error {
 	b.logger.Debug("HandleChatMessage", "chat_id", chatID, "content_len", len(content))
+
+	// Resolve chat BEFORE persisting user message so we can fail-fast on
+	// config errors (e.g. unprovisioned devcontainer) without polluting
+	// conversation history.
+	b.logger.Debug("resolving chat", "chat_id", chatID)
+	info, err := b.resolver.ResolveChat(ctx, chatID)
+	if err != nil {
+		b.logger.Debug("ResolveChat failed", "error", err)
+		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve chat"})
+		return fmt.Errorf("resolve chat: %w", err)
+	}
+	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
+
+	// For COORDINATOR agents (no crew), use a synthetic crew identity for container management
+	containerKey := info.CrewID
+	if info.AgentRole == "COORDINATOR" && info.CrewID == "" {
+		containerKey = "coordinator-" + info.WorkspaceID
+		info.CrewID = containerKey
+		info.CrewSlug = "coordinator"
+	}
+
+	// Fail-fast: if the crew has a devcontainer config that actually needs
+	// provisioning (features / postCreateCommand / mise) but no cached image
+	// has been built, block start with a helpful message. Configs that are
+	// no-ops at provision time (e.g. only containerEnv) launch directly
+	// from runtime_image.
+	if info.DevcontainerConfig != "" && info.CachedImage == "" && devcontainerNeedsProvision(info.DevcontainerConfig, info.MiseConfig) {
+		msg := fmt.Sprintf("Crew %q has devcontainer configuration but no provisioned image. Run `crewship crew provision %s` first.", info.CrewSlug, info.CrewSlug)
+		b.logger.Error("agent start blocked: devcontainer not provisioned",
+			"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
+		streamFn(ws.ChatEvent{Type: "error", Content: msg})
+		return fmt.Errorf("%s", msg)
+	}
+
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),
 		Role:      conversation.RoleUser,
@@ -163,23 +218,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	if err := b.resolver.UpdateChatTitle(ctx, chatID, title); err != nil {
 		b.logger.Debug("auto-title failed (non-fatal)", "error", err)
-	}
-
-	b.logger.Debug("resolving chat", "chat_id", chatID)
-	info, err := b.resolver.ResolveChat(ctx, chatID)
-	if err != nil {
-		b.logger.Debug("ResolveChat failed", "error", err)
-		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve chat"})
-		return fmt.Errorf("resolve chat: %w", err)
-	}
-	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
-
-	// For COORDINATOR agents (no crew), use a synthetic crew identity for container management
-	containerKey := info.CrewID
-	if info.AgentRole == "COORDINATOR" && info.CrewID == "" {
-		containerKey = "coordinator-" + info.WorkspaceID
-		info.CrewID = containerKey
-		info.CrewSlug = "coordinator"
 	}
 
 	// Look up cached container ID for this crew (avoids status noise on repeat messages)
@@ -217,20 +255,21 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		cpuVal = b.cfg.DefaultCPUs
 	}
 
-	// Auto-provision warning: if crew has devcontainer config but no cached
-	// image, the agent will start with the base image. The user should run
-	// `crewship crew provision <slug>` to build the custom image first.
-	if info.DevcontainerConfig != "" && info.CachedImage == "" {
-		msg := fmt.Sprintf("Crew %q has devcontainer configuration but no provisioned image. Run `crewship crew provision %s` first.", info.CrewSlug, info.CrewSlug)
-		b.logger.Error("agent start blocked: devcontainer not provisioned",
-			"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
-		streamFn(ws.ChatEvent{Type: "error", Content: msg})
-		return fmt.Errorf("%s", msg)
-	}
-
 	if containerID == "" && b.container != nil {
 		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
+		// Merge feature-level ContainerEnv (from CachedRequirements) with
+		// root-level ContainerEnv. Root wins on conflict so user intent in
+		// devcontainer.json overrides feature defaults.
+		mergedEnv := make(map[string]string)
+		if info.CachedRequirements != nil {
+			for k, v := range info.CachedRequirements.ContainerEnv {
+				mergedEnv[k] = v
+			}
+		}
+		for k, v := range info.ContainerEnv {
+			mergedEnv[k] = v
+		}
 		cc := provider.CrewConfig{
 			ID:             info.CrewID,
 			Slug:           info.CrewSlug,
@@ -241,7 +280,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			NetworkMode:    info.NetworkMode,
 			AllowedDomains: info.AllowedDomains,
 			TTLHours:       info.TTLHours,
-			ContainerEnv:   info.ContainerEnv,
+			ContainerEnv:   mergedEnv,
 		}
 		if info.CachedRequirements != nil {
 			cc.Privileged = info.CachedRequirements.Privileged

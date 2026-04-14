@@ -106,6 +106,16 @@ iptables -P INPUT DROP
 iptables -P FORWARD DROP
 iptables -P OUTPUT DROP
 
+# 8b. Block all IPv6 traffic — no v6 allowlist implemented.
+# Containers should not have outbound IPv6 by default; this is belt+suspenders.
+# Use `2>/dev/null || true` so the script doesn't fail on hosts without IPv6
+# kernel support (Alpine / minimal Debian may ship without the v6 module loaded).
+ip6tables -P INPUT DROP 2>/dev/null || true
+ip6tables -P FORWARD DROP 2>/dev/null || true
+ip6tables -P OUTPUT DROP 2>/dev/null || true
+ip6tables -A INPUT -i lo -j ACCEPT 2>/dev/null || true
+ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+
 # 9. Allow established connections
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT

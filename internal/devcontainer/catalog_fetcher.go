@@ -68,9 +68,10 @@ func NewCatalogFetcher(cacheDir string, logger *slog.Logger) *CatalogFetcher {
 func (f *CatalogFetcher) GetCatalog(ctx context.Context) []CatalogEntry {
 	f.mu.RLock()
 	if f.memCache != nil && time.Since(f.memCache.fetchedAt) < catalogMemTTL {
-		entries := f.memCache.entries
+		out := make([]CatalogEntry, len(f.memCache.entries))
+		copy(out, f.memCache.entries)
 		f.mu.RUnlock()
-		return entries
+		return out
 	}
 	f.mu.RUnlock()
 
@@ -78,9 +79,14 @@ func (f *CatalogFetcher) GetCatalog(ctx context.Context) []CatalogEntry {
 	if entries, fetchedAt, err := f.readDiskCache(); err == nil {
 		if time.Since(fetchedAt) < catalogDiskTTL {
 			f.mu.Lock()
-			f.memCache = &catalogMemCache{entries: entries, fetchedAt: fetchedAt}
+			// Store a copy in memCache so later callers also get fresh copies.
+			cached := make([]CatalogEntry, len(entries))
+			copy(cached, entries)
+			f.memCache = &catalogMemCache{entries: cached, fetchedAt: fetchedAt}
 			f.mu.Unlock()
-			return entries
+			out := make([]CatalogEntry, len(entries))
+			copy(out, entries)
+			return out
 		}
 	}
 

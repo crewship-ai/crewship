@@ -46,6 +46,7 @@ func init() {
 	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
 	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
 	seedCmd.Flags().Int("smoke-timeout", 60, "Per-agent timeout (seconds) for smoke test")
+	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
@@ -55,6 +56,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	password, _ := cmd.Flags().GetString("password")
 	smokeTest, _ := cmd.Flags().GetBool("smoke-test")
 	smokeTimeout, _ := cmd.Flags().GetInt("smoke-timeout")
+	provisionTimeoutSec, _ := cmd.Flags().GetInt("provision-timeout")
 	if password == "" {
 		password = devDefaultPassword
 		fmt.Fprintf(os.Stderr, "  Using dev default admin password: %s\n", password)
@@ -97,7 +99,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	provisionCrews(ctx, client, crewIDs)
+	provisionCrews(ctx, client, crewIDs, time.Duration(provisionTimeoutSec)*time.Second)
 
 	// ── Phase 3: Agents ──
 	if err := ctx.Err(); err != nil {
@@ -171,7 +173,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 // devcontainer_config and waits for all to finish (in parallel). Errors are
 // reported but do not abort the whole seed — a partially-provisioned demo env
 // is still better than bailing out before agents/skills/issues are created.
-func provisionCrews(ctx context.Context, client *cli.Client, crewIDs map[string]string) {
+func provisionCrews(ctx context.Context, client *cli.Client, crewIDs map[string]string, timeout time.Duration) {
 	// Map slug → has devcontainer config, from static seed data. If the seed
 	// data evolves to skip devcontainers we silently skip those crews.
 	hasDevcontainer := map[string]bool{}
@@ -204,7 +206,7 @@ func provisionCrews(ctx context.Context, client *cli.Client, crewIDs map[string]
 		go func(slug, id string) {
 			defer wg.Done()
 			fmt.Fprintf(os.Stderr, "  Provisioning %s...\n", slug)
-			if err := provisionCrewAndWait(ctx, client, id, 5*time.Minute); err != nil {
+			if err := provisionCrewAndWait(ctx, client, id, timeout); err != nil {
 				fmt.Fprintf(os.Stderr, "  X %s: %v\n", slug, err)
 				errCh <- fmt.Errorf("%s: %w", slug, err)
 				return

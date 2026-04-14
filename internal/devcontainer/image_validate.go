@@ -46,7 +46,7 @@ func ValidateImageExists(ctx context.Context, ref string) error {
 		if isAuthError(err) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("validate image %q: %w", ref, err)
 	}
 	return nil
 }
