@@ -1,0 +1,296 @@
+package devcontainer
+
+import (
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
+	dockernetwork "github.com/docker/docker/api/types/network"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+)
+
+// CommitClient is the subset of the Docker API needed for image provisioning.
+// A real *client.Client satisfies this interface.
+type CommitClient interface {
+	ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *dockernetwork.NetworkingConfig, platform *ocispec.Platform, containerName string) (container.CreateResponse, error)
+	ContainerStart(ctx context.Context, containerID string, options container.StartOptions) error
+	ContainerStop(ctx context.Context, containerID string, options container.StopOptions) error
+	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
+	ContainerCommit(ctx context.Context, containerID string, options container.CommitOptions) (container.CommitResponse, error)
+	ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error)
+}
+
+// Provisioner orchestrates the full devcontainer provisioning flow: create a
+// temporary container from the base image, install features, run post-create
+// commands, and commit the result as a cached image.
+type Provisioner struct {
+	docker     CommitClient
+	installer  *Installer
+	downloader *FeatureDownloader
+	logger     *slog.Logger
+}
+
+// ProvisionResult contains the output of a successful provisioning run.
+type ProvisionResult struct {
+	CachedImage string // e.g. "crewship-cache:a1b2c3d4e5f6"
+	ConfigHash  string // full SHA-256 hex digest
+}
+
+// NewProvisioner creates a Provisioner with all required dependencies.
+func NewProvisioner(docker CommitClient, installer *Installer, downloader *FeatureDownloader, logger *slog.Logger) *Provisioner {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Provisioner{
+		docker:     docker,
+		installer:  installer,
+		downloader: downloader,
+		logger:     logger,
+	}
+}
+
+// cacheImageTag returns the Docker image tag for a given config hash.
+func cacheImageTag(configHash string) string {
+	short := configHash
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	return "crewship-cache:" + short
+}
+
+// configHash computes a deterministic SHA-256 hash from the base image,
+// devcontainer config, and mise config.
+func configHash(baseImage string, cfg *Config, miseConfig string) string {
+	h := sha256.New()
+	h.Write([]byte(baseImage))
+	h.Write([]byte("|"))
+	h.Write([]byte(cfg.Hash()))
+	h.Write([]byte("|"))
+	h.Write([]byte(miseConfig))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// IsCached reports whether a cached image for the given config hash exists.
+func (p *Provisioner) IsCached(ctx context.Context, hash string) (bool, error) {
+	tag := cacheImageTag(hash)
+	return p.imageExists(ctx, tag)
+}
+
+// imageExists checks whether a locally available image matches the given
+// reference (e.g. "crewship-cache:a1b2c3d4e5f6").
+func (p *Provisioner) imageExists(ctx context.Context, ref string) (bool, error) {
+	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return false, fmt.Errorf("listing images: %w", err)
+	}
+	for _, img := range imgs {
+		for _, tag := range img.RepoTags {
+			if tag == ref {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// Provision builds a cached image by installing devcontainer features and
+// running post-create commands in a temporary container. If a cached image
+// already exists, it returns immediately.
+func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Config, miseConfig string) (*ProvisionResult, error) {
+	hash := configHash(baseImage, cfg, miseConfig)
+	tag := cacheImageTag(hash)
+
+	// 1. Check cache.
+	exists, err := p.imageExists(ctx, tag)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		p.logger.Info("using cached image", "tag", tag)
+		return &ProvisionResult{CachedImage: tag, ConfigHash: hash}, nil
+	}
+
+	p.logger.Info("provisioning devcontainer image", "base", baseImage, "tag", tag)
+
+	// 2. Create temporary container.
+	containerID, err := p.createTempContainer(ctx, baseImage)
+	if err != nil {
+		return nil, fmt.Errorf("creating temp container: %w", err)
+	}
+
+	// Ensure cleanup on any exit path.
+	defer func() {
+		cleanupCtx := context.Background()
+		_ = p.docker.ContainerStop(cleanupCtx, containerID, container.StopOptions{})
+		_ = p.docker.ContainerRemove(cleanupCtx, containerID, container.RemoveOptions{Force: true})
+	}()
+
+	// 3. Start the container.
+	if err := p.docker.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+		return nil, fmt.Errorf("starting temp container: %w", err)
+	}
+
+	// 4. Download and sort features.
+	if err := p.installFeatures(ctx, containerID, cfg); err != nil {
+		return nil, err
+	}
+
+	// 5. Handle mise configuration.
+	// TODO: implement mise provisioning in a separate mise.go file.
+	if miseConfig != "" {
+		p.logger.Debug("mise config provided but mise provisioning not yet implemented")
+	}
+
+	// 6. Run postCreateCommand as agent user (1001:1001).
+	if err := p.runPostCreateCommands(ctx, containerID, cfg); err != nil {
+		return nil, err
+	}
+
+	// 7. Write containerEnv to /etc/environment.
+	if err := p.writeContainerEnv(ctx, containerID, cfg); err != nil {
+		return nil, err
+	}
+
+	// 8. Clean up caches inside the container.
+	if err := p.cleanupCaches(ctx, containerID); err != nil {
+		p.logger.Warn("cache cleanup failed", "error", err)
+	}
+
+	// 9. Commit the container as a cached image.
+	_, commitErr := p.docker.ContainerCommit(ctx, containerID, container.CommitOptions{
+		Reference: tag,
+	})
+	if commitErr != nil {
+		return nil, fmt.Errorf("committing container: %w", commitErr)
+	}
+
+	p.logger.Info("provisioned cached image", "tag", tag)
+	return &ProvisionResult{CachedImage: tag, ConfigHash: hash}, nil
+}
+
+// createTempContainer creates a temporary container from the base image,
+// configured for provisioning (root user, writable filesystem).
+func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string) (string, error) {
+	resp, err := p.docker.ContainerCreate(ctx,
+		&container.Config{
+			Image: baseImage,
+			Cmd:   []string{"sleep", "infinity"},
+			User:  "0:0",
+		},
+		&container.HostConfig{
+			Tmpfs: map[string]string{
+				"/tmp": "exec",
+			},
+		},
+		nil, // networkingConfig
+		nil, // platform
+		"",  // no name (Docker assigns one)
+	)
+	if err != nil {
+		return "", err
+	}
+	return resp.ID, nil
+}
+
+// installFeatures downloads, sorts, and installs all features from the config.
+func (p *Provisioner) installFeatures(ctx context.Context, containerID string, cfg *Config) error {
+	if len(cfg.Features) == 0 {
+		return nil
+	}
+
+	// Download all features.
+	var resolved []*ResolvedFeature
+	optionsByRef := make(map[string]map[string]any, len(cfg.Features))
+	for ref, opts := range cfg.Features {
+		feature, err := p.downloader.Download(ctx, ref, opts)
+		if err != nil {
+			return fmt.Errorf("downloading feature %s: %w", ref, err)
+		}
+		resolved = append(resolved, feature)
+		optionsByRef[ref] = opts
+	}
+
+	// Sort by dependency order.
+	sorted := SortFeatures(resolved)
+
+	// Install each feature.
+	for _, feature := range sorted {
+		opts := optionsByRef[feature.Ref]
+		if err := p.installer.InstallFeature(ctx, containerID, feature, opts); err != nil {
+			return fmt.Errorf("installing feature %s: %w", feature.Metadata.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// runPostCreateCommands executes postCreateCommand entries as the agent user.
+func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID string, cfg *Config) error {
+	cmds := cfg.NormalizedPostCreateCommands()
+	if len(cmds) == 0 {
+		return nil
+	}
+
+	for _, cmd := range cmds {
+		output, exitCode, err := p.installer.execInContainer(ctx, containerID,
+			[]string{"bash", "-c", cmd},
+			[]string{"USER=agent", "HOME=/home/agent"},
+		)
+		if err != nil {
+			return fmt.Errorf("postCreateCommand %q: %w", cmd, err)
+		}
+		if output != "" {
+			p.logger.Debug("postCreateCommand output", "cmd", cmd, "output", output)
+		}
+		if exitCode != 0 {
+			return fmt.Errorf("postCreateCommand %q exited with code %d: %s", cmd, exitCode, output)
+		}
+	}
+
+	return nil
+}
+
+// writeContainerEnv writes containerEnv entries to /etc/environment so they
+// are available to all login shells.
+func (p *Provisioner) writeContainerEnv(ctx context.Context, containerID string, cfg *Config) error {
+	if len(cfg.ContainerEnv) == 0 {
+		return nil
+	}
+
+	// Build the content for /etc/environment (KEY=VALUE lines).
+	var lines []string
+	for key, val := range cfg.ContainerEnv {
+		lines = append(lines, key+"="+val)
+	}
+	content := strings.Join(lines, "\n") + "\n"
+
+	// Append to /etc/environment using tee (preserves existing content).
+	cmd := []string{"bash", "-c", fmt.Sprintf("printf '%%s' %q >> /etc/environment", content)}
+	_, exitCode, err := p.installer.execInContainer(ctx, containerID, cmd, nil)
+	if err != nil {
+		return fmt.Errorf("writing containerEnv: %w", err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("writing containerEnv: exit code %d", exitCode)
+	}
+
+	return nil
+}
+
+// cleanupCaches removes package manager caches and temp files to reduce the
+// committed image size.
+func (p *Provisioner) cleanupCaches(ctx context.Context, containerID string) error {
+	cmd := []string{"bash", "-c", "rm -rf /var/cache/apt /var/lib/apt/lists /tmp/*"}
+	_, exitCode, err := p.installer.execInContainer(ctx, containerID, cmd, nil)
+	if err != nil {
+		return err
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("cache cleanup exited with code %d", exitCode)
+	}
+	return nil
+}
