@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -262,6 +263,21 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 		}
 		opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath))
+
+		// Dynamic catalog fetchers (devcontainer features + mise runtimes).
+		// They default to cached / embedded data; a background goroutine
+		// refreshes them at startup and every 6h.
+		catalogCacheDir := ""
+		if cfg.Storage.BasePath != "" {
+			catalogCacheDir = cfg.Storage.BasePath + "/catalog-cache"
+		}
+		catalogFetcher := devcontainer.NewCatalogFetcher(catalogCacheDir, logger)
+		runtimeFetcher := devcontainer.NewRuntimeFetcher(catalogCacheDir, logger)
+		opts = append(opts, goapi.WithCatalogFetcher(catalogFetcher))
+		opts = append(opts, goapi.WithRuntimeFetcher(runtimeFetcher))
+
+		// Kick off initial + periodic refresh without blocking startup.
+		startCatalogRefresh(catalogFetcher, runtimeFetcher, logger)
 
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
 		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))
@@ -571,4 +587,32 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		AND id NOT IN (SELECT DISTINCT agent_id FROM agent_runs WHERE status = 'RUNNING')`, now); err != nil {
 		s.logger.Error("reset agent statuses after recovery", "error", err)
 	}
+}
+
+// startCatalogRefresh launches background tasks to refresh the devcontainer
+// feature and mise runtime catalogs. The initial refresh is fired immediately
+// (but decoupled from startup with a 60s timeout); subsequent refreshes run
+// every 6h. Failures are logged, not fatal — the fetchers fall back to the
+// disk cache / embedded data.
+func startCatalogRefresh(catalog *devcontainer.CatalogFetcher, runtimes *devcontainer.RuntimeFetcher, logger *slog.Logger) {
+	refresh := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := catalog.RefreshCatalog(ctx); err != nil {
+			logger.Warn("devcontainer catalog refresh failed, using cached/fallback", "error", err)
+		}
+		if err := runtimes.RefreshRuntimes(ctx); err != nil {
+			logger.Warn("mise runtime catalog refresh failed, using cached/fallback", "error", err)
+		}
+	}
+
+	go refresh()
+
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			refresh()
+		}
+	}()
 }

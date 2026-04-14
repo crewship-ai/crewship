@@ -193,7 +193,7 @@ export function CrewRuntimeConfig({
           )}
           {miseConfig && (
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Mise Config</Label>
+              <Label className="text-xs text-muted-foreground">Language Runtimes Config</Label>
               <pre className="rounded-lg border bg-muted/50 p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
                 {miseConfig}
               </pre>

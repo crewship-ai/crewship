@@ -11,23 +11,60 @@ import (
 // ProvisioningHandler provides endpoints for the devcontainer feature catalog
 // and crew provisioning status.
 type ProvisioningHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db             *sql.DB
+	logger         *slog.Logger
+	catalogFetcher *devcontainer.CatalogFetcher
+	runtimeFetcher *devcontainer.RuntimeFetcher
 }
 
 // NewProvisioningHandler creates a ProvisioningHandler with the given database and logger.
-func NewProvisioningHandler(db *sql.DB, logger *slog.Logger) *ProvisioningHandler {
-	return &ProvisioningHandler{db: db, logger: logger}
+// Fetchers may be nil; in that case the handler falls back to the embedded catalogs.
+func NewProvisioningHandler(
+	db *sql.DB,
+	logger *slog.Logger,
+	catalogFetcher *devcontainer.CatalogFetcher,
+	runtimeFetcher *devcontainer.RuntimeFetcher,
+) *ProvisioningHandler {
+	return &ProvisioningHandler{
+		db:             db,
+		logger:         logger,
+		catalogFetcher: catalogFetcher,
+		runtimeFetcher: runtimeFetcher,
+	}
 }
 
-// CatalogList returns the static devcontainer feature catalog, optionally filtered
-// by a search query parameter.
+// CatalogList returns the devcontainer feature catalog, optionally filtered
+// by a search query parameter. Data comes from the dynamic fetcher when
+// available; otherwise from the embedded fallback.
 func (h *ProvisioningHandler) CatalogList(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
-	entries := devcontainer.SearchCatalog(search)
+	var all []devcontainer.CatalogEntry
+	if h.catalogFetcher != nil {
+		all = h.catalogFetcher.GetCatalog(r.Context())
+	} else {
+		all = append(all, devcontainer.FallbackCatalog...)
+	}
+	entries := devcontainer.FilterCatalog(all, search)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"features": entries,
+	})
+}
+
+// RuntimeCatalogList returns the mise runtime/tool catalog, optionally
+// filtered by a search query parameter.
+func (h *ProvisioningHandler) RuntimeCatalogList(w http.ResponseWriter, r *http.Request) {
+	search := r.URL.Query().Get("search")
+	var all []devcontainer.RuntimeCatalogEntry
+	if h.runtimeFetcher != nil {
+		all = h.runtimeFetcher.GetRuntimes(r.Context())
+	} else {
+		all = append(all, devcontainer.FallbackRuntimeCatalog...)
+	}
+	entries := devcontainer.FilterRuntimes(all, search)
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtimes": entries,
 	})
 }
 

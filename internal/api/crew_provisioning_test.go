@@ -13,7 +13,7 @@ func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
 	t.Helper()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewProvisioningHandler(db, logger)
+	return NewProvisioningHandler(db, logger, nil, nil)
 }
 
 func TestCatalogList(t *testing.T) {
@@ -88,7 +88,7 @@ func TestCatalogListSearch(t *testing.T) {
 func TestProvisionStatus_NoCrew(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger)
+	h := NewProvisioningHandler(db, logger, nil, nil)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)

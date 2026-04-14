@@ -707,7 +707,7 @@ export default function NewCrewPage() {
                 </button>
               </CollapsibleTrigger>
             }
-            description="Configure devcontainer features, mise runtimes, and base image for the crew container."
+            description="Configure devcontainer features, language runtimes, and base image for the crew container."
           >
             <CollapsibleContent>
               <div className="px-6 pb-6">

@@ -9,6 +9,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -57,6 +58,8 @@ type Router struct {
 	license              *license.License
 	agentHandler         *AgentHandler
 	storagePath          string // base path for crew file storage
+	catalogFetcher       *devcontainer.CatalogFetcher
+	runtimeFetcher       *devcontainer.RuntimeFetcher
 	authRateLimitedMux http.Handler // mux wrapped with auth rate limiter
 	apiRateLimitedMux  http.Handler // mux wrapped with general API rate limiter
 }
@@ -190,6 +193,20 @@ func WithGoogleOAuth(clientID, secret, baseURL string) RouterOption {
 func WithStoragePath(path string) RouterOption {
 	return func(r *Router) {
 		r.storagePath = path
+	}
+}
+
+// WithCatalogFetcher wires the dynamic devcontainer feature catalog fetcher.
+func WithCatalogFetcher(f *devcontainer.CatalogFetcher) RouterOption {
+	return func(r *Router) {
+		r.catalogFetcher = f
+	}
+}
+
+// WithRuntimeFetcher wires the dynamic mise runtime catalog fetcher.
+func WithRuntimeFetcher(f *devcontainer.RuntimeFetcher) RouterOption {
+	return func(r *Router) {
+		r.runtimeFetcher = f
 	}
 }
 
@@ -627,8 +644,9 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
 	// Devcontainer feature catalog (auth required, no workspace context needed)
-	provisioning := NewProvisioningHandler(r.db, r.logger)
+	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher)
 	r.mux.Handle("GET /api/v1/features/catalog", authed(http.HandlerFunc(provisioning.CatalogList)))
+	r.mux.Handle("GET /api/v1/runtimes/catalog", authed(http.HandlerFunc(provisioning.RuntimeCatalogList)))
 
 	// Crew provisioning (require workspace context)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))

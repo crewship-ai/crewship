@@ -14,9 +14,13 @@ type CatalogEntry struct {
 	SizeHint    string `json:"size_hint"` // approximate installed size
 }
 
-// Catalog is the built-in list of popular devcontainer features. All entries
+// FallbackCatalog is the built-in list of popular devcontainer features. All entries
 // reference the official devcontainers feature collection on ghcr.io.
-var Catalog = []CatalogEntry{
+//
+// This catalog is used ONLY as a fallback when the dynamic upstream fetch
+// (see catalog_fetcher.go) fails or is unavailable. For live data, use
+// CatalogFetcher.GetCatalog.
+var FallbackCatalog = []CatalogEntry{
 	{
 		Ref:         "ghcr.io/devcontainers/features/common-utils:2",
 		Name:        "Common Utilities",
@@ -118,16 +122,26 @@ var Catalog = []CatalogEntry{
 // SearchCatalog returns catalog entries whose Name, Description, or Category
 // contain the query string (case-insensitive). An empty query returns all
 // entries.
+//
+// Deprecated: prefer CatalogFetcher.GetCatalog combined with FilterCatalog.
+// This function still operates on the embedded fallback catalog.
 func SearchCatalog(query string) []CatalogEntry {
+	return FilterCatalog(FallbackCatalog, query)
+}
+
+// FilterCatalog returns entries whose Name, Description, or Category contain
+// the query string (case-insensitive). An empty query returns a copy of the
+// full list.
+func FilterCatalog(entries []CatalogEntry, query string) []CatalogEntry {
 	if query == "" {
-		result := make([]CatalogEntry, len(Catalog))
-		copy(result, Catalog)
+		result := make([]CatalogEntry, len(entries))
+		copy(result, entries)
 		return result
 	}
 
 	q := strings.ToLower(strings.TrimSpace(query))
 	var results []CatalogEntry
-	for _, e := range Catalog {
+	for _, e := range entries {
 		if strings.Contains(strings.ToLower(e.Name), q) ||
 			strings.Contains(strings.ToLower(e.Description), q) ||
 			strings.Contains(strings.ToLower(e.Category), q) {

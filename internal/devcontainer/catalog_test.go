@@ -6,7 +6,7 @@ import (
 )
 
 func TestCatalogRefsAreValid(t *testing.T) {
-	for _, entry := range Catalog {
+	for _, entry := range FallbackCatalog {
 		_, _, _, err := ParseFeatureRef(entry.Ref)
 		if err != nil {
 			t.Errorf("catalog entry %q has invalid ref %q: %v", entry.Name, entry.Ref, err)
@@ -15,7 +15,7 @@ func TestCatalogRefsAreValid(t *testing.T) {
 }
 
 func TestCatalogEntriesHaveRequiredFields(t *testing.T) {
-	for _, entry := range Catalog {
+	for _, entry := range FallbackCatalog {
 		if entry.Name == "" {
 			t.Errorf("catalog entry with ref %q has empty Name", entry.Ref)
 		}
@@ -41,8 +41,8 @@ func TestCatalogEntriesHaveRequiredFields(t *testing.T) {
 }
 
 func TestCatalogHasMinimumEntries(t *testing.T) {
-	if len(Catalog) < 12 {
-		t.Errorf("expected at least 12 catalog entries, got %d", len(Catalog))
+	if len(FallbackCatalog) < 12 {
+		t.Errorf("expected at least 12 catalog entries, got %d", len(FallbackCatalog))
 	}
 }
 
@@ -93,7 +93,7 @@ func TestSearchCatalogNoMatch(t *testing.T) {
 
 func TestSearchCatalogEmptyQuery(t *testing.T) {
 	results := SearchCatalog("")
-	if len(results) != len(Catalog) {
-		t.Errorf("empty query should return all entries: got %d, want %d", len(results), len(Catalog))
+	if len(results) != len(FallbackCatalog) {
+		t.Errorf("empty query should return all entries: got %d, want %d", len(results), len(FallbackCatalog))
 	}
 }
