@@ -150,7 +150,14 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return nil, fmt.Errorf("ensure agent user: %w", err)
 	}
 
-	// 5. Download and sort features.
+	// 5. Install Claude Code CLI if missing (required by CLAUDE_CODE adapter).
+	// Bake it into the cached image so all agents in this crew can use it.
+	if err := EnsureClaudeCode(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
+		p.logger.Warn("failed to install Claude Code CLI", "error", err)
+		// Don't fail provisioning — user may use a different CLI adapter.
+	}
+
+	// 6. Download and sort features.
 	if err := p.installFeatures(ctx, containerID, cfg); err != nil {
 		return nil, err
 	}
