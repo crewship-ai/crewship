@@ -2,7 +2,6 @@ package devcontainer
 
 import (
 	"archive/tar"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -167,7 +166,11 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 		return fmt.Errorf("image %q has no layers", ref)
 	}
 
-	rc, err := layers[0].Compressed()
+	// Devcontainer features are OCI artifacts with media type
+	// "application/vnd.devcontainers.layer.v1+tar" (uncompressed tar).
+	// Use Uncompressed() which handles both gzipped image layers and
+	// raw-tar artifact layers transparently.
+	rc, err := layers[0].Uncompressed()
 	if err != nil {
 		return fmt.Errorf("reading layer for %q: %w", ref, err)
 	}
@@ -208,17 +211,12 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 	return nil
 }
 
-// extractTarGz reads a gzip-compressed tar stream and writes entries into
-// destDir. It protects against path traversal by rejecting entries that
-// resolve outside destDir.
+// extractTarGz reads a tar stream (already uncompressed — go-containerregistry's
+// Uncompressed() handles any gzip layer transparently, and devcontainer feature
+// artifacts use raw tar layers) and writes entries into destDir. It protects
+// against path traversal by rejecting entries that resolve outside destDir.
 func extractTarGz(r io.Reader, destDir string) error {
-	gz, err := gzip.NewReader(r)
-	if err != nil {
-		return fmt.Errorf("gzip reader: %w", err)
-	}
-	defer gz.Close()
-
-	tr := tar.NewReader(gz)
+	tr := tar.NewReader(r)
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {

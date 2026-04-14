@@ -3,7 +3,6 @@ package devcontainer
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -299,8 +298,7 @@ func TestExtractTarGz_Normal(t *testing.T) {
 
 	// Build a tar.gz with two normal files and a subdirectory.
 	var buf bytes.Buffer
-	gw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gw)
+	tw := tar.NewWriter(&buf)
 
 	// Add a directory entry.
 	if err := tw.WriteHeader(&tar.Header{
@@ -340,7 +338,6 @@ func TestExtractTarGz_Normal(t *testing.T) {
 	}
 
 	tw.Close()
-	gw.Close()
 
 	if err := extractTarGz(&buf, destDir); err != nil {
 		t.Fatalf("extractTarGz: %v", err)
@@ -370,8 +367,7 @@ func TestExtractTarGz_PathTraversal(t *testing.T) {
 
 	// Build a tar.gz with a path-traversal entry and a normal entry.
 	var buf bytes.Buffer
-	gw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gw)
+	tw := tar.NewWriter(&buf)
 
 	// Malicious entry: tries to escape destDir.
 	malicious := []byte("pwned")
@@ -415,7 +411,6 @@ func TestExtractTarGz_PathTraversal(t *testing.T) {
 	}
 
 	tw.Close()
-	gw.Close()
 
 	if err := extractTarGz(&buf, destDir); err != nil {
 		t.Fatalf("extractTarGz: %v", err)
@@ -441,8 +436,7 @@ func TestExtractTarGz_Subdirectories(t *testing.T) {
 
 	// Build a tar.gz with nested directories (no explicit dir entries — tests implicit mkdir).
 	var buf bytes.Buffer
-	gw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gw)
+	tw := tar.NewWriter(&buf)
 
 	content := []byte("deep file")
 	if err := tw.WriteHeader(&tar.Header{
@@ -458,7 +452,6 @@ func TestExtractTarGz_Subdirectories(t *testing.T) {
 	}
 
 	tw.Close()
-	gw.Close()
 
 	if err := extractTarGz(&buf, destDir); err != nil {
 		t.Fatalf("extractTarGz: %v", err)
