@@ -51,9 +51,16 @@ echo "OK: binaries present, Docker up, server reachable"
 
 # 1. Create crew
 step "Step 1: Create crew '$SLUG'"
-"$CREWSHIP" crew create --name "E2E Test" --slug "$SLUG" \
+CREATE_OUT=$("$CREWSHIP" crew create --name "E2E Test" --slug "$SLUG" \
     --description "CRE-123 E2E test" \
-    --server "$SERVER" 2>&1 | grep -q "created" || fail "crew create failed"
+    --server "$SERVER" 2>&1) || {
+    echo "$CREATE_OUT" >&2
+    fail "crew create failed (exit code non-zero)"
+}
+echo "$CREATE_OUT" | grep -q "created" || {
+    echo "$CREATE_OUT" >&2
+    fail "crew create did not report 'created'"
+}
 
 CREW_ID=$(sqlite3 "$DB" "SELECT id FROM crews WHERE slug = '$SLUG' AND deleted_at IS NULL")
 [ -n "$CREW_ID" ] || fail "crew not found in DB after create"

@@ -29,6 +29,7 @@ jobs:
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -75,16 +76,13 @@ jobs:
   govulncheck:
     name: Go Vuln Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      # web/embed.go stub required for go-analysis tools.
-      - name: Create embed stub
-        run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
 
       # Pin to a specific govulncheck version so CI runs are reproducible.
       # '@latest' would silently upgrade across breaking changes.
@@ -145,6 +143,7 @@ jobs:
   grype:
     name: Grype Source Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # SARIF upload to the GitHub Security tab requires write access to
     # security-events. Granted only to this job (least-privilege).
     permissions:
@@ -179,15 +178,13 @@ jobs:
   license-check:
     name: License Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Create embed stub
-        run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
 
       # Pin to a specific go-licenses version for reproducible CI runs.
       # Note: v2.x has a different CLI surface (different `check` / `csv`

@@ -1,0 +1,22 @@
+name: Setup Go + embed stub
+description: >
+  Installs Go with module cache and creates the `web/out/index.html` stub
+  required by `web/embed.go`'s `go:embed` directive. Every Go-touching job
+  needs both; consolidating avoids drift across workflows.
+
+inputs:
+  go-version:
+    description: Go version
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      with:
+        go-version: ${{ inputs.go-version }}
+
+    - shell: bash
+      run: |
+        mkdir -p web/out
+        [ -f web/out/index.html ] || echo '<!doctype html>' > web/out/index.html
