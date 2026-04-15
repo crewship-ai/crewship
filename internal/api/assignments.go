@@ -386,11 +386,13 @@ func (h *AssignmentHandler) runAssignment(
 	// advisory lock. Otherwise this execution would write agent
 	// state that the in-flight dump has already passed and therefore
 	// miss from the bundle.
-	if err := refuseIfBackupInProgress(ctx, h.db, body.WorkspaceID); err != nil {
+	guardRelease, guardErr := refuseIfBackupInProgress(ctx, h.db, body.WorkspaceID)
+	if guardErr != nil {
 		h.logger.Warn("assignment refused — backup in progress", "assignment_id", assignmentID, "workspace_id", body.WorkspaceID)
-		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", err.Error())
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", guardErr.Error())
 		return
 	}
+	defer guardRelease()
 
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
 		h.logger.Error("assignment execution failed", "error", err, "assignment_id", assignmentID)
