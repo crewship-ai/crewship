@@ -30,9 +30,10 @@ func debugReadBuildInfo() (string, bool) {
 
 // DefaultBackupsDir is the on-disk location the runner defaults to
 // when --output is not specified. Callers can override it via
-// CreateOptions.OutputDir.
+// CreateOptions.OutputDir. Uses the package-level default StorageOps
+// (LocalStorageOps unless swapped by tests via SetDefaultStorage).
 func DefaultBackupsDir() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := defaultStorage.Home()
 	if err != nil {
 		return "", fmt.Errorf("backup: resolve home dir: %w", err)
 	}
@@ -73,6 +74,11 @@ type CreateOptions struct {
 	CrewContainerName func(slug string) string
 	// DockerOps executes pause/unpause/CopyFrom against the daemon.
 	DockerOps DockerOps
+	// Storage overrides the file-system operations used for bundle
+	// output. Nil uses LocalStorageOps; tests can inject an in-memory
+	// or S3-backed implementation via package-level SetDefaultStorage
+	// or this field.
+	Storage StorageOps
 }
 
 // Validate returns an error if opts lack the fields required by its
@@ -134,6 +140,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
+	st := resolveStorage(opts.Storage)
 
 	// 1. Resolve targets.
 	var target *WorkspaceTarget
@@ -172,7 +179,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 			return nil, err
 		}
 	}
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
+	if err := st.MkdirAll(outDir, 0o700); err != nil {
 		return nil, fmt.Errorf("backup: ensure output dir: %w", err)
 	}
 	// Sweep stale .partial files older than one hour. A process that
@@ -185,12 +192,12 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	// workspace size. A multi-GB workspace therefore stays within
 	// reasonable RAM even on modest hosts.
 	now := time.Now().UTC()
-	payloadFile, err := os.CreateTemp("", "crewship-backup-payload-*.tar.zst")
+	payloadFile, err := st.CreateTemp("", "crewship-backup-payload-*.tar.zst")
 	if err != nil {
 		return nil, fmt.Errorf("backup: create payload temp: %w", err)
 	}
 	payloadPath := payloadFile.Name()
-	defer func() { _ = os.Remove(payloadPath) }()
+	defer func() { _ = st.Remove(payloadPath) }()
 
 	payloadWriter, err := NewTarZstWriter(payloadFile)
 	if err != nil {
@@ -250,14 +257,14 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	// we know its size and SHA-256 before writing the outer bundle.
 	// The sealed temp is streamed directly into the final .partial
 	// output in step 8 without loading it into memory.
-	sealedFile, err := os.CreateTemp("", "crewship-backup-sealed-*")
+	sealedFile, err := st.CreateTemp("", "crewship-backup-sealed-*")
 	if err != nil {
 		return nil, fmt.Errorf("backup: create sealed temp: %w", err)
 	}
 	sealedPath := sealedFile.Name()
-	defer func() { _ = os.Remove(sealedPath) }()
+	defer func() { _ = st.Remove(sealedPath) }()
 
-	rawPayload, err := os.Open(payloadPath)
+	rawPayload, err := st.Open(payloadPath)
 	if err != nil {
 		_ = sealedFile.Close()
 		return nil, fmt.Errorf("backup: reopen payload: %w", err)
@@ -314,14 +321,14 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	}
 	finalPath := filepath.Join(outDir, fname)
 	partialPath := finalPath + ".partial"
-	outFile, err := os.OpenFile(partialPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	outFile, err := st.Create(partialPath, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open partial: %w", err)
 	}
-	sealedIn, err := os.Open(sealedPath)
+	sealedIn, err := st.Open(sealedPath)
 	if err != nil {
 		_ = outFile.Close()
-		_ = os.Remove(partialPath)
+		_ = st.Remove(partialPath)
 		return nil, fmt.Errorf("backup: reopen sealed: %w", err)
 	}
 	err = WriteBundleStream(outFile, manifest, sealedIn, sealedSize)
@@ -330,16 +337,16 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		err = cerr
 	}
 	if err != nil {
-		_ = os.Remove(partialPath)
+		_ = st.Remove(partialPath)
 		return nil, err
 	}
-	info, err := os.Stat(partialPath)
+	info, err := st.Stat(partialPath)
 	if err != nil {
-		_ = os.Remove(partialPath)
+		_ = st.Remove(partialPath)
 		return nil, fmt.Errorf("backup: stat partial: %w", err)
 	}
-	if err := os.Rename(partialPath, finalPath); err != nil {
-		_ = os.Remove(partialPath)
+	if err := st.Rename(partialPath, finalPath); err != nil {
+		_ = st.Remove(partialPath)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
 	}
 
@@ -369,6 +376,10 @@ type RestoreOptions struct {
 	// messages (e.g. "docker phase skipped …"). The CLI wires this
 	// into stderr; the REST handler can log to slog.
 	Logger func(string)
+	// Storage overrides file-system operations used while reading the
+	// bundle. Nil uses LocalStorageOps (see CreateOptions.Storage for
+	// the rationale).
+	Storage StorageOps
 }
 
 // RestoreResult summarises what was restored.
@@ -398,8 +409,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 	if opts.Path == "" {
 		return nil, fmt.Errorf("backup: RestoreOptions.Path required")
 	}
+	st := resolveStorage(opts.Storage)
 
-	f, err := os.Open(opts.Path)
+	f, err := st.Open(opts.Path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open bundle: %w", err)
 	}
@@ -649,7 +661,7 @@ func firstWorkspaceID(dump *DBDump) string {
 // result is stable-ordered by CreatedAt descending so the newest
 // bundle is first (matches what most users want in the CLI output).
 func ListBackups(dir string) ([]ListEntry, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := defaultStorage.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -709,7 +721,7 @@ type ListEntry struct {
 // Inspect opens a bundle and returns its manifest without decrypting
 // the payload. Used by `crewship backup inspect` and ListBackups.
 func Inspect(path string) (*Manifest, error) {
-	f, err := os.Open(path)
+	f, err := defaultStorage.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
@@ -742,16 +754,15 @@ type VerifyResult struct {
 // stored bundle is still restorable without actually committing to a
 // restore against a test instance.
 func Verify(path string) (*VerifyResult, error) {
-	f, err := os.Open(path)
+	info, err := defaultStorage.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("backup: stat %s: %w", path, err)
+	}
+	f, err := defaultStorage.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("backup: stat %s: %w", path, err)
-	}
 
 	manifest, sealed, closeBundle, err := ReadBundleStream(f)
 	if err != nil {
@@ -866,7 +877,7 @@ func Delete(path string) error {
 	if _, err := Inspect(path); err != nil {
 		return fmt.Errorf("backup: refuse to delete %q: failed inspect (%v)", path, err)
 	}
-	if err := os.Remove(path); err != nil {
+	if err := defaultStorage.Remove(path); err != nil {
 		return fmt.Errorf("backup: delete %s: %w", path, err)
 	}
 	return nil
@@ -962,7 +973,7 @@ func compatibleTargetsFor(s Scope) []Target {
 // consequence of a failed cleanup is a file that will be retried on
 // the next backup, not a correctness issue.
 func cleanupStalePartials(dir string, maxAge time.Duration) {
-	entries, err := os.ReadDir(dir)
+	entries, err := defaultStorage.ReadDir(dir)
 	if err != nil {
 		return
 	}
@@ -979,7 +990,7 @@ func cleanupStalePartials(dir string, maxAge time.Duration) {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-			_ = os.Remove(filepath.Join(dir, e.Name()))
+			_ = defaultStorage.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 }

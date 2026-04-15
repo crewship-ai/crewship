@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path"
 	"strings"
 )
@@ -50,7 +49,7 @@ func (p *ExtractedPayload) Close() error {
 	if p == nil || p.tempDir == "" {
 		return nil
 	}
-	err := os.RemoveAll(p.tempDir)
+	err := defaultStorage.RemoveAll(p.tempDir)
 	p.tempDir = ""
 	p.workspacePathBySlug = nil
 	p.volumePathsBySlug = nil
@@ -73,7 +72,7 @@ func (p *ExtractedPayload) OpenWorkspace(slug string) (io.ReadCloser, bool, erro
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := os.Open(path)
+	f, err := defaultStorage.Open(path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open workspace section %s: %w", slug, err)
 	}
@@ -91,7 +90,7 @@ func (p *ExtractedPayload) OpenVolume(slug, vol string) (io.ReadCloser, bool, er
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := os.Open(path)
+	f, err := defaultStorage.Open(path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open volume section %s/%s: %w", slug, vol, err)
 	}
@@ -105,7 +104,7 @@ func (p *ExtractedPayload) OpenMemory(slug string) (io.ReadCloser, bool, error) 
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := os.Open(path)
+	f, err := defaultStorage.Open(path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open memory section %s: %w", slug, err)
 	}
@@ -121,7 +120,7 @@ func (p *ExtractedPayload) OpenMemory(slug string) (io.ReadCloser, bool, error) 
 // MUST call Close() once finished with all sections (typically via
 // defer in RestoreBackup).
 func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
-	tempDir, err := os.MkdirTemp("", "crewship-restore-*")
+	tempDir, err := defaultStorage.MkdirTemp("", "crewship-restore-*")
 	if err != nil {
 		return nil, fmt.Errorf("backup: temp dir: %w", err)
 	}
@@ -159,7 +158,7 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 			return s, nil
 		}
 		safe := strings.ReplaceAll(key, "/", "_")
-		f, err := os.CreateTemp(tempDir, safe+"-*.tar")
+		f, err := defaultStorage.CreateTemp(tempDir, safe+"-*.tar")
 		if err != nil {
 			return nil, fmt.Errorf("backup: create section temp %s: %w", key, err)
 		}
@@ -252,10 +251,9 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 			_ = s.file.Close()
 			return nil, fmt.Errorf("backup: close inner tar %s: %w", key, err)
 		}
-		if err := s.file.Sync(); err != nil {
-			_ = s.file.Close()
-			return nil, fmt.Errorf("backup: sync inner tar %s: %w", key, err)
-		}
+		// No fsync here: the temp file is read back by the same process
+		// inside OpenWorkspace/OpenVolume/OpenMemory, so kernel page-cache
+		// coherency is sufficient and Sync is not on the StorageOps API.
 		name := s.file.Name()
 		if err := s.file.Close(); err != nil {
 			return nil, fmt.Errorf("backup: close inner tar file %s: %w", key, err)
@@ -354,9 +352,9 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 }
 
 // sink is a package-local struct for repackIntoSink. Holds an open
-// *os.File and its wrapping *tar.Writer.
+// temp-file handle and its wrapping *tar.Writer.
 type sink struct {
-	file *os.File
+	file TempFile
 	tw   *tar.Writer
 }
 
