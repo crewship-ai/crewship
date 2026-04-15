@@ -11,7 +11,8 @@ permissions:
 jobs:
   label:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
-      - uses: actions/labeler@v6
+      - uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b # v6.0.0
         with:
           configuration-path: .github/labeler.yml
