@@ -171,11 +171,13 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		// lock — otherwise this run's state would be written behind
 		// the in-flight dump and miss from the bundle.
 		var err error
-		if guardErr := refuseIfBackupInProgress(runCtx, h.db, req.WorkspaceID); guardErr != nil {
+		guardRelease, guardErr := refuseIfBackupInProgress(runCtx, h.db, req.WorkspaceID)
+		if guardErr != nil {
 			h.logger.Warn("webhook run refused — backup in progress", "workspace_id", req.WorkspaceID)
 			err = guardErr
 		} else {
 			err = h.orch.RunAgent(runCtx, req, handler)
+			guardRelease()
 		}
 
 		exitCode := 0
