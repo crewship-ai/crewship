@@ -29,6 +29,7 @@ var labelListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -79,6 +80,7 @@ var labelCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -128,10 +130,10 @@ var labelUpdateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess("Label updated.")
 		return nil
@@ -159,10 +161,10 @@ var labelDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess("Label deleted.")
 		return nil

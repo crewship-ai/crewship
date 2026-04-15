@@ -34,6 +34,7 @@ var issueCommentsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -112,10 +113,10 @@ var issueRelateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess(fmt.Sprintf("Created %s relation: %s → %s", relType, identifier, args[1]))
 		return nil
@@ -148,6 +149,7 @@ var issueRelationsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -200,10 +202,10 @@ var issueUnrelateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 		cli.PrintSuccess("Relation removed.")
 		return nil
 	},

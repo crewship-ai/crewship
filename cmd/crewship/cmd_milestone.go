@@ -45,6 +45,7 @@ var projectMilestoneListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -108,6 +109,7 @@ var projectMilestoneCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -165,10 +167,10 @@ var projectMilestoneUpdateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess("Milestone updated.")
 		return nil
@@ -196,10 +198,10 @@ var projectMilestoneDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess("Milestone deleted.")
 		return nil

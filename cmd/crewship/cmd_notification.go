@@ -54,6 +54,7 @@ var notificationListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -106,6 +107,7 @@ var notificationCountCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -135,10 +137,10 @@ var notificationReadCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess("Notification marked as read.")
 		return nil
@@ -158,6 +160,7 @@ var notificationReadAllCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -189,10 +192,10 @@ var notificationDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
 		cli.PrintSuccess("Notification deleted.")
 		return nil
