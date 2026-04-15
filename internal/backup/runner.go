@@ -6,14 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
 	"filippo.io/age"
+
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // debugReadBuildInfo is a tiny indirection so tests can substitute a
@@ -615,6 +619,25 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		}
 	}
 
+	// Replay forward-migration backfill hooks. The bundle's manifest
+	// records the migrations applied on the source instance; any
+	// migration applied on the TARGET but absent from the manifest
+	// represents schema that did not exist when the backup was taken.
+	// Pure ADD COLUMN migrations need no special handling (DB DEFAULT
+	// covers them); migrations that need to populate new columns on
+	// existing rows register a RestoreBackfillFunc via migrate.go so
+	// the restored rows get the same treatment.
+	//
+	// Runs AFTER RestoreDumpTx commits — the rows we want to backfill
+	// must already be visible. A hook failure surfaces as
+	// ErrRestoreBackfillFailed; the admin must investigate because the
+	// main restore is already committed.
+	if extracted.DBDump != nil && !opts.DryRun && len(manifest.SchemaMigrationVersions) > 0 {
+		if err := replayRestoreBackfills(ctx, db, manifest.SchemaMigrationVersions, opts.Logger); err != nil {
+			return nil, err
+		}
+	}
+
 	// No-op restore detection: the bundle carried rows but every one
 	// of them collided with an existing primary key and INSERT OR
 	// IGNORE silently dropped it. The classic cause is "restore into
@@ -1106,6 +1129,51 @@ func rewriteCrewSlug(dump *DBDump, crewID, newSlug string) {
 			return
 		}
 	}
+}
+
+// replayRestoreBackfills walks the migrations the TARGET has applied
+// but the BUNDLE did not, and invokes any registered backfill hook so
+// columns added post-backup get sensible values on the restored rows.
+// Each hook runs in its own transaction so one failure does not strand
+// a half-applied backfill. Failure returns ErrRestoreBackfillFailed
+// with the offending version wrapped.
+func replayRestoreBackfills(ctx context.Context, db *sql.DB, bundleVersions []int, logger func(string)) error {
+	applied := AppliedMigrationVersions(ctx, db)
+	if len(applied) == 0 {
+		return nil
+	}
+	bundleSet := make(map[int]bool, len(bundleVersions))
+	for _, v := range bundleVersions {
+		bundleSet[v] = true
+	}
+	var missing []int
+	for _, v := range applied {
+		if !bundleSet[v] {
+			missing = append(missing, v)
+		}
+	}
+	sort.Ints(missing)
+	for _, v := range missing {
+		fn := database.RestoreBackfillFor(v)
+		if fn == nil {
+			continue
+		}
+		if logger != nil {
+			logger(fmt.Sprintf("restore backfill: replaying v%d", v))
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("%w: begin tx for v%d: %v", ErrRestoreBackfillFailed, v, err)
+		}
+		if err := fn(ctx, tx, slog.Default()); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("%w: v%d: %v", ErrRestoreBackfillFailed, v, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("%w: commit v%d: %v", ErrRestoreBackfillFailed, v, err)
+		}
+	}
+	return nil
 }
 
 // firstWorkspaceSlug returns the slug of the first (and typically only)

@@ -85,7 +85,24 @@ type migration struct {
 	// fn, if set, runs instead of sql. Receives the migration's transaction
 	// so its work commits atomically with the _migrations row.
 	fn func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
+	// restoreBackfill, if set, runs during RestoreBackup against the rows
+	// just re-inserted from a bundle whose source schema predates this
+	// migration. The bundle's manifest records the migration versions
+	// applied on the source; when the target has additional migrations
+	// applied (target > source) the backup subsystem calls the hook for
+	// each such migration so newly-added columns get populated on the
+	// restored rows. Pure ADD COLUMN migrations that rely on the DB
+	// DEFAULT need no hook. See internal/backup/runner.go RestoreBackup.
+	restoreBackfill RestoreBackfillFunc
 }
+
+// RestoreBackfillFunc is the signature for per-migration hooks that
+// populate newly-added columns on rows just restored from an older
+// bundle. Runs in its own transaction after the main restore tx has
+// committed successfully; a returned error aborts the restore but does
+// not roll back the already-committed row inserts — callers log
+// loudly and prompt the operator to investigate.
+type RestoreBackfillFunc func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
 
 var migrations = []migration{
 	{version: 1, name: "init", sql: migrationInit},
@@ -173,6 +190,46 @@ CREATE TABLE IF NOT EXISTS backup_locks (
 );
 CREATE INDEX IF NOT EXISTS idx_backup_locks_expires ON backup_locks(expires_at);
 `},
+}
+
+// restoreBackfillOverrides lets tests wire a hook without touching the
+// main migrations slice. Keyed by version; a registered fn shadows
+// whatever the migration's own restoreBackfill would return.
+var restoreBackfillOverrides = map[int]RestoreBackfillFunc{}
+
+// RestoreBackfillFor returns the hook registered for the given
+// migration version, or nil if none. Consulted by the backup runner
+// during RestoreBackup so each missing-on-source-but-applied-on-target
+// migration can populate its added columns on the restored rows.
+//
+// The lookup prefers test overrides over the baked-in migration hook,
+// so a test can exercise the replay plumbing without mutating the
+// package's migration table.
+func RestoreBackfillFor(version int) RestoreBackfillFunc {
+	if fn, ok := restoreBackfillOverrides[version]; ok {
+		return fn
+	}
+	for _, m := range migrations {
+		if m.version == version {
+			return m.restoreBackfill
+		}
+	}
+	return nil
+}
+
+// RegisterRestoreBackfill installs a hook for the given migration
+// version, returning a deregister closure. Intended for tests. A
+// second call for the same version replaces the prior registration.
+func RegisterRestoreBackfill(version int, fn RestoreBackfillFunc) (unregister func()) {
+	prev, had := restoreBackfillOverrides[version]
+	restoreBackfillOverrides[version] = fn
+	return func() {
+		if had {
+			restoreBackfillOverrides[version] = prev
+		} else {
+			delete(restoreBackfillOverrides, version)
+		}
+	}
 }
 
 // RollbackV47 reverts the schema change introduced by migration v47
