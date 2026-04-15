@@ -74,7 +74,7 @@ item `blocked:<reason>`.
 
 ### High risk — requires tests + race + human review
 
-- [ ] **7. mission-tasks-split** `high_risk: true` —
+- [~] **7. mission-tasks-split** `high_risk: true` —
       `internal/orchestrator/mission_tasks.go` (1320 LOC).
       Split by lifecycle stage:
       - `mission_resolve.go` — `ResolveReadyTasks`, `buildMissionBrief`
