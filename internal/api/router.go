@@ -4,9 +4,11 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -321,6 +323,13 @@ func (r *Router) registerRoutes() {
 	skills := NewSkillHandler(r.db, r.logger)
 	runs := NewRunHandler(r.db, r.logger)
 	audit := NewAuditHandler(r.db, r.logger)
+	// Adapt the concrete Docker client to backup.DockerOps so the
+	// admin-backup HTTP layer doesn't see the Moby SDK directly.
+	var backupDockerOps backup.DockerOps
+	if r.dockerClient != nil {
+		backupDockerOps = &backup.MobyDockerOps{Client: r.dockerClient}
+	}
+	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
@@ -576,6 +585,16 @@ func (r *Router) registerRoutes() {
 
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
+
+	// Backups (admin-only; require workspace context for scoping). See
+	// .claude/context/prd/BACKUP.md for the full API contract.
+	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))
+	r.mux.Handle("GET /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.List))))
+	r.mux.Handle("GET /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Status))))
+	r.mux.Handle("GET /api/v1/admin/backups/inspect", authed(wsCtx(http.HandlerFunc(backupH.Inspect))))
+	r.mux.Handle("GET /api/v1/admin/backups/download", authed(wsCtx(http.HandlerFunc(backupH.Download))))
+	r.mux.Handle("POST /api/v1/admin/backups/restore", authed(wsCtx(http.HandlerFunc(backupH.Restore))))
+	r.mux.Handle("DELETE /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Delete))))
 
 	// MCP tool call audit (require workspace context)
 	mcpAudit := NewMCPAuditHandler(r.db, r.logger)

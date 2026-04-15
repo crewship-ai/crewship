@@ -42,4 +42,27 @@ var (
 	// compatible_targets list disallows the current target (e.g. a
 	// crew bundle being restored into a different Crewship instance).
 	ErrIncompatibleTarget = errors.New("backup: bundle not compatible with this target instance")
+
+	// ErrAdminRequired is returned by RequireAdmin when the caller's
+	// workspace role is not OWNER or ADMIN. Callers (CLI, HTTP
+	// handlers) check via errors.Is so status-code mapping does not
+	// depend on error-message substrings.
+	ErrAdminRequired = errors.New("backup: admin role required")
+
+	// ErrAgentRunning is returned by the agent-idle guard when a crew
+	// in the target scope has an agent with status=running or busy.
+	// The caller typically maps to HTTP 409.
+	ErrAgentRunning = errors.New("backup: agent is running")
+
+	// ErrSchemaTooOld is returned on restore when the target database
+	// has not applied every migration the bundle was produced with.
+	// Maps to HTTP 400 — the operator must upgrade Crewship.
+	ErrSchemaTooOld = errors.New("backup: target schema is older than the bundle")
+
+	// ErrNoOpRestore is returned when RestoreBackup completes with
+	// rowsInserted == 0 despite a non-empty bundle — every primary
+	// key collided with an existing row and INSERT OR IGNORE dropped
+	// the lot. Callers map to a non-fatal warning so the admin can
+	// re-run with --as-workspace.
+	ErrNoOpRestore = errors.New("backup: restore inserted zero rows despite non-empty bundle")
 )
