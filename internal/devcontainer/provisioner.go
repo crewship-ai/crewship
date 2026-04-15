@@ -15,12 +15,10 @@ import (
 
 	dockerclient "github.com/docker/docker/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -46,20 +44,33 @@ type Provisioner struct {
 	downloader *FeatureDownloader
 	logger     *slog.Logger
 
-	// Cache of remote image digests to skip the HEAD request on every
-	// provision. Thread-safe via digestMu; keys are image refs, values include
-	// fetch time for TTL. Per-process (in-memory) — lost on restart, which is
-	// fine: a cold cache simply costs one extra HEAD per base image.
-	digestMu    sync.RWMutex
-	digestCache map[string]digestCacheEntry
+	// digestResolver caches remote manifest digests used by ensureImage. Shared
+	// helper (see internal/dockerutil) so the runtime Provider uses identical
+	// semantics — one source of truth for "is my local copy stale?".
+	digestResolver *dockerutil.DigestResolver
+
+	// Cache of ImageList results to avoid an O(n) Docker call on every
+	// imageExists/Provision check. Invalidated on Pull/Commit (our own
+	// mutations) and on TTL expiry (external mutations via `docker rmi` etc.).
+	// Short TTL so disk reclaim or manual rmi is reflected quickly.
+	imageListMu    sync.Mutex
+	imageListCache imageListCacheEntry
 }
 
-type digestCacheEntry struct {
-	digest    string
+type imageListCacheEntry struct {
+	images    []image.Summary
 	fetchedAt time.Time
 }
 
-const remoteDigestTTL = 24 * time.Hour
+const imageListTTL = 60 * time.Second
+
+// TempContainerLabelKey and TempContainerLabelValue identify temporary
+// containers created by Provisioner.createTempContainer. Exported so the
+// orphan-temp sweeper (internal/api/crew_provisioning.go) can filter on them.
+const (
+	TempContainerLabelKey   = "crewship.temp"
+	TempContainerLabelValue = "provision"
+)
 
 // ProvisionResult contains the output of a successful provisioning run.
 type ProvisionResult struct {
@@ -126,11 +137,11 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 		logger = slog.Default()
 	}
 	return &Provisioner{
-		docker:      docker,
-		installer:   installer,
-		downloader:  downloader,
-		logger:      logger,
-		digestCache: make(map[string]digestCacheEntry),
+		docker:         docker,
+		installer:      installer,
+		downloader:     downloader,
+		logger:         logger,
+		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
 	}
 }
 
@@ -195,9 +206,10 @@ func (p *Provisioner) IsCached(ctx context.Context, hash string) (bool, error) {
 }
 
 // imageExists checks whether a locally available image matches the given
-// reference (e.g. "crewship-cache:a1b2c3d4e5f6").
+// reference (e.g. "crewship-cache:a1b2c3d4e5f6"). Uses the cached image list
+// when fresh.
 func (p *Provisioner) imageExists(ctx context.Context, ref string) (bool, error) {
-	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
+	imgs, err := p.listImages(ctx)
 	if err != nil {
 		return false, fmt.Errorf("listing images: %w", err)
 	}
@@ -209,6 +221,34 @@ func (p *Provisioner) imageExists(ctx context.Context, ref string) (bool, error)
 		}
 	}
 	return false, nil
+}
+
+// listImages returns the local image summaries, using a short-lived cache to
+// avoid hammering the Docker daemon. Cache is invalidated on our own
+// ImagePull/ImageCommit calls and on TTL expiry. External `docker rmi` is
+// picked up after the TTL window (default 60s).
+func (p *Provisioner) listImages(ctx context.Context) ([]image.Summary, error) {
+	p.imageListMu.Lock()
+	defer p.imageListMu.Unlock()
+
+	if p.imageListCache.images != nil && time.Since(p.imageListCache.fetchedAt) < imageListTTL {
+		return p.imageListCache.images, nil
+	}
+	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	p.imageListCache = imageListCacheEntry{images: imgs, fetchedAt: time.Now()}
+	return imgs, nil
+}
+
+// invalidateImageListCache forces the next listImages call to hit the Docker
+// daemon. Call after any operation that mutates the local image set
+// (ImagePull, ImageCommit, ImageRemove).
+func (p *Provisioner) invalidateImageListCache() {
+	p.imageListMu.Lock()
+	p.imageListCache = imageListCacheEntry{}
+	p.imageListMu.Unlock()
 }
 
 // Provision builds a cached image by installing devcontainer features and
@@ -305,6 +345,8 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if commitErr != nil {
 		return nil, fmt.Errorf("committing container: %w", commitErr)
 	}
+	// New crewship-cache:* tag is now present locally — drop cached list.
+	p.invalidateImageListCache()
 
 	p.logger.Info("provisioned cached image",
 		"tag", tag,
@@ -347,6 +389,11 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 			Image: baseImage,
 			Cmd:   []string{"sleep", "infinity"},
 			User:  "0:0",
+			// Label is the canonical marker used by the orphan-temp sweeper.
+			// If crewshipd is SIGKILLed between ContainerCreate and the
+			// provision flow's cleanup defer, the next start-up sweep removes
+			// these by label (see internal/api/crew_provisioning.go).
+			Labels: map[string]string{TempContainerLabelKey: TempContainerLabelValue},
 		},
 		&container.HostConfig{
 			// Parity with runtime — some feature install scripts dial the host
@@ -369,18 +416,18 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 // tag across hosts with identical configs — breaking reproducibility.
 //
 // Resolution order:
-//  1. HEAD manifest on remote registry (best-effort, ≤imageValidateTimeout).
+//  1. HEAD manifest on remote registry (best-effort, via dockerutil.DigestResolver).
 //  2. ImageInspect locally for RepoDigests.
 //  3. If both succeed and local RepoDigests contain the remote digest → done.
 //  4. Otherwise (local missing, stale, or offline): attempt ImagePull. An
 //     offline registry with a locally present image is accepted (we trust
 //     the presence); a missing image is an error only if pull fails too.
 func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
-	remoteDigest := p.getCachedOrFreshDigest(ctx, ref)
+	remoteDigest := p.digestResolver.Remote(ctx, ref)
 
 	inspect, inspectErr := p.docker.ImageInspect(ctx, ref)
 	localPresent := inspectErr == nil
-	if localPresent && remoteDigest != "" && repoDigestsContain(inspect.RepoDigests, remoteDigest) {
+	if localPresent && remoteDigest != "" && dockerutil.RepoDigestsContain(inspect.RepoDigests, remoteDigest) {
 		return nil
 	}
 	if localPresent && remoteDigest == "" {
@@ -402,71 +449,16 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 			p.logger.Warn("pull failed; proceeding with local (possibly stale) image", "ref", ref, "error", err)
 			return nil
 		}
-		return err
+		return fmt.Errorf("pull image %q: %w", ref, err)
 	}
 	defer rc.Close()
 	// Docker requires the stream to be fully read for the pull to complete.
 	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return fmt.Errorf("read pull stream: %w", err)
 	}
+	// New or updated image may now be present locally — drop the cached list.
+	p.invalidateImageListCache()
 	return nil
-}
-
-// getCachedOrFreshDigest returns the cached remote digest for ref if it was
-// fetched within remoteDigestTTL, otherwise triggers a fresh HEAD and caches
-// the result. Empty fresh results are NOT cached — we want the next call to
-// retry transient registry failures.
-func (p *Provisioner) getCachedOrFreshDigest(ctx context.Context, ref string) string {
-	p.digestMu.RLock()
-	entry, ok := p.digestCache[ref]
-	p.digestMu.RUnlock()
-
-	if ok && time.Since(entry.fetchedAt) < remoteDigestTTL {
-		return entry.digest
-	}
-
-	fresh := p.remoteImageDigest(ctx, ref)
-	if fresh != "" {
-		p.digestMu.Lock()
-		p.digestCache[ref] = digestCacheEntry{digest: fresh, fetchedAt: time.Now()}
-		p.digestMu.Unlock()
-	}
-	return fresh
-}
-
-// remoteImageDigest returns the manifest digest of ref from its registry via
-// HEAD. Best-effort: returns "" on auth errors, parse failures, or timeouts.
-// Reuses the 5-second ceiling already established for ValidateImageExists.
-func (p *Provisioner) remoteImageDigest(ctx context.Context, ref string) string {
-	parsed, err := name.ParseReference(ref)
-	if err != nil {
-		return ""
-	}
-	headCtx, cancel := context.WithTimeout(ctx, imageValidateTimeout)
-	defer cancel()
-	desc, err := remote.Head(parsed,
-		remote.WithContext(headCtx),
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
-	)
-	if err != nil {
-		return ""
-	}
-	return desc.Digest.String()
-}
-
-// repoDigestsContain reports whether any entry in repoDigests refers to the
-// given manifest digest. Each repoDigest is formatted as "<repo>@sha256:<hex>".
-func repoDigestsContain(repoDigests []string, digest string) bool {
-	if digest == "" {
-		return false
-	}
-	for _, rd := range repoDigests {
-		at := strings.LastIndex(rd, "@")
-		if at > 0 && rd[at+1:] == digest {
-			return true
-		}
-	}
-	return false
 }
 
 // installFeatures downloads, sorts, and installs all features from the config.

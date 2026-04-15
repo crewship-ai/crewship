@@ -35,6 +35,9 @@ type mockCommitClient struct {
 	startErr  error
 	commitErr error
 	listErr   error
+
+	// Call counters.
+	imageListCalls int
 }
 
 type mockCreateCall struct {
@@ -80,6 +83,7 @@ func (m *mockCommitClient) ContainerCommit(_ context.Context, containerID string
 }
 
 func (m *mockCommitClient) ImageList(_ context.Context, _ image.ListOptions) ([]image.Summary, error) {
+	m.imageListCalls++
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
@@ -407,5 +411,61 @@ func TestProvision_ContainerEnv(t *testing.T) {
 	// Should have exec calls for containerEnv write and cleanup.
 	if len(dockerMock.execCreated) < 2 {
 		t.Errorf("expected at least 2 exec calls (containerEnv + cleanup), got %d", len(dockerMock.execCreated))
+	}
+}
+
+// TestImageListCache_Memoizes verifies that two consecutive imageExists calls
+// on the same Provisioner hit Docker only once (cache is shared + fresh).
+func TestImageListCache_Memoizes(t *testing.T) {
+	mock := &mockCommitClient{existingImages: []string{"crewship-cache:abc"}}
+	p := NewProvisioner(mock, nil, nil, testLogger())
+
+	if _, err := p.IsCached(context.Background(), "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.IsCached(context.Background(), "def"); err != nil {
+		t.Fatal(err)
+	}
+	if mock.imageListCalls != 1 {
+		t.Errorf("expected 1 ImageList call (cache hit), got %d", mock.imageListCalls)
+	}
+}
+
+// TestImageListCache_InvalidatedBySweeper verifies that invalidateImageListCache
+// forces the next listImages call to hit Docker.
+func TestImageListCache_InvalidatedBySweeper(t *testing.T) {
+	mock := &mockCommitClient{existingImages: []string{"crewship-cache:abc"}}
+	p := NewProvisioner(mock, nil, nil, testLogger())
+
+	if _, err := p.IsCached(context.Background(), "abc"); err != nil {
+		t.Fatal(err)
+	}
+	p.invalidateImageListCache()
+	if _, err := p.IsCached(context.Background(), "abc"); err != nil {
+		t.Fatal(err)
+	}
+	if mock.imageListCalls != 2 {
+		t.Errorf("expected 2 ImageList calls (post-invalidate), got %d", mock.imageListCalls)
+	}
+}
+
+// TestCreateTempContainer_HasLabel verifies the temp container carries the
+// label the orphan-temp GC sweeper filters on.
+func TestCreateTempContainer_HasLabel(t *testing.T) {
+	mock := &mockCommitClient{
+		existingImages: []string{"ubuntu:22.04"},
+		inspectDigests: map[string][]string{"ubuntu:22.04": {"ubuntu@sha256:deadbeef"}},
+	}
+	p := NewProvisioner(mock, nil, nil, testLogger())
+
+	if _, err := p.createTempContainer(context.Background(), "ubuntu:22.04"); err != nil {
+		t.Fatalf("createTempContainer: %v", err)
+	}
+	if len(mock.createdContainers) != 1 {
+		t.Fatalf("expected 1 ContainerCreate call, got %d", len(mock.createdContainers))
+	}
+	labels := mock.createdContainers[0].config.Labels
+	if got := labels[TempContainerLabelKey]; got != TempContainerLabelValue {
+		t.Errorf("temp container missing GC label: got %q, want %q", got, TempContainerLabelValue)
 	}
 }
