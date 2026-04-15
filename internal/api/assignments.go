@@ -330,7 +330,7 @@ func (h *AssignmentHandler) runAssignment(
 	}
 
 	// Ensure crew container is running
-	containerID, err := h.orch.GetOrCreateContainer(ctx, target.CrewSlug, body.CrewID)
+	containerID, err := h.orch.GetOrCreateContainer(ctx, target.CrewSlug, body.CrewID, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",

@@ -68,7 +68,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN (
 		    SELECT project_id,
 		           COUNT(*) AS issue_count,
-		           SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END) AS done_count
+		           SUM(CASE WHEN status IN ('DONE','COMPLETED','REVIEW') THEN 1 ELSE 0 END) AS done_count
 		    FROM missions WHERE mission_type = 'issue' GROUP BY project_id
 		) ic ON ic.project_id = p.id
 		WHERE p.workspace_id = ?`
@@ -235,7 +235,7 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 		       END,
 		       p.start_date, p.target_date, p.created_at, p.updated_at,
 		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue') AS issue_count,
-		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')) AS done_count
+		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED','REVIEW')) AS done_count
 		FROM projects p
 		WHERE p.id = ? AND p.workspace_id = ?`,
 		projectID, wsID).Scan(
@@ -367,7 +367,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 		       END,
 		       p.start_date, p.target_date, p.created_at, p.updated_at,
 		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue') AS issue_count,
-		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')) AS done_count
+		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED','REVIEW')) AS done_count
 		FROM projects p
 		WHERE p.id = ?`, projectID).Scan(
 		&p.ID, &p.WorkspaceID, &p.Name, &p.Slug,
@@ -494,7 +494,7 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	// COALESCE needed because SUM returns NULL for projects with no issues.
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COUNT(*),
-		       COALESCE(SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END), 0)
+		       COALESCE(SUM(CASE WHEN status IN ('DONE','COMPLETED','REVIEW') THEN 1 ELSE 0 END), 0)
 		FROM missions WHERE project_id = ? AND mission_type = 'issue'`,
 		projectID).Scan(&resp.TotalIssues, &resp.CompletedIssues); err != nil {
 		h.logger.Error("load project stats counts", "project_id", projectID, "error", err)
@@ -518,7 +518,7 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	assigneeRows, err := h.db.QueryContext(r.Context(), `
 		SELECT m.assignee_id, COALESCE(a.name, 'Unassigned'),
 		       COUNT(*),
-		       SUM(CASE WHEN m.status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END)
+		       SUM(CASE WHEN m.status IN ('DONE','COMPLETED','REVIEW') THEN 1 ELSE 0 END)
 		FROM missions m
 		LEFT JOIN agents a ON m.assignee_id = a.id
 		WHERE m.project_id = ? AND m.mission_type = 'issue'

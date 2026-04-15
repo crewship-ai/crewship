@@ -71,3 +71,9 @@ func (d *DataDir) LogsDir() string {
 func (d *DataDir) SkillsDir() string {
 	return filepath.Join(d.Root, "skills")
 }
+
+// WorkspaceMemoryDir returns the path to workspace-level memory for a given workspace.
+// Used by Coordinator/Captain agents for cross-crew memory.
+func (d *DataDir) WorkspaceMemoryDir(workspaceID string) string {
+	return filepath.Join(d.Root, "memory", workspaceID)
+}

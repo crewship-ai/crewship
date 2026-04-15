@@ -166,6 +166,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	var statsCollector *StatsCollector
 	if ctr != nil {
 		statsCollector = NewStatsCollector(ctr, wsHub, logger, 5*time.Second)
+		// Wire the orchestrator so every crew-container create/reuse on the
+		// mission path also registers the container with the stats poller.
+		// Without this, only the direct-run path (handleAgentStart) registers
+		// containers and the dashboard's container resources tile stays empty
+		// for mission-driven runs.
+		sc := statsCollector
+		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
+			sc.Register(containerID, crewID, workspaceID)
+		})
 	}
 
 	tokenPool := llmproxy.NewTokenPool(logger)

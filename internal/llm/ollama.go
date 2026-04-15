@@ -167,7 +167,10 @@ func (r *ollamaChatResponse) toResponse() *Response {
 	if len(r.Message.ToolCalls) > 0 {
 		resp.StopReason = StopToolUse
 		for i, tc := range r.Message.ToolCalls {
-			argsJSON, _ := json.Marshal(tc.Function.Arguments)
+			argsJSON, err := json.Marshal(tc.Function.Arguments)
+			if err != nil {
+				argsJSON = []byte("{}")
+			}
 			resp.ToolCalls = append(resp.ToolCalls, ToolCall{
 				ID:    fmt.Sprintf("tc_%d", i),
 				Name:  tc.Function.Name,
@@ -242,7 +245,10 @@ func (o *Ollama) parseNDJSONStream(r io.Reader, handler func(StreamEvent) error)
 			if len(chunk.Message.ToolCalls) > 0 {
 				final.StopReason = StopToolUse
 				for i, tc := range chunk.Message.ToolCalls {
-					argsJSON, _ := json.Marshal(tc.Function.Arguments)
+					argsJSON, err := json.Marshal(tc.Function.Arguments)
+					if err != nil {
+						return final, fmt.Errorf("marshal tool call args: %w", err)
+					}
 					toolCall := ToolCall{
 						ID:    fmt.Sprintf("tc_%d", i),
 						Name:  tc.Function.Name,

@@ -361,11 +361,15 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 
 	if runErr != nil {
 		errMsg := runErr.Error()
-		_ = s.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, completedMeta)
+		if err := s.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, completedMeta); err != nil {
+			s.logger.Warn("failed to update run status", "run_id", runID, "status", "FAILED", "error", err)
+		}
 		s.logger.Error("scheduled run failed", "agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
 	} else {
 		exitCode := 0
-		_ = s.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta)
+		if err := s.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
+			s.logger.Warn("failed to update run status", "run_id", runID, "status", "COMPLETED", "error", err)
+		}
 		s.logger.Info("scheduled run completed", "agent", ag.Slug, "duration_ms", completedMeta["duration_ms"])
 	}
 

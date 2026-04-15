@@ -73,6 +73,8 @@ type ChatInfo struct {
 	MCPServers    []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
+	PreferredLanguage  string
+	WorkspaceMemPath   string // Host path to workspace memory (for COORDINATOR)
 }
 
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
@@ -346,6 +348,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		MCPServers:         info.MCPServers,
 		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
+		PreferredLanguage:  info.PreferredLanguage,
+		WorkspaceMemPath:   info.WorkspaceMemPath,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
@@ -423,9 +427,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			cancelMsg := "cancelled"
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cleanCancel()
-			_ = b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, map[string]interface{}{
+			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, map[string]interface{}{
 				"duration_ms": time.Since(startedAt).Milliseconds(),
-			})
+			}); err != nil {
+				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)
+			}
 			// Persist partial response if any
 			if fullResponse != "" {
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{

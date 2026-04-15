@@ -421,6 +421,164 @@ func TestSearchSpecialCharacters(t *testing.T) {
 	_ = results
 }
 
+// TestEngine_MultiInstance verifies two Engine instances on different paths
+// work independently — the foundation for agent + crew memory coexistence.
+func TestEngine_MultiInstance(t *testing.T) {
+	// Setup agent memory
+	agentDir := t.TempDir()
+	agentEngine, err := New(agentDir, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentEngine.Close()
+
+	// Setup crew shared memory (separate dir, separate engine)
+	crewDir := t.TempDir()
+	crewEngine, err := New(crewDir, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer crewEngine.Close()
+
+	// Write distinct content to each
+	os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# Agent\nI prefer dark mode and TypeScript."), 0o644)
+	os.WriteFile(filepath.Join(crewDir, "CREW.md"), []byte("# Crew\nWe deploy via GitHub Actions to production."), 0o644)
+
+	// Reindex both
+	if err := agentEngine.Reindex(); err != nil {
+		t.Fatal(err)
+	}
+	if err := crewEngine.Reindex(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	// Agent engine finds agent content, NOT crew content
+	results, err := agentEngine.Search(ctx, "TypeScript", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Error("agent engine should find 'TypeScript'")
+	}
+
+	results, err = agentEngine.Search(ctx, "GitHub Actions", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Error("agent engine should NOT find crew content 'GitHub Actions'")
+	}
+
+	// Crew engine finds crew content, NOT agent content
+	results, err = crewEngine.Search(ctx, "GitHub Actions", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) == 0 {
+		t.Error("crew engine should find 'GitHub Actions'")
+	}
+
+	results, err = crewEngine.Search(ctx, "TypeScript", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Error("crew engine should NOT find agent content 'TypeScript'")
+	}
+
+	// Status should reflect each independently
+	agentStatus, _ := agentEngine.Status(ctx)
+	crewStatus, _ := crewEngine.Status(ctx)
+
+	if agentStatus.TotalFiles != 1 {
+		t.Errorf("agent: expected 1 file, got %d", agentStatus.TotalFiles)
+	}
+	if crewStatus.TotalFiles != 1 {
+		t.Errorf("crew: expected 1 file, got %d", crewStatus.TotalFiles)
+	}
+}
+
+// TestEngine_EmptyDirectory verifies an engine works correctly when the
+// directory has no markdown files (crew shared memory starts empty).
+func TestEngine_EmptyDirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := New(dir, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+
+	// Reindex on empty dir should succeed
+	if err := engine.Reindex(); err != nil {
+		t.Fatalf("Reindex on empty dir: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// Status should show zeros
+	status, err := engine.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.TotalFiles != 0 {
+		t.Errorf("expected 0 files, got %d", status.TotalFiles)
+	}
+	if status.TotalChunks != 0 {
+		t.Errorf("expected 0 chunks, got %d", status.TotalChunks)
+	}
+	if !status.SearchReady {
+		t.Error("expected SearchReady=true even when empty")
+	}
+
+	// Search on empty should return empty, not error
+	results, err := engine.Search(ctx, "anything", 10)
+	if err != nil {
+		t.Fatalf("Search on empty engine: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+// TestEngine_ReindexAfterFileAdded verifies that adding a file after initial
+// reindex becomes searchable after a second reindex — the crew shared memory
+// pattern where agents gradually add content.
+func TestEngine_ReindexAfterFileAdded(t *testing.T) {
+	dir := t.TempDir()
+
+	engine, err := New(dir, DefaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+
+	// Start empty
+	engine.Reindex()
+	results, _ := engine.Search(context.Background(), "PostgreSQL", 10)
+	if len(results) != 0 {
+		t.Error("should be empty initially")
+	}
+
+	// Add a file
+	os.WriteFile(filepath.Join(dir, "CREW.md"), []byte("# Crew\nUse PostgreSQL 16 for all databases."), 0o644)
+
+	// Still not visible until reindex
+	results, _ = engine.Search(context.Background(), "PostgreSQL", 10)
+	if len(results) != 0 {
+		t.Error("should not be visible before reindex")
+	}
+
+	// After reindex — visible
+	engine.Reindex()
+	results, _ = engine.Search(context.Background(), "PostgreSQL", 10)
+	if len(results) == 0 {
+		t.Error("should be visible after reindex")
+	}
+}
+
 func TestSanitizeFTSQuery(t *testing.T) {
 	tests := []struct {
 		input    string

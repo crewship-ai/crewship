@@ -74,6 +74,7 @@
               "cli/credential",
               "cli/skill",
               "cli/captain",
+              "cli/memory",
               "cli/config",
               "cli/system"
             ]
