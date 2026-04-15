@@ -42,6 +42,12 @@ func TestSendEvent(t *testing.T) {
 	// `delivered` before the case runs.
 	signedOK := func(t *testing.T) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			// Verb is part of the SendEvent contract too — a regression
+			// that flips to GET/PUT would still pass body/header checks
+			// without this gate.
+			if r.Method != http.MethodPost {
+				t.Errorf("method: got %q want %q", r.Method, http.MethodPost)
+			}
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("read body: %v", err)

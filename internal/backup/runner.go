@@ -793,7 +793,13 @@ func firstWorkspaceID(dump *DBDump) string {
 // result is stable-ordered by CreatedAt descending so the newest
 // bundle is first (matches what most users want in the CLI output).
 func ListBackups(ctx context.Context, dir string) ([]ListEntry, error) {
-	entries, err := getDefaultStorage().ReadDir(ctx, dir)
+	// Capture the backend once so every entry in this list is
+	// inspected against the SAME storage. Without the capture a
+	// concurrent SetDefaultStorage swap could have ReadDir return
+	// paths from one backend and Inspect read manifests from another,
+	// silently returning stale or unrelated data.
+	st := getDefaultStorage()
+	entries, err := st.ReadDir(ctx, dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -814,7 +820,7 @@ func ListBackups(ctx context.Context, dir string) ([]ListEntry, error) {
 		if err != nil {
 			continue
 		}
-		m, inspectErr := Inspect(ctx, path)
+		m, inspectErr := inspectWithStorage(ctx, st, path)
 		le := ListEntry{
 			Path: path,
 			Size: info.Size(),
@@ -863,7 +869,16 @@ type ListEntry struct {
 // Inspect opens a bundle and returns its manifest without decrypting
 // the payload. Used by `crewship backup inspect` and ListBackups.
 func Inspect(ctx context.Context, path string) (*Manifest, error) {
-	f, err := getDefaultStorage().Open(ctx, path)
+	return inspectWithStorage(ctx, getDefaultStorage(), path)
+}
+
+// inspectWithStorage is the shared body behind Inspect. Having a
+// storage-parameterised variant lets ListBackups / Delete keep a
+// single StorageOps for the whole operation — otherwise a concurrent
+// SetDefaultStorage swap could make iteration and per-entry inspect
+// talk to different backends.
+func inspectWithStorage(ctx context.Context, st StorageOps, path string) (*Manifest, error) {
+	f, err := st.Open(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
@@ -896,11 +911,12 @@ type VerifyResult struct {
 // stored bundle is still restorable without actually committing to a
 // restore against a test instance.
 func Verify(ctx context.Context, path string) (*VerifyResult, error) {
-	info, err := getDefaultStorage().Stat(ctx, path)
+	st := getDefaultStorage()
+	info, err := st.Stat(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: stat %s: %w", path, err)
 	}
-	f, err := getDefaultStorage().Open(ctx, path)
+	f, err := st.Open(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
@@ -1016,10 +1032,11 @@ func Delete(ctx context.Context, path string) error {
 	if !strings.HasSuffix(path, ".tar.zst") {
 		return fmt.Errorf("backup: refuse to delete %q: not a .tar.zst bundle", path)
 	}
-	if _, err := Inspect(ctx, path); err != nil {
+	st := getDefaultStorage()
+	if _, err := inspectWithStorage(ctx, st, path); err != nil {
 		return fmt.Errorf("backup: refuse to delete %q: failed inspect (%v)", path, err)
 	}
-	if err := getDefaultStorage().Remove(ctx, path); err != nil {
+	if err := st.Remove(ctx, path); err != nil {
 		return fmt.Errorf("backup: delete %s: %w", path, err)
 	}
 	return nil
