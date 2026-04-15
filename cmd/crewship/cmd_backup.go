@@ -280,15 +280,27 @@ var backupRestoreCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
+		prefix := "Restore complete"
+		if dryRun {
+			// The admin asked for a verify-only run; make the log reflect
+			// that nothing was actually mutated. The row count reported
+			// is the POTENTIAL insert count the dry-run computed, not
+			// a committed write.
+			prefix = "Restore validation complete (dry-run, no changes applied)"
+		}
 		msg := fmt.Sprintf(
-			"Restore complete — workspace=%s crews=%d rows=%d",
-			out.RestoredWs, out.CrewsCount, out.RowsInserted,
+			"%s — workspace=%s crews=%d rows=%d",
+			prefix, out.RestoredWs, out.CrewsCount, out.RowsInserted,
 		)
 		if out.RestoredWorkspaceID != "" {
 			msg += " id=" + out.RestoredWorkspaceID
 		}
 		cli.PrintSuccess(msg)
-		if out.DockerPhaseSkipped {
+		// The docker-phase warning only matters on a real restore —
+		// dry-run never touches docker, so surfacing "you still need
+		// to provision crews" would mislead the admin into thinking
+		// the DB mutated when it did not.
+		if !dryRun && out.DockerPhaseSkipped {
 			cli.PrintWarning("Docker phase skipped (--as-workspace/--as-crew supplied). Provision the new crews with `crewship crew provision` and re-run restore without the rewrite flag to land container state.")
 		}
 		return nil

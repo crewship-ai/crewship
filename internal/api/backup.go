@@ -98,13 +98,20 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required for crew scope"})
 		return
 	}
+	// Trim before selector counting so a "   "-only passphrase (or
+	// recipient) cannot smuggle its way past the CLI's empty-string
+	// check. API clients that call us directly should not be able to
+	// weaken the encryption path this way.
+	passphraseInput := strings.TrimSpace(req.Passphrase)
+	recipientInput := strings.TrimSpace(req.Recipient)
+
 	// Exactly-one encryption selector. Passphrase, Recipient, or
 	// NoEncrypt — never multiple.
 	encryptionSelectors := 0
-	if req.Passphrase != "" {
+	if passphraseInput != "" {
 		encryptionSelectors++
 	}
-	if req.Recipient != "" {
+	if recipientInput != "" {
 		encryptionSelectors++
 	}
 	if req.NoEncrypt {
@@ -127,15 +134,15 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// silently reinterpreted as an X25519 recipient.
 	var passphrase string
 	var recipients []age.Recipient
-	if req.Recipient != "" {
-		rec, err := age.ParseX25519Recipient(req.Recipient)
+	if recipientInput != "" {
+		rec, err := age.ParseX25519Recipient(recipientInput)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid age1 recipient: " + err.Error()})
 			return
 		}
 		recipients = []age.Recipient{rec}
 	} else {
-		passphrase = req.Passphrase
+		passphrase = passphraseInput
 	}
 
 	// Constrain custom output directory to live under the default so an
@@ -492,7 +499,15 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if req.KeepLast <= 0 && req.KeepDays <= 0 {
+	// Reject negatives explicitly. 0 disables a rule (documented);
+	// a caller passing -1 otherwise slipped past the "at least one
+	// positive" gate with a positive counterpart and then fed the
+	// negative into Rotate, producing undefined behaviour.
+	if req.KeepLast < 0 || req.KeepDays < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "keep_last and keep_days must be >= 0 (0 disables the rule)"})
+		return
+	}
+	if req.KeepLast == 0 && req.KeepDays == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one of keep_last or keep_days must be positive"})
 		return
 	}
