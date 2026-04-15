@@ -62,7 +62,7 @@ item `blocked:<reason>`.
 
 ### Medium risk — domain splits
 
-- [ ] **6. docker-provider-split** — `internal/provider/docker/docker.go`
+- [~] **6. docker-provider-split** — `internal/provider/docker/docker.go`
       (1064 LOC). Split by domain:
       - `docker_detect.go` — `Detect`, `candidateSockets`
       - `docker_network.go` — `ensureNetwork`
