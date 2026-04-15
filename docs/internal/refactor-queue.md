@@ -97,13 +97,24 @@ item `blocked:<reason>`.
       > then re-open this item by flipping the checkbox back to
       > `[ ]`. Revert preserved `main`-matching runner state.
 
-- [~] **8. orchestrator-config-split** `high_risk: true` —
+- [!] **8. orchestrator-config-split** `high_risk: true` —
       `internal/orchestrator/orchestrator.go` (1195 LOC). Extract
       pure getters/setters (`SetStatsRegisterCallback`,
       `SetSidecarEnabled`, `SetKeeperEnabled`, `SetIPCConfig`,
       `ContainerProvider`, etc.) to `orchestrator_config.go`. Keep
       business logic (`GetOrCreateContainer`, run lifecycle) in
       `orchestrator.go`. Risk: HIGH — this is core infra.
+
+      > blocked: depends on #7. `go test -race ./internal/orchestrator/...`
+      > is red BEFORE any refactor because of the pre-existing race in
+      > `TestScheduleTask_CrossCrew_Connected` (same goroutine bug that
+      > blocked #7). Any high-risk extraction in this package would
+      > pass the build but fail the `-race` gate through no fault of
+      > its own, so the autonomous pass short-circuits here and leaves
+      > the work untouched. Human action: fix the race in
+      > `scheduleTask` (noted under #7), then flip both #7 and #8 back
+      > to `[ ]` — they can land in either order after the race is
+      > gone.
 
 ### Deferred (don't touch automatically)
 
