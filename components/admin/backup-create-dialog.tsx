@@ -89,12 +89,14 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label>Scope</Label>
-            <div className="flex gap-2">
+            <Label id="backup-scope-label">Scope</Label>
+            <div className="flex gap-2" role="radiogroup" aria-labelledby="backup-scope-label">
               {(["workspace", "crew"] as CreateBackupScope[]).map((s) => (
                 <Button
                   type="button"
                   key={s}
+                  role="radio"
+                  aria-checked={scope === s}
                   variant={scope === s ? "default" : "outline"}
                   size="sm"
                   onClick={() => setScope(s)}
@@ -117,8 +119,12 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
             </div>
           )}
           <div className="space-y-2">
-            <Label>Encryption</Label>
-            <div className="flex gap-2 flex-wrap">
+            <Label id="backup-encryption-label">Encryption</Label>
+            <div
+              className="flex gap-2 flex-wrap"
+              role="radiogroup"
+              aria-labelledby="backup-encryption-label"
+            >
               {(
                 [
                   ["passphrase", "Passphrase"],
@@ -129,6 +135,8 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
                 <Button
                   type="button"
                   key={v}
+                  role="radio"
+                  aria-checked={encryption === v}
                   variant={encryption === v ? "default" : "outline"}
                   size="sm"
                   onClick={() => setEncryption(v)}

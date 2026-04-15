@@ -131,6 +131,21 @@ function requireWorkspaceId(workspaceId: string | undefined): string {
   return workspaceId
 }
 
+/**
+ * Build a URL with properly encoded query params. Raw string
+ * interpolation breaks when a workspace slug or bundle path contains
+ * `&`, `=`, or spaces — URLSearchParams handles percent-encoding
+ * uniformly so the server always sees the intended values.
+ */
+function withQuery(
+  path: string,
+  workspaceId: string,
+  extra?: Record<string, string>,
+): string {
+  const params = new URLSearchParams({ workspace_id: workspaceId, ...(extra ?? {}) })
+  return `${path}?${params.toString()}`
+}
+
 export function useBackups(
   workspaceId: string | undefined,
   options?: Omit<UseQueryOptions<BackupListEntry[]>, "queryKey" | "queryFn">,
@@ -138,7 +153,7 @@ export function useBackups(
   return useQuery<BackupListEntry[]>({
     queryKey: ["backups", workspaceId],
     queryFn: async () => {
-      const res = await fetch(`/api/v1/admin/backups?workspace_id=${workspaceId}`)
+      const res = await fetch(withQuery("/api/v1/admin/backups", workspaceId!))
       const body = await asJSON<{ data: BackupListEntry[] }>(res)
       return body.data ?? []
     },
@@ -151,7 +166,7 @@ export function useBackupStatus(workspaceId: string | undefined) {
   return useQuery<BackupStatus>({
     queryKey: ["backup-status", workspaceId],
     queryFn: async () => {
-      const res = await fetch(`/api/v1/admin/backups/status?workspace_id=${workspaceId}`)
+      const res = await fetch(withQuery("/api/v1/admin/backups/status", workspaceId!))
       return asJSON<BackupStatus>(res)
     },
     enabled: Boolean(workspaceId),
@@ -166,7 +181,7 @@ export function useInspectBackup(workspaceId: string | undefined, path: string |
     queryKey: ["backup-inspect", workspaceId, path],
     queryFn: async () => {
       const res = await fetch(
-        `/api/v1/admin/backups/inspect?workspace_id=${workspaceId}&path=${encodeURIComponent(path!)}`,
+        withQuery("/api/v1/admin/backups/inspect", workspaceId!, { path: path! }),
       )
       return asJSON<BackupManifest>(res)
     },
@@ -179,7 +194,7 @@ export function useCreateBackup(workspaceId: string | undefined) {
   return useMutation<CreateBackupResponse, Error, CreateBackupRequest>({
     mutationFn: async (req) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(`/api/v1/admin/backups?workspace_id=${ws}`, {
+      const res = await fetch(withQuery("/api/v1/admin/backups", ws), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -198,7 +213,7 @@ export function useRestoreBackup(workspaceId: string | undefined) {
   return useMutation<unknown, Error, RestoreBackupRequest>({
     mutationFn: async (req) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(`/api/v1/admin/backups/restore?workspace_id=${ws}`, {
+      const res = await fetch(withQuery("/api/v1/admin/backups/restore", ws), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -216,10 +231,9 @@ export function useDeleteBackup(workspaceId: string | undefined) {
   return useMutation<void, Error, string>({
     mutationFn: async (path) => {
       const ws = requireWorkspaceId(workspaceId)
-      const res = await fetch(
-        `/api/v1/admin/backups?workspace_id=${ws}&path=${encodeURIComponent(path)}`,
-        { method: "DELETE" },
-      )
+      const res = await fetch(withQuery("/api/v1/admin/backups", ws, { path }), {
+        method: "DELETE",
+      })
       if (!res.ok) {
         throw await asError(res)
       }

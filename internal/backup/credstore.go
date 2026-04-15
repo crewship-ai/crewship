@@ -80,9 +80,12 @@ ORDER BY created_at`)
 }
 
 // ImportEncryptedCredentials inserts the supplied rows back into the
-// credentials table on restore. INSERT OR IGNORE so an existing
-// credential with the same id is left untouched — an operator who
-// wants to force-replace should restore into a clean instance.
+// credentials table on restore. ON CONFLICT(id) DO NOTHING so an
+// existing credential with the same id is left untouched — an
+// operator who wants to force-replace should restore into a clean
+// instance. Other conflicts (notably UNIQUE(workspace_id, name)
+// collisions on a non-matching id) surface as an error rather than
+// being silently dropped.
 //
 // encrypted_value is written verbatim. The target instance must share
 // the source's ENCRYPTION_KEY env var (or a compatible key version)

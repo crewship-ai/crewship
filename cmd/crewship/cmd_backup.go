@@ -88,11 +88,25 @@ var backupCreateCmd = &cobra.Command{
 			// decryption failure during restore — the bundle itself is
 			// still written with whatever passphrase the keyring held.
 			ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+			// --use-keyring is an explicit user opt-in; surface
+			// init/decrypt/write failures instead of silently degrading
+			// to a prompt. The one error we DO swallow is
+			// ErrKeyringEntryNotFound — that's the "first use on this
+			// workspace" path where a fresh prompt is the correct
+			// behaviour.
 			if useKeyring && passphraseFile == "" {
-				if kr, kerr := backup.DefaultKeyring(cmd.Context()); kerr == nil {
-					if p, gerr := kr.GetPassphrase(cmd.Context(), ws); gerr == nil {
-						passphrase = p
-					}
+				kr, err := backup.DefaultKeyring(cmd.Context())
+				if err != nil {
+					return fmt.Errorf("open backup keyring: %w", err)
+				}
+				p, err := kr.GetPassphrase(cmd.Context(), ws)
+				switch {
+				case err == nil:
+					passphrase = p
+				case errors.Is(err, backup.ErrKeyringEntryNotFound):
+					// fall through to the prompt below
+				default:
+					return fmt.Errorf("read backup keyring: %w", err)
 				}
 			}
 			if passphrase == "" {
@@ -104,9 +118,15 @@ var backupCreateCmd = &cobra.Command{
 			}
 			// Only persist AFTER the user confirmed a fresh prompt — a
 			// passphrase we just read from the keyring needs no rewrite.
+			// Store failures are reported as warnings rather than
+			// aborting: the bundle is still going to be written, and
+			// losing the keyring cache is recoverable at next use.
 			if useKeyring && passphraseFile == "" && ws != "" {
-				if kr, kerr := backup.DefaultKeyring(cmd.Context()); kerr == nil {
-					_ = kr.StorePassphrase(cmd.Context(), ws, passphrase)
+				kr, err := backup.DefaultKeyring(cmd.Context())
+				if err != nil {
+					cli.PrintWarning(fmt.Sprintf("Keyring unavailable: %v", err))
+				} else if err := kr.StorePassphrase(cmd.Context(), ws, passphrase); err != nil {
+					cli.PrintWarning(fmt.Sprintf("Failed to store passphrase in keyring: %v", err))
 				}
 			}
 		}
@@ -270,11 +290,23 @@ var backupRestoreCmd = &cobra.Command{
 		// was supplied — cleaner than "no passphrase on stdin" from us.
 		var passphrase string
 		ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+		// Mirror the error-propagation policy used during create: the
+		// only silent fallback is ErrKeyringEntryNotFound; every other
+		// failure aborts so the admin sees the real cause instead of a
+		// later "decryption failed" that's hard to diagnose.
 		if useKeyring && passphraseFile == "" && ws != "" {
-			if kr, kerr := backup.DefaultKeyring(cmd.Context()); kerr == nil {
-				if p, gerr := kr.GetPassphrase(cmd.Context(), ws); gerr == nil {
-					passphrase = p
-				}
+			kr, err := backup.DefaultKeyring(cmd.Context())
+			if err != nil {
+				return fmt.Errorf("open backup keyring: %w", err)
+			}
+			p, err := kr.GetPassphrase(cmd.Context(), ws)
+			switch {
+			case err == nil:
+				passphrase = p
+			case errors.Is(err, backup.ErrKeyringEntryNotFound):
+				// fall through to prompt / stdin
+			default:
+				return fmt.Errorf("read backup keyring: %w", err)
 			}
 		}
 		if passphrase == "" {
