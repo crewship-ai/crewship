@@ -52,7 +52,7 @@ item `blocked:<reason>`.
       Extract `containsDangerousShellChars` + any other free
       functions to `internal/api/keeper_helpers.go`. Risk: low.
 
-- [~] **5. runner-create-restore-split** — `internal/backup/runner.go`
+- [x] **5. runner-create-restore-split** — `internal/backup/runner.go`
       (1361 LOC). Move `CreateBackup` + deferred-webhook closure to
       `runner_create.go`. Move `RestoreBackup` + `replayRestoreBackfills`
       to `runner_restore.go`. Keep `DefaultBackupsDir`, `ListBackups`,
@@ -111,4 +111,5 @@ Each completed item appends one line here via the nightly commit.
 - `#2 credentials-loaders` — 926 → 800 LOC in credentials.go; 5 batch/junction loaders moved to `internal/api/credentials_loaders.go` (140 LOC) (2026-04-15)
 - `#3 agents-loaders` — 917 → 885 LOC in agents.go; batchCountByAgentID moved to `internal/api/agents_loaders.go` (49 LOC); parseListPagination left in place (cross-file helper, followup refactor) (2026-04-16)
 - `#4 keeper-helpers` — 849 → 773 LOC in keeper.go; containsDangerousShellChars + regex vars + reverseString + nullIfEmpty moved to `internal/api/keeper_helpers.go` (103 LOC); added `keeper_helpers_test.go` (116 LOC) with 24 subtests covering shell-injection classes + UTF-8 reverse + env-var pattern (2026-04-16)
+- `#5 runner-create-restore-split` — 1361 → 465 LOC in runner.go; CreateBackup + CreateOptions/Result + LockTimeout + compatibleTargetsFor + buildContents (443 LOC) moved to `internal/backup/runner_create.go`; RestoreBackup + RestoreOptions/Result + firstWorkspaceID/Slug + rewriteWorkspaceSlug + rewriteCrewSlug + replayRestoreBackfills (496 LOC) moved to `internal/backup/runner_restore.go`; list/inspect/verify/delete/rotate + shared utilities stay in runner.go (2026-04-16)
 <!-- end:progress -->
