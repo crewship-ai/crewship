@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -21,6 +22,9 @@ import (
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
@@ -62,7 +66,29 @@ type Provider struct {
 	cfg      Config
 	logger   *slog.Logger
 	detected DetectResult
+
+	// digestCache short-circuits repeated HEAD requests to the registry for
+	// the same runtime image reference. Mirrors the provisioner-side cache so
+	// a stale :latest tag is detected without paying the HEAD cost on every
+	// EnsureCrewRuntime call. Per-process, lost on restart.
+	digestMu    sync.RWMutex
+	digestCache map[string]runtimeDigestCacheEntry
 }
+
+type runtimeDigestCacheEntry struct {
+	digest    string
+	fetchedAt time.Time
+}
+
+// runtimeDigestTTL bounds how long a cached HEAD result is trusted. Matches
+// the provisioner's 24h window — registry manifests are essentially static
+// for tagged images and HEAD cost is small anyway.
+const runtimeDigestTTL = 24 * time.Hour
+
+// runtimeImageHeadTimeout caps a single HEAD request against the remote
+// registry. Keeps EnsureCrewRuntime responsive in offline / slow-network
+// environments (docker will fall back to the local copy).
+const runtimeImageHeadTimeout = 5 * time.Second
 
 // socketCandidate is a socket path + label for auto-detection.
 type socketCandidate struct {
@@ -209,7 +235,13 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
 
-	p := &Provider{client: cli, cfg: cfg, logger: logger, detected: *detected}
+	p := &Provider{
+		client:      cli,
+		cfg:         cfg,
+		logger:      logger,
+		detected:    *detected,
+		digestCache: make(map[string]runtimeDigestCacheEntry),
+	}
 
 	logger.Info("container runtime detected",
 		"runtime", detected.Runtime,
@@ -259,25 +291,44 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
-// ensureImage pulls the agent runtime image if it is not already present locally.
+// ensureImage makes sure the agent runtime image is present locally and, when
+// reachable, matches the current remote manifest digest. Mirrors the
+// provisioner's ensureImage (internal/devcontainer/provisioner.go): a purely
+// tag-based match would silently reuse a stale `:latest` tag across hosts
+// with identical configs, breaking reproducibility for shared base images.
+//
+// Resolution order:
+//  1. HEAD manifest on remote registry (best-effort, ≤runtimeImageHeadTimeout,
+//     cached for runtimeDigestTTL).
+//  2. ImageInspect locally for RepoDigests.
+//  3. Local present AND RepoDigests contain the remote digest → done.
+//  4. Otherwise → pull. Offline with a local image is accepted (warn + reuse).
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
-	// List ALL local images (no filter) and check manually.
-	// Docker Desktop can block indefinitely when using reference filters
-	// or ImageInspect on remote registry references (ghcr.io/...).
-	imgs, err := p.client.ImageList(ctx, image.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("list images: %w", err)
+	remoteDigest := p.getCachedOrFreshRuntimeDigest(ctx, ref)
+
+	inspect, inspectErr := p.client.ImageInspect(ctx, ref)
+	localPresent := inspectErr == nil
+	if localPresent && remoteDigest != "" && runtimeRepoDigestsContain(inspect.RepoDigests, remoteDigest) {
+		return nil
 	}
-	for _, img := range imgs {
-		for _, tag := range img.RepoTags {
-			if tag == ref {
-				return nil
-			}
-		}
+	if localPresent && remoteDigest == "" {
+		// Offline or auth-gated registry; trust local presence.
+		p.logger.Debug("runtime image present locally; skipping pull (remote digest unavailable)", "ref", ref)
+		return nil
 	}
-	p.logger.Info("pulling agent runtime image", "image", ref)
+
+	action := "pulling agent runtime image"
+	if localPresent {
+		action = "local runtime image stale, re-pulling"
+	}
+	p.logger.Info(action, "image", ref, "remote_digest", remoteDigest)
 	reader, err := p.client.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
+		if localPresent {
+			p.logger.Warn("runtime image pull failed; proceeding with local (possibly stale) copy",
+				"image", ref, "error", err)
+			return nil
+		}
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	defer reader.Close()
@@ -286,6 +337,60 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	}
 	p.logger.Info("agent runtime image pulled", "image", ref)
 	return nil
+}
+
+// getCachedOrFreshRuntimeDigest returns a cached HEAD-manifest digest if still
+// within runtimeDigestTTL, otherwise fetches a fresh one and caches it. Empty
+// results are NOT cached — the next call retries transient registry failures.
+func (p *Provider) getCachedOrFreshRuntimeDigest(ctx context.Context, ref string) string {
+	p.digestMu.RLock()
+	entry, ok := p.digestCache[ref]
+	p.digestMu.RUnlock()
+
+	if ok && time.Since(entry.fetchedAt) < runtimeDigestTTL {
+		return entry.digest
+	}
+	fresh := p.remoteRuntimeImageDigest(ctx, ref)
+	if fresh != "" {
+		p.digestMu.Lock()
+		p.digestCache[ref] = runtimeDigestCacheEntry{digest: fresh, fetchedAt: time.Now()}
+		p.digestMu.Unlock()
+	}
+	return fresh
+}
+
+// remoteRuntimeImageDigest returns the manifest digest for ref via HEAD.
+// Best-effort: returns "" on auth errors, parse failures, or timeouts.
+func (p *Provider) remoteRuntimeImageDigest(ctx context.Context, ref string) string {
+	parsed, err := name.ParseReference(ref)
+	if err != nil {
+		return ""
+	}
+	headCtx, cancel := context.WithTimeout(ctx, runtimeImageHeadTimeout)
+	defer cancel()
+	desc, err := remote.Head(parsed,
+		remote.WithContext(headCtx),
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+	)
+	if err != nil {
+		return ""
+	}
+	return desc.Digest.String()
+}
+
+// runtimeRepoDigestsContain reports whether any entry in repoDigests refers
+// to the given manifest digest. Each entry is formatted "<repo>@sha256:<hex>".
+func runtimeRepoDigestsContain(repoDigests []string, digest string) bool {
+	if digest == "" {
+		return false
+	}
+	for _, rd := range repoDigests {
+		at := strings.LastIndex(rd, "@")
+		if at > 0 && rd[at+1:] == digest {
+			return true
+		}
+	}
+	return false
 }
 
 // CrewContainerName returns the container name for a crew based on its slug and the configured prefix.

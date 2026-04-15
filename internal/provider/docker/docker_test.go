@@ -171,3 +171,31 @@ func TestEnsureNetworkNotInternal(t *testing.T) {
 	}
 	t.Errorf("network %q not found after ensureNetwork", testNet)
 }
+
+// TestRuntimeRepoDigestsContain covers the digest-match helper used by the
+// runtime ensureImage to decide whether a locally-present image already
+// matches the remote HEAD digest.
+func TestRuntimeRepoDigestsContain(t *testing.T) {
+	digest := "sha256:deadbeef"
+	cases := []struct {
+		name    string
+		rd      []string
+		digest  string
+		want    bool
+		message string
+	}{
+		{"match", []string{"ghcr.io/foo/bar@" + digest}, digest, true, "exact match should return true"},
+		{"no-match", []string{"ghcr.io/foo/bar@sha256:other"}, digest, false, "different digest should return false"},
+		{"empty-list", nil, digest, false, "empty repoDigests should return false"},
+		{"empty-digest", []string{"ghcr.io/foo/bar@" + digest}, "", false, "empty digest arg must not match (avoid spurious hits)"},
+		{"malformed", []string{"not-a-repo-digest"}, digest, false, "entries missing '@' must be skipped"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runtimeRepoDigestsContain(tc.rd, tc.digest); got != tc.want {
+				t.Errorf("runtimeRepoDigestsContain(%v, %q) = %v; want %v — %s",
+					tc.rd, tc.digest, got, tc.want, tc.message)
+			}
+		})
+	}
+}

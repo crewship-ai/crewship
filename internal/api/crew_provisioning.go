@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 )
@@ -147,7 +150,169 @@ func NewProvisioningHandler(
 	// Launch background cleanup so completed/failed jobs don't accumulate
 	// forever. Handler lives for the process lifetime; Background ctx is OK.
 	go h.startJobCleanupRoutine(context.Background())
+
+	// Orphan GC — only runs when Docker is wired in. Does one-shot sweep at
+	// startup (best-effort, non-fatal) then periodic sweeps. Both temp
+	// containers (leaked if crewshipd SIGKILL'd during provision) and orphan
+	// cache-images (leaked if crash between ContainerCommit and DB UPDATE)
+	// are handled here.
+	if docker != nil {
+		go h.runStartupAndPeriodicGC(context.Background())
+	}
+
 	return h
+}
+
+// Orphan GC tunables. A provisioning run should finish well under tempContainerMaxAge;
+// anything older is almost certainly a crash remnant.
+const (
+	tempContainerMaxAge = 1 * time.Hour
+	orphanGCInterval    = 30 * time.Minute
+	orphanGCSweepCap    = 200 // defensive — don't stall on pathological state
+
+	// cacheGCAutoDeleteEnv gates destructive removal of unreferenced
+	// crewship-cache:* images. Default (unset/false) is log-only — an operator
+	// has to opt in to deletion because dropping an image someone just built
+	// locally is surprising.
+	cacheGCAutoDeleteEnv = "CREWSHIP_CACHE_GC_AUTODELETE"
+)
+
+// runStartupAndPeriodicGC performs one sweep at process startup and then
+// schedules recurring sweeps every orphanGCInterval. Exits on ctx.Done.
+func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
+	// Startup sweep — tolerate failures (Docker may not yet be reachable).
+	h.sweepOrphanTempContainers(ctx)
+	h.sweepOrphanCacheImages(ctx)
+
+	ticker := time.NewTicker(orphanGCInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.sweepOrphanTempContainers(ctx)
+			h.sweepOrphanCacheImages(ctx)
+		}
+	}
+}
+
+// sweepOrphanTempContainers removes temp containers created by the provisioner
+// that have outlived a full provisioning run (tempContainerMaxAge). A normal
+// run cleans up via defer; this sweeper only catches the crash/SIGKILL path.
+// Filtered by the Provisioner's label so we never touch unrelated containers.
+func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
+	if h.docker == nil {
+		return
+	}
+	start := time.Now()
+	labelFilter := devcontainer.TempContainerLabelKey + "=" + devcontainer.TempContainerLabelValue
+	containers, err := h.docker.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filters.NewArgs(filters.Arg("label", labelFilter)),
+	})
+	if err != nil {
+		h.logger.Warn("orphan temp-container GC: list failed", "error", err)
+		return
+	}
+	cutoff := time.Now().Add(-tempContainerMaxAge).Unix()
+	removed := 0
+	for i, c := range containers {
+		if i >= orphanGCSweepCap {
+			h.logger.Warn("orphan temp-container GC: sweep cap hit; remaining containers skipped",
+				"cap", orphanGCSweepCap, "total", len(containers))
+			break
+		}
+		if c.Created >= cutoff {
+			continue
+		}
+		if err := h.docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
+			h.logger.Warn("orphan temp-container GC: remove failed", "container", c.ID, "error", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		h.logger.Info("orphan temp-container GC: removed stale temp containers",
+			"removed", removed, "scanned", len(containers), "duration", time.Since(start))
+	} else {
+		h.logger.Debug("orphan temp-container GC: nothing to remove",
+			"scanned", len(containers), "duration", time.Since(start))
+	}
+}
+
+// sweepOrphanCacheImages finds crewship-cache:* images that have no referencing
+// crew row across ALL workspaces. These are leaks from a crash window between
+// ContainerCommit and the crews.cached_image UPDATE. Removal is opt-in via
+// CREWSHIP_CACHE_GC_AUTODELETE=true — default is log-only for visibility.
+func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
+	if h.docker == nil {
+		return
+	}
+	// 1. Collect every cached_image still referenced by any crew across all
+	//    workspaces (no workspace filter — an image referenced by another
+	//    tenant's crew must never be deleted).
+	rows, err := h.db.QueryContext(ctx,
+		`SELECT DISTINCT cached_image FROM crews
+		 WHERE cached_image IS NOT NULL AND cached_image != ''
+		       AND deleted_at IS NULL`)
+	if err != nil {
+		h.logger.Warn("orphan cache-image GC: query failed", "error", err)
+		return
+	}
+	referenced := make(map[string]struct{})
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			rows.Close()
+			h.logger.Warn("orphan cache-image GC: scan failed", "error", err)
+			return
+		}
+		referenced[tag] = struct{}{}
+	}
+	rows.Close()
+
+	// 2. Compare against the local image set. Any crewship-cache:* tag with
+	//    no referencing row is an orphan.
+	imgs, err := h.docker.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		h.logger.Warn("orphan cache-image GC: image list failed", "error", err)
+		return
+	}
+	autoDelete := strings.EqualFold(os.Getenv(cacheGCAutoDeleteEnv), "true") ||
+		os.Getenv(cacheGCAutoDeleteEnv) == "1"
+
+	orphans := make([]string, 0)
+	for _, img := range imgs {
+		for _, tag := range img.RepoTags {
+			if !strings.HasPrefix(tag, cacheImagePrefix) {
+				continue
+			}
+			if _, ok := referenced[tag]; ok {
+				continue
+			}
+			orphans = append(orphans, tag)
+		}
+	}
+	if len(orphans) == 0 {
+		h.logger.Debug("orphan cache-image GC: nothing to report")
+		return
+	}
+	if !autoDelete {
+		h.logger.Info("orphan cache-image GC: unreferenced cache images detected (log-only, set CREWSHIP_CACHE_GC_AUTODELETE=true to remove)",
+			"orphans", orphans, "count", len(orphans))
+		return
+	}
+	removed := 0
+	for _, tag := range orphans {
+		if _, err := h.docker.ImageRemove(ctx, tag, image.RemoveOptions{Force: false, PruneChildren: true}); err != nil {
+			h.logger.Warn("orphan cache-image GC: remove failed", "tag", tag, "error", err)
+			continue
+		}
+		removed++
+	}
+	h.logger.Info("orphan cache-image GC: removed unreferenced cache images",
+		"removed", removed, "total_orphans", len(orphans))
 }
 
 // cleanupOldJobs removes completed/failed jobs older than 1h from the jobs map.

@@ -52,6 +52,13 @@ type Provisioner struct {
 	// fine: a cold cache simply costs one extra HEAD per base image.
 	digestMu    sync.RWMutex
 	digestCache map[string]digestCacheEntry
+
+	// Cache of ImageList results to avoid an O(n) Docker call on every
+	// imageExists/Provision check. Invalidated on Pull/Commit (our own
+	// mutations) and on TTL expiry (external mutations via `docker rmi` etc.).
+	// Short TTL so disk reclaim or manual rmi is reflected quickly.
+	imageListMu    sync.Mutex
+	imageListCache imageListCacheEntry
 }
 
 type digestCacheEntry struct {
@@ -59,7 +66,23 @@ type digestCacheEntry struct {
 	fetchedAt time.Time
 }
 
-const remoteDigestTTL = 24 * time.Hour
+type imageListCacheEntry struct {
+	images    []image.Summary
+	fetchedAt time.Time
+}
+
+const (
+	remoteDigestTTL = 24 * time.Hour
+	imageListTTL    = 60 * time.Second
+)
+
+// TempContainerLabelKey and TempContainerLabelValue identify temporary
+// containers created by Provisioner.createTempContainer. Exported so the
+// orphan-temp sweeper (internal/api/crew_provisioning.go) can filter on them.
+const (
+	TempContainerLabelKey   = "crewship.temp"
+	TempContainerLabelValue = "provision"
+)
 
 // ProvisionResult contains the output of a successful provisioning run.
 type ProvisionResult struct {
@@ -195,9 +218,10 @@ func (p *Provisioner) IsCached(ctx context.Context, hash string) (bool, error) {
 }
 
 // imageExists checks whether a locally available image matches the given
-// reference (e.g. "crewship-cache:a1b2c3d4e5f6").
+// reference (e.g. "crewship-cache:a1b2c3d4e5f6"). Uses the cached image list
+// when fresh.
 func (p *Provisioner) imageExists(ctx context.Context, ref string) (bool, error) {
-	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
+	imgs, err := p.listImages(ctx)
 	if err != nil {
 		return false, fmt.Errorf("listing images: %w", err)
 	}
@@ -209,6 +233,34 @@ func (p *Provisioner) imageExists(ctx context.Context, ref string) (bool, error)
 		}
 	}
 	return false, nil
+}
+
+// listImages returns the local image summaries, using a short-lived cache to
+// avoid hammering the Docker daemon. Cache is invalidated on our own
+// ImagePull/ImageCommit calls and on TTL expiry. External `docker rmi` is
+// picked up after the TTL window (default 60s).
+func (p *Provisioner) listImages(ctx context.Context) ([]image.Summary, error) {
+	p.imageListMu.Lock()
+	defer p.imageListMu.Unlock()
+
+	if p.imageListCache.images != nil && time.Since(p.imageListCache.fetchedAt) < imageListTTL {
+		return p.imageListCache.images, nil
+	}
+	imgs, err := p.docker.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	p.imageListCache = imageListCacheEntry{images: imgs, fetchedAt: time.Now()}
+	return imgs, nil
+}
+
+// invalidateImageListCache forces the next listImages call to hit the Docker
+// daemon. Call after any operation that mutates the local image set
+// (ImagePull, ImageCommit, ImageRemove).
+func (p *Provisioner) invalidateImageListCache() {
+	p.imageListMu.Lock()
+	p.imageListCache = imageListCacheEntry{}
+	p.imageListMu.Unlock()
 }
 
 // Provision builds a cached image by installing devcontainer features and
@@ -305,6 +357,8 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	if commitErr != nil {
 		return nil, fmt.Errorf("committing container: %w", commitErr)
 	}
+	// New crewship-cache:* tag is now present locally — drop cached list.
+	p.invalidateImageListCache()
 
 	p.logger.Info("provisioned cached image",
 		"tag", tag,
@@ -347,6 +401,11 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 			Image: baseImage,
 			Cmd:   []string{"sleep", "infinity"},
 			User:  "0:0",
+			// Label is the canonical marker used by the orphan-temp sweeper.
+			// If crewshipd is SIGKILLed between ContainerCreate and the
+			// provision flow's cleanup defer, the next start-up sweep removes
+			// these by label (see internal/api/crew_provisioning.go).
+			Labels: map[string]string{TempContainerLabelKey: TempContainerLabelValue},
 		},
 		&container.HostConfig{
 			// Parity with runtime — some feature install scripts dial the host
@@ -409,6 +468,8 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return fmt.Errorf("read pull stream: %w", err)
 	}
+	// New or updated image may now be present locally — drop the cached list.
+	p.invalidateImageListCache()
 	return nil
 }
 
