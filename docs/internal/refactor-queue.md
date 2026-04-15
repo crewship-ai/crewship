@@ -97,7 +97,7 @@ item `blocked:<reason>`.
       > then re-open this item by flipping the checkbox back to
       > `[ ]`. Revert preserved `main`-matching runner state.
 
-- [ ] **8. orchestrator-config-split** `high_risk: true` —
+- [~] **8. orchestrator-config-split** `high_risk: true` —
       `internal/orchestrator/orchestrator.go` (1195 LOC). Extract
       pure getters/setters (`SetStatsRegisterCallback`,
       `SetSidecarEnabled`, `SetKeeperEnabled`, `SetIPCConfig`,
