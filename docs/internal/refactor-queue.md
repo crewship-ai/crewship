@@ -48,7 +48,7 @@ item `blocked:<reason>`.
       Extract `batchCountByAgentID` + related helpers to
       `internal/api/agents_loaders.go`. Risk: low.
 
-- [ ] **4. keeper-helpers** — `internal/api/keeper.go` (849 LOC).
+- [~] **4. keeper-helpers** — `internal/api/keeper.go` (849 LOC).
       Extract `containsDangerousShellChars` + any other free
       functions to `internal/api/keeper_helpers.go`. Risk: low.
 
