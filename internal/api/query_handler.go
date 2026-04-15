@@ -215,12 +215,14 @@ Question: %s`, body.FromSlug, body.Question)
 	}
 
 	// Guard against running while a backup holds the workspace lock.
-	if err := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID); err != nil {
+	guardRelease, guardErr := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID)
+	if guardErr != nil {
 		h.logger.Warn("peer query refused — backup in progress", "query_id", convID, "workspace_id", body.WorkspaceID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", err.Error(), startTime)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "query_id": convID})
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", guardErr.Error(), startTime)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": guardErr.Error(), "query_id": convID})
 		return
 	}
+	defer guardRelease()
 
 	if err := h.orch.RunAgentForAssignment(r.Context(), req, handler); err != nil {
 		h.logger.Error("peer query execution failed", "error", err, "query_id", convID)

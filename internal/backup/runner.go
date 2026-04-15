@@ -148,7 +148,20 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		return nil, err
 	}
 
-	// 2. Acquire lock (per-workspace).
+	// 2a. Acquire the in-process workspace guard BEFORE the DB lock.
+	// This closes the TOCTOU race with mission-start: without it, a
+	// request already past refuseIfBackupInProgress could register a
+	// new agent run between our DB lock insert and ensureAgentsIdle,
+	// silently missing from the dump. See internal/backup/guard.go.
+	guardRelease, err := DefaultGuard().BeginBackup(target.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer guardRelease()
+
+	// 2b. Acquire DB advisory lock (per-workspace). The DB row is the
+	// durable, user-visible status marker (`crewship backup status`
+	// reads it) and the multi-process-safety net.
 	lockMgr := NewSQLLockManager(db)
 	release, err := lockMgr.AcquireWorkspaceLock(ctx, target.ID, opts.Actor.UserID, LockTimeout)
 	if err != nil {
@@ -157,6 +170,8 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	defer func() { _ = release(context.Background()) }()
 
 	// 3. Agent idle guard — refuse if any agent is actively running.
+	// With the in-process guard already held, no new mission can slip
+	// in between this check and the payload build.
 	if err := ensureAgentsIdle(ctx, db, target); err != nil {
 		return nil, err
 	}

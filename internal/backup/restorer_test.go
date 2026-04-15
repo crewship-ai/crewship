@@ -6,9 +6,25 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 )
+
+// runtimeMemSnapshot is a thin wrapper around runtime.MemStats that
+// exposes only the counter TestExtractPayload_StreamsLargeEntries
+// cares about. Using MemStats directly in the test would drag in a
+// lot of noise (stack scans, mallocs, etc).
+type runtimeMemSnapshot struct {
+	totalAlloc uint64
+}
+
+func (s *runtimeMemSnapshot) capture() {
+	runtime.GC()
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	s.totalAlloc = ms.TotalAlloc
+}
 
 // buildPayloadWithEntry constructs a minimal payload tar.zst that
 // contains exactly one custom entry plus the db/dump.json the
@@ -177,6 +193,102 @@ func TestExtractPayload_ReadsDBDumpEntry(t *testing.T) {
 	}
 	if out.DBDump.WorkspaceID != "ws" {
 		t.Errorf("wrong workspace id: %v", out.DBDump.WorkspaceID)
+	}
+}
+
+// TestExtractPayload_StreamsLargeEntries asserts ExtractPayload never
+// buffers a whole per-crew section in memory. We construct a payload
+// whose workspace/{slug} section carries a file much larger than any
+// reasonable in-memory buffer would tolerate and confirm that:
+//
+//  1. extraction succeeds,
+//  2. the reported heap allocation for the extraction (measured via
+//     runtime.MemStats delta) stays below a small multiple of the
+//     file size — if ExtractPayload ever regresses to io.ReadAll on
+//     the workspace entry, total alloc would be at least O(fileSize).
+//
+// The file is 64 MiB to keep CI time bounded; production workspaces
+// regularly exceed 1 GiB and the same streaming path is exercised.
+func TestExtractPayload_StreamsLargeEntries(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skip large-payload streaming test under -short")
+	}
+	const entryBytes = 64 * 1024 * 1024 // 64 MiB
+	var buf bytes.Buffer
+	tw, err := NewTarZstWriter(&buf)
+	if err != nil {
+		t.Fatalf("writer: %v", err)
+	}
+	hdr := &tar.Header{
+		Name:     "workspace/big/blob.bin",
+		Mode:     0o644,
+		ModTime:  time.Now(),
+		Typeflag: tar.TypeReg,
+		Size:     entryBytes,
+	}
+	if err := tw.tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("header: %v", err)
+	}
+	// Stream the body through the writer in 64 KiB chunks. Content is
+	// deterministic zeros so zstd compresses it aggressively and the
+	// tar.zst buffer stays tiny — that is fine, we are testing the
+	// extractor's memory bound, not the writer's.
+	chunk := make([]byte, 64*1024)
+	remaining := int64(entryBytes)
+	for remaining > 0 {
+		n := int64(len(chunk))
+		if n > remaining {
+			n = remaining
+		}
+		if _, err := tw.tw.Write(chunk[:n]); err != nil {
+			t.Fatalf("body: %v", err)
+		}
+		remaining -= n
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Sample heap before and after extraction. GC first so baseline is
+	// accurate; the TotalAlloc delta is cumulative since program
+	// start, so GC does not affect the measurement.
+	var before, after runtimeMemSnapshot
+	before.capture()
+	out, err := ExtractPayload(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	defer func() { _ = out.Close() }()
+	after.capture()
+
+	if !out.HasWorkspace("big") {
+		t.Fatal("expected workspace/big section to be present")
+	}
+
+	delta := after.totalAlloc - before.totalAlloc
+	// Primary invariant: total alloc delta must not scale with entry
+	// size. If ExtractPayload ever regresses to io.ReadAll on the
+	// workspace body, delta would be at least entryBytes. We allow a
+	// generous margin (entryBytes / 4) to absorb zstd decode windows,
+	// tar header buffers, and test-harness chatter.
+	if delta > uint64(entryBytes)/4 {
+		t.Fatalf("heap alloc during extract = %d bytes, expected < %d (entry was %d bytes)",
+			delta, entryBytes/4, entryBytes)
+	}
+
+	// Consume the extracted workspace to make sure the on-disk tar is
+	// valid. The caller owns Close() on the ReadCloser.
+	r, ok, err := out.OpenWorkspace("big")
+	if err != nil || !ok {
+		t.Fatalf("OpenWorkspace: ok=%v err=%v", ok, err)
+	}
+	n, err := io.Copy(io.Discard, r)
+	_ = r.Close()
+	if err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	if n < int64(entryBytes) {
+		t.Fatalf("streamed %d bytes, expected >= %d", n, entryBytes)
 	}
 }
 
