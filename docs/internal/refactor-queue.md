@@ -52,7 +52,7 @@ item `blocked:<reason>`.
       Extract `containsDangerousShellChars` + any other free
       functions to `internal/api/keeper_helpers.go`. Risk: low.
 
-- [ ] **5. runner-create-restore-split** — `internal/backup/runner.go`
+- [~] **5. runner-create-restore-split** — `internal/backup/runner.go`
       (1361 LOC). Move `CreateBackup` + deferred-webhook closure to
       `runner_create.go`. Move `RestoreBackup` + `replayRestoreBackfills`
       to `runner_restore.go`. Keep `DefaultBackupsDir`, `ListBackups`,
