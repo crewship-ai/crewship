@@ -9,11 +9,22 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"filippo.io/age"
 )
+
+// debugReadBuildInfo is a tiny indirection so tests can substitute a
+// deterministic version string. The real path consults runtime/debug.
+func debugReadBuildInfo() (string, bool) {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", false
+	}
+	return bi.Main.Version, true
+}
 
 // Scope-qualified filename helpers.
 
@@ -150,7 +161,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		return nil, err
 	}
 
-	// 4. Output directory.
+	// 4. Output directory. Supports --output via opts.OutputDir and
+	// falls back to ~/.crewship/backups. The preflight (disk-space
+	// check, partial-file cleanup) operates on the effective path so
+	// a non-default --output is not left with stale .partial files.
 	outDir := opts.OutputDir
 	if outDir == "" {
 		outDir, err = DefaultBackupsDir()
@@ -161,6 +175,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return nil, fmt.Errorf("backup: ensure output dir: %w", err)
 	}
+	// Sweep stale .partial files older than one hour. A process that
+	// crashed mid-CreateBackup leaves one behind; without this sweep
+	// the admin accumulates orphans forever and disk fills up.
+	cleanupStalePartials(outDir, time.Hour)
 
 	// 5. Build the payload tar to a temp file so peak memory is bounded
 	// by the zstd encoder's window (a few MB) rather than the full
@@ -258,11 +276,17 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		return nil, fmt.Errorf("backup: close sealed temp: %w", err)
 	}
 
-	// 7. Build the manifest with derived fields populated.
+	// 7. Build the manifest with derived fields populated. Version and
+	// migration-version fields fall back to runtime detection so the
+	// resulting manifest is never empty in those slots.
+	migrations := opts.SchemaMigrationVersions
+	if len(migrations) == 0 {
+		migrations = AppliedMigrationVersions(ctx, db)
+	}
 	manifest := &Manifest{
 		FormatVersion:           FormatVersion,
-		CrewshipVersionAtBackup: opts.CrewshipVersion,
-		SchemaMigrationVersions: opts.SchemaMigrationVersions,
+		CrewshipVersionAtBackup: DetectCrewshipVersion(opts.CrewshipVersion),
+		SchemaMigrationVersions: migrations,
 		Scope:                   opts.Scope,
 		CompatibleTargets:       compatibleTargetsFor(opts.Scope),
 		CreatedAt:               now,
@@ -435,6 +459,15 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		}
 		if opts.AsCrew != "" && manifest.Scope == ScopeCrew && len(manifest.Contents.Crews) > 0 {
 			rewriteCrewSlug(extracted.DBDump, manifest.Contents.Crews[0].ID, opts.AsCrew)
+		}
+		// When the admin picked a new slug via --as-* they want the
+		// restored data to live alongside the source. Regenerate every
+		// primary key and rewrite every FK so INSERT OR IGNORE does
+		// not drop the whole bundle on PK collision.
+		if opts.AsWorkspace != "" || opts.AsCrew != "" {
+			if err := RemapIDs(ctx, db, extracted.DBDump); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -665,6 +698,34 @@ func compatibleTargetsFor(s Scope) []Target {
 	}
 }
 
+// cleanupStalePartials removes *.partial files older than maxAge in
+// dir. A crashed or cancelled CreateBackup leaves one behind; without
+// this sweep they accumulate forever. Errors are swallowed — the only
+// consequence of a failed cleanup is a file that will be retried on
+// the next backup, not a correctness issue.
+func cleanupStalePartials(dir string, maxAge time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-maxAge)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ".partial") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
 // currentInstance collects hostname / platform details for the manifest.
 func currentInstance() Instance {
 	host, _ := os.Hostname()
@@ -672,6 +733,49 @@ func currentInstance() Instance {
 		Hostname: host,
 		Platform: runtime.GOOS + "/" + runtime.GOARCH,
 	}
+}
+
+// AppliedMigrationVersions returns the list of migration versions
+// recorded in the _migrations table, sorted ascending. A missing
+// table or a read error returns an empty slice so the caller can
+// always populate manifest.SchemaMigrationVersions without nil
+// handling — the manifest treats [] as "unknown", not broken.
+func AppliedMigrationVersions(ctx context.Context, db *sql.DB) []int {
+	if db == nil {
+		return nil
+	}
+	rows, err := db.QueryContext(ctx, `SELECT version FROM _migrations ORDER BY version`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []int
+	for rows.Next() {
+		var v int
+		if err := rows.Scan(&v); err != nil {
+			return out
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// DetectCrewshipVersion returns a best-effort version string for the
+// running binary. The build system typically injects it via
+// -ldflags "-X main.Version=…"; we fall back to the module's
+// ReadBuildInfo version (often "(devel)" in local dev) so the
+// manifest always records something non-empty.
+func DetectCrewshipVersion(override string) string {
+	if override != "" {
+		return override
+	}
+	if env := os.Getenv("CREWSHIP_VERSION"); env != "" {
+		return env
+	}
+	if bi, ok := debugReadBuildInfo(); ok && bi != "" {
+		return bi
+	}
+	return "dev"
 }
 
 // buildContents translates a WorkspaceTarget into the manifest's

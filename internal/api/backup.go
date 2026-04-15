@@ -49,6 +49,7 @@ type createRequest struct {
 	CrewID     string `json:"crew_id,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
 	NoEncrypt  bool   `json:"no_encrypt,omitempty"`
+	OutputDir  string `json:"output_dir,omitempty"`
 }
 
 type createResponse struct {
@@ -115,10 +116,23 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		passphrase = req.Passphrase
 	}
 
+	// Constrain custom output directory to live under the default so an
+	// admin cannot use POST /backups as a write primitive to arbitrary
+	// host paths. validateBackupPath handles the symlink + prefix
+	// checks we already use for Inspect / Restore / Download.
+	outputDir := req.OutputDir
+	if outputDir != "" {
+		if err := validateBackupPath(outputDir); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid output_dir: " + err.Error()})
+			return
+		}
+	}
+
 	result, err := backup.CreateBackup(ctx, h.db, backup.CreateOptions{
 		Scope:             scope,
 		WorkspaceID:       workspaceID,
 		CrewID:            req.CrewID,
+		OutputDir:         outputDir,
 		CrewshipVersion:   h.crewshipVersion,
 		Actor:             backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		Passphrase:        passphrase,
@@ -289,6 +303,51 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Status handles GET /api/v1/admin/backups/status. Reports whether an
+// advisory backup_lock row is currently held for the caller's workspace.
+// Useful when Create returns 409 "another backup is already in progress"
+// and the admin wants to know who has the lock and when it expires.
+func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	role := RoleFromContext(ctx)
+	workspaceID := WorkspaceIDFromContext(ctx)
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	if workspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace context required"})
+		return
+	}
+
+	type statusResp struct {
+		Held        bool   `json:"held"`
+		WorkspaceID string `json:"workspace_id,omitempty"`
+		AcquiredBy  string `json:"acquired_by,omitempty"`
+		AcquiredAt  string `json:"acquired_at,omitempty"`
+		ExpiresAt   string `json:"expires_at,omitempty"`
+	}
+
+	var out statusResp
+	out.WorkspaceID = workspaceID
+	held, err := backup.IsLockHeld(ctx, h.db, workspaceID, time.Now())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out.Held = held
+	if held {
+		// Pull the row detail so the CLI can show who / when. Errors
+		// here degrade to "held=true with empty fields" rather than a
+		// 500 — the lock detection itself is authoritative.
+		_ = h.db.QueryRowContext(ctx,
+			`SELECT acquired_by, acquired_at, expires_at FROM backup_locks WHERE workspace_id = ?`,
+			workspaceID,
+		).Scan(&out.AcquiredBy, &out.AcquiredAt, &out.ExpiresAt)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // Delete handles DELETE /api/v1/admin/backups?path=…
 func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -352,9 +411,15 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Bundle bytes contain sensitive workspace contents (even encrypted,
+	// the metadata is plaintext). Disable proxy / browser caching so a
+	// compromised intermediary does not retain a copy after download.
 	w.Header().Set("Content-Type", "application/zstd")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(path)))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_, _ = io.Copy(w, f)
 
 	if user != nil {

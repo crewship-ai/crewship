@@ -84,6 +84,24 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 		}
 		name := strings.TrimPrefix(hdr.Name, "./")
 
+		// Defence-in-depth against a tampered bundle: a tar entry that
+		// climbs above the intended prefix (e.g. "../../etc/shadow")
+		// or carries a symlink target would, when later handed to
+		// docker CopyTo, write into unexpected parts of the container
+		// rootfs. Docker enforces its own containment but we reject
+		// the entry up front so the failure mode is "bad bundle", not
+		// "unexpected file where it should not be".
+		if strings.Contains(name, "..") {
+			return nil, fmt.Errorf("%w: payload entry %q contains parent reference", ErrInvalidManifest, hdr.Name)
+		}
+		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
+			// Crewship bundles never carry symlinks — the collector
+			// harvests via docker CopyFromContainer which expands
+			// regular files only. A symlink in the stream therefore
+			// means a tampered bundle.
+			return nil, fmt.Errorf("%w: payload entry %q is a symlink", ErrInvalidManifest, hdr.Name)
+		}
+
 		switch {
 		case name == "db/dump.json":
 			data, err := io.ReadAll(tr)

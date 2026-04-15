@@ -99,11 +99,13 @@ var backupCreateCmd = &cobra.Command{
 			}
 		}
 
+		outputDir, _ := cmd.Flags().GetString("output")
 		body := map[string]any{
 			"scope":      scope,
 			"crew_id":    crewID,
 			"passphrase": passphrase,
 			"no_encrypt": noEncrypt,
+			"output_dir": outputDir,
 		}
 		resp, err := client.Post("/api/v1/admin/backups", body)
 		if err != nil {
@@ -282,6 +284,51 @@ var backupRestoreCmd = &cobra.Command{
 	},
 }
 
+var backupStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show active backup locks for the current workspace",
+	Long: `Report whether a backup is currently in progress on this
+workspace and when its advisory lock expires. Useful when
+'backup create' returns 'another backup is already in progress' and
+you need to know who acquired the lock (or wait for its TTL).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/admin/backups/status")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Held        bool   `json:"held"`
+			AcquiredBy  string `json:"acquired_by,omitempty"`
+			AcquiredAt  string `json:"acquired_at,omitempty"`
+			ExpiresAt   string `json:"expires_at,omitempty"`
+			WorkspaceID string `json:"workspace_id,omitempty"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		if !out.Held {
+			fmt.Fprintln(os.Stderr, "No backup in progress on this workspace.")
+			return nil
+		}
+		f := newFormatter()
+		f.Table(
+			[]string{"WORKSPACE", "ACQUIRED_BY", "ACQUIRED_AT", "EXPIRES_AT"},
+			[][]string{{out.WorkspaceID, out.AcquiredBy, out.AcquiredAt, out.ExpiresAt}},
+		)
+		return nil
+	},
+}
+
 var backupDeleteCmd = &cobra.Command{
 	Use:   "delete <file>",
 	Short: "Delete a backup bundle from disk",
@@ -313,6 +360,7 @@ func init() {
 	backupCreateCmd.Flags().Bool("no-encrypt", false, "Write a plaintext payload instead of AGE-encrypting it")
 	backupCreateCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
 	backupCreateCmd.Flags().String("recipient", "", "AGE X25519 public key (age1…) for asymmetric encryption")
+	backupCreateCmd.Flags().String("output", "", "Override output directory (default: ~/.crewship/backups on the server)")
 
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
@@ -323,6 +371,7 @@ func init() {
 	backupCmd.AddCommand(backupInspectCmd)
 	backupCmd.AddCommand(backupRestoreCmd)
 	backupCmd.AddCommand(backupDeleteCmd)
+	backupCmd.AddCommand(backupStatusCmd)
 }
 
 // readPassphrase reads a passphrase from the given file, or prompts the
