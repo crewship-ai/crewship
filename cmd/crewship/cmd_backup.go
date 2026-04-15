@@ -49,6 +49,7 @@ var backupCreateCmd = &cobra.Command{
 		crewRef, _ := cmd.Flags().GetString("crew")
 		noEncrypt, _ := cmd.Flags().GetBool("no-encrypt")
 		passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
+		recipient, _ := cmd.Flags().GetString("recipient")
 
 		if scope != "workspace" && scope != "crew" {
 			return fmt.Errorf("--scope must be 'workspace' or 'crew' (got %q)", scope)
@@ -57,16 +58,34 @@ var backupCreateCmd = &cobra.Command{
 			return fmt.Errorf("--crew <slug-or-id> is required when --scope=crew")
 		}
 
-		// Collect passphrase unless the user opted out explicitly.
+		// Mutually-exclusive encryption selectors. --recipient overrides
+		// --passphrase-file; --no-encrypt wins over both and skips the
+		// prompt entirely.
+		if recipient != "" && noEncrypt {
+			return fmt.Errorf("--recipient and --no-encrypt are mutually exclusive")
+		}
+		if recipient != "" && passphraseFile != "" {
+			return fmt.Errorf("--recipient and --passphrase-file are mutually exclusive")
+		}
+
 		var passphrase string
-		if !noEncrypt {
+		switch {
+		case noEncrypt:
+			cli.PrintWarning("--no-encrypt: bundle will contain plaintext data. Protect it accordingly.")
+		case recipient != "":
+			if !strings.HasPrefix(recipient, "age1") {
+				return fmt.Errorf("--recipient must be an age1… public key")
+			}
+			// Server-side handler accepts a single recipient string; we
+			// ship it as "passphrase" to keep the wire shape stable
+			// across MVP, tagged by the age1 prefix the server detects.
+			passphrase = recipient
+		default:
 			p, err := readPassphrase(passphraseFile, true /*confirm*/)
 			if err != nil {
 				return err
 			}
 			passphrase = p
-		} else {
-			cli.PrintWarning("--no-encrypt: bundle will contain plaintext data. Protect it accordingly.")
 		}
 
 		// Resolve crew slug → ID if necessary.
@@ -286,6 +305,7 @@ func init() {
 	backupCreateCmd.Flags().String("crew", "", "Crew slug or ID (required for --scope=crew)")
 	backupCreateCmd.Flags().Bool("no-encrypt", false, "Write a plaintext payload instead of AGE-encrypting it")
 	backupCreateCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
+	backupCreateCmd.Flags().String("recipient", "", "AGE X25519 public key (age1…) for asymmetric encryption")
 
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")

@@ -1,14 +1,15 @@
 package backup
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"filippo.io/age"
@@ -161,12 +162,21 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		return nil, fmt.Errorf("backup: ensure output dir: %w", err)
 	}
 
-	// 5. Build the payload tar in memory. Expected payloads are in the
-	// few-GB range; a tmpfs host handles that comfortably.
+	// 5. Build the payload tar to a temp file so peak memory is bounded
+	// by the zstd encoder's window (a few MB) rather than the full
+	// workspace size. A multi-GB workspace therefore stays within
+	// reasonable RAM even on modest hosts.
 	now := time.Now().UTC()
-	var payloadBuf bytes.Buffer
-	payloadWriter, err := NewTarZstWriter(&payloadBuf)
+	payloadFile, err := os.CreateTemp("", "crewship-backup-payload-*.tar.zst")
 	if err != nil {
+		return nil, fmt.Errorf("backup: create payload temp: %w", err)
+	}
+	payloadPath := payloadFile.Name()
+	defer func() { _ = os.Remove(payloadPath) }()
+
+	payloadWriter, err := NewTarZstWriter(payloadFile)
+	if err != nil {
+		_ = payloadFile.Close()
 		return nil, err
 	}
 
@@ -175,6 +185,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		if opts.DockerOps != nil && crew.ContainerID != "" {
 			if err := CollectCrew(ctx, opts.DockerOps, payloadWriter, crew); err != nil {
 				_ = payloadWriter.Close()
+				_ = payloadFile.Close()
 				return nil, err
 			}
 		}
@@ -183,6 +194,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	// 5b. Devcontainer / mise config per crew.
 	if err := WriteDevcontainerSection(payloadWriter, target.CrewTargets, now); err != nil {
 		_ = payloadWriter.Close()
+		_ = payloadFile.Close()
 		return nil, err
 	}
 
@@ -198,20 +210,55 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	}
 	if err != nil {
 		_ = payloadWriter.Close()
+		_ = payloadFile.Close()
 		return nil, err
 	}
 	if dump != nil {
 		if err := WriteDBSection(payloadWriter, dump, now); err != nil {
 			_ = payloadWriter.Close()
+			_ = payloadFile.Close()
 			return nil, err
 		}
 	}
-
 	if err := payloadWriter.Close(); err != nil {
+		_ = payloadFile.Close()
 		return nil, fmt.Errorf("backup: close payload tar: %w", err)
 	}
+	if err := payloadFile.Close(); err != nil {
+		return nil, fmt.Errorf("backup: close payload file: %w", err)
+	}
 
-	// 6. Build the manifest.
+	// 6. Seal the payload (encrypt + hash) into a second temp file so
+	// we know its size and SHA-256 before writing the outer bundle.
+	// The sealed temp is streamed directly into the final .partial
+	// output in step 8 without loading it into memory.
+	sealedFile, err := os.CreateTemp("", "crewship-backup-sealed-*")
+	if err != nil {
+		return nil, fmt.Errorf("backup: create sealed temp: %w", err)
+	}
+	sealedPath := sealedFile.Name()
+	defer func() { _ = os.Remove(sealedPath) }()
+
+	rawPayload, err := os.Open(payloadPath)
+	if err != nil {
+		_ = sealedFile.Close()
+		return nil, fmt.Errorf("backup: reopen payload: %w", err)
+	}
+	sha, sealedSize, err := SealPayload(sealedFile, rawPayload, WriteBundleOptions{
+		Recipients: opts.Recipients,
+		Passphrase: opts.Passphrase,
+		NoEncrypt:  opts.NoEncrypt,
+	})
+	_ = rawPayload.Close()
+	if err != nil {
+		_ = sealedFile.Close()
+		return nil, err
+	}
+	if err := sealedFile.Close(); err != nil {
+		return nil, fmt.Errorf("backup: close sealed temp: %w", err)
+	}
+
+	// 7. Build the manifest with derived fields populated.
 	manifest := &Manifest{
 		FormatVersion:           FormatVersion,
 		CrewshipVersionAtBackup: opts.CrewshipVersion,
@@ -222,37 +269,59 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		CreatedBy:               opts.Actor,
 		SourceInstance:          currentInstance(),
 		Contents:                buildContents(target),
+		Checksums:               Checksums{PayloadSHA256: sha},
+	}
+	switch {
+	case opts.NoEncrypt:
+		manifest.Encryption = Encryption{Enabled: false}
+	case len(opts.Recipients) > 0:
+		manifest.Encryption = Encryption{Enabled: true, Algorithm: EncryptionAlgorithm}
+		for _, r := range opts.Recipients {
+			manifest.Encryption.Recipients = append(manifest.Encryption.Recipients, recipientString(r))
+		}
+	case opts.Passphrase != "":
+		manifest.Encryption = Encryption{Enabled: true, Algorithm: EncryptionAlgorithm, KeyDerivation: "scrypt"}
 	}
 
-	// 7. Wrap in bundle (AGE, outer tar).
-	var bundleBuf bytes.Buffer
-	if err := WriteBundle(&bundleBuf, manifest, &payloadBuf, WriteBundleOptions{
-		Recipients: opts.Recipients,
-		Passphrase: opts.Passphrase,
-		NoEncrypt:  opts.NoEncrypt,
-	}); err != nil {
-		return nil, err
-	}
-
-	// 8. Atomic rename.
+	// 8. Stream the outer bundle into .partial and atomic-rename.
 	fname := BundleFileName(opts.Scope, target.Slug, now)
 	if opts.Scope == ScopeCrew && len(target.CrewTargets) > 0 {
 		fname = BundleFileName(opts.Scope, target.CrewTargets[0].Slug, now)
 	}
 	finalPath := filepath.Join(outDir, fname)
 	partialPath := finalPath + ".partial"
-	if err := os.WriteFile(partialPath, bundleBuf.Bytes(), 0o600); err != nil {
-		return nil, fmt.Errorf("backup: write partial bundle: %w", err)
+	outFile, err := os.OpenFile(partialPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("backup: open partial: %w", err)
+	}
+	sealedIn, err := os.Open(sealedPath)
+	if err != nil {
+		_ = outFile.Close()
+		_ = os.Remove(partialPath)
+		return nil, fmt.Errorf("backup: reopen sealed: %w", err)
+	}
+	err = WriteBundleStream(outFile, manifest, sealedIn, sealedSize)
+	_ = sealedIn.Close()
+	if cerr := outFile.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(partialPath)
+		return nil, err
+	}
+	info, err := os.Stat(partialPath)
+	if err != nil {
+		_ = os.Remove(partialPath)
+		return nil, fmt.Errorf("backup: stat partial: %w", err)
 	}
 	if err := os.Rename(partialPath, finalPath); err != nil {
 		_ = os.Remove(partialPath)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
 	}
 
-	// 9. Audit log (write via caller-supplied helper; see api/backup.go).
 	return &CreateResult{
 		Path:     finalPath,
-		Size:     int64(bundleBuf.Len()),
+		Size:     info.Size(),
 		SHA256:   manifest.Checksums.PayloadSHA256,
 		Manifest: manifest,
 	}, nil
@@ -302,26 +371,38 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 	}
 	defer func() { _ = f.Close() }()
 
-	manifest, payloadReader, err := ReadBundle(f)
+	manifest, sealedReader, closeBundle, err := ReadBundleStream(f)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if closeBundle != nil {
+			_ = closeBundle()
+		}
+	}()
 	if manifest.Scope == ScopeInstance {
 		return nil, fmt.Errorf("%w: instance scope restore is not supported yet (V1.5)", ErrInvalidScope)
 	}
 
-	// Decrypt payload if needed.
-	effectivePayload := payloadReader
+	// Wrap the sealed stream with a hashing reader so we can verify
+	// the payload SHA-256 recorded in the manifest as we consume. The
+	// verification happens at the end of extraction — a mismatch
+	// surfaces as ErrInvalidChecksum and the caller must abort.
+	hashed := NewHashingReader(sealedReader)
+
+	// Decrypt payload if needed. The hasher sits on the SEALED bytes
+	// (outside encryption) because that's what the writer hashed.
+	var effectivePayload io.Reader = hashed
 	if manifest.Encryption.Enabled {
 		switch {
 		case opts.Passphrase != "":
-			r, err := DecryptStreamPassphrase(payloadReader, opts.Passphrase)
+			r, err := DecryptStreamPassphrase(hashed, opts.Passphrase)
 			if err != nil {
 				return nil, err
 			}
 			effectivePayload = r
 		case len(opts.Identities) > 0:
-			r, err := DecryptStream(payloadReader, opts.Identities...)
+			r, err := DecryptStream(hashed, opts.Identities...)
 			if err != nil {
 				return nil, err
 			}
@@ -331,16 +412,18 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		}
 	}
 
-	// Verify checksum by hashing the (encrypted) payload bytes. Note
-	// that ReadBundle gives us the sealed stream; we already consumed
-	// through the decrypt path if applicable, so we re-compute on the
-	// raw byte buffer kept by ReadBundle's in-memory shim.
-	// NB: MVP does not re-verify here because ReadBundle returned an
-	// in-memory *bytes.Buffer. V2 streams and checks inline.
-
-	// Extract sections.
+	// Extract sections. ExtractPayload consumes until EOF, which means
+	// the hasher sees every sealed byte and can produce a final sum.
 	extracted, err := ExtractPayload(effectivePayload)
 	if err != nil {
+		return nil, err
+	}
+
+	// Drain any trailer bytes the AGE reader may hold back, then
+	// verify checksum. Mismatch means corruption or tampering and
+	// aborts the restore before we touch the DB or docker volumes.
+	_, _ = io.Copy(io.Discard, hashed)
+	if err := VerifyChecksum(manifest.Checksums.PayloadSHA256, hashed.Sum()); err != nil {
 		return nil, err
 	}
 
@@ -449,9 +532,20 @@ func Inspect(path string) (*Manifest, error) {
 	return m, nil
 }
 
-// Delete removes a bundle. The file is removed atomically (os.Remove)
-// and callers should emit an audit log row after a successful delete.
+// Delete removes a bundle. Before touching disk it verifies the file
+// is actually a Crewship backup — the name ends with .tar.zst AND the
+// outer tar yields a valid MANIFEST.json. This guard prevents a
+// mis-click from using the delete endpoint as a generic rm primitive
+// for anything that passed API-level path validation.
+//
+// Callers emit an audit log row after a successful delete.
 func Delete(path string) error {
+	if !strings.HasSuffix(path, ".tar.zst") {
+		return fmt.Errorf("backup: refuse to delete %q: not a .tar.zst bundle", path)
+	}
+	if _, err := Inspect(path); err != nil {
+		return fmt.Errorf("backup: refuse to delete %q: failed inspect (%v)", path, err)
+	}
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("backup: delete %s: %w", path, err)
 	}

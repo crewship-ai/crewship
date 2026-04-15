@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
 	dockerclient "github.com/docker/docker/client"
 
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -96,13 +97,31 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ops = &backup.MobyDockerOps{Client: h.dockerClient}
 	}
 
+	// Passphrase vs recipient: the CLI packs an `age1…` public key into
+	// the Passphrase field when the admin uses asymmetric mode. We
+	// detect the prefix here and parse it as an X25519 recipient so
+	// the wire format stays backwards-compatible with MVP clients.
+	var passphrase string
+	var recipients []age.Recipient
+	if strings.HasPrefix(req.Passphrase, "age1") {
+		rec, err := age.ParseX25519Recipient(req.Passphrase)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid age1 recipient: " + err.Error()})
+			return
+		}
+		recipients = []age.Recipient{rec}
+	} else {
+		passphrase = req.Passphrase
+	}
+
 	result, err := backup.CreateBackup(ctx, h.db, backup.CreateOptions{
 		Scope:             scope,
 		WorkspaceID:       workspaceID,
 		CrewID:            req.CrewID,
 		CrewshipVersion:   h.crewshipVersion,
 		Actor:             backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
-		Passphrase:        req.Passphrase,
+		Passphrase:        passphrase,
+		Recipients:        recipients,
 		NoEncrypt:         req.NoEncrypt,
 		CrewContainerName: crewContainerNameFunc(),
 		DockerOps:         ops,
