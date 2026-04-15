@@ -2,10 +2,23 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+// hexColorRE matches standard 3- or 6-digit hex colors, case-insensitive.
+// Accepts `#abc`, `#AABBCC`, etc. Fails fast client-side so the server
+// does not have to surface a generic 400.
+var hexColorRE = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+
+func validateHexColor(color string) error {
+	if !hexColorRE.MatchString(color) {
+		return fmt.Errorf("invalid --color %q: expected hex like #3B82F6 or #abc", color)
+	}
+	return nil
+}
 
 var labelCmd = &cobra.Command{
 	Use:     "label",
@@ -69,6 +82,9 @@ var labelCreateCmd = &cobra.Command{
 		if color == "" {
 			return fmt.Errorf("--color is required")
 		}
+		if err := validateHexColor(color); err != nil {
+			return err
+		}
 
 		body := map[string]interface{}{"name": name, "color": color}
 		if v, _ := cmd.Flags().GetString("group"); v != "" {
@@ -114,6 +130,9 @@ var labelUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("color") {
 			v, _ := flags.GetString("color")
+			if err := validateHexColor(v); err != nil {
+				return err
+			}
 			body["color"] = v
 		}
 		if flags.Changed("group") {

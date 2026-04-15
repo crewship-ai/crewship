@@ -383,20 +383,63 @@ var workspaceMemberRemoveCmd = &cobra.Command{
 
 // workspaceInviteCmd groups invitation subcommands. It also acts as a
 // shortcut: `crewship workspace invite <email>` invites a user directly
-// without requiring the `create` subcommand.
+// without requiring the `create` subcommand. Both paths call
+// sendWorkspaceInvitation so there is no Cobra flag-delegation hack.
 var workspaceInviteCmd = &cobra.Command{
 	Use:     "invite [email]",
 	Aliases: []string{"invitation", "invitations"},
 	Short:   "Manage workspace invitations",
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// If no positional arg, show help (group mode).
+		// No positional arg — fall back to help (group mode).
 		if len(args) == 0 {
 			return cmd.Help()
 		}
-		// Delegate to create with the email arg.
-		return workspaceInviteCreateCmd.RunE(cmd, args)
+		role, _ := cmd.Flags().GetString("role")
+		return sendWorkspaceInvitation(args[0], role)
 	},
+}
+
+// sendWorkspaceInvitation is the shared implementation for both the
+// `workspace invite <email>` shortcut and `workspace invite create
+// <email>`. Keeping it a plain function avoids relying on Cobra flag
+// inheritance across delegated RunE calls.
+func sendWorkspaceInvitation(email, role string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+	if err := requireWorkspace(); err != nil {
+		return err
+	}
+	if role == "" {
+		role = "MEMBER"
+	}
+
+	client := newAPIClient()
+	wsID := client.GetWorkspaceID()
+	resp, err := client.Post("/api/v1/workspaces/"+wsID+"/invitations", map[string]string{
+		"email": email,
+		"role":  role,
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return err
+	}
+
+	var inv struct {
+		ID    string `json:"id"`
+		Email string `json:"email"`
+		Role  string `json:"role"`
+	}
+	if err := cli.ReadJSON(resp, &inv); err != nil {
+		return err
+	}
+
+	cli.PrintSuccess(fmt.Sprintf("Invitation sent to %s (%s role).", inv.Email, inv.Role))
+	return nil
 }
 
 var workspaceInviteListCmd = &cobra.Command{
@@ -416,6 +459,7 @@ var workspaceInviteListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -446,42 +490,8 @@ var workspaceInviteCreateCmd = &cobra.Command{
 	Short: "Invite a user to the workspace by email",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		if err := requireWorkspace(); err != nil {
-			return err
-		}
-
 		role, _ := cmd.Flags().GetString("role")
-		if role == "" {
-			role = "MEMBER"
-		}
-
-		client := newAPIClient()
-		wsID := client.GetWorkspaceID()
-		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/invitations", map[string]string{
-			"email": args[0],
-			"role":  role,
-		})
-		if err != nil {
-			return err
-		}
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
-
-		var inv struct {
-			ID    string `json:"id"`
-			Email string `json:"email"`
-			Role  string `json:"role"`
-		}
-		if err := cli.ReadJSON(resp, &inv); err != nil {
-			return err
-		}
-
-		cli.PrintSuccess(fmt.Sprintf("Invitation sent to %s (%s role).", inv.Email, inv.Role))
-		return nil
+		return sendWorkspaceInvitation(args[0], role)
 	},
 }
 

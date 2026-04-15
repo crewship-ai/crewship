@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -34,23 +35,24 @@ var notificationListCmd = &cobra.Command{
 			return err
 		}
 
-		path := "/api/v1/notifications"
 		unreadOnly, _ := cmd.Flags().GetBool("unread")
 		limit, _ := cmd.Flags().GetInt("limit")
-		q := ""
+		// Use url.Values so future flags (strings with special chars)
+		// are URL-encoded correctly without relying on manual escaping.
+		q := url.Values{}
 		if unreadOnly {
-			q = "?read=false"
+			q.Set("read", "false")
 		}
 		if limit > 0 {
-			if q == "" {
-				q = fmt.Sprintf("?limit=%d", limit)
-			} else {
-				q += fmt.Sprintf("&limit=%d", limit)
-			}
+			q.Set("limit", fmt.Sprintf("%d", limit))
+		}
+		path := "/api/v1/notifications"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get(path + q)
+		resp, err := client.Get(path)
 		if err != nil {
 			return err
 		}
