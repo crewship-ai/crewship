@@ -342,10 +342,21 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteAuditLog(ctx, h.db, "backup.restore", "backup", req.Path, user.ID, workspaceID, map[string]interface{}{
+	// Distinct audit action for dry-runs so an admin reading the
+	// audit log can tell the difference between "verified that this
+	// bundle would restore" and "actually restored data". Both are
+	// worth recording for compliance, but they are NOT the same
+	// event — the dry-run mutated nothing in workspaces / crews /
+	// agents, only this audit row itself.
+	auditAction := "backup.restore"
+	if req.DryRun {
+		auditAction = "backup.restore.dry_run"
+	}
+	WriteAuditLog(ctx, h.db, auditAction, "backup", req.Path, user.ID, workspaceID, map[string]interface{}{
 		"scope":         string(result.Manifest.Scope),
 		"crews_count":   result.CrewsCount,
 		"rows_inserted": result.RowsInserted,
+		"dry_run":       req.DryRun,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

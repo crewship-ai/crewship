@@ -282,11 +282,12 @@ var backupRestoreCmd = &cobra.Command{
 		}
 		prefix := "Restore complete"
 		if dryRun {
-			// The admin asked for a verify-only run; make the log reflect
-			// that nothing was actually mutated. The row count reported
-			// is the POTENTIAL insert count the dry-run computed, not
-			// a committed write.
-			prefix = "Restore validation complete (dry-run, no changes applied)"
+			// The admin asked for a verify-only run. No workspace /
+			// crew / agent rows changed and the docker phase was
+			// skipped; the only side effect is one
+			// backup.restore.dry_run row in the audit log so an
+			// auditor can see who tested what.
+			prefix = "Restore validation complete (dry-run; no workspace/crew data changes applied)"
 		}
 		msg := fmt.Sprintf(
 			"%s — workspace=%s crews=%d rows=%d",
@@ -537,7 +538,7 @@ func init() {
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
 	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
-	backupRestoreCmd.Flags().Bool("dry-run", false, "Verify compat, checksum and decryption without writing to DB or docker")
+	backupRestoreCmd.Flags().Bool("dry-run", false, "Verify compat, checksum and decryption without applying workspace/crew writes or docker changes (an audit row is still recorded)")
 
 	backupRotateCmd.Flags().Int("keep-last", 0, "Keep only the N newest bundles (0 disables)")
 	backupRotateCmd.Flags().Int("keep-days", 0, "Drop bundles older than N days (0 disables)")
