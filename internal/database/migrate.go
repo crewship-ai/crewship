@@ -158,6 +158,21 @@ ALTER TABLE crews ADD COLUMN config_hash TEXT;
 	{version: 47, name: "add_cached_requirements", sql: `
 ALTER TABLE crews ADD COLUMN cached_requirements TEXT;
 `},
+	// Per-workspace advisory lock used by the backup subsystem (CRE-126).
+	// `backup create` acquires the row before pausing containers and
+	// writing the tar.zst bundle; concurrent backups on the same
+	// workspace are refused with ErrLockHeld. The TTL column lets a
+	// crashed backup be reclaimed after one hour without operator
+	// intervention. See .claude/context/prd/BACKUP.md section 4.3.
+	{version: 48, name: "add_backup_locks", sql: `
+CREATE TABLE IF NOT EXISTS backup_locks (
+    workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    acquired_by TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_backup_locks_expires ON backup_locks(expires_at);
+`},
 }
 
 // RollbackV47 reverts the schema change introduced by migration v47

@@ -1,0 +1,146 @@
+package backup
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// DefaultLockTTL is how long an acquired backup lock stays valid before
+// another caller can reclaim it. One hour is ample for the largest
+// bundles we expect; a crashed backup self-heals after this window
+// without operator intervention.
+const DefaultLockTTL = 1 * time.Hour
+
+// ReleaseFunc releases a previously acquired workspace lock. It is
+// idempotent — calling it multiple times is safe. If the lock expired
+// and was reclaimed by another caller before Release was invoked, the
+// function still returns nil (the broken lock is no longer ours to
+// release, and there is nothing useful we can do about it from here).
+type ReleaseFunc func() error
+
+// LockManager provides the advisory-lock operations the backup flow
+// needs. It is satisfied by *sql.DB in production and by in-memory
+// fakes in tests.
+type LockManager interface {
+	// AcquireWorkspaceLock inserts a row into backup_locks for the
+	// given workspace. Returns ErrLockHeld if another backup is
+	// already in progress and the prior lock has not expired.
+	AcquireWorkspaceLock(ctx context.Context, workspaceID, userID string, ttl time.Duration) (ReleaseFunc, error)
+}
+
+// SQLLockManager implements LockManager against the main Crewship DB.
+type SQLLockManager struct {
+	DB *sql.DB
+	// Now lets tests inject a deterministic clock.
+	Now func() time.Time
+}
+
+// NewSQLLockManager returns a LockManager backed by db using wall-clock time.
+func NewSQLLockManager(db *sql.DB) *SQLLockManager {
+	return &SQLLockManager{DB: db, Now: time.Now}
+}
+
+// AcquireWorkspaceLock implements LockManager. It runs in a single
+// transaction so the read-then-write sequence is atomic even under
+// SQLite's default isolation. We first evict any row whose expires_at
+// is in the past (that backup crashed or was abandoned), then attempt
+// to insert our own row. PK conflict = another live backup is holding
+// the lock.
+func (m *SQLLockManager) AcquireWorkspaceLock(ctx context.Context, workspaceID, userID string, ttl time.Duration) (ReleaseFunc, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("%w: workspace_id must be set", ErrInvalidManifest)
+	}
+	if ttl <= 0 {
+		ttl = DefaultLockTTL
+	}
+	now := m.Now().UTC()
+	expires := now.Add(ttl)
+
+	tx, err := m.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, fmt.Errorf("backup: begin lock tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Evict a stale lock (expired by now).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM backup_locks WHERE workspace_id = ? AND expires_at < ?`,
+		workspaceID, now.Format(time.RFC3339),
+	); err != nil {
+		return nil, fmt.Errorf("backup: evict stale lock: %w", err)
+	}
+
+	// Attempt to claim the lock. PK collision = held by someone else.
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO backup_locks (workspace_id, acquired_at, acquired_by, expires_at)
+		 VALUES (?, ?, ?, ?)`,
+		workspaceID,
+		now.Format(time.RFC3339),
+		userID,
+		expires.Format(time.RFC3339),
+	)
+	if err != nil {
+		// modernc.org/sqlite returns a generic error on PK conflict; the
+		// text varies by binding. Any INSERT failure at this point means
+		// the row exists and is not yet expired.
+		return nil, ErrLockHeld
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("backup: commit lock: %w", err)
+	}
+	committed = true
+
+	release := func() error {
+		// Only release the lock if the row we see still belongs to us
+		// (same acquired_at). If another caller reclaimed after TTL
+		// expiry we silently succeed — their lock is legitimate.
+		_, err := m.DB.ExecContext(context.Background(),
+			`DELETE FROM backup_locks
+			 WHERE workspace_id = ?
+			   AND acquired_at = ?
+			   AND acquired_by = ?`,
+			workspaceID, now.Format(time.RFC3339), userID,
+		)
+		if err != nil {
+			return fmt.Errorf("backup: release lock: %w", err)
+		}
+		return nil
+	}
+	return release, nil
+}
+
+// IsLockHeld reports whether a workspace currently has a live backup
+// lock. Stale locks (past expires_at) are treated as not held — this
+// matches the auto-eviction behaviour of AcquireWorkspaceLock.
+//
+// Callers in the orchestrator use this to refuse starting new agent
+// runs while a backup is in flight.
+func IsLockHeld(ctx context.Context, db *sql.DB, workspaceID string, now time.Time) (bool, error) {
+	var expiresAt string
+	err := db.QueryRowContext(ctx,
+		`SELECT expires_at FROM backup_locks WHERE workspace_id = ?`,
+		workspaceID,
+	).Scan(&expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("backup: check lock: %w", err)
+	}
+	exp, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		// Corrupt row — treat as not held so backups can proceed; the
+		// eviction path in AcquireWorkspaceLock will clean up next time.
+		return false, nil
+	}
+	return exp.After(now.UTC()), nil
+}
