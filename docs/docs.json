@@ -37,7 +37,8 @@
               "guides/agent-memory",
               "guides/coordinator",
               "guides/scheduling",
-              "guides/files-and-output"
+              "guides/files-and-output",
+              "guides/backup"
             ]
           },
           {
@@ -46,7 +47,8 @@
               "security/rbac",
               "security/encryption",
               "security/container-isolation",
-              "security/audit"
+              "security/audit",
+              "security/security-headers"
             ]
           },
           {
@@ -97,7 +99,8 @@
               "api-reference/integrations",
               "api-reference/webhooks",
               "api-reference/websocket",
-              "api-reference/admin"
+              "api-reference/admin",
+              "api-reference/backup"
             ]
           }
         ]

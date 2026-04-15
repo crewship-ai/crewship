@@ -55,6 +55,10 @@ Crewship lets you organize AI agents into teams, assign them roles, credentials,
 | **Isolated execution** | Every crew runs in its own Docker container |
 | **Role-based access** | 5-tier RBAC: Owner, Admin, Manager, Member, Viewer |
 | **Real-time logs** | JSONL streaming via WebSocket |
+| **4-tier memory with FTS5** | Agent, crew, workspace, and session memory with sub-ms SQLite FTS5 search — no embeddings, no vector DB |
+| **Devcontainer provisioning** | `devcontainer.json` + mise-based crew runtimes with shared cache images and 24 h registry-digest checks |
+| **Rate limiting & security headers** | Per-IP limits (10 req/min auth, 120 req/min API), standard response-header hardening, single-use OAuth state with 15 min expiry |
+| **Backup & restore** | Portable AGE-encrypted `.tar.zst` bundles, workspace or crew scope, forward-compatible manifest, advisory locking, retention rotation |
 | **Multi-workspace** | Manage multiple organizations from a single instance |
 | **Self-hosted** | Run on your own infrastructure, keep your data |
 | **CLI adapters** | Claude Code, Codex CLI, Gemini CLI, OpenCode |

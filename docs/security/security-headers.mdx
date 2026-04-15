@@ -1,0 +1,119 @@
+---
+title: "Rate Limiting & Security Headers"
+description: "Per-IP HTTP rate limits on auth and API routes, standard security response headers, and single-use OAuth state tokens with 15-minute expiry."
+icon: "lock"
+---
+
+# Rate Limiting & Security Headers
+
+Crewship's HTTP layer applies three defensive controls to every request: response-header hardening, per-IP rate limiting, and CSRF-safe OAuth state handling. All three are wired at the router level — no handler opt-out.
+
+Code of record:
+
+- `internal/api/middleware.go` — `SecurityHeaders`.
+- `internal/api/ratelimit.go` — `RateLimiter`, `extractIP`.
+- `internal/api/router.go` — middleware composition and route buckets.
+- `internal/api/auth_google.go` + `internal/api/oauth.go` — OAuth state lifecycle.
+
+## Security response headers
+
+`SecurityHeaders` wraps every response (static UI and API alike) with a fixed set of headers:
+
+| Header | Value | Purpose |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | Forbid MIME-type sniffing of responses. |
+| `X-Frame-Options` | `DENY` | Forbid rendering the UI inside a frame/iframe (clickjacking defence). |
+| `X-XSS-Protection` | `0` | Disable the legacy XSS auditor (known to introduce bugs; CSP is the modern path). |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Leak only origin — not path — to cross-origin navigations. |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Explicitly deny powerful features the UI does not use. |
+
+<Note>
+  HSTS and a full CSP are intentionally **not** set here. The single binary must support plain-HTTP deployments (dev, on-prem behind a TLS-terminating reverse proxy), and CSP requires a per-deployment analysis. Set HSTS at your reverse proxy when TLS is in front.
+</Note>
+
+## Per-IP rate limiting
+
+`RateLimiter` is a token-bucket limiter keyed by client IP, implemented with `golang.org/x/time/rate`. Two independent buckets guard different route families:
+
+| Route family | Limit | Handler |
+|---|---|---|
+| `/api/auth/*`, `/api/v1/auth/*`, `/api/v1/bootstrap` | **10 req/min** per IP | Auth endpoints — strict because these gate the entire system. |
+| `/api/*` (all other) | **120 req/min** per IP | Public API endpoints. |
+| `/api/v1/internal/*` | **no rate limit** | Sidecar IPC. Authenticated via `X-Internal-Token`, not IP. |
+| Static UI / other paths | **no rate limit** | Served from the embedded Next.js export. |
+
+Dispatch happens in `Router.routeWithRateLimiting`:
+
+```go
+// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
+if strings.HasPrefix(path, "/api/v1/internal/") { r.mux.ServeHTTP(w, req); return }
+if strings.HasPrefix(path, "/api/auth/") || … { r.authRateLimitedMux.ServeHTTP(…); return }
+if strings.HasPrefix(path, "/api/")          { r.apiRateLimitedMux.ServeHTTP(…);  return }
+r.mux.ServeHTTP(w, req)
+```
+
+### Burst, cleanup, 429 response
+
+- Bucket **burst** equals the per-minute limit (full bucket on first visit).
+- Stale per-IP entries are swept every 3 minutes; anything not seen in the last 5 minutes is evicted.
+- Exceeding the bucket returns:
+  ```http
+  HTTP/1.1 429 Too Many Requests
+  Retry-After: 60
+  Content-Type: application/json
+
+  {"error": "Too many requests"}
+  ```
+
+### IP extraction
+
+`extractIP` picks the client address in this order — callers **must** run Crewship behind a reverse proxy that either strips or rewrites these headers if they cannot be trusted:
+
+1. `X-Forwarded-For` — split on comma, **only the first entry is used**. If the header is `1.2.3.4, 10.0.0.1`, the client IP is `1.2.3.4`.
+2. `X-Real-IP` — used if `X-Forwarded-For` is absent.
+3. `r.RemoteAddr` (host portion) — final fallback.
+
+<Warning>
+  If Crewship is exposed directly to the internet without a proxy, any client can spoof `X-Forwarded-For` to bypass per-IP rate limits. Run behind a reverse proxy (nginx, Caddy, Traefik) that overwrites these headers from the true connecting peer.
+</Warning>
+
+## OAuth CSRF state
+
+Both the Google sign-in flow (`internal/api/auth_google.go`) and the credential OAuth connector flow (`internal/api/oauth.go`) store an opaque state token in the `oauth_states` table at the start of the round-trip and consume it atomically on callback.
+
+Guarantees:
+
+- **Single-use** — the callback uses `DELETE … RETURNING` to read and remove the row in one statement. A replayed `?state=…` returns `400 Invalid or expired state`.
+- **15-minute expiry** — the callback rejects any state whose `created_at` is older than 15 minutes with `400 OAuth state expired`. The OAuth connector flow also sweeps expired rows on each new request (`DELETE FROM oauth_states WHERE created_at < datetime('now', '-15 minutes')`).
+- **Fail closed on parse error** — unreadable timestamps are treated as invalid rather than allowed through.
+- **PKCE** — the credential-connector flow additionally stores a PKCE `code_verifier` alongside the state for the token-exchange step.
+- **Safe redirect allowlist** — Google sign-in passes the caller's `?redirect=` through `isSafeRedirect` before storing, so a bad actor cannot smuggle in an open-redirect target via the state row.
+
+### State lifecycle
+
+```
+POST /api/auth/google/start
+  → generate 16 random bytes, base64url-encode
+  → INSERT INTO oauth_states (state, redirect_uri, [code_verifier])
+  → 307 redirect to provider with ?state=<token>
+
+GET /api/auth/google/callback?state=<token>&code=<code>
+  → DELETE FROM oauth_states WHERE state = ? RETURNING redirect_uri, created_at
+  → if row missing              → 400 Invalid or expired state
+  → if created_at > 15 min ago  → 400 OAuth state expired
+  → otherwise exchange code and sign the user in
+```
+
+## Reviewing behaviour in practice
+
+| Symptom | Likely cause |
+|---|---|
+| `429 Too Many Requests` on `/api/auth/login` after 10 attempts | Auth rate limiter (10 req/min). Retry after 60 s or behind a different IP. |
+| `400 OAuth state expired` after leaving the sign-in tab open | State row older than 15 minutes. Retry from the start. |
+| `400 Invalid or expired state` on back-button replay | State row already consumed — single-use. |
+| Legitimate internal caller rate-limited | Request hit the `/api/*` bucket because it was not sent under `/api/v1/internal/*`. Fix the route prefix; internal callers go through `X-Internal-Token` auth. |
+
+## See also
+
+- [RBAC](/security/rbac) — role-gated authorisation layered on top of these controls.
+- [Encryption](/security/encryption) — credential + memory at-rest protection.
