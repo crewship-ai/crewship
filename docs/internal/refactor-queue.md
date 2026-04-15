@@ -44,7 +44,7 @@ item `blocked:<reason>`.
       `loadCrewIDsBatch`, `setCrewIDs`. Handler file drops to ~600.
       Risk: low.
 
-- [ ] **3. agents-loaders** — `internal/api/agents.go` (917 LOC).
+- [~] **3. agents-loaders** — `internal/api/agents.go` (917 LOC).
       Extract `batchCountByAgentID` + related helpers to
       `internal/api/agents_loaders.go`. Risk: low.
 
