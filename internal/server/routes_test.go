@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -64,6 +65,9 @@ func (m *mockContainer) ContainerStats(_ context.Context, _ string) (*provider.C
 }
 func (m *mockContainer) CrewContainerName(slug string) string {
 	return "crewship-team-" + slug
+}
+func (m *mockContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
+	return nil
 }
 
 func newTestServerWithDeps() *Server {

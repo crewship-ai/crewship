@@ -12,7 +12,8 @@
 #
 # Requires:
 #   - Docker daemon running
-#   - crewship-agent-runtime:latest image
+#   - A devcontainer-compatible base image (default mcr.microsoft.com/devcontainers/base:bookworm)
+#     — override with CREW_IMAGE=<ref>
 #   - crewship server running on :8080 (fresh DB with bootstrap)
 #   - curl, jq, sqlite3
 #
@@ -20,7 +21,7 @@ set -uo pipefail
 
 PORT="${PORT:-8080}"
 BASE="http://localhost:${PORT}"
-IMAGE="crewship-agent-runtime:latest"
+IMAGE="${CREW_IMAGE:-mcr.microsoft.com/devcontainers/base:bookworm}"
 CONTAINER_NAME="crewship-e2e-test"
 DATA_DIR="/tmp/crewship-e2e-data"
 DB="/opt/crewship/crewship.db"

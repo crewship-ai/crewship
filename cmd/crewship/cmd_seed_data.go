@@ -242,11 +242,20 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		body := map[string]string{
+		body := map[string]interface{}{
 			"name":  c.Name,
 			"slug":  c.Slug,
 			"color": c.Color,
 			"icon":  c.Icon,
+		}
+		if c.RuntimeImage != "" {
+			body["runtime_image"] = c.RuntimeImage
+		}
+		if c.DevcontainerConfig != "" {
+			body["devcontainer_config"] = c.DevcontainerConfig
+		}
+		if c.MiseConfig != "" {
+			body["mise_config"] = c.MiseConfig
 		}
 		id, err := createOrResolve(client, "/api/v1/crews", body, "/api/v1/crews", c.Slug)
 		if err != nil {

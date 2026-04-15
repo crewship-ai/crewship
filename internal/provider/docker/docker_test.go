@@ -10,7 +10,7 @@ import (
 
 func TestConfigDefaults(t *testing.T) {
 	cfg := Config{
-		RuntimeImage:   "ghcr.io/crewship-ai/agent-runtime:latest",
+		RuntimeImage:   "debian:bookworm-slim",
 		DefaultRuntime: "runc",
 		Network:        "crewship-agents",
 		OutputBasePath: "/var/lib/crewship",
@@ -24,6 +24,59 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if cfg.Network != "crewship-agents" {
 		t.Errorf("expected crewship-agents, got %q", cfg.Network)
+	}
+}
+
+func TestBuildMountsIncludesSidecarBinds(t *testing.T) {
+	p := &Provider{cfg: Config{
+		SidecarBinaryPath: "/host/path/crewship-sidecar",
+		EntrypointPath:    "/host/path/entrypoint.sh",
+	}}
+	mounts, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets")
+	if err != nil {
+		t.Fatalf("buildMounts: %v", err)
+	}
+
+	var haveSidecar, haveEntrypoint bool
+	for _, m := range mounts {
+		if m.Target == "/usr/local/bin/crewship-sidecar" {
+			haveSidecar = true
+			if m.Source != "/host/path/crewship-sidecar" {
+				t.Errorf("sidecar mount source: got %q", m.Source)
+			}
+			if !m.ReadOnly {
+				t.Error("sidecar mount should be read-only")
+			}
+		}
+		if m.Target == "/usr/local/bin/entrypoint.sh" {
+			haveEntrypoint = true
+			if m.Source != "/host/path/entrypoint.sh" {
+				t.Errorf("entrypoint mount source: got %q", m.Source)
+			}
+			if !m.ReadOnly {
+				t.Error("entrypoint mount should be read-only")
+			}
+		}
+	}
+	if !haveSidecar {
+		t.Error("expected sidecar bind mount when SidecarBinaryPath is set")
+	}
+	if !haveEntrypoint {
+		t.Error("expected entrypoint bind mount when EntrypointPath is set")
+	}
+}
+
+func TestBuildMountsErrorsWhenSidecarPathMissing(t *testing.T) {
+	p := &Provider{cfg: Config{EntrypointPath: "/host/entrypoint.sh"}}
+	if _, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+		t.Fatal("expected error when SidecarBinaryPath is empty")
+	}
+}
+
+func TestBuildMountsErrorsWhenEntrypointPathMissing(t *testing.T) {
+	p := &Provider{cfg: Config{SidecarBinaryPath: "/host/crewship-sidecar"}}
+	if _, err := p.buildMounts("eng", "/ws", "/out", "/crew", "/secrets"); err == nil {
+		t.Fatal("expected error when EntrypointPath is empty")
 	}
 }
 

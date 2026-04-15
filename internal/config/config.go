@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -56,6 +57,21 @@ type ContainerConfig struct {
 	DefaultMemoryMB int     `yaml:"default_memory_mb"`
 	DefaultCPUs     float64 `yaml:"default_cpus"`
 	SidecarEnabled  bool    `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
+
+	// SidecarBinaryPath is the host path to the crewship-sidecar binary to
+	// bind-mount into crew containers. When set, it overrides whatever the
+	// base image has baked in at /usr/local/bin/crewship-sidecar.
+	// Empty = autodetect next to the crewship binary, then /usr/local/bin.
+	// If nothing is found, no bind mount is added (falls back to baked-in
+	// sidecar in the default runtime image).
+	SidecarBinaryPath string `yaml:"sidecar_binary_path"`
+
+	// EntrypointPath is the host path to entrypoint.sh to bind-mount into
+	// crew containers. When set, the container's Entrypoint is forced to
+	// /usr/local/bin/entrypoint.sh so custom base images (debian, ubuntu)
+	// use our init script instead of their default /bin/sh.
+	// Empty = autodetect; see SidecarBinaryPath for the same semantics.
+	EntrypointPath string `yaml:"entrypoint_path"`
 }
 
 // StorageConfig holds file storage settings for agent outputs and logs.
@@ -118,7 +134,7 @@ func Default() *Config {
 		},
 		Container: ContainerConfig{
 			Provider:        "docker",
-			RuntimeImage:    "ghcr.io/crewship-ai/agent-runtime:latest",
+			RuntimeImage:    "debian:bookworm-slim",
 			DefaultRuntime:  "runc",
 			Network:         "crewship-agents",
 			DefaultMemoryMB: 512,
@@ -168,6 +184,16 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+
+	// Autodetect sidecar binary + entrypoint.sh paths when not explicitly set.
+	// Since the legacy agent-runtime image (with baked-in sidecar) has been
+	// removed, these bind mounts are now mandatory — any Linux base image the
+	// user brings needs them injected from the host. Fail fast if missing so
+	// the operator sees "run 'make build:sidecar'" instead of a cryptic
+	// runtime crash inside the agent container.
+	if err := autodetectSidecarPaths(cfg); err != nil {
+		return nil, err
+	}
 
 	// Auto-derive NextjsURL from server port if not explicitly overridden.
 	// In single binary mode, the internal resolver calls itself on the same port.
@@ -293,6 +319,12 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_SIDECAR_ENABLED"); v == "true" || v == "1" {
 		cfg.Container.SidecarEnabled = true
 	}
+	if v := os.Getenv("CREWSHIP_SIDECAR_PATH"); v != "" {
+		cfg.Container.SidecarBinaryPath = v
+	}
+	if v := os.Getenv("CREWSHIP_ENTRYPOINT_PATH"); v != "" {
+		cfg.Container.EntrypointPath = v
+	}
 	if v := os.Getenv("CREWSHIP_NEXTJS_URL"); v != "" {
 		cfg.Auth.NextjsURL = v
 	}
@@ -324,6 +356,84 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_LICENSE_FILE"); v != "" {
 		cfg.License.FilePath = v
 	}
+}
+
+// autodetectSidecarPaths fills in SidecarBinaryPath and EntrypointPath when
+// they were not set explicitly (via YAML or env var). After the legacy
+// agent-runtime image was retired, both paths are mandatory: any user-provided
+// base image (debian, ubuntu, mcr devcontainers/base, ...) has no sidecar of
+// its own, so we bind-mount ours from the host. If detection fails, we return
+// a descriptive error so operators see "run 'make build:sidecar'" rather than
+// a container crashloop.
+//
+// Escape hatch: set CREWSHIP_SKIP_SIDECAR=1 for unit tests / envs that never
+// launch containers (e.g. the API handler test suite).
+func autodetectSidecarPaths(cfg *Config) error {
+	// Resolve the directory containing the crewship binary. If os.Executable
+	// fails for some reason, fall back to the current working directory.
+	var binDir string
+	var sidecarTried, entrypointTried []string
+	if exe, err := os.Executable(); err == nil {
+		if abs, err := filepath.Abs(exe); err == nil {
+			binDir = filepath.Dir(abs)
+		}
+	}
+
+	if cfg.Container.SidecarBinaryPath == "" {
+		candidates := []string{}
+		if binDir != "" {
+			candidates = append(candidates, filepath.Join(binDir, "crewship-sidecar"))
+		}
+		candidates = append(candidates, "/usr/local/bin/crewship-sidecar")
+		for _, c := range candidates {
+			c = filepath.Clean(c)
+			sidecarTried = append(sidecarTried, c)
+			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+				cfg.Container.SidecarBinaryPath = c
+				slog.Debug("autodetected sidecar binary", "path", c)
+				break
+			}
+		}
+	}
+
+	if cfg.Container.EntrypointPath == "" {
+		candidates := []string{}
+		if binDir != "" {
+			candidates = append(candidates, filepath.Join(binDir, "entrypoint.sh"))
+		}
+		if cwd, err := os.Getwd(); err == nil {
+			candidates = append(candidates, filepath.Join(cwd, "scripts", "entrypoint.sh"))
+			candidates = append(candidates, filepath.Join(cwd, "entrypoint.sh"))
+		}
+		candidates = append(candidates, "/usr/local/share/crewship/entrypoint.sh")
+		for _, c := range candidates {
+			c = filepath.Clean(c)
+			entrypointTried = append(entrypointTried, c)
+			if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+				cfg.Container.EntrypointPath = c
+				slog.Debug("autodetected entrypoint.sh", "path", c)
+				break
+			}
+		}
+	}
+
+	if os.Getenv("CREWSHIP_SKIP_SIDECAR") == "1" {
+		return nil
+	}
+
+	if cfg.Container.SidecarBinaryPath == "" {
+		return fmt.Errorf(
+			"sidecar binary not found (tried %v); run 'make build:sidecar' or set CREWSHIP_SIDECAR_PATH (or CREWSHIP_SKIP_SIDECAR=1 to bypass in tests)",
+			sidecarTried,
+		)
+	}
+	if cfg.Container.EntrypointPath == "" {
+		return fmt.Errorf(
+			"entrypoint.sh not found (tried %v); run 'make build:sidecar' or set CREWSHIP_ENTRYPOINT_PATH (or CREWSHIP_SKIP_SIDECAR=1 to bypass in tests)",
+			entrypointTried,
+		)
+	}
+	return nil
 }
 
 func generateRandomToken(bytes int) (string, error) {

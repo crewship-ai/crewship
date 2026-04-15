@@ -3,6 +3,7 @@ package chatbridge
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -170,6 +171,9 @@ func (f *failContainer) ContainerStats(_ context.Context, _ string) (*provider.C
 func (f *failContainer) CrewContainerName(slug string) string {
 	return "crewship-team-" + slug
 }
+func (f *failContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
+	return fmt.Errorf("copy failed: container unavailable")
+}
 
 func testBridgeWithContainer(t *testing.T, resolver ChatResolver, ctr provider.ContainerProvider) *Bridge {
 	t.Helper()
@@ -208,25 +212,24 @@ func TestHandleChatMessageRunAgentError(t *testing.T) {
 }
 
 func TestHandleChatMessagePersistsUserMessage(t *testing.T) {
+	// Resolve failure should NOT persist the user message — we fail-fast
+	// before polluting conversation history with prompts that never ran.
 	resolver := &mockResolver{err: fmt.Errorf("resolve fail")}
 	b, _ := testBridge(t, resolver)
 
 	streamFn := func(_ ws.ChatEvent) {}
 
-	_ = b.HandleChatMessage(context.Background(), "user-1", "test-chat", "hello world", streamFn)
+	err := b.HandleChatMessage(context.Background(), "user-1", "test-chat", "hello world", streamFn)
+	if err == nil {
+		t.Fatal("expected error from resolver failure")
+	}
 
 	messages, err := b.convStore.Read(context.Background(), "test-chat", 0, 0)
 	if err != nil {
 		t.Fatalf("read messages: %v", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(messages))
-	}
-	if messages[0].Role != conversation.RoleUser {
-		t.Errorf("expected user role, got %s", messages[0].Role)
-	}
-	if messages[0].Content != "hello world" {
-		t.Errorf("expected 'hello world', got %q", messages[0].Content)
+	if len(messages) != 0 {
+		t.Fatalf("expected 0 messages (resolve failed before persist), got %d", len(messages))
 	}
 }
 

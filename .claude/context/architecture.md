@@ -346,7 +346,7 @@ Admin can purge archives (GDPR).
 - `/output/{crew}/{agent}/` = per-agent (default, isolated). Agent CWD is set here so files are immediately visible in UI.
 - `/output/{crew}/_shared/` = shared across agents in crew (for collaboration, Phase 2)
 - Landlock (Phase 2) = agent "bob" sees only `/output/{crew}/bob/` and `/output/{crew}/_shared/`, NOT `/output/{crew}/alice/`
-- Concurrent write safety for `_shared/`: advisory file locking via sidecar (Phase 2). See AGENT-RUNTIME.md section 6B.
+- Concurrent write safety for `_shared/`: advisory file locking via sidecar (Phase 2).
 
 ### Logs
 
@@ -373,15 +373,15 @@ Zero custom code -- Linux has done this for 30 years.
 
 ```
 Every crew gets ONE Docker container:
-  - Base image: ghcr.io/crewship-ai/agent-runtime:latest (Ubuntu 24.04)
+  - Base image: user-provided (default `debian:bookworm-slim`; seed demos use `mcr.microsoft.com/devcontainers/base:bookworm`)
   - Runtime: runc (default) or runsc/gVisor (optional, ADR-003)
-  - Non-root user: agent (UID 1001) -- NEVER root
+  - Non-root user: agent (UID 1001) — created by `common-utils` devcontainer feature, NEVER root
   - Network: crewship-agents (--internal, no internet by default)
   - Explicit allowlist for LLM API endpoints only
   - Contains:
-    - crewship-sidecar (IMPL: Go binary, localhost:9119 as UID 1002, HTTP proxy + credential injection)
-    - CLI tools (Claude Code, OpenCode, Codex -- for CLI mode, UID 1001)
-    - crewship-agent (Go binary, API-direct runtime, Phase 2)
+    - crewship-sidecar (Go binary, localhost:9119 as UID 1002, HTTP proxy + credential injection) — **bind-mounted** from host at `/usr/local/bin/crewship-sidecar`, not baked into the image
+    - entrypoint.sh — **bind-mounted** from host at `/usr/local/bin/entrypoint.sh`
+    - CLI tools (Claude Code, OpenCode, Codex — installed via devcontainer features, e.g. `ghcr.io/devcontainers-extra/features/claude-code:2`)
     - landrun (Landlock wrapper, per-agent filesystem isolation, Phase 2)
     - MCP servers (stdio processes, started by sidecar, 1 per skill, Phase 2)
   - Mounts:
@@ -479,7 +479,9 @@ NEW: Agent has NO tool credentials
      Agent sees only tool result, never the credential
 ```
 
-Full specification: `AGENT-RUNTIME.md` section 6A.
+Full specification: see sidecar + MCP gateway code in `internal/sidecar/` and
+`internal/mcp/` (the historical `AGENT-RUNTIME.md` spec doc was retired with
+commit `dd86356`).
 
 ## Skill Hub — MCP Marketplace (ADR-019, ADR-020, ADR-021)
 
@@ -558,7 +560,8 @@ through Crewship security pipeline before publishing to Skill Hub.
 Free + Premium tiers. Premium skills: revenue share with author (default 70%).
 Gated by Plan tier (FREE plan: limited premium skills).
 
-Full specification: `AGENT-RUNTIME.md` section 6A.10.
+Full specification: see Skill Hub implementation + ADR-019..021 (the historical
+`AGENT-RUNTIME.md` spec doc was retired with commit `dd86356`).
 
 ## Dual Runtime Architecture (ADR-009)
 

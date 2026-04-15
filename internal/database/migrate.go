@@ -142,6 +142,69 @@ var migrations = []migration{
 	// the backfill) and don't depend on each other.
 	{version: 44, name: "add_performance_indexes", sql: migrationAddPerformanceIndexes},
 	{version: 45, name: "backfill_legacy_timestamps", fn: migrationBackfillLegacyTimestamps},
+	{version: 46, name: "add_devcontainer_provisioning", sql: `
+ALTER TABLE crews ADD COLUMN runtime_image TEXT;
+ALTER TABLE crews ADD COLUMN devcontainer_config TEXT;
+ALTER TABLE crews ADD COLUMN mise_config TEXT;
+ALTER TABLE crews ADD COLUMN cached_image TEXT;
+ALTER TABLE crews ADD COLUMN config_hash TEXT;
+`},
+	// Aggregated runtime requirements bubbled up from devcontainer features
+	// (privileged, capAdd, mounts, containerEnv). Stored as JSON so the runtime
+	// can apply them to HostConfig when starting a crew container. Without this,
+	// features like DinD (which need privileged:true + /var/run/docker.sock)
+	// would silently not work — the feature installs fine, but the final
+	// container lacks the capabilities the feature requires.
+	{version: 47, name: "add_cached_requirements", sql: `
+ALTER TABLE crews ADD COLUMN cached_requirements TEXT;
+`},
+}
+
+// RollbackV47 reverts the schema change introduced by migration v47
+// (add_cached_requirements). Intended as an operator escape hatch when a bad
+// devcontainer rollout needs the runtime-requirements column removed in place.
+//
+// The Migrate framework is forward-only; this helper is called manually
+// (planned future CLI: `crewship admin migrate rollback --version 47`).
+// SQLite 3.35+ supports `ALTER TABLE DROP COLUMN` natively (modernc.org/sqlite
+// tracks recent SQLite releases, so no CREATE-TABLE-AS-SELECT gymnastics are
+// needed on current builds).
+//
+// The function is idempotent — dropping a missing column is treated as a
+// no-op — and also removes the _migrations row so Migrate() will re-apply v47
+// on next startup if the caller wants to replay it cleanly.
+func RollbackV47(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin rollback tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Check if the column exists before attempting DROP — SQLite errors on
+	// "no such column" even when wrapped in IF EXISTS-style patterns.
+	var hasCol int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pragma_table_info('crews') WHERE name = 'cached_requirements'`,
+	).Scan(&hasCol); err != nil {
+		return fmt.Errorf("probe cached_requirements column: %w", err)
+	}
+	if hasCol > 0 {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE crews DROP COLUMN cached_requirements`); err != nil {
+			return fmt.Errorf("drop cached_requirements column: %w", err)
+		}
+		logger.Info("rollback v47: dropped crews.cached_requirements")
+	} else {
+		logger.Info("rollback v47: column already absent; skipping DROP")
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM _migrations WHERE version = 47`); err != nil {
+		return fmt.Errorf("delete _migrations row for v47: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit rollback: %w", err)
+	}
+	return nil
 }
 
 const migrationAddKeeperObservability = `

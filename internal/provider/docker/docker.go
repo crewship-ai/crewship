@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -33,6 +34,17 @@ type Config struct {
 	Network         string
 	OutputBasePath  string
 	ContainerPrefix string // Container name prefix (e.g. "crewship" -> "crewship-team-{slug}"). Allows multi-instance isolation.
+
+	// SidecarBinaryPath is the host path to crewship-sidecar to bind-mount
+	// into crew containers at /usr/local/bin/crewship-sidecar. Empty = no
+	// bind mount (fall back to baked-in binary in the default image).
+	SidecarBinaryPath string
+
+	// EntrypointPath is the host path to entrypoint.sh to bind-mount into
+	// crew containers at /usr/local/bin/entrypoint.sh. When set, the
+	// container's Entrypoint is forced to that path so custom base images
+	// (debian, ubuntu, etc.) use our init script instead of /bin/sh.
+	EntrypointPath string
 }
 
 // DetectResult contains info about the detected container runtime.
@@ -219,6 +231,13 @@ func (p *Provider) Detected() DetectResult {
 	return p.detected
 }
 
+// DockerClient returns the underlying Docker SDK client. Used for low-level
+// operations (image commits, container create/start/commit/remove during
+// provisioning) that aren't part of the ContainerProvider interface.
+func (p *Provider) DockerClient() *client.Client {
+	return p.client
+}
+
 // ensureNetwork creates the Docker bridge network if it doesn't already exist.
 func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	networks, err := p.client.NetworkList(ctx, dockernetwork.ListOptions{})
@@ -262,7 +281,9 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	defer reader.Close()
-	_, _ = io.Copy(io.Discard, reader)
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		return fmt.Errorf("drain pull stream for %s: %w", ref, err)
+	}
 	p.logger.Info("agent runtime image pulled", "image", ref)
 	return nil
 }
@@ -296,7 +317,19 @@ func (p *Provider) toolsVolumeName(slug string) string {
 
 // buildMounts returns the full list of mounts for a crew container, including
 // persistent bind mounts and named volumes for home/tools directories.
-func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secretsPath string) []mount.Mount {
+//
+// Sidecar + entrypoint bind mounts are mandatory: the legacy agent-runtime
+// image (which baked them in) was retired, so any user-provided base image
+// needs them injected from the host. Returns an error if the config is
+// missing either path — the operator should run 'make build:sidecar' or
+// set CREWSHIP_SIDECAR_PATH / CREWSHIP_ENTRYPOINT_PATH.
+func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secretsPath string) ([]mount.Mount, error) {
+	if p.cfg.SidecarBinaryPath == "" {
+		return nil, fmt.Errorf("docker provider: SidecarBinaryPath is required (run 'make build:sidecar' or set CREWSHIP_SIDECAR_PATH)")
+	}
+	if p.cfg.EntrypointPath == "" {
+		return nil, fmt.Errorf("docker provider: EntrypointPath is required (run 'make build:sidecar' or set CREWSHIP_ENTRYPOINT_PATH)")
+	}
 	mounts := []mount.Mount{
 		{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 		{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
@@ -309,7 +342,21 @@ func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secret
 			mount.Mount{Type: mount.TypeVolume, Source: p.toolsVolumeName(slug), Target: "/opt/crew-tools"},
 		)
 	}
-	return mounts
+	mounts = append(mounts,
+		mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   p.cfg.SidecarBinaryPath,
+			Target:   "/usr/local/bin/crewship-sidecar",
+			ReadOnly: true,
+		},
+		mount.Mount{
+			Type:     mount.TypeBind,
+			Source:   p.cfg.EntrypointPath,
+			Target:   "/usr/local/bin/entrypoint.sh",
+			ReadOnly: true,
+		},
+	)
+	return mounts, nil
 }
 
 // ensureVolume creates a Docker named volume if it doesn't already exist.
@@ -415,6 +462,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				if err := p.client.ContainerStart(ctx, c.ID, container.StartOptions{}); err != nil {
 					return "", fmt.Errorf("start existing container: %w", err)
 				}
+				// Note: postStartCommand runs ONCE when the container is
+				// freshly created (see the create-path call below). On warm
+				// restart of a stopped container, the hooks already ran at
+				// create time and the changes were persisted to the container
+				// filesystem — re-running them would cause issues for
+				// non-idempotent commands (e.g. "mysql start" would hit port
+				// conflicts, "mkdir /foo" would fail on EEXIST).
+				//
+				// This is a deliberate deviation from the devcontainer spec's
+				// "run on every start" semantics, but matches what most
+				// template authors actually want. If a future use case needs
+				// ephemeral hooks that re-run on each restart, add a
+				// per-feature opt-in flag rather than flipping this default.
 				return c.ID, nil
 			}
 		}
@@ -437,8 +497,17 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		cpus = 1.0
 	}
 
-	p.logger.Debug("ensuring image", "image", p.cfg.RuntimeImage)
-	if err := p.ensureImage(ctx, p.cfg.RuntimeImage); err != nil {
+	// Image selection chain: CachedImage > Image > default RuntimeImage
+	runtimeImage := p.cfg.RuntimeImage
+	if team.Image != "" {
+		runtimeImage = team.Image
+	}
+	if team.CachedImage != "" {
+		runtimeImage = team.CachedImage
+	}
+
+	p.logger.Debug("ensuring image", "image", runtimeImage)
+	if err := p.ensureImage(ctx, runtimeImage); err != nil {
 		return "", fmt.Errorf("ensure image: %w", err)
 	}
 
@@ -494,7 +563,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 		initResp, initErr := p.client.ContainerCreate(ctx,
 			&container.Config{
-				Image:      p.cfg.RuntimeImage,
+				Image:      runtimeImage,
 				User:       "0:0",
 				Entrypoint: []string{"sh", "-c", chownCmd},
 			},
@@ -514,42 +583,111 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	pidsLimit := int64(200)
-	p.logger.Debug("calling ContainerCreate", "image", p.cfg.RuntimeImage, "name", containerName)
+	p.logger.Debug("calling ContainerCreate", "image", runtimeImage, "name", containerName)
+	env := []string{
+		"CREWSHIP_CREW_ID=" + team.ID,
+	}
+	// Merge devcontainer containerEnv (from runtime config) if present.
+	// These come from the committed cached image's devcontainer_config,
+	// passed through from crew config. CREWSHIP_-prefixed keys are reserved
+	// for platform-managed vars and silently skipped.
+	if team.ContainerEnv != nil {
+		for k, v := range team.ContainerEnv {
+			if strings.HasPrefix(k, "CREWSHIP_") {
+				continue
+			}
+			env = append(env, k+"="+v)
+		}
+	}
+	containerCfg := &container.Config{
+		Image: runtimeImage,
+		User:  "1001:1001",
+		Env:   env,
+		Healthcheck: &container.HealthConfig{
+			Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
+			Interval: 30_000_000_000,
+			Timeout:  5_000_000_000,
+			Retries:  3,
+		},
+	}
+	// Force the bind-mounted entrypoint.sh so custom base images (debian,
+	// ubuntu) use our init script instead of their default (typically
+	// /bin/sh). Clear Cmd because the entrypoint ends with `exec sleep
+	// infinity` — no CMD needed. Paths are guaranteed non-empty by
+	// buildMounts below (it errors out otherwise).
+	containerCfg.Entrypoint = []string{"/usr/local/bin/entrypoint.sh"}
+	containerCfg.Cmd = nil
+	crewMounts, err := p.buildMounts(team.Slug, workspacePath, outputPath, crewPath, secretsPath)
+	if err != nil {
+		return "", err
+	}
+	// Apply feature-declared mounts (e.g. DinD needs /var/run/docker.sock).
+	// Feature metadata is user-controlled via devcontainer.json, so each
+	// mount source is validated against an allowlist to prevent malicious
+	// features from exposing arbitrary host paths (e.g. "/").
+	for _, m := range team.ExtraMounts {
+		if !devcontainer.IsAllowedMountSource(m.Source) {
+			p.logger.Warn("rejecting feature-declared mount with unsafe source",
+				"crew_id", team.ID,
+				"source", m.Source,
+				"target", m.Target,
+			)
+			continue
+		}
+		mt := mount.TypeBind
+		if strings.EqualFold(m.Type, "volume") {
+			mt = mount.TypeVolume
+		}
+		crewMounts = append(crewMounts, mount.Mount{
+			Type:   mt,
+			Source: m.Source,
+			Target: m.Target,
+		})
+	}
+
+	// Build base HostConfig. Privileged features (DinD etc.) require
+	// dropping the default no-new-privileges and relaxing capability drops.
+	securityOpt := []string{"no-new-privileges"}
+	capAdd := []string{"NET_RAW"}
+	readonlyRoot := true
+	if team.Privileged {
+		// Privileged mode implies the security restrictions we normally
+		// enforce are unnecessary (and actually incompatible — dockerd
+		// can't run under no-new-privileges with ReadOnlyRootFS).
+		securityOpt = nil
+		readonlyRoot = false
+	}
+	// Additional feature-declared capabilities/security opts are appended
+	// after the defaults; Docker dedupes capAdd server-side.
+	capAdd = append(capAdd, team.CapAdd...)
+	securityOpt = append(securityOpt, team.SecurityOpt...)
+
+	hostConfig := &container.HostConfig{
+		Runtime:        runtime,
+		ReadonlyRootfs: readonlyRoot,
+		Privileged:     team.Privileged,
+		Init:           boolPtrIf(team.Init),
+		SecurityOpt:    securityOpt,
+		CapDrop:        []string{"ALL"},
+		CapAdd:         capAdd,
+		// ExtraHosts makes host.docker.internal resolve to the Docker host
+		// on both macOS and Linux, enabling containers to reach crewshipd
+		// for assignment IPC calls via the sidecar.
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+		Resources: container.Resources{
+			Memory:    int64(memoryMB) * 1024 * 1024,
+			NanoCPUs:  int64(cpus * 1e9),
+			PidsLimit: &pidsLimit,
+		},
+		Mounts: crewMounts,
+		Tmpfs: map[string]string{
+			"/tmp": "rw,size=500m",
+		},
+		NetworkMode: container.NetworkMode(p.cfg.Network),
+	}
 	resp, err := p.client.ContainerCreate(ctx,
-		&container.Config{
-			Image: p.cfg.RuntimeImage,
-			User:  "1001:1001",
-			Env: []string{
-				"CREWSHIP_CREW_ID=" + team.ID,
-			},
-			Healthcheck: &container.HealthConfig{
-				Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
-				Interval: 30_000_000_000,
-				Timeout:  5_000_000_000,
-				Retries:  3,
-			},
-		},
-		&container.HostConfig{
-			Runtime:        runtime,
-			ReadonlyRootfs: true,
-			SecurityOpt:    []string{"no-new-privileges"},
-			CapDrop:        []string{"ALL"},
-			CapAdd:         []string{"NET_RAW"},
-			// ExtraHosts makes host.docker.internal resolve to the Docker host
-			// on both macOS and Linux, enabling containers to reach crewshipd
-			// for assignment IPC calls via the sidecar.
-			ExtraHosts: []string{"host.docker.internal:host-gateway"},
-			Resources: container.Resources{
-				Memory:    int64(memoryMB) * 1024 * 1024,
-				NanoCPUs:  int64(cpus * 1e9),
-				PidsLimit: &pidsLimit,
-			},
-			Mounts: p.buildMounts(team.Slug, workspacePath, outputPath, crewPath, secretsPath),
-			Tmpfs: map[string]string{
-				"/tmp": "rw,size=500m",
-			},
-			NetworkMode: container.NetworkMode(p.cfg.Network),
-		},
+		containerCfg,
+		hostConfig,
 		&dockernetwork.NetworkingConfig{},
 		nil,
 		containerName,
@@ -568,7 +706,105 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		"runtime", runtime,
 	)
 
+	// Sanity-check the bind-mounted sidecar on any BYOI crew (user-provided
+	// base image, with or without a cached derivative). Runs the binary with
+	// --version so an ABI mismatch (musl base vs. glibc sidecar) surfaces as
+	// a clear error instead of a cryptic runtime crash once the agent starts.
+	//
+	// Previously scoped to `team.CachedImage == ""` only, meaning a cached
+	// image originally built from a musl base would silently ship a broken
+	// sidecar. Now fires whenever team.Image is set.
+	if team.Image != "" {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		execCfg := container.ExecOptions{
+			Cmd:          []string{"/usr/local/bin/crewship-sidecar", "--version"},
+			User:         "0:0",
+			AttachStdout: true,
+			AttachStderr: true,
+		}
+		ex, execErr := p.client.ContainerExecCreate(checkCtx, resp.ID, execCfg)
+		if execErr == nil {
+			if startErr := p.client.ContainerExecStart(checkCtx, ex.ID, container.ExecStartOptions{}); startErr == nil {
+				// Poll exit code briefly.
+				for i := 0; i < 20; i++ {
+					inspect, ierr := p.client.ContainerExecInspect(checkCtx, ex.ID)
+					if ierr != nil {
+						break
+					}
+					if !inspect.Running {
+						if inspect.ExitCode != 0 {
+							p.logger.Error("sidecar binary incompatible with container libc — " +
+								"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
+							return "", fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", inspect.ExitCode, team.Image)
+						}
+						break
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
+			}
+		}
+	}
+
+	// Run postStartCommand hooks (feature-level + root-level, pre-merged by
+	// the bridge resolver). Non-fatal — failures log warnings but do not
+	// block the container from coming up.
+	p.runPostStartCommands(ctx, resp.ID, team.PostStartCommands)
+
 	return resp.ID, nil
+}
+
+// runPostStartCommands executes each post-start hook sequentially as the
+// agent user (UID 1001). Per-command timeout is 60 s. Non-fatal: a failing
+// hook is logged as a warning and we move on — agents can retry their own
+// logic.
+func (p *Provider) runPostStartCommands(ctx context.Context, containerID string, cmds []string) {
+	if len(cmds) == 0 {
+		return
+	}
+	for _, cmd := range cmds {
+		runCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		// strict mode — fail loud on first error, matches install.sh behavior.
+		execCfg := container.ExecOptions{
+			Cmd:          []string{"bash", "-lc", "set -e\n" + cmd},
+			User:         "1001:1001",
+			Env:          []string{"HOME=/home/agent", "USER=agent"},
+			AttachStdout: true,
+			AttachStderr: true,
+		}
+		ex, err := p.client.ContainerExecCreate(runCtx, containerID, execCfg)
+		if err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand exec create failed",
+				"container", shortID(containerID), "cmd", cmd, "error", err)
+			continue
+		}
+		if err := p.client.ContainerExecStart(runCtx, ex.ID, container.ExecStartOptions{}); err != nil {
+			cancel()
+			p.logger.Warn("postStartCommand exec start failed",
+				"container", shortID(containerID), "cmd", cmd, "error", err)
+			continue
+		}
+		// Poll exit code briefly; cap at ~60s total via runCtx timeout.
+		for i := 0; i < 1200; i++ { // 1200 * 50ms = 60s
+			inspect, ierr := p.client.ContainerExecInspect(runCtx, ex.ID)
+			if ierr != nil {
+				break
+			}
+			if !inspect.Running {
+				if inspect.ExitCode != 0 {
+					p.logger.Warn("postStartCommand exited non-zero",
+						"container", shortID(containerID), "cmd", cmd, "exit_code", inspect.ExitCode)
+				} else {
+					p.logger.Debug("postStartCommand completed",
+						"container", shortID(containerID), "cmd", cmd)
+				}
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		cancel()
+	}
 }
 
 // shortID returns first 12 chars of a container ID, or the full string if shorter.
@@ -771,7 +1007,21 @@ func (p *Provider) HostAddress() string {
 	return "host.docker.internal"
 }
 
+// CopyToContainer copies a tar archive into the container filesystem at dstPath.
+func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error {
+	return p.client.CopyToContainer(ctx, containerID, dstPath, content, container.CopyToContainerOptions{})
+}
+
 // Close releases the Docker API client connection.
 func (p *Provider) Close() error {
 	return p.client.Close()
+}
+
+// boolPtrIf returns a pointer to true if b is true, else nil. Used for
+// HostConfig.Init which accepts *bool (nil = default, true = force init).
+func boolPtrIf(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return &b
 }

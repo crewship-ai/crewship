@@ -1,0 +1,33 @@
+{
+    "name": "Crewship Sandbox",
+    "image": "ghcr.io/crewship-ai/crewship-sandbox:latest",
+
+    // Required for iptables firewall
+    "runArgs": [
+        "--cap-add=NET_ADMIN",
+        "--cap-add=NET_RAW"
+    ],
+
+    // Run firewall setup on container start
+    "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+    "waitFor": "postStartCommand",
+
+    // Run as non-root agent user (matches Crewship convention)
+    "remoteUser": "agent",
+
+    // Persist home directory and command history
+    "mounts": [
+        "source=crewship-agent-home-${devcontainerId},target=/home/agent,type=volume",
+        "source=crewship-agent-history-${devcontainerId},target=/commandhistory,type=volume"
+    ],
+
+    // Bind workspace
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
+    "workspaceFolder": "/workspace",
+
+    // Environment
+    "containerEnv": {
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "CLAUDE_CODE_DISABLE_AUTOUPDATE": "1"
+    }
+}

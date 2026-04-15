@@ -507,29 +507,26 @@ EXPOSE 8080
 ENTRYPOINT ["crewship", "start"]
 ```
 
-### 8.2 Agent Runtime Dockerfile
+### 8.2 Agent Runtime (DEPRECATED — no longer a dedicated image)
 
-```dockerfile
-# docker/agent-runtime/Dockerfile
-FROM ubuntu:24.04
-
-RUN apt-get update && apt-get install -y \
-    curl git jq openssh-client python3 \
-    && rm -rf /var/lib/apt/lists/*
-
-# CLI tools (pinned versions)
-RUN npm install -g \
-    @anthropic-ai/claude-code@1.x.x \
-    @openai/codex@0.x.x
-
-# Non-root user
-RUN groupadd -g 1001 agent && useradd -u 1001 -g agent agent
-USER agent
-WORKDIR /workspace
-
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=5s CMD echo "alive"
-```
+> **Historický kontext:** Crewship dříve udržoval `docker/agent-runtime/Dockerfile`
+> (Ubuntu 24.04 s baked-in sidecarem a CLI adaptéry). Commit `dd86356`
+> (Apr 2026) tuto image odstranil.
+>
+> **Aktuální model:** Uživatel přiveze libovolný Linux base image
+> (`debian:bookworm-slim`, `ubuntu:24.04`, `mcr.microsoft.com/devcontainers/base:bookworm`, …).
+> Crewship pak:
+>
+> 1. Pull base image.
+> 2. Spustí temp container a spustí nad ním každou nadeklarovanou **devcontainer feature**
+>    (`common-utils` → agent user UID 1001, `claude-code` → Claude Code CLI, atd.).
+> 3. Volitelně nainstaluje `mise` tooling (Node/Python/Terraform/…).
+> 4. `docker commit` → `crewship-cache:{hash[:12]}` (per-crew cached image).
+> 5. Při startu crew kontejneru bind-mountne `crewship-sidecar` a `entrypoint.sh`
+>    z hostu do `/usr/local/bin/` (read-only).
+>
+> Specifikace: `internal/devcontainer/provisioner.go`, seed crews v
+> `cmd/crewship/seeddata/crews.go`.
 
 ---
 

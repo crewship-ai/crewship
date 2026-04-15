@@ -9,6 +9,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -17,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/services"
 	"github.com/crewship-ai/crewship/internal/ws"
+	dockerclient "github.com/docker/docker/client"
 )
 
 // keeperWSBroadcaster adapts ws.Hub to the KeeperBroadcaster interface.
@@ -56,7 +58,11 @@ type Router struct {
 	authBaseURL          string
 	license              *license.License
 	agentHandler         *AgentHandler
-	storagePath          string       // base path for crew file storage
+	storagePath          string // base path for crew file storage
+	catalogFetcher       *devcontainer.CatalogFetcher
+	runtimeFetcher       *devcontainer.RuntimeFetcher
+	dockerClient         *dockerclient.Client
+	featureCacheDir      string
 	authRateLimitedMux   http.Handler // mux wrapped with auth rate limiter
 	apiRateLimitedMux    http.Handler // mux wrapped with general API rate limiter
 }
@@ -190,6 +196,37 @@ func WithGoogleOAuth(clientID, secret, baseURL string) RouterOption {
 func WithStoragePath(path string) RouterOption {
 	return func(r *Router) {
 		r.storagePath = path
+	}
+}
+
+// WithCatalogFetcher wires the dynamic devcontainer feature catalog fetcher.
+func WithCatalogFetcher(f *devcontainer.CatalogFetcher) RouterOption {
+	return func(r *Router) {
+		r.catalogFetcher = f
+	}
+}
+
+// WithRuntimeFetcher wires the dynamic mise runtime catalog fetcher.
+func WithRuntimeFetcher(f *devcontainer.RuntimeFetcher) RouterOption {
+	return func(r *Router) {
+		r.runtimeFetcher = f
+	}
+}
+
+// WithDockerClient attaches a Docker SDK client used by the devcontainer
+// provisioner (image commits, temp containers). If unset, the provision
+// trigger endpoint returns 503.
+func WithDockerClient(c *dockerclient.Client) RouterOption {
+	return func(r *Router) {
+		r.dockerClient = c
+	}
+}
+
+// WithFeatureCacheDir sets the on-disk cache directory for downloaded
+// devcontainer feature tarballs.
+func WithFeatureCacheDir(path string) RouterOption {
+	return func(r *Router) {
+		r.featureCacheDir = path
 	}
 }
 
@@ -627,6 +664,20 @@ func (r *Router) registerRoutes() {
 	// Keeper admin log
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
+
+	// Devcontainer feature catalog (auth required, no workspace context needed)
+	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.featureCacheDir)
+	r.mux.Handle("GET /api/v1/features/catalog", authed(http.HandlerFunc(provisioning.CatalogList)))
+	r.mux.Handle("GET /api/v1/runtimes/catalog", authed(http.HandlerFunc(provisioning.RuntimeCatalogList)))
+
+	// Crew provisioning (require workspace context)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionTrigger))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/rebuild", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionRebuild))))
+
+	// Devcontainer image cache management (GC)
+	r.mux.Handle("GET /api/v1/cache/images", authed(wsCtx(http.HandlerFunc(provisioning.CacheList))))
+	r.mux.Handle("DELETE /api/v1/cache/images/{tag}", authed(wsCtx(http.HandlerFunc(provisioning.CacheDelete))))
 
 	// Crewshipd proxy + agent runtime routes (require IPC socket)
 	socketPath := r.socketPath

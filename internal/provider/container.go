@@ -18,6 +18,39 @@ type CrewConfig struct {
 	AllowedDomains []string // domains allowed when NetworkMode is "restricted"
 	TTLHours       int      // auto-stop after idle period; 0 = no TTL
 	Image          string   // custom runtime image; empty = provider default
+	CachedImage    string   // provisioned Docker image tag; empty = use Image or default
+	// ContainerEnv is extra env vars from devcontainer.json containerEnv.
+	// CREWSHIP_* keys are reserved for platform-managed vars and silently
+	// skipped. Providers merge these into the container's Env at create time.
+	ContainerEnv map[string]string
+
+	// Runtime requirements bubbled up from devcontainer features. Applied to
+	// the HostConfig at create time. Critical for features like DinD which
+	// need Privileged + a docker.sock bind mount.
+	Privileged  bool
+	Init        bool
+	CapAdd      []string
+	SecurityOpt []string
+	ExtraMounts []CrewMount
+
+	// PostStartCommands are shell commands that run in the container on every
+	// start / restart, not only first create. Concatenation of feature-level
+	// postStartCommand hooks (install-order) followed by the root-level
+	// devcontainer.json postStartCommand. Providers that run these must
+	// execute as UID 1001:1001 (the agent user) with stdout/stderr captured
+	// for debugging. A failing post-start command logs a warning but does
+	// not prevent the container from coming up — agents may recover via
+	// retry. Intentionally excluded from the provisioning hash; mutating the
+	// list does not invalidate the cached image.
+	PostStartCommands []string
+}
+
+// CrewMount declares an additional bind or volume mount to apply to the crew
+// runtime, typically sourced from a devcontainer feature's metadata.
+type CrewMount struct {
+	Source string // host path (bind) or volume name (volume)
+	Target string // path inside the container
+	Type   string // "bind" (default) or "volume"
 }
 
 // ExecConfig describes a non-interactive command to execute inside a container.
@@ -67,6 +100,8 @@ type ContainerProvider interface {
 	ExecInspect(ctx context.Context, execID string) (bool, int, error)
 	// CrewContainerName returns the container name for a given crew slug.
 	CrewContainerName(slug string) string
+	// CopyToContainer copies a tar archive into the container filesystem at dstPath.
+	CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error
 }
 
 // HostAddressProvider is an optional interface that container providers can
