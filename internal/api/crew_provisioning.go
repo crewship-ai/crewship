@@ -301,17 +301,16 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 		h.logger.Warn("orphan cache-image GC: query failed", "error", err)
 		return
 	}
+	defer rows.Close()
 	referenced := make(map[string]struct{})
 	for rows.Next() {
 		var tag string
 		if err := rows.Scan(&tag); err != nil {
-			rows.Close()
 			h.logger.Warn("orphan cache-image GC: scan failed", "error", err)
 			return
 		}
 		referenced[tag] = struct{}{}
 	}
-	rows.Close()
 
 	// 2. Compare against the local image set. Any crewship-cache:* tag with
 	//    no referencing row AND older than cacheImageMinAge is an orphan.

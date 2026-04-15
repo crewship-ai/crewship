@@ -416,7 +416,7 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 // tag across hosts with identical configs — breaking reproducibility.
 //
 // Resolution order:
-//  1. HEAD manifest on remote registry (best-effort, ≤imageValidateTimeout).
+//  1. HEAD manifest on remote registry (best-effort, via dockerutil.DigestResolver).
 //  2. ImageInspect locally for RepoDigests.
 //  3. If both succeed and local RepoDigests contain the remote digest → done.
 //  4. Otherwise (local missing, stale, or offline): attempt ImagePull. An
