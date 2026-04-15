@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -625,26 +626,11 @@ func truncateLong(s string, max int) string {
 	return s[:max] + "…"
 }
 
-// encodeQuery is a minimal URL query escape for path values passed via
-// the ?path= query string. We avoid net/url just to keep the file's
-// import list short.
+// encodeQuery delegates to net/url.QueryEscape. The previous hand-
+// rolled escaper missed % and = — a bundle path containing either
+// would have produced a malformed ?path= value. QueryEscape handles
+// every reserved character the same way application/x-www-form-
+// urlencoded expects.
 func encodeQuery(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == ' ':
-			b.WriteString("%20")
-		case r == '&':
-			b.WriteString("%26")
-		case r == '#':
-			b.WriteString("%23")
-		case r == '?':
-			b.WriteString("%3F")
-		case r == '+':
-			b.WriteString("%2B")
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return url.QueryEscape(s)
 }

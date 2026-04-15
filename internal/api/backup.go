@@ -402,8 +402,6 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 // covers sealed bytes so no key is needed. Handy for periodic
 // bundle-rot checks ("is my 3-month-old backup still restorable?").
 func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	_ = ctx
 	role := RoleFromContext(r.Context())
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if !canRole(role, "manage") {

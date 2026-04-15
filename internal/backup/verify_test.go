@@ -178,22 +178,29 @@ func TestRotate_KeepLast(t *testing.T) {
 
 func TestRotate_IgnoresOtherWorkspaces(t *testing.T) {
 	dir := t.TempDir()
-	// Two bundles, different workspace IDs.
+	// Two bundles, different workspace IDs. Every setup error is
+	// fatal so a test that passes cannot hide behind a failed setup.
 	for _, wsID := range []string{"ws_mine", "ws_other"} {
 		manifest := newValidManifest()
 		manifest.Checksums = Checksums{}
 		manifest.Encryption = Encryption{}
 		manifest.Contents.Workspace.ID = wsID
 		name := filepath.Join(dir, "crewship-workspace-"+wsID+".tar.zst")
-		f, _ := os.Create(name)
-		_ = WriteBundle(f, manifest, bytes.NewReader([]byte("x")), WriteBundleOptions{NoEncrypt: true})
-		_ = f.Close()
+		f, err := os.Create(name)
+		if err != nil {
+			t.Fatalf("create %s: %v", wsID, err)
+		}
+		if err := WriteBundle(f, manifest, bytes.NewReader([]byte("x")), WriteBundleOptions{NoEncrypt: true}); err != nil {
+			_ = f.Close()
+			t.Fatalf("write bundle %s: %v", wsID, err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("close bundle %s: %v", wsID, err)
+		}
 	}
-	// Rotate with keep-last=0-but-positive-days=0 is invalid; use keep-days=-1 effectively disabled via 0.
-	// Instead: call with keep-last=0 so nothing matches ws_mine scope.
-	// Actually keep-last=0 disables the rule; we want to verify that a
-	// rotate against ws_mine never touches ws_other. Use keep-last=1
-	// which would delete ws_other if scoping were broken.
+	// keep-last=1 would delete one of the two bundles if cross-workspace
+	// scoping were broken; scoped to ws_mine there is only one bundle
+	// in the pool and keep-last=1 leaves it alone.
 	deleted, err := Rotate(dir, "ws_mine", 1, 0, false)
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
@@ -201,8 +208,10 @@ func TestRotate_IgnoresOtherWorkspaces(t *testing.T) {
 	if len(deleted) != 0 {
 		t.Errorf("expected 0 deletions (only 1 bundle in scope, keep-last=1), got %v", deleted)
 	}
-	// Both bundles must still exist.
-	entries, _ := os.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
 	if len(entries) != 2 {
 		t.Errorf("rotate should not touch other workspace's bundle, %d remain", len(entries))
 	}

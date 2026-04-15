@@ -29,9 +29,12 @@ func refuseIfBackupInProgress(ctx context.Context, db *sql.DB, workspaceID strin
 	if err != nil {
 		// Probing the lock table should never fail in steady state,
 		// but if it does we fail open (allow the run) rather than
-		// blocking every run when the lock subsystem has a bug.
-		// Callers see the error in the logs via the returned nil-err
-		// below; a future PR can tighten to fail-closed if needed.
+		// blocking every run when the lock subsystem has a bug. The
+		// error is intentionally swallowed here — we do not have a
+		// logger on this path — so a lock-subsystem incident surfaces
+		// only via `crewship backup status` and the audit trail, not
+		// via the run log. A follow-up PR can thread slog through if
+		// that visibility matters.
 		_ = err
 		return nil
 	}

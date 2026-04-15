@@ -680,6 +680,9 @@ func ListBackups(dir string) ([]ListEntry, error) {
 			le.Encrypted = m.Encryption.Enabled
 			le.CreatedAt = m.CreatedAt
 			le.FormatVersion = m.FormatVersion
+			if m.Contents.Workspace != nil {
+				le.WorkspaceID = m.Contents.Workspace.ID
+			}
 		}
 		out = append(out, le)
 	}
@@ -688,6 +691,11 @@ func ListBackups(dir string) ([]ListEntry, error) {
 
 // ListEntry is the row format emitted by ListBackups and surfaced by
 // the CLI `crewship backup list` output.
+//
+// WorkspaceID is populated from the manifest when the bundle is a
+// workspace-scope backup, so callers (Rotate, the /admin/backups
+// handler's per-workspace filter) can cheaply route bundles without
+// re-parsing the manifest a second time.
 type ListEntry struct {
 	Path          string
 	Size          int64
@@ -695,6 +703,7 @@ type ListEntry struct {
 	Encrypted     bool
 	CreatedAt     time.Time
 	FormatVersion int
+	WorkspaceID   string
 }
 
 // Inspect opens a bundle and returns its manifest without decrypting
@@ -796,17 +805,15 @@ func Rotate(dir, workspaceID string, keepLast int, keepDays int, dryRun bool) ([
 	if err != nil {
 		return nil, err
 	}
-	// Filter to the caller's workspace.
+	// Filter to the caller's workspace. ListBackups already parsed
+	// each bundle's manifest to populate WorkspaceID + CreatedAt, so
+	// we avoid a second Inspect per bundle here — meaningful on a
+	// directory with hundreds of backups.
 	var scoped []ListEntry
 	for _, e := range entries {
-		m, err := Inspect(e.Path)
-		if err != nil || m == nil || m.Contents.Workspace == nil {
+		if e.WorkspaceID == "" || e.WorkspaceID != workspaceID {
 			continue
 		}
-		if m.Contents.Workspace.ID != workspaceID {
-			continue
-		}
-		e.CreatedAt = m.CreatedAt
 		scoped = append(scoped, e)
 	}
 	// Newest first so keepLast drops the tail.
