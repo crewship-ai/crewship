@@ -591,7 +591,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))
 	r.mux.Handle("GET /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.List))))
 	r.mux.Handle("GET /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Status))))
+	r.mux.Handle("DELETE /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Unlock))))
 	r.mux.Handle("GET /api/v1/admin/backups/inspect", authed(wsCtx(http.HandlerFunc(backupH.Inspect))))
+	r.mux.Handle("GET /api/v1/admin/backups/verify", authed(wsCtx(http.HandlerFunc(backupH.Verify))))
+	r.mux.Handle("POST /api/v1/admin/backups/rotate", authed(wsCtx(http.HandlerFunc(backupH.Rotate))))
 	r.mux.Handle("GET /api/v1/admin/backups/download", authed(wsCtx(http.HandlerFunc(backupH.Download))))
 	r.mux.Handle("POST /api/v1/admin/backups/restore", authed(wsCtx(http.HandlerFunc(backupH.Restore))))
 	r.mux.Handle("DELETE /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Delete))))
@@ -830,7 +833,7 @@ func (r *Router) registerRoutes() {
 			baseURL = "http://localhost:8080"
 		}
 		resolver := chatbridge.NewIPCResolver(baseURL, r.internalToken, r.logger)
-		wh := NewWebhookHandler(r.logger, resolver, r.orch, r.hub, r.keeperContainer, r.logWriter)
+		wh := NewWebhookHandler(r.db, r.logger, resolver, r.orch, r.hub, r.keeperContainer, r.logWriter)
 		r.mux.Handle("POST /api/v1/webhooks/{crewId}/{agentId}/trigger", http.HandlerFunc(wh.ServeHTTP))
 	}
 }

@@ -2,20 +2,23 @@ package backup
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"strings"
 )
 
 // ExtractedPayload carries the section readers pulled out of a bundle
-// payload tar. All fields may be nil if the section is absent.
+// payload tar. The large per-crew sections (workspace, volumes,
+// memory) are written to disk as temp files rather than buffered in
+// memory so multi-GB restores fit in a modest host's RAM. Small
+// sections (devcontainer.json, mise.toml, db/dump.json) stay
+// in-memory because they are under a few KB.
 //
-// Values are eagerly materialised into byte slices for MVP simplicity.
-// V2 may switch to on-the-fly restoration, but the current one-pass
-// read keeps the error model tractable.
+// The caller MUST invoke Close once finished so the temp directory
+// is removed. A nil ExtractedPayload's Close is a no-op.
 type ExtractedPayload struct {
 	// DBDump is the parsed contents of db/dump.json. nil when the
 	// bundle had no DB section.
@@ -23,55 +26,146 @@ type ExtractedPayload struct {
 
 	// DevcontainerBySlug maps crew slug to the devcontainer.json bytes
 	// recorded in the bundle. Missing slugs indicate the crew had no
-	// devcontainer config.
+	// devcontainer config. Kept in memory — sub-KB per entry.
 	DevcontainerBySlug map[string][]byte
 
 	// MiseBySlug is the mise.toml counterpart to DevcontainerBySlug.
 	MiseBySlug map[string][]byte
 
-	// WorkspaceTarsBySlug holds a tar archive per crew, containing the
-	// workspace bind mount contents. The runner hands these to
-	// DockerOps.CopyTo after the container is recreated.
-	WorkspaceTarsBySlug map[string][]byte
+	// tempDir is the directory that holds every on-disk section tar.
+	// Removed by Close().
+	tempDir string
 
-	// VolumeTarsBySlug["home"] and ["tools"] follow the same pattern.
-	VolumeTarsBySlug map[string]map[string][]byte
+	// per-section path maps. nil-or-missing = section absent.
+	workspacePathBySlug map[string]string
+	volumePathsBySlug   map[string]map[string]string // crew → volume name → path
+	memoryPathBySlug    map[string]string
+}
 
-	// MemoryTarsBySlug covers the /output directory contents.
-	MemoryTarsBySlug map[string][]byte
+// Close removes the temp directory and every temp file backing
+// workspace / volume / memory sections. Safe to call multiple times.
+// Returns the first removal error encountered, if any; the rest are
+// best-effort swept.
+func (p *ExtractedPayload) Close() error {
+	if p == nil || p.tempDir == "" {
+		return nil
+	}
+	err := os.RemoveAll(p.tempDir)
+	p.tempDir = ""
+	p.workspacePathBySlug = nil
+	p.volumePathsBySlug = nil
+	p.memoryPathBySlug = nil
+	return err
+}
+
+// HasWorkspace reports whether the bundle carried a workspace tar
+// for the given slug.
+func (p *ExtractedPayload) HasWorkspace(slug string) bool {
+	_, ok := p.workspacePathBySlug[slug]
+	return ok
+}
+
+// OpenWorkspace returns a reader for the workspace bind-mount tar of
+// the given crew slug. Caller closes. Returns (nil, false, nil) when
+// the bundle has no such section.
+func (p *ExtractedPayload) OpenWorkspace(slug string) (io.ReadCloser, bool, error) {
+	path, ok := p.workspacePathBySlug[slug]
+	if !ok {
+		return nil, false, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open workspace section %s: %w", slug, err)
+	}
+	return f, true, nil
+}
+
+// OpenVolume returns a reader for one of a crew's named-volume tars.
+// vol is "home" or "tools" per the collector's layout.
+func (p *ExtractedPayload) OpenVolume(slug, vol string) (io.ReadCloser, bool, error) {
+	bySlug, ok := p.volumePathsBySlug[slug]
+	if !ok {
+		return nil, false, nil
+	}
+	path, ok := bySlug[vol]
+	if !ok {
+		return nil, false, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open volume section %s/%s: %w", slug, vol, err)
+	}
+	return f, true, nil
+}
+
+// OpenMemory returns a reader for the /output (.memory/) tar of the
+// given crew slug.
+func (p *ExtractedPayload) OpenMemory(slug string) (io.ReadCloser, bool, error) {
+	path, ok := p.memoryPathBySlug[slug]
+	if !ok {
+		return nil, false, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open memory section %s: %w", slug, err)
+	}
+	return f, true, nil
 }
 
 // ExtractPayload walks the payload tar produced by the collector and
-// splits it into the ExtractedPayload buckets. It does NOT touch the
-// database or docker — that's the runner's job.
+// splits it into the ExtractedPayload buckets. Per-crew sections are
+// re-tar'd into temp files so the caller's peak memory stays bounded
+// by the zstd decoder window regardless of bundle size.
+//
+// The returned ExtractedPayload owns its temp directory; the caller
+// MUST call Close() once finished with all sections (typically via
+// defer in RestoreBackup).
 func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
+	tempDir, err := os.MkdirTemp("", "crewship-restore-*")
+	if err != nil {
+		return nil, fmt.Errorf("backup: temp dir: %w", err)
+	}
 	out := &ExtractedPayload{
 		DevcontainerBySlug:  map[string][]byte{},
 		MiseBySlug:          map[string][]byte{},
-		WorkspaceTarsBySlug: map[string][]byte{},
-		VolumeTarsBySlug:    map[string]map[string][]byte{},
-		MemoryTarsBySlug:    map[string][]byte{},
+		tempDir:             tempDir,
+		workspacePathBySlug: map[string]string{},
+		volumePathsBySlug:   map[string]map[string]string{},
+		memoryPathBySlug:    map[string]string{},
 	}
+	// Defer-based cleanup on error paths so a partial extract does
+	// not leak temp files.
+	success := false
+	defer func() {
+		if !success {
+			_ = out.Close()
+		}
+	}()
+
 	tr, err := NewTarZstReader(payload)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tr.Close() }()
 
-	// Build nested tars section-by-section. We re-tar inside buckets so
-	// CopyTo receives a single coherent archive per destination.
-	//
-	// Keyed by destination label (e.g. "workspace/my-crew") -> in-memory
-	// tar writer + backing buffer.
+	// sinks holds an open *tar.Writer streaming into an os.File temp
+	// per "bucket" (workspace/<slug>, volumes/<slug>/<vol>,
+	// memory/<slug>). Each bucket gets its own temp file so the
+	// caller can stream it straight back into docker CopyTo without
+	// materialising the whole thing. sink type declared at file scope.
 	sinks := map[string]*sink{}
-	sinkFor := func(key string) *sink {
+	sinkFor := func(key string) (*sink, error) {
 		if s, ok := sinks[key]; ok {
-			return s
+			return s, nil
 		}
-		buf := &bytes.Buffer{}
-		s := &sink{buf: buf, tw: tar.NewWriter(buf)}
+		safe := strings.ReplaceAll(key, "/", "_")
+		f, err := os.CreateTemp(tempDir, safe+"-*.tar")
+		if err != nil {
+			return nil, fmt.Errorf("backup: create section temp %s: %w", key, err)
+		}
+		s := &sink{file: f, tw: tar.NewWriter(f)}
 		sinks[key] = s
-		return s
+		return s, nil
 	}
 
 	for {
@@ -95,10 +189,6 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 			return nil, fmt.Errorf("%w: payload entry %q contains parent reference", ErrInvalidManifest, hdr.Name)
 		}
 		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
-			// Crewship bundles never carry symlinks — the collector
-			// harvests via docker CopyFromContainer which expands
-			// regular files only. A symlink in the stream therefore
-			// means a tampered bundle.
 			return nil, fmt.Errorf("%w: payload entry %q is a symlink", ErrInvalidManifest, hdr.Name)
 		}
 
@@ -154,10 +244,21 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 		}
 	}
 
-	// Close all inner tars and distribute into the typed buckets.
+	// Close every inner tar writer and distribute file paths into the
+	// typed lookup maps. Keep the files themselves — the caller opens
+	// them fresh when streaming into CopyTo.
 	for key, s := range sinks {
 		if err := s.tw.Close(); err != nil {
+			_ = s.file.Close()
 			return nil, fmt.Errorf("backup: close inner tar %s: %w", key, err)
+		}
+		if err := s.file.Sync(); err != nil {
+			_ = s.file.Close()
+			return nil, fmt.Errorf("backup: sync inner tar %s: %w", key, err)
+		}
+		name := s.file.Name()
+		if err := s.file.Close(); err != nil {
+			return nil, fmt.Errorf("backup: close inner tar file %s: %w", key, err)
 		}
 		parts := strings.SplitN(key, "/", 3)
 		if len(parts) < 2 {
@@ -165,37 +266,40 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 		}
 		switch parts[0] {
 		case "workspace":
-			out.WorkspaceTarsBySlug[parts[1]] = s.buf.Bytes()
+			out.workspacePathBySlug[parts[1]] = name
 		case "memory":
-			out.MemoryTarsBySlug[parts[1]] = s.buf.Bytes()
+			out.memoryPathBySlug[parts[1]] = name
 		case "volumes":
 			if len(parts) < 3 {
 				continue
 			}
 			slug, vol := parts[1], parts[2]
-			bySlug, ok := out.VolumeTarsBySlug[slug]
+			bySlug, ok := out.volumePathsBySlug[slug]
 			if !ok {
-				bySlug = map[string][]byte{}
-				out.VolumeTarsBySlug[slug] = bySlug
+				bySlug = map[string]string{}
+				out.volumePathsBySlug[slug] = bySlug
 			}
-			bySlug[vol] = s.buf.Bytes()
+			bySlug[vol] = name
 		}
 	}
+
+	success = true
 	return out, nil
 }
 
 // repackIntoSink streams the current tar entry (hdr + tr body) into
-// the appropriate in-memory sink, keyed by the top-level prefix.
+// the appropriate on-disk sink, keyed by the top-level prefix.
+//
 // Sink keys are:
 //
-//	workspace/<slug>                  → one sink per crew
-//	volumes/<slug>/<volumeName>       → one sink per crew+volume
-//	memory/<slug>                     → one sink per crew
+//	workspace/<slug>                  → one file per crew
+//	volumes/<slug>/<volumeName>       → one file per crew+volume
+//	memory/<slug>                     → one file per crew
 //
 // Entry names inside the sink are stripped of their outermost path
 // segments so CopyTo places them directly at the container destination
 // (e.g. /workspace/, /home/agent/, /output/).
-func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, sinkFor func(string) *sink) error {
+func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, sinkFor func(string) (*sink, error)) error {
 	rest := strings.TrimPrefix(name, topPrefix)
 	var key string
 	var strip string
@@ -228,7 +332,10 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 	default:
 		return nil
 	}
-	s := sinkFor(key)
+	s, err := sinkFor(key)
+	if err != nil {
+		return err
+	}
 	newName := strings.TrimPrefix(rest, strip)
 	if newName == "" {
 		newName = "."
@@ -246,16 +353,15 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 	return nil
 }
 
-// sink is a package-local struct for repackIntoSink.
+// sink is a package-local struct for repackIntoSink. Holds an open
+// *os.File and its wrapping *tar.Writer.
 type sink struct {
-	buf *bytes.Buffer
-	tw  *tar.Writer
+	file *os.File
+	tw   *tar.Writer
 }
 
 // splitFirst splits s on the first "/" and returns the two halves plus
-// true if the separator was found, or "", "", false otherwise. Kept
-// local so we don't take another dependency on path/filepath split
-// semantics (which normalise unexpectedly on Windows).
+// true if the separator was found, or "", "", false otherwise.
 func splitFirst(s string) (head, tail string, ok bool) {
 	if i := strings.Index(s, "/"); i >= 0 {
 		return s[:i], s[i+1:], true
@@ -263,37 +369,49 @@ func splitFirst(s string) (head, tail string, ok bool) {
 	return s, "", false
 }
 
-// RestoreCrew writes the per-crew sections of an ExtractedPayload into
-// a freshly-provisioned container. The container MUST already exist
-// (created, optionally started) and have the canonical mount paths
-// available; the caller is responsible for invoking the existing
-// devcontainer provisioner before calling this.
+// RestoreCrew streams the per-crew sections of an ExtractedPayload
+// into a freshly-provisioned container. The container MUST already
+// exist with the canonical mount paths available; callers are
+// responsible for invoking the devcontainer provisioner before this.
 func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlug string, payload *ExtractedPayload) error {
 	if payload == nil {
 		return fmt.Errorf("backup: RestoreCrew: nil payload")
 	}
 	// Workspace bind.
-	if body, ok := payload.WorkspaceTarsBySlug[crewSlug]; ok && len(body) > 0 {
-		if err := ops.CopyTo(ctx, containerID, ContainerWorkspacePath, bytes.NewReader(body)); err != nil {
+	if r, ok, err := payload.OpenWorkspace(crewSlug); err != nil {
+		return err
+	} else if ok {
+		err := ops.CopyTo(ctx, containerID, ContainerWorkspacePath, r)
+		_ = r.Close()
+		if err != nil {
 			return fmt.Errorf("backup: restore workspace %s: %w", crewSlug, err)
 		}
 	}
 	// Named volumes.
-	if byVol, ok := payload.VolumeTarsBySlug[crewSlug]; ok {
-		if body := byVol["home"]; len(body) > 0 {
-			if err := ops.CopyTo(ctx, containerID, ContainerHomePath, bytes.NewReader(body)); err != nil {
-				return fmt.Errorf("backup: restore home %s: %w", crewSlug, err)
-			}
+	for _, pair := range []struct{ vol, dest string }{
+		{"home", ContainerHomePath},
+		{"tools", ContainerToolsPath},
+	} {
+		r, ok, err := payload.OpenVolume(crewSlug, pair.vol)
+		if err != nil {
+			return err
 		}
-		if body := byVol["tools"]; len(body) > 0 {
-			if err := ops.CopyTo(ctx, containerID, ContainerToolsPath, bytes.NewReader(body)); err != nil {
-				return fmt.Errorf("backup: restore tools %s: %w", crewSlug, err)
-			}
+		if !ok {
+			continue
+		}
+		err = ops.CopyTo(ctx, containerID, pair.dest, r)
+		_ = r.Close()
+		if err != nil {
+			return fmt.Errorf("backup: restore %s %s: %w", pair.vol, crewSlug, err)
 		}
 	}
 	// Memory / output.
-	if body, ok := payload.MemoryTarsBySlug[crewSlug]; ok && len(body) > 0 {
-		if err := ops.CopyTo(ctx, containerID, ContainerMemoryPath, bytes.NewReader(body)); err != nil {
+	if r, ok, err := payload.OpenMemory(crewSlug); err != nil {
+		return err
+	} else if ok {
+		err := ops.CopyTo(ctx, containerID, ContainerMemoryPath, r)
+		_ = r.Close()
+		if err != nil {
 			return fmt.Errorf("backup: restore memory %s: %w", crewSlug, err)
 		}
 	}

@@ -361,6 +361,10 @@ type RestoreOptions struct {
 	Actor        Actor
 	DockerOps    DockerOps
 	ContainerFor func(slug string) string // map crew slug -> container ID
+	// DryRun, when true, runs every validation (checksum, schema-skew,
+	// decrypt, payload walk) but commits no DB writes and performs no
+	// docker CopyTo. RestoreResult reports what WOULD have happened.
+	DryRun bool
 	// Logger, if set, receives human-readable progress/warning
 	// messages (e.g. "docker phase skipped …"). The CLI wires this
 	// into stderr; the REST handler can log to slog.
@@ -470,10 +474,14 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 
 	// Extract sections. ExtractPayload consumes until EOF, which means
 	// the hasher sees every sealed byte and can produce a final sum.
+	// Large per-crew sections live in temp files owned by the returned
+	// ExtractedPayload — Close must fire on every exit path to clean
+	// them up.
 	extracted, err := ExtractPayload(effectivePayload)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = extracted.Close() }()
 
 	// Drain any trailer bytes the AGE reader may hold back, then
 	// verify checksum. Mismatch means corruption or tampering and
@@ -558,6 +566,30 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		}
 		return nil
 	}
+	// Dry-run short-circuit: all validation already ran (manifest
+	// parse, checksum verify, payload extract, schema-skew). Nothing
+	// left mutates state, so return early with a synthetic success
+	// result that reports what would have been inserted.
+	if opts.DryRun {
+		if opts.Logger != nil {
+			opts.Logger("dry-run: checksum + schema compat OK; no DB or docker writes performed")
+		}
+		rowsSeen := 0
+		if extracted.DBDump != nil {
+			for _, rows := range extracted.DBDump.Tables {
+				rowsSeen += len(rows)
+			}
+		}
+		return &RestoreResult{
+			Manifest:            manifest,
+			RestoredWs:          firstWorkspaceSlug(extracted.DBDump),
+			RestoredWorkspaceID: firstWorkspaceID(extracted.DBDump),
+			CrewsCount:          len(manifest.Contents.Crews),
+			RowsInserted:        rowsSeen, // dry-run reports potential inserts
+			DockerPhaseSkipped:  skipDocker,
+		}, nil
+	}
+
 	var stats RestoreStats
 	if extracted.DBDump != nil {
 		s, err := RestoreDumpTx(ctx, db, extracted.DBDump, dockerRestore)
@@ -678,6 +710,139 @@ func Inspect(path string) (*Manifest, error) {
 		return m, err
 	}
 	return m, nil
+}
+
+// VerifyResult is returned by Verify and reports whether the bundle
+// at the given path is structurally valid and passes its recorded
+// SHA-256 checksum. Mismatch or decryption failure produces a non-nil
+// Err with the specific reason; Valid summarises.
+type VerifyResult struct {
+	Manifest *Manifest
+	Valid    bool
+	Size     int64
+	Err      error
+}
+
+// Verify opens a bundle, reads the manifest, and streams the sealed
+// payload through HashingReader to confirm the SHA-256 recorded in
+// the manifest still matches. Unlike Inspect it does NOT stop at
+// the manifest — it walks the whole payload — but it never decrypts
+// (the checksum covers the sealed bytes, so no key is needed).
+//
+// Used by `crewship backup verify <file>` so admins can confirm a
+// stored bundle is still restorable without actually committing to a
+// restore against a test instance.
+func Verify(path string) (*VerifyResult, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("backup: open %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("backup: stat %s: %w", path, err)
+	}
+
+	manifest, sealed, closeBundle, err := ReadBundleStream(f)
+	if err != nil {
+		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: err}, nil
+	}
+	defer func() {
+		if closeBundle != nil {
+			_ = closeBundle()
+		}
+	}()
+
+	hashed := NewHashingReader(sealed)
+	if _, err := io.Copy(io.Discard, hashed); err != nil {
+		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: err}, nil
+	}
+	if err := VerifyChecksum(manifest.Checksums.PayloadSHA256, hashed.Sum()); err != nil {
+		return &VerifyResult{Manifest: manifest, Valid: false, Size: info.Size(), Err: err}, nil
+	}
+	return &VerifyResult{Manifest: manifest, Valid: true, Size: info.Size()}, nil
+}
+
+// ForceReleaseLock deletes the backup_lock row for the given
+// workspace regardless of owner or TTL. Emergency escape hatch for
+// a crashed backup whose defer release did not fire. Callers must
+// gate this behind an explicit operator action (CLI `backup unlock
+// --force`, admin UI confirmation) and emit an audit log row — the
+// function itself enforces no policy.
+func ForceReleaseLock(ctx context.Context, db *sql.DB, workspaceID string) error {
+	if db == nil || workspaceID == "" {
+		return fmt.Errorf("backup: ForceReleaseLock: db and workspaceID required")
+	}
+	_, err := db.ExecContext(ctx, `DELETE FROM backup_locks WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return fmt.Errorf("backup: force release lock: %w", err)
+	}
+	return nil
+}
+
+// Rotate enumerates bundles in dir (via ListBackups), filters them
+// by workspace (bundle.Manifest.Contents.Workspace.ID == workspaceID
+// — so an admin of workspace A does not accidentally rotate workspace
+// B's backups), sorts by CreatedAt descending, and deletes anything
+// beyond keepLast or older than cutoff. dryRun returns the list of
+// paths that WOULD be deleted without touching disk.
+//
+// keepLast ≤ 0 disables the count-based rule; keepDays ≤ 0 disables
+// the age-based rule. When both are set, both are applied (a bundle
+// survives only if it is within keepLast AND newer than cutoff).
+func Rotate(dir, workspaceID string, keepLast int, keepDays int, dryRun bool) ([]string, error) {
+	entries, err := ListBackups(dir)
+	if err != nil {
+		return nil, err
+	}
+	// Filter to the caller's workspace.
+	var scoped []ListEntry
+	for _, e := range entries {
+		m, err := Inspect(e.Path)
+		if err != nil || m == nil || m.Contents.Workspace == nil {
+			continue
+		}
+		if m.Contents.Workspace.ID != workspaceID {
+			continue
+		}
+		e.CreatedAt = m.CreatedAt
+		scoped = append(scoped, e)
+	}
+	// Newest first so keepLast drops the tail.
+	for i := 1; i < len(scoped); i++ {
+		for j := i; j > 0 && scoped[j-1].CreatedAt.Before(scoped[j].CreatedAt); j-- {
+			scoped[j], scoped[j-1] = scoped[j-1], scoped[j]
+		}
+	}
+	now := time.Now().UTC()
+	var cutoff time.Time
+	if keepDays > 0 {
+		cutoff = now.AddDate(0, 0, -keepDays)
+	}
+
+	var toDelete []string
+	for i, e := range scoped {
+		drop := false
+		if keepLast > 0 && i >= keepLast {
+			drop = true
+		}
+		if keepDays > 0 && e.CreatedAt.Before(cutoff) {
+			drop = true
+		}
+		if drop {
+			toDelete = append(toDelete, e.Path)
+		}
+	}
+	if dryRun {
+		return toDelete, nil
+	}
+	for _, p := range toDelete {
+		if err := Delete(p); err != nil {
+			return toDelete, err
+		}
+	}
+	return toDelete, nil
 }
 
 // Delete removes a bundle. Before touching disk it verifies the file
