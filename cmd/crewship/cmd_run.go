@@ -166,28 +166,62 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool)
 		return fmt.Errorf("send message: %w", err)
 	}
 
-	// Collect all text, display only at the end
+	// Collect all text, display only at the end. Track terminal state so that
+	// callers (e.g. `crewship seed --smoke-test` which execs this subprocess)
+	// see a non-zero exit + diagnostic on error, instead of a silent success.
 	var fullText strings.Builder
+	var streamErr string // populated by "error" events
+	gotDone := false
+	readErr := error(nil)
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
+			readErr = err
 			break
 		}
 		event, err := cli.ParseChatEvent(msg)
 		if err != nil || event == nil {
 			continue
 		}
-		if event.Type == "text" {
+		switch event.Type {
+		case "text":
 			fullText.WriteString(event.Content)
+		case "error":
+			streamErr = event.Content
+		case "done":
+			gotDone = true
 		}
 		if event.Type == "done" || event.Type == "error" {
 			break
 		}
 	}
 
-	fmt.Print(fullText.String())
-	if !strings.HasSuffix(fullText.String(), "\n") {
-		fmt.Println()
+	text := fullText.String()
+	if text != "" {
+		fmt.Print(text)
+		if !strings.HasSuffix(text, "\n") {
+			fmt.Println()
+		}
+	}
+
+	// Failure cases — emit a clear stderr message so exec callers can diagnose,
+	// and return an error so the process exits non-zero.
+	if streamErr != "" {
+		fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, streamErr)
+		return fmt.Errorf("agent error: %s", streamErr)
+	}
+	if text == "" {
+		if readErr != nil {
+			fmt.Fprintf(os.Stderr, "%s[error]%s connection closed before any output: %v\n",
+				cli.Red, cli.Reset, readErr)
+			return fmt.Errorf("connection closed before any output: %w", readErr)
+		}
+		if !gotDone {
+			fmt.Fprintln(os.Stderr, cli.Red+"[error]"+cli.Reset+" stream ended without done event and no text received")
+			return fmt.Errorf("stream ended without done event and no text received")
+		}
+		fmt.Fprintln(os.Stderr, cli.Red+"[error]"+cli.Reset+" agent returned no text")
+		return fmt.Errorf("agent returned no text")
 	}
 	return nil
 }

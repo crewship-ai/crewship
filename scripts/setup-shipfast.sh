@@ -444,7 +444,7 @@ ensure_agent filip --name "Filip" --slug filip --crew devops --role LEAD \
 ## Technický kontext Crewshipu
 - Single binary: Go + embedded Next.js static export
 - Build: make build → pnpm build → go build
-- Kontejnery: Docker, 1 container = 1 crew, agent-runtime image
+- Kontejnery: Docker, 1 container = 1 crew, user-provided base image + bind-mounted sidecar
 - Deployment: Docker Compose (docker/docker-compose.prod.yml)
 - DB: SQLite (file:/data/crewship.db), volumes pro persistenci
 - Networking: crewship-internal (backend), crewship-agents (agent containers)

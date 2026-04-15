@@ -98,6 +98,9 @@ func (m *mockContainer) ContainerStats(_ context.Context, _ string) (*provider.C
 func (m *mockContainer) CrewContainerName(slug string) string {
 	return "crewship-team-" + slug
 }
+func (m *mockContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
+	return nil
+}
 
 func TestNew(t *testing.T) {
 	o := New(nil, nil, slog.Default())
@@ -163,6 +166,7 @@ func TestRunAgentSuccess(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
+			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
@@ -222,6 +226,7 @@ func TestRunAgentExitCodeError(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
+			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "exec-1", Reader: r},
@@ -371,6 +376,7 @@ func TestRunAgentScrubsCredentials(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
+			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
@@ -432,6 +438,7 @@ func TestRunAgentWithSidecar(t *testing.T) {
 		execResults: []*provider.ExecResult{
 			{ExecID: "health-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "sidecar-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
@@ -486,6 +493,7 @@ func TestRunAgentCancelledContext(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
+			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "exec-1", Reader: r},

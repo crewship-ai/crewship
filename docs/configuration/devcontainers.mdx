@@ -1,0 +1,173 @@
+---
+title: "Devcontainer Configuration"
+description: "Reference for per-crew devcontainer config fields, supported features, mise tools, and the sidecar bind-mount paths."
+icon: "sliders"
+---
+
+# Devcontainer Configuration
+
+This page is the flat reference for every field, env var, and CLI flag that governs Crewship's devcontainer runtime. For the step-by-step narrative, see [Guides → Devcontainers & Runtime Images](/guides/devcontainers).
+
+## Per-crew fields
+
+Stored on the `crews` table, settable via UI wizard, REST PATCH, or `crewship crew config`.
+
+| Column | Type | Default | Notes |
+|---|---|---|---|
+| `runtime_image` | string | `debian:bookworm-slim` (global default) / `mcr.microsoft.com/devcontainers/base:bookworm` (seeds) | OCI reference. Glibc Linux only. Whitespace/control chars rejected. |
+| `devcontainer_config` | JSON string | `NULL` | Subset of `devcontainer.json`. Max 100 KB. Validated at write time. |
+| `mise_config` | JSON string | `NULL` | `{"tools":{…}}` map. Max 10 KB. |
+| `cached_image` | string | `NULL` | Populated by the provisioner on success: `crewship-cache:{hash[:12]}`. |
+| `config_hash` | string | `NULL` | SHA-256 of `(runtime_image, devcontainer_config, mise_config)`. |
+
+## `devcontainer_config` schema
+
+Parser: `internal/devcontainer/config.go:Config`.
+
+| Field | Type | Required | Purpose |
+|---|---|---|---|
+| `image` | string | ✓ | Base image reference. Must equal `runtime_image` at the API boundary. |
+| `features` | `map[featureRef]options` | — | Community devcontainer features. Accepts tag form (`ghcr.io/…/python:1`) and SHA256 digest form (`ghcr.io/…/python@sha256:abc…`). Digest form pins the exact artifact — recommended for paid/shared templates where an upstream tag rewrite would silently ship new code to every customer. |
+| `postCreateCommand` | `string` \| `[]string` \| `map[string]string` | — | Commands run as `agent` user (UID 1001) **once** during provisioning. Baked into the cached image. Changes invalidate the cache. |
+| `postStartCommand` | `string` \| `[]string` \| `map[string]string` | — | Commands run as `agent` user (UID 1001) on **every** container start / restart. Not baked into the image; changes do **not** invalidate the cache. Use for "start local services" style init. Failures log a warning but do not block the container. |
+| `containerEnv` | `map[string]string` | — | Env vars baked into the cached image (via `ENV` on commit). |
+| `remoteUser` | string | — | Default user for commands. Only `"agent"` / `"1001"` / empty are accepted — other values are rejected with HTTP 400. Crewship always runs as UID 1001. |
+
+### Allowed feature registries
+
+Feature IDs are validated against an allowlist in `internal/devcontainer/features.go` to avoid arbitrary OCI artifact execution. Accepted prefixes:
+
+- `ghcr.io/devcontainers/features/*` — official
+- `ghcr.io/devcontainers-extra/features/*` — extras (claude-code, opencode, codex, …)
+- `ghcr.io/devcontainers-community/features/*`
+- `ghcr.io/crewship-ai/features/*` — reserved for first-party features
+
+Dependencies declared in a feature's `devcontainer-feature.json` `installsAfter` (either spec form `["common-utils"]` or legacy wild form `[{"id":"common-utils"}]`) are honoured by the topological sort in `SortFeatures`.
+
+### Canonical feature set for every Crewship crew
+
+These two are considered the minimum to turn a bare Debian/Ubuntu image into a working Crewship crew container:
+
+```json
+"features": {
+  "ghcr.io/devcontainers/features/common-utils:2": {
+    "username": "agent",
+    "userUid": "1001",
+    "userGid": "1001",
+    "installZsh": false
+  },
+  "ghcr.io/devcontainers-extra/features/claude-code:2": {}
+}
+```
+
+- `common-utils` creates the `agent` user at UID 1001 and installs `curl`, `git`, `ca-certificates`, `sudo`. Replaces the deleted `EnsureAgentUser` Go helper.
+- `claude-code` installs Node.js 22 (NodeSource) + `@anthropic-ai/claude-code` globally. Replaces the deleted `EnsureClaudeCode` Go helper.
+
+## `mise_config` schema
+
+```json
+{
+  "tools": {
+    "<tool>": "<version>"
+  }
+}
+```
+
+Provisioner installs `mise` as the agent user, then `mise install` per tool. Versions follow mise semantics (`latest`, `22`, `22.11.0`, `lts`).
+
+## Environment variables
+
+Extend the main [environment reference](/configuration/environment). These govern the bind-mount pipeline.
+
+| Variable | Default | Description |
+|---|---|---|
+| `CREWSHIP_SIDECAR_PATH` | autodetected | Absolute path to the `crewship-sidecar` Go binary on the host. |
+| `CREWSHIP_ENTRYPOINT_PATH` | autodetected | Absolute path to `entrypoint.sh` on the host. |
+| `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass the fail-fast check. Intended for unit tests; never set in production. |
+| `CREWSHIP_RUNTIME_IMAGE` | `debian:bookworm-slim` | Global default base image if a crew has no explicit `runtime_image`. |
+
+### Autodetect order
+
+`internal/config/config.go:autodetectSidecarPaths` walks these candidates and picks the first hit:
+
+**Sidecar binary**
+1. `{dir of crewship executable}/crewship-sidecar`
+2. `/usr/local/bin/crewship-sidecar`
+
+**Entrypoint script**
+1. `{dir of crewship executable}/entrypoint.sh`
+2. `{cwd}/scripts/entrypoint.sh`
+3. `{cwd}/entrypoint.sh`
+4. `/usr/local/share/crewship/entrypoint.sh`
+
+If either remains empty and `CREWSHIP_SKIP_SIDECAR != 1`, `config.Load` returns a descriptive error and the server refuses to start.
+
+## REST endpoints
+
+| Method | Path | Handler | Purpose |
+|---|---|---|---|
+| `GET` | `/api/v1/crews/{crewId}/provision` | `ProvisioningHandler.ProvisionStatus` | Current status + cached image tag + config hash. |
+| `POST` | `/api/v1/crews/{crewId}/provision` | `ProvisioningHandler.ProvisionTrigger` | Enqueue async provisioning; returns `202 Accepted`. |
+| `POST` | `/api/v1/crews/{crewId}/rebuild` | `ProvisioningHandler.ProvisionRebuild` | Clear cache marker + re-provision. |
+| `GET` | `/api/v1/admin/devcontainer-features` | feature catalog handler | Dynamic catalog for UI (3-tier cache). |
+| `GET` | `/api/v1/admin/runtime-images` | runtime catalog handler | Curated base image list. |
+| `GET` | `/api/v1/admin/mise-tools` | mise catalog handler | Searchable mise tool registry. |
+
+All endpoints require a workspace-authenticated user. `ProvisionTrigger` returns `503 Service Unavailable` if the Docker client is not configured on the server.
+
+## CLI flags
+
+```
+crewship crew config <slug>
+  --show                    Print current config as YAML.
+  --export                  Same as --show but emits a redistributable YAML bundle.
+  --clear                   Remove runtime_image + devcontainer_config + mise_config.
+  --devcontainer <path>     Load JSON from path and PATCH devcontainer_config.
+  --mise <path>             Load JSON from path and PATCH mise_config.
+  --runtime-image <ref>     PATCH runtime_image only.
+
+crewship crew provision <slug>                # trigger async
+crewship crew provision status <slug>         # poll
+crewship crew rebuild <slug>                  # invalidate + trigger
+```
+
+Flags are mutually exclusive; combining them errors out before hitting the API.
+
+## Provisioning states
+
+Emitted by `ProvisionStatus` + WebSocket channel `provision:{crewId}`:
+
+| State | Meaning |
+|---|---|
+| `idle` | No config yet, or cached image in sync with hash. |
+| `pending` | Job enqueued, goroutine not yet started. |
+| `running` | Active — installing features / mise / running postCreate. |
+| `success` | Cache image committed, `cached_image` + `config_hash` written. |
+| `failed` | Commit never happened; error recorded. Re-run with `crewship crew rebuild`. |
+
+## Validation rules
+
+Enforced in `internal/api/crews.go` write paths and `devcontainer.Config.Validate`:
+
+- `image` / `runtime_image`: non-empty, no whitespace/control chars, ≤ 512 chars.
+- `features`: keys match the allowlisted registries above.
+- `postCreateCommand`: ≤ 4096 chars per entry, no null bytes.
+- `containerEnv`: ≤ 32 keys, each key `[A-Z_][A-Z0-9_]*`.
+- `mise_config`: well-formed JSON, `tools` map only, ≤ 32 entries.
+- Total `devcontainer_config` blob ≤ 100 KB.
+- Total `mise_config` blob ≤ 10 KB.
+
+## Code of record
+
+| Concern | File |
+|---|---|
+| Config parser / validation | `internal/devcontainer/config.go` |
+| Feature downloader (OCI) | `internal/devcontainer/features.go` |
+| Feature installer (exec) | `internal/devcontainer/installer.go` |
+| Provisioner + caching | `internal/devcontainer/provisioner.go` |
+| REST handlers | `internal/api/crew_provisioning.go` |
+| CLI `crew config` | `cmd/crewship/cmd_crew_config.go` |
+| CLI `crew provision` | `cmd/crewship/cmd_crew_provision.go` |
+| Seed demo data | `cmd/crewship/seeddata/crews.go` |
+| Sidecar bind mount | `internal/provider/docker/docker.go:buildMounts` |
+| Autodetect + fail-fast | `internal/config/config.go:autodetectSidecarPaths` |

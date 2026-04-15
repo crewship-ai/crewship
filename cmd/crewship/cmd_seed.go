@@ -7,8 +7,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
@@ -39,6 +44,9 @@ func init() {
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
 	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
+	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
+	seedCmd.Flags().Int("smoke-timeout", 60, "Per-agent timeout (seconds) for smoke test")
+	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
@@ -46,6 +54,9 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
 	password, _ := cmd.Flags().GetString("password")
+	smokeTest, _ := cmd.Flags().GetBool("smoke-test")
+	smokeTimeout, _ := cmd.Flags().GetInt("smoke-timeout")
+	provisionTimeoutSec, _ := cmd.Flags().GetInt("provision-timeout")
 	if password == "" {
 		password = devDefaultPassword
 		fmt.Fprintf(os.Stderr, "  Using dev default admin password: %s\n", password)
@@ -80,6 +91,15 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// ── Phase 2b: Provision crews with devcontainer config (parallel) ──
+	// Without this, `crewship run <agent>` fails with "Crew has devcontainer
+	// configuration but no provisioned image". Seed is supposed to produce a
+	// demo environment that works out of the box.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	provisionCrews(ctx, client, crewIDs, time.Duration(provisionTimeoutSec)*time.Second)
 
 	// ── Phase 3: Agents ──
 	if err := ctx.Err(); err != nil {
@@ -127,7 +147,305 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	// ── Phase 11: Summary ──
 	fmt.Fprintln(os.Stderr, "")
 	cli.PrintSuccess(fmt.Sprintf("Seed complete: %d crews, %d agents", len(crewIDs), len(agentIDs)))
+	fmt.Fprintln(os.Stderr, "Login: demo@crewship.ai / "+password)
+
+	// ── Phase 12: Smoke test (optional) ──
+	if smokeTest {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := runSmokeTest(ctx, agentIDs, time.Duration(smokeTimeout)*time.Second); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "To test that agents work end-to-end:")
+		fmt.Fprintln(os.Stderr, "  crewship seed --smoke-test")
+	}
 	return nil
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 2b: Provisioning
+// ════════════════════════════════════════════════════════════════════════════
+
+// provisionCrews triggers devcontainer provisioning for every crew that has a
+// devcontainer_config and waits for all to finish (in parallel). Errors are
+// reported but do not abort the whole seed — a partially-provisioned demo env
+// is still better than bailing out before agents/skills/issues are created.
+func provisionCrews(ctx context.Context, client *cli.Client, crewIDs map[string]string, timeout time.Duration) {
+	// Map slug → has devcontainer config, from static seed data. If the seed
+	// data evolves to skip devcontainers we silently skip those crews.
+	hasDevcontainer := map[string]bool{}
+	for _, c := range seeddata.Crews {
+		if c.DevcontainerConfig != "" {
+			hasDevcontainer[c.Slug] = true
+		}
+	}
+
+	// Collect only crews we actually need to provision.
+	type target struct{ slug, id string }
+	var targets []target
+	for slug, id := range crewIDs {
+		if hasDevcontainer[slug] {
+			targets = append(targets, target{slug: slug, id: id})
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].slug < targets[j].slug })
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Provisioning demo crews (pulling images, installing features)...")
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(targets))
+	for _, t := range targets {
+		wg.Add(1)
+		go func(slug, id string) {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "  Provisioning %s...\n", slug)
+			if err := provisionCrewAndWait(ctx, client, id, timeout); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: %v\n", slug, err)
+				errCh <- fmt.Errorf("%s: %w", slug, err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "  + %s provisioned\n", slug)
+		}(t.slug, t.id)
+	}
+	wg.Wait()
+	close(errCh)
+
+	failed := 0
+	for range errCh {
+		failed++
+	}
+	if failed > 0 {
+		fmt.Fprintf(os.Stderr,
+			"  WARNING: %d/%d crews failed to provision. Agents in those crews will not run.\n",
+			failed, len(targets),
+		)
+		fmt.Fprintf(os.Stderr,
+			"           Retry with: crewship crew provision <slug>\n")
+	}
+}
+
+// provisionCrewAndWait triggers provisioning for a crew and polls until
+// completion, failure, or timeout. The trigger endpoint returns 202 Accepted
+// (or 409 if a job is already running, which we treat as "fine, keep polling").
+func provisionCrewAndWait(ctx context.Context, client *cli.Client, crewID string, timeout time.Duration) error {
+	// Bound the whole operation with a sub-context so the poll loop terminates
+	// cleanly on timeout / Ctrl-C.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	pollClient := client.WithContext(ctx)
+
+	// Kick off provisioning. 202 = started; 409 = already in progress (still OK
+	// to poll); anything else is an error.
+	resp, err := pollClient.Post("/api/v1/crews/"+crewID+"/provision", nil)
+	if err != nil {
+		return fmt.Errorf("trigger provision: %w", err)
+	}
+	if resp.StatusCode != http.StatusAccepted &&
+		resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return fmt.Errorf("trigger provision: HTTP %d: %s",
+			resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	resp.Body.Close()
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	var lastStatus string
+	for {
+		// Check status immediately (so a fast provision returns quickly) then
+		// again on every tick.
+		st, err := fetchProvisionStatus(pollClient, crewID)
+		if err != nil {
+			return fmt.Errorf("poll status: %w", err)
+		}
+		lastStatus = st.Status
+		switch st.Status {
+		case "completed":
+			return nil
+		case "failed":
+			if st.Error != "" {
+				return fmt.Errorf("provision failed: %s", st.Error)
+			}
+			return fmt.Errorf("provision failed")
+		}
+		// pending / running / idle → keep polling
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout after %s (last status: %s)", timeout, lastStatus)
+		case <-ticker.C:
+		}
+	}
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 12: Smoke test
+// ════════════════════════════════════════════════════════════════════════════
+
+// smokeTestResult captures the outcome of a single agent smoke test.
+type smokeTestResult struct {
+	CrewSlug  string
+	AgentSlug string
+	OK        bool
+	Timeout   bool
+	Elapsed   time.Duration
+	Output    string
+	ErrMsg    string
+}
+
+// runSmokeTest sends a simple prompt to every agent that was seeded and reports
+// per-agent success/failure. It execs the currently-running crewship binary as
+// a subprocess (via `crewship run --no-stream --quiet`) so the smoke test
+// exercises the real CLI path end-to-end rather than coupling to HTTP internals.
+func runSmokeTest(ctx context.Context, agentIDs map[string]string, timeout time.Duration) error {
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Running smoke test (per-agent timeout: "+timeout.String()+")...")
+
+	// Build slug → crew slug map from static seed data. Only test agents we
+	// both seeded AND successfully created (present in agentIDs).
+	crewBySlug := map[string]string{}
+	for _, a := range seeddata.Agents {
+		crewBySlug[a.Slug] = a.CrewSlug
+	}
+
+	// Stable ordering: crew slug, then agent slug.
+	slugs := make([]string, 0, len(agentIDs))
+	for slug := range agentIDs {
+		slugs = append(slugs, slug)
+	}
+	sort.Slice(slugs, func(i, j int) bool {
+		ci, cj := crewBySlug[slugs[i]], crewBySlug[slugs[j]]
+		if ci != cj {
+			return ci < cj
+		}
+		return slugs[i] < slugs[j]
+	})
+
+	server := cli.ResolveServer(flagServer, cliCfg)
+	crewshipBin := os.Args[0]
+
+	results := make([]smokeTestResult, 0, len(slugs))
+	for _, slug := range slugs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		res := smokeTestAgent(ctx, crewshipBin, slug, crewBySlug[slug], server, timeout)
+		results = append(results, res)
+		printSmokeLine(res)
+	}
+
+	return printSmokeSummary(results)
+}
+
+// smokeTestAgent invokes `crewship run` as a subprocess and collects its
+// stdout. Returns a result struct — errors are captured, not returned, so the
+// caller can keep iterating through the remaining agents.
+func smokeTestAgent(ctx context.Context, crewshipBin, agentSlug, crewSlug, serverURL string, timeout time.Duration) smokeTestResult {
+	start := time.Now()
+	res := smokeTestResult{CrewSlug: crewSlug, AgentSlug: agentSlug}
+
+	// Sub-context bounds the subprocess. When it expires the kernel delivers
+	// SIGKILL via exec.CommandContext, so we can distinguish timeouts from
+	// other failures by checking ctx2.Err() afterwards.
+	ctx2, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	args := []string{
+		"run", agentSlug,
+		"Hello, introduce yourself in one sentence.",
+		"--no-stream", "--quiet",
+		"--timeout", fmt.Sprintf("%d", int(timeout.Seconds())),
+		"--server", serverURL,
+	}
+	cmd := exec.CommandContext(ctx2, crewshipBin, args...)
+	out, err := cmd.CombinedOutput()
+	res.Elapsed = time.Since(start)
+	res.Output = strings.TrimSpace(string(out))
+
+	if ctx2.Err() == context.DeadlineExceeded {
+		res.Timeout = true
+		res.ErrMsg = fmt.Sprintf("exceeded %s", timeout)
+		return res
+	}
+	if err != nil {
+		res.ErrMsg = err.Error()
+		return res
+	}
+	if res.Output == "" {
+		res.ErrMsg = "empty response"
+		return res
+	}
+	res.OK = true
+	return res
+}
+
+// printSmokeLine renders a single fixed-width result line.
+func printSmokeLine(r smokeTestResult) {
+	const (
+		pathW   = 28
+		statusW = 10
+	)
+	path := r.CrewSlug + "/" + r.AgentSlug
+	if len(path) < pathW {
+		path = path + strings.Repeat(" ", pathW-len(path))
+	}
+
+	var status, detail string
+	switch {
+	case r.OK:
+		status = "OK"
+		detail = fmt.Sprintf("(%.1fs)  %q", r.Elapsed.Seconds(), truncateForSmoke(r.Output, 80))
+	case r.Timeout:
+		status = "TIMEOUT"
+		detail = "(" + r.ErrMsg + ")"
+	default:
+		status = "FAIL"
+		detail = "(" + r.ErrMsg + ")"
+	}
+	if len(status) < statusW {
+		status = status + strings.Repeat(" ", statusW-len(status))
+	}
+	fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", path, status, detail)
+}
+
+// printSmokeSummary writes a passed/failed tally and returns an error if any
+// agent failed so the process exits with a non-zero status.
+func printSmokeSummary(results []smokeTestResult) error {
+	passed, failed := 0, 0
+	for _, r := range results {
+		if r.OK {
+			passed++
+		} else {
+			failed++
+		}
+	}
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintf(os.Stderr, "%d passed, %d failed, 0 skipped\n", passed, failed)
+	if failed > 0 {
+		return fmt.Errorf("smoke test: %d/%d agents failed", failed, len(results))
+	}
+	return nil
+}
+
+// truncateForSmoke collapses whitespace and hard-truncates at n runes for the
+// one-line per-agent summary.
+func truncateForSmoke(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n-3]) + "..."
 }
 
 // ════════════════════════════════════════════════════════════════════════════

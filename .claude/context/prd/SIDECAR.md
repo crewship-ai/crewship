@@ -543,13 +543,16 @@ Agent (UID 1001) → cat /proc/<sidecar_pid>/environ → Permission denied
 Credentials jsou JEN v heap pameti sidecar procesu (UID 1002).
 Agent je nemuze precist.
 
-### 8.3 Dockerfile setup
+### 8.3 Container user setup
 
-```dockerfile
-# docker/agent-runtime/Dockerfile
-RUN groupadd -g 1001 agent && useradd -u 1001 -g agent -m agent && \
-    groupadd -g 1002 sidecar && useradd -u 1002 -g sidecar -s /usr/sbin/nologin sidecar
-```
+Uživatelé (agent + sidecar) se vytvářejí během provisioning fáze:
+
+- `agent` (UID 1001) zajišťuje community feature
+  `ghcr.io/devcontainers/features/common-utils:2` s options
+  `{username:"agent", userUid:"1001"}` (viz `cmd/crewship/seeddata/crews.go`).
+- `sidecar` (UID 1002, shell `/usr/sbin/nologin`) vytváří `scripts/entrypoint.sh`
+  při startu kontejneru — uzel běží jako root jen po dobu této init fáze, pak
+  přepíná na UID 1002 a spouští bind-mountovaný `crewship-sidecar` binary.
 
 Sidecar uzivatel ma `/usr/sbin/nologin` shell -- nelze se do nej prihlasit.
 

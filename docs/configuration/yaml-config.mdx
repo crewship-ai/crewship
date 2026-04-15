@@ -34,13 +34,18 @@ ipc:
 # Container provider
 container:
   provider: "docker"            # "docker" | "apple" | "auto" | "k8s"
-  runtime_image: "ghcr.io/crewship-ai/agent-runtime:latest"
+  runtime_image: "debian:bookworm-slim"
   default_runtime: "runc"       # "runc" | "runsc" | "kata-runtime" | "sysbox-runc"
   network: "crewship-agents"    # Docker bridge network name
   container_prefix: ""          # Name prefix for multi-instance isolation
   default_memory_mb: 512        # Default container memory limit
   default_cpus: 1.0             # Default container CPU limit
   sidecar_enabled: false        # Enable sidecar proxy for credential injection
+
+# Note: Crewship injects the sidecar binary and entrypoint script into the
+# container at runtime via bind mount from the host. Any glibc-based Linux
+# image (debian, ubuntu, or a derivative) works out of the box — no custom
+# base image is required.
 
 # File storage
 storage:
@@ -101,7 +106,7 @@ The `shutdown_timeout` controls how long the server waits for in-flight requests
 ```yaml
 container:
   provider: "docker"
-  runtime_image: "ghcr.io/crewship-ai/agent-runtime:latest"
+  runtime_image: "debian:bookworm-slim"
   default_runtime: "runc"
   network: "crewship-agents"
   container_prefix: ""
@@ -230,7 +235,7 @@ server:
 
 container:
   provider: "docker"
-  runtime_image: "ghcr.io/crewship-ai/agent-runtime:v1.0.0"
+  runtime_image: "debian:bookworm-slim"
   default_runtime: "runsc"      # gVisor for production security
   network: "crewship-agents"
   default_memory_mb: 1024

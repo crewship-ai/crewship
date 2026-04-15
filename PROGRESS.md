@@ -511,7 +511,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 - [x] **Production Dockerfile: Next.js** (multi-stage, standalone output)
 - [x] **Production Dockerfile: crewshipd** (multi-stage, static binary)
-- [x] **docker-compose.prod.yml** (PostgreSQL + Next.js + crewshipd + agent-runtime sit)
+- [x] **docker-compose.prod.yml** (PostgreSQL + Next.js + crewshipd + crew agents síť)
 - [x] **Session metadata sync** (Go → IPC → Next.js → Prisma)
 - [x] **SessionResolver** (IPCResolver: crewshipd → Next.js, dekrypce credentials)
 - [x] **Prisma migrace** (init migrace, 20 tabulek, migration_lock.toml)

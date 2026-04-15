@@ -147,6 +147,13 @@ type Orchestrator struct {
 	mu             sync.RWMutex
 	accepting      bool
 	crews          map[string]*crewState
+
+	// tmuxCache memoizes whether each container has tmux installed. Avoids a
+	// `command -v tmux` exec on every agent run (was ~50ms per call). Key is
+	// the container ID; value is true if tmux was found. Invalidated when the
+	// container is recreated (new ID) so stale entries are harmless.
+	tmuxCacheMu sync.RWMutex
+	tmuxCache   map[string]bool
 }
 
 // New creates an Orchestrator with the given container and state providers.
@@ -163,6 +170,7 @@ func New(
 		cooldown:  NewCooldownManager(),
 		accepting: true,
 		crews:     make(map[string]*crewState),
+		tmuxCache: make(map[string]bool),
 	}
 }
 
@@ -1007,11 +1015,87 @@ func TmuxSessionName(agentSlug string) string {
 	return "agent-" + agentSlug
 }
 
+// tmuxCacheLookup returns the cached tmux-present value for containerID and
+// whether the cache held an entry.
+func (o *Orchestrator) tmuxCacheLookup(containerID string) (bool, bool) {
+	o.tmuxCacheMu.RLock()
+	defer o.tmuxCacheMu.RUnlock()
+	v, ok := o.tmuxCache[containerID]
+	return v, ok
+}
+
+// tmuxCacheStore records whether containerID has tmux installed. A size cap
+// (tmuxCacheMaxEntries) prevents unbounded growth on long-running crewshipd
+// processes that churn containers (recreate on config change, TTL cycle,
+// etc.). On overflow the entire cache is flushed — cheaper than tracking
+// liveness against provider state, and the worst case is a one-time re-
+// probe of `command -v tmux` for each active crew (~50 ms per crew).
+func (o *Orchestrator) tmuxCacheStore(containerID string, has bool) {
+	o.tmuxCacheMu.Lock()
+	defer o.tmuxCacheMu.Unlock()
+	if len(o.tmuxCache) >= tmuxCacheMaxEntries {
+		// Reset rather than evict-oldest: we do not track access time and
+		// bulk clear costs nothing in Go.
+		o.tmuxCache = make(map[string]bool, tmuxCacheMaxEntries)
+	}
+	o.tmuxCache[containerID] = has
+}
+
+// tmuxCacheMaxEntries caps the number of remembered container IDs. A busy
+// workspace rarely exceeds a few dozen live containers; this cap is a safety
+// net against container-ID churn leaking into long-running server memory.
+const tmuxCacheMaxEntries = 1024
+
+// InvalidateTmuxCache removes a container's cached tmux-presence entry. Called
+// when a container is removed so the map does not grow unbounded across the
+// lifetime of the crewshipd process (container IDs are 64 hex chars each and
+// a busy workspace churns them). Safe to call for unknown IDs.
+func (o *Orchestrator) InvalidateTmuxCache(containerID string) {
+	o.tmuxCacheMu.Lock()
+	defer o.tmuxCacheMu.Unlock()
+	delete(o.tmuxCache, containerID)
+}
+
 // setupTmuxExec prepares a tmux-wrapped execution environment for an agent.
 // It writes command args, env vars, and a script to files in the container
 // (avoiding shell quoting issues), then returns a wrapper command that starts
 // tmux and streams output via FIFO. Falls back gracefully if setup fails.
 func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cmd []string, agentSlug string, env []string) ([]string, error) {
+	// Pre-check: fail fast if tmux is not installed in the container. Custom
+	// base images (debian:bookworm-slim, ubuntu:24.04) don't ship with tmux.
+	// Without this check, the outer wrapper runs anyway and produces noisy
+	// stderr output before falling back, which confuses users.
+	//
+	// Result is cached per container — tmux presence is fixed once the image
+	// is built, so repeating the probe on every run (every agent message) was
+	// a 50 ms tax for no information. Cache is invalidated naturally when the
+	// container is recreated with a new ID.
+	if has, ok := o.tmuxCacheLookup(containerID); ok {
+		if !has {
+			return nil, fmt.Errorf("tmux not installed in container")
+		}
+	} else {
+		checkResult, checkErr := o.container.Exec(ctx, provider.ExecConfig{
+			ContainerID: containerID,
+			Cmd:         []string{"sh", "-c", "command -v tmux >/dev/null 2>&1"},
+			User:        "1001:1001",
+		})
+		if checkErr != nil {
+			return nil, fmt.Errorf("tmux check: %w", checkErr)
+		}
+		io.Copy(io.Discard, checkResult.Reader)
+		checkResult.Reader.Close()
+		_, tmuxExitCode, inspectErr := o.container.ExecInspect(ctx, checkResult.ExecID)
+		if inspectErr != nil {
+			return nil, fmt.Errorf("tmux check inspect: %w", inspectErr)
+		}
+		has := tmuxExitCode == 0
+		o.tmuxCacheStore(containerID, has)
+		if !has {
+			return nil, fmt.Errorf("tmux not installed in container")
+		}
+	}
+
 	session := TmuxSessionName(agentSlug)
 	argsFile := fmt.Sprintf("/tmp/%s.args", session)
 	scriptFile := fmt.Sprintf("/tmp/%s.sh", session)
