@@ -88,6 +88,7 @@ func init() {
 	rootCmd.AddCommand(memoryCmd)
 	rootCmd.AddCommand(notificationCmd)
 	rootCmd.AddCommand(labelCmd)
+	rootCmd.AddCommand(backupCmd)
 }
 
 func main() {

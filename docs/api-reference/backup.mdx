@@ -1,0 +1,277 @@
+---
+title: "Backup"
+description: "REST endpoints for creating, listing, inspecting, verifying, restoring, rotating, and deleting backup bundles. All routes require OWNER or ADMIN on the workspace."
+icon: "shield"
+---
+
+# Backup API
+
+All endpoints live under `/api/v1/admin/backups` and are gated by the `authed` + `wsCtx` middleware chain. Handlers additionally re-check the workspace role (`canRole(role, "manage")`) — only **OWNER** and **ADMIN** pass. Every mutation writes one row to `audit_log`.
+
+Routes are registered in `internal/api/router.go`; handlers live in `internal/api/backup.go`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/admin/backups` | Create a new bundle |
+| `GET` | `/api/v1/admin/backups` | List bundles for the current workspace |
+| `GET` | `/api/v1/admin/backups/status` | Inspect the per-workspace advisory lock |
+| `DELETE` | `/api/v1/admin/backups/status` | Force-release the lock |
+| `GET` | `/api/v1/admin/backups/inspect` | Read the plaintext MANIFEST |
+| `GET` | `/api/v1/admin/backups/verify` | Recompute sealed-payload SHA-256 |
+| `POST` | `/api/v1/admin/backups/rotate` | Apply retention policy |
+| `GET` | `/api/v1/admin/backups/download` | Stream bundle bytes |
+| `POST` | `/api/v1/admin/backups/restore` | Restore a bundle |
+| `DELETE` | `/api/v1/admin/backups` | Delete a bundle from disk |
+
+<Note>
+  Path-based endpoints (`inspect`, `verify`, `download`, `restore`, `delete`) validate that the supplied path lives under `~/.crewship/backups` and belongs to the caller's workspace. **Symlinks are explicitly rejected during path validation** — no escape via `ln -s` to read files outside the backup directory. Paths from other workspaces return `404 Not Found` rather than `403`, so the endpoint does not confirm existence of bundles outside the caller's scope.
+</Note>
+
+## POST /api/v1/admin/backups
+
+Create a new backup bundle. Runs inline (seconds to minutes); no async job queue.
+
+### Request
+
+```json
+{
+  "scope": "workspace",
+  "crew_id": "",
+  "passphrase": "correct horse battery staple",
+  "recipient": "",
+  "no_encrypt": false,
+  "output_dir": ""
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `scope` | `"workspace"` \| `"crew"` | Required. `"instance"` is reserved for CRE-129 and rejected. |
+| `crew_id` | string | Required when `scope == "crew"`. |
+| `passphrase` | string | AGE passphrase. Exactly one of `passphrase` / `recipient` / `no_encrypt` must be supplied. |
+| `recipient` | string | AGE X25519 public key (`age1…`). Parsed with `age.ParseX25519Recipient`. |
+| `no_encrypt` | bool | Plaintext payload. Use for test / CI only. |
+| `output_dir` | string | Optional override. Must resolve under `~/.crewship/backups`; symlinks rejected. |
+
+### Response — `201 Created`
+
+```json
+{
+  "path": "/home/admin/.crewship/backups/crewship-workspace-acme-2026-04-15T12-05-01Z.tar.zst",
+  "size_bytes": 13421772,
+  "payload_sha256": "b5f7…",
+  "format_version": 1,
+  "scope": "workspace",
+  "created_at": "2026-04-15T12:05:01Z",
+  "encrypted": true
+}
+```
+
+### Errors
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid body, invalid scope, missing `crew_id`, multiple or zero encryption selectors, invalid AGE recipient, `output_dir` escapes the default directory. |
+| `401` | Missing or invalid auth. |
+| `403` | Role < ADMIN. |
+| `409` | Another backup already holds the lock (`ErrLockHeld`) or an agent run is active (`ErrAgentRunning`). |
+| `500` | DB dump, tar, or encryption failure. |
+
+Audit action: `backup.create`.
+
+## GET /api/v1/admin/backups
+
+List bundles from `~/.crewship/backups` filtered to the caller's workspace (bundles of other workspaces are hidden from the response).
+
+### Response — `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "path": "/home/admin/.crewship/backups/crewship-workspace-acme-2026-04-15T12-05-01Z.tar.zst",
+      "file_name": "crewship-workspace-acme-2026-04-15T12-05-01Z.tar.zst",
+      "size_bytes": 13421772,
+      "scope": "workspace",
+      "encrypted": true,
+      "created_at": "2026-04-15T12:05:01Z",
+      "format_version": 1
+    }
+  ]
+}
+```
+
+## GET /api/v1/admin/backups/status
+
+Report the workspace's advisory lock.
+
+### Response — `200 OK`
+
+```json
+{
+  "held": true,
+  "workspace_id": "ws_abc123",
+  "acquired_by": "user_def456",
+  "acquired_at": "2026-04-15T12:04:58Z",
+  "expires_at": "2026-04-15T13:04:58Z"
+}
+```
+
+`held: false` omits the detail fields. The lock TTL is 1 hour (`backup.DefaultLockTTL`).
+
+## DELETE /api/v1/admin/backups/status
+
+Force-release the per-workspace lock regardless of owner. Intended as an emergency escape hatch when a crashed backup left a stale lock behind. Returns `204 No Content`.
+
+Audit action: `backup.unlock`.
+
+## GET /api/v1/admin/backups/inspect
+
+Return the plaintext MANIFEST for a bundle without decrypting the payload.
+
+### Query
+
+| Parameter | Required | Notes |
+|---|---|---|
+| `path` | ✓ | Absolute path. Must live under `~/.crewship/backups` and belong to the caller's workspace. |
+
+### Response — `200 OK`
+
+Returns the manifest JSON as produced by `backup.Inspect` (`internal/backup/manifest.go`).
+
+## GET /api/v1/admin/backups/verify
+
+Recompute the sealed-payload SHA-256 and compare against the MANIFEST. Does not decrypt. Streams the payload from a temp file so peak heap is bounded by the zstd decoder window.
+
+### Response — `200 OK`
+
+```json
+{
+  "valid": true,
+  "size_bytes": 13421772,
+  "manifest": { "format_version": 1, "scope": "workspace", "…": "…" },
+  "error": ""
+}
+```
+
+`valid: false` sets `error` to a human-readable reason (`checksum mismatch`, `truncated payload`, `unreadable bundle`, …).
+
+## POST /api/v1/admin/backups/rotate
+
+Apply retention policy to the caller's workspace. Per-workspace only — another workspace's bundles are never enumerated.
+
+### Request
+
+```json
+{ "keep_last": 10, "keep_days": 30, "dry_run": false }
+```
+
+At least one of `keep_last` / `keep_days` must be positive (0 disables the rule). Negatives are rejected.
+
+### Response — `200 OK`
+
+```json
+{
+  "deleted": [
+    "/home/admin/.crewship/backups/crewship-workspace-acme-2025-12-01T…tar.zst"
+  ],
+  "dry_run": false
+}
+```
+
+With `dry_run: true` the paths are returned but the files stay on disk and no audit rows are written.
+
+Audit action (per deleted bundle, non-dry-run only): `backup.rotate`.
+
+## GET /api/v1/admin/backups/download
+
+Stream the raw bundle bytes over HTTP for `scp`-free transfer off-box.
+
+Response headers:
+
+- `Content-Type: application/zstd`
+- `Content-Disposition: attachment; filename="<file>"`
+- `Cache-Control: no-store`
+- `X-Content-Type-Options: nosniff`
+
+Audit action: `backup.download`.
+
+## POST /api/v1/admin/backups/restore
+
+Restore a bundle into the current workspace.
+
+### Request
+
+```json
+{
+  "path": "/home/admin/.crewship/backups/crewship-workspace-acme-…tar.zst",
+  "passphrase": "correct horse battery staple",
+  "as_workspace": "",
+  "as_crew": "",
+  "dry_run": false
+}
+```
+
+| Field | Notes |
+|---|---|
+| `path` | Required. Subject to the same path-safety checks as `inspect`. |
+| `passphrase` | Required for encrypted bundles. Empty for `--no-encrypt` bundles. |
+| `as_workspace` | Land the workspace under a new slug. Docker phase is skipped. |
+| `as_crew` | Land the crew under a new slug (crew-scope bundles only). Docker phase is skipped. |
+| `dry_run` | Decrypt + replay the DB transaction, then **roll back**. No workspace / crew / agent writes are applied. |
+
+### Response — `200 OK`
+
+```json
+{
+  "manifest": { "format_version": 1, "scope": "workspace", "…": "…" },
+  "restored_ws": "acme",
+  "restored_workspace_id": "ws_abc123",
+  "crews_count": 4,
+  "rows_inserted": 312,
+  "docker_phase_skipped": false
+}
+```
+
+`docker_phase_skipped: true` when `as_workspace` / `as_crew` rewrote the slug — container state is not landed; call `POST /api/v1/crews/{crewId}/provision` afterwards.
+
+### Errors
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid path, format too new/old (`ErrFormatTooNew`, `ErrFormatTooOld`), invalid manifest, invalid checksum, decryption failure (wrong passphrase / corrupted bundle). |
+| `404` | Bundle does not belong to caller's workspace (or does not exist). |
+| `409` | `ErrNoOpRestore` — bundle would insert zero rows; treated as "nothing to do". |
+| `500` | Unexpected failure during extraction / replay. |
+
+Audit action: `backup.restore` (or `backup.restore.dry_run` for `dry_run: true`).
+
+## DELETE /api/v1/admin/backups
+
+Delete a bundle from disk. Returns `204 No Content`.
+
+### Query
+
+| Parameter | Required | Notes |
+|---|---|---|
+| `path` | ✓ | Absolute path. Must live under `~/.crewship/backups` and belong to the caller's workspace. |
+
+Audit action: `backup.delete`.
+
+## Error mapping
+
+`internal/api/backup.go:statusForBackupError` maps sentinel errors to HTTP status using `errors.Is`, so the backup package can rework error wording without breaking HTTP contracts:
+
+| Sentinel | Status |
+|---|---|
+| `backup.ErrAdminRequired` | `403` |
+| `backup.ErrAgentRunning`, `backup.ErrLockHeld` | `409` |
+| `backup.ErrFormatTooNew`, `backup.ErrFormatTooOld`, `backup.ErrSchemaTooOld`, `backup.ErrInvalidManifest`, `backup.ErrInvalidScope` | `400` |
+| `backup.ErrDecryption`, `backup.ErrInvalidChecksum` | `400` |
+| `backup.ErrNoOpRestore` | `409` |
+| _any other_ | `500` |
+
+## See also
+
+- [Backup & Restore guide](/guides/backup) — end-to-end walkthrough.
+- [Security → Audit log](/security/audit) — audit row layout for `backup.*` events.

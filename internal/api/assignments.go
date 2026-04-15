@@ -382,6 +382,18 @@ func (h *AssignmentHandler) runAssignment(
 		body.WorkspaceID).Scan(&lang)
 	req.PreferredLanguage = lang
 
+	// Refuse the run if a backup currently holds the workspace's
+	// advisory lock. Otherwise this execution would write agent
+	// state that the in-flight dump has already passed and therefore
+	// miss from the bundle.
+	guardRelease, guardErr := refuseIfBackupInProgress(ctx, h.db, body.WorkspaceID)
+	if guardErr != nil {
+		h.logger.Warn("assignment refused — backup in progress", "assignment_id", assignmentID, "workspace_id", body.WorkspaceID)
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", guardErr.Error())
+		return
+	}
+	defer guardRelease()
+
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
 		h.logger.Error("assignment execution failed", "error", err, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",

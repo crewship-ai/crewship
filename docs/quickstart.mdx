@@ -76,6 +76,22 @@ icon: "rocket"
     Authenticates your CLI session against the server.
   </Step>
 
+  <Step title="Select a workspace (multi-workspace setups)">
+    `crewship init` creates your first workspace and marks it as the default — you can skip this step on a single-workspace install. If you belong to more than one workspace, pick which one the CLI targets for every subsequent command:
+
+    ```bash
+    crewship workspace list
+    # SLUG         NAME          ID        ROLE
+    # acme *       Acme Corp     ws_abc…   OWNER
+    # side-proj    Side Project  ws_def…   ADMIN
+
+    crewship workspace use side-proj
+    # ✓ Default workspace set to: side-proj
+    ```
+
+    The selection is written to `~/.crewship/config.yaml` and used by every subsequent CLI call. Override per-command with `--workspace <slug>` if needed.
+  </Step>
+
   <Step title="Check system health">
     ```bash
     crewship doctor

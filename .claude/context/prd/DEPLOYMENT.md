@@ -740,3 +740,80 @@ PostgreSQL cluster (patroni)
 5. **Secrets management** — Coolify env vars staci? Nebo Vault/SOPS pro ENCRYPTION_KEY?
 6. **SQLite → PostgreSQL migrace** — automaticky CLI tool (`crewship migrate`)? Nebo manualni dump/import?
 7. **Auto-update UX** — notifikace v UI kdyz je nova verze? Nebo silent background update?
+
+---
+
+## 11. RESTORE MIMO CREWSHIP
+
+Backup bundly (`crewship-*-*.tar.zst`) jsou navrzene tak, aby sly
+extraktovat i bez Crewship binarky — napriklad pri forensnim auditu
+nebo kdyz klient jen chce sahnout na konkretni soubory. Kompletni
+restore (vcetne obnoveni Docker kontejneru a DB radek) vyzaduje
+`crewship backup restore`.
+
+### 11.1 Data-only extract (coreutils + age)
+
+Potreba: `tar`, `zstd` (pripadne `tar --zstd`), a `age` CLI pokud je
+bundle sifrovany.
+
+```bash
+# Rozbaleni vnejsiho tar.zst
+tar --zstd -xf crewship-workspace-acme-20260101T120000Z.tar.zst
+# -> MANIFEST.json, RESTORE.md, payload
+
+# Pokud MANIFEST.json hlasi encryption.enabled: true
+age -d -p payload > payload.tar            # passphrase mode
+# nebo
+age -d -i my-identity-file payload > payload.tar   # X25519 recipient
+
+# Pokud encryption.enabled: false
+mv payload payload.tar
+
+# Vnitrni payload tar obsahuje:
+#   devcontainer/<slug>/devcontainer.json
+#   devcontainer/<slug>/mise.toml
+#   workspace/<slug>/…        (bind mount contents)
+#   volumes/<slug>/home/…
+#   volumes/<slug>/tools/…
+#   memory/<slug>/…
+#   db/dump.json
+tar -xf payload.tar
+```
+
+Po rozbaleni ma klient k dispozici cely obsah — uzitecne pro
+offline inspekci, manualni export souboru, nebo jako vstup pro
+rucni re-import do jine instance.
+
+### 11.2 Crewship-native restore
+
+Preferovany happy path:
+
+```bash
+crewship backup restore \
+  ~/.crewship/backups/crewship-workspace-acme-20260101T120000Z.tar.zst \
+  [--as-workspace <new-slug>]
+```
+
+CLI se zepta na passphrase (nebo vezme `--passphrase-file`), overi
+kompat `format_version`, zkontroluje kolize slug, aplikuje forward
+migration chain nad DB radkami a obnovi workspace bind mount +
+Docker volumes + memory.
+
+### 11.3 Disaster recovery workflow
+
+Pri ztrate hostu / migraci na novy stroj:
+
+1. **Nainstaluj Crewship** na cilovem stroji (`crewship init`,
+   cista DB, pripadne custom `~/.crewship/config.yaml`).
+2. **Priloz backup soubor** (`scp`, SFTP, cokoliv) do
+   `~/.crewship/backups/`.
+3. **Prihlas se jako OWNER/ADMIN** (`crewship login`).
+4. **Spust restore**:
+   ```bash
+   crewship backup restore ~/.crewship/backups/<file>.tar.zst
+   ```
+5. **Provisionuj kontejnery** — `crewship crew provision <slug>`
+   pro kazdou crew, kterou chces znovu rozbehnout.
+
+Instance-level backup (celou instalaci vcetne credstore a auth
+keys) prijde v PR 4 (CRE-129, V1.5) po security review.
