@@ -311,6 +311,12 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 		}
 		referenced[tag] = struct{}{}
 	}
+	// Critical: if iteration died mid-stream, `referenced` is incomplete and
+	// using it to decide orphans could delete a still-live cache image.
+	if err := rows.Err(); err != nil {
+		h.logger.Warn("orphan cache-image GC: rows iteration failed", "error", err)
+		return
+	}
 
 	// 2. Compare against the local image set. Any crewship-cache:* tag with
 	//    no referencing row AND older than cacheImageMinAge is an orphan.
@@ -915,7 +921,10 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	_, err := h.docker.ImageRemove(r.Context(), tag, image.RemoveOptions{Force: force, PruneChildren: true})
+	// Use the narrow gcClient interface — same underlying *client.Client, but
+	// keeps the destructive surface aligned with the orphan sweeper for both
+	// readability and test parity.
+	_, err := h.gcClient.ImageRemove(r.Context(), tag, image.RemoveOptions{Force: force, PruneChildren: true})
 	if err != nil {
 		h.logger.Error("docker image remove", "tag", tag, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

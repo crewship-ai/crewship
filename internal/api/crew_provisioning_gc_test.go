@@ -29,11 +29,45 @@ type fakeGCClient struct {
 	imageListCalls int32
 }
 
-func (f *fakeGCClient) ContainerList(_ context.Context, _ container.ListOptions) ([]container.Summary, error) {
+func (f *fakeGCClient) ContainerList(_ context.Context, opts container.ListOptions) ([]container.Summary, error) {
 	if f.containerListErr != nil {
 		return nil, f.containerListErr
 	}
-	return f.containers, nil
+	// Enforce the label filter so a regression in the sweeper's filter
+	// argument is caught by the test (e.g. if it stopped scoping to
+	// crewship.temp=provision and started touching unrelated containers).
+	wantLabels := opts.Filters.Get("label")
+	if len(wantLabels) == 0 {
+		return f.containers, nil
+	}
+	out := make([]container.Summary, 0, len(f.containers))
+	for _, c := range f.containers {
+		if matchesAllLabels(c.Labels, wantLabels) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// matchesAllLabels returns true when every "key=value" filter expression in
+// wants is present in labels. Mirrors the real Docker daemon's exact-match
+// label filter semantics for our test scope.
+func matchesAllLabels(labels map[string]string, wants []string) bool {
+	for _, expr := range wants {
+		eq := strings.Index(expr, "=")
+		if eq < 0 {
+			// Key-only filter ("label=foo") — require key presence.
+			if _, ok := labels[expr]; !ok {
+				return false
+			}
+			continue
+		}
+		key, val := expr[:eq], expr[eq+1:]
+		if labels[key] != val {
+			return false
+		}
+	}
+	return true
 }
 
 func (f *fakeGCClient) ContainerRemove(_ context.Context, id string, _ container.RemoveOptions) error {
@@ -67,11 +101,14 @@ func newGCTestHandler(t *testing.T, fake *fakeGCClient) *ProvisioningHandler {
 // Temp container sweeper — removes stale, keeps fresh, respects cap.
 func TestSweepOrphanTempContainers_RemovesStaleKeepsFresh(t *testing.T) {
 	now := time.Now().Unix()
+	tempLabel := map[string]string{
+		devcontainer.TempContainerLabelKey: devcontainer.TempContainerLabelValue,
+	}
 	fake := &fakeGCClient{
 		containers: []container.Summary{
-			{ID: "old1", Created: now - int64((2 * time.Hour).Seconds())},
-			{ID: "fresh", Created: now - int64((5 * time.Minute).Seconds())},
-			{ID: "old2", Created: now - int64((3 * time.Hour).Seconds())},
+			{ID: "old1", Created: now - int64((2 * time.Hour).Seconds()), Labels: tempLabel},
+			{ID: "fresh", Created: now - int64((5 * time.Minute).Seconds()), Labels: tempLabel},
+			{ID: "old2", Created: now - int64((3 * time.Hour).Seconds()), Labels: tempLabel},
 		},
 	}
 	h := newGCTestHandler(t, fake)
@@ -80,6 +117,33 @@ func TestSweepOrphanTempContainers_RemovesStaleKeepsFresh(t *testing.T) {
 
 	if got := strings.Join(fake.removedContainers, ","); got != "old1,old2" {
 		t.Errorf("removed containers = %q; want old1,old2", got)
+	}
+}
+
+// Sentinel: if the sweeper ever drops or weakens its label filter, this test
+// fails — guards against accidentally broadening the destructive scope to
+// non-Crewship containers. Unrelated old containers must NEVER be removed.
+func TestSweepOrphanTempContainers_LabelFilterScopesDestruction(t *testing.T) {
+	now := time.Now().Unix()
+	tempLabel := map[string]string{
+		devcontainer.TempContainerLabelKey: devcontainer.TempContainerLabelValue,
+	}
+	fake := &fakeGCClient{
+		containers: []container.Summary{
+			// Old, has label → should be removed.
+			{ID: "ours-old", Created: now - int64((2 * time.Hour).Seconds()), Labels: tempLabel},
+			// Old, NO crewship label → must be ignored even though it's old.
+			{ID: "user-old", Created: now - int64((24 * time.Hour).Seconds()), Labels: map[string]string{"app": "their-thing"}},
+			// Old, different crewship label value → must be ignored.
+			{ID: "wrong-value", Created: now - int64((24 * time.Hour).Seconds()), Labels: map[string]string{devcontainer.TempContainerLabelKey: "different"}},
+		},
+	}
+	h := newGCTestHandler(t, fake)
+
+	h.sweepOrphanTempContainers(context.Background())
+
+	if got := strings.Join(fake.removedContainers, ","); got != "ours-old" {
+		t.Errorf("removed = %q; want ours-old (label filter must scope destruction)", got)
 	}
 }
 
