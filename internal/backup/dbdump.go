@@ -128,19 +128,18 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 // but we issue the explicit PRAGMA afterwards to be safe against
 // driver changes.
 func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump, error) {
+	// sql.LevelSerializable maps to BEGIN IMMEDIATE on modernc.org/sqlite,
+	// which is what we want: the writer lock is grabbed on the first
+	// statement so a concurrent writer cannot slip rows between our
+	// probes and selects. We deliberately do NOT set PRAGMA query_only
+	// on the tx — that pragma persists on the pooled connection after
+	// the tx commits and then breaks subsequent writes on that
+	// connection.
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("backup: begin dump tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	// BEGIN IMMEDIATE is the SQLite idiom for "hold the writer lock
-	// from the first statement". Without it, we're on a deferred tx
-	// and a concurrent writer can sneak in between our probes and
-	// selects. sqlite errors on "transaction within a transaction"
-	// so this exec is tolerated but redundant on some driver paths.
-	if _, err := tx.ExecContext(ctx, `PRAGMA query_only = ON`); err != nil {
-		return nil, fmt.Errorf("backup: set query_only: %w", err)
-	}
 
 	dump := &DBDump{
 		WorkspaceID: workspaceID,
@@ -370,7 +369,20 @@ type RestoreStats struct {
 // you restore into the same instance that produced the bundle).
 func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func(context.Context) error) (RestoreStats, error) {
 	var stats RestoreStats
-	tx, err := db.BeginTx(ctx, nil)
+	// PRAGMA foreign_keys is a no-op inside an open transaction per
+	// the SQLite docs, so we must set it on a held connection BEFORE
+	// BeginTx. db.Conn pins us to a single pooled connection; we
+	// release it on defer so the pragma setting does not leak to
+	// unrelated callers that happen to get this connection next.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return stats, fmt.Errorf("backup: acquire conn: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		return stats, fmt.Errorf("backup: enable FK enforcement: %w", err)
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return stats, fmt.Errorf("backup: begin restore tx: %w", err)
 	}
@@ -380,15 +392,6 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 			_ = tx.Rollback()
 		}
 	}()
-	// Enable FK enforcement explicitly. SQLite defaults to foreign_keys
-	// = OFF per-connection, so without this a bundle that has an FK
-	// pointing at a row not carried in the dump would insert happily
-	// and leave orphaned references behind. Setting the pragma inside
-	// the tx makes it effective for the subsequent inserts and does
-	// not leak to other connections.
-	if _, err := tx.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
-		return stats, fmt.Errorf("backup: enable FK enforcement: %w", err)
-	}
 
 	for _, table := range BackupTables {
 		rows, ok := dump.Tables[table]
