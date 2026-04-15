@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -218,8 +219,9 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // List handles GET /api/v1/admin/backups.
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	workspaceID := WorkspaceIDFromContext(r.Context())
+	ctx := r.Context()
+	role := RoleFromContext(ctx)
+	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
@@ -230,7 +232,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	entries, err := backup.ListBackups(dir)
+	entries, err := backup.ListBackups(ctx, dir)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -240,7 +242,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	// would see bundles from every other workspace on the host.
 	filtered := entries[:0]
 	for _, e := range entries {
-		if bundleBelongsToWorkspace(e.Path, workspaceID) {
+		if bundleBelongsToWorkspace(ctx, e.Path, workspaceID) {
 			filtered = append(filtered, e)
 		}
 	}
@@ -272,8 +274,9 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Inspect handles GET /api/v1/admin/backups/inspect?path=…
 func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	workspaceID := WorkspaceIDFromContext(r.Context())
+	ctx := r.Context()
+	role := RoleFromContext(ctx)
+	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
@@ -287,7 +290,7 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if !bundleBelongsToWorkspace(path, workspaceID) {
+	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
 		// Either the bundle doesn't exist, failed to inspect, or
 		// belongs to a different workspace. Return 404 rather than
 		// 403 so we don't confirm the existence of a bundle the
@@ -295,7 +298,7 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
 		return
 	}
-	m, err := backup.Inspect(path)
+	m, err := backup.Inspect(ctx, path)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -340,7 +343,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if !bundleBelongsToWorkspace(req.Path, workspaceID) {
+	if !bundleBelongsToWorkspace(ctx, req.Path, workspaceID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
 		return
 	}
@@ -441,8 +444,9 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 // covers sealed bytes so no key is needed. Handy for periodic
 // bundle-rot checks ("is my 3-month-old backup still restorable?").
 func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	workspaceID := WorkspaceIDFromContext(r.Context())
+	ctx := r.Context()
+	role := RoleFromContext(ctx)
+	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
 		return
@@ -456,11 +460,11 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if !bundleBelongsToWorkspace(path, workspaceID) {
+	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
 		return
 	}
-	res, err := backup.Verify(path)
+	res, err := backup.Verify(ctx, path)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -548,7 +552,7 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	deleted, err := backup.Rotate(dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
+	deleted, err := backup.Rotate(ctx, dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -590,11 +594,11 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if !bundleBelongsToWorkspace(path, workspaceID) {
+	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
 		return
 	}
-	if err := backup.Delete(path); err != nil {
+	if err := backup.Delete(ctx, path); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -631,7 +635,7 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if !bundleBelongsToWorkspace(path, workspaceID) {
+	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
 		return
 	}
@@ -671,11 +675,11 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 // A bundle with no workspace in its manifest (e.g. a future
 // instance-scope bundle) returns false — instance admin endpoints
 // will handle those separately once CRE-129 lands.
-func bundleBelongsToWorkspace(path, workspaceID string) bool {
+func bundleBelongsToWorkspace(ctx context.Context, path, workspaceID string) bool {
 	if workspaceID == "" {
 		return false
 	}
-	m, err := backup.Inspect(path)
+	m, err := backup.Inspect(ctx, path)
 	if err != nil || m == nil {
 		return false
 	}

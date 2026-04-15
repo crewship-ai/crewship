@@ -17,12 +17,12 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 	root := t.TempDir()
 
 	sub := filepath.Join(root, "nested", "dir")
-	if err := ops.MkdirAll(sub, 0o700); err != nil {
+	if err := ops.MkdirAll(t.Context(), sub, 0o700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
 	// CreateTemp inside sub, write a blob, close.
-	tf, err := ops.CreateTemp(sub, "blob-*.bin")
+	tf, err := ops.CreateTemp(t.Context(), sub, "blob-*.bin")
 	if err != nil {
 		t.Fatalf("CreateTemp: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 	tempPath := tf.Name()
 
 	// Open for read, check content.
-	r, err := ops.Open(tempPath)
+	r, err := ops.Open(t.Context(), tempPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 	}
 
 	// Stat → size matches payload.
-	info, err := ops.Stat(tempPath)
+	info, err := ops.Stat(t.Context(), tempPath)
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -60,10 +60,10 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 
 	// Rename to deterministic path, then ReadDir surfaces it.
 	final := filepath.Join(sub, "final.bin")
-	if err := ops.Rename(tempPath, final); err != nil {
+	if err := ops.Rename(t.Context(), tempPath, final); err != nil {
 		t.Fatalf("Rename: %v", err)
 	}
-	entries, err := ops.ReadDir(sub)
+	entries, err := ops.ReadDir(t.Context(), sub)
 	if err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 	}
 
 	// Create (truncating) replaces content.
-	w, err := ops.Create(final, 0o600)
+	w, err := ops.Create(t.Context(), final, 0o600)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -88,36 +88,41 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close on Create: %v", err)
 	}
-	r2, err := ops.Open(final)
+	r2, err := ops.Open(t.Context(), final)
 	if err != nil {
 		t.Fatalf("Open final: %v", err)
 	}
-	got2, _ := io.ReadAll(r2)
-	_ = r2.Close()
+	got2, err := io.ReadAll(r2)
+	if err != nil {
+		t.Fatalf("ReadAll final: %v", err)
+	}
+	if err := r2.Close(); err != nil {
+		t.Fatalf("Close final: %v", err)
+	}
 	if string(got2) != "overwritten" {
 		t.Fatalf("Create truncate failed: got %q", got2)
 	}
 
 	// Remove + RemoveAll.
-	if err := ops.Remove(final); err != nil {
+	if err := ops.Remove(t.Context(), final); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
-	if err := ops.RemoveAll(filepath.Join(root, "nested")); err != nil {
+	if err := ops.RemoveAll(t.Context(), filepath.Join(root, "nested")); err != nil {
 		t.Fatalf("RemoveAll: %v", err)
 	}
-	if _, err := ops.Stat(filepath.Join(root, "nested")); !os.IsNotExist(err) {
+	if _, err := ops.Stat(t.Context(), filepath.Join(root, "nested")); !os.IsNotExist(err) {
 		t.Fatalf("expected ErrNotExist after RemoveAll, got %v", err)
 	}
 
 	// MkdirTemp + RemoveAll cleanup.
-	td, err := ops.MkdirTemp(root, "tmp-*")
+	td, err := ops.MkdirTemp(t.Context(), root, "tmp-*")
 	if err != nil {
 		t.Fatalf("MkdirTemp: %v", err)
 	}
-	if _, err := ops.Stat(td); err != nil {
+	if _, err := ops.Stat(t.Context(), td); err != nil {
 		t.Fatalf("Stat MkdirTemp: %v", err)
 	}
-	if err := ops.RemoveAll(td); err != nil {
+	if err := ops.RemoveAll(t.Context(), td); err != nil {
 		t.Fatalf("RemoveAll tempdir: %v", err)
 	}
 

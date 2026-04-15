@@ -48,7 +48,7 @@ func buildPayloadWithEntry(t *testing.T, name string, typeflag byte, linkname st
 
 func TestExtractPayload_RejectsParentTraversal(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/../../etc/shadow", tar.TypeReg, "")
-	_, err := ExtractPayload(bytes.NewReader(payload))
+	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
 		t.Fatal("expected ExtractPayload to reject a '..' entry")
 	}
@@ -59,7 +59,7 @@ func TestExtractPayload_RejectsParentTraversal(t *testing.T) {
 
 func TestExtractPayload_RejectsSymlink(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "/etc/passwd")
-	_, err := ExtractPayload(bytes.NewReader(payload))
+	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
 		t.Fatal("expected ExtractPayload to reject a symlink entry")
 	}
@@ -70,7 +70,7 @@ func TestExtractPayload_RejectsSymlink(t *testing.T) {
 
 func TestExtractPayload_RejectsHardLink(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "/etc/passwd")
-	_, err := ExtractPayload(bytes.NewReader(payload))
+	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
 		t.Fatal("expected ExtractPayload to reject a hardlink entry")
 	}
@@ -81,7 +81,7 @@ func TestExtractPayload_RejectsHardLink(t *testing.T) {
 
 func TestExtractPayload_AcceptsValidLayout(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/file.txt", tar.TypeReg, "")
-	out, err := ExtractPayload(bytes.NewReader(payload))
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("valid payload should succeed, got %v", err)
 	}
@@ -89,7 +89,7 @@ func TestExtractPayload_AcceptsValidLayout(t *testing.T) {
 	if !out.HasWorkspace("my-crew") {
 		t.Error("expected workspace section for my-crew")
 	}
-	r, ok, err := out.OpenWorkspace("my-crew")
+	r, ok, err := out.OpenWorkspace(t.Context(), "my-crew")
 	if err != nil {
 		t.Fatalf("OpenWorkspace: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestExtractPayload_AcceptsValidLayout(t *testing.T) {
 
 func TestExtractPayload_CloseRemovesTempDir(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/xyz/a.txt", tar.TypeReg, "")
-	out, err := ExtractPayload(bytes.NewReader(payload))
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestExtractPayload_EmptyPayload(t *testing.T) {
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	out, err := ExtractPayload(&buf)
+	out, err := ExtractPayload(t.Context(), &buf)
 	if err != nil {
 		t.Fatalf("empty payload: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestExtractPayload_ReadsDBDumpEntry(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	out, err := ExtractPayload(&buf)
+	out, err := ExtractPayload(t.Context(), &buf)
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}

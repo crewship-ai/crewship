@@ -41,7 +41,10 @@ export interface BackupListEntry {
 
 export interface BackupStatus {
   workspace_id: string
-  locked: boolean
+  /** Server field is `held` (matches lock semantics in the DB). An
+   * earlier draft used `locked` here — renamed so consumers match
+   * what `/api/v1/admin/backups/status` actually returns. */
+  held: boolean
   acquired_by?: string
   acquired_at?: string
   expires_at?: string

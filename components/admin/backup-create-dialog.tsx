@@ -31,6 +31,21 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
   const [recipient, setRecipient] = useState("")
   const [outputDir, setOutputDir] = useState("")
 
+  // Centralises sensitive-field cleanup so every close path — Cancel
+  // button, dialog overlay click, ESC, success handler — wipes
+  // passphrase / recipient. Keeping wipe logic in onSubmit only
+  // (previous behaviour) left secrets in state if the user dismissed
+  // the dialog mid-edit.
+  function resetAndClose() {
+    setPassphrase("")
+    setRecipient("")
+    setCrewId("")
+    setOutputDir("")
+    setScope("workspace")
+    setEncryption("passphrase")
+    close()
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (scope === "crew" && !crewId) {
@@ -55,18 +70,14 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
         output_dir: outputDir || undefined,
       })
       toast.success(`Backup created: ${res.path}`)
-      close()
-      // Wipe secret fields so they do not linger in memory for the
-      // next session's dialog open.
-      setPassphrase("")
-      setRecipient("")
+      resetAndClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create backup")
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && close()}>
+    <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Create backup</DialogTitle>
@@ -162,7 +173,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={close}>
+            <Button type="button" variant="ghost" onClick={resetAndClose}>
               Cancel
             </Button>
             <Button type="submit" disabled={create.isPending}>

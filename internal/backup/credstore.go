@@ -11,16 +11,26 @@ import (
 // "v1:<base64>" prefix exactly — we deliberately do NOT decrypt at
 // backup time so the bundle has two layers of protection (credstore
 // master key on the plaintext, AGE recipient on the outer payload).
+//
+// Fields must cover every NOT NULL column in the canonical
+// credentials schema (see migrate.go migrationAddKeeper): omitting
+// created_by (NOT NULL FK to users.id) fails the restore INSERT with
+// a constraint violation. crew_id and scope preserve the credential's
+// workspace/crew wiring across hosts.
 type EncryptedCredential struct {
 	ID             string
 	WorkspaceID    string
+	CrewID         string // nullable FK → crews.id
 	Name           string
+	Description    string
 	Type           string
+	Scope          string // 'WORKSPACE' | 'CREW' | …
 	Status         string
 	Provider       string
 	SecurityLevel  int
 	KeeperCrewID   string
 	EncryptedValue string
+	CreatedBy      string // NOT NULL FK → users.id — MUST be exported
 	CreatedAt      string
 	UpdatedAt      string
 }
@@ -38,9 +48,10 @@ func ExportEncryptedCredentials(ctx context.Context, db *sql.DB) ([]EncryptedCre
 		return nil, nil
 	}
 	rows, err := db.QueryContext(ctx, `
-SELECT id, workspace_id, name, type, COALESCE(status,''),
+SELECT id, workspace_id, COALESCE(crew_id,''), name, COALESCE(description,''),
+       type, COALESCE(scope,'WORKSPACE'), COALESCE(status,''),
        COALESCE(provider,''), COALESCE(security_level,0),
-       COALESCE(keeper_crew_id,''), encrypted_value,
+       COALESCE(keeper_crew_id,''), encrypted_value, created_by,
        COALESCE(created_at,''), COALESCE(updated_at,'')
 FROM credentials
 WHERE deleted_at IS NULL AND status = 'ACTIVE'
@@ -53,9 +64,10 @@ ORDER BY created_at`)
 	for rows.Next() {
 		var c EncryptedCredential
 		if err := rows.Scan(
-			&c.ID, &c.WorkspaceID, &c.Name, &c.Type, &c.Status,
+			&c.ID, &c.WorkspaceID, &c.CrewID, &c.Name, &c.Description,
+			&c.Type, &c.Scope, &c.Status,
 			&c.Provider, &c.SecurityLevel, &c.KeeperCrewID,
-			&c.EncryptedValue, &c.CreatedAt, &c.UpdatedAt,
+			&c.EncryptedValue, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("backup: scan credential: %w", err)
 		}
@@ -96,11 +108,14 @@ func ImportEncryptedCredentials(ctx context.Context, db *sql.DB, creds []Encrypt
 	// collision — which would indicate that the target instance has an
 	// unrelated credential under the same name — surfaces as an error
 	// instead of silently losing the restored row.
+	// Column list mirrors ExportEncryptedCredentials 1:1 so the
+	// exporter and importer cannot silently drift apart.
 	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO credentials
-  (id, workspace_id, name, type, status, provider, security_level,
-   keeper_crew_id, encrypted_value, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  (id, workspace_id, crew_id, name, description, type, scope, status,
+   provider, security_level, keeper_crew_id, encrypted_value,
+   created_by, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING`)
 	if err != nil {
 		return 0, fmt.Errorf("backup: prepare credential insert: %w", err)
@@ -108,10 +123,17 @@ ON CONFLICT(id) DO NOTHING`)
 	defer func() { _ = stmt.Close() }()
 	var inserted int
 	for _, c := range creds {
+		// NULL out empty crew_id since the FK is nullable; sqlite's
+		// empty-string → FK "crews.id = ''" would fail constraint.
+		var crewID any
+		if c.CrewID != "" {
+			crewID = c.CrewID
+		}
 		res, err := stmt.ExecContext(ctx,
-			c.ID, c.WorkspaceID, c.Name, c.Type, c.Status,
+			c.ID, c.WorkspaceID, crewID, c.Name, c.Description,
+			c.Type, c.Scope, c.Status,
 			c.Provider, c.SecurityLevel, c.KeeperCrewID,
-			c.EncryptedValue, c.CreatedAt, c.UpdatedAt,
+			c.EncryptedValue, c.CreatedBy, c.CreatedAt, c.UpdatedAt,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("backup: insert credential %s: %w", c.ID, err)

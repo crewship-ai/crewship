@@ -53,9 +53,11 @@ BUNDLE="$WORKDIR/bundle.tar.zst"
 CLEANUP() {
   local rc=$?
   rm -rf "$WORKDIR" || true
-  # Rehydrate the canary on the best-effort path so a crashed run does
-  # not leave the crew missing the marker file for the next invocation.
-  docker exec "$CONTAINER_NAME" sh -c 'true' >/dev/null 2>&1 || true
+  # Best-effort trap: each run writes a fresh canary at step 1, so
+  # there is nothing to rehydrate here. We intentionally do NOT restore
+  # the canary on failure — that would mask whether the restore step
+  # actually worked on the next invocation. If the trap needs to
+  # survive `set -e` aborts, wrap local docker cleanup in `|| true`.
   exit $rc
 }
 trap CLEANUP EXIT

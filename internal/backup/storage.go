@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"io"
 	"os"
 	"sync"
@@ -11,54 +12,55 @@ import (
 // changing every call-site. The production implementation is
 // LocalStorageOps, which wraps the standard os.* primitives.
 //
-// Only the operations actually used by the runner are exposed. A
-// remote backend is free to synthesise some of them (atomic rename via
-// compose-then-delete, for instance) — the interface is low-level
-// enough to survive such translation but high-level enough that
-// call-sites stay readable.
+// Every I/O method takes a context.Context so a remote backend can
+// honor cancellation and deadlines — a long S3 download must not
+// block a cancelled restore. LocalStorageOps ignores the context
+// because os.* does not accept one; the signature stays uniform so
+// swapping in a ctx-aware backend requires zero call-site churn.
+//
+// Home is the single exception: it reads an env var / getpwuid lookup
+// — no I/O, no network, nothing to cancel.
 type StorageOps interface {
-	// Home returns the calling user's home directory. Used only to
-	// derive DefaultBackupsDir; a remote backend is free to return a
-	// synthetic path its other operations understand.
+	// Home returns the calling user's home directory.
 	Home() (string, error)
 
 	// MkdirAll ensures the given directory tree exists with perm on any
 	// newly-created components.
-	MkdirAll(path string, perm os.FileMode) error
+	MkdirAll(ctx context.Context, path string, perm os.FileMode) error
 
 	// ReadDir returns the directory entries at path. Callers sort if
 	// they need a stable order.
-	ReadDir(path string) ([]os.DirEntry, error)
+	ReadDir(ctx context.Context, path string) ([]os.DirEntry, error)
 
 	// Open opens path for reading.
-	Open(path string) (io.ReadCloser, error)
+	Open(ctx context.Context, path string) (io.ReadCloser, error)
 
 	// Create opens path for writing with O_CREATE|O_WRONLY|O_TRUNC and
 	// the given permission bits. Any existing file is truncated.
-	Create(path string, perm os.FileMode) (io.WriteCloser, error)
+	Create(ctx context.Context, path string, perm os.FileMode) (io.WriteCloser, error)
 
 	// CreateTemp creates a new temporary file in dir (or the OS default
 	// when dir == "") matching pattern; returns a handle that is both
 	// readable and writable plus the path it was created at.
-	CreateTemp(dir, pattern string) (TempFile, error)
+	CreateTemp(ctx context.Context, dir, pattern string) (TempFile, error)
 
 	// MkdirTemp creates a new temporary directory in dir (or the OS
 	// default when dir == "") matching pattern and returns its path.
-	MkdirTemp(dir, pattern string) (string, error)
+	MkdirTemp(ctx context.Context, dir, pattern string) (string, error)
 
 	// Remove deletes a single file.
-	Remove(path string) error
+	Remove(ctx context.Context, path string) error
 
 	// RemoveAll removes path and any children.
-	RemoveAll(path string) error
+	RemoveAll(ctx context.Context, path string) error
 
 	// Rename renames old to new. The runner's atomic .partial → final
 	// dance relies on this being atomic on the same filesystem, which
 	// os.Rename provides on Linux/macOS.
-	Rename(oldPath, newPath string) error
+	Rename(ctx context.Context, oldPath, newPath string) error
 
 	// Stat returns os.FileInfo for path.
-	Stat(path string) (os.FileInfo, error)
+	Stat(ctx context.Context, path string) (os.FileInfo, error)
 }
 
 // TempFile is the handle type returned by CreateTemp. It is both
@@ -76,47 +78,52 @@ type LocalStorageOps struct{}
 // Home implements StorageOps.
 func (LocalStorageOps) Home() (string, error) { return os.UserHomeDir() }
 
-// MkdirAll implements StorageOps.
-func (LocalStorageOps) MkdirAll(path string, perm os.FileMode) error {
+// MkdirAll implements StorageOps. Context is accepted for interface
+// parity; os.MkdirAll does not honour cancellation.
+func (LocalStorageOps) MkdirAll(_ context.Context, path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
 }
 
 // ReadDir implements StorageOps.
-func (LocalStorageOps) ReadDir(path string) ([]os.DirEntry, error) {
+func (LocalStorageOps) ReadDir(_ context.Context, path string) ([]os.DirEntry, error) {
 	return os.ReadDir(path)
 }
 
 // Open implements StorageOps.
-func (LocalStorageOps) Open(path string) (io.ReadCloser, error) { return os.Open(path) }
+func (LocalStorageOps) Open(_ context.Context, path string) (io.ReadCloser, error) {
+	return os.Open(path)
+}
 
 // Create implements StorageOps.
-func (LocalStorageOps) Create(path string, perm os.FileMode) (io.WriteCloser, error) {
+func (LocalStorageOps) Create(_ context.Context, path string, perm os.FileMode) (io.WriteCloser, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 }
 
 // CreateTemp implements StorageOps.
-func (LocalStorageOps) CreateTemp(dir, pattern string) (TempFile, error) {
+func (LocalStorageOps) CreateTemp(_ context.Context, dir, pattern string) (TempFile, error) {
 	return os.CreateTemp(dir, pattern)
 }
 
 // MkdirTemp implements StorageOps.
-func (LocalStorageOps) MkdirTemp(dir, pattern string) (string, error) {
+func (LocalStorageOps) MkdirTemp(_ context.Context, dir, pattern string) (string, error) {
 	return os.MkdirTemp(dir, pattern)
 }
 
 // Remove implements StorageOps.
-func (LocalStorageOps) Remove(path string) error { return os.Remove(path) }
+func (LocalStorageOps) Remove(_ context.Context, path string) error { return os.Remove(path) }
 
 // RemoveAll implements StorageOps.
-func (LocalStorageOps) RemoveAll(path string) error { return os.RemoveAll(path) }
+func (LocalStorageOps) RemoveAll(_ context.Context, path string) error { return os.RemoveAll(path) }
 
 // Rename implements StorageOps.
-func (LocalStorageOps) Rename(oldPath, newPath string) error {
+func (LocalStorageOps) Rename(_ context.Context, oldPath, newPath string) error {
 	return os.Rename(oldPath, newPath)
 }
 
 // Stat implements StorageOps.
-func (LocalStorageOps) Stat(path string) (os.FileInfo, error) { return os.Stat(path) }
+func (LocalStorageOps) Stat(_ context.Context, path string) (os.FileInfo, error) {
+	return os.Stat(path)
+}
 
 // defaultStorage is used by helpers that do not accept options
 // (Inspect, Verify, ListBackups, Delete, cleanupStalePartials, the

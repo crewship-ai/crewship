@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -17,15 +18,15 @@ func TestKeyring_RoundTrip(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	k, err := DefaultKeyring()
+	k, err := DefaultKeyring(context.Background())
 	if err != nil {
 		t.Fatalf("DefaultKeyring: %v", err)
 	}
 
-	if err := k.StorePassphrase("ws-1", "hunter2"); err != nil {
+	if err := k.StorePassphrase(context.Background(), "ws-1", "hunter2"); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
-	got, err := k.GetPassphrase("ws-1")
+	got, err := k.GetPassphrase(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -34,10 +35,10 @@ func TestKeyring_RoundTrip(t *testing.T) {
 	}
 
 	// Overwrite exercises the loop-and-re-encrypt path.
-	if err := k.StorePassphrase("ws-1", "correcthorsebatterystaple"); err != nil {
+	if err := k.StorePassphrase(context.Background(), "ws-1", "correcthorsebatterystaple"); err != nil {
 		t.Fatalf("Store overwrite: %v", err)
 	}
-	got2, err := k.GetPassphrase("ws-1")
+	got2, err := k.GetPassphrase(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("Get after overwrite: %v", err)
 	}
@@ -59,11 +60,11 @@ func TestKeyring_GetMissing(t *testing.T) {
 	withTestEncryptionKey(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	k, err := DefaultKeyring()
+	k, err := DefaultKeyring(context.Background())
 	if err != nil {
 		t.Fatalf("DefaultKeyring: %v", err)
 	}
-	_, err = k.GetPassphrase("absent")
+	_, err = k.GetPassphrase(context.Background(), "absent")
 	if !errors.Is(err, ErrKeyringEntryNotFound) {
 		t.Errorf("expected ErrKeyringEntryNotFound, got %v", err)
 	}
@@ -73,17 +74,17 @@ func TestKeyring_Forget(t *testing.T) {
 	withTestEncryptionKey(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	k, err := DefaultKeyring()
+	k, err := DefaultKeyring(context.Background())
 	if err != nil {
 		t.Fatalf("DefaultKeyring: %v", err)
 	}
-	if err := k.StorePassphrase("ws-1", "secret"); err != nil {
+	if err := k.StorePassphrase(context.Background(), "ws-1", "secret"); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
-	if err := k.Forget("ws-1"); err != nil {
+	if err := k.Forget(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
-	if _, err := k.GetPassphrase("ws-1"); !errors.Is(err, ErrKeyringEntryNotFound) {
+	if _, err := k.GetPassphrase(context.Background(), "ws-1"); !errors.Is(err, ErrKeyringEntryNotFound) {
 		t.Errorf("post-Forget: expected ErrKeyringEntryNotFound, got %v", err)
 	}
 }

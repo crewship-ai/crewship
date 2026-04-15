@@ -16,7 +16,7 @@ export function BackupStatusBanner({ workspaceId }: { workspaceId: string | unde
     return null
   }
 
-  if (!data.locked) {
+  if (!data.held) {
     return (
       <div
         className={cn(
@@ -40,7 +40,9 @@ export function BackupStatusBanner({ workspaceId }: { workspaceId: string | unde
       <Lock className="h-3.5 w-3.5" />
       <span>
         Backup in progress — locked by {data.acquired_by}
-        {data.expires_at ? ` (TTL ${new Date(data.expires_at).toLocaleTimeString()})` : ""}
+        {data.expires_at
+          ? ` (expires ${new Date(data.expires_at).toLocaleTimeString()})`
+          : ""}
       </span>
     </div>
   )

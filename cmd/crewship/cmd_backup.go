@@ -89,8 +89,8 @@ var backupCreateCmd = &cobra.Command{
 			// still written with whatever passphrase the keyring held.
 			ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 			if useKeyring && passphraseFile == "" {
-				if kr, kerr := backup.DefaultKeyring(); kerr == nil {
-					if p, gerr := kr.GetPassphrase(ws); gerr == nil {
+				if kr, kerr := backup.DefaultKeyring(cmd.Context()); kerr == nil {
+					if p, gerr := kr.GetPassphrase(cmd.Context(), ws); gerr == nil {
 						passphrase = p
 					}
 				}
@@ -105,8 +105,8 @@ var backupCreateCmd = &cobra.Command{
 			// Only persist AFTER the user confirmed a fresh prompt — a
 			// passphrase we just read from the keyring needs no rewrite.
 			if useKeyring && passphraseFile == "" && ws != "" {
-				if kr, kerr := backup.DefaultKeyring(); kerr == nil {
-					_ = kr.StorePassphrase(ws, passphrase)
+				if kr, kerr := backup.DefaultKeyring(cmd.Context()); kerr == nil {
+					_ = kr.StorePassphrase(cmd.Context(), ws, passphrase)
 				}
 			}
 		}
@@ -271,8 +271,8 @@ var backupRestoreCmd = &cobra.Command{
 		var passphrase string
 		ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 		if useKeyring && passphraseFile == "" && ws != "" {
-			if kr, kerr := backup.DefaultKeyring(); kerr == nil {
-				if p, gerr := kr.GetPassphrase(ws); gerr == nil {
+			if kr, kerr := backup.DefaultKeyring(cmd.Context()); kerr == nil {
+				if p, gerr := kr.GetPassphrase(cmd.Context(), ws); gerr == nil {
 					passphrase = p
 				}
 			}

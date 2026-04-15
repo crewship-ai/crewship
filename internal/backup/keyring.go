@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,19 +49,25 @@ type Keyring struct {
 }
 
 // DefaultKeyring returns a Keyring rooted at ~/.crewship/
-// backup-keyring.enc using the package-level defaultStorage.
-func DefaultKeyring() (*Keyring, error) {
-	home, err := getDefaultStorage().Home()
+// backup-keyring.enc. The keyring ALWAYS uses LocalStorageOps,
+// independent of the package-level defaultStorage: `defaultStorage`
+// is the bundle backend (potentially swappable to S3/GCS in a future
+// release), and sending passphrase ciphertext to a remote bundle
+// store would violate the "keyring lives on the operator's host"
+// contract the CLI relies on.
+func DefaultKeyring(ctx context.Context) (*Keyring, error) {
+	st := LocalStorageOps{}
+	home, err := st.Home()
 	if err != nil {
 		return nil, fmt.Errorf("backup keyring: resolve home: %w", err)
 	}
 	dir := filepath.Join(home, ".crewship")
-	if err := getDefaultStorage().MkdirAll(dir, 0o700); err != nil {
+	if err := st.MkdirAll(ctx, dir, 0o700); err != nil {
 		return nil, fmt.Errorf("backup keyring: create dir: %w", err)
 	}
 	return &Keyring{
 		path:    filepath.Join(dir, keyringFileName),
-		storage: getDefaultStorage(),
+		storage: st,
 	}, nil
 }
 
@@ -68,13 +75,13 @@ func DefaultKeyring() (*Keyring, error) {
 // workspaceID, re-encrypting and re-writing the whole file under the
 // process lock. The file mode is forced to 0o600 on every write so a
 // mistaken `umask` cannot widen permissions after the initial create.
-func (k *Keyring) StorePassphrase(workspaceID, passphrase string) error {
+func (k *Keyring) StorePassphrase(ctx context.Context, workspaceID, passphrase string) error {
 	if workspaceID == "" {
 		return fmt.Errorf("backup keyring: workspaceID required")
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	entries, err := k.loadLocked()
+	entries, err := k.loadLocked(ctx)
 	if err != nil {
 		return err
 	}
@@ -83,15 +90,15 @@ func (k *Keyring) StorePassphrase(workspaceID, passphrase string) error {
 		return fmt.Errorf("backup keyring: encrypt: %w", err)
 	}
 	entries[workspaceID] = enc
-	return k.saveLocked(entries)
+	return k.saveLocked(ctx, entries)
 }
 
 // GetPassphrase returns the decrypted passphrase or
 // ErrKeyringEntryNotFound.
-func (k *Keyring) GetPassphrase(workspaceID string) (string, error) {
+func (k *Keyring) GetPassphrase(ctx context.Context, workspaceID string) (string, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	entries, err := k.loadLocked()
+	entries, err := k.loadLocked(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -109,23 +116,23 @@ func (k *Keyring) GetPassphrase(workspaceID string) (string, error) {
 // Forget removes a workspace's passphrase. Non-existence is not an
 // error — the caller usually does not care whether a delete was a
 // no-op.
-func (k *Keyring) Forget(workspaceID string) error {
+func (k *Keyring) Forget(ctx context.Context, workspaceID string) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	entries, err := k.loadLocked()
+	entries, err := k.loadLocked(ctx)
 	if err != nil {
 		return err
 	}
 	delete(entries, workspaceID)
-	return k.saveLocked(entries)
+	return k.saveLocked(ctx, entries)
 }
 
 // loadLocked reads the file. An absent file returns an empty map so
 // the first StorePassphrase on a fresh install succeeds. Must be
 // called with k.mu held.
-func (k *Keyring) loadLocked() (map[string]string, error) {
+func (k *Keyring) loadLocked(ctx context.Context) (map[string]string, error) {
 	out := map[string]string{}
-	r, err := k.storage.Open(k.path)
+	r, err := k.storage.Open(ctx, k.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return out, nil
@@ -148,27 +155,27 @@ func (k *Keyring) loadLocked() (map[string]string, error) {
 
 // saveLocked writes the map atomically via .partial + rename so a
 // crash between allocations does not corrupt the file.
-func (k *Keyring) saveLocked(entries map[string]string) error {
+func (k *Keyring) saveLocked(ctx context.Context, entries map[string]string) error {
 	body, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return fmt.Errorf("backup keyring: marshal: %w", err)
 	}
 	partial := k.path + ".partial"
-	w, err := k.storage.Create(partial, 0o600)
+	w, err := k.storage.Create(ctx, partial, 0o600)
 	if err != nil {
 		return fmt.Errorf("backup keyring: create partial: %w", err)
 	}
 	if _, err := w.Write(body); err != nil {
 		_ = w.Close()
-		_ = k.storage.Remove(partial)
+		_ = k.storage.Remove(ctx, partial)
 		return fmt.Errorf("backup keyring: write: %w", err)
 	}
 	if err := w.Close(); err != nil {
-		_ = k.storage.Remove(partial)
+		_ = k.storage.Remove(ctx, partial)
 		return fmt.Errorf("backup keyring: close: %w", err)
 	}
-	if err := k.storage.Rename(partial, k.path); err != nil {
-		_ = k.storage.Remove(partial)
+	if err := k.storage.Rename(ctx, partial, k.path); err != nil {
+		_ = k.storage.Remove(ctx, partial)
 		return fmt.Errorf("backup keyring: rename: %w", err)
 	}
 	return nil

@@ -45,11 +45,15 @@ type ExtractedPayload struct {
 // workspace / volume / memory sections. Safe to call multiple times.
 // Returns the first removal error encountered, if any; the rest are
 // best-effort swept.
+//
+// Uses context.Background() on purpose: the Close is called from
+// defer paths where the owning context may already have been
+// cancelled, yet we still need to remove the temp directory.
 func (p *ExtractedPayload) Close() error {
 	if p == nil || p.tempDir == "" {
 		return nil
 	}
-	err := getDefaultStorage().RemoveAll(p.tempDir)
+	err := getDefaultStorage().RemoveAll(context.Background(), p.tempDir)
 	p.tempDir = ""
 	p.workspacePathBySlug = nil
 	p.volumePathsBySlug = nil
@@ -67,12 +71,12 @@ func (p *ExtractedPayload) HasWorkspace(slug string) bool {
 // OpenWorkspace returns a reader for the workspace bind-mount tar of
 // the given crew slug. Caller closes. Returns (nil, false, nil) when
 // the bundle has no such section.
-func (p *ExtractedPayload) OpenWorkspace(slug string) (io.ReadCloser, bool, error) {
+func (p *ExtractedPayload) OpenWorkspace(ctx context.Context, slug string) (io.ReadCloser, bool, error) {
 	path, ok := p.workspacePathBySlug[slug]
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := getDefaultStorage().Open(path)
+	f, err := getDefaultStorage().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open workspace section %s: %w", slug, err)
 	}
@@ -81,7 +85,7 @@ func (p *ExtractedPayload) OpenWorkspace(slug string) (io.ReadCloser, bool, erro
 
 // OpenVolume returns a reader for one of a crew's named-volume tars.
 // vol is "home" or "tools" per the collector's layout.
-func (p *ExtractedPayload) OpenVolume(slug, vol string) (io.ReadCloser, bool, error) {
+func (p *ExtractedPayload) OpenVolume(ctx context.Context, slug, vol string) (io.ReadCloser, bool, error) {
 	bySlug, ok := p.volumePathsBySlug[slug]
 	if !ok {
 		return nil, false, nil
@@ -90,7 +94,7 @@ func (p *ExtractedPayload) OpenVolume(slug, vol string) (io.ReadCloser, bool, er
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := getDefaultStorage().Open(path)
+	f, err := getDefaultStorage().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open volume section %s/%s: %w", slug, vol, err)
 	}
@@ -99,12 +103,12 @@ func (p *ExtractedPayload) OpenVolume(slug, vol string) (io.ReadCloser, bool, er
 
 // OpenMemory returns a reader for the /output (.memory/) tar of the
 // given crew slug.
-func (p *ExtractedPayload) OpenMemory(slug string) (io.ReadCloser, bool, error) {
+func (p *ExtractedPayload) OpenMemory(ctx context.Context, slug string) (io.ReadCloser, bool, error) {
 	path, ok := p.memoryPathBySlug[slug]
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := getDefaultStorage().Open(path)
+	f, err := getDefaultStorage().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open memory section %s: %w", slug, err)
 	}
@@ -119,8 +123,8 @@ func (p *ExtractedPayload) OpenMemory(slug string) (io.ReadCloser, bool, error) 
 // The returned ExtractedPayload owns its temp directory; the caller
 // MUST call Close() once finished with all sections (typically via
 // defer in RestoreBackup).
-func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
-	tempDir, err := getDefaultStorage().MkdirTemp("", "crewship-restore-*")
+func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, error) {
+	tempDir, err := getDefaultStorage().MkdirTemp(ctx, "", "crewship-restore-*")
 	if err != nil {
 		return nil, fmt.Errorf("backup: temp dir: %w", err)
 	}
@@ -158,7 +162,7 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 			return s, nil
 		}
 		safe := strings.ReplaceAll(key, "/", "_")
-		f, err := getDefaultStorage().CreateTemp(tempDir, safe+"-*.tar")
+		f, err := getDefaultStorage().CreateTemp(ctx, tempDir, safe+"-*.tar")
 		if err != nil {
 			return nil, fmt.Errorf("backup: create section temp %s: %w", key, err)
 		}
@@ -376,7 +380,7 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 		return fmt.Errorf("backup: RestoreCrew: nil payload")
 	}
 	// Workspace bind.
-	if r, ok, err := payload.OpenWorkspace(crewSlug); err != nil {
+	if r, ok, err := payload.OpenWorkspace(ctx, crewSlug); err != nil {
 		return err
 	} else if ok {
 		err := ops.CopyTo(ctx, containerID, ContainerWorkspacePath, r)
@@ -390,7 +394,7 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 		{"home", ContainerHomePath},
 		{"tools", ContainerToolsPath},
 	} {
-		r, ok, err := payload.OpenVolume(crewSlug, pair.vol)
+		r, ok, err := payload.OpenVolume(ctx, crewSlug, pair.vol)
 		if err != nil {
 			return err
 		}
@@ -404,7 +408,7 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 		}
 	}
 	// Memory / output.
-	if r, ok, err := payload.OpenMemory(crewSlug); err != nil {
+	if r, ok, err := payload.OpenMemory(ctx, crewSlug); err != nil {
 		return err
 	} else if ok {
 		err := ops.CopyTo(ctx, containerID, ContainerMemoryPath, r)

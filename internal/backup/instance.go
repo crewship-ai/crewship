@@ -43,7 +43,13 @@ func EnsureInstanceHostname(ctx context.Context, db *sql.DB) error {
 	if cur != "" {
 		return nil
 	}
-	host, _ := os.Hostname()
+	host, err := os.Hostname()
+	if err != nil {
+		return fmt.Errorf("backup: resolve hostname: %w", err)
+	}
+	if host == "" {
+		return fmt.Errorf("backup: hostname is empty; refusing to persist blank instance identity")
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE instance_config SET hostname = ? WHERE id = 1`, host); err != nil {
 		return fmt.Errorf("backup: set instance hostname: %w", err)
 	}

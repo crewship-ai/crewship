@@ -41,7 +41,11 @@ func UpsertCatalogEntry(ctx context.Context, db *sql.DB, e CatalogEntry) error {
 		return nil
 	}
 	if e.ID == "" {
-		e.ID = newCatalogID()
+		id, err := newCatalogID()
+		if err != nil {
+			return err
+		}
+		e.ID = id
 	}
 	_, err := db.ExecContext(ctx, `
 INSERT INTO backup_catalog
@@ -119,7 +123,11 @@ FROM backup_catalog`
 			&createdAt, &e.CreatedBy, &e.Size, &e.SHA256, &enc, &e.FormatVersion); err != nil {
 			return nil, fmt.Errorf("backup: scan catalog row: %w", err)
 		}
-		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		parsed, err := time.Parse(time.RFC3339, createdAt)
+		if err != nil {
+			return nil, fmt.Errorf("backup: parse created_at %q for %s: %w", createdAt, e.ID, err)
+		}
+		e.CreatedAt = parsed
 		e.Encrypted = enc == 1
 		out = append(out, e)
 	}
@@ -140,7 +148,7 @@ func BackfillCatalogFromDir(ctx context.Context, db *sql.DB, dir string, logger 
 	if db == nil || dir == "" {
 		return nil
 	}
-	entries, err := ListBackups(dir)
+	entries, err := ListBackups(ctx, dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -148,7 +156,7 @@ func BackfillCatalogFromDir(ctx context.Context, db *sql.DB, dir string, logger 
 		return err
 	}
 	for _, le := range entries {
-		manifest, err := Inspect(le.Path)
+		manifest, err := Inspect(ctx, le.Path)
 		if err != nil {
 			if logger != nil {
 				logger(fmt.Sprintf("backup catalog backfill: skip %s: %v", le.Path, err))
@@ -182,10 +190,17 @@ func BackfillCatalogFromDir(ctx context.Context, db *sql.DB, dir string, logger 
 // newCatalogID returns a random 128-bit hex string. We intentionally
 // do not reuse the CUID generator from internal/api — it lives behind
 // a dependency boundary we are not willing to invert.
-func newCatalogID() string {
+//
+// Propagates rand.Read errors rather than swallowing them: if the OS
+// entropy source is unavailable we MUST abort the catalogue write —
+// continuing with a fixed/empty ID risks duplicate rows and later
+// constraint failures on backup_catalog.id PRIMARY KEY.
+func newCatalogID() (string, error) {
 	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return "bk_" + strings.TrimSpace(hex.EncodeToString(b[:]))
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("backup: generate catalog id: %w", err)
+	}
+	return "bk_" + hex.EncodeToString(b[:]), nil
 }
 
 func boolToInt(b bool) int {

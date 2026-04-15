@@ -59,7 +59,9 @@ func TestEnsureInstanceHostname_Idempotent(t *testing.T) {
 func TestIsCrossInstanceRestore_SameHost(t *testing.T) {
 	db := newInstanceConfigDB(t)
 	ctx := context.Background()
-	_ = EnsureInstanceHostname(ctx, db)
+	if err := EnsureInstanceHostname(ctx, db); err != nil {
+		t.Fatalf("EnsureInstanceHostname: %v", err)
+	}
 
 	host, _ := os.Hostname()
 	m := &Manifest{SourceInstance: Instance{Hostname: host}}
@@ -71,7 +73,9 @@ func TestIsCrossInstanceRestore_SameHost(t *testing.T) {
 func TestIsCrossInstanceRestore_DifferentHost(t *testing.T) {
 	db := newInstanceConfigDB(t)
 	ctx := context.Background()
-	_ = EnsureInstanceHostname(ctx, db)
+	if err := EnsureInstanceHostname(ctx, db); err != nil {
+		t.Fatalf("EnsureInstanceHostname: %v", err)
+	}
 
 	m := &Manifest{SourceInstance: Instance{Hostname: "somewhere-else"}}
 	if !IsCrossInstanceRestore(ctx, db, m) {
@@ -82,7 +86,9 @@ func TestIsCrossInstanceRestore_DifferentHost(t *testing.T) {
 func TestIsCrossInstanceRestore_EmptySourceErrorsOnSide(t *testing.T) {
 	db := newInstanceConfigDB(t)
 	ctx := context.Background()
-	_ = EnsureInstanceHostname(ctx, db)
+	if err := EnsureInstanceHostname(ctx, db); err != nil {
+		t.Fatalf("EnsureInstanceHostname: %v", err)
+	}
 
 	m := &Manifest{SourceInstance: Instance{Hostname: ""}}
 	if !IsCrossInstanceRestore(ctx, db, m) {
@@ -138,7 +144,9 @@ func TestAllowInstanceBackup_EnforcesWindow(t *testing.T) {
 func TestShouldRotateAuthKeysOnRestore(t *testing.T) {
 	db := newInstanceConfigDB(t)
 	ctx := context.Background()
-	_ = EnsureInstanceHostname(ctx, db)
+	if err := EnsureInstanceHostname(ctx, db); err != nil {
+		t.Fatalf("EnsureInstanceHostname: %v", err)
+	}
 	host, _ := os.Hostname()
 
 	cases := []struct {

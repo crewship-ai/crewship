@@ -16,13 +16,16 @@ func TestExportAndImportEncryptedCredentials(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed: one ACTIVE + one DELETED + one REVOKED. Only ACTIVE must
-	// survive the round-trip.
+	// survive the round-trip. created_by is populated because the
+	// production column is NOT NULL — exporting a row without it would
+	// fail the restore INSERT.
 	if _, err := db.ExecContext(ctx, `
-INSERT INTO credentials (id, workspace_id, name, type, status, encrypted_value, created_at)
-VALUES ('c1','ws1','k1','SECRET','ACTIVE','v1:ct1','2026-01-01'),
-       ('c2','ws1','k2','SECRET','ACTIVE','v1:ct2','2026-01-02'),
-       ('c3','ws1','k3','SECRET','REVOKED','v1:ct3','2026-01-03'),
-       ('c4','ws1','k4','SECRET','ACTIVE','v1:ct4','2026-01-04')`); err != nil {
+INSERT INTO credentials
+  (id, workspace_id, name, type, status, encrypted_value, created_by, created_at)
+VALUES ('c1','ws1','k1','SECRET','ACTIVE','v1:ct1','u1','2026-01-01'),
+       ('c2','ws1','k2','SECRET','ACTIVE','v1:ct2','u1','2026-01-02'),
+       ('c3','ws1','k3','SECRET','REVOKED','v1:ct3','u1','2026-01-03'),
+       ('c4','ws1','k4','SECRET','ACTIVE','v1:ct4','u1','2026-01-04')`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	// Soft-delete c4 — must also be excluded.
@@ -87,13 +90,17 @@ func newCredentialsDB(t *testing.T) *sql.DB {
 CREATE TABLE credentials (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
+  crew_id TEXT,
   name TEXT NOT NULL,
+  description TEXT,
   type TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'WORKSPACE',
   status TEXT,
   provider TEXT,
   security_level INTEGER DEFAULT 0,
   keeper_crew_id TEXT,
   encrypted_value TEXT NOT NULL,
+  created_by TEXT NOT NULL,
   created_at TEXT,
   updated_at TEXT,
   deleted_at TEXT,
