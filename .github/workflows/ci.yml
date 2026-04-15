@@ -183,6 +183,10 @@ jobs:
           # still responds (base mux) but the bootstrap step 404s. Test-only
           # value; no production secret material.
           NEXTAUTH_SECRET: ci-e2e-test-secret-not-for-production
+          # Required for credential seeding — encryption.go panics with
+          # "Failed to encrypt credential" if unset. Must be 64 hex chars
+          # (32 raw bytes). Test-only value; no production key material.
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
         run: |
           mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
           ./crewship start >/tmp/crewship.log 2>&1 &
