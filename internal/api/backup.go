@@ -45,10 +45,15 @@ func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerOps backup.DockerOp
 }
 
 // createRequest is the JSON body of POST /api/v1/admin/backups.
+//
+// Exactly one of Passphrase, Recipient or NoEncrypt must be set (the
+// CLI enforces this before calling). Recipient is an `age1…` X25519
+// public key; Passphrase is a user-supplied secret run through scrypt.
 type createRequest struct {
 	Scope      string `json:"scope"` // "crew" or "workspace"
 	CrewID     string `json:"crew_id,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
+	Recipient  string `json:"recipient,omitempty"`
 	NoEncrypt  bool   `json:"no_encrypt,omitempty"`
 	OutputDir  string `json:"output_dir,omitempty"`
 }
@@ -93,27 +98,58 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required for crew scope"})
 		return
 	}
-	if req.Passphrase == "" && !req.NoEncrypt {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "passphrase required unless no_encrypt=true"})
+	// Trim ONLY for the "is this a real selector or whitespace
+	// padding?" gate. The actual encryption secret stays as the user
+	// supplied it — Restore reads req.Passphrase verbatim, so any
+	// silent rewrite here would create a bundle the same admin
+	// could not decrypt afterwards. A "   "-only passphrase still
+	// gets blocked because trimmedPassphrase is empty for selector
+	// counting purposes.
+	trimmedPassphrase := strings.TrimSpace(req.Passphrase)
+	trimmedRecipient := strings.TrimSpace(req.Recipient)
+
+	// Exactly-one encryption selector. Passphrase, Recipient, or
+	// NoEncrypt — never multiple.
+	encryptionSelectors := 0
+	if trimmedPassphrase != "" {
+		encryptionSelectors++
+	}
+	if trimmedRecipient != "" {
+		encryptionSelectors++
+	}
+	if req.NoEncrypt {
+		encryptionSelectors++
+	}
+	if encryptionSelectors == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "passphrase, recipient, or no_encrypt=true required"})
+		return
+	}
+	if encryptionSelectors > 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "exactly one of passphrase / recipient / no_encrypt may be supplied"})
 		return
 	}
 
 	ops := h.dockerOps
 
-	// Passphrase vs recipient: the CLI packs an `age1…` public key into
-	// the Passphrase field when the admin uses asymmetric mode. We
-	// detect the prefix here and parse it as an X25519 recipient so
-	// the wire format stays backwards-compatible with MVP clients.
+	// Explicit passphrase vs recipient wire — no prefix sniffing. CLI
+	// and UI send the mode they picked, server parses the matching
+	// field. An accidental age1-shaped passphrase no longer gets
+	// silently reinterpreted as an X25519 recipient.
 	var passphrase string
 	var recipients []age.Recipient
-	if strings.HasPrefix(req.Passphrase, "age1") {
-		rec, err := age.ParseX25519Recipient(req.Passphrase)
+	if trimmedRecipient != "" {
+		// age public keys are bech32, so trimming-then-parsing is
+		// safe and saves a "spurious whitespace" failure mode.
+		rec, err := age.ParseX25519Recipient(trimmedRecipient)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid age1 recipient: " + err.Error()})
 			return
 		}
 		recipients = []age.Recipient{rec}
 	} else {
+		// Use the user-supplied passphrase verbatim so Restore (which
+		// reads req.Passphrase unchanged) can decrypt with the exact
+		// same characters the admin typed.
 		passphrase = req.Passphrase
 	}
 
@@ -260,6 +296,7 @@ type restoreRequest struct {
 	Passphrase  string `json:"passphrase,omitempty"`
 	AsWorkspace string `json:"as_workspace,omitempty"`
 	AsCrew      string `json:"as_crew,omitempty"`
+	DryRun      bool   `json:"dry_run,omitempty"`
 }
 
 // Restore handles POST /api/v1/admin/backups/restore.
@@ -302,6 +339,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		Passphrase:   req.Passphrase,
 		AsWorkspace:  req.AsWorkspace,
 		AsCrew:       req.AsCrew,
+		DryRun:       req.DryRun,
 		Actor:        backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		DockerOps:    ops,
 		ContainerFor: crewContainerNameFunc(),
@@ -312,10 +350,21 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteAuditLog(ctx, h.db, "backup.restore", "backup", req.Path, user.ID, workspaceID, map[string]interface{}{
+	// Distinct audit action for dry-runs so an admin reading the
+	// audit log can tell the difference between "verified that this
+	// bundle would restore" and "actually restored data". Both are
+	// worth recording for compliance, but they are NOT the same
+	// event — the dry-run mutated nothing in workspaces / crews /
+	// agents, only this audit row itself.
+	auditAction := "backup.restore"
+	if req.DryRun {
+		auditAction = "backup.restore.dry_run"
+	}
+	WriteAuditLog(ctx, h.db, auditAction, "backup", req.Path, user.ID, workspaceID, map[string]interface{}{
 		"scope":         string(result.Manifest.Scope),
 		"crews_count":   result.CrewsCount,
 		"rows_inserted": result.RowsInserted,
+		"dry_run":       req.DryRun,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -371,6 +420,138 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		).Scan(&out.AcquiredBy, &out.AcquiredAt, &out.ExpiresAt)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// Verify handles GET /api/v1/admin/backups/verify?path=…. Opens the
+// bundle, verifies the sealed payload SHA-256 against the manifest,
+// and returns a VerifyResult JSON. Does NOT decrypt — checksum
+// covers sealed bytes so no key is needed. Handy for periodic
+// bundle-rot checks ("is my 3-month-old backup still restorable?").
+func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
+		return
+	}
+	if err := validateBackupPath(path); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !bundleBelongsToWorkspace(path, workspaceID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		return
+	}
+	res, err := backup.Verify(path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	errStr := ""
+	if res.Err != nil {
+		errStr = res.Err.Error()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"valid":      res.Valid,
+		"size_bytes": res.Size,
+		"manifest":   res.Manifest,
+		"error":      errStr,
+	})
+}
+
+// Unlock handles DELETE /api/v1/admin/backups/status. Force-releases
+// the advisory lock for the caller's workspace regardless of owner.
+// Emergency escape hatch when a crashed backup left a stale lock
+// behind and the 1 h TTL has not yet fired.
+func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := UserFromContext(ctx)
+	role := RoleFromContext(ctx)
+	workspaceID := WorkspaceIDFromContext(ctx)
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	if user == nil || workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if err := backup.ForceReleaseLock(ctx, h.db, workspaceID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	WriteAuditLog(ctx, h.db, "backup.unlock", "backup", workspaceID, user.ID, workspaceID, nil)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// rotateRequest is the body of POST /api/v1/admin/backups/rotate.
+type rotateRequest struct {
+	KeepLast int  `json:"keep_last,omitempty"`
+	KeepDays int  `json:"keep_days,omitempty"`
+	DryRun   bool `json:"dry_run,omitempty"`
+}
+
+// Rotate handles POST /api/v1/admin/backups/rotate. Applies retention
+// policy (by count and/or age) to the caller's workspace bundles.
+// DryRun returns the list of paths that WOULD be deleted without
+// touching disk.
+func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	user := UserFromContext(ctx)
+	role := RoleFromContext(ctx)
+	workspaceID := WorkspaceIDFromContext(ctx)
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	if user == nil || workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	var req rotateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	// Reject negatives explicitly. 0 disables a rule (documented);
+	// a caller passing -1 otherwise slipped past the "at least one
+	// positive" gate with a positive counterpart and then fed the
+	// negative into Rotate, producing undefined behaviour.
+	if req.KeepLast < 0 || req.KeepDays < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "keep_last and keep_days must be >= 0 (0 disables the rule)"})
+		return
+	}
+	if req.KeepLast == 0 && req.KeepDays == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one of keep_last or keep_days must be positive"})
+		return
+	}
+	dir, err := backup.DefaultBackupsDir()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	deleted, err := backup.Rotate(dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !req.DryRun {
+		for _, p := range deleted {
+			WriteAuditLog(ctx, h.db, "backup.rotate", "backup", p, user.ID, workspaceID, map[string]interface{}{
+				"keep_last": req.KeepLast,
+				"keep_days": req.KeepDays,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted": deleted,
+		"dry_run": req.DryRun,
+	})
 }
 
 // Delete handles DELETE /api/v1/admin/backups?path=…

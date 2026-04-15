@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -76,10 +77,8 @@ var backupCreateCmd = &cobra.Command{
 			if !strings.HasPrefix(recipient, "age1") {
 				return fmt.Errorf("--recipient must be an age1… public key")
 			}
-			// Server-side handler accepts a single recipient string; we
-			// ship it as "passphrase" to keep the wire shape stable
-			// across MVP, tagged by the age1 prefix the server detects.
-			passphrase = recipient
+			// Recipient is packed into the request body below as its
+			// own JSON field; leave passphrase empty.
 		default:
 			p, err := readPassphrase(passphraseFile, true /*confirm*/)
 			if err != nil {
@@ -104,6 +103,7 @@ var backupCreateCmd = &cobra.Command{
 			"scope":      scope,
 			"crew_id":    crewID,
 			"passphrase": passphrase,
+			"recipient":  recipient,
 			"no_encrypt": noEncrypt,
 			"output_dir": outputDir,
 		}
@@ -254,11 +254,13 @@ var backupRestoreCmd = &cobra.Command{
 			passphrase = p
 		}
 
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		body := map[string]any{
 			"path":         args[0],
 			"passphrase":   passphrase,
 			"as_workspace": asWorkspace,
 			"as_crew":      asCrew,
+			"dry_run":      dryRun,
 		}
 		client := newAPIClient()
 		resp, err := client.Post("/api/v1/admin/backups/restore", body)
@@ -278,16 +280,159 @@ var backupRestoreCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
+		prefix := "Restore complete"
+		if dryRun {
+			// The admin asked for a verify-only run. No workspace /
+			// crew / agent rows changed and the docker phase was
+			// skipped; the only side effect is one
+			// backup.restore.dry_run row in the audit log so an
+			// auditor can see who tested what.
+			prefix = "Restore validation complete (dry-run; no workspace/crew data changes applied)"
+		}
 		msg := fmt.Sprintf(
-			"Restore complete — workspace=%s crews=%d rows=%d",
-			out.RestoredWs, out.CrewsCount, out.RowsInserted,
+			"%s — workspace=%s crews=%d rows=%d",
+			prefix, out.RestoredWs, out.CrewsCount, out.RowsInserted,
 		)
 		if out.RestoredWorkspaceID != "" {
 			msg += " id=" + out.RestoredWorkspaceID
 		}
 		cli.PrintSuccess(msg)
-		if out.DockerPhaseSkipped {
+		// The docker-phase warning only matters on a real restore —
+		// dry-run never touches docker, so surfacing "you still need
+		// to provision crews" would mislead the admin into thinking
+		// the DB mutated when it did not.
+		if !dryRun && out.DockerPhaseSkipped {
 			cli.PrintWarning("Docker phase skipped (--as-workspace/--as-crew supplied). Provision the new crews with `crewship crew provision` and re-run restore without the rewrite flag to land container state.")
+		}
+		return nil
+	},
+}
+
+var backupVerifyCmd = &cobra.Command{
+	Use:   "verify <file>",
+	Short: "Verify a bundle's SHA-256 checksum without restoring",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/admin/backups/verify?path=" + encodeQuery(args[0]))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Valid     bool   `json:"valid"`
+			SizeBytes int64  `json:"size_bytes"`
+			Error     string `json:"error"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		if out.Valid {
+			cli.PrintSuccess(fmt.Sprintf("VALID — %s (%s)", args[0], formatBytes(out.SizeBytes)))
+			return nil
+		}
+		cli.PrintError(fmt.Sprintf("INVALID — %s: %s", args[0], out.Error))
+		return fmt.Errorf("bundle verification failed")
+	},
+}
+
+var backupUnlockCmd = &cobra.Command{
+	Use:   "unlock",
+	Short: "Force-release the advisory backup lock for this workspace",
+	Long: `Release a stuck backup lock. Used when a previous backup
+crashed or was killed mid-run and its defer-release did not fire.
+Without --force this is interactive (stdin y/N prompt); in a
+non-interactive session --force is mandatory.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		force, _ := cmd.Flags().GetBool("force")
+		if !force {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("refusing to unlock without --force in a non-interactive session")
+			}
+			fmt.Fprint(os.Stderr, "Force-release the backup lock for this workspace? [y/N] ")
+			reader := bufio.NewReader(os.Stdin)
+			line, _ := reader.ReadString('\n')
+			line = strings.TrimSpace(strings.ToLower(line))
+			if line != "y" && line != "yes" {
+				fmt.Fprintln(os.Stderr, "Aborted.")
+				return nil
+			}
+		}
+		client := newAPIClient()
+		resp, err := client.Delete("/api/v1/admin/backups/status")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+		cli.PrintSuccess("Backup lock released.")
+		return nil
+	},
+}
+
+var backupRotateCmd = &cobra.Command{
+	Use:   "rotate",
+	Short: "Apply retention policy — drop bundles over --keep-last or older than --keep-days",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		keepLast, _ := cmd.Flags().GetInt("keep-last")
+		keepDays, _ := cmd.Flags().GetInt("keep-days")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		if keepLast <= 0 && keepDays <= 0 {
+			return fmt.Errorf("at least one of --keep-last or --keep-days must be positive")
+		}
+		body := map[string]any{
+			"keep_last": keepLast,
+			"keep_days": keepDays,
+			"dry_run":   dryRun,
+		}
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/admin/backups/rotate", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Deleted []string `json:"deleted"`
+			DryRun  bool     `json:"dry_run"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		verb := "Deleted"
+		if out.DryRun {
+			verb = "Would delete"
+		}
+		if len(out.Deleted) == 0 {
+			fmt.Fprintln(os.Stderr, "No bundles matched the retention policy.")
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "%s %d bundle(s):\n", verb, len(out.Deleted))
+		for _, p := range out.Deleted {
+			fmt.Fprintln(os.Stderr, "  "+p)
 		}
 		return nil
 	},
@@ -393,6 +538,13 @@ func init() {
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
 	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
+	backupRestoreCmd.Flags().Bool("dry-run", false, "Verify compat, checksum and decryption without applying workspace/crew writes or docker changes (an audit row is still recorded)")
+
+	backupRotateCmd.Flags().Int("keep-last", 0, "Keep only the N newest bundles (0 disables)")
+	backupRotateCmd.Flags().Int("keep-days", 0, "Drop bundles older than N days (0 disables)")
+	backupRotateCmd.Flags().Bool("dry-run", false, "List bundles that WOULD be deleted without touching disk")
+
+	backupUnlockCmd.Flags().Bool("force", false, "Skip interactive confirmation (required in non-interactive sessions)")
 
 	backupDeleteCmd.Flags().Bool("force", false, "Delete without interactive confirmation (required in non-interactive sessions)")
 
@@ -402,6 +554,9 @@ func init() {
 	backupCmd.AddCommand(backupRestoreCmd)
 	backupCmd.AddCommand(backupDeleteCmd)
 	backupCmd.AddCommand(backupStatusCmd)
+	backupCmd.AddCommand(backupVerifyCmd)
+	backupCmd.AddCommand(backupUnlockCmd)
+	backupCmd.AddCommand(backupRotateCmd)
 }
 
 // readPassphrase reads a passphrase from the given file, or prompts the
@@ -484,26 +639,11 @@ func truncateLong(s string, max int) string {
 	return s[:max] + "…"
 }
 
-// encodeQuery is a minimal URL query escape for path values passed via
-// the ?path= query string. We avoid net/url just to keep the file's
-// import list short.
+// encodeQuery delegates to net/url.QueryEscape. The previous hand-
+// rolled escaper missed % and = — a bundle path containing either
+// would have produced a malformed ?path= value. QueryEscape handles
+// every reserved character the same way application/x-www-form-
+// urlencoded expects.
 func encodeQuery(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == ' ':
-			b.WriteString("%20")
-		case r == '&':
-			b.WriteString("%26")
-		case r == '#':
-			b.WriteString("%23")
-		case r == '?':
-			b.WriteString("%3F")
-		case r == '+':
-			b.WriteString("%2B")
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return url.QueryEscape(s)
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 // WebhookHandler receives incoming webhook events and triggers agent runs.
 type WebhookHandler struct {
+	db        *sql.DB
 	handler   *webhook.Handler
 	logger    *slog.Logger
 	resolver  chatbridge.ChatResolver
@@ -28,6 +30,7 @@ type WebhookHandler struct {
 
 // NewWebhookHandler creates a WebhookHandler with the given dependencies for webhook verification and dispatch.
 func NewWebhookHandler(
+	db *sql.DB,
 	logger *slog.Logger,
 	resolver chatbridge.ChatResolver,
 	orch *orchestrator.Orchestrator,
@@ -36,6 +39,7 @@ func NewWebhookHandler(
 	logWriter *logcollector.Writer,
 ) *WebhookHandler {
 	wh := &WebhookHandler{
+		db:        db,
 		logger:    logger,
 		resolver:  resolver,
 		orch:      orch,
@@ -163,7 +167,16 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		}
 
 		startedAt := time.Now()
-		err := h.orch.RunAgent(runCtx, req, handler)
+		// Guard against running while a backup holds the workspace
+		// lock — otherwise this run's state would be written behind
+		// the in-flight dump and miss from the bundle.
+		var err error
+		if guardErr := refuseIfBackupInProgress(runCtx, h.db, req.WorkspaceID); guardErr != nil {
+			h.logger.Warn("webhook run refused — backup in progress", "workspace_id", req.WorkspaceID)
+			err = guardErr
+		} else {
+			err = h.orch.RunAgent(runCtx, req, handler)
+		}
 
 		exitCode := 0
 		status := "COMPLETED"

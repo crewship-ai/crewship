@@ -214,6 +214,14 @@ Question: %s`, body.FromSlug, body.Question)
 		SkipConvHistory: true, // Fresh context for peer queries
 	}
 
+	// Guard against running while a backup holds the workspace lock.
+	if err := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID); err != nil {
+		h.logger.Warn("peer query refused — backup in progress", "query_id", convID, "workspace_id", body.WorkspaceID)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", err.Error(), startTime)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error(), "query_id": convID})
+		return
+	}
+
 	if err := h.orch.RunAgentForAssignment(r.Context(), req, handler); err != nil {
 		h.logger.Error("peer query execution failed", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",
