@@ -157,6 +157,28 @@ Enforced in `internal/api/crews.go` write paths and `devcontainer.Config.Validat
 - Total `devcontainer_config` blob ≤ 100 KB.
 - Total `mise_config` blob ≤ 10 KB.
 
+## Background GC
+
+`ProvisioningHandler` runs a sweeper every 30 minutes (and once at startup)
+to remove crash leaks:
+
+- **Temp containers** labelled `crewship.temp=provision` and older than 1 hour
+  are force-removed. Filter is label-scoped, so unrelated containers are
+  never touched.
+- **Cache images** (`crewship-cache:*`) with no referencing crew row across
+  any workspace are flagged. A 5-minute age floor protects images that
+  Provision() has just committed but not yet linked to a crew, eliminating
+  the obvious race window.
+
+Cache-image deletion is opt-in via [`CREWSHIP_CACHE_GC_AUTODELETE`](/configuration/environment#devcontainer-cache-gc).
+Default is log-only — operators see the orphan list and can decide. The
+sweeper logs a single line per pass with `removed`, `total_orphans`, and
+`skipped_too_young` so dashboards can alert on growth.
+
+The sweeper shares a 10-second image-list cache with `GET /api/v1/admin/cache`,
+so admin UI polling does not pay the O(n) Docker `ImageList` cost on every
+request.
+
 ## Code of record
 
 | Concern | File |
@@ -165,7 +187,8 @@ Enforced in `internal/api/crews.go` write paths and `devcontainer.Config.Validat
 | Feature downloader (OCI) | `internal/devcontainer/features.go` |
 | Feature installer (exec) | `internal/devcontainer/installer.go` |
 | Provisioner + caching | `internal/devcontainer/provisioner.go` |
-| REST handlers | `internal/api/crew_provisioning.go` |
+| REST handlers + GC sweepers | `internal/api/crew_provisioning.go` |
+| Shared HEAD-digest cache | `internal/dockerutil/imagedigest.go` |
 | CLI `crew config` | `cmd/crewship/cmd_crew_config.go` |
 | CLI `crew provision` | `cmd/crewship/cmd_crew_provision.go` |
 | Seed demo data | `cmd/crewship/seeddata/crews.go` |

@@ -143,78 +143,9 @@ jobs:
       - name: Verify binary runs
         run: ./crewship version
 
-  # ── E2E: devcontainer provisioning smoke test ──
-  #
-  # Builds the CLI + sidecar, boots the server, and exercises the full
-  # provisioning path end-to-end against a live Docker daemon. Gated to PR +
-  # push to main because it pulls real base images and feature artifacts from
-  # ghcr.io (slow, and rate-limited on anonymous requests).
-  e2e-devcontainer:
-    name: E2E Devcontainer Provisioning
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: [go]
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-
-      - uses: ./.github/actions/setup-go-embed
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Build sidecar + CLI
-        run: |
-          make build:sidecar
-          go build -o crewship ./cmd/crewship
-
-      - name: Start dev server in background
-        env:
-          # CI runner can't write to /var/lib/crewship (default); redirect
-          # state + storage + logs into the workspace.
-          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
-          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
-          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
-          # SQLite DB — also redirected, and exported so the e2e script can
-          # read the same file the server is writing to.
-          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
-          CREWSHIP_NEXTJS_URL: http://localhost:8080
-          CREWSHIP_SKIP_SIDECAR: "1"
-        run: |
-          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
-          ./crewship start >/tmp/crewship.log 2>&1 &
-          echo $! > /tmp/crewship.pid
-          # Wait for readiness (up to 60s) — use /healthz (no auth required).
-          for i in $(seq 1 60); do
-            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
-              echo "server up after ${i}s"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "server failed to start" >&2
-          cat /tmp/crewship.log >&2
-          exit 1
-
-      - name: Bootstrap admin + CLI token
-        env:
-          CREWSHIP_SERVER: http://localhost:8080
-        run: |
-          # `crewship seed` bootstraps admin@crewship.ai and writes the CLI
-          # auth token to the config file that subsequent `crewship crew ...`
-          # commands require. --skip-issues cuts the Linear-style issue seed.
-          ./crewship seed --skip-issues --server "$CREWSHIP_SERVER"
-
-      - name: Run E2E devcontainer test
-        run: bash scripts/e2e-devcontainer-test.sh
-        env:
-          CREWSHIP_SERVER: http://localhost:8080
-          CREWSHIP: ./crewship
-          CREWSHIP_DB: ${{ github.workspace }}/.crewship-data/crewship.db
-
-      - name: Dump server log on failure
-        if: failure()
-        run: cat /tmp/crewship.log || true
-
-      - name: Stop server
-        if: always()
-        run: |
-          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
+  # NOTE: E2E Devcontainer Provisioning was moved out of the per-PR gate.
+  # It pulls real base images + features from ghcr.io (slow, rate-limited)
+  # and exercises the full seed+provision path — that's ~8-15 min of CI time
+  # per push that, in practice, mostly catches infra flakes. It now lives in
+  # `.github/workflows/e2e-devcontainer.yml`, triggered nightly + on demand
+  # via `gh workflow run e2e-devcontainer.yml`.

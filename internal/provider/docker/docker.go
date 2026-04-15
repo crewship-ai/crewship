@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -62,6 +63,12 @@ type Provider struct {
 	cfg      Config
 	logger   *slog.Logger
 	detected DetectResult
+
+	// digestResolver short-circuits repeated HEAD requests to the registry
+	// for the runtime image. Shared helper (see internal/dockerutil) so the
+	// provisioner uses identical semantics — one source of truth for
+	// "is my local copy stale?".
+	digestResolver *dockerutil.DigestResolver
 }
 
 // socketCandidate is a socket path + label for auto-detection.
@@ -209,7 +216,13 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
 
-	p := &Provider{client: cli, cfg: cfg, logger: logger, detected: *detected}
+	p := &Provider{
+		client:         cli,
+		cfg:            cfg,
+		logger:         logger,
+		detected:       *detected,
+		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
+	}
 
 	logger.Info("container runtime detected",
 		"runtime", detected.Runtime,
@@ -259,25 +272,49 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
-// ensureImage pulls the agent runtime image if it is not already present locally.
+// ensureImage makes sure the agent runtime image is present locally and, when
+// reachable, matches the current remote manifest digest. Mirrors the
+// provisioner's ensureImage (internal/devcontainer/provisioner.go): a purely
+// tag-based match would silently reuse a stale `:latest` tag across hosts
+// with identical configs, breaking reproducibility for shared base images.
+//
+// Resolution order:
+//  1. HEAD manifest on remote registry (best-effort, ≤runtimeImageHeadTimeout,
+//     cached for runtimeDigestTTL).
+//  2. ImageInspect locally for RepoDigests.
+//  3. Local present AND RepoDigests contain the remote digest → done.
+//  4. Otherwise → pull. Offline with a local image is accepted (warn + reuse).
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
-	// List ALL local images (no filter) and check manually.
-	// Docker Desktop can block indefinitely when using reference filters
-	// or ImageInspect on remote registry references (ghcr.io/...).
-	imgs, err := p.client.ImageList(ctx, image.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("list images: %w", err)
+	remoteDigest := p.digestResolver.Remote(ctx, ref)
+
+	// Cap ImageInspect with a short timeout. Older Docker Desktop versions
+	// could block indefinitely on remote registry references — the timeout
+	// treats that as "unknown local state" and lets the pull path decide.
+	inspectCtx, cancel := context.WithTimeout(ctx, dockerutil.DefaultHeadTimeout)
+	defer cancel()
+	inspect, inspectErr := p.client.ImageInspect(inspectCtx, ref)
+	localPresent := inspectErr == nil
+	if localPresent && remoteDigest != "" && dockerutil.RepoDigestsContain(inspect.RepoDigests, remoteDigest) {
+		return nil
 	}
-	for _, img := range imgs {
-		for _, tag := range img.RepoTags {
-			if tag == ref {
-				return nil
-			}
-		}
+	if localPresent && remoteDigest == "" {
+		// Offline or auth-gated registry; trust local presence.
+		p.logger.Debug("runtime image present locally; skipping pull (remote digest unavailable)", "ref", ref)
+		return nil
 	}
-	p.logger.Info("pulling agent runtime image", "image", ref)
+
+	action := "pulling agent runtime image"
+	if localPresent {
+		action = "local runtime image stale, re-pulling"
+	}
+	p.logger.Info(action, "image", ref, "remote_digest", remoteDigest)
 	reader, err := p.client.ImagePull(ctx, ref, image.PullOptions{})
 	if err != nil {
+		if localPresent {
+			p.logger.Warn("runtime image pull failed; proceeding with local (possibly stale) copy",
+				"image", ref, "error", err)
+			return nil
+		}
 		return fmt.Errorf("pull image %s: %w", ref, err)
 	}
 	defer reader.Close()
