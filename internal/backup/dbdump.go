@@ -332,7 +332,18 @@ func quoteIdent(name string) string {
 // rows land before children and FK enforcement does not explode on
 // crew.workspace_id etc.
 func RestoreDump(ctx context.Context, db *sql.DB, dump *DBDump) error {
-	return RestoreDumpTx(ctx, db, dump, func(context.Context) error { return nil })
+	_, err := RestoreDumpTx(ctx, db, dump, func(context.Context) error { return nil })
+	return err
+}
+
+// RestoreStats captures the real outcome of a RestoreDump call so the
+// caller can distinguish "bundle was empty" from "every row collided
+// with an existing primary key and INSERT OR IGNORE silently dropped
+// it" — a restore into the source instance is the usual case of the
+// latter and is effectively a no-op today.
+type RestoreStats struct {
+	RowsSeen     int // total rows in the bundle (sum of len(Tables[*]))
+	RowsInserted int // rows that actually landed (sum of RowsAffected)
 }
 
 // RestoreDumpTx is RestoreDump with a caller-supplied preflight hook
@@ -340,10 +351,16 @@ func RestoreDump(ctx context.Context, db *sql.DB, dump *DBDump) error {
 // before the commit. If the hook returns an error the tx rolls back
 // so partial restores do not commit DB state when downstream phases
 // (Docker CopyTo, etc.) are about to fail.
-func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func(context.Context) error) error {
+//
+// Returns RestoreStats so callers can warn the admin when the bundle
+// was non-empty but nothing was inserted (the classic "INSERT OR
+// IGNORE swallowed every PK collision" scenario that happens when
+// you restore into the same instance that produced the bundle).
+func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func(context.Context) error) (RestoreStats, error) {
+	var stats RestoreStats
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("backup: begin restore tx: %w", err)
+		return stats, fmt.Errorf("backup: begin restore tx: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -357,9 +374,10 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 		if !ok || len(rows) == 0 {
 			continue
 		}
+		stats.RowsSeen += len(rows)
 		exists, err := tableExistsTx(ctx, tx, table)
 		if err != nil {
-			return fmt.Errorf("backup: probe %s: %w", table, err)
+			return stats, fmt.Errorf("backup: probe %s: %w", table, err)
 		}
 		if !exists {
 			// Target lacks this table — skip rather than failing so a
@@ -368,14 +386,12 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 		}
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
-			return fmt.Errorf("backup: columns of %s: %w", table, err)
+			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
 		}
 		for _, row := range rows {
 			cols := make([]string, 0, len(row))
 			placeholders := make([]string, 0, len(row))
 			args := make([]any, 0, len(row))
-			// Iterate deterministically so query cache and tests stay
-			// stable across restores. map range order is random.
 			keys := make([]string, 0, len(row))
 			for k := range row {
 				keys = append(keys, k)
@@ -383,9 +399,6 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 			sortStrings(keys)
 			for _, k := range keys {
 				if !allowed[k] {
-					// Unknown column — silently drop rather than failing
-					// so a row with a column added in a newer schema
-					// can still partially restore.
 					continue
 				}
 				cols = append(cols, quoteIdent(k))
@@ -401,19 +414,23 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 				strings.Join(cols, ","),
 				strings.Join(placeholders, ","),
 			)
-			if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-				return fmt.Errorf("backup: insert into %s: %w", table, err)
+			res, err := tx.ExecContext(ctx, query, args...)
+			if err != nil {
+				return stats, fmt.Errorf("backup: insert into %s: %w", table, err)
+			}
+			if n, err := res.RowsAffected(); err == nil {
+				stats.RowsInserted += int(n)
 			}
 		}
 	}
 	if err := preCommit(ctx); err != nil {
-		return err
+		return stats, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("backup: commit restore tx: %w", err)
+		return stats, fmt.Errorf("backup: commit restore tx: %w", err)
 	}
 	committed = true
-	return nil
+	return stats, nil
 }
 
 // tableExistsTx is like tableExists but runs on an already-open tx.

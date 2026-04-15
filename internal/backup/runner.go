@@ -429,16 +429,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 
 	// Stage DB rewrites before any writes so both --as-* flags and the
 	// FK rows land consistently.
-	var rowsInserted int
 	if extracted.DBDump != nil {
 		if opts.AsWorkspace != "" {
 			rewriteWorkspaceSlug(extracted.DBDump, opts.AsWorkspace)
 		}
 		if opts.AsCrew != "" && manifest.Scope == ScopeCrew && len(manifest.Contents.Crews) > 0 {
 			rewriteCrewSlug(extracted.DBDump, manifest.Contents.Crews[0].ID, opts.AsCrew)
-		}
-		for _, rows := range extracted.DBDump.Tables {
-			rowsInserted += len(rows)
 		}
 	}
 
@@ -462,23 +458,39 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		}
 		return nil
 	}
+	var stats RestoreStats
 	if extracted.DBDump != nil {
-		if err := RestoreDumpTx(ctx, db, extracted.DBDump, dockerRestore); err != nil {
+		s, err := RestoreDumpTx(ctx, db, extracted.DBDump, dockerRestore)
+		if err != nil {
 			return nil, err
 		}
+		stats = s
 	} else {
-		// No DB dump (pure container-content restore) — still run the
-		// docker phase, but without the tx.
 		if err := dockerRestore(ctx); err != nil {
 			return nil, err
 		}
+	}
+
+	// No-op restore detection: the bundle carried rows but every one
+	// of them collided with an existing primary key and INSERT OR
+	// IGNORE silently dropped it. The classic cause is "restore into
+	// the same instance that produced the bundle" — the admin thinks
+	// they rolled state back but nothing changed. Surface a loud
+	// warning via a dedicated error so CLI + API both show it.
+	if stats.RowsSeen > 0 && stats.RowsInserted == 0 {
+		return &RestoreResult{
+			Manifest:     manifest,
+			RestoredWs:   firstWorkspaceSlug(extracted.DBDump),
+			CrewsCount:   len(manifest.Contents.Crews),
+			RowsInserted: 0,
+		}, fmt.Errorf("backup: restore completed but inserted 0 of %d rows — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", stats.RowsSeen)
 	}
 
 	return &RestoreResult{
 		Manifest:     manifest,
 		RestoredWs:   firstWorkspaceSlug(extracted.DBDump),
 		CrewsCount:   len(manifest.Contents.Crews),
-		RowsInserted: rowsInserted,
+		RowsInserted: stats.RowsInserted,
 	}, nil
 }
 
