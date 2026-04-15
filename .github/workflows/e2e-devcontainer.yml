@@ -46,6 +46,19 @@ jobs:
           make build:sidecar
           go build -o crewship ./cmd/crewship
 
+      - name: Generate ephemeral test secrets
+        # Generated per-run rather than hard-coded so:
+        #   1. Nothing in the repo trips the Gitleaks high-entropy scanner.
+        #   2. Each run starts from a clean cryptographic slate (no
+        #      cross-run state via accidentally-shared keys).
+        # Both vars are scoped to the GitHub Actions $GITHUB_ENV file, so
+        # subsequent steps inherit them automatically.
+        run: |
+          {
+            echo "NEXTAUTH_SECRET=$(openssl rand -hex 32)"
+            echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
+
       - name: Start dev server in background
         env:
           # CI runner can't write to /var/lib/crewship (default); redirect
@@ -56,13 +69,10 @@ jobs:
           DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
           CREWSHIP_NEXTJS_URL: http://localhost:8080
           CREWSHIP_SKIP_SIDECAR: "1"
-          # Server only mounts /api/* routes when JWTSecret is set
-          # (internal/server/server.go) — without this /healthz responds
-          # but bootstrap 404s. Test-only value.
-          NEXTAUTH_SECRET: ci-e2e-test-secret-not-for-production
-          # Required for the credential-seed phase. Must be 64 hex chars
-          # (32 raw bytes). Test-only value; mirrors encryption_test.go.
-          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          # NEXTAUTH_SECRET (server only mounts /api/* when JWTSecret is set
+          # — without this /healthz responds but bootstrap 404s) and
+          # ENCRYPTION_KEY (required by internal/encryption for credential
+          # seed) come from $GITHUB_ENV via the previous step.
         run: |
           mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
           ./crewship start >/tmp/crewship.log 2>&1 &
