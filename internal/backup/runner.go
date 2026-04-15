@@ -253,7 +253,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, fmt.Errorf("backup: create payload temp: %w", err)
 	}
 	payloadPath := payloadFile.Name()
-	defer func() { _ = st.Remove(ctx, payloadPath) }()
+	// Cleanup must run even if the request ctx is cancelled — we
+	// still need to remove the temp file, otherwise a client
+	// disconnect leaks GBs of staging data.
+	defer func() { _ = st.Remove(context.Background(), payloadPath) }()
 
 	payloadWriter, err := NewTarZstWriter(payloadFile)
 	if err != nil {
@@ -318,7 +321,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, fmt.Errorf("backup: create sealed temp: %w", err)
 	}
 	sealedPath := sealedFile.Name()
-	defer func() { _ = st.Remove(ctx, sealedPath) }()
+	defer func() { _ = st.Remove(context.Background(), sealedPath) }()
 
 	rawPayload, err := st.Open(ctx, payloadPath)
 	if err != nil {
@@ -384,7 +387,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	sealedIn, err := st.Open(ctx, sealedPath)
 	if err != nil {
 		_ = outFile.Close()
-		_ = st.Remove(ctx, partialPath)
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: reopen sealed: %w", err)
 	}
 	err = WriteBundleStream(outFile, manifest, sealedIn, sealedSize)
@@ -393,16 +396,16 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		err = cerr
 	}
 	if err != nil {
-		_ = st.Remove(ctx, partialPath)
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, err
 	}
 	info, err := st.Stat(ctx, partialPath)
 	if err != nil {
-		_ = st.Remove(ctx, partialPath)
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: stat partial: %w", err)
 	}
 	if err := st.Rename(ctx, partialPath, finalPath); err != nil {
-		_ = st.Remove(ctx, partialPath)
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
 	}
 
@@ -467,6 +470,14 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 	st := resolveStorage(opts.Storage)
 
+	// Manifest metadata captured as the restore progresses, so the
+	// webhook can report scope/workspace even on failure paths that
+	// abort before `result` is populated. Updated right after
+	// ReadBundleStream parses the manifest below.
+	var (
+		manifestScope       string
+		manifestWorkspaceID string
+	)
 	// Observability: classify outcome regardless of return path. Do NOT
 	// observe a DryRun — it is not a "real" restore and would skew the
 	// restored_total counter.
@@ -478,12 +489,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		cfg := WebhookConfigFromEnv()
 		event := "backup.restored"
 		errStr := ""
-		var scope, workspaceID string
+		scope := manifestScope
+		workspaceID := manifestWorkspaceID
 		if result != nil && result.Manifest != nil {
 			scope = string(result.Manifest.Scope)
-			// Lift WorkspaceID out of the manifest so downstream
-			// consumers can filter restore events by workspace the
-			// same way they filter create events.
 			if ws := result.Manifest.Contents.Workspace; ws != nil {
 				workspaceID = ws.ID
 			}
@@ -523,6 +532,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			_ = closeBundle()
 		}
 	}()
+	// Capture manifest metadata so the deferred webhook above can
+	// still emit scope + workspace on failure paths that never reach
+	// a successful `result`.
+	manifestScope = string(manifest.Scope)
+	if ws := manifest.Contents.Workspace; ws != nil {
+		manifestWorkspaceID = ws.ID
+	}
 	if manifest.Scope == ScopeInstance {
 		return nil, fmt.Errorf("%w: instance scope restore is not supported yet (V1.5)", ErrInvalidScope)
 	}
@@ -802,6 +818,10 @@ func ListBackups(ctx context.Context, dir string) ([]ListEntry, error) {
 		le := ListEntry{
 			Path: path,
 			Size: info.Size(),
+			// Fall back to the filesystem mtime so sort has a
+			// reasonable ordering even when Inspect cannot read the
+			// manifest (corrupted bundle, permission issue).
+			CreatedAt: info.ModTime(),
 		}
 		if inspectErr == nil && m != nil {
 			le.Scope = m.Scope
@@ -814,6 +834,12 @@ func ListBackups(ctx context.Context, dir string) ([]ListEntry, error) {
 		}
 		out = append(out, le)
 	}
+	// Newest-first ordering is part of the ListBackups contract
+	// (StorageOps.ReadDir leaves ordering undefined), so a remote
+	// backend would otherwise return entries in arbitrary order.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
 	return out, nil
 }
 

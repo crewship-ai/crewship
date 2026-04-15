@@ -9,7 +9,11 @@ import { cn } from "@/lib/utils"
  * set in the hook (5s) so the banner clears promptly after a backup
  * run finishes.
  */
-export function BackupStatusBanner({ workspaceId }: { workspaceId: string | undefined }) {
+interface BackupStatusBannerProps {
+  workspaceId: string | undefined
+}
+
+export function BackupStatusBanner({ workspaceId }: BackupStatusBannerProps) {
   const { data, isLoading } = useBackupStatus(workspaceId)
 
   if (isLoading || !data) {
@@ -41,7 +45,7 @@ export function BackupStatusBanner({ workspaceId }: { workspaceId: string | unde
     >
       <Lock className="h-3.5 w-3.5" />
       <span>
-        Backup in progress — locked by {data.acquired_by}
+        Backup in progress — locked by {data.acquired_by || "unknown user"}
         {data.expires_at
           ? ` (expires ${new Date(data.expires_at).toLocaleTimeString()})`
           : ""}

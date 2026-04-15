@@ -150,6 +150,12 @@ export function useBackups(
   workspaceId: string | undefined,
   options?: Omit<UseQueryOptions<BackupListEntry[]>, "queryKey" | "queryFn">,
 ) {
+  // Destructure `enabled` so it does NOT bleed in via ...rest and
+  // override our workspace guard. A caller who tries to force
+  // enabled:true without a workspace would otherwise trigger a fetch
+  // with workspace_id=undefined — the guard is load-bearing.
+  const { enabled: _ignored, ...rest } = options ?? {}
+  void _ignored
   return useQuery<BackupListEntry[]>({
     queryKey: ["backups", workspaceId],
     queryFn: async () => {
@@ -157,8 +163,8 @@ export function useBackups(
       const body = await asJSON<{ data: BackupListEntry[] }>(res)
       return body.data ?? []
     },
+    ...rest,
     enabled: Boolean(workspaceId),
-    ...options,
   })
 }
 
