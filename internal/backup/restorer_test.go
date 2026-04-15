@@ -254,7 +254,7 @@ func TestExtractPayload_StreamsLargeEntries(t *testing.T) {
 	// start, so GC does not affect the measurement.
 	var before, after runtimeMemSnapshot
 	before.capture()
-	out, err := ExtractPayload(bytes.NewReader(buf.Bytes()))
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(buf.Bytes()))
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestExtractPayload_StreamsLargeEntries(t *testing.T) {
 
 	// Consume the extracted workspace to make sure the on-disk tar is
 	// valid. The caller owns Close() on the ReadCloser.
-	r, ok, err := out.OpenWorkspace("big")
+	r, ok, err := out.OpenWorkspace(t.Context(), "big")
 	if err != nil || !ok {
 		t.Fatalf("OpenWorkspace: ok=%v err=%v", ok, err)
 	}
