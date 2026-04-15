@@ -218,10 +218,9 @@ jobs:
           mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
           ./crewship start >/tmp/crewship.log 2>&1 &
           echo $! > /tmp/crewship.pid
-          # Wait for readiness (up to 30s)
-          for i in $(seq 1 30); do
-            if curl -sf -o /dev/null "http://localhost:8080/api/v1/features/catalog" \
-               || [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/features/catalog)" = "401" ]; then
+          # Wait for readiness (up to 60s) — use /healthz (no auth required).
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
               echo "server up after ${i}s"
               exit 0
             fi
