@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
 	"testing"
 	"time"
 )
@@ -84,8 +85,51 @@ func TestExtractPayload_AcceptsValidLayout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid payload should succeed, got %v", err)
 	}
-	if _, ok := out.WorkspaceTarsBySlug["my-crew"]; !ok {
-		t.Errorf("expected workspace tar for my-crew, got %v", out.WorkspaceTarsBySlug)
+	defer func() { _ = out.Close() }()
+	if !out.HasWorkspace("my-crew") {
+		t.Error("expected workspace section for my-crew")
+	}
+	r, ok, err := out.OpenWorkspace("my-crew")
+	if err != nil {
+		t.Fatalf("OpenWorkspace: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected OpenWorkspace to return a reader")
+	}
+	defer func() { _ = r.Close() }()
+	// Just reading the header confirms the inner tar is well-formed.
+	tr := tar.NewReader(r)
+	hdr, err := tr.Next()
+	if err != nil {
+		t.Fatalf("read inner tar: %v", err)
+	}
+	if hdr.Name != "file.txt" {
+		t.Errorf("inner entry name: got %q want 'file.txt'", hdr.Name)
+	}
+}
+
+func TestExtractPayload_CloseRemovesTempDir(t *testing.T) {
+	payload := buildPayloadWithEntry(t, "workspace/xyz/a.txt", tar.TypeReg, "")
+	out, err := ExtractPayload(bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	dir := out.tempDir
+	if dir == "" {
+		t.Fatal("expected non-empty tempDir after extract")
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("tempDir should exist: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("tempDir should be removed after Close; stat err = %v", err)
+	}
+	// Idempotent.
+	if err := out.Close(); err != nil {
+		t.Errorf("second Close should be no-op, got %v", err)
 	}
 }
 
