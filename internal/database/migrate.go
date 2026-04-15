@@ -190,6 +190,29 @@ CREATE TABLE IF NOT EXISTS backup_locks (
 );
 CREATE INDEX IF NOT EXISTS idx_backup_locks_expires ON backup_locks(expires_at);
 `},
+	// Backup catalog — fast list of known bundles so the admin UI does
+	// not have to filesystem-scan and parse every manifest on each
+	// refresh. Populated on CreateBackup success, pruned on Delete. An
+	// idempotent startup scan in internal/backup/catalog.go walks the
+	// default backups dir and back-fills rows for bundles that existed
+	// before this migration. See CRE-128 in .claude/context/prd/BACKUP.md.
+	{version: 49, name: "add_backup_catalog", sql: `
+CREATE TABLE IF NOT EXISTS backup_catalog (
+    id TEXT PRIMARY KEY,
+    file_path TEXT NOT NULL UNIQUE,
+    scope TEXT NOT NULL,
+    slug TEXT,
+    workspace_id TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    encrypted INTEGER NOT NULL,
+    format_version INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_backup_catalog_workspace ON backup_catalog(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_backup_catalog_created_at ON backup_catalog(created_at);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -1,0 +1,202 @@
+"use client"
+
+import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type UseQueryOptions,
+} from "@tanstack/react-query"
+
+/**
+ * React Query surface for the admin backups panel (CRE-128). One
+ * cache per endpoint; mutations invalidate the shared `backups` key
+ * so the list refreshes after create / delete without a manual
+ * `refetch()` from every caller.
+ *
+ * All fetch calls rely on the session cookie set by NextAuth. RFC
+ * 7807 / plain-text errors flow through `asError` so `onError`
+ * handlers render human-friendly messages via sonner.
+ */
+
+export type BackupScope = "crew" | "workspace" | "instance"
+
+export interface BackupListEntry {
+  path: string
+  file_name: string
+  size_bytes: number
+  scope: BackupScope
+  encrypted: boolean
+  created_at?: string
+  format_version?: number
+}
+
+export interface BackupStatus {
+  workspace_id: string
+  locked: boolean
+  acquired_by?: string
+  acquired_at?: string
+  expires_at?: string
+}
+
+export interface BackupManifest {
+  format_version: number
+  crewship_version_at_backup: string
+  scope: BackupScope
+  created_at: string
+  checksums: { payload_sha256: string }
+  encryption: {
+    enabled: boolean
+    algorithm?: string
+    key_derivation?: string
+    recipients?: string[]
+  }
+  contents: {
+    workspace?: { id: string; slug: string; name: string }
+    crews: Array<{
+      id: string
+      slug: string
+      name: string
+      agent_count?: number
+    }>
+  }
+}
+
+export interface CreateBackupRequest {
+  scope: BackupScope
+  crew_id?: string
+  passphrase?: string
+  recipient?: string
+  no_encrypt?: boolean
+  output_dir?: string
+}
+
+export interface CreateBackupResponse {
+  path: string
+  size_bytes: number
+  payload_sha256: string
+  format_version: number
+  scope: BackupScope
+  created_at: string
+  encrypted: boolean
+}
+
+export interface RestoreBackupRequest {
+  path: string
+  passphrase?: string
+  as_workspace?: string
+  as_crew?: string
+  dry_run?: boolean
+}
+
+async function asError(res: Response): Promise<Error> {
+  const text = await res.text()
+  try {
+    const json = JSON.parse(text) as { error?: string; detail?: string }
+    return new Error(json.error || json.detail || `HTTP ${res.status}`)
+  } catch {
+    return new Error(text || `HTTP ${res.status}`)
+  }
+}
+
+async function asJSON<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    throw await asError(res)
+  }
+  return (await res.json()) as T
+}
+
+export function useBackups(
+  workspaceId: string | undefined,
+  options?: Omit<UseQueryOptions<BackupListEntry[]>, "queryKey" | "queryFn">,
+) {
+  return useQuery<BackupListEntry[]>({
+    queryKey: ["backups", workspaceId],
+    queryFn: async () => {
+      const res = await fetch(`/api/v1/admin/backups?workspace_id=${workspaceId}`)
+      const body = await asJSON<{ data: BackupListEntry[] }>(res)
+      return body.data ?? []
+    },
+    enabled: Boolean(workspaceId),
+    ...options,
+  })
+}
+
+export function useBackupStatus(workspaceId: string | undefined) {
+  return useQuery<BackupStatus>({
+    queryKey: ["backup-status", workspaceId],
+    queryFn: async () => {
+      const res = await fetch(`/api/v1/admin/backups/status?workspace_id=${workspaceId}`)
+      return asJSON<BackupStatus>(res)
+    },
+    enabled: Boolean(workspaceId),
+    // Poll while the lock banner is mounted so the admin sees the
+    // lock release as soon as a backup finishes.
+    refetchInterval: 5_000,
+  })
+}
+
+export function useInspectBackup(workspaceId: string | undefined, path: string | null) {
+  return useQuery<BackupManifest>({
+    queryKey: ["backup-inspect", workspaceId, path],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/v1/admin/backups/inspect?workspace_id=${workspaceId}&path=${encodeURIComponent(path!)}`,
+      )
+      return asJSON<BackupManifest>(res)
+    },
+    enabled: Boolean(workspaceId && path),
+  })
+}
+
+export function useCreateBackup(workspaceId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation<CreateBackupResponse, Error, CreateBackupRequest>({
+    mutationFn: async (req) => {
+      const res = await fetch(`/api/v1/admin/backups?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      })
+      return asJSON<CreateBackupResponse>(res)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["backups", workspaceId] })
+      qc.invalidateQueries({ queryKey: ["backup-status", workspaceId] })
+    },
+  })
+}
+
+export function useRestoreBackup(workspaceId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation<unknown, Error, RestoreBackupRequest>({
+    mutationFn: async (req) => {
+      const res = await fetch(`/api/v1/admin/backups/restore?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      })
+      return asJSON<unknown>(res)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["backups", workspaceId] })
+    },
+  })
+}
+
+export function useDeleteBackup(workspaceId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation<void, Error, string>({
+    mutationFn: async (path) => {
+      const res = await fetch(
+        `/api/v1/admin/backups?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`,
+        { method: "DELETE" },
+      )
+      if (!res.ok) {
+        throw await asError(res)
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["backups", workspaceId] })
+    },
+  })
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -51,6 +52,7 @@ var backupCreateCmd = &cobra.Command{
 		noEncrypt, _ := cmd.Flags().GetBool("no-encrypt")
 		passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
 		recipient, _ := cmd.Flags().GetString("recipient")
+		useKeyring, _ := cmd.Flags().GetBool("use-keyring")
 
 		if scope != "workspace" && scope != "crew" {
 			return fmt.Errorf("--scope must be 'workspace' or 'crew' (got %q)", scope)
@@ -80,11 +82,33 @@ var backupCreateCmd = &cobra.Command{
 			// Recipient is packed into the request body below as its
 			// own JSON field; leave passphrase empty.
 		default:
-			p, err := readPassphrase(passphraseFile, true /*confirm*/)
-			if err != nil {
-				return err
+			// Keyring lookup short-circuits the prompt when the admin
+			// asked for --use-keyring and we have a stored passphrase
+			// for this workspace. Wrong keyring content surfaces as a
+			// decryption failure during restore — the bundle itself is
+			// still written with whatever passphrase the keyring held.
+			ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+			if useKeyring && passphraseFile == "" {
+				if kr, kerr := backup.DefaultKeyring(); kerr == nil {
+					if p, gerr := kr.GetPassphrase(ws); gerr == nil {
+						passphrase = p
+					}
+				}
 			}
-			passphrase = p
+			if passphrase == "" {
+				p, err := readPassphrase(passphraseFile, true /*confirm*/)
+				if err != nil {
+					return err
+				}
+				passphrase = p
+			}
+			// Only persist AFTER the user confirmed a fresh prompt — a
+			// passphrase we just read from the keyring needs no rewrite.
+			if useKeyring && passphraseFile == "" && ws != "" {
+				if kr, kerr := backup.DefaultKeyring(); kerr == nil {
+					_ = kr.StorePassphrase(ws, passphrase)
+				}
+			}
 		}
 
 		// Resolve crew slug → ID if necessary.
@@ -237,6 +261,7 @@ var backupRestoreCmd = &cobra.Command{
 		asWorkspace, _ := cmd.Flags().GetString("as-workspace")
 		asCrew, _ := cmd.Flags().GetString("as-crew")
 		passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
+		useKeyring, _ := cmd.Flags().GetBool("use-keyring")
 
 		// In a non-interactive environment without --passphrase-file we
 		// let the caller through with an empty passphrase so unencrypted
@@ -244,14 +269,24 @@ var backupRestoreCmd = &cobra.Command{
 		// 400 if the bundle turns out to be encrypted and no passphrase
 		// was supplied — cleaner than "no passphrase on stdin" from us.
 		var passphrase string
-		if passphraseFile == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
-			passphrase = ""
-		} else {
-			p, err := readPassphrase(passphraseFile, false /*no confirm*/)
-			if err != nil {
-				return err
+		ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+		if useKeyring && passphraseFile == "" && ws != "" {
+			if kr, kerr := backup.DefaultKeyring(); kerr == nil {
+				if p, gerr := kr.GetPassphrase(ws); gerr == nil {
+					passphrase = p
+				}
 			}
-			passphrase = p
+		}
+		if passphrase == "" {
+			if passphraseFile == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+				passphrase = ""
+			} else {
+				p, err := readPassphrase(passphraseFile, false /*no confirm*/)
+				if err != nil {
+					return err
+				}
+				passphrase = p
+			}
 		}
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -532,12 +567,14 @@ func init() {
 	backupCreateCmd.Flags().String("crew", "", "Crew slug or ID (required for --scope=crew)")
 	backupCreateCmd.Flags().Bool("no-encrypt", false, "Write a plaintext payload instead of AGE-encrypting it")
 	backupCreateCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
+	backupCreateCmd.Flags().Bool("use-keyring", false, "Store and reuse the passphrase via the local backup keyring (~/.crewship/backup-keyring.enc)")
 	backupCreateCmd.Flags().String("recipient", "", "AGE X25519 public key (age1…) for asymmetric encryption")
 	backupCreateCmd.Flags().String("output", "", "Override output directory (default: ~/.crewship/backups on the server)")
 
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
 	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
+	backupRestoreCmd.Flags().Bool("use-keyring", false, "Read the passphrase from the local backup keyring before prompting")
 	backupRestoreCmd.Flags().Bool("dry-run", false, "Verify compat, checksum and decryption without applying workspace/crew writes or docker changes (an audit row is still recorded)")
 
 	backupRotateCmd.Flags().Int("keep-last", 0, "Keep only the N newest bundles (0 disables)")

@@ -192,6 +192,19 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"encrypted":      result.Manifest.Encryption.Enabled,
 	})
 
+	// Index the bundle in backup_catalog so the admin UI list view
+	// does not have to filesystem-scan on every refresh. Failure to
+	// catalogue does NOT fail the create — the bundle is safely on
+	// disk either way; the admin just loses the fast-list affordance
+	// for that row and gets back-filled on next startup scan.
+	catEntry := backup.CatalogEntryFromResult(result, result.Manifest, workspaceID)
+	if catEntry.CreatedBy == "" {
+		catEntry.CreatedBy = user.Email
+	}
+	if err := backup.UpsertCatalogEntry(ctx, h.db, catEntry); err != nil {
+		h.logger.Warn("backup catalog upsert failed", "error", err, "path", result.Path)
+	}
+
 	writeJSON(w, http.StatusCreated, createResponse{
 		Path:          result.Path,
 		Size:          result.Size,
@@ -584,6 +597,14 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := backup.Delete(path); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	// Drop the catalog row too so the admin UI list view refreshes
+	// cleanly. A best-effort failure here is not fatal — the bundle is
+	// gone from disk; a stale row would surface on the next refresh
+	// (ListCatalog) and either get ignored by the UI or re-resolved by
+	// the startup backfill scan.
+	if err := backup.DeleteCatalogEntry(ctx, h.db, path); err != nil {
+		h.logger.Warn("backup catalog delete failed", "error", err, "path", path)
 	}
 	WriteAuditLog(ctx, h.db, "backup.delete", "backup", path, user.ID, workspaceID, nil)
 	w.WriteHeader(http.StatusNoContent)
