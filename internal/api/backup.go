@@ -98,20 +98,23 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required for crew scope"})
 		return
 	}
-	// Trim before selector counting so a "   "-only passphrase (or
-	// recipient) cannot smuggle its way past the CLI's empty-string
-	// check. API clients that call us directly should not be able to
-	// weaken the encryption path this way.
-	passphraseInput := strings.TrimSpace(req.Passphrase)
-	recipientInput := strings.TrimSpace(req.Recipient)
+	// Trim ONLY for the "is this a real selector or whitespace
+	// padding?" gate. The actual encryption secret stays as the user
+	// supplied it — Restore reads req.Passphrase verbatim, so any
+	// silent rewrite here would create a bundle the same admin
+	// could not decrypt afterwards. A "   "-only passphrase still
+	// gets blocked because trimmedPassphrase is empty for selector
+	// counting purposes.
+	trimmedPassphrase := strings.TrimSpace(req.Passphrase)
+	trimmedRecipient := strings.TrimSpace(req.Recipient)
 
 	// Exactly-one encryption selector. Passphrase, Recipient, or
 	// NoEncrypt — never multiple.
 	encryptionSelectors := 0
-	if passphraseInput != "" {
+	if trimmedPassphrase != "" {
 		encryptionSelectors++
 	}
-	if recipientInput != "" {
+	if trimmedRecipient != "" {
 		encryptionSelectors++
 	}
 	if req.NoEncrypt {
@@ -134,15 +137,20 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// silently reinterpreted as an X25519 recipient.
 	var passphrase string
 	var recipients []age.Recipient
-	if recipientInput != "" {
-		rec, err := age.ParseX25519Recipient(recipientInput)
+	if trimmedRecipient != "" {
+		// age public keys are bech32, so trimming-then-parsing is
+		// safe and saves a "spurious whitespace" failure mode.
+		rec, err := age.ParseX25519Recipient(trimmedRecipient)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid age1 recipient: " + err.Error()})
 			return
 		}
 		recipients = []age.Recipient{rec}
 	} else {
-		passphrase = passphraseInput
+		// Use the user-supplied passphrase verbatim so Restore (which
+		// reads req.Passphrase unchanged) can decrypt with the exact
+		// same characters the admin typed.
+		passphrase = req.Passphrase
 	}
 
 	// Constrain custom output directory to live under the default so an
