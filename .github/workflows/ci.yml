@@ -10,6 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Default least-privilege. Individual jobs widen only when required.
+permissions:
+  contents: read
+
 env:
   NODE_VERSION: "22"
   PNPM_VERSION: "10"
@@ -20,24 +24,14 @@ jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: pnpm/action-setup@v5
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v6
+      - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma Client
-        run: pnpm db:generate
-        env:
-          DATABASE_URL: "file:./dev.db"
+          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Lint
         run: pnpm lint
@@ -62,43 +56,29 @@ jobs:
   frontend-test:
     name: Frontend Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: pnpm/action-setup@v5
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v6
+      - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma Client
-        run: pnpm db:generate
-        env:
-          DATABASE_URL: "file:./dev.db"
+          pnpm-version: ${{ env.PNPM_VERSION }}
 
       - name: Test
         run: pnpm test
 
-  # ── Go: vet, build, test (always runs — this is a Go-first project) ──
+  # ── Go: vet, build, test ──
   go:
     name: Go
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      # web/embed.go requires web/out/ to exist for go:embed.
-      # Create a minimal stub so vet/build/test pass without the full frontend.
-      - name: Create embed stub
-        run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
 
       - name: Go vet
         run: go vet ./...
@@ -109,53 +89,44 @@ jobs:
       - name: Go test
         run: go test ./... -count=1
 
-  # ── Go lint: golangci-lint (CRE-122 Phase 1 — conservative ruleset) ──
+  # ── Go lint: golangci-lint ──
   go-lint:
     name: Go Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # Same embed stub requirement as the go job
-      - name: Create embed stub
-        run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
-
-      # Install golangci-lint FROM SOURCE with our Go 1.26 toolchain.
-      #
-      # Pre-built golangci-lint releases (including v2.1.6) are compiled with
-      # Go 1.24 or earlier, and the binary refuses to analyze code targeting
-      # a newer Go version than its build ("Go language version go1.24 is
-      # lower than the targeted Go version 1.26"). Building from source with
-      # `go install` uses the Go toolchain provided by setup-go@v6, so the
-      # resulting binary has matching language support.
-      #
-      # This costs ~30s extra per run versus the pre-built action, but is
-      # the only reliable path until an upstream release is built with
-      # Go 1.26+.
+      # Build golangci-lint from source with Go 1.26. Pre-built releases (up
+      # to v2.1.6) ship with Go ≤1.24 and refuse to analyze code targeting a
+      # newer language version. Costs ~30s; removable once an upstream
+      # release is built with Go 1.26+.
       - name: Install golangci-lint from source
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
 
       - name: Run golangci-lint
-        # Block scalar so the inner double-quotes reach the shell. Quoting
-        # $(go env GOPATH) prevents word-splitting if GOPATH contains spaces
-        # on a self-hosted runner. shellcheck SC2046.
         run: |
           "$(go env GOPATH)/bin/golangci-lint" run --timeout=5m ./...
 
   # ── Full binary build (push to main only — verifies embed works) ──
+  #
+  # Stays push-only to conserve runner minutes. The Go job already catches
+  # compile errors; embed-path regressions are rare enough that post-merge
+  # detection is acceptable for the budget.
   binary:
     name: Binary Build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [frontend, go]
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -165,13 +136,6 @@ jobs:
         with:
           name: nextjs-static-export
           path: web/out
-
-      # Fallback stub if artifact wasn't available (quota limit)
-      - name: Ensure embed directory exists
-        run: |
-          if [ ! -f web/out/index.html ]; then
-            mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
-          fi
 
       - name: Build single binary with embedded frontend
         run: go build -o crewship ./cmd/crewship
