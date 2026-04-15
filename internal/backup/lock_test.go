@@ -57,7 +57,7 @@ func TestAcquireWorkspaceLock_OK(t *testing.T) {
 	if count != 1 {
 		t.Errorf("expected 1 lock row, got %d", count)
 	}
-	if err := release(); err != nil {
+	if err := release(context.Background()); err != nil {
 		t.Errorf("release: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM backup_locks WHERE workspace_id = 'ws_test'`).Scan(&count); err != nil {
@@ -75,7 +75,7 @@ func TestAcquireWorkspaceLock_ConflictSameWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
-	defer func() { _ = release() }()
+	defer func() { _ = release(context.Background()) }()
 
 	_, err = mgr.AcquireWorkspaceLock(context.Background(), "ws_test", "user_2", 0)
 	if !errors.Is(err, ErrLockHeld) {
@@ -93,13 +93,13 @@ func TestAcquireWorkspaceLock_DifferentWorkspacesConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws_test acquire: %v", err)
 	}
-	defer func() { _ = rel1() }()
+	defer func() { _ = rel1(context.Background()) }()
 
 	rel2, err := mgr.AcquireWorkspaceLock(context.Background(), "ws_other", "u", 0)
 	if err != nil {
 		t.Fatalf("ws_other acquire: %v", err)
 	}
-	defer func() { _ = rel2() }()
+	defer func() { _ = rel2(context.Background()) }()
 }
 
 func TestAcquireWorkspaceLock_ExpiredReclaimable(t *testing.T) {
@@ -120,7 +120,7 @@ func TestAcquireWorkspaceLock_ExpiredReclaimable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reclaim expired: %v", err)
 	}
-	defer func() { _ = release() }()
+	defer func() { _ = release(context.Background()) }()
 
 	var user string
 	if err := db.QueryRow(`SELECT acquired_by FROM backup_locks WHERE workspace_id = 'ws_test'`).Scan(&user); err != nil {
@@ -131,6 +131,34 @@ func TestAcquireWorkspaceLock_ExpiredReclaimable(t *testing.T) {
 	}
 }
 
+func TestAcquireWorkspaceLock_MalformedExpiresReclaimable(t *testing.T) {
+	// A corrupted write that leaves a non-parseable expires_at must not
+	// block future backups forever. The eviction path drops it so the
+	// new INSERT can succeed instead of returning ErrLockHeld.
+	db := newLockTestDB(t)
+	if _, err := db.Exec(
+		`INSERT INTO backup_locks (workspace_id, acquired_at, acquired_by, expires_at)
+		 VALUES ('ws_test', 'not-a-date', 'ghost', 'also-not-a-date')`,
+	); err != nil {
+		t.Fatalf("seed malformed lock: %v", err)
+	}
+
+	mgr := NewSQLLockManager(db)
+	release, err := mgr.AcquireWorkspaceLock(context.Background(), "ws_test", "new_user", 0)
+	if err != nil {
+		t.Fatalf("reclaim malformed: %v", err)
+	}
+	defer func() { _ = release(context.Background()) }()
+
+	var user string
+	if err := db.QueryRow(`SELECT acquired_by FROM backup_locks WHERE workspace_id = 'ws_test'`).Scan(&user); err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if user != "new_user" {
+		t.Errorf("malformed lock not reclaimed; acquired_by = %q", user)
+	}
+}
+
 func TestRelease_Idempotent(t *testing.T) {
 	db := newLockTestDB(t)
 	mgr := NewSQLLockManager(db)
@@ -138,10 +166,10 @@ func TestRelease_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	if err := release(); err != nil {
+	if err := release(context.Background()); err != nil {
 		t.Fatalf("first release: %v", err)
 	}
-	if err := release(); err != nil {
+	if err := release(context.Background()); err != nil {
 		t.Errorf("second release should be idempotent, got %v", err)
 	}
 }
@@ -165,7 +193,7 @@ func TestIsLockHeld(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	defer func() { _ = release() }()
+	defer func() { _ = release(context.Background()) }()
 
 	held, err = IsLockHeld(ctx, db, "ws_test", now)
 	if err != nil {

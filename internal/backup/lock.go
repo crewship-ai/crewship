@@ -20,7 +20,12 @@ const DefaultLockTTL = 1 * time.Hour
 // and was reclaimed by another caller before Release was invoked, the
 // function still returns nil (the broken lock is no longer ours to
 // release, and there is nothing useful we can do about it from here).
-type ReleaseFunc func() error
+//
+// The caller's context is respected for cancellation and deadlines; pass
+// context.Background() if none is available. A nil context is treated
+// as context.Background() so old callers (and defensive deferred
+// releases) do not panic.
+type ReleaseFunc func(ctx context.Context) error
 
 // LockManager provides the advisory-lock operations the backup flow
 // needs. It is satisfied by *sql.DB in production and by in-memory
@@ -71,9 +76,16 @@ func (m *SQLLockManager) AcquireWorkspaceLock(ctx context.Context, workspaceID, 
 		}
 	}()
 
-	// Evict a stale lock (expired by now).
+	// Evict a stale lock (expired by now). We also reap rows whose
+	// expires_at is non-parseable — otherwise a corrupted write leaves
+	// a ghost row that IsLockHeld treats as "not held" but PK collision
+	// in the INSERT below surfaces as ErrLockHeld forever. datetime()
+	// returns NULL on input that is not a recognisable SQLite datetime,
+	// which lets us spot and drop the bad row in the same statement.
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM backup_locks WHERE workspace_id = ? AND expires_at < ?`,
+		`DELETE FROM backup_locks
+		 WHERE workspace_id = ?
+		   AND (expires_at < ? OR datetime(expires_at) IS NULL)`,
 		workspaceID, now.Format(time.RFC3339),
 	); err != nil {
 		return nil, fmt.Errorf("backup: evict stale lock: %w", err)
@@ -108,11 +120,14 @@ func (m *SQLLockManager) AcquireWorkspaceLock(ctx context.Context, workspaceID, 
 	}
 	committed = true
 
-	release := func() error {
+	release := func(ctx context.Context) error {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		// Only release the lock if the row we see still belongs to us
 		// (same acquired_at). If another caller reclaimed after TTL
 		// expiry we silently succeed — their lock is legitimate.
-		_, err := m.DB.ExecContext(context.Background(),
+		_, err := m.DB.ExecContext(ctx,
 			`DELETE FROM backup_locks
 			 WHERE workspace_id = ?
 			   AND acquired_at = ?
