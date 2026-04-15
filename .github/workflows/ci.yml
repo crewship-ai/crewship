@@ -178,6 +178,11 @@ jobs:
           DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
           CREWSHIP_NEXTJS_URL: http://localhost:8080
           CREWSHIP_SKIP_SIDECAR: "1"
+          # Required — server only mounts /api/* routes (including
+          # /api/v1/bootstrap) when JWTSecret is set. Without this, /healthz
+          # still responds (base mux) but the bootstrap step 404s. Test-only
+          # value; no production secret material.
+          NEXTAUTH_SECRET: ci-e2e-test-secret-not-for-production
         run: |
           mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
           ./crewship start >/tmp/crewship.log 2>&1 &
