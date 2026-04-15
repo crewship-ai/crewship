@@ -14,11 +14,11 @@ func IsAdminRole(role string) bool {
 }
 
 // RequireAdmin returns an error suitable for HTTP 403 / CLI exit if
-// role is not an admin role. Callers inside the API layer should map
-// this to 403 with a consistent body; the CLI prints it verbatim.
+// role is not an admin role. The error wraps ErrAdminRequired so
+// callers can identify it via errors.Is rather than substring match.
 func RequireAdmin(role string) error {
 	if !IsAdminRole(role) {
-		return fmt.Errorf("backup: admin role required (have %q); only OWNER and ADMIN can create or restore backups", role)
+		return fmt.Errorf("%w (have %q); only OWNER and ADMIN can create or restore backups", ErrAdminRequired, role)
 	}
 	return nil
 }

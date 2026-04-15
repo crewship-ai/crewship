@@ -112,10 +112,17 @@ func TestExtractPayload_EmptyPayload(t *testing.T) {
 // Sanity check: io.Reader plumbing works on the common happy path.
 func TestExtractPayload_ReadsDBDumpEntry(t *testing.T) {
 	var buf bytes.Buffer
-	tw, _ := NewTarZstWriter(&buf)
-	_ = tw.WriteFile("db/dump.json", 0o644, time.Now(),
-		[]byte(`{"workspace_id":"ws","tables":{}}`))
-	_ = tw.Close()
+	tw, err := NewTarZstWriter(&buf)
+	if err != nil {
+		t.Fatalf("new writer: %v", err)
+	}
+	if err := tw.WriteFile("db/dump.json", 0o644, time.Now(),
+		[]byte(`{"workspace_id":"ws","tables":{}}`)); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
 
 	out, err := ExtractPayload(&buf)
 	if err != nil {

@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -168,8 +169,6 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // List handles GET /api/v1/admin/backups.
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	_ = ctx
 	role := RoleFromContext(r.Context())
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if !canRole(role, "manage") {
@@ -555,22 +554,32 @@ func resolveExistingAncestor(p string) string {
 }
 
 // statusForBackupError maps a backup package error to the right HTTP
-// status. RBAC denials → 403; agent / lock conflicts → 409; format
-// version issues → 400; everything else → 500.
+// status using sentinel errors (errors.Is) rather than substring
+// matching on the message. When the backup package reworks its
+// wording the status codes stay stable.
 func statusForBackupError(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	msg := err.Error()
 	switch {
-	case strings.Contains(msg, "admin role required"):
+	case errors.Is(err, backup.ErrAdminRequired):
 		return http.StatusForbidden
-	case strings.Contains(msg, "agent") && strings.Contains(msg, "running"):
+	case errors.Is(err, backup.ErrAgentRunning),
+		errors.Is(err, backup.ErrLockHeld):
 		return http.StatusConflict
-	case strings.Contains(msg, "another backup is already in progress"):
-		return http.StatusConflict
-	case strings.Contains(msg, "format version"):
+	case errors.Is(err, backup.ErrFormatTooNew),
+		errors.Is(err, backup.ErrFormatTooOld),
+		errors.Is(err, backup.ErrSchemaTooOld),
+		errors.Is(err, backup.ErrInvalidManifest),
+		errors.Is(err, backup.ErrInvalidScope):
 		return http.StatusBadRequest
+	case errors.Is(err, backup.ErrDecryption),
+		errors.Is(err, backup.ErrInvalidChecksum):
+		return http.StatusBadRequest
+	case errors.Is(err, backup.ErrNoOpRestore):
+		// The DB was never mutated; surface as 409 so the client sees
+		// "nothing to do" rather than "internal error".
+		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError
 	}

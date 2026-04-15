@@ -42,13 +42,23 @@ func TestValidateBackupPath_RejectsParentEscape(t *testing.T) {
 }
 
 func TestStatusForBackupError(t *testing.T) {
+	// Cases drive off the backup package sentinel errors rather than
+	// substring-matching fmt.Errorf strings — if the backup package
+	// reworks its wording, status mapping stays stable.
 	cases := map[error]int{
 		nil: http.StatusOK,
-		fmt.Errorf("admin role required (have MEMBER)"):                                http.StatusForbidden,
-		fmt.Errorf("backup refused: agent \"x\" is running"):                           http.StatusConflict,
-		fmt.Errorf("backup: another backup is already in progress for this workspace"): http.StatusConflict,
-		errors.New("backup: bundle format version too old"):                            http.StatusBadRequest,
-		errors.New("database unavailable"):                                             http.StatusInternalServerError,
+		fmt.Errorf("wrapped: %w", backup.ErrAdminRequired):   http.StatusForbidden,
+		fmt.Errorf("wrapped: %w", backup.ErrAgentRunning):    http.StatusConflict,
+		fmt.Errorf("wrapped: %w", backup.ErrLockHeld):        http.StatusConflict,
+		fmt.Errorf("wrapped: %w", backup.ErrFormatTooNew):    http.StatusBadRequest,
+		fmt.Errorf("wrapped: %w", backup.ErrFormatTooOld):    http.StatusBadRequest,
+		fmt.Errorf("wrapped: %w", backup.ErrSchemaTooOld):    http.StatusBadRequest,
+		fmt.Errorf("wrapped: %w", backup.ErrInvalidManifest): http.StatusBadRequest,
+		fmt.Errorf("wrapped: %w", backup.ErrInvalidScope):    http.StatusBadRequest,
+		fmt.Errorf("wrapped: %w", backup.ErrDecryption):      http.StatusBadRequest,
+		fmt.Errorf("wrapped: %w", backup.ErrInvalidChecksum): http.StatusBadRequest,
+		fmt.Errorf("wrapped: %w", backup.ErrNoOpRestore):     http.StatusConflict,
+		errors.New("database unavailable"):                   http.StatusInternalServerError,
 	}
 	for err, wantStatus := range cases {
 		if got := statusForBackupError(err); got != wantStatus {

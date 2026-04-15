@@ -434,8 +434,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		}
 		if len(missing) > 0 {
 			return nil, fmt.Errorf(
-				"backup: target schema is older than the bundle — missing migrations %v. Upgrade Crewship on this host to at least the version that introduced those migrations, then retry restore",
-				missing,
+				"%w — missing migrations %v. Upgrade Crewship on this host to at least the version that introduced those migrations, then retry restore",
+				ErrSchemaTooOld, missing,
 			)
 		}
 	}
@@ -583,7 +583,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 			RestoredWs:   firstWorkspaceSlug(extracted.DBDump),
 			CrewsCount:   len(manifest.Contents.Crews),
 			RowsInserted: 0,
-		}, fmt.Errorf("backup: restore completed but inserted 0 of %d rows — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", stats.RowsSeen)
+		}, fmt.Errorf("%w: 0 of %d rows inserted — every primary key collided with an existing row. Restore into a clean target instance, or supply --as-workspace to re-scope IDs (workspace scope only)", ErrNoOpRestore, stats.RowsSeen)
 	}
 
 	return &RestoreResult{
@@ -745,7 +745,7 @@ func ensureAgentsIdle(ctx context.Context, db *sql.DB, target *WorkspaceTarget) 
 	if err != nil {
 		return fmt.Errorf("backup: agent-idle guard query: %w", err)
 	}
-	return fmt.Errorf("backup refused: agent %q is running; abort the run or wait for it to finish", running)
+	return fmt.Errorf("%w: agent %q; abort the run or wait for it to finish", ErrAgentRunning, running)
 }
 
 // columnExists reports whether table.column is present in the current
