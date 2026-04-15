@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
@@ -321,6 +322,7 @@ func (r *Router) registerRoutes() {
 	skills := NewSkillHandler(r.db, r.logger)
 	runs := NewRunHandler(r.db, r.logger)
 	audit := NewAuditHandler(r.db, r.logger)
+	backupH := NewBackupHandler(r.db, r.logger, r.dockerClient, os.Getenv("CREWSHIP_VERSION"))
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
@@ -576,6 +578,15 @@ func (r *Router) registerRoutes() {
 
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
+
+	// Backups (admin-only; require workspace context for scoping). See
+	// .claude/context/prd/BACKUP.md for the full API contract.
+	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))
+	r.mux.Handle("GET /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.List))))
+	r.mux.Handle("GET /api/v1/admin/backups/inspect", authed(wsCtx(http.HandlerFunc(backupH.Inspect))))
+	r.mux.Handle("GET /api/v1/admin/backups/download", authed(wsCtx(http.HandlerFunc(backupH.Download))))
+	r.mux.Handle("POST /api/v1/admin/backups/restore", authed(wsCtx(http.HandlerFunc(backupH.Restore))))
+	r.mux.Handle("DELETE /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Delete))))
 
 	// MCP tool call audit (require workspace context)
 	mcpAudit := NewMCPAuditHandler(r.db, r.logger)

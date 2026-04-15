@@ -1,0 +1,401 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
+	"github.com/crewship-ai/crewship/internal/cli"
+)
+
+// backupCmd is the root of `crewship backup …`. All backup operations
+// are admin-only (OWNER/ADMIN on the workspace) and hit the
+// /api/v1/admin/backups endpoints on a running Crewship server.
+var backupCmd = &cobra.Command{
+	Use:   "backup",
+	Short: "Create, list, inspect and restore workspace / crew backups (admin only)",
+	Long: `Manage workspace and crew backups. All subcommands require OWNER or
+ADMIN role on the workspace; MEMBER and VIEWER roles are refused.
+
+Bundles live at ~/.crewship/backups by default and are AGE-encrypted
+with a passphrase unless --no-encrypt is supplied.
+
+Examples:
+  crewship backup create --scope=workspace
+  crewship backup create --scope=crew --crew=<slug-or-id>
+  crewship backup list
+  crewship backup inspect ~/.crewship/backups/crewship-workspace-acme-*.tar.zst
+  crewship backup restore ~/.crewship/backups/crewship-workspace-acme-*.tar.zst
+  crewship backup delete ~/.crewship/backups/old.tar.zst`,
+}
+
+var backupCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new backup bundle",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		scope, _ := cmd.Flags().GetString("scope")
+		crewRef, _ := cmd.Flags().GetString("crew")
+		noEncrypt, _ := cmd.Flags().GetBool("no-encrypt")
+		passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
+
+		if scope != "workspace" && scope != "crew" {
+			return fmt.Errorf("--scope must be 'workspace' or 'crew' (got %q)", scope)
+		}
+		if scope == "crew" && crewRef == "" {
+			return fmt.Errorf("--crew <slug-or-id> is required when --scope=crew")
+		}
+
+		// Collect passphrase unless the user opted out explicitly.
+		var passphrase string
+		if !noEncrypt {
+			p, err := readPassphrase(passphraseFile, true /*confirm*/)
+			if err != nil {
+				return err
+			}
+			passphrase = p
+		} else {
+			cli.PrintWarning("--no-encrypt: bundle will contain plaintext data. Protect it accordingly.")
+		}
+
+		// Resolve crew slug → ID if necessary.
+		client := newAPIClient()
+		var crewID string
+		if scope == "crew" {
+			var err error
+			crewID, err = resolveCrewID(client, crewRef)
+			if err != nil {
+				return err
+			}
+		}
+
+		body := map[string]any{
+			"scope":      scope,
+			"crew_id":    crewID,
+			"passphrase": passphrase,
+			"no_encrypt": noEncrypt,
+		}
+		resp, err := client.Post("/api/v1/admin/backups", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Path          string `json:"path"`
+			Size          int64  `json:"size_bytes"`
+			SHA256        string `json:"payload_sha256"`
+			FormatVersion int    `json:"format_version"`
+			Scope         string `json:"scope"`
+			Encrypted     bool   `json:"encrypted"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Backup created: %s", out.Path))
+		f := newFormatter()
+		headers := []string{"SCOPE", "SIZE", "ENCRYPTED", "FORMAT", "SHA256"}
+		rows := [][]string{{
+			out.Scope,
+			formatBytes(out.Size),
+			yesNo(out.Encrypted),
+			fmt.Sprintf("v%d", out.FormatVersion),
+			truncateLong(out.SHA256, 20),
+		}}
+		f.Table(headers, rows)
+		return nil
+	},
+}
+
+var backupListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List backup bundles in ~/.crewship/backups",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/admin/backups")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Data []struct {
+				Path          string `json:"path"`
+				FileName      string `json:"file_name"`
+				Size          int64  `json:"size_bytes"`
+				Scope         string `json:"scope"`
+				Encrypted     bool   `json:"encrypted"`
+				CreatedAt     string `json:"created_at,omitempty"`
+				FormatVersion int    `json:"format_version,omitempty"`
+			} `json:"data"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		if len(out.Data) == 0 {
+			fmt.Fprintln(os.Stderr, "No backups found.")
+			return nil
+		}
+		f := newFormatter()
+		headers := []string{"FILE", "SCOPE", "SIZE", "ENCRYPTED", "FORMAT", "CREATED_AT"}
+		rows := make([][]string, 0, len(out.Data))
+		for _, e := range out.Data {
+			rows = append(rows, []string{
+				e.FileName,
+				e.Scope,
+				formatBytes(e.Size),
+				yesNo(e.Encrypted),
+				fmt.Sprintf("v%d", e.FormatVersion),
+				e.CreatedAt,
+			})
+		}
+		f.Table(headers, rows)
+		return nil
+	},
+}
+
+var backupInspectCmd = &cobra.Command{
+	Use:   "inspect <file>",
+	Short: "Show the manifest of a backup bundle without decrypting the payload",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/admin/backups/inspect?path=" + encodeQuery(args[0]))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := cli.ReadJSON(resp, &raw); err != nil {
+			return err
+		}
+		pretty, _ := json.MarshalIndent(raw, "", "  ")
+		fmt.Println(string(pretty))
+		return nil
+	},
+}
+
+var backupRestoreCmd = &cobra.Command{
+	Use:   "restore <file>",
+	Short: "Restore a workspace or crew from a backup bundle",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		asWorkspace, _ := cmd.Flags().GetString("as-workspace")
+		asCrew, _ := cmd.Flags().GetString("as-crew")
+		passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
+
+		// Ask for passphrase unless bundle is known to be unencrypted.
+		// We cannot cheaply inspect from here without a round-trip, so
+		// we always prompt and let the server reject an empty passphrase
+		// on encrypted bundles.
+		passphrase, err := readPassphrase(passphraseFile, false /*no confirm*/)
+		if err != nil {
+			return err
+		}
+
+		body := map[string]any{
+			"path":         args[0],
+			"passphrase":   passphrase,
+			"as_workspace": asWorkspace,
+			"as_crew":      asCrew,
+		}
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/admin/backups/restore", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			RestoredWs   string `json:"restored_ws"`
+			CrewsCount   int    `json:"crews_count"`
+			RowsInserted int    `json:"rows_inserted"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf(
+			"Restore complete — workspace=%s, crews=%d, rows=%d",
+			out.RestoredWs, out.CrewsCount, out.RowsInserted,
+		))
+		return nil
+	},
+}
+
+var backupDeleteCmd = &cobra.Command{
+	Use:   "delete <file>",
+	Short: "Delete a backup bundle from disk",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Delete("/api/v1/admin/backups?path=" + encodeQuery(args[0]))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+		cli.PrintSuccess("Backup deleted: " + args[0])
+		return nil
+	},
+}
+
+func init() {
+	backupCreateCmd.Flags().String("scope", "workspace", "Backup scope: workspace | crew")
+	backupCreateCmd.Flags().String("crew", "", "Crew slug or ID (required for --scope=crew)")
+	backupCreateCmd.Flags().Bool("no-encrypt", false, "Write a plaintext payload instead of AGE-encrypting it")
+	backupCreateCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
+
+	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
+	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
+	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
+
+	backupCmd.AddCommand(backupCreateCmd)
+	backupCmd.AddCommand(backupListCmd)
+	backupCmd.AddCommand(backupInspectCmd)
+	backupCmd.AddCommand(backupRestoreCmd)
+	backupCmd.AddCommand(backupDeleteCmd)
+}
+
+// readPassphrase reads a passphrase from the given file, or prompts the
+// user on stderr if the file path is empty. When confirm is true the
+// user types the passphrase twice and mismatches return an error — this
+// matches AGE's own CLI conventions and guards against typos on
+// create-only flows. Restore accepts a single read.
+func readPassphrase(file string, confirm bool) (string, error) {
+	if file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("read passphrase file: %w", err)
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	// Interactive prompt. Reading from /dev/tty respects environments
+	// where stdin was redirected by a helper script.
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		// Non-interactive environment without --passphrase-file:
+		// fall back to a single line from stdin.
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() {
+			return "", errors.New("no passphrase on stdin")
+		}
+		return strings.TrimSpace(scanner.Text()), nil
+	}
+	fmt.Fprint(os.Stderr, "Passphrase: ")
+	first, err := term.ReadPassword(fd)
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("read passphrase: %w", err)
+	}
+	if !confirm {
+		return string(first), nil
+	}
+	fmt.Fprint(os.Stderr, "Confirm passphrase: ")
+	second, err := term.ReadPassword(fd)
+	fmt.Fprintln(os.Stderr)
+	if err != nil {
+		return "", fmt.Errorf("read confirmation: %w", err)
+	}
+	if string(first) != string(second) {
+		return "", errors.New("passphrases do not match")
+	}
+	if len(strings.TrimSpace(string(first))) == 0 {
+		return "", errors.New("passphrase must not be empty")
+	}
+	return string(first), nil
+}
+
+// --- small formatting helpers kept local to avoid polluting other files.
+
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(n)/float64(int64(1)<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/float64(int64(1)<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KiB", float64(n)/float64(int64(1)<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+func truncateLong(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
+
+// encodeQuery is a minimal URL query escape for path values passed via
+// the ?path= query string. We avoid net/url just to keep the file's
+// import list short.
+func encodeQuery(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == ' ':
+			b.WriteString("%20")
+		case r == '&':
+			b.WriteString("%26")
+		case r == '#':
+			b.WriteString("%23")
+		case r == '?':
+			b.WriteString("%3F")
+		case r == '+':
+			b.WriteString("%2B")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
