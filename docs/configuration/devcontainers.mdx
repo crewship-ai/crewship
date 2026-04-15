@@ -157,6 +157,23 @@ Enforced in `internal/api/crews.go` write paths and `devcontainer.Config.Validat
 - Total `devcontainer_config` blob ≤ 100 KB.
 - Total `mise_config` blob ≤ 10 KB.
 
+## Cache image naming
+
+Successful provisions commit a reusable layer tagged `crewship-cache:{hash[:12]}`, where `hash` is the SHA-256 of `(runtime_image, devcontainer_config, mise_config)`. The full 64-char hash is written to `crews.config_hash`; the truncated 12-char form is used as the image tag so `docker images` stays legible.
+
+- **Cache hit** — provisioner sees the `crewship-cache:{hash[:12]}` image already exists and the crew row is in sync. No work is done; `cached_image` is kept.
+- **Cache miss** — hash differs from `crews.config_hash`, or the tagged image was pruned. Full feature + mise install runs and the new image is committed under the new hash.
+
+Two crews with identical configs share the same cache image (deduped on first provision). Pushing a custom `containerEnv` key or tweaking `postCreateCommand` changes the hash and creates a fresh cache image; the old one becomes eligible for GC after its last crew migrates off.
+
+## Runtime base-image digest check
+
+`internal/dockerutil/imagedigest.go` keeps a HEAD-manifest cache of remote base-image digests (`DefaultDigestTTL = 24 * time.Hour`). On a provision request, the resolver checks whether the caller's `runtime_image` reference still resolves to the digest baked into the existing cache image. If the registry has moved the tag (security update, rolled release), the provisioner treats the cache as stale even when the `config_hash` is unchanged and rebuilds.
+
+- **TTL:** 24 hours. Empty/negative results are also cached so a missing upstream does not trigger a HEAD storm.
+- **Bypass:** pin `runtime_image` to an explicit digest (`ghcr.io/…@sha256:…`). Digest-pinned references skip the HEAD round-trip.
+- **Shared:** the same resolver backs `GET /api/v1/admin/cache` so the admin UI and the provisioner do not double-pay for the registry check.
+
 ## Background GC
 
 `ProvisioningHandler` runs a sweeper every 30 minutes (and once at startup)
@@ -170,14 +187,20 @@ to remove crash leaks:
   Provision() has just committed but not yet linked to a crew, eliminating
   the obvious race window.
 
-Cache-image deletion is opt-in via [`CREWSHIP_CACHE_GC_AUTODELETE`](/configuration/environment#devcontainer-cache-gc).
-Default is log-only — operators see the orphan list and can decide. The
-sweeper logs a single line per pass with `removed`, `total_orphans`, and
-`skipped_too_young` so dashboards can alert on growth.
+### Orphan deletion policy
 
-The sweeper shares a 10-second image-list cache with `GET /api/v1/admin/cache`,
-so admin UI polling does not pay the O(n) Docker `ImageList` cost on every
-request.
+Cache-image deletion is opt-in via the `CREWSHIP_CACHE_GC_AUTODELETE` environment variable (also described in [Environment → Devcontainer cache GC](/configuration/environment#devcontainer-cache-gc)):
+
+| Value | Behaviour |
+|---|---|
+| unset / `0` / `false` (default) | **Log-only.** Orphans are enumerated and logged; nothing is deleted. Operators see the list and can decide. |
+| `1` / `true` | **Auto-delete.** Orphans beyond the 5-minute age floor are force-removed each pass. |
+
+The sweeper logs a single line per pass with `removed`, `total_orphans`, and `skipped_too_young` so dashboards can alert on cache growth regardless of mode.
+
+### Image-list cache
+
+Docker's `ImageList` is O(n) over every image on the host. The sweeper and `GET /api/v1/admin/cache` share a **10-second image-list cache** so admin UI polling does not pay that cost on every request. The cache is invalidated on any commit/delete performed by the provisioner itself, so the caller always sees its own writes.
 
 ## Code of record
 
