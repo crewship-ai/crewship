@@ -165,11 +165,9 @@ func (m *Manifest) Validate() error {
 // WriteTo serializes m as pretty-printed JSON to w. A trailing newline
 // is emitted so the file is POSIX text-file compliant.
 func (m *Manifest) WriteTo(w io.Writer) (int64, error) {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
 	// Count bytes via a wrapper; json.Encoder does not expose counts.
 	cw := &countingWriter{w: w}
-	enc = json.NewEncoder(cw)
+	enc := json.NewEncoder(cw)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(m); err != nil {
 		return cw.n, err

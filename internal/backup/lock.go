@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -51,7 +52,7 @@ func NewSQLLockManager(db *sql.DB) *SQLLockManager {
 // the lock.
 func (m *SQLLockManager) AcquireWorkspaceLock(ctx context.Context, workspaceID, userID string, ttl time.Duration) (ReleaseFunc, error) {
 	if workspaceID == "" {
-		return nil, fmt.Errorf("%w: workspace_id must be set", ErrInvalidManifest)
+		return nil, fmt.Errorf("backup: AcquireWorkspaceLock: workspace_id must be set")
 	}
 	if ttl <= 0 {
 		ttl = DefaultLockTTL
@@ -88,10 +89,18 @@ func (m *SQLLockManager) AcquireWorkspaceLock(ctx context.Context, workspaceID, 
 		expires.Format(time.RFC3339),
 	)
 	if err != nil {
-		// modernc.org/sqlite returns a generic error on PK conflict; the
-		// text varies by binding. Any INSERT failure at this point means
-		// the row exists and is not yet expired.
-		return nil, ErrLockHeld
+		// Distinguish primary-key collision (lock held by another backup)
+		// from any other DB error (connection drop, FK violation on a
+		// non-existent workspace_id, etc.). modernc.org/sqlite surfaces
+		// the collision as a message containing "UNIQUE constraint failed"
+		// or "PRIMARY KEY constraint failed"; fall back to wrapping the
+		// raw error otherwise so the caller can see the root cause.
+		msg := err.Error()
+		if strings.Contains(msg, "UNIQUE constraint failed") ||
+			strings.Contains(msg, "PRIMARY KEY constraint failed") {
+			return nil, ErrLockHeld
+		}
+		return nil, fmt.Errorf("backup: insert lock: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

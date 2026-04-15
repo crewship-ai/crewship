@@ -22,6 +22,15 @@ func EncryptStream(out io.Writer, recipients ...age.Recipient) (io.WriteCloser, 
 	if len(recipients) == 0 {
 		return nil, fmt.Errorf("backup: EncryptStream requires at least one recipient")
 	}
+	// age requires that ScryptRecipient (passphrase-based) be the sole
+	// recipient. Mixing it with X25519 or multiple scrypts is rejected
+	// by the library with an opaque error deep inside Wrap; catch that
+	// here so callers get a clear message before streaming begins.
+	for _, r := range recipients {
+		if _, isScrypt := r.(*age.ScryptRecipient); isScrypt && len(recipients) != 1 {
+			return nil, fmt.Errorf("backup: passphrase (scrypt) recipient must be the only recipient")
+		}
+	}
 	w, err := age.Encrypt(out, recipients...)
 	if err != nil {
 		return nil, fmt.Errorf("backup: init age encryptor: %w", err)

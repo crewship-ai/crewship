@@ -127,3 +127,20 @@ func TestEncryptStreamPassphrase_EmptyPassword(t *testing.T) {
 		t.Error("expected error for empty passphrase")
 	}
 }
+
+func TestEncryptStream_RejectsMixedScryptAndX25519(t *testing.T) {
+	id, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatalf("gen identity: %v", err)
+	}
+	scrypt, err := age.NewScryptRecipient("test-passphrase")
+	if err != nil {
+		t.Fatalf("new scrypt: %v", err)
+	}
+	// Scrypt + X25519 in the same bundle is a library-level error that
+	// surfaces deep inside Wrap; EncryptStream must catch it up front.
+	_, err = EncryptStream(&bytes.Buffer{}, scrypt, id.Recipient())
+	if err == nil || !strings.Contains(err.Error(), "only recipient") {
+		t.Errorf("expected 'only recipient' error, got %v", err)
+	}
+}

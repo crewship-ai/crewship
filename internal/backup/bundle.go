@@ -174,6 +174,7 @@ func ReadBundle(src io.Reader) (*Manifest, io.Reader, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() { _ = tr.Close() }()
 
 	var manifest *Manifest
 	var payloadBuf bytes.Buffer
