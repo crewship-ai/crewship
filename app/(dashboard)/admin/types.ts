@@ -70,3 +70,4 @@ export type TabKey =
   | "users"
   | "providers"
   | "security"
+  | "backups"

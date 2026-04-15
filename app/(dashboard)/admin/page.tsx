@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
-  LayoutDashboard, Building, Users, Server, Shield,
+  LayoutDashboard, Building, Users, Server, Shield, Database,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -16,6 +16,7 @@ import { RuntimeTab } from "./tabs/runtime-tab"
 import { KeeperTab } from "./tabs/keeper-tab"
 import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
+import { BackupsTab } from "./tabs/backups-tab"
 
 /**
  * Admin sidebar sections — ONLY real, wired tabs.
@@ -56,6 +57,12 @@ const sections: NavSection[] = [
     label: "Security",
     items: [
       { key: "security", label: "Keeper", icon: Shield },
+    ],
+  },
+  {
+    label: "Data",
+    items: [
+      { key: "backups", label: "Backups", icon: Database },
     ],
   },
 ]
@@ -215,6 +222,10 @@ export default function AdminPage() {
           onCheckRuntime={checkRuntime}
         />
       )
+    }
+
+    if (tab === "backups") {
+      return <BackupsTab workspaceId={workspaceId ?? undefined} />
     }
 
     if (tab === "security") {

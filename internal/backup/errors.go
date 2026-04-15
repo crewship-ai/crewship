@@ -65,4 +65,12 @@ var (
 	// the lot. Callers map to a non-fatal warning so the admin can
 	// re-run with --as-workspace.
 	ErrNoOpRestore = errors.New("backup: restore inserted zero rows despite non-empty bundle")
+
+	// ErrRestoreBackfillFailed is returned when a per-migration
+	// restoreBackfill hook returned an error. At the point this fires
+	// the main restore transaction has already committed, so rolling
+	// back is not automatic — the admin must inspect the target DB,
+	// re-run the backfill manually, or restore onto a clean instance.
+	// Maps to HTTP 500.
+	ErrRestoreBackfillFailed = errors.New("backup: restore backfill hook failed")
 )

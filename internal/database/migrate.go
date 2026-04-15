@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 )
 
 // Migrate applies all pending schema migrations to the database in order.
@@ -85,7 +86,24 @@ type migration struct {
 	// fn, if set, runs instead of sql. Receives the migration's transaction
 	// so its work commits atomically with the _migrations row.
 	fn func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
+	// restoreBackfill, if set, runs during RestoreBackup against the rows
+	// just re-inserted from a bundle whose source schema predates this
+	// migration. The bundle's manifest records the migration versions
+	// applied on the source; when the target has additional migrations
+	// applied (target > source) the backup subsystem calls the hook for
+	// each such migration so newly-added columns get populated on the
+	// restored rows. Pure ADD COLUMN migrations that rely on the DB
+	// DEFAULT need no hook. See internal/backup/runner.go RestoreBackup.
+	restoreBackfill RestoreBackfillFunc
 }
+
+// RestoreBackfillFunc is the signature for per-migration hooks that
+// populate newly-added columns on rows just restored from an older
+// bundle. Runs in its own transaction after the main restore tx has
+// committed successfully; a returned error aborts the restore but does
+// not roll back the already-committed row inserts — callers log
+// loudly and prompt the operator to investigate.
+type RestoreBackfillFunc func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
 
 var migrations = []migration{
 	{version: 1, name: "init", sql: migrationInit},
@@ -173,6 +191,96 @@ CREATE TABLE IF NOT EXISTS backup_locks (
 );
 CREATE INDEX IF NOT EXISTS idx_backup_locks_expires ON backup_locks(expires_at);
 `},
+	// Backup catalog — fast list of known bundles so the admin UI does
+	// not have to filesystem-scan and parse every manifest on each
+	// refresh. Populated on CreateBackup success, pruned on Delete. An
+	// idempotent startup scan in internal/backup/catalog.go walks the
+	// default backups dir and back-fills rows for bundles that existed
+	// before this migration. See CRE-128 in .claude/context/prd/BACKUP.md.
+	{version: 49, name: "add_backup_catalog", sql: `
+CREATE TABLE IF NOT EXISTS backup_catalog (
+    id TEXT PRIMARY KEY,
+    file_path TEXT NOT NULL UNIQUE,
+    scope TEXT NOT NULL,
+    slug TEXT,
+    workspace_id TEXT,
+    created_at TEXT NOT NULL,
+    created_by TEXT,
+    size INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    encrypted INTEGER NOT NULL,
+    format_version INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_backup_catalog_workspace ON backup_catalog(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_backup_catalog_created_at ON backup_catalog(created_at);
+`},
+	// Persistent instance identity for CRE-129 (instance-scope backup /
+	// restore). Single-row table (CHECK id=1) so the row always exists
+	// once migration runs; hostname is populated at first startup by
+	// internal/backup/instance.go. When the manifest's source hostname
+	// differs from the target's on restore, the flow forces an auth-key
+	// rotation because we are clearly on a different host.
+	{version: 50, name: "add_instance_config", sql: `
+CREATE TABLE IF NOT EXISTS instance_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    hostname TEXT NOT NULL DEFAULT '',
+    installed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO instance_config (id, hostname) VALUES (1, '');
+`},
+}
+
+// restoreBackfillOverrides lets tests wire a hook without touching the
+// main migrations slice. Keyed by version; a registered fn shadows
+// whatever the migration's own restoreBackfill would return. Access
+// goes through restoreBackfillMu because Go's test runner executes
+// functions in parallel by default, and tests in
+// restorer_backfill_test.go all register+unregister overrides.
+var (
+	restoreBackfillOverrides   = map[int]RestoreBackfillFunc{}
+	restoreBackfillOverridesMu sync.RWMutex
+)
+
+// RestoreBackfillFor returns the hook registered for the given
+// migration version, or nil if none. Consulted by the backup runner
+// during RestoreBackup so each missing-on-source-but-applied-on-target
+// migration can populate its added columns on the restored rows.
+//
+// The lookup prefers test overrides over the baked-in migration hook,
+// so a test can exercise the replay plumbing without mutating the
+// package's migration table.
+func RestoreBackfillFor(version int) RestoreBackfillFunc {
+	restoreBackfillOverridesMu.RLock()
+	fn, ok := restoreBackfillOverrides[version]
+	restoreBackfillOverridesMu.RUnlock()
+	if ok {
+		return fn
+	}
+	for _, m := range migrations {
+		if m.version == version {
+			return m.restoreBackfill
+		}
+	}
+	return nil
+}
+
+// RegisterRestoreBackfill installs a hook for the given migration
+// version, returning a deregister closure. Intended for tests. A
+// second call for the same version replaces the prior registration.
+func RegisterRestoreBackfill(version int, fn RestoreBackfillFunc) (unregister func()) {
+	restoreBackfillOverridesMu.Lock()
+	prev, had := restoreBackfillOverrides[version]
+	restoreBackfillOverrides[version] = fn
+	restoreBackfillOverridesMu.Unlock()
+	return func() {
+		restoreBackfillOverridesMu.Lock()
+		defer restoreBackfillOverridesMu.Unlock()
+		if had {
+			restoreBackfillOverrides[version] = prev
+		} else {
+			delete(restoreBackfillOverrides, version)
+		}
+	}
 }
 
 // RollbackV47 reverts the schema change introduced by migration v47

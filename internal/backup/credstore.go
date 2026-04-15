@@ -1,0 +1,190 @@
+package backup
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+)
+
+// EncryptedCredential is the wire shape for credstore rows exported
+// into an instance-scope bundle. The encrypted_value field keeps its
+// "v1:<base64>" prefix exactly — we deliberately do NOT decrypt at
+// backup time so the bundle has two layers of protection (credstore
+// master key on the plaintext, AGE recipient on the outer payload).
+//
+// Fields must cover every NOT NULL column in the canonical
+// credentials schema (see migrate.go migrationAddKeeper): omitting
+// created_by (NOT NULL FK to users.id) fails the restore INSERT with
+// a constraint violation. crew_id and scope preserve the credential's
+// workspace/crew wiring across hosts.
+type EncryptedCredential struct {
+	ID             string
+	WorkspaceID    string
+	CrewID         string // nullable FK → crews.id
+	Name           string
+	Description    string
+	Type           string
+	Scope          string // 'WORKSPACE' | 'CREW' | …
+	Status         string
+	Provider       string
+	SecurityLevel  int
+	KeeperCrewID   string
+	EncryptedValue string
+	// OAuth metadata — refresh tokens are encrypted on disk; copying
+	// the cipher across hosts preserves long-lived sessions exactly
+	// the same way EncryptedValue does for the primary secret.
+	EncryptedRefreshToken string
+	TokenExpiresAt        string
+	// Account context displayed in the UI / used by the keeper. None
+	// of these are secrets but losing them on restore makes
+	// reconnect/heal flows unable to identify the linked account.
+	AccountLabel  string
+	AccountEmail  string
+	LastCheckedAt string
+	LastError     string
+	CreatedBy     string // NOT NULL FK → users.id — MUST be exported
+	CreatedAt     string
+	UpdatedAt     string
+}
+
+// ExportEncryptedCredentials reads every ACTIVE credential row across
+// all workspaces, returning the cipher blobs WITHOUT decrypting them.
+// The runner writes these straight into the instance bundle payload
+// (inside the outer AGE seal). Restore writes them back via
+// ImportEncryptedCredentials.
+//
+// Only ACTIVE rows are exported. DELETED / revoked credentials stay
+// out of the bundle so a restore does not silently resurrect them.
+func ExportEncryptedCredentials(ctx context.Context, db *sql.DB) ([]EncryptedCredential, error) {
+	if db == nil {
+		// Refuse to claim a successful export with zero rows when the
+		// caller forgot to wire the DB — that masks a serious bug
+		// (missed initialisation) as a benign "empty bundle".
+		return nil, fmt.Errorf("backup: ExportEncryptedCredentials: db is nil")
+	}
+	rows, err := db.QueryContext(ctx, `
+SELECT id, workspace_id, COALESCE(crew_id,''), name, COALESCE(description,''),
+       type, COALESCE(scope,'WORKSPACE'), COALESCE(status,''),
+       COALESCE(provider,''), COALESCE(security_level,0),
+       COALESCE(keeper_crew_id,''), encrypted_value,
+       COALESCE(encrypted_refresh_token,''), COALESCE(token_expires_at,''),
+       COALESCE(account_label,''), COALESCE(account_email,''),
+       COALESCE(last_checked_at,''), COALESCE(last_error,''),
+       created_by, COALESCE(created_at,''), COALESCE(updated_at,'')
+FROM credentials
+WHERE deleted_at IS NULL AND status = 'ACTIVE'
+ORDER BY created_at`)
+	if err != nil {
+		return nil, fmt.Errorf("backup: export credentials: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []EncryptedCredential
+	for rows.Next() {
+		var c EncryptedCredential
+		if err := rows.Scan(
+			&c.ID, &c.WorkspaceID, &c.CrewID, &c.Name, &c.Description,
+			&c.Type, &c.Scope, &c.Status,
+			&c.Provider, &c.SecurityLevel, &c.KeeperCrewID,
+			&c.EncryptedValue,
+			&c.EncryptedRefreshToken, &c.TokenExpiresAt,
+			&c.AccountLabel, &c.AccountEmail,
+			&c.LastCheckedAt, &c.LastError,
+			&c.CreatedBy, &c.CreatedAt, &c.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("backup: scan credential: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: iterate credentials: %w", err)
+	}
+	return out, nil
+}
+
+// ImportEncryptedCredentials inserts the supplied rows back into the
+// credentials table on restore. ON CONFLICT(id) DO NOTHING so an
+// existing credential with the same id is left untouched — an
+// operator who wants to force-replace should restore into a clean
+// instance. Other conflicts (notably UNIQUE(workspace_id, name)
+// collisions on a non-matching id) surface as an error rather than
+// being silently dropped.
+//
+// encrypted_value is written verbatim. The target instance must share
+// the source's ENCRYPTION_KEY env var (or a compatible key version)
+// for the credstore to decrypt these at runtime; if the keys diverge,
+// keeper.Reload will log per-row "decrypt failed" entries and the
+// operator must re-enter affected credentials.
+func ImportEncryptedCredentials(ctx context.Context, db *sql.DB, creds []EncryptedCredential) (int, error) {
+	if db == nil {
+		return 0, fmt.Errorf("backup: ImportEncryptedCredentials: db is nil")
+	}
+	if len(creds) == 0 {
+		return 0, nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("backup: begin credential restore: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	// ON CONFLICT(id) DO NOTHING rather than INSERT OR IGNORE so only
+	// duplicate PKs are silently skipped. A UNIQUE(workspace_id, name)
+	// collision — which would indicate that the target instance has an
+	// unrelated credential under the same name — surfaces as an error
+	// instead of silently losing the restored row.
+	// Column list mirrors ExportEncryptedCredentials 1:1 so the
+	// exporter and importer cannot silently drift apart.
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO credentials
+  (id, workspace_id, crew_id, name, description, type, scope, status,
+   provider, security_level, keeper_crew_id, encrypted_value,
+   encrypted_refresh_token, token_expires_at, account_label, account_email,
+   last_checked_at, last_error,
+   created_by, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO NOTHING`)
+	if err != nil {
+		return 0, fmt.Errorf("backup: prepare credential insert: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+	// emptyAsNull keeps nullable text columns NULL when the source
+	// row had no value — important for token_expires_at /
+	// last_checked_at where downstream code does IS NULL checks
+	// rather than empty-string comparisons.
+	emptyAsNull := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	var inserted int
+	for _, c := range creds {
+		// NULL out empty crew_id since the FK is nullable; sqlite's
+		// empty-string → FK "crews.id = ''" would fail constraint.
+		res, err := stmt.ExecContext(ctx,
+			c.ID, c.WorkspaceID, emptyAsNull(c.CrewID), c.Name, c.Description,
+			c.Type, c.Scope, c.Status,
+			c.Provider, c.SecurityLevel, c.KeeperCrewID,
+			c.EncryptedValue,
+			emptyAsNull(c.EncryptedRefreshToken), emptyAsNull(c.TokenExpiresAt),
+			emptyAsNull(c.AccountLabel), emptyAsNull(c.AccountEmail),
+			emptyAsNull(c.LastCheckedAt), emptyAsNull(c.LastError),
+			c.CreatedBy, c.CreatedAt, c.UpdatedAt,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("backup: insert credential %s: %w", c.ID, err)
+		}
+		if n, err := res.RowsAffected(); err == nil {
+			inserted += int(n)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("backup: commit credential restore: %w", err)
+	}
+	committed = true
+	return inserted, nil
+}
