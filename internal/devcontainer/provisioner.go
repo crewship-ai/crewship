@@ -449,7 +449,7 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 			p.logger.Warn("pull failed; proceeding with local (possibly stale) image", "ref", ref, "error", err)
 			return nil
 		}
-		return err
+		return fmt.Errorf("pull image %q: %w", ref, err)
 	}
 	defer rc.Close()
 	// Docker requires the stream to be fully read for the pull to complete.
