@@ -1,0 +1,159 @@
+"use client"
+
+import * as React from "react"
+import { Check, ExternalLink, Loader2 } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { Card } from "@/components/ui/card"
+import { StatusBadge } from "@/components/ui/status-badge"
+import { cn } from "@/lib/utils"
+
+interface OAuthAutoConnectProps {
+  serverName: string
+  mcpURL: string
+  workspaceId: string | null
+  authStatus: "connected" | "missing" | "expired" | "none"
+  onCredentialCreated: (credId: string) => Promise<void>
+}
+
+/**
+ * OAuth auto-discovery + consent flow for a single MCP integration.
+ * Owns its own polling state so the parent only hears the final
+ * "authorised → credential <id>" event via onCredentialCreated.
+ */
+export function OAuthAutoConnect({
+  serverName,
+  mcpURL,
+  workspaceId,
+  authStatus,
+  onCredentialCreated,
+}: OAuthAutoConnectProps) {
+  const [status, setStatus] = React.useState<
+    "idle" | "discovering" | "authorizing" | "polling" | "done" | "error"
+  >(authStatus === "connected" ? "done" : "idle")
+  const [error, setError] = React.useState("")
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
+
+  async function handleConnect() {
+    if (!workspaceId) return
+    setStatus("discovering")
+    setError("")
+
+    try {
+      const res = await fetch(`/api/v1/oauth/auto-connect?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mcp_url: mcpURL, server_name: serverName }),
+      })
+      const data = await res.json()
+
+      if (data.status === "authorize") {
+        setStatus("authorizing")
+        // Open browser for OAuth consent
+        window.open(data.auth_url, "_blank", "width=600,height=700")
+
+        // Poll credential status until ACTIVE
+        const credId = data.credential_id
+        pollRef.current = setInterval(async () => {
+          try {
+            const credRes = await fetch(`/api/v1/credentials/${credId}?workspace_id=${workspaceId}`)
+            if (credRes.ok) {
+              const cred = await credRes.json()
+              if (cred.status === "ACTIVE") {
+                if (pollRef.current) clearInterval(pollRef.current)
+                pollRef.current = null
+                setStatus("done")
+                await onCredentialCreated(credId)
+              }
+            }
+          } catch { /* keep polling */ }
+        }, 2000)
+
+        // Stop polling after 2 minutes
+        setTimeout(() => {
+          if (pollRef.current) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            setStatus("error")
+            setError("Authorization timed out. Please try again.")
+          }
+        }, 120000)
+      } else if (data.status === "needs_client_id") {
+        setStatus("error")
+        setError(data.message || "Please provide Client ID manually via OAuth form in credential picker.")
+      } else {
+        setStatus("error")
+        setError(data.error || "Unknown error")
+      }
+    } catch {
+      setStatus("error")
+      setError("Network error")
+    }
+  }
+
+  if (status === "done" && authStatus !== "missing" && authStatus !== "expired") {
+    return (
+      <Card className="p-4 bg-surface-subtle">
+        <div className="flex items-center gap-2 text-body font-medium">
+          <Check className="h-4 w-4" />
+          <StatusBadge status="COMPLETED" label="OAuth connected" />
+        </div>
+      </Card>
+    )
+  }
+
+  const isMissing = authStatus === "missing"
+  const isExpired = authStatus === "expired"
+
+  return (
+    <Card
+      className={cn(
+        "p-4 space-y-3",
+        isMissing && "border-destructive/50 bg-destructive/5",
+        isExpired && "border-amber-500/50 bg-amber-500/5",
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-body font-medium">
+          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+          Authentication
+        </div>
+        {isMissing && (
+          <StatusBadge status="FAILED" label="Credential missing" />
+        )}
+        {isExpired && (
+          <StatusBadge status="BLOCKED" label="Expired" />
+        )}
+      </div>
+      <p className="text-label text-muted-foreground">
+        {isMissing
+          ? "The credential for this integration was deleted. Reconnect to restore access."
+          : isExpired
+            ? "The OAuth token has expired. Reconnect to refresh."
+            : "Connect with OAuth to automatically authenticate with this service."}
+      </p>
+      {error && (
+        <p className="text-label text-destructive">{error}</p>
+      )}
+      <Button
+        size="sm"
+        variant={isMissing || isExpired ? "destructive" : "default"}
+        onClick={handleConnect}
+        disabled={status === "discovering" || status === "authorizing" || status === "polling"}
+      >
+        {(status === "discovering" || status === "authorizing") && (
+          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+        )}
+        {status === "authorizing" ? "Waiting for authorization..."
+          : isMissing || isExpired ? "Reconnect with OAuth"
+          : "Connect with OAuth"}
+      </Button>
+    </Card>
+  )
+}

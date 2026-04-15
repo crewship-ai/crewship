@@ -29,7 +29,7 @@ item `blocked:<reason>`.
 
 ### Low risk — extract-only refactors (start here)
 
-- [~] **1. integrations-page** — `app/(dashboard)/integrations/page.tsx`
+- [x] **1. integrations-page** — `app/(dashboard)/integrations/page.tsx`
       (1627 LOC, 5 colocated components). Split into:
       `components/features/integrations/oauth-auto-connect.tsx`,
       `template-popover.tsx`, `test-connection-button.tsx`,
@@ -107,4 +107,5 @@ item `blocked:<reason>`.
 Each completed item appends one line here via the nightly commit.
 
 <!-- start:progress -->
+- `#1 integrations-page` — 1627 → 669 LOC in page.tsx, 6-way split to `components/features/integrations/{types,helpers,oauth-auto-connect,template-popover,test-connection-button,expanded-panel}` (2026-04-15)
 <!-- end:progress -->
