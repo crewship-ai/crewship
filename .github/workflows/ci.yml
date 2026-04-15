@@ -206,7 +206,16 @@ jobs:
           go build -o crewship ./cmd/crewship
 
       - name: Start dev server in background
+        env:
+          # CI runner can't write to /var/lib/crewship (default); redirect
+          # state + storage + logs into the workspace.
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
         run: |
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
           ./crewship start >/tmp/crewship.log 2>&1 &
           echo $! > /tmp/crewship.pid
           # Wait for readiness (up to 30s)
