@@ -74,7 +74,7 @@ item `blocked:<reason>`.
 
 ### High risk — requires tests + race + human review
 
-- [~] **7. mission-tasks-split** `high_risk: true` —
+- [!] **7. mission-tasks-split** `high_risk: true` —
       `internal/orchestrator/mission_tasks.go` (1320 LOC).
       Split by lifecycle stage:
       - `mission_resolve.go` — `ResolveReadyTasks`, `buildMissionBrief`
@@ -83,6 +83,19 @@ item `blocked:<reason>`.
       - `mission_complete.go` — `OnAssignmentCompleted`, `checkApprovalGate`
       BEFORE splitting: write integration test that drives the full
       lifecycle if one doesn't exist. Risk: HIGH.
+
+      > blocked: the high-risk gate requires `go test -race` green,
+      > but `TestScheduleTask_CrossCrew_Connected` reports a
+      > pre-existing data race on `main` (goroutine spawned inside
+      > `scheduleTask`). The refactor itself was a pure file move
+      > (3-way split into `mission_resolve.go`/`mission_schedule.go`/
+      > `mission_complete.go`) and validated green without `-race`,
+      > but the autonomous pass refuses to merge work that hides
+      > behind a flaky race detector. Human action: fix the race in
+      > `scheduleTask`'s goroutine first (likely a shared map /
+      > slice accessed from the spawned goroutine without a lock),
+      > then re-open this item by flipping the checkbox back to
+      > `[ ]`. Revert preserved `main`-matching runner state.
 
 - [ ] **8. orchestrator-config-split** `high_risk: true` —
       `internal/orchestrator/orchestrator.go` (1195 LOC). Extract
