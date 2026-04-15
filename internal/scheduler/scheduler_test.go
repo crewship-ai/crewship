@@ -121,6 +121,9 @@ func (m *mockContainer) ContainerStats(_ context.Context, _ string) (*provider.C
 	return nil, nil
 }
 func (m *mockContainer) CrewContainerName(_ string) string { return "test-container" }
+func (m *mockContainer) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
+	return nil
+}
 
 // in-memory state mock for orchestrator
 type memState struct {

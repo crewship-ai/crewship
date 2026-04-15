@@ -23,6 +23,7 @@ import { toast } from "sonner"
 import { CrewNameSlugFields } from "@/components/features/crews/crew-name-slug-fields"
 import { CrewAgentPreviewList } from "@/components/features/crews/crew-agent-preview-list"
 import { QuickStartTemplateGrid, TemplateGallery } from "@/components/features/crews/crew-template-picker"
+import { RuntimeConfig, type RuntimeConfigValue } from "@/components/features/crews/runtime-config"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,12 @@ export default function NewCrewPage() {
   // id to a Tailwind class, so any freeform hex would break them.
   const [color, setColor] = useState<CrewPaletteId>("blue")
   const [icon, setIcon] = useState("")
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigValue>({
+    runtimeImage: "",
+    devcontainerConfig: "",
+    miseConfig: "",
+  })
+  const [runtimeDirty, setRuntimeDirty] = useState(false)
 
   useEffect(() => {
     if (!slugManual) setSlug(slugify(name))
@@ -289,6 +296,9 @@ export default function NewCrewPage() {
       if (description) body.description = description
       if (color) body.color = color
       if (icon) body.icon = icon
+      if (runtimeDirty && runtimeConfig.devcontainerConfig) body.devcontainer_config = runtimeConfig.devcontainerConfig
+      if (runtimeDirty && runtimeConfig.miseConfig) body.mise_config = runtimeConfig.miseConfig
+      if (runtimeDirty && runtimeConfig.runtimeImage && runtimeConfig.runtimeImage !== "debian:bookworm-slim") body.runtime_image = runtimeConfig.runtimeImage
 
       try {
         const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`, {
@@ -309,7 +319,7 @@ export default function NewCrewPage() {
         setSubmitting(false)
       }
     },
-    [workspaceId, name, slug, description, color, icon, router]
+    [workspaceId, name, slug, description, color, icon, runtimeConfig, runtimeDirty, router]
   )
 
   // ── Loading ──────────────────────────────────────────────────────────────────
@@ -677,6 +687,13 @@ export default function NewCrewPage() {
               </div>
             </div>
           </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Runtime Configuration"
+          description="Configure devcontainer features, language runtimes, and base image for the crew container."
+        >
+          <RuntimeConfig value={runtimeConfig} onChange={(val) => { setRuntimeConfig(val); setRuntimeDirty(true) }} />
         </SectionCard>
 
         <div className="flex items-center gap-3 pt-2">

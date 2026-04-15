@@ -1,0 +1,458 @@
+---
+title: "Devcontainers & Runtime Images"
+description: "Bring your own Linux base image, declare devcontainer features and mise tools, and let Crewship provision a cached per-crew image. The sidecar is bind-mounted from the host — no custom runtime image needed."
+icon: "container"
+---
+
+# Devcontainers & Runtime Images
+
+Crewship used to ship a single monolithic `ghcr.io/crewship-ai/agent-runtime` image with every CLI, tool, and the sidecar baked in. That image has been retired (commit [`dd86356`](https://github.com/crewship-ai/crewship/commit/dd86356)). **Any glibc-based Linux base image now works** — Crewship provisions the crew-specific tooling on top via [devcontainer features](https://containers.dev/implementors/features/) and bind-mounts the sidecar from the host.
+
+This guide explains the whole pipeline end-to-end, from setting a base image on a crew to running agents inside the cached per-crew image.
+
+## What you get
+
+<CardGroup cols={2}>
+  <Card title="Bring Your Own Image (BYOI)" icon="box">
+    Use `debian:bookworm-slim`, `ubuntu:24.04`, `mcr.microsoft.com/devcontainers/base:bookworm`, or any other glibc Linux image. Musl/Alpine is unsupported (the Go sidecar binary is CGO-free but still glibc-linked).
+  </Card>
+  <Card title="Community Features" icon="puzzle-piece">
+    Declarative tooling via the open [devcontainer Features spec](https://containers.dev/implementors/features/). Dependencies sort automatically (`installsAfter`).
+  </Card>
+  <Card title="mise Runtime Tools" icon="layer-group">
+    Pin exact language versions (Node 22, Python 3.12, Terraform 1.9) via a `mise.json` block — no Dockerfile required.
+  </Card>
+  <Card title="Per-Crew Cached Image" icon="database">
+    Provisioning commits the container as `crewship-cache:{hash[:12]}`. Re-running agents skips the install phase entirely.
+  </Card>
+</CardGroup>
+
+## Mental model
+
+```
++----------------------------------------------------------------+
+|  Host (your Mac / VM / server)                                 |
+|                                                                |
+|  crewshipd    <---- HTTP/WS ----   crewship CLI & UI           |
+|    |                                                           |
+|    | provisioner.Provision()                                   |
+|    v                                                           |
+|  +----------------------------------+                          |
+|  | 1. Pull base image               |  debian:bookworm-slim    |
+|  | 2. Create temp container         |                          |
+|  | 3. Install devcontainer features |  common-utils, claude... |
+|  | 4. Install mise tools            |  node@22, python@3.12    |
+|  | 5. Run postCreateCommand         |                          |
+|  | 6. docker commit -> cache image  |  crewship-cache:a1b2c3…  |
+|  +----------------------------------+                          |
+|                                                                |
+|  Per-crew runtime (EnsureCrewRuntime):                         |
+|  +----------------------------------+                          |
+|  | image = CachedImage || RuntimeImg|                          |
+|  | Bind mounts (read-only):         |                          |
+|  |   crewship-sidecar -> /usr/local/bin/crewship-sidecar       |
+|  |   entrypoint.sh    -> /usr/local/bin/entrypoint.sh          |
+|  | Bind mounts (rw):                |                          |
+|  |   /workspace /output /crew /secrets                         |
+|  | Volumes: /home/agent, /opt/crew-tools                       |
+|  +----------------------------------+                          |
++----------------------------------------------------------------+
+```
+
+---
+
+## Prerequisites
+
+<Steps>
+  <Step title="Build the sidecar on the host">
+    The sidecar is a CGO-free Go binary that Crewship bind-mounts into every crew container. It is **mandatory** — there is no baked-in fallback anymore.
+
+    ```bash
+    make build:sidecar
+    # Produces:
+    #   ./crewship-sidecar        (the Go binary)
+    #   ./entrypoint.sh           (init script, copied from scripts/entrypoint.sh)
+    ```
+
+    Autodetect in `internal/config/config.go` searches:
+    - `{binDir}/crewship-sidecar` (next to the `crewship` binary)
+    - `/usr/local/bin/crewship-sidecar`
+
+    And for the entrypoint:
+    - `{binDir}/entrypoint.sh`
+    - `{cwd}/scripts/entrypoint.sh`
+    - `{cwd}/entrypoint.sh`
+    - `/usr/local/share/crewship/entrypoint.sh`
+
+    Override explicitly with `CREWSHIP_SIDECAR_PATH` / `CREWSHIP_ENTRYPOINT_PATH`.
+  </Step>
+
+  <Step title="Verify fail-fast is in effect">
+    If neither file can be located, `crewship start` exits with:
+
+    ```
+    sidecar binary not found (tried [/opt/crewship/crewship-sidecar /usr/local/bin/crewship-sidecar]);
+    run 'make build:sidecar' or set CREWSHIP_SIDECAR_PATH
+    (or CREWSHIP_SKIP_SIDECAR=1 to bypass in tests)
+    ```
+
+    This replaces the old silent-fallback behaviour that would launch containers without a sidecar.
+  </Step>
+
+  <Step title="Confirm Docker can pull images">
+    Provisioning runs `docker pull` against the base image you declare. On air-gapped hosts, pre-pull:
+
+    ```bash
+    docker pull mcr.microsoft.com/devcontainers/base:bookworm
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Configuration shape
+
+Every crew stores three optional fields in the `crews` table:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `runtime_image` | string | Base OCI reference; default `debian:bookworm-slim`. Seed demos use `mcr.microsoft.com/devcontainers/base:bookworm`. |
+| `devcontainer_config` | JSON string | Subset of the [devcontainer.json spec](https://containers.dev/implementors/json_reference/): `image`, `features`, `postCreateCommand`, `containerEnv`, `remoteUser`. |
+| `mise_config` | JSON string | mise `config.toml` in JSON form: `{"tools":{"node":"22","python":"3.12"}}`. |
+
+### Supported `devcontainer.json` fields
+
+Parser lives in `internal/devcontainer/config.go`:
+
+```json
+{
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "agent",
+      "userUid": "1001",
+      "userGid": "1001",
+      "installZsh": false
+    },
+    "ghcr.io/devcontainers-extra/features/claude-code:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "echo ready",
+  "containerEnv": {
+    "TZ": "UTC"
+  },
+  "remoteUser": "agent"
+}
+```
+
+<Note>
+  `postCreateCommand` accepts the polymorphic forms from the spec: a single string, an array of strings (run sequentially), or an object of named commands (keys ignored, values executed). See `parsePostCreateCommand` in `internal/devcontainer/config.go`.
+</Note>
+
+### mise config
+
+```json
+{
+  "tools": {
+    "node": "22",
+    "python": "3.12",
+    "terraform": "1.9"
+  }
+}
+```
+
+mise is installed as the `agent` user (UID 1001), so tools land under `/home/agent/.local/share/mise`. This survives cache rebuilds because the cache image freezes the post-mise state.
+
+---
+
+## Managing a crew's runtime config
+
+<Tabs>
+  <Tab title="UI (Crew Wizard)">
+    The crew creation / edit wizard has a **Runtime Configuration** step with:
+
+    - Base image dropdown (populated from `/api/v1/admin/runtime-images` catalog)
+    - Feature picker (searchable, powered by `/api/v1/admin/devcontainer-features`)
+    - mise tool picker (searchable, powered by `/api/v1/admin/mise-tools`)
+    - A side-by-side preview of the generated `devcontainer.json` and `mise.json` blobs
+
+    Catalogs are refreshed on a 3-tier cache: in-memory → BoltDB → `containers.dev` scrape, TTL 24 h.
+  </Tab>
+
+  <Tab title="CLI">
+    ```bash
+    # Show current config
+    crewship crew config engineering --show
+
+    # Set devcontainer.json from file
+    crewship crew config engineering --devcontainer ./devcontainer.json
+
+    # Set mise.json from file
+    crewship crew config engineering --mise ./mise.json
+
+    # Change the base image
+    crewship crew config engineering --runtime-image debian:bookworm-slim
+
+    # Export full config (prints YAML)
+    crewship crew config engineering --export
+
+    # Clear all runtime config (back to default base, no features/mise)
+    crewship crew config engineering --clear
+    ```
+
+    These flags are mutually exclusive — pick exactly one action per invocation.
+  </Tab>
+
+  <Tab title="REST API">
+    ```http
+    PATCH /api/v1/crews/{crewId}
+    Content-Type: application/json
+
+    {
+      "runtime_image": "debian:bookworm-slim",
+      "devcontainer_config": "{\"image\":\"debian:bookworm-slim\",...}",
+      "mise_config": "{\"tools\":{\"node\":\"22\"}}"
+    }
+    ```
+
+    Server-side validation rejects blobs with whitespace/control chars in the image ref or non-allowlisted feature IDs. JSON config has per-field size limits enforced by the API:
+
+    - `devcontainer_config`: 100 KB max
+    - `mise_config`: 10 KB max
+
+    Configs larger than these limits are rejected at the API layer with HTTP 400. This prevents accidentally storing huge configs (often a sign of pasted-in log output or wrong field).
+  </Tab>
+</Tabs>
+
+---
+
+## Triggering provisioning
+
+Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status.
+
+<Steps>
+  <Step title="Trigger">
+    ```bash
+    crewship crew provision engineering
+    # ✓ Provisioning started for crew "engineering".
+    ```
+
+    Under the hood: `POST /api/v1/crews/{crewId}/provision` → `ProvisioningHandler.ProvisionTrigger` → spawns a background goroutine that calls `provisioner.Provision(ctx, baseImage, cfg, miseConfig)`.
+  </Step>
+
+  <Step title="Poll status">
+    ```bash
+    crewship crew provision status engineering
+    # Status        running        # pending | running | success | failed | idle
+    # Has Config    yes
+    # Cached Image  crewship-cache:a1b2c3d4e5f6
+    # Config Hash   a1b2c3d4e5f6…
+    ```
+
+    The hash is a deterministic SHA-256 of `(baseImage, devcontainer_config, mise_config)` — see `configHash` in `internal/devcontainer/provisioner.go`. Any change invalidates the cache.
+  </Step>
+
+  <Step title="Re-build on demand">
+    ```bash
+    crewship crew rebuild engineering
+    ```
+
+    Clears the cached image marker on the crew row and kicks off provisioning again. Use this when upstream features publish breaking updates under the same tag.
+  </Step>
+</Steps>
+
+### What `Provision` does, step by step
+
+The entire pipeline is in `internal/devcontainer/provisioner.go:Provision`:
+
+<AccordionGroup>
+  <Accordion title="1. Compute config hash, check cache">
+    ```
+    hash := configHash(baseImage, cfg, miseConfig)
+    tag  := "crewship-cache:" + hash[:12]
+    if p.IsCached(ctx, hash) {
+        return &ProvisionResult{CachedImage: tag}, nil
+    }
+    ```
+
+    If the image tag already exists in the local registry, skip straight to the "already provisioned" return.
+  </Accordion>
+
+  <Accordion title="2. Skip if nothing to do">
+    When the config has no features, no `postCreateCommand`, no `containerEnv`, and no mise tools, `Provision` returns `CachedImage=""` — the runtime launcher uses the bare `RuntimeImage` as-is.
+  </Accordion>
+
+  <Accordion title="3. Pull base image if missing">
+    `ensureImage` runs `ImageList` then `ImagePull` if absent. The stream is drained to completion before proceeding — otherwise the next `ContainerCreate` fails with `No such image`.
+  </Accordion>
+
+  <Accordion title="4. Create a temporary container">
+    Named `crewship-provision-{hash[:8]}-{unixnano}`, entrypoint `["sleep", "infinity"]`, runs as root so `install.sh` scripts can write everywhere.
+  </Accordion>
+
+  <Accordion title="5. Install devcontainer features">
+    For each `feature: {}` entry:
+
+    1. Resolve feature ID → OCI artifact (`ghcr.io/devcontainers/features/common-utils:2`).
+    2. Fetch manifest, pull the single layer (media type `application/vnd.devcontainers.layer.v1+tar`, raw tar — not gzipped).
+    3. Write the tar stream into `/tmp/devcontainer-features/{featureId}/` inside the container via `CopyToContainer`.
+    4. Exec `install.sh` with the feature options injected as env vars (e.g. `USERNAME=agent USERUID=1001 /tmp/devcontainer-features/common-utils/install.sh`).
+
+    Ordering honours `installsAfter` (topological sort on feature IDs) — see `features.go:SortFeatures`. Legacy wild-form `[{id: string}]` metadata is accepted alongside the spec-compliant `[]string`.
+  </Accordion>
+
+  <Accordion title="6. Install mise tools (if declared)">
+    Runs `curl -fsSL https://mise.run | sh` as the `agent` user, then `mise install` for each `{tool: version}` entry. Fails the provisioning job if any tool download 404s or the version is invalid.
+
+    <Warning>
+      **Supply-chain risk:** `curl | sh` from `mise.run` executes whatever that endpoint serves at provision time — no signature, checksum, or version pin. Provisioning also requires outbound HTTPS to `mise.run` from the build container. For high-security environments, vendor a known-good `mise` release into the base image (or a custom feature), pin by SHA256, and drop the `mise` section from `devcontainer_config` so this step is skipped.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="7. Run postCreateCommand">
+    Each command executes as UID 1001 (`agent`) via `docker exec`, with stdout/stderr streamed to the server log. Non-zero exit aborts the whole provision.
+  </Accordion>
+
+  <Accordion title="8. Clean up, commit, tag">
+    Removes apt/pip/npm caches to shrink the committed image, then:
+
+    ```go
+    _, err := p.docker.ContainerCommit(ctx, containerID, container.CommitOptions{
+        Reference: "crewship-cache:" + hash[:12],
+    })
+    ```
+
+    The temp container is force-removed after commit (deferred).
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Running agents on the cached image
+
+When a message arrives for a crew, `chatbridge.Bridge` calls `container.EnsureCrewRuntime(ctx, team, ...)` in `internal/provider/docker/docker.go`:
+
+1. Resolve which image to boot:
+   - If `team.CachedImage != ""` → use the cached image.
+   - Else → use `team.RuntimeImage` or config default (`debian:bookworm-slim`).
+2. Ensure Docker network `crewship-agents` exists (`Internal: false` — containers need outbound HTTPS for LLM providers).
+3. `ContainerCreate` with:
+   - Entrypoint forced to `/usr/local/bin/entrypoint.sh` (bind-mounted).
+   - HostConfig:
+     - `CapDrop: ALL, CapAdd: NET_RAW, no-new-privileges, ReadonlyRootfs: true`.
+     - Memory / CPU / `PidsLimit: 200`.
+     - `ExtraHosts: ["host.docker.internal:host-gateway"]` — lets the sidecar reach `crewshipd` on Linux too.
+     - `Mounts`: `/workspace`, `/output`, `/crew`, `/secrets` (rw binds), `/home/agent` + `/opt/crew-tools` (named volumes), plus the two read-only bind mounts for the sidecar binary + entrypoint.
+4. `ContainerStart`.
+5. **Sanity-check** the sidecar bind mount for BYOI images:
+
+   ```go
+   if team.Image != "" && team.CachedImage == "" {
+       // exec `ls /usr/local/bin/crewship-sidecar`; exit != 0 -> fail loudly
+   }
+   ```
+
+   Catches Alpine/musl base images that silently can't run the glibc-linked sidecar.
+
+6. From then on, agent execution uses `docker exec` (never `docker run`).
+
+---
+
+## Seed data: end-to-end demo
+
+The `crewship seed` command seeds demo crews with sensible devcontainer + mise configs, then provisions all of them in parallel:
+
+```bash
+crewship seed                     # populate crews + credentials + agents
+crewship seed --smoke-test        # also run `crewship run <slug> "hello"` on every agent
+crewship seed --smoke-test --smoke-timeout 90s
+```
+
+| Crew | Base image | Features | mise |
+|---|---|---|---|
+| Engineering | `mcr.microsoft.com/devcontainers/base:bookworm` | `common-utils`, `claude-code`, `github-cli` | `node:22`, `python:3.12` |
+| Quality | same | `common-utils`, `claude-code`, `python:1` | — |
+| DevOps | same | `common-utils`, `claude-code`, `docker-in-docker`, `kubectl-helm-minikube` | `terraform:1.9` |
+| Research | same | `common-utils`, `claude-code`, `python:1` | `python:3.12` |
+
+The parallel provisioning has a 5-minute timeout per crew and a 3-second poll interval. Failed crews are logged as warnings but do not abort the rest — a partial demo is better than none.
+
+<Tip>
+  The `--smoke-test` flag is the fastest way to prove the whole stack works after a fresh checkout: CLI → API → orchestrator → container → agent → LLM. If it passes, you can ship.
+</Tip>
+
+---
+
+## Runtime bind-mount semantics
+
+- **`crewship-sidecar` + `entrypoint.sh`** are bind-mounted **read-only** from the host into every crew container. Host-side edits do **not** take effect in already-running containers — the mount is snapshotted at `docker create` time.
+- To roll out a new sidecar or entrypoint across existing crews, rebuild the sidecar (`make build:sidecar`) and then remove each crew's container: `docker rm -f crewship-team-<slug>`. The container is recreated transparently on the next agent message, picking up the updated bind mount.
+- **`postStartCommand`** runs on *every* start, so it is the right hook for operations that must reflect host state at the moment of launch (e.g. refreshing a secret via `vault read`). Do not try to bake those into `postCreateCommand` — they'd freeze at provisioning time.
+- Cached images (`crewship-cache:{hash}`) live on the Docker host indefinitely. Run `crewship crew cache prune --older-than 30d` as part of your maintenance rotation; cached images referenced by live crews are protected automatically.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="sidecar binary not found; run 'make build:sidecar'">
+    `autodetectSidecarPaths` in `internal/config/config.go` failed. Run `make build:sidecar` on the host, or set `CREWSHIP_SIDECAR_PATH=/absolute/path/to/crewship-sidecar` and `CREWSHIP_ENTRYPOINT_PATH=/absolute/path/to/entrypoint.sh`. For tests that never launch containers, set `CREWSHIP_SKIP_SIDECAR=1`.
+  </Accordion>
+
+  <Accordion title="sidecar bind mount sanity check failed (exit 126)">
+    The user-provided base image is musl-based (Alpine) or missing glibc. Switch to a glibc image:
+
+    ```bash
+    crewship crew config my-crew --runtime-image debian:bookworm-slim
+    crewship crew rebuild my-crew
+    ```
+  </Accordion>
+
+  <Accordion title="feature 'xyz' install.sh exits non-zero">
+    Most common cause: base image lacks prerequisites (`curl`, `git`, `ca-certificates`). `debian:bookworm-slim` is intentionally minimal. Either:
+
+    - Switch to `mcr.microsoft.com/devcontainers/base:bookworm` (pre-installed), or
+    - Declare `ghcr.io/devcontainers/features/common-utils:2` as the *first* feature — it installs prerequisites.
+  </Accordion>
+
+  <Accordion title="cache image never refreshes">
+    `configHash` is deterministic over `(baseImage, devcontainer_config, mise_config)`. Upstream feature releases that re-use the same tag don't change the hash. Force a rebuild:
+
+    ```bash
+    crewship crew rebuild my-crew
+    ```
+  </Accordion>
+
+  <Accordion title="tmux: not found (noisy log on startup)">
+    Fixed in commit [`44da863`](https://github.com/crewship-ai/crewship/commit/44da863): `setupTmuxExec` now pre-checks `command -v tmux` and falls back to `stdbuf -oL <cmd>` when absent. `debian:bookworm-slim` doesn't ship tmux — this is expected.
+  </Accordion>
+
+  <Accordion title="claude: not found inside agent container">
+    The Claude Code CLI is installed via the `ghcr.io/devcontainers-extra/features/claude-code:2` feature (replaces our former Go `EnsureClaudeCode` helper). Make sure it's in the crew's `devcontainer_config.features`. Seed crews include it automatically.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Migrating from the legacy `agent-runtime` image
+
+If you have a long-running deployment that still references `ghcr.io/crewship-ai/agent-runtime:latest`:
+
+1. Update Crewship to the current release (post-[`dd86356`](https://github.com/crewship-ai/crewship/commit/dd86356)).
+2. `make build:sidecar` on the host.
+3. For each existing crew:
+   ```bash
+   crewship crew config <slug> --runtime-image debian:bookworm-slim
+   crewship crew config <slug> --devcontainer ./devcontainer.json   # with common-utils + claude-code
+   crewship crew rebuild <slug>
+   ```
+4. Restart `crewshipd`. The fail-fast check will confirm your sidecar is discoverable.
+
+The legacy image is no longer published by CI (`agent-runtime.yml` workflow deleted). Pulling its old tag still works but sits frozen; nothing in Crewship itself assumes it anymore.
+
+---
+
+## Reference
+
+- [Configuration → Devcontainers](/configuration/devcontainers) — config fields + environment variables reference.
+- [Configuration → Environment Variables](/configuration/environment) — `CREWSHIP_SIDECAR_PATH`, `CREWSHIP_ENTRYPOINT_PATH`, `CREWSHIP_SKIP_SIDECAR`.
+- [Security → Container Isolation](/security/container-isolation) — UID boundaries, capability drops, network policy.
+- Code of record: `internal/devcontainer/`, `internal/provider/docker/docker.go`, `cmd/crewship/seeddata/crews.go`, `cmd/crewship/cmd_crew_config.go`, `cmd/crewship/cmd_crew_provision.go`.

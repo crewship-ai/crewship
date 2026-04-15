@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -62,6 +63,11 @@ type chatResolveResponse struct {
 	MemoryMB           int                      `json:"memory_mb"`
 	CPUs               float64                  `json:"cpus"`
 	TTLHours           int                      `json:"ttl_hours"`
+	RuntimeImage       string                   `json:"runtime_image"`
+	CachedImage        string                   `json:"cached_image"`
+	CachedRequirements string                   `json:"cached_requirements"`
+	DevcontainerConfig string                   `json:"devcontainer_config"`
+	MiseConfig         string                   `json:"mise_config"`
 	MCPServers         []mcpServerResponse      `json:"mcp_servers,omitempty"`
 	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
 	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
@@ -449,6 +455,62 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		mcpServers = append(mcpServers, cfg)
 	}
 
+	// Extract containerEnv and postStartCommand from devcontainer_config so
+	// they can flow into CrewConfig at container create time. Use a tolerant
+	// local decode (not the full ParseBytes validator) so that future schema
+	// changes — or fields added/removed by other writers — don't cause us to
+	// silently drop runtime fields for already-saved crews. We only need two
+	// fields here, so a minimal struct is the right level of coupling.
+	var containerEnv map[string]string
+	var rootPostStart []string
+	if data.DevcontainerConfig != "" {
+		var runtimeFields struct {
+			ContainerEnv     map[string]string `json:"containerEnv"`
+			PostStartCommand any               `json:"postStartCommand"`
+		}
+		if err := json.Unmarshal([]byte(data.DevcontainerConfig), &runtimeFields); err != nil {
+			r.logger.Warn("failed to decode stored devcontainer_config for runtime fields",
+				"error", err)
+		} else {
+			if len(runtimeFields.ContainerEnv) > 0 {
+				containerEnv = runtimeFields.ContainerEnv
+			}
+			rootPostStart = devcontainer.NormalizeCommand(runtimeFields.PostStartCommand)
+		}
+	}
+
+	// Parse cached_requirements — runtime requirements (privileged, capAdd,
+	// mounts, containerEnv) bubbled up from the devcontainer features that
+	// were installed at provision time. Without applying these at runtime,
+	// features like DinD silently don't work: the feature installs fine,
+	// but the container runs without privileged and without the docker.sock
+	// mount that the feature requires. Parse failures are logged but
+	// non-fatal — we fall back to "no extra requirements".
+	var cachedReqs *devcontainer.AggregatedRequirements
+	if data.CachedRequirements != "" {
+		var req devcontainer.AggregatedRequirements
+		if err := json.Unmarshal([]byte(data.CachedRequirements), &req); err != nil {
+			r.logger.Warn("failed to parse cached_requirements JSON",
+				"error", err)
+		} else {
+			cachedReqs = &req
+			// Merge feature-declared containerEnv with devcontainer.json
+			// root-level (already in containerEnv). Root-level wins, but
+			// feature env should still reach the container for features
+			// that rely on their own env (e.g. GOPATH).
+			if len(req.ContainerEnv) > 0 {
+				if containerEnv == nil {
+					containerEnv = map[string]string{}
+				}
+				for k, v := range req.ContainerEnv {
+					if _, exists := containerEnv[k]; !exists {
+						containerEnv[k] = v
+					}
+				}
+			}
+		}
+	}
+
 	return &ChatInfo{
 		AgentID:            data.AgentID,
 		AgentSlug:          data.AgentSlug,
@@ -472,6 +534,13 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		MemoryMB:           data.MemoryMB,
 		CPUs:               data.CPUs,
 		TTLHours:           data.TTLHours,
+		RuntimeImage:       data.RuntimeImage,
+		CachedImage:        data.CachedImage,
+		DevcontainerConfig: data.DevcontainerConfig,
+		MiseConfig:         data.MiseConfig,
+		ContainerEnv:       containerEnv,
+		CachedRequirements: cachedReqs,
+		RootPostStart:      rootPostStart,
 		MCPServers:         mcpServers,
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,

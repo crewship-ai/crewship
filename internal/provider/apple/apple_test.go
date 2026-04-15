@@ -72,7 +72,7 @@ func TestNewRequiresAppleRuntime(t *testing.T) {
 
 func TestConfigDefaults(t *testing.T) {
 	cfg := Config{
-		RuntimeImage:   "ghcr.io/crewship-ai/agent-runtime:latest",
+		RuntimeImage:   "debian:bookworm-slim",
 		Network:        "crewship-agents",
 		OutputBasePath: "/var/lib/crewship",
 	}

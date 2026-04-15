@@ -28,8 +28,11 @@ All Crewship configuration can be set via environment variables. These override 
 | `CREWSHIP_CONTAINER_PROVIDER` | `docker` | Container provider: `docker`, `apple`, `auto`, `k8s` |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge network name |
 | `CREWSHIP_CONTAINER_PREFIX` | (empty) | Container name prefix for multi-instance isolation |
-| `CREWSHIP_RUNTIME_IMAGE` | `ghcr.io/crewship-ai/agent-runtime:latest` | Agent runtime Docker image |
+| `CREWSHIP_RUNTIME_IMAGE` | `debian:bookworm-slim` | Default agent runtime image for crews without an explicit `runtime_image`. Any glibc-based Linux image works — Crewship bind-mounts the sidecar and entrypoint at runtime. |
 | `CREWSHIP_SIDECAR_ENABLED` | `false` | Enable sidecar proxy (`true` or `1`) |
+| `CREWSHIP_SIDECAR_PATH` | autodetected | Absolute host path to the `crewship-sidecar` Go binary. See [Devcontainers reference](/configuration/devcontainers#environment-variables) for autodetect order. |
+| `CREWSHIP_ENTRYPOINT_PATH` | autodetected | Absolute host path to `entrypoint.sh`. |
+| `CREWSHIP_SKIP_SIDECAR` | (unset) | Set to `1` to bypass fail-fast autodetect (tests only — never set in production). |
 
 <Note>
   `CREWSHIP_CONTAINER_PREFIX` is essential for multi-instance deployments. Without it, multiple Crewship instances will create containers with colliding names like `crewship-team-engineering`.
@@ -140,7 +143,11 @@ CREWSHIP_PORT=8080
 # Container
 CREWSHIP_CONTAINER_PROVIDER=docker
 CREWSHIP_SIDECAR_ENABLED=true
-CREWSHIP_RUNTIME_IMAGE=ghcr.io/crewship-ai/agent-runtime:latest
+CREWSHIP_RUNTIME_IMAGE=debian:bookworm-slim
+# CREWSHIP_SIDECAR_PATH and CREWSHIP_ENTRYPOINT_PATH are normally autodetected
+# from `make build:sidecar` output. Override when running from an unusual layout.
+# CREWSHIP_SIDECAR_PATH=/opt/crewship/crewship-sidecar
+# CREWSHIP_ENTRYPOINT_PATH=/opt/crewship/entrypoint.sh
 
 # Auth
 CREWSHIP_ALLOW_SIGNUP=true

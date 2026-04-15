@@ -26,6 +26,7 @@
             "pages": [
               "guides/installation",
               "guides/first-crew",
+              "guides/devcontainers",
               "guides/credentials",
               "guides/skills",
               "guides/orchestration",
@@ -53,7 +54,8 @@
             "pages": [
               "configuration/environment",
               "configuration/yaml-config",
-              "configuration/providers"
+              "configuration/providers",
+              "configuration/devcontainers"
             ]
           }
         ]

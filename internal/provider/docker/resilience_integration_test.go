@@ -24,11 +24,25 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 
 	networkName := "crewship-test-resilience"
 
+	// EnsureCrewRuntime requires sidecar+entrypoint bind-mount sources.
+	// Create placeholder files so the provider passes its fail-fast validation;
+	// the test doesn't exercise sidecar IPC, only network/container lifecycle.
+	sidecarPath := filepath.Join(tmpDir, "crewship-sidecar")
+	entrypointPath := filepath.Join(tmpDir, "entrypoint.sh")
+	if err := os.WriteFile(sidecarPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypointPath, []byte("#!/bin/sh\nexec sleep infinity\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	p, err := New(ctx, Config{
-		RuntimeImage:   "alpine:latest",
-		DefaultRuntime: "runc",
-		Network:        networkName,
-		OutputBasePath: tmpDir,
+		RuntimeImage:      "alpine:latest",
+		DefaultRuntime:    "runc",
+		Network:           networkName,
+		OutputBasePath:    tmpDir,
+		SidecarBinaryPath: sidecarPath,
+		EntrypointPath:    entrypointPath,
 	}, nil)
 	if err != nil {
 		t.Skipf("Docker not available: %v", err)

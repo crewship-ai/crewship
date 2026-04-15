@@ -630,6 +630,11 @@ func (p *pipeReadWriteCloser) Close() error {
 	return p.closeFn()
 }
 
+// CopyToContainer is not supported on Apple Containers.
+func (p *Provider) CopyToContainer(_ context.Context, _ string, _ string, _ io.Reader) error {
+	return fmt.Errorf("CopyToContainer not supported on Apple Containers provider")
+}
+
 // Close stops the background gc goroutine and releases resources.
 func (p *Provider) Close() error {
 	close(p.done)

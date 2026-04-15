@@ -36,37 +36,84 @@ var crewListCmd = &cobra.Command{
 		}
 
 		var crews []struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			Slug        string  `json:"slug"`
-			Description *string `json:"description"`
-			MemoryMB    int     `json:"container_memory_mb"`
-			CPUs        float64 `json:"container_cpus"`
-			NetworkMode string  `json:"network_mode"`
-			AgentCount  int     `json:"_count_agents"`
+			ID           string  `json:"id"`
+			Name         string  `json:"name"`
+			Slug         string  `json:"slug"`
+			Description  *string `json:"description"`
+			MemoryMB     int     `json:"container_memory_mb"`
+			CPUs         float64 `json:"container_cpus"`
+			NetworkMode  string  `json:"network_mode"`
+			RuntimeImage *string `json:"runtime_image"`
+			CachedImage  *string `json:"cached_image"`
+			Count        struct {
+				Agents  int `json:"agents"`
+				Members int `json:"members"`
+			} `json:"_count"`
 		}
 		if err := cli.ReadJSON(resp, &crews); err != nil {
 			return err
 		}
 
+		showRuntime, _ := cmd.Flags().GetBool("runtime")
+
 		f := newFormatter()
 		headers := []string{"SLUG", "NAME", "AGENTS", "NETWORK", "MEMORY", "CPUS"}
+		if showRuntime {
+			headers = append(headers, "RUNTIME", "CACHED", "PROVISIONED")
+		}
 		var rows [][]string
 		for _, c := range crews {
 			nm := c.NetworkMode
 			if nm == "" {
 				nm = "free"
 			}
-			rows = append(rows, []string{
+			row := []string{
 				c.Slug, c.Name,
-				fmt.Sprintf("%d", c.AgentCount),
+				fmt.Sprintf("%d", c.Count.Agents),
 				nm,
 				fmt.Sprintf("%dMB", c.MemoryMB),
 				fmt.Sprintf("%.1f", c.CPUs),
-			})
+			}
+			if showRuntime {
+				runtime := "—"
+				if c.RuntimeImage != nil && *c.RuntimeImage != "" {
+					runtime = truncateImageRef(*c.RuntimeImage)
+				}
+				cached := "—"
+				provisioned := "no"
+				if c.CachedImage != nil && *c.CachedImage != "" {
+					cached = truncateImageRef(*c.CachedImage)
+					provisioned = "yes"
+				}
+				row = append(row, runtime, cached, provisioned)
+			}
+			rows = append(rows, row)
 		}
 		return f.Auto(crews, headers, rows)
 	},
+}
+
+// truncateImageRef shortens a container image reference for display by stripping
+// the registry/path prefix and, for cache images, truncating the long hash tag.
+// Examples:
+//
+//	mcr.microsoft.com/devcontainers/javascript-node:22-bookworm -> javascript-node:22-bookworm
+//	crewship-cache:02be226ac713abcd -> cache:02be226a
+func truncateImageRef(ref string) string {
+	// Strip registry/path prefix — keep only the last path segment.
+	name := ref
+	if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+		name = ref[idx+1:]
+	}
+	// For crewship-cache images, shorten long hash tags to 8 chars.
+	if strings.HasPrefix(name, "crewship-cache:") {
+		tag := strings.TrimPrefix(name, "crewship-cache:")
+		if len(tag) > 8 {
+			tag = tag[:8]
+		}
+		return "cache:" + tag
+	}
+	return name
 }
 
 var crewGetCmd = &cobra.Command{
@@ -651,6 +698,8 @@ var crewPeerConvsCmd = &cobra.Command{
 }
 
 func init() {
+	crewListCmd.Flags().Bool("runtime", false, "Include runtime image, cached image, and provisioning status columns")
+
 	crewConnectCmd.Flags().String("direction", "bidirectional", "Connection direction: bidirectional or unidirectional")
 
 	crewStandupCmd.Flags().String("since", "", "Show activity since (RFC3339, default: 24h ago)")
