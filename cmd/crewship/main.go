@@ -86,6 +86,8 @@ func init() {
 	rootCmd.AddCommand(runtimesCmd)
 	rootCmd.AddCommand(seedIssuesCmd) // deprecated: use "crewship seed" instead
 	rootCmd.AddCommand(memoryCmd)
+	rootCmd.AddCommand(notificationCmd)
+	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(backupCmd)
 }
 
