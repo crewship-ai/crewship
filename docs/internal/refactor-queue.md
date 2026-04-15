@@ -37,7 +37,7 @@ item `blocked:<reason>`.
       in `page.tsx`. Preserve all prop / hook wiring exactly.
       Risk: low (pure move).
 
-- [ ] **2. credentials-loaders** — `internal/api/credentials.go`
+- [~] **2. credentials-loaders** — `internal/api/credentials.go`
       (926 LOC). Extract batch loaders to
       `internal/api/credentials_loaders.go`:
       `loadAgentNamesBatch`, `loadMCPUsedBatch`, `loadCrewIDs`,
