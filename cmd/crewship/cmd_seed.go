@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -260,7 +260,7 @@ func provisionCrewAndWait(ctx context.Context, client *cli.Client, crewID string
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	lastStatus := "unknown"
+	var lastStatus string
 	for {
 		// Check status immediately (so a fast provision returns quickly) then
 		// again on every tick.

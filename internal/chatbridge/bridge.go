@@ -69,8 +69,8 @@ type ChatInfo struct {
 	// the crew's devcontainer_config. Appended to feature-level post-start
 	// hooks (from CachedRequirements.PostStartCommands) so that user intent
 	// wins over feature defaults.
-	RootPostStart []string
-	MCPServers    []orchestrator.MCPServerConfig
+	RootPostStart      []string
+	MCPServers         []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
 	PreferredLanguage  string

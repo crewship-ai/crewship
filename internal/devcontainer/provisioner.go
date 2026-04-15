@@ -363,7 +363,6 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 	return resp.ID, nil
 }
 
-
 // ensureImage makes sure the given image reference is present locally and, if
 // reachable, matches the current remote digest. This replaces the previous
 // "ImageList + tag match" approach which could silently reuse a stale `:latest`
@@ -649,12 +648,6 @@ func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID str
 	}
 
 	return nil
-}
-
-// writeContainerEnv writes containerEnv entries to /etc/environment so they
-// are available to all login shells.
-func (p *Provisioner) writeContainerEnv(ctx context.Context, containerID string, cfg *Config) error {
-	return p.writeAggregatedContainerEnv(ctx, containerID, cfg.ContainerEnv)
 }
 
 // writeAggregatedContainerEnv writes the merged (feature + root-level)

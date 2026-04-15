@@ -24,21 +24,21 @@ type agentConfigData struct {
 	timeoutSecs   int
 	memoryEnabled bool
 
-	crewID             sql.NullString
-	crewSlug           sql.NullString
-	crewName           sql.NullString
-	crewNetworkMode    sql.NullString
-	crewAllowedDomains sql.NullString
-	crewMemoryMB       sql.NullInt64
-	crewCPUs           sql.NullFloat64
-	crewTTLHours       sql.NullInt64
-	crewRuntimeImage        sql.NullString
-	crewCachedImage         sql.NullString
-	crewCachedRequirements  sql.NullString
-	crewDevcontainerConfig  sql.NullString
-	crewMiseConfig          sql.NullString
-	crewMCPConfigJSON       sql.NullString
-	agentMCPConfigJSON      sql.NullString
+	crewID                 sql.NullString
+	crewSlug               sql.NullString
+	crewName               sql.NullString
+	crewNetworkMode        sql.NullString
+	crewAllowedDomains     sql.NullString
+	crewMemoryMB           sql.NullInt64
+	crewCPUs               sql.NullFloat64
+	crewTTLHours           sql.NullInt64
+	crewRuntimeImage       sql.NullString
+	crewCachedImage        sql.NullString
+	crewCachedRequirements sql.NullString
+	crewDevcontainerConfig sql.NullString
+	crewMiseConfig         sql.NullString
+	crewMCPConfigJSON      sql.NullString
+	agentMCPConfigJSON     sql.NullString
 }
 
 // memberIntegrationEntry describes an MCP integration available to a crew member.

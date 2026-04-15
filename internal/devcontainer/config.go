@@ -33,12 +33,12 @@ var (
 //     content, only runtime behaviour. Template authors use this for
 //     "start my local DB" or "mount secrets from Vault" style init.
 type Config struct {
-	Image             string                       `json:"image"`
-	Features          map[string]map[string]any     `json:"features,omitempty"`
-	PostCreateCommand any                           `json:"postCreateCommand,omitempty"`
-	PostStartCommand  any                           `json:"postStartCommand,omitempty"`
-	ContainerEnv      map[string]string             `json:"containerEnv,omitempty"`
-	RemoteUser        string                        `json:"remoteUser,omitempty"`
+	Image             string                    `json:"image"`
+	Features          map[string]map[string]any `json:"features,omitempty"`
+	PostCreateCommand any                       `json:"postCreateCommand,omitempty"`
+	PostStartCommand  any                       `json:"postStartCommand,omitempty"`
+	ContainerEnv      map[string]string         `json:"containerEnv,omitempty"`
+	RemoteUser        string                    `json:"remoteUser,omitempty"`
 }
 
 // Parse reads a devcontainer.json from r and returns a validated Config.

@@ -63,8 +63,8 @@ type Router struct {
 	runtimeFetcher       *devcontainer.RuntimeFetcher
 	dockerClient         *dockerclient.Client
 	featureCacheDir      string
-	authRateLimitedMux http.Handler // mux wrapped with auth rate limiter
-	apiRateLimitedMux  http.Handler // mux wrapped with general API rate limiter
+	authRateLimitedMux   http.Handler // mux wrapped with auth rate limiter
+	apiRateLimitedMux    http.Handler // mux wrapped with general API rate limiter
 }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.
@@ -92,8 +92,8 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	r.registerRoutes()
 
 	// Pre-wrap mux with rate limiters (once, not per-request)
-	r.authRateLimitedMux = NewRateLimiter(10).Middleware(r.mux)  // 10 req/min per IP
-	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(r.mux)  // 120 req/min per IP
+	r.authRateLimitedMux = NewRateLimiter(10).Middleware(r.mux) // 10 req/min per IP
+	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(r.mux) // 120 req/min per IP
 
 	return r, nil
 }

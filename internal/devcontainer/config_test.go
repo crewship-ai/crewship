@@ -283,13 +283,13 @@ func TestParseFeatureRefCaseInsensitiveRegistry(t *testing.T) {
 
 func TestParseFeatureRefInvalid(t *testing.T) {
 	cases := []string{
-		"python",           // no registry, no tag
-		"python:1",         // no registry
-		"ghcr.io/python:",  // empty tag
-		"/repo:1",          // empty registry
-		"ghcr.io/:1",       // empty repo
-		"ghcr.io/python@sha256:xyz",                       // non-hex digest body
-		"ghcr.io/python@sha256:abc",                       // too-short digest body
+		"python",                    // no registry, no tag
+		"python:1",                  // no registry
+		"ghcr.io/python:",           // empty tag
+		"/repo:1",                   // empty registry
+		"ghcr.io/:1",                // empty repo
+		"ghcr.io/python@sha256:xyz", // non-hex digest body
+		"ghcr.io/python@sha256:abc", // too-short digest body
 		"ghcr.io/python@md5:0123456789abcdef0123456789abcd", // wrong algorithm
 	}
 	for _, ref := range cases {

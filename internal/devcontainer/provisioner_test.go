@@ -38,9 +38,9 @@ type mockCommitClient struct {
 }
 
 type mockCreateCall struct {
-	config   *container.Config
-	hostCfg  *container.HostConfig
-	name     string
+	config  *container.Config
+	hostCfg *container.HostConfig
+	name    string
 }
 
 func (m *mockCommitClient) ContainerCreate(_ context.Context, config *container.Config, hostConfig *container.HostConfig, _ *dockernetwork.NetworkingConfig, _ *ocispec.Platform, name string) (container.CreateResponse, error) {

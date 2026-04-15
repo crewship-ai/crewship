@@ -30,7 +30,7 @@ var (
 // MiseConfig represents a mise tool configuration stored as JSON in the DB.
 // It maps tool names to version strings.
 type MiseConfig struct {
-	Tools map[string]string `json:"tools"`        // e.g., {"node": "22", "python": "3.12"}
+	Tools map[string]string `json:"tools"`         // e.g., {"node": "22", "python": "3.12"}
 	Env   map[string]string `json:"env,omitempty"` // e.g., {"NODE_OPTIONS": "--max-old-space-size=4096"}
 }
 

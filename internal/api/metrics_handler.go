@@ -54,12 +54,12 @@ var (
 // Series values are always floats on the wire so cost_usd and integer counts
 // share a single JSON shape and the frontend never has to branch on type.
 type metricsResponse struct {
-	Metric       string             `json:"metric"`
-	Window       string             `json:"window"`
-	Bucket       string             `json:"bucket"`
-	GroupBy      string             `json:"group_by"`
-	Buckets      []metricsBucket    `json:"buckets"`
-	SeriesLabels map[string]string  `json:"series_labels"`
+	Metric       string            `json:"metric"`
+	Window       string            `json:"window"`
+	Bucket       string            `json:"bucket"`
+	GroupBy      string            `json:"group_by"`
+	Buckets      []metricsBucket   `json:"buckets"`
+	SeriesLabels map[string]string `json:"series_labels"`
 }
 
 // metricsBucket is one row of the time series: a bucket-start timestamp and a

@@ -109,11 +109,11 @@ func TestMiseConfig_Validate(t *testing.T) {
 
 func TestMiseConfig_Validate_BadToolName(t *testing.T) {
 	cases := []string{
-		"node js",       // space
-		"node@latest",   // @
-		"node/lts",      // /
-		"no$de",         // $
-		"",              // empty
+		"node js",               // space
+		"node@latest",           // @
+		"node/lts",              // /
+		"no$de",                 // $
+		"",                      // empty
 		strings.Repeat("a", 51), // too long
 	}
 	for _, name := range cases {
@@ -127,9 +127,9 @@ func TestMiseConfig_Validate_BadToolName(t *testing.T) {
 
 func TestMiseConfig_Validate_BadVersion(t *testing.T) {
 	cases := []string{
-		"22 lts",        // space
-		"",              // empty
-		"v3.12; rm -rf", // semicolon
+		"22 lts",                // space
+		"",                      // empty
+		"v3.12; rm -rf",         // semicolon
 		strings.Repeat("1", 31), // too long
 	}
 	for _, ver := range cases {
