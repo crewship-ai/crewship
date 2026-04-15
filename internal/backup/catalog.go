@@ -131,7 +131,10 @@ FROM backup_catalog`
 		e.Encrypted = enc == 1
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: iterate catalog: %w", err)
+	}
+	return out, nil
 }
 
 // BackfillCatalogFromDir walks the default bundles directory and

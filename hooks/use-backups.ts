@@ -171,8 +171,11 @@ export function useBackupStatus(workspaceId: string | undefined) {
     },
     enabled: Boolean(workspaceId),
     // Poll while the lock banner is mounted so the admin sees the
-    // lock release as soon as a backup finishes.
+    // lock release as soon as a backup finishes. Disable in the
+    // background so a minimised tab does not burn bandwidth on a
+    // status the user cannot see anyway.
     refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
   })
 }
 

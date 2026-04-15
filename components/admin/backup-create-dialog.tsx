@@ -189,7 +189,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
               id="outputDir"
               value={outputDir}
               onChange={(e) => setOutputDir(e.target.value)}
-              placeholder="~/.crewship/backups (default)"
+              placeholder="/var/backups/crewship (absolute path; default ~/.crewship/backups)"
             />
           </div>
           <DialogFooter>

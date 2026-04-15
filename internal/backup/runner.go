@@ -478,20 +478,33 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		cfg := WebhookConfigFromEnv()
 		event := "backup.restored"
 		errStr := ""
-		var scope string
+		var scope, workspaceID string
 		if result != nil && result.Manifest != nil {
 			scope = string(result.Manifest.Scope)
+			// Lift WorkspaceID out of the manifest so downstream
+			// consumers can filter restore events by workspace the
+			// same way they filter create events.
+			if ws := result.Manifest.Contents.Workspace; ws != nil {
+				workspaceID = ws.ID
+			}
+		}
+		// result.RestoredWorkspaceID takes precedence when the admin
+		// used --as-workspace — that's the NEW id after RemapIDs, not
+		// the one the bundle carried.
+		if result != nil && result.RestoredWorkspaceID != "" {
+			workspaceID = result.RestoredWorkspaceID
 		}
 		if retErr != nil {
 			event = "backup.failed"
 			errStr = retErr.Error()
 		}
 		SendEventAsync(cfg, WebhookEvent{
-			Event:     event,
-			Timestamp: time.Now().UTC(),
-			Scope:     scope,
-			Path:      opts.Path,
-			Error:     errStr,
+			Event:       event,
+			Timestamp:   time.Now().UTC(),
+			WorkspaceID: workspaceID,
+			Scope:       scope,
+			Path:        opts.Path,
+			Error:       errStr,
 		}, nil)
 	}()
 

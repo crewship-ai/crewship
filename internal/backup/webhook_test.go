@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,5 +104,13 @@ func TestSendEvent_RespectsContextTimeout(t *testing.T) {
 	err := SendEvent(context.Background(), WebhookConfig{URL: srv.URL, Secret: "s", Timeout: 100 * time.Millisecond}, WebhookEvent{})
 	if err == nil {
 		t.Fatal("expected timeout error")
+	}
+	// A random network-layer error would also satisfy err != nil; assert
+	// it's specifically deadline-class so a regression that returns the
+	// wrong error shape gets caught.
+	if !errors.Is(err, context.DeadlineExceeded) &&
+		!strings.Contains(err.Error(), "context deadline exceeded") &&
+		!strings.Contains(err.Error(), "Client.Timeout") {
+		t.Errorf("expected deadline-class error, got %v", err)
 	}
 }
