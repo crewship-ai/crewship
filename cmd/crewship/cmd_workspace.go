@@ -266,8 +266,9 @@ var workspaceUpdateCmd = &cobra.Command{
 
 // workspaceMemberCmd groups member management subcommands.
 var workspaceMemberCmd = &cobra.Command{
-	Use:   "member",
-	Short: "Manage workspace members",
+	Use:     "member",
+	Aliases: []string{"members"},
+	Short:   "Manage workspace members",
 }
 
 var workspaceMemberListCmd = &cobra.Command{
@@ -380,10 +381,22 @@ var workspaceMemberRemoveCmd = &cobra.Command{
 	},
 }
 
-// workspaceInviteCmd groups invitation subcommands.
+// workspaceInviteCmd groups invitation subcommands. It also acts as a
+// shortcut: `crewship workspace invite <email>` invites a user directly
+// without requiring the `create` subcommand.
 var workspaceInviteCmd = &cobra.Command{
-	Use:   "invite",
-	Short: "Manage workspace invitations",
+	Use:     "invite [email]",
+	Aliases: []string{"invitation", "invitations"},
+	Short:   "Manage workspace invitations",
+	Args:    cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// If no positional arg, show help (group mode).
+		if len(args) == 0 {
+			return cmd.Help()
+		}
+		// Delegate to create with the email arg.
+		return workspaceInviteCreateCmd.RunE(cmd, args)
+	},
 }
 
 var workspaceInviteListCmd = &cobra.Command{
@@ -485,6 +498,8 @@ func init() {
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	workspaceInviteCreateCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
+	// Mirror the role flag on the parent so `workspace invite <email> --role ADMIN` works.
+	workspaceInviteCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 
 	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberAddCmd)

@@ -348,8 +348,9 @@ func statusColor(status string) string {
 }
 
 var crewMemberCmd = &cobra.Command{
-	Use:   "member",
-	Short: "Manage crew members",
+	Use:     "member",
+	Aliases: []string{"members"},
+	Short:   "Manage crew members",
 }
 
 var crewMemberListCmd = &cobra.Command{
