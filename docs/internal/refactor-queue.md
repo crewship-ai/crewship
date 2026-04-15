@@ -37,7 +37,7 @@ item `blocked:<reason>`.
       in `page.tsx`. Preserve all prop / hook wiring exactly.
       Risk: low (pure move).
 
-- [~] **2. credentials-loaders** — `internal/api/credentials.go`
+- [x] **2. credentials-loaders** — `internal/api/credentials.go`
       (926 LOC). Extract batch loaders to
       `internal/api/credentials_loaders.go`:
       `loadAgentNamesBatch`, `loadMCPUsedBatch`, `loadCrewIDs`,
@@ -108,4 +108,5 @@ Each completed item appends one line here via the nightly commit.
 
 <!-- start:progress -->
 - `#1 integrations-page` — 1627 → 669 LOC in page.tsx, 6-way split to `components/features/integrations/{types,helpers,oauth-auto-connect,template-popover,test-connection-button,expanded-panel}` (2026-04-15)
+- `#2 credentials-loaders` — 926 → 800 LOC in credentials.go; 5 batch/junction loaders moved to `internal/api/credentials_loaders.go` (140 LOC) (2026-04-15)
 <!-- end:progress -->
