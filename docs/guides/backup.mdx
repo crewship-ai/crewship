@@ -10,6 +10,20 @@ Crewship's backup system produces portable `.tar.zst` bundles that capture a wor
 
 Every backup subcommand requires the **OWNER** or **ADMIN** role on the workspace — MEMBER and VIEWER roles are refused at both the CLI and the server.
 
+## Subcommands at a glance
+
+| Command | Purpose |
+|---------|---------|
+| `crewship backup create` | Produce a new bundle for a workspace or crew. |
+| `crewship backup list` | List bundles on disk. |
+| `crewship backup inspect` | Print a bundle's manifest without decrypting the payload. |
+| `crewship backup verify` | Decrypt + checksum a bundle end-to-end (no DB writes). |
+| `crewship backup restore` | Restore a bundle (supports `--dry-run`). |
+| `crewship backup delete` | Remove a single bundle (interactive confirm or `--force`). |
+| `crewship backup rotate` | Retention sweep — `--keep-last N` / `--keep-days D`. |
+| `crewship backup status` | Show the advisory lock state for the current workspace. |
+| `crewship backup unlock` | Release a stale lock owned by this host (admin-only, confirm required). |
+
 ## Bundle layout
 
 ```

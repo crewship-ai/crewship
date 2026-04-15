@@ -69,9 +69,13 @@ r.mux.ServeHTTP(w, req)
 
 `extractIP` picks the client address in this order — callers **must** run Crewship behind a reverse proxy that either strips or rewrites these headers if they cannot be trusted:
 
-1. `X-Forwarded-For` (first entry, comma-split).
-2. `X-Real-IP`.
-3. `r.RemoteAddr` (host portion).
+1. `X-Forwarded-For` — split on comma, **only the first entry is used**. If the header is `1.2.3.4, 10.0.0.1`, the client IP is `1.2.3.4`.
+2. `X-Real-IP` — used if `X-Forwarded-For` is absent.
+3. `r.RemoteAddr` (host portion) — final fallback.
+
+<Warning>
+  If Crewship is exposed directly to the internet without a proxy, any client can spoof `X-Forwarded-For` to bypass per-IP rate limits. Run behind a reverse proxy (nginx, Caddy, Traefik) that overwrites these headers from the true connecting peer.
+</Warning>
 
 ## OAuth CSRF state
 

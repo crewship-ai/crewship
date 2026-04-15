@@ -24,7 +24,7 @@ Routes are registered in `internal/api/router.go`; handlers live in `internal/ap
 | `DELETE` | `/api/v1/admin/backups` | Delete a bundle from disk |
 
 <Note>
-  Path-based endpoints (`inspect`, `verify`, `download`, `restore`, `delete`) validate that the supplied path lives under `~/.crewship/backups` and belongs to the caller's workspace. Paths from other workspaces return `404 Not Found` rather than `403`, so the endpoint does not confirm existence of bundles outside the caller's scope.
+  Path-based endpoints (`inspect`, `verify`, `download`, `restore`, `delete`) validate that the supplied path lives under `~/.crewship/backups` and belongs to the caller's workspace. **Symlinks are explicitly rejected during path validation** — no escape via `ln -s` to read files outside the backup directory. Paths from other workspaces return `404 Not Found` rather than `403`, so the endpoint does not confirm existence of bundles outside the caller's scope.
 </Note>
 
 ## POST /api/v1/admin/backups
