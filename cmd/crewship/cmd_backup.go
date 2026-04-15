@@ -94,6 +94,7 @@ var backupCreateCmd = &cobra.Command{
 			// ErrKeyringEntryNotFound — that's the "first use on this
 			// workspace" path where a fresh prompt is the correct
 			// behaviour.
+			var fromKeyring bool
 			if useKeyring && passphraseFile == "" {
 				kr, err := backup.DefaultKeyring(cmd.Context())
 				if err != nil {
@@ -103,6 +104,7 @@ var backupCreateCmd = &cobra.Command{
 				switch {
 				case err == nil:
 					passphrase = p
+					fromKeyring = true
 				case errors.Is(err, backup.ErrKeyringEntryNotFound):
 					// fall through to the prompt below
 				default:
@@ -116,12 +118,14 @@ var backupCreateCmd = &cobra.Command{
 				}
 				passphrase = p
 			}
-			// Only persist AFTER the user confirmed a fresh prompt — a
-			// passphrase we just read from the keyring needs no rewrite.
+			// Only persist AFTER the user confirmed a fresh prompt —
+			// fromKeyring suppresses the re-write when the passphrase
+			// came straight out of the keyring (re-encrypting the same
+			// value just burns entropy and churns the file).
 			// Store failures are reported as warnings rather than
 			// aborting: the bundle is still going to be written, and
 			// losing the keyring cache is recoverable at next use.
-			if useKeyring && passphraseFile == "" && ws != "" {
+			if useKeyring && passphraseFile == "" && ws != "" && !fromKeyring {
 				kr, err := backup.DefaultKeyring(cmd.Context())
 				if err != nil {
 					cli.PrintWarning(fmt.Sprintf("Keyring unavailable: %v", err))

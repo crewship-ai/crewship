@@ -48,7 +48,14 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (scope === "crew" && !crewId) {
+    // Trim crewId + recipient so a whitespace-only input fails the
+    // required-ness check instead of reaching the server as a padded
+    // value. Passphrase stays verbatim — a passphrase the user
+    // explicitly typed with leading/trailing spaces must match the
+    // same bytes at restore.
+    const crewIdTrimmed = crewId.trim()
+    const recipientTrimmed = recipient.trim()
+    if (scope === "crew" && !crewIdTrimmed) {
       toast.error("Crew ID or slug is required for crew scope")
       return
     }
@@ -56,18 +63,18 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
       toast.error("Passphrase required")
       return
     }
-    if (encryption === "recipient" && !recipient.startsWith("age1")) {
+    if (encryption === "recipient" && !recipientTrimmed.startsWith("age1")) {
       toast.error("Recipient must be an age1… public key")
       return
     }
     try {
       const res = await create.mutateAsync({
         scope,
-        crew_id: scope === "crew" ? crewId : undefined,
+        crew_id: scope === "crew" ? crewIdTrimmed : undefined,
         passphrase: encryption === "passphrase" ? passphrase : undefined,
-        recipient: encryption === "recipient" ? recipient : undefined,
+        recipient: encryption === "recipient" ? recipientTrimmed : undefined,
         no_encrypt: encryption === "none",
-        output_dir: outputDir || undefined,
+        output_dir: outputDir.trim() || undefined,
       })
       toast.success(`Backup created: ${res.path}`)
       resetAndClose()

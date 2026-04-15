@@ -45,7 +45,10 @@ type EncryptedCredential struct {
 // out of the bundle so a restore does not silently resurrect them.
 func ExportEncryptedCredentials(ctx context.Context, db *sql.DB) ([]EncryptedCredential, error) {
 	if db == nil {
-		return nil, nil
+		// Refuse to claim a successful export with zero rows when the
+		// caller forgot to wire the DB — that masks a serious bug
+		// (missed initialisation) as a benign "empty bundle".
+		return nil, fmt.Errorf("backup: ExportEncryptedCredentials: db is nil")
 	}
 	rows, err := db.QueryContext(ctx, `
 SELECT id, workspace_id, COALESCE(crew_id,''), name, COALESCE(description,''),
@@ -93,7 +96,10 @@ ORDER BY created_at`)
 // keeper.Reload will log per-row "decrypt failed" entries and the
 // operator must re-enter affected credentials.
 func ImportEncryptedCredentials(ctx context.Context, db *sql.DB, creds []EncryptedCredential) (int, error) {
-	if db == nil || len(creds) == 0 {
+	if db == nil {
+		return 0, fmt.Errorf("backup: ImportEncryptedCredentials: db is nil")
+	}
+	if len(creds) == 0 {
 		return 0, nil
 	}
 	tx, err := db.BeginTx(ctx, nil)
