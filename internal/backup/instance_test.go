@@ -3,12 +3,16 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+var instanceMemCounter atomic.Uint64
 
 func TestIsInstanceOwner_GatesOnEnv(t *testing.T) {
 	t.Setenv(InstanceOwnerEmailEnv, "")
@@ -90,7 +94,11 @@ func TestIsCrossInstanceRestore_EmptySourceErrorsOnSide(t *testing.T) {
 // instance_config table shaped like migration v50.
 func newInstanceConfigDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	// Shared-cache in-memory DSN so pooled connections see a single
+	// DB (plain ":memory:" is per-connection on modernc.org/sqlite).
+	name := fmt.Sprintf("crewship-instance-test-%d", instanceMemCounter.Add(1))
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

@@ -25,5 +25,5 @@ export const useBackupStore = create<BackupUIState>((set) => ({
   openCreate: () => set({ dialog: "create", selectedPath: null }),
   openRestore: (path) => set({ dialog: "restore", selectedPath: path }),
   openInspect: (path) => set({ dialog: "inspect", selectedPath: path }),
-  close: () => set({ dialog: null }),
+  close: () => set({ dialog: null, selectedPath: null }),
 }))

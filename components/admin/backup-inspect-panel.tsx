@@ -27,8 +27,8 @@ export function BackupInspectPanel({ workspaceId }: { workspaceId: string | unde
         </DialogHeader>
         {isLoading && <Skeleton className="h-40 rounded-md" />}
         {isError && (
-          <div className="text-sm text-destructive-foreground">
-            {(error as Error)?.message ?? "Failed to inspect bundle"}
+          <div className="text-sm text-destructive">
+            {error instanceof Error ? error.message : "Failed to inspect bundle"}
           </div>
         )}
         {data && (

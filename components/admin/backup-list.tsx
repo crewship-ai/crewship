@@ -49,7 +49,7 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
       await del.mutateAsync(entry.path)
       toast.success("Backup deleted")
     } catch (err) {
-      toast.error((err as Error).message)
+      toast.error(err instanceof Error ? err.message : "Failed to delete backup")
     }
   }
 

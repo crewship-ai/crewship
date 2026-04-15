@@ -3,6 +3,7 @@ package backup
 import (
 	"io"
 	"os"
+	"sync"
 )
 
 // StorageOps abstracts the file-system operations the backup runner
@@ -120,20 +121,37 @@ func (LocalStorageOps) Stat(path string) (os.FileInfo, error) { return os.Stat(p
 // defaultStorage is used by helpers that do not accept options
 // (Inspect, Verify, ListBackups, Delete, cleanupStalePartials, the
 // ExtractedPayload lifecycle). Tests wishing to intercept may swap it
-// via SetDefaultStorage.
-var defaultStorage StorageOps = LocalStorageOps{}
+// via SetDefaultStorage. Access is guarded by defaultStorageMu so a
+// future concurrent caller does not race with an in-flight test swap.
+var (
+	defaultStorage   StorageOps = LocalStorageOps{}
+	defaultStorageMu sync.RWMutex
+)
 
 // SetDefaultStorage swaps the package-level default for tests or for
 // processes that run against a remote backend exclusively. The
 // returned function restores the previous default so callers can use a
 // single `defer` for teardown.
 func SetDefaultStorage(s StorageOps) (restore func()) {
+	defaultStorageMu.Lock()
 	prev := defaultStorage
 	if s == nil {
 		s = LocalStorageOps{}
 	}
 	defaultStorage = s
-	return func() { defaultStorage = prev }
+	defaultStorageMu.Unlock()
+	return func() {
+		defaultStorageMu.Lock()
+		defaultStorage = prev
+		defaultStorageMu.Unlock()
+	}
+}
+
+// getDefaultStorage reads the package default under the RWMutex.
+func getDefaultStorage() StorageOps {
+	defaultStorageMu.RLock()
+	defer defaultStorageMu.RUnlock()
+	return defaultStorage
 }
 
 // resolveStorage returns the caller's override if non-nil, falling
@@ -141,7 +159,7 @@ func SetDefaultStorage(s StorageOps) (restore func()) {
 // line at function entry.
 func resolveStorage(s StorageOps) StorageOps {
 	if s == nil {
-		return defaultStorage
+		return getDefaultStorage()
 	}
 	return s
 }

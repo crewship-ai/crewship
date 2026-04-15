@@ -18,7 +18,16 @@ import {
  * handlers render human-friendly messages via sonner.
  */
 
+/**
+ * Bundles coming BACK from the server can be any scope (the manifest
+ * on disk may have been produced by a newer server that supports
+ * instance scope). Creating a new backup is narrower — the current
+ * REST contract only accepts "crew" or "workspace"; instance scope is
+ * wired through the CLI path only. Keeping the types distinct prevents
+ * the UI from compiling a request the server will always reject.
+ */
 export type BackupScope = "crew" | "workspace" | "instance"
+export type CreateBackupScope = Exclude<BackupScope, "instance">
 
 export interface BackupListEntry {
   path: string
@@ -62,7 +71,7 @@ export interface BackupManifest {
 }
 
 export interface CreateBackupRequest {
-  scope: BackupScope
+  scope: CreateBackupScope
   crew_id?: string
   passphrase?: string
   recipient?: string
@@ -103,6 +112,20 @@ async function asJSON<T>(res: Response): Promise<T> {
     throw await asError(res)
   }
   return (await res.json()) as T
+}
+
+/**
+ * Fail fast when the caller has not yet resolved a workspace. The
+ * alternative is a fetch call with `workspace_id=undefined`, which the
+ * server silently maps to "no workspace" and then returns a 400 that
+ * the UI renders as a generic error — debugging that chain is painful
+ * for someone who has never touched the admin panel before.
+ */
+function requireWorkspaceId(workspaceId: string | undefined): string {
+  if (!workspaceId) {
+    throw new Error("workspaceId is required for this mutation")
+  }
+  return workspaceId
 }
 
 export function useBackups(
@@ -152,7 +175,8 @@ export function useCreateBackup(workspaceId: string | undefined) {
   const qc = useQueryClient()
   return useMutation<CreateBackupResponse, Error, CreateBackupRequest>({
     mutationFn: async (req) => {
-      const res = await fetch(`/api/v1/admin/backups?workspace_id=${workspaceId}`, {
+      const ws = requireWorkspaceId(workspaceId)
+      const res = await fetch(`/api/v1/admin/backups?workspace_id=${ws}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -170,7 +194,8 @@ export function useRestoreBackup(workspaceId: string | undefined) {
   const qc = useQueryClient()
   return useMutation<unknown, Error, RestoreBackupRequest>({
     mutationFn: async (req) => {
-      const res = await fetch(`/api/v1/admin/backups/restore?workspace_id=${workspaceId}`, {
+      const ws = requireWorkspaceId(workspaceId)
+      const res = await fetch(`/api/v1/admin/backups/restore?workspace_id=${ws}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -187,8 +212,9 @@ export function useDeleteBackup(workspaceId: string | undefined) {
   const qc = useQueryClient()
   return useMutation<void, Error, string>({
     mutationFn: async (path) => {
+      const ws = requireWorkspaceId(workspaceId)
       const res = await fetch(
-        `/api/v1/admin/backups?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`,
+        `/api/v1/admin/backups?workspace_id=${ws}&path=${encodeURIComponent(path)}`,
         { method: "DELETE" },
       )
       if (!res.ok) {

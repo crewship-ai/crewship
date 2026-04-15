@@ -61,7 +61,10 @@ ORDER BY created_at`)
 		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("backup: iterate credentials: %w", err)
+	}
+	return out, nil
 }
 
 // ImportEncryptedCredentials inserts the supplied rows back into the
@@ -88,11 +91,17 @@ func ImportEncryptedCredentials(ctx context.Context, db *sql.DB, creds []Encrypt
 			_ = tx.Rollback()
 		}
 	}()
+	// ON CONFLICT(id) DO NOTHING rather than INSERT OR IGNORE so only
+	// duplicate PKs are silently skipped. A UNIQUE(workspace_id, name)
+	// collision — which would indicate that the target instance has an
+	// unrelated credential under the same name — surfaces as an error
+	// instead of silently losing the restored row.
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT OR IGNORE INTO credentials
+INSERT INTO credentials
   (id, workspace_id, name, type, status, provider, security_level,
    keeper_crew_id, encrypted_value, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO NOTHING`)
 	if err != nil {
 		return 0, fmt.Errorf("backup: prepare credential insert: %w", err)
 	}
@@ -105,14 +114,14 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 			c.EncryptedValue, c.CreatedAt, c.UpdatedAt,
 		)
 		if err != nil {
-			return inserted, fmt.Errorf("backup: insert credential %s: %w", c.ID, err)
+			return 0, fmt.Errorf("backup: insert credential %s: %w", c.ID, err)
 		}
 		if n, err := res.RowsAffected(); err == nil {
 			inserted += int(n)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return inserted, fmt.Errorf("backup: commit credential restore: %w", err)
+		return 0, fmt.Errorf("backup: commit credential restore: %w", err)
 	}
 	committed = true
 	return inserted, nil

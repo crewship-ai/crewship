@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 )
 
 // Migrate applies all pending schema migrations to the database in order.
@@ -231,8 +232,14 @@ INSERT OR IGNORE INTO instance_config (id, hostname) VALUES (1, '');
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
 // main migrations slice. Keyed by version; a registered fn shadows
-// whatever the migration's own restoreBackfill would return.
-var restoreBackfillOverrides = map[int]RestoreBackfillFunc{}
+// whatever the migration's own restoreBackfill would return. Access
+// goes through restoreBackfillMu because Go's test runner executes
+// functions in parallel by default, and tests in
+// restorer_backfill_test.go all register+unregister overrides.
+var (
+	restoreBackfillOverrides   = map[int]RestoreBackfillFunc{}
+	restoreBackfillOverridesMu sync.RWMutex
+)
 
 // RestoreBackfillFor returns the hook registered for the given
 // migration version, or nil if none. Consulted by the backup runner
@@ -243,7 +250,10 @@ var restoreBackfillOverrides = map[int]RestoreBackfillFunc{}
 // so a test can exercise the replay plumbing without mutating the
 // package's migration table.
 func RestoreBackfillFor(version int) RestoreBackfillFunc {
-	if fn, ok := restoreBackfillOverrides[version]; ok {
+	restoreBackfillOverridesMu.RLock()
+	fn, ok := restoreBackfillOverrides[version]
+	restoreBackfillOverridesMu.RUnlock()
+	if ok {
 		return fn
 	}
 	for _, m := range migrations {
@@ -258,9 +268,13 @@ func RestoreBackfillFor(version int) RestoreBackfillFunc {
 // version, returning a deregister closure. Intended for tests. A
 // second call for the same version replaces the prior registration.
 func RegisterRestoreBackfill(version int, fn RestoreBackfillFunc) (unregister func()) {
+	restoreBackfillOverridesMu.Lock()
 	prev, had := restoreBackfillOverrides[version]
 	restoreBackfillOverrides[version] = fn
+	restoreBackfillOverridesMu.Unlock()
 	return func() {
+		restoreBackfillOverridesMu.Lock()
+		defer restoreBackfillOverridesMu.Unlock()
 		if had {
 			restoreBackfillOverrides[version] = prev
 		} else {

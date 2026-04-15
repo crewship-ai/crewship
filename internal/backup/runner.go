@@ -36,8 +36,15 @@ func debugReadBuildInfo() (string, bool) {
 // when --output is not specified. Callers can override it via
 // CreateOptions.OutputDir. Uses the package-level default StorageOps
 // (LocalStorageOps unless swapped by tests via SetDefaultStorage).
+// CreateBackup uses defaultBackupsDirFor so the per-call storage
+// override (CreateOptions.Storage) derives its default path from the
+// same backend that will write the bundle.
 func DefaultBackupsDir() (string, error) {
-	home, err := defaultStorage.Home()
+	return defaultBackupsDirFor(getDefaultStorage())
+}
+
+func defaultBackupsDirFor(st StorageOps) (string, error) {
+	home, err := st.Home()
 	if err != nil {
 		return "", fmt.Errorf("backup: resolve home dir: %w", err)
 	}
@@ -151,13 +158,20 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// successful result (or 0 on failure) and emits the outbound webhook
 	// so downstream consumers see create.success / create.failed events.
 	finish := ObserveCreateStart(string(opts.Scope))
+	// Close over target so crew-scope events carry a workspace id too —
+	// LoadCrewTarget resolves it even when opts.WorkspaceID is empty.
+	var target *WorkspaceTarget
 	defer func() {
 		var bytes int64
 		var sha, path string
+		workspaceID := opts.WorkspaceID
 		if result != nil {
 			bytes = result.Size
 			sha = result.SHA256
 			path = result.Path
+		}
+		if workspaceID == "" && target != nil {
+			workspaceID = target.ID
 		}
 		finish(retErr, bytes)
 		cfg := WebhookConfigFromEnv()
@@ -170,7 +184,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		SendEventAsync(cfg, WebhookEvent{
 			Event:       event,
 			Timestamp:   time.Now().UTC(),
-			WorkspaceID: opts.WorkspaceID,
+			WorkspaceID: workspaceID,
 			Scope:       string(opts.Scope),
 			Path:        path,
 			Bytes:       bytes,
@@ -179,8 +193,9 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		}, nil)
 	}()
 
-	// 1. Resolve targets.
-	var target *WorkspaceTarget
+	// 1. Resolve targets. `target` is declared in the deferred webhook
+	// block above so crew-scope events can populate WorkspaceID from
+	// the resolved target.ID.
 	var err error
 	switch opts.Scope {
 	case ScopeWorkspace:
@@ -215,7 +230,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// a non-default --output is not left with stale .partial files.
 	outDir := opts.OutputDir
 	if outDir == "" {
-		outDir, err = DefaultBackupsDir()
+		outDir, err = defaultBackupsDirFor(st)
 		if err != nil {
 			return nil, err
 		}
@@ -226,7 +241,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// Sweep stale .partial files older than one hour. A process that
 	// crashed mid-CreateBackup leaves one behind; without this sweep
 	// the admin accumulates orphans forever and disk fills up.
-	cleanupStalePartials(outDir, time.Hour)
+	cleanupStalePartials(st, outDir, time.Hour)
 
 	// 5. Build the payload tar to a temp file so peak memory is bounded
 	// by the zstd encoder's window (a few MB) rather than the full
@@ -749,7 +764,7 @@ func firstWorkspaceID(dump *DBDump) string {
 // result is stable-ordered by CreatedAt descending so the newest
 // bundle is first (matches what most users want in the CLI output).
 func ListBackups(dir string) ([]ListEntry, error) {
-	entries, err := defaultStorage.ReadDir(dir)
+	entries, err := getDefaultStorage().ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -809,7 +824,7 @@ type ListEntry struct {
 // Inspect opens a bundle and returns its manifest without decrypting
 // the payload. Used by `crewship backup inspect` and ListBackups.
 func Inspect(path string) (*Manifest, error) {
-	f, err := defaultStorage.Open(path)
+	f, err := getDefaultStorage().Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
@@ -842,11 +857,11 @@ type VerifyResult struct {
 // stored bundle is still restorable without actually committing to a
 // restore against a test instance.
 func Verify(path string) (*VerifyResult, error) {
-	info, err := defaultStorage.Stat(path)
+	info, err := getDefaultStorage().Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: stat %s: %w", path, err)
 	}
-	f, err := defaultStorage.Open(path)
+	f, err := getDefaultStorage().Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
@@ -965,7 +980,7 @@ func Delete(path string) error {
 	if _, err := Inspect(path); err != nil {
 		return fmt.Errorf("backup: refuse to delete %q: failed inspect (%v)", path, err)
 	}
-	if err := defaultStorage.Remove(path); err != nil {
+	if err := getDefaultStorage().Remove(path); err != nil {
 		return fmt.Errorf("backup: delete %s: %w", path, err)
 	}
 	return nil
@@ -1060,8 +1075,11 @@ func compatibleTargetsFor(s Scope) []Target {
 // this sweep they accumulate forever. Errors are swallowed — the only
 // consequence of a failed cleanup is a file that will be retried on
 // the next backup, not a correctness issue.
-func cleanupStalePartials(dir string, maxAge time.Duration) {
-	entries, err := defaultStorage.ReadDir(dir)
+func cleanupStalePartials(st StorageOps, dir string, maxAge time.Duration) {
+	if st == nil {
+		st = getDefaultStorage()
+	}
+	entries, err := st.ReadDir(dir)
 	if err != nil {
 		return
 	}
@@ -1078,7 +1096,7 @@ func cleanupStalePartials(dir string, maxAge time.Duration) {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-			_ = defaultStorage.Remove(filepath.Join(dir, e.Name()))
+			_ = st.Remove(filepath.Join(dir, e.Name()))
 		}
 	}
 }

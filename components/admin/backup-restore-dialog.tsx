@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useBackupStore } from "@/stores/backup-store"
@@ -45,7 +46,7 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
       close()
       setPassphrase("")
     } catch (err) {
-      toast.error((err as Error).message)
+      toast.error(err instanceof Error ? err.message : "Failed to restore backup")
     }
   }
 
@@ -94,11 +95,11 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
               placeholder="new-crew-slug"
             />
           </div>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
+          <label htmlFor="dryRun" className="flex items-center gap-2 text-xs">
+            <Checkbox
+              id="dryRun"
               checked={dryRun}
-              onChange={(e) => setDryRun(e.target.checked)}
+              onCheckedChange={(v) => setDryRun(v === true)}
             />
             Dry run (validate checksum + compat, no writes)
           </label>

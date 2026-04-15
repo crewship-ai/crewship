@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useBackupStore } from "@/stores/backup-store"
-import { useCreateBackup, type BackupScope } from "@/hooks/use-backups"
+import { useCreateBackup, type CreateBackupScope } from "@/hooks/use-backups"
 
 export function BackupCreateDialog({ workspaceId }: { workspaceId: string | undefined }) {
   const dialog = useBackupStore((s) => s.dialog)
@@ -24,7 +24,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
   const create = useCreateBackup(workspaceId)
   const open = dialog === "create"
 
-  const [scope, setScope] = useState<BackupScope>("workspace")
+  const [scope, setScope] = useState<CreateBackupScope>("workspace")
   const [crewId, setCrewId] = useState("")
   const [encryption, setEncryption] = useState<"passphrase" | "recipient" | "none">("passphrase")
   const [passphrase, setPassphrase] = useState("")
@@ -61,7 +61,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
       setPassphrase("")
       setRecipient("")
     } catch (err) {
-      toast.error((err as Error).message)
+      toast.error(err instanceof Error ? err.message : "Failed to create backup")
     }
   }
 
@@ -80,7 +80,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
           <div className="space-y-2">
             <Label>Scope</Label>
             <div className="flex gap-2">
-              {(["workspace", "crew"] as BackupScope[]).map((s) => (
+              {(["workspace", "crew"] as CreateBackupScope[]).map((s) => (
                 <Button
                   type="button"
                   key={s}

@@ -26,7 +26,14 @@ var ErrKeyringEntryNotFound = errors.New("backup keyring: entry not found")
 // Keyring is a file-backed passphrase cache scoped to a host's
 // ~/.crewship/ directory. Intentionally tiny: one level of indirection
 // per workspace, AES-256-GCM at rest via internal/encryption, and a
-// lock so concurrent CLI invocations do not clobber each other.
+// per-process mutex so writes within the same process serialise.
+//
+// The mutex does NOT cover multiple concurrent CLI invocations — two
+// `crewship backup create --use-keyring` processes racing on the
+// same file will last-write-wins and may clobber an entry. In
+// practice the CLI is interactive, so a real race is unlikely; a
+// future OS-level file lock (flock) can tighten this without
+// changing the API.
 //
 // We do not adopt 99designs/keyring because it pulls cgo (macOS
 // Security framework, libsecret) on all platforms, which conflicts
@@ -43,17 +50,17 @@ type Keyring struct {
 // DefaultKeyring returns a Keyring rooted at ~/.crewship/
 // backup-keyring.enc using the package-level defaultStorage.
 func DefaultKeyring() (*Keyring, error) {
-	home, err := defaultStorage.Home()
+	home, err := getDefaultStorage().Home()
 	if err != nil {
 		return nil, fmt.Errorf("backup keyring: resolve home: %w", err)
 	}
 	dir := filepath.Join(home, ".crewship")
-	if err := defaultStorage.MkdirAll(dir, 0o700); err != nil {
+	if err := getDefaultStorage().MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("backup keyring: create dir: %w", err)
 	}
 	return &Keyring{
 		path:    filepath.Join(dir, keyringFileName),
-		storage: defaultStorage,
+		storage: getDefaultStorage(),
 	}, nil
 }
 

@@ -89,17 +89,23 @@ func ListCatalog(ctx context.Context, db *sql.DB, workspaceID string) ([]Catalog
 	if db == nil {
 		return nil, nil
 	}
-	query := `
+	const baseQuery = `
 SELECT id, file_path, scope, COALESCE(slug, ''), COALESCE(workspace_id, ''),
        created_at, COALESCE(created_by, ''), size, sha256, encrypted, format_version
 FROM backup_catalog`
-	args := []any{}
+	// Two distinct queries keep the driver's parameter plane typed —
+	// []any with an optional first element is easy to get wrong when
+	// the WHERE clause grows.
+	var rows *sql.Rows
+	var err error
 	if workspaceID != "" {
-		query += ` WHERE workspace_id = ?`
-		args = append(args, workspaceID)
+		rows, err = db.QueryContext(ctx,
+			baseQuery+` WHERE workspace_id = ? ORDER BY created_at DESC`,
+			workspaceID)
+	} else {
+		rows, err = db.QueryContext(ctx,
+			baseQuery+` ORDER BY created_at DESC`)
 	}
-	query += ` ORDER BY created_at DESC`
-	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("backup: list catalog: %w", err)
 	}

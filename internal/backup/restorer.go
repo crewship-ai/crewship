@@ -49,7 +49,7 @@ func (p *ExtractedPayload) Close() error {
 	if p == nil || p.tempDir == "" {
 		return nil
 	}
-	err := defaultStorage.RemoveAll(p.tempDir)
+	err := getDefaultStorage().RemoveAll(p.tempDir)
 	p.tempDir = ""
 	p.workspacePathBySlug = nil
 	p.volumePathsBySlug = nil
@@ -72,7 +72,7 @@ func (p *ExtractedPayload) OpenWorkspace(slug string) (io.ReadCloser, bool, erro
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := defaultStorage.Open(path)
+	f, err := getDefaultStorage().Open(path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open workspace section %s: %w", slug, err)
 	}
@@ -90,7 +90,7 @@ func (p *ExtractedPayload) OpenVolume(slug, vol string) (io.ReadCloser, bool, er
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := defaultStorage.Open(path)
+	f, err := getDefaultStorage().Open(path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open volume section %s/%s: %w", slug, vol, err)
 	}
@@ -104,7 +104,7 @@ func (p *ExtractedPayload) OpenMemory(slug string) (io.ReadCloser, bool, error) 
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := defaultStorage.Open(path)
+	f, err := getDefaultStorage().Open(path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open memory section %s: %w", slug, err)
 	}
@@ -120,7 +120,7 @@ func (p *ExtractedPayload) OpenMemory(slug string) (io.ReadCloser, bool, error) 
 // MUST call Close() once finished with all sections (typically via
 // defer in RestoreBackup).
 func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
-	tempDir, err := defaultStorage.MkdirTemp("", "crewship-restore-*")
+	tempDir, err := getDefaultStorage().MkdirTemp("", "crewship-restore-*")
 	if err != nil {
 		return nil, fmt.Errorf("backup: temp dir: %w", err)
 	}
@@ -158,7 +158,7 @@ func ExtractPayload(payload io.Reader) (*ExtractedPayload, error) {
 			return s, nil
 		}
 		safe := strings.ReplaceAll(key, "/", "_")
-		f, err := defaultStorage.CreateTemp(tempDir, safe+"-*.tar")
+		f, err := getDefaultStorage().CreateTemp(tempDir, safe+"-*.tar")
 		if err != nil {
 			return nil, fmt.Errorf("backup: create section temp %s: %w", key, err)
 		}

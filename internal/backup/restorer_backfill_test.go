@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -12,13 +14,18 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
+var backfillMemCounter atomic.Uint64
+
 // newTestDBWithMigrations builds an in-memory SQLite DB with a
 // _migrations row per supplied version. No actual schema is created —
 // the backfill replay machinery only consults _migrations, so an empty
 // DB is all that's needed to exercise the replay logic.
 func newTestDBWithMigrations(t *testing.T, versions ...int) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	// Shared-cache in-memory DSN so connection-pool fan-out sees one DB.
+	name := fmt.Sprintf("crewship-backfill-test-%d", backfillMemCounter.Add(1))
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -162,7 +169,9 @@ func TestReplayRestoreBackfills_OrdersAscending(t *testing.T) {
 // with no _migrations rows at all (unit-test fixture or very old
 // install). Must not crash and must not iterate.
 func TestReplayRestoreBackfills_EmptyAppliedIsNoOp(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
+	name := fmt.Sprintf("crewship-backfill-empty-%d", backfillMemCounter.Add(1))
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

@@ -63,7 +63,11 @@ trap CLEANUP EXIT
 # --- 1. write canary inside the container -----------------------------
 log "write canary"
 CANARY_VALUE="canary-$(date -u +%s)-$$"
-docker exec "$CONTAINER_NAME" sh -c "printf '%s' '$CANARY_VALUE' > /workspace/CANARY.txt"
+# Pass the value via an explicit env var so outer-shell expansion is
+# not load-bearing on the sh -c body's quoting. Single-quoted body
+# keeps the in-container shell from re-interpreting anything.
+docker exec -e CANARY_VALUE="$CANARY_VALUE" "$CONTAINER_NAME" \
+  sh -c 'printf "%s" "$CANARY_VALUE" > /workspace/CANARY.txt'
 SEEN="$(docker exec "$CONTAINER_NAME" cat /workspace/CANARY.txt)"
 if [[ "$SEEN" != "$CANARY_VALUE" ]]; then
   fail "failed to place canary (got: $SEEN)"

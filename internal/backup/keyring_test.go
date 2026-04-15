@@ -77,7 +77,9 @@ func TestKeyring_Forget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultKeyring: %v", err)
 	}
-	_ = k.StorePassphrase("ws-1", "secret")
+	if err := k.StorePassphrase("ws-1", "secret"); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
 	if err := k.Forget("ws-1"); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}

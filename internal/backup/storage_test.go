@@ -131,26 +131,26 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 // helper is symmetric — important so test fixtures can use a single
 // `defer` without corrupting the package-level default for later tests.
 func TestSetDefaultStorage_RestoresPrevious(t *testing.T) {
-	orig := defaultStorage
+	orig := getDefaultStorage()
 	sentinel := recordingStorage{LocalStorageOps{}}
 
 	restore := SetDefaultStorage(sentinel)
-	if _, ok := defaultStorage.(recordingStorage); !ok {
-		t.Fatalf("SetDefaultStorage did not install override: %T", defaultStorage)
+	if _, ok := getDefaultStorage().(recordingStorage); !ok {
+		t.Fatalf("SetDefaultStorage did not install override: %T", getDefaultStorage())
 	}
 	restore()
-	if defaultStorage != orig {
+	if getDefaultStorage() != orig {
 		t.Fatalf("restore() did not revert defaultStorage")
 	}
 
 	// Nil input must fall back to LocalStorageOps rather than panic
 	// later when a helper dereferences a nil interface.
 	restore = SetDefaultStorage(nil)
-	if _, ok := defaultStorage.(LocalStorageOps); !ok {
-		t.Fatalf("nil input did not resolve to LocalStorageOps: %T", defaultStorage)
+	if _, ok := getDefaultStorage().(LocalStorageOps); !ok {
+		t.Fatalf("nil input did not resolve to LocalStorageOps: %T", getDefaultStorage())
 	}
 	restore()
-	if defaultStorage != orig {
+	if getDefaultStorage() != orig {
 		t.Fatalf("restore() after nil input did not revert defaultStorage")
 	}
 }

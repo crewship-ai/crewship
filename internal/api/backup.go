@@ -755,15 +755,21 @@ func resolveExistingAncestor(p string) string {
 	return p
 }
 
-// Metrics handles GET /api/v1/admin/backups/metrics. Admin-only.
-// Returns the current in-memory counter snapshot — process-lifetime
-// counters that reset on restart. Persistent history lives in the
-// audit_logs table; this endpoint is for ops dashboards / smoke
-// checks, not long-term storage.
+// Metrics handles GET /api/v1/admin/backups/metrics. Returns the
+// current in-memory counter snapshot — process-lifetime counters
+// that reset on restart. The snapshot is PROCESS-WIDE (cross-workspace
+// lock-held map, global counters), so workspace admins must not see
+// it: the endpoint is gated to the instance-level OWNER
+// (CREWSHIP_OWNER_EMAIL env) only.
 func (h *BackupHandler) Metrics(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+	ctx := r.Context()
+	user := UserFromContext(ctx)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if !backup.IsInstanceOwner(user.Email) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instance owner required"})
 		return
 	}
 	writeJSON(w, http.StatusOK, backup.Snapshot())

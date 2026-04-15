@@ -92,12 +92,15 @@ func TestSendEvent_SurfacesServerError(t *testing.T) {
 }
 
 func TestSendEvent_RespectsContextTimeout(t *testing.T) {
-	// Server blocks long enough that our 50ms timeout fires first.
+	// Server blocks long enough that our timeout fires first. The gap
+	// is generous (500ms server vs 100ms timeout) so the test is
+	// stable on a heavily-loaded CI node — a tight 50/200ms split
+	// occasionally flakes under cgroup throttling.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}))
 	defer srv.Close()
-	err := SendEvent(context.Background(), WebhookConfig{URL: srv.URL, Secret: "s", Timeout: 50 * time.Millisecond}, WebhookEvent{})
+	err := SendEvent(context.Background(), WebhookConfig{URL: srv.URL, Secret: "s", Timeout: 100 * time.Millisecond}, WebhookEvent{})
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}

@@ -3,6 +3,9 @@ package backup
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -35,7 +38,7 @@ VALUES ('c1','ws1','k1','SECRET','ACTIVE','v1:ct1','2026-01-01'),
 		t.Fatalf("export count: got %d want 2 (ACTIVE+non-deleted only)", len(exported))
 	}
 	for _, c := range exported {
-		if c.EncryptedValue == "" || c.EncryptedValue[:3] != "v1:" {
+		if !strings.HasPrefix(c.EncryptedValue, "v1:") {
 			t.Errorf("encrypted_value must carry v1: prefix verbatim, got %q", c.EncryptedValue)
 		}
 	}
@@ -59,9 +62,23 @@ VALUES ('c1','ws1','k1','SECRET','ACTIVE','v1:ct1','2026-01-01'),
 	}
 }
 
+// sharedMemCounter disambiguates the shared-cache DSN across test
+// helper calls so two newCredentialsDB() instances get independent
+// in-memory DBs (otherwise they'd alias and the "fresh target"
+// half of the round-trip test would see the source's rows).
+var sharedMemCounter atomic.Uint64
+
 func newCredentialsDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	// Use a shared-cache in-memory URI so every pooled connection
+	// opened by database/sql sees the same schema. Plain ":memory:"
+	// creates an isolated DB per connection under modernc.org/sqlite,
+	// which would cause the fan-out of a future parallel test to lose
+	// state. Unique `mode=memory` name per helper call keeps different
+	// DBs from aliasing.
+	name := fmt.Sprintf("crewship-cred-test-%d", sharedMemCounter.Add(1))
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", name)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -79,7 +96,8 @@ CREATE TABLE credentials (
   encrypted_value TEXT NOT NULL,
   created_at TEXT,
   updated_at TEXT,
-  deleted_at TEXT
+  deleted_at TEXT,
+  UNIQUE(workspace_id, name)
 )`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}

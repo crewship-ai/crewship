@@ -191,12 +191,18 @@ func classifyErr(err error) string {
 		return ""
 	case errors.Is(err, ErrLockHeld):
 		return "lock_held"
+	case errors.Is(err, ErrLockExpired):
+		return "lock_expired"
 	case errors.Is(err, ErrAgentRunning):
 		return "agent_running"
 	case errors.Is(err, ErrSchemaTooOld):
 		return "schema_too_old"
 	case errors.Is(err, ErrInvalidChecksum):
 		return "invalid_checksum"
+	case errors.Is(err, ErrInvalidManifest):
+		return "invalid_manifest"
+	case errors.Is(err, ErrIncompatibleTarget):
+		return "incompatible_target"
 	case errors.Is(err, ErrDecryption):
 		return "decryption"
 	case errors.Is(err, ErrFormatTooNew):
