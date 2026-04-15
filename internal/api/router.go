@@ -591,6 +591,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))
 	r.mux.Handle("GET /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.List))))
 	r.mux.Handle("GET /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Status))))
+	r.mux.Handle("GET /api/v1/admin/backups/metrics", authed(wsCtx(http.HandlerFunc(backupH.Metrics))))
 	r.mux.Handle("DELETE /api/v1/admin/backups/status", authed(wsCtx(http.HandlerFunc(backupH.Unlock))))
 	r.mux.Handle("GET /api/v1/admin/backups/inspect", authed(wsCtx(http.HandlerFunc(backupH.Inspect))))
 	r.mux.Handle("GET /api/v1/admin/backups/verify", authed(wsCtx(http.HandlerFunc(backupH.Verify))))

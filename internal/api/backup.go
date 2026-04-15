@@ -734,6 +734,20 @@ func resolveExistingAncestor(p string) string {
 	return p
 }
 
+// Metrics handles GET /api/v1/admin/backups/metrics. Admin-only.
+// Returns the current in-memory counter snapshot — process-lifetime
+// counters that reset on restart. Persistent history lives in the
+// audit_logs table; this endpoint is for ops dashboards / smoke
+// checks, not long-term storage.
+func (h *BackupHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	writeJSON(w, http.StatusOK, backup.Snapshot())
+}
+
 // statusForBackupError maps a backup package error to the right HTTP
 // status using sentinel errors (errors.Is) rather than substring
 // matching on the message. When the backup package reworks its

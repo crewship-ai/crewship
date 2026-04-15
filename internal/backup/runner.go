@@ -140,11 +140,44 @@ const LockTimeout = DefaultLockTTL
 // All steps release resources on error; if unpause fails after a
 // successful tar, the error surfaces as ErrPauseUnpauseLost so the
 // caller can alert an operator.
-func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateResult, error) {
+func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *CreateResult, retErr error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
 	st := resolveStorage(opts.Storage)
+
+	// Observability: capture duration + classify outcome regardless of
+	// which return path fires. The deferred hook records bytes from the
+	// successful result (or 0 on failure) and emits the outbound webhook
+	// so downstream consumers see create.success / create.failed events.
+	finish := ObserveCreateStart(string(opts.Scope))
+	defer func() {
+		var bytes int64
+		var sha, path string
+		if result != nil {
+			bytes = result.Size
+			sha = result.SHA256
+			path = result.Path
+		}
+		finish(retErr, bytes)
+		cfg := WebhookConfigFromEnv()
+		event := "backup.created"
+		errStr := ""
+		if retErr != nil {
+			event = "backup.failed"
+			errStr = retErr.Error()
+		}
+		SendEventAsync(cfg, WebhookEvent{
+			Event:       event,
+			Timestamp:   time.Now().UTC(),
+			WorkspaceID: opts.WorkspaceID,
+			Scope:       string(opts.Scope),
+			Path:        path,
+			Bytes:       bytes,
+			SHA256:      sha,
+			Error:       errStr,
+		}, nil)
+	}()
 
 	// 1. Resolve targets.
 	var target *WorkspaceTarget
@@ -165,7 +198,11 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = release(context.Background()) }()
+	ObserveLockAcquired(target.ID)
+	defer func() {
+		_ = release(context.Background())
+		ObserveLockReleased(target.ID)
+	}()
 
 	// 3. Agent idle guard — refuse if any agent is actively running.
 	if err := ensureAgentsIdle(ctx, db, target); err != nil {
@@ -403,7 +440,7 @@ type RestoreResult struct {
 //
 // In MVP this is gated to workspace / crew scope; instance scope
 // produces ErrInvalidScope until PR 4 lands.
-func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*RestoreResult, error) {
+func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result *RestoreResult, retErr error) {
 	if opts.Actor.UserID == "" {
 		return nil, fmt.Errorf("backup: RestoreOptions.Actor.UserID required")
 	}
@@ -414,6 +451,34 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		return nil, fmt.Errorf("backup: RestoreOptions.Path required")
 	}
 	st := resolveStorage(opts.Storage)
+
+	// Observability: classify outcome regardless of return path. Do NOT
+	// observe a DryRun — it is not a "real" restore and would skew the
+	// restored_total counter.
+	defer func() {
+		if opts.DryRun {
+			return
+		}
+		ObserveRestore(retErr)
+		cfg := WebhookConfigFromEnv()
+		event := "backup.restored"
+		errStr := ""
+		var scope string
+		if result != nil && result.Manifest != nil {
+			scope = string(result.Manifest.Scope)
+		}
+		if retErr != nil {
+			event = "backup.failed"
+			errStr = retErr.Error()
+		}
+		SendEventAsync(cfg, WebhookEvent{
+			Event:     event,
+			Timestamp: time.Now().UTC(),
+			Scope:     scope,
+			Path:      opts.Path,
+			Error:     errStr,
+		}, nil)
+	}()
 
 	f, err := st.Open(opts.Path)
 	if err != nil {
