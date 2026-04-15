@@ -12,6 +12,9 @@ import (
 )
 
 func TestValidateBackupPath_AllowsDefaultDir(t *testing.T) {
+	// Sandbox HOME so DefaultBackupsDir resolves inside t.TempDir()
+	// and MkdirAll never touches the real developer's machine.
+	t.Setenv("HOME", t.TempDir())
 	defaultDir, err := backup.DefaultBackupsDir()
 	if err != nil {
 		t.Fatalf("default dir: %v", err)

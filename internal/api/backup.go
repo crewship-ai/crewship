@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"filippo.io/age"
-	dockerclient "github.com/docker/docker/client"
 
 	"github.com/crewship-ai/crewship/internal/backup"
 )
@@ -22,21 +21,26 @@ import (
 // require workspace role OWNER or ADMIN; the router wires authed() +
 // wsCtx() in front, but each handler double-checks via canRole to
 // avoid accidental downgrades when a caller supplies a stale token.
+//
+// The handler depends on backup.DockerOps (an abstraction implemented
+// by backup.MobyDockerOps) rather than the concrete *docker.Client,
+// keeping the HTTP layer honest about the provider pattern and
+// trivially mockable from unit tests.
 type BackupHandler struct {
-	db           *sql.DB
-	logger       *slog.Logger
-	dockerClient *dockerclient.Client
+	db        *sql.DB
+	logger    *slog.Logger
+	dockerOps backup.DockerOps // nil-safe: Create/Restore fall back to pure-DB mode
 	// crewshipVersion is stamped into created manifests so restores on
 	// future binaries can report what produced each bundle. Injected by
 	// the router from main's build-info; empty string when unknown.
 	crewshipVersion string
 }
 
-// NewBackupHandler constructs a BackupHandler. dockerClient may be nil
+// NewBackupHandler constructs a BackupHandler. dockerOps may be nil
 // in test setups; Create/Restore then run in pure-DB mode (useful for
 // restoring a workspace that has no crews with containers).
-func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerClient *dockerclient.Client, crewshipVersion string) *BackupHandler {
-	return &BackupHandler{db: db, logger: logger, dockerClient: dockerClient, crewshipVersion: crewshipVersion}
+func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerOps backup.DockerOps, crewshipVersion string) *BackupHandler {
+	return &BackupHandler{db: db, logger: logger, dockerOps: dockerOps, crewshipVersion: crewshipVersion}
 }
 
 // createRequest is the JSON body of POST /api/v1/admin/backups.
@@ -92,10 +96,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ops backup.DockerOps
-	if h.dockerClient != nil {
-		ops = &backup.MobyDockerOps{Client: h.dockerClient}
-	}
+	ops := h.dockerOps
 
 	// Passphrase vs recipient: the CLI packs an `age1…` public key into
 	// the Passphrase field when the admin uses asymmetric mode. We
@@ -257,10 +258,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ops backup.DockerOps
-	if h.dockerClient != nil {
-		ops = &backup.MobyDockerOps{Client: h.dockerClient}
-	}
+	ops := h.dockerOps
 
 	result, err := backup.RestoreBackup(ctx, h.db, backup.RestoreOptions{
 		Path:         req.Path,
@@ -366,7 +364,11 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 
 // validateBackupPath refuses paths outside DefaultBackupsDir so these
 // admin endpoints cannot be coerced into arbitrary-file read/write
-// primitives. A future `--allow-external-dir` flag can relax it.
+// primitives. Symlinks are resolved before the prefix check so a
+// malicious link under the backups dir (e.g.
+// ~/.crewship/backups/evil -> /etc/passwd) cannot bypass the
+// boundary once os.Open follows it. A future --allow-external-dir
+// flag can relax this once a real use case appears.
 func validateBackupPath(path string) error {
 	if strings.Contains(path, "..") {
 		return fmt.Errorf("path must not contain '..'")
@@ -383,10 +385,48 @@ func validateBackupPath(path string) error {
 	if err != nil {
 		return fmt.Errorf("resolve default dir: %w", err)
 	}
-	if !strings.HasPrefix(absPath, absDefault+string(filepath.Separator)) {
-		return fmt.Errorf("path must live under %s", absDefault)
+	// Reject symlinks outright: a Crewship backup file is always a
+	// regular file written by us, never a symlink. Lstat probes the
+	// link itself, not its target.
+	if info, err := os.Lstat(absPath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path must not be a symlink")
+		}
+	}
+	// Resolve symlinks on both sides so the prefix check compares the
+	// canonical paths. For a path that does not yet exist (e.g. the
+	// final file name during Create), EvalSymlinks errors — walk up
+	// the ancestry to the nearest existing directory, resolve that,
+	// and re-append the trailing segments. Apple's /var → /private/var
+	// redirect is the most common reason this matters.
+	resolvedPath := resolveExistingAncestor(absPath)
+	resolvedDefault := absDefault
+	if rd, err := filepath.EvalSymlinks(absDefault); err == nil {
+		resolvedDefault = rd
+	}
+	if !strings.HasPrefix(resolvedPath, resolvedDefault+string(filepath.Separator)) &&
+		resolvedPath != resolvedDefault {
+		return fmt.Errorf("path must live under %s", resolvedDefault)
 	}
 	return nil
+}
+
+// resolveExistingAncestor returns the symlink-resolved form of p using
+// the closest existing directory on its way up. A leaf that does not
+// yet exist still gets a canonical prefix so validateBackupPath can
+// compare against a resolved default directory. When every ancestor
+// fails EvalSymlinks we return the original absolute path unchanged.
+func resolveExistingAncestor(p string) string {
+	for dir := p; dir != "/" && dir != "." && dir != ""; dir = filepath.Dir(dir) {
+		if rp, err := filepath.EvalSymlinks(dir); err == nil {
+			rel, err := filepath.Rel(dir, p)
+			if err != nil {
+				return p
+			}
+			return filepath.Join(rp, rel)
+		}
+	}
+	return p
 }
 
 // statusForBackupError maps a backup package error to the right HTTP

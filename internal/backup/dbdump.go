@@ -109,6 +109,11 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "mcp_bindings":
 		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "crew_memory":
+		// crew_memory is crew-scoped — traverse via the crews FK so
+		// DumpWorkspace does not silently miss rows the way the
+		// generic "workspace_id = ?" branch would.
+		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
 	default:
 		// Generic case: table has a workspace_id column.
 		return "workspace_id = ?", []any{workspaceID}, false
@@ -277,16 +282,65 @@ func normalizeScan(v any) any {
 	return v
 }
 
+// tableColumns returns the set of column names present on the given
+// target table, cached per-transaction so we probe PRAGMA once per
+// table. Used by RestoreDump to reject unknown column names that
+// could otherwise smuggle arbitrary SQL through dump.json.
+func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return nil, err
+		}
+		out[name] = true
+	}
+	return out, rows.Err()
+}
+
+// quoteIdent applies SQLite's double-quote identifier escaping so the
+// identifier survives restore-time concatenation into SQL. Any embedded
+// double quote is doubled per the SQLite spec.
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
 // RestoreDump writes the rows from dump into the target database. It
 // uses INSERT OR IGNORE so a restore into an instance that already has
 // some of the rows (e.g. workspace row from same-slug re-restore) does
 // not blow up; callers that want hard conflict semantics should check
 // for collisions before invoking.
 //
-// Every table's rows are inserted in the order recorded in BackupTables
-// so parent rows land before children and the default SQLite FK
-// enforcement (ON) does not explode on crew.workspace_id etc.
+// Security & schema-skew guarantees:
+//   - Unknown tables on the target are skipped (not failed) so a bundle
+//     produced by a newer Crewship does not explode on restore against
+//     an older install.
+//   - Column names from dump.json are whitelisted against the target
+//     schema via PRAGMA table_info and double-quoted before being
+//     concatenated into the SQL string. An attacker who tampered with
+//     dump.json cannot smuggle SQL through column identifiers.
+//
+// Rows are inserted in the order recorded in BackupTables so parent
+// rows land before children and FK enforcement does not explode on
+// crew.workspace_id etc.
 func RestoreDump(ctx context.Context, db *sql.DB, dump *DBDump) error {
+	return RestoreDumpTx(ctx, db, dump, func(context.Context) error { return nil })
+}
+
+// RestoreDumpTx is RestoreDump with a caller-supplied preflight hook
+// that runs inside the same transaction after all validation but
+// before the commit. If the hook returns an error the tx rolls back
+// so partial restores do not commit DB state when downstream phases
+// (Docker CopyTo, etc.) are about to fail.
+func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func(context.Context) error) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("backup: begin restore tx: %w", err)
@@ -300,21 +354,50 @@ func RestoreDump(ctx context.Context, db *sql.DB, dump *DBDump) error {
 
 	for _, table := range BackupTables {
 		rows, ok := dump.Tables[table]
-		if !ok {
+		if !ok || len(rows) == 0 {
 			continue
+		}
+		exists, err := tableExistsTx(ctx, tx, table)
+		if err != nil {
+			return fmt.Errorf("backup: probe %s: %w", table, err)
+		}
+		if !exists {
+			// Target lacks this table — skip rather than failing so a
+			// bundle from a newer schema can restore (partially) here.
+			continue
+		}
+		allowed, err := tableColumns(ctx, tx, table)
+		if err != nil {
+			return fmt.Errorf("backup: columns of %s: %w", table, err)
 		}
 		for _, row := range rows {
 			cols := make([]string, 0, len(row))
 			placeholders := make([]string, 0, len(row))
 			args := make([]any, 0, len(row))
-			for k, v := range row {
-				cols = append(cols, k)
+			// Iterate deterministically so query cache and tests stay
+			// stable across restores. map range order is random.
+			keys := make([]string, 0, len(row))
+			for k := range row {
+				keys = append(keys, k)
+			}
+			sortStrings(keys)
+			for _, k := range keys {
+				if !allowed[k] {
+					// Unknown column — silently drop rather than failing
+					// so a row with a column added in a newer schema
+					// can still partially restore.
+					continue
+				}
+				cols = append(cols, quoteIdent(k))
 				placeholders = append(placeholders, "?")
-				args = append(args, v)
+				args = append(args, row[k])
+			}
+			if len(cols) == 0 {
+				continue
 			}
 			query := fmt.Sprintf(
 				"INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
-				table,
+				quoteIdent(table),
 				strings.Join(cols, ","),
 				strings.Join(placeholders, ","),
 			)
@@ -323,11 +406,37 @@ func RestoreDump(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	if err := preCommit(ctx); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("backup: commit restore tx: %w", err)
 	}
 	committed = true
 	return nil
+}
+
+// tableExistsTx is like tableExists but runs on an already-open tx.
+func tableExistsTx(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
+	var count int
+	err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`,
+		table,
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// sortStrings is a local insertion sort so dbdump.go does not pull
+// in the sort package just for RestoreDump determinism.
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
 
 // MarshalDump returns the JSON encoding of dump. Kept separate from the

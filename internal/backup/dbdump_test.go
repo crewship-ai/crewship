@@ -13,7 +13,13 @@ import (
 // pulling the full migrate.go tangle into the backup package tests.
 func newDumpTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:")
+	// Use a fresh on-disk DB per test so connection-pool behaviour
+	// does not split the schema across isolated ":memory:" databases
+	// (which happens whenever database/sql opens a second connection
+	// — e.g. DumpCrew's pre-transaction QueryRow vs. its BeginTx).
+	// t.TempDir auto-cleans the file so there is no leftover state.
+	dbPath := t.TempDir() + "/test.db"
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

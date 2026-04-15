@@ -236,13 +236,20 @@ var backupRestoreCmd = &cobra.Command{
 		asCrew, _ := cmd.Flags().GetString("as-crew")
 		passphraseFile, _ := cmd.Flags().GetString("passphrase-file")
 
-		// Ask for passphrase unless bundle is known to be unencrypted.
-		// We cannot cheaply inspect from here without a round-trip, so
-		// we always prompt and let the server reject an empty passphrase
-		// on encrypted bundles.
-		passphrase, err := readPassphrase(passphraseFile, false /*no confirm*/)
-		if err != nil {
-			return err
+		// In a non-interactive environment without --passphrase-file we
+		// let the caller through with an empty passphrase so unencrypted
+		// bundles restore from CI / scripts. The server will surface a
+		// 400 if the bundle turns out to be encrypted and no passphrase
+		// was supplied — cleaner than "no passphrase on stdin" from us.
+		var passphrase string
+		if passphraseFile == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+			passphrase = ""
+		} else {
+			p, err := readPassphrase(passphraseFile, false /*no confirm*/)
+			if err != nil {
+				return err
+			}
+			passphrase = p
 		}
 
 		body := map[string]any{
@@ -331,8 +338,10 @@ func readPassphrase(file string, confirm bool) (string, error) {
 		}
 		return strings.TrimSpace(string(data)), nil
 	}
-	// Interactive prompt. Reading from /dev/tty respects environments
-	// where stdin was redirected by a helper script.
+	// Interactive prompt. We read from os.Stdin (not /dev/tty) since
+	// the terminal detection below uses the same FD; scripts that want
+	// to supply a passphrase without a TTY should pass --passphrase-file
+	// or pipe a single line on stdin (handled immediately below).
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
 		// Non-interactive environment without --passphrase-file:

@@ -427,7 +427,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		return nil, err
 	}
 
-	// Apply DB dump.
+	// Stage DB rewrites before any writes so both --as-* flags and the
+	// FK rows land consistently.
 	var rowsInserted int
 	if extracted.DBDump != nil {
 		if opts.AsWorkspace != "" {
@@ -436,24 +437,40 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		if opts.AsCrew != "" && manifest.Scope == ScopeCrew && len(manifest.Contents.Crews) > 0 {
 			rewriteCrewSlug(extracted.DBDump, manifest.Contents.Crews[0].ID, opts.AsCrew)
 		}
-		if err := RestoreDump(ctx, db, extracted.DBDump); err != nil {
-			return nil, err
-		}
 		for _, rows := range extracted.DBDump.Tables {
 			rowsInserted += len(rows)
 		}
 	}
 
-	// Apply per-crew volume / workspace / memory data.
-	if opts.DockerOps != nil && opts.ContainerFor != nil {
+	// Commit the DB restore only after the Docker phase completes.
+	// RestoreDumpTx runs the inserts inside a transaction and defers
+	// the commit to preCommit, so a CopyTo failure leaves the target
+	// DB untouched — no half-restored workspace rows with no volume
+	// data behind them.
+	dockerRestore := func(_ context.Context) error {
+		if opts.DockerOps == nil || opts.ContainerFor == nil {
+			return nil
+		}
 		for _, c := range manifest.Contents.Crews {
 			containerID := opts.ContainerFor(c.Slug)
 			if containerID == "" {
 				continue
 			}
 			if err := RestoreCrew(ctx, opts.DockerOps, containerID, c.Slug, extracted); err != nil {
-				return nil, err
+				return fmt.Errorf("backup: restore crew %s: %w", c.Slug, err)
 			}
+		}
+		return nil
+	}
+	if extracted.DBDump != nil {
+		if err := RestoreDumpTx(ctx, db, extracted.DBDump, dockerRestore); err != nil {
+			return nil, err
+		}
+	} else {
+		// No DB dump (pure container-content restore) — still run the
+		// docker phase, but without the tx.
+		if err := dockerRestore(ctx); err != nil {
+			return nil, err
 		}
 	}
 
@@ -567,14 +584,16 @@ func ensureAgentsIdle(ctx context.Context, db *sql.DB, target *WorkspaceTarget) 
 	if hasStatus, _ := columnExists(ctx, db, "agents", "status"); !hasStatus {
 		return nil
 	}
-	var crewIDs []any
+	crewIDs := make([]string, 0, len(target.CrewTargets))
 	for _, c := range target.CrewTargets {
 		crewIDs = append(crewIDs, c.ID)
 	}
 	if len(crewIDs) == 0 {
 		return nil
 	}
-	// Build a placeholder set of ? for the crew IDs.
+	// Build a placeholder set of ? for the crew IDs. Variadic to []any
+	// conversion happens only at the DB boundary so the rest of the
+	// function keeps its string typing.
 	placeholders := "?"
 	for i := 1; i < len(crewIDs); i++ {
 		placeholders += ",?"
@@ -583,8 +602,12 @@ func ensureAgentsIdle(ctx context.Context, db *sql.DB, target *WorkspaceTarget) 
 		`SELECT COALESCE(slug, id) FROM agents WHERE crew_id IN (%s) AND status IN ('running','busy') LIMIT 1`,
 		placeholders,
 	)
+	args := make([]any, len(crewIDs))
+	for i, id := range crewIDs {
+		args[i] = id
+	}
 	var running string
-	err = db.QueryRowContext(ctx, query, crewIDs...).Scan(&running)
+	err = db.QueryRowContext(ctx, query, args...).Scan(&running)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

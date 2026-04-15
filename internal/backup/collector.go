@@ -102,17 +102,23 @@ func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, co
 }
 
 // isNotFoundErr returns true if err comes from docker complaining
-// about a missing path inside the container. The moby client reports
-// this with a 404 plus "Could not find the file" or similar text.
-// We check by substring because the raw error type is not exported.
+// about a missing PATH inside an EXISTING container — the signal we
+// want to swallow so a never-provisioned crew still produces a bundle
+// without its volumes.
+//
+// Deliberately narrow: a bare "not found" can also mean the container
+// itself disappeared (stale CrewTarget), and masking that would
+// produce a silent, empty backup. Only moby's two known "path missing"
+// phrasings qualify. "No such container" — which contains "not found"
+// depending on daemon version — is NOT matched here and therefore
+// propagates up as a hard error.
 func isNotFoundErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "Could not find the file") ||
-		strings.Contains(msg, "No such container:path") ||
-		strings.Contains(msg, "not found")
+		strings.Contains(msg, "No such container:path")
 }
 
 // LoadWorkspaceTarget resolves a workspace slug-or-id into a full

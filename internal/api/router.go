@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -322,7 +323,13 @@ func (r *Router) registerRoutes() {
 	skills := NewSkillHandler(r.db, r.logger)
 	runs := NewRunHandler(r.db, r.logger)
 	audit := NewAuditHandler(r.db, r.logger)
-	backupH := NewBackupHandler(r.db, r.logger, r.dockerClient, os.Getenv("CREWSHIP_VERSION"))
+	// Adapt the concrete Docker client to backup.DockerOps so the
+	// admin-backup HTTP layer doesn't see the Moby SDK directly.
+	var backupDockerOps backup.DockerOps
+	if r.dockerClient != nil {
+		backupDockerOps = &backup.MobyDockerOps{Client: r.dockerClient}
+	}
+	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
