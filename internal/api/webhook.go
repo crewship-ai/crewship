@@ -176,8 +176,10 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 			h.logger.Warn("webhook run refused — backup in progress", "workspace_id", req.WorkspaceID)
 			err = guardErr
 		} else {
+			// Defer release so the guard is freed even if RunAgent
+			// panics. Matches assignments.go and query_handler.go.
+			defer guardRelease()
 			err = h.orch.RunAgent(runCtx, req, handler)
-			guardRelease()
 		}
 
 		exitCode := 0

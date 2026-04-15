@@ -75,11 +75,25 @@ var ErrGuardMissionsInFlight = fmt.Errorf("backup: one or more agent runs are in
 // is active the returned error is ErrGuardBackupInProgress and the
 // release func is nil.
 //
-// The release func must be called when the mission-start path has
-// fully registered itself with the orchestrator (DB inserts + any
-// in-memory state that a subsequent backup's ensureAgentsIdle would
-// inspect). Holding it only for the brief register window — not for
-// the full agent execution — keeps backups from starving.
+// Hold duration — current semantics
+// ---------------------------------
+// The release func MUST be called when the caller is done with the
+// mission run. The current call sites (assignments.go, webhook.go,
+// query_handler.go) defer release until AFTER the full agent run
+// has returned — not only the brief "register with orchestrator"
+// window. This is the safer of two possible designs:
+//
+//   - Hold through full execution (current): no missions can slip
+//     into the dump between register and execute; cost is that a
+//     long-running agent blocks a concurrent backup attempt, which
+//     returns ErrGuardMissionsInFlight so the admin can retry.
+//   - Hold only through register: backups never starve, but
+//     ensureAgentsIdle must still catch in-flight runs via the DB;
+//     this requires more careful coupling than we have today.
+//
+// If backup starvation under long missions becomes a real problem,
+// switch to the shorter hold and strengthen ensureAgentsIdle — the
+// guard.go API does not have to change.
 func (g *WorkspaceGuard) BeginMission(workspaceID string) (release func(), err error) {
 	if workspaceID == "" {
 		// An empty workspace ID means "no guard" — preserves the
