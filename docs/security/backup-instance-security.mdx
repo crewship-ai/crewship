@@ -1,0 +1,148 @@
+---
+title: "Instance-Scope Backup Security"
+sidebarTitle: "Backup (Instance Scope)"
+description: "Threat model, crypto chain, failure modes, and operational requirements for CRE-129 instance-scope backups."
+---
+
+## What "instance scope" means
+
+An instance-scope backup bundles **every workspace** on a Crewship host
+plus the cross-workspace surfaces that make the install usable:
+
+- All workspace, crew, and agent rows (same as `--scope=workspace` per
+  workspace)
+- The **credstore** — encrypted credential rows from every workspace,
+  exported **without decrypting** so the bundle carries two layers of
+  protection: the credstore's own AES-256-GCM plus the outer AGE seal.
+- The **auth signing secret** (`NEXTAUTH_SECRET`) so sessions survive
+  a restore onto the *same* host.
+- The instance identity (`instance_config.hostname`) so the target can
+  detect whether a restore is a same-host roll-back or a
+  cross-host DR operation.
+
+Crew-scope and workspace-scope backups are already documented in
+[`BACKUP.md`](../.claude/context/prd/BACKUP.md) — this page is
+specifically about the instance scope's additional risks.
+
+## Access control
+
+- **Server-level OWNER is distinct from workspace OWNER.** Instance
+  backup is gated by `CREWSHIP_OWNER_EMAIL` (env var). Any other
+  workspace role — including OWNER or ADMIN of a single workspace —
+  is refused with HTTP 403. The env is intentionally not stored in
+  the database; rotating it is a file edit + restart, never a SQL
+  UPDATE that a compromised DB session could perform.
+- **Rate limited to 1 instance backup per user per hour.** A runaway
+  script cannot DoS the host by thrashing the endpoint. Workspace-
+  and crew-scope backups are still governed by `backup_locks` only.
+- **Encryption is recipient-only.** Instance scope refuses
+  `--passphrase-file`. The surface is too broad (every workspace's
+  secrets in one blob) to trust a brute-forceable scrypt passphrase.
+  Callers must supply an AGE `age1…` X25519 public key and hold the
+  matching private key offline.
+
+## Crypto chain
+
+```
+credentials.encrypted_value  (AES-256-GCM, ENCRYPTION_KEY on source)
+    └─ packaged verbatim into payload/credstore.json
+           └─ whole payload sealed with AGE recipient
+                  └─ outer tar.zst bundle
+```
+
+Losing any one layer does not immediately expose plaintext:
+
+- Bundle leak alone (attacker has `.tar.zst`): outer AGE recipient
+  still encrypts the payload — attacker must also have the
+  recipient's X25519 private key.
+- Bundle + AGE key: payload decrypts, but `encrypted_value` rows are
+  still AES-256-GCM under `ENCRYPTION_KEY`. Attacker needs the source
+  host's master key env too.
+- Bundle + AGE key + source ENCRYPTION_KEY: full compromise. This is
+  the same blast radius as losing a live backup bundle of the raw
+  credentials table, and is why offsite storage of the AGE private
+  key belongs on a separate device from the one that stores
+  `ENCRYPTION_KEY`.
+
+## Cross-host restore (disaster recovery)
+
+Each bundle records the source hostname in the manifest. On restore
+the runner compares it to `instance_config.hostname` of the TARGET:
+
+- **Same host**: no rotation. Sessions and credentials resume seamlessly.
+- **Different host OR unknown source host**: the flow **mandates an
+  auth-key rotation**. The CLI refuses to proceed without
+  `--rotate-auth-keys`; the admin UI pops a confirmation dialog.
+  After rotation every existing session token is invalidated — users
+  log in fresh on the new host. This is how we prevent a stolen
+  session token from the source host remaining valid on the target.
+
+The rotation returns a newly-generated 64-byte hex secret. The
+operator MUST persist it into the service environment (`.env`,
+systemd drop-in, Kubernetes Secret) **before** the next
+`crewshipd` start. We cannot mutate the env of the running process
+— forked sidecar workers already hold the old value.
+
+## Credstore master-key continuity
+
+`encrypted_value` is written unmodified at backup time and
+reinserted unmodified at restore time. The target instance must
+share the source's `ENCRYPTION_KEY` (or a compatible key version
+from `ENCRYPTION_KEY_vN`) to actually decrypt on next keeper.Reload.
+When keys differ:
+
+- Reload logs a "decrypt failed" warning for each affected row.
+- The credential remains in the DB but is flagged (via the existing
+  keeper error path) and must be re-entered by the workspace owner.
+- No silent data loss — the row is retained so manual recovery is
+  possible once the correct key is located.
+
+An instance backup is therefore NOT a substitute for rotating
+`ENCRYPTION_KEY` across hosts. The operator must coordinate master
+keys out of band.
+
+## Rotation policy
+
+- **AGE recipient**: rotate whenever a holder of the private key
+  leaves the organisation. Old bundles encrypted to the retired key
+  should be re-encrypted (unseal with old key, reseal with new) or
+  retired.
+- **`ENCRYPTION_KEY`**: rotate at least yearly, or immediately on any
+  suspected host compromise. Use `ENCRYPTION_KEY_vN` versioned keys
+  so ciphertext-at-rest remains decryptable during transition.
+- **`NEXTAUTH_SECRET`**: rotated automatically on any cross-host
+  restore. Rotate manually if an operator session token leaks (every
+  session expires next restart).
+
+## Incident response
+
+If a bundle is known or suspected to have leaked:
+
+1. Rotate the AGE recipient holding the matching private key
+   immediately; revoke the pubkey from `manifest.encryption.recipients`
+   so future backups do not re-seal to it.
+2. Rotate `ENCRYPTION_KEY` on the source host; keeper.Reload will
+   re-encrypt rows using the new key on its first successful cycle.
+3. Force-logout every session by rotating `NEXTAUTH_SECRET`.
+4. Audit-log review: every backup create/restore emits a row in
+   `audit_logs` with entity_type `backup`; instance scope carries a
+   metadata object including crypto chain, scope, and
+   `cross_instance` flag. Filter the log for the incident window.
+
+## Known limitations
+
+- Instance backup does NOT protect against a live compromise prior
+  to `crewship backup create`. An attacker with root on the source
+  is inside the trust boundary and can capture keys directly.
+- Instance backup does NOT encrypt the manifest (`MANIFEST.json` is
+  stored plaintext inside the outer tar.zst so `inspect` works
+  without a key). Manifest carries no secrets — only metadata — but
+  hostnames, user emails, and workspace slugs are visible.
+- `--scope=instance --passphrase-file` is refused by design.
+  Deployments that cannot manage AGE keys should use workspace
+  scope and accept the operational cost of restoring each workspace
+  individually.
+- Instance restore into a non-empty installation is refused. Merge
+  strategies (conflict resolution across workspaces, keeper crew
+  selection) were intentionally scoped out — restore onto a clean
+  install and let the operator migrate data manually if needed.

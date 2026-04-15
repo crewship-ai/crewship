@@ -213,6 +213,20 @@ CREATE TABLE IF NOT EXISTS backup_catalog (
 CREATE INDEX IF NOT EXISTS idx_backup_catalog_workspace ON backup_catalog(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_backup_catalog_created_at ON backup_catalog(created_at);
 `},
+	// Persistent instance identity for CRE-129 (instance-scope backup /
+	// restore). Single-row table (CHECK id=1) so the row always exists
+	// once migration runs; hostname is populated at first startup by
+	// internal/backup/instance.go. When the manifest's source hostname
+	// differs from the target's on restore, the flow forces an auth-key
+	// rotation because we are clearly on a different host.
+	{version: 50, name: "add_instance_config", sql: `
+CREATE TABLE IF NOT EXISTS instance_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    hostname TEXT NOT NULL DEFAULT '',
+    installed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO instance_config (id, hostname) VALUES (1, '');
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
