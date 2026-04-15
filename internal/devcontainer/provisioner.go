@@ -15,12 +15,10 @@ import (
 
 	dockerclient "github.com/docker/docker/client"
 
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	dockernetwork "github.com/docker/docker/api/types/network"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -46,12 +44,10 @@ type Provisioner struct {
 	downloader *FeatureDownloader
 	logger     *slog.Logger
 
-	// Cache of remote image digests to skip the HEAD request on every
-	// provision. Thread-safe via digestMu; keys are image refs, values include
-	// fetch time for TTL. Per-process (in-memory) — lost on restart, which is
-	// fine: a cold cache simply costs one extra HEAD per base image.
-	digestMu    sync.RWMutex
-	digestCache map[string]digestCacheEntry
+	// digestResolver caches remote manifest digests used by ensureImage. Shared
+	// helper (see internal/dockerutil) so the runtime Provider uses identical
+	// semantics — one source of truth for "is my local copy stale?".
+	digestResolver *dockerutil.DigestResolver
 
 	// Cache of ImageList results to avoid an O(n) Docker call on every
 	// imageExists/Provision check. Invalidated on Pull/Commit (our own
@@ -61,20 +57,12 @@ type Provisioner struct {
 	imageListCache imageListCacheEntry
 }
 
-type digestCacheEntry struct {
-	digest    string
-	fetchedAt time.Time
-}
-
 type imageListCacheEntry struct {
 	images    []image.Summary
 	fetchedAt time.Time
 }
 
-const (
-	remoteDigestTTL = 24 * time.Hour
-	imageListTTL    = 60 * time.Second
-)
+const imageListTTL = 60 * time.Second
 
 // TempContainerLabelKey and TempContainerLabelValue identify temporary
 // containers created by Provisioner.createTempContainer. Exported so the
@@ -149,11 +137,11 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 		logger = slog.Default()
 	}
 	return &Provisioner{
-		docker:      docker,
-		installer:   installer,
-		downloader:  downloader,
-		logger:      logger,
-		digestCache: make(map[string]digestCacheEntry),
+		docker:         docker,
+		installer:      installer,
+		downloader:     downloader,
+		logger:         logger,
+		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
 	}
 }
 
@@ -435,11 +423,11 @@ func (p *Provisioner) createTempContainer(ctx context.Context, baseImage string)
 //     offline registry with a locally present image is accepted (we trust
 //     the presence); a missing image is an error only if pull fails too.
 func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
-	remoteDigest := p.getCachedOrFreshDigest(ctx, ref)
+	remoteDigest := p.digestResolver.Remote(ctx, ref)
 
 	inspect, inspectErr := p.docker.ImageInspect(ctx, ref)
 	localPresent := inspectErr == nil
-	if localPresent && remoteDigest != "" && repoDigestsContain(inspect.RepoDigests, remoteDigest) {
+	if localPresent && remoteDigest != "" && dockerutil.RepoDigestsContain(inspect.RepoDigests, remoteDigest) {
 		return nil
 	}
 	if localPresent && remoteDigest == "" {
@@ -471,63 +459,6 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 	// New or updated image may now be present locally — drop the cached list.
 	p.invalidateImageListCache()
 	return nil
-}
-
-// getCachedOrFreshDigest returns the cached remote digest for ref if it was
-// fetched within remoteDigestTTL, otherwise triggers a fresh HEAD and caches
-// the result. Empty fresh results are NOT cached — we want the next call to
-// retry transient registry failures.
-func (p *Provisioner) getCachedOrFreshDigest(ctx context.Context, ref string) string {
-	p.digestMu.RLock()
-	entry, ok := p.digestCache[ref]
-	p.digestMu.RUnlock()
-
-	if ok && time.Since(entry.fetchedAt) < remoteDigestTTL {
-		return entry.digest
-	}
-
-	fresh := p.remoteImageDigest(ctx, ref)
-	if fresh != "" {
-		p.digestMu.Lock()
-		p.digestCache[ref] = digestCacheEntry{digest: fresh, fetchedAt: time.Now()}
-		p.digestMu.Unlock()
-	}
-	return fresh
-}
-
-// remoteImageDigest returns the manifest digest of ref from its registry via
-// HEAD. Best-effort: returns "" on auth errors, parse failures, or timeouts.
-// Reuses the 5-second ceiling already established for ValidateImageExists.
-func (p *Provisioner) remoteImageDigest(ctx context.Context, ref string) string {
-	parsed, err := name.ParseReference(ref)
-	if err != nil {
-		return ""
-	}
-	headCtx, cancel := context.WithTimeout(ctx, imageValidateTimeout)
-	defer cancel()
-	desc, err := remote.Head(parsed,
-		remote.WithContext(headCtx),
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
-	)
-	if err != nil {
-		return ""
-	}
-	return desc.Digest.String()
-}
-
-// repoDigestsContain reports whether any entry in repoDigests refers to the
-// given manifest digest. Each repoDigest is formatted as "<repo>@sha256:<hex>".
-func repoDigestsContain(repoDigests []string, digest string) bool {
-	if digest == "" {
-		return false
-	}
-	for _, rd := range repoDigests {
-		at := strings.LastIndex(rd, "@")
-		if at > 0 && rd[at+1:] == digest {
-			return true
-		}
-	}
-	return false
 }
 
 // installFeatures downloads, sorts, and installs all features from the config.

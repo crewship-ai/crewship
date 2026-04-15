@@ -33,6 +33,16 @@ type ProvisionJob struct {
 	ConfigHash  string
 }
 
+// orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
+// sweepers and CacheList. Exists as an interface so tests can swap in a fake
+// without standing up a real Docker daemon. Satisfied by *docker.Client.
+type orphanGCClient interface {
+	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
+	ContainerRemove(ctx context.Context, containerID string, options container.RemoveOptions) error
+	ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error)
+	ImageRemove(ctx context.Context, imageID string, options image.RemoveOptions) ([]image.DeleteResponse, error)
+}
+
 // ProvisioningHandler provides endpoints for the devcontainer feature catalog
 // and crew provisioning (trigger, status, rebuild).
 type ProvisioningHandler struct {
@@ -44,6 +54,7 @@ type ProvisioningHandler struct {
 	// Provisioner pipeline. May be nil in tests or when no Docker client is
 	// available -- in that case the trigger endpoint returns 503.
 	docker      *client.Client
+	gcClient    orphanGCClient // narrowed view for sweepers + CacheList; usually == docker
 	provisioner *devcontainer.Provisioner
 
 	// In-memory provisioning job state, keyed by crewID. MVP only.
@@ -53,7 +64,26 @@ type ProvisioningHandler struct {
 	// rateLimiter caps concurrent and recent provisions per workspace. Guards
 	// against runaway triggers (e.g. a buggy loop) exhausting Docker resources.
 	rateLimiter *provisionRateLimiter
+
+	// imgListMu guards imgListCache. CacheList + sweepOrphanCacheImages both
+	// page through all local images; memoizing that O(n) Docker call trims
+	// the UI poll cost and the background sweep. Workspace-scoped
+	// `referenced_by` data is still queried fresh per request (cheap index
+	// lookup) so tenants never see cross-workspace state.
+	imgListMu    sync.Mutex
+	imgListCache cachedImageList
 }
+
+type cachedImageList struct {
+	images    []image.Summary
+	fetchedAt time.Time
+}
+
+// imageListCacheTTL is short on purpose: cache images mutate only via our
+// own Provision (which we can't invalidate from here without coupling) and
+// CacheDelete (which we DO invalidate). The TTL bounds the staleness window
+// for the admin UI while still cutting the common-case poll cost.
+const imageListCacheTTL = 10 * time.Second
 
 // Rate limit constants. Per-workspace bucket.
 const (
@@ -147,6 +177,9 @@ func NewProvisioningHandler(
 		jobs:           make(map[string]*ProvisionJob),
 		rateLimiter:    newProvisionRateLimiter(),
 	}
+	if docker != nil {
+		h.gcClient = docker // *client.Client implements orphanGCClient
+	}
 	// Launch background cleanup so completed/failed jobs don't accumulate
 	// forever. Handler lives for the process lifetime; Background ctx is OK.
 	go h.startJobCleanupRoutine(context.Background())
@@ -169,6 +202,14 @@ const (
 	tempContainerMaxAge = 1 * time.Hour
 	orphanGCInterval    = 30 * time.Minute
 	orphanGCSweepCap    = 200 // defensive — don't stall on pathological state
+
+	// cacheImageMinAge is a safety window: a crewship-cache:* image younger
+	// than this is skipped by the orphan sweeper even if no crew row points
+	// at it. Rationale — Provision() writes the DB row AFTER `docker commit`.
+	// Between those two steps (seconds at most) the image legitimately looks
+	// "unreferenced". A 5-minute floor is many orders of magnitude larger
+	// than the actual race window, at zero operational cost.
+	cacheImageMinAge = 5 * time.Minute
 
 	// cacheGCAutoDeleteEnv gates destructive removal of unreferenced
 	// crewship-cache:* images. Default (unset/false) is log-only — an operator
@@ -202,12 +243,12 @@ func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
 // run cleans up via defer; this sweeper only catches the crash/SIGKILL path.
 // Filtered by the Provisioner's label so we never touch unrelated containers.
 func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
-	if h.docker == nil {
+	if h.gcClient == nil {
 		return
 	}
 	start := time.Now()
 	labelFilter := devcontainer.TempContainerLabelKey + "=" + devcontainer.TempContainerLabelValue
-	containers, err := h.docker.ContainerList(ctx, container.ListOptions{
+	containers, err := h.gcClient.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filters.NewArgs(filters.Arg("label", labelFilter)),
 	})
@@ -226,7 +267,7 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 		if c.Created >= cutoff {
 			continue
 		}
-		if err := h.docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
+		if err := h.gcClient.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
 			h.logger.Warn("orphan temp-container GC: remove failed", "container", c.ID, "error", err)
 			continue
 		}
@@ -246,7 +287,7 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 // ContainerCommit and the crews.cached_image UPDATE. Removal is opt-in via
 // CREWSHIP_CACHE_GC_AUTODELETE=true — default is log-only for visibility.
 func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
-	if h.docker == nil {
+	if h.gcClient == nil {
 		return
 	}
 	// 1. Collect every cached_image still referenced by any crew across all
@@ -273,8 +314,11 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	rows.Close()
 
 	// 2. Compare against the local image set. Any crewship-cache:* tag with
-	//    no referencing row is an orphan.
-	imgs, err := h.docker.ImageList(ctx, image.ListOptions{})
+	//    no referencing row AND older than cacheImageMinAge is an orphan.
+	//    The age floor closes the race between ContainerCommit and the DB
+	//    UPDATE inside Provision() — a freshly-committed image legitimately
+	//    looks "unreferenced" until the caller persists the link.
+	imgs, err := h.listLocalImagesCached(ctx)
 	if err != nil {
 		h.logger.Warn("orphan cache-image GC: image list failed", "error", err)
 		return
@@ -282,7 +326,9 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	autoDelete := strings.EqualFold(os.Getenv(cacheGCAutoDeleteEnv), "true") ||
 		os.Getenv(cacheGCAutoDeleteEnv) == "1"
 
+	safeCutoff := time.Now().Add(-cacheImageMinAge).Unix()
 	orphans := make([]string, 0)
+	tooYoung := 0
 	for _, img := range imgs {
 		for _, tag := range img.RepoTags {
 			if !strings.HasPrefix(tag, cacheImagePrefix) {
@@ -291,28 +337,32 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 			if _, ok := referenced[tag]; ok {
 				continue
 			}
+			if img.Created > safeCutoff {
+				tooYoung++
+				continue
+			}
 			orphans = append(orphans, tag)
 		}
 	}
 	if len(orphans) == 0 {
-		h.logger.Debug("orphan cache-image GC: nothing to report")
+		h.logger.Debug("orphan cache-image GC: nothing to report", "skipped_too_young", tooYoung)
 		return
 	}
 	if !autoDelete {
 		h.logger.Info("orphan cache-image GC: unreferenced cache images detected (log-only, set CREWSHIP_CACHE_GC_AUTODELETE=true to remove)",
-			"orphans", orphans, "count", len(orphans))
+			"orphans", orphans, "count", len(orphans), "skipped_too_young", tooYoung)
 		return
 	}
 	removed := 0
 	for _, tag := range orphans {
-		if _, err := h.docker.ImageRemove(ctx, tag, image.RemoveOptions{Force: false, PruneChildren: true}); err != nil {
+		if _, err := h.gcClient.ImageRemove(ctx, tag, image.RemoveOptions{Force: false, PruneChildren: true}); err != nil {
 			h.logger.Warn("orphan cache-image GC: remove failed", "tag", tag, "error", err)
 			continue
 		}
 		removed++
 	}
 	h.logger.Info("orphan cache-image GC: removed unreferenced cache images",
-		"removed", removed, "total_orphans", len(orphans))
+		"removed", removed, "total_orphans", len(orphans), "skipped_too_young", tooYoung)
 }
 
 // cleanupOldJobs removes completed/failed jobs older than 1h from the jobs map.
@@ -768,7 +818,7 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 		refs[tag] = append(refs[tag], slug)
 	}
 
-	imgs, err := h.docker.ImageList(r.Context(), image.ListOptions{})
+	imgs, err := h.listLocalImagesCached(r.Context())
 	if err != nil {
 		h.logger.Error("docker image list", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -789,6 +839,32 @@ func (h *ProvisioningHandler) CacheList(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"images": out})
+}
+
+// listLocalImagesCached returns the local Docker image set with a short-lived
+// memoization. Callers must treat the slice as read-only.
+func (h *ProvisioningHandler) listLocalImagesCached(ctx context.Context) ([]image.Summary, error) {
+	h.imgListMu.Lock()
+	defer h.imgListMu.Unlock()
+
+	if h.imgListCache.images != nil && time.Since(h.imgListCache.fetchedAt) < imageListCacheTTL {
+		return h.imgListCache.images, nil
+	}
+	imgs, err := h.gcClient.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	h.imgListCache = cachedImageList{images: imgs, fetchedAt: time.Now()}
+	return imgs, nil
+}
+
+// invalidateImageListCache forces the next listLocalImagesCached call to hit
+// Docker. Called after CacheDelete; Provision can't reach us from the
+// devcontainer package without coupling, so we rely on the TTL for that path.
+func (h *ProvisioningHandler) invalidateImageListCache() {
+	h.imgListMu.Lock()
+	h.imgListCache = cachedImageList{}
+	h.imgListMu.Unlock()
 }
 
 // CacheDelete removes a single crewship-cache:* image. Refuses if the image
@@ -846,6 +922,8 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Cached image list no longer reflects local state.
+	h.invalidateImageListCache()
 	writeJSON(w, http.StatusOK, map[string]string{"tag": tag, "status": "deleted"})
 }
 
