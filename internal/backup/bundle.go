@@ -63,6 +63,169 @@ type WriteBundleOptions struct {
 	NoEncrypt  bool            // explicit opt-out; bundle will carry a plaintext payload
 }
 
+// SealPayload streams raw payload through the configured encryption
+// path into dst and returns (sha256, bytes-written). It does NOT write
+// the outer bundle — callers assemble that with WriteBundleStream.
+//
+// This exists so multi-GB bundles can flow through disk-backed temp
+// files instead of being held twice in memory (once for payload, once
+// for sealed output) as WriteBundle does.
+func SealPayload(dst io.Writer, src io.Reader, opts WriteBundleOptions) (string, int64, error) {
+	// dst → counting → hashing. Sealed bytes flow: AGE writer → hasher
+	// → counter → dst. The counter gives us the tar header size without
+	// a second pass over the file.
+	counter := &countingWriter{w: dst}
+	hasher := NewHashingWriter(counter)
+	switch {
+	case opts.NoEncrypt:
+		if _, err := io.Copy(hasher, src); err != nil {
+			return "", 0, fmt.Errorf("backup: copy plaintext payload: %w", err)
+		}
+		return hasher.Sum(), counter.n, nil
+	case len(opts.Recipients) > 0:
+		w, err := EncryptStream(hasher, opts.Recipients...)
+		if err != nil {
+			return "", 0, err
+		}
+		if _, err := io.Copy(w, src); err != nil {
+			_ = w.Close()
+			return "", 0, fmt.Errorf("backup: copy encrypted payload: %w", err)
+		}
+		if err := w.Close(); err != nil {
+			return "", 0, fmt.Errorf("backup: close AGE writer: %w", err)
+		}
+		return hasher.Sum(), counter.n, nil
+	case opts.Passphrase != "":
+		w, err := EncryptStreamPassphrase(hasher, opts.Passphrase)
+		if err != nil {
+			return "", 0, err
+		}
+		if _, err := io.Copy(w, src); err != nil {
+			_ = w.Close()
+			return "", 0, fmt.Errorf("backup: copy encrypted payload: %w", err)
+		}
+		if err := w.Close(); err != nil {
+			return "", 0, fmt.Errorf("backup: close AGE writer: %w", err)
+		}
+		return hasher.Sum(), counter.n, nil
+	default:
+		return "", 0, fmt.Errorf("backup: SealPayload requires Recipients, Passphrase, or NoEncrypt=true")
+	}
+}
+
+// WriteBundleStream assembles a finalised bundle given already-sealed
+// payload bytes of known size. The caller must populate manifest.Scope,
+// manifest.Encryption and manifest.Checksums.PayloadSHA256 before
+// calling; this function only writes outer tar headers and bodies.
+//
+// Used by the runner to stream GB-scale payloads through disk without
+// doubling up in memory. WriteBundle remains available for small-scale
+// tests that don't care about peak memory.
+func WriteBundleStream(sink io.Writer, manifest *Manifest, sealed io.Reader, sealedSize int64) error {
+	if manifest == nil {
+		return fmt.Errorf("backup: WriteBundleStream: manifest is nil")
+	}
+	if manifest.FormatVersion == 0 {
+		manifest.FormatVersion = FormatVersion
+	}
+	if err := manifest.Validate(); err != nil {
+		return fmt.Errorf("backup: manifest validate: %w", err)
+	}
+
+	var manifestBuf bytes.Buffer
+	if _, err := manifest.WriteTo(&manifestBuf); err != nil {
+		return fmt.Errorf("backup: marshal manifest: %w", err)
+	}
+
+	tw, err := NewTarZstWriter(sink)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if err := tw.WriteFile(manifestFileName, 0o644, now, manifestBuf.Bytes()); err != nil {
+		return err
+	}
+	if err := tw.WriteFile(restoreReadmeName, 0o644, now, []byte(RestoreReadmeContent)); err != nil {
+		return err
+	}
+	if err := tw.WriteStream(payloadFileName, 0o600, now, sealedSize, sealed); err != nil {
+		return err
+	}
+	return tw.Close()
+}
+
+// ReadBundleStream is the streaming counterpart to ReadBundle. It
+// returns the parsed manifest and a Reader that yields the sealed
+// payload bytes as they come off the outer tar, plus a Close function
+// the caller MUST invoke once consumption is complete. Checksum
+// verification is the caller's responsibility — wrap the returned
+// reader with NewHashingReader and call VerifyChecksum when done.
+//
+// Unlike ReadBundle this never buffers the full payload in memory;
+// consuming a multi-GB bundle stays within a few MB of heap.
+func ReadBundleStream(src io.Reader) (*Manifest, io.Reader, func() error, error) {
+	tr, err := NewTarZstReader(src)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	closer := func() error { return tr.Close() }
+
+	var manifest *Manifest
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = tr.Close()
+			return nil, nil, nil, fmt.Errorf("backup: read bundle entry: %w", err)
+		}
+		switch hdr.Name {
+		case manifestFileName:
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				_ = tr.Close()
+				return nil, nil, nil, fmt.Errorf("backup: read manifest: %w", err)
+			}
+			m, err := ReadManifest(data)
+			if err != nil {
+				_ = tr.Close()
+				return nil, nil, nil, err
+			}
+			manifest = m
+		case restoreReadmeName:
+			if _, err := io.Copy(io.Discard, tr); err != nil {
+				_ = tr.Close()
+				return nil, nil, nil, fmt.Errorf("backup: skip RESTORE.md: %w", err)
+			}
+		case payloadFileName:
+			if manifest == nil {
+				_ = tr.Close()
+				return nil, nil, nil, fmt.Errorf("%w: payload entry appeared before MANIFEST.json", ErrInvalidManifest)
+			}
+			if err := CompatibilityReason(manifest.FormatVersion); err != nil {
+				_ = tr.Close()
+				return manifest, nil, nil, err
+			}
+			// The tar reader itself is the streaming payload source.
+			// Caller consumes and then calls closer() (which closes the
+			// outer zstd decoder). We do not advance past this entry —
+			// the payload is the last one the writer emitted.
+			return manifest, tr, closer, nil
+		default:
+			if _, err := io.Copy(io.Discard, tr); err != nil {
+				_ = tr.Close()
+				return nil, nil, nil, fmt.Errorf("backup: skip %q: %w", hdr.Name, err)
+			}
+		}
+	}
+	_ = tr.Close()
+	if manifest == nil {
+		return nil, nil, nil, fmt.Errorf("%w: MANIFEST.json missing from bundle", ErrInvalidManifest)
+	}
+	return manifest, nil, nil, fmt.Errorf("%w: payload missing from bundle", ErrInvalidManifest)
+}
+
 // WriteBundle assembles a complete bundle at sink. The payload bytes
 // supplied in payload are sealed according to opts and placed in the
 // outer tar alongside the manifest and RESTORE.md. The manifest's

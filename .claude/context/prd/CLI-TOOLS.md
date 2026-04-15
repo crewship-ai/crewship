@@ -286,3 +286,29 @@ Přidat GitHub, GitLab, Vercel, AWS ikony do PROVIDER_ICONS mapy.
 2. **AWS compound credentials:** AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY — 1 credential s 2 hodnotami, nebo 2 credentials?
 3. **Domain allowlist auto-config:** Automaticky přidat domény dle provider? Nebo manuálně?
 4. **Tool version pinning:** Potřeba pinovat verze CLI tools? Nebo vždy latest?
+
+---
+
+## 10. CREWSHIP BACKUP (CRE-125 / CRE-127)
+
+Admin-only CLI pro zalohy workspace a crew. Plna specifikace v
+`.claude/context/prd/BACKUP.md`. Strucny pristup:
+
+```bash
+crewship backup create --scope=workspace
+crewship backup create --scope=crew --crew=<slug-or-id>
+crewship backup list
+crewship backup inspect <file>
+crewship backup restore <file> [--as-workspace <new-slug>]
+crewship backup delete <file>
+```
+
+Pozadavky:
+- Role OWNER nebo ADMIN na workspaceu.
+- Docker daemon dostupny pri `create` (pro pause/unpause/copy).
+- Kontejner nesmi mit zadneho agenta se statusem `running` nebo
+  `busy` behem `create`; jinak flow odmitne s jasnou hlaskou.
+
+Bundly defaultne letí do `~/.crewship/backups/` a jsou sifrovane
+pres AGE. Pro plnou dokumentaci restore mimo Crewship viz
+`DEPLOYMENT.md` sekce "Restore mimo Crewship".
