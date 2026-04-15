@@ -6,14 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
 	"filippo.io/age"
+
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 // debugReadBuildInfo is a tiny indirection so tests can substitute a
@@ -30,9 +34,17 @@ func debugReadBuildInfo() (string, bool) {
 
 // DefaultBackupsDir is the on-disk location the runner defaults to
 // when --output is not specified. Callers can override it via
-// CreateOptions.OutputDir.
+// CreateOptions.OutputDir. Uses the package-level default StorageOps
+// (LocalStorageOps unless swapped by tests via SetDefaultStorage).
+// CreateBackup uses defaultBackupsDirFor so the per-call storage
+// override (CreateOptions.Storage) derives its default path from the
+// same backend that will write the bundle.
 func DefaultBackupsDir() (string, error) {
-	home, err := os.UserHomeDir()
+	return defaultBackupsDirFor(getDefaultStorage())
+}
+
+func defaultBackupsDirFor(st StorageOps) (string, error) {
+	home, err := st.Home()
 	if err != nil {
 		return "", fmt.Errorf("backup: resolve home dir: %w", err)
 	}
@@ -73,6 +85,11 @@ type CreateOptions struct {
 	CrewContainerName func(slug string) string
 	// DockerOps executes pause/unpause/CopyFrom against the daemon.
 	DockerOps DockerOps
+	// Storage overrides the file-system operations used for bundle
+	// output. Nil uses LocalStorageOps; tests can inject an in-memory
+	// or S3-backed implementation via package-level SetDefaultStorage
+	// or this field.
+	Storage StorageOps
 }
 
 // Validate returns an error if opts lack the fields required by its
@@ -130,13 +147,55 @@ const LockTimeout = DefaultLockTTL
 // All steps release resources on error; if unpause fails after a
 // successful tar, the error surfaces as ErrPauseUnpauseLost so the
 // caller can alert an operator.
-func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateResult, error) {
+func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *CreateResult, retErr error) {
 	if err := opts.Validate(); err != nil {
 		return nil, err
 	}
+	st := resolveStorage(opts.Storage)
 
-	// 1. Resolve targets.
+	// Observability: capture duration + classify outcome regardless of
+	// which return path fires. The deferred hook records bytes from the
+	// successful result (or 0 on failure) and emits the outbound webhook
+	// so downstream consumers see create.success / create.failed events.
+	finish := ObserveCreateStart(string(opts.Scope))
+	// Close over target so crew-scope events carry a workspace id too —
+	// LoadCrewTarget resolves it even when opts.WorkspaceID is empty.
 	var target *WorkspaceTarget
+	defer func() {
+		var bytes int64
+		var sha, path string
+		workspaceID := opts.WorkspaceID
+		if result != nil {
+			bytes = result.Size
+			sha = result.SHA256
+			path = result.Path
+		}
+		if workspaceID == "" && target != nil {
+			workspaceID = target.ID
+		}
+		finish(retErr, bytes)
+		cfg := WebhookConfigFromEnv()
+		event := "backup.created"
+		errStr := ""
+		if retErr != nil {
+			event = "backup.failed"
+			errStr = retErr.Error()
+		}
+		SendEventAsync(cfg, WebhookEvent{
+			Event:       event,
+			Timestamp:   time.Now().UTC(),
+			WorkspaceID: workspaceID,
+			Scope:       string(opts.Scope),
+			Path:        path,
+			Bytes:       bytes,
+			SHA256:      sha,
+			Error:       errStr,
+		}, nil)
+	}()
+
+	// 1. Resolve targets. `target` is declared in the deferred webhook
+	// block above so crew-scope events can populate WorkspaceID from
+	// the resolved target.ID.
 	var err error
 	switch opts.Scope {
 	case ScopeWorkspace:
@@ -167,7 +226,11 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = release(context.Background()) }()
+	ObserveLockAcquired(target.ID)
+	defer func() {
+		_ = release(context.Background())
+		ObserveLockReleased(target.ID)
+	}()
 
 	// 3. Agent idle guard — refuse if any agent is actively running.
 	// With the in-process guard already held, no new mission can slip
@@ -182,30 +245,33 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	// a non-default --output is not left with stale .partial files.
 	outDir := opts.OutputDir
 	if outDir == "" {
-		outDir, err = DefaultBackupsDir()
+		outDir, err = defaultBackupsDirFor(st)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
+	if err := st.MkdirAll(ctx, outDir, 0o700); err != nil {
 		return nil, fmt.Errorf("backup: ensure output dir: %w", err)
 	}
 	// Sweep stale .partial files older than one hour. A process that
 	// crashed mid-CreateBackup leaves one behind; without this sweep
 	// the admin accumulates orphans forever and disk fills up.
-	cleanupStalePartials(outDir, time.Hour)
+	cleanupStalePartials(ctx, st, outDir, time.Hour)
 
 	// 5. Build the payload tar to a temp file so peak memory is bounded
 	// by the zstd encoder's window (a few MB) rather than the full
 	// workspace size. A multi-GB workspace therefore stays within
 	// reasonable RAM even on modest hosts.
 	now := time.Now().UTC()
-	payloadFile, err := os.CreateTemp("", "crewship-backup-payload-*.tar.zst")
+	payloadFile, err := st.CreateTemp(ctx, "", "crewship-backup-payload-*.tar.zst")
 	if err != nil {
 		return nil, fmt.Errorf("backup: create payload temp: %w", err)
 	}
 	payloadPath := payloadFile.Name()
-	defer func() { _ = os.Remove(payloadPath) }()
+	// Cleanup must run even if the request ctx is cancelled — we
+	// still need to remove the temp file, otherwise a client
+	// disconnect leaks GBs of staging data.
+	defer func() { _ = st.Remove(context.Background(), payloadPath) }()
 
 	payloadWriter, err := NewTarZstWriter(payloadFile)
 	if err != nil {
@@ -265,14 +331,14 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	// we know its size and SHA-256 before writing the outer bundle.
 	// The sealed temp is streamed directly into the final .partial
 	// output in step 8 without loading it into memory.
-	sealedFile, err := os.CreateTemp("", "crewship-backup-sealed-*")
+	sealedFile, err := st.CreateTemp(ctx, "", "crewship-backup-sealed-*")
 	if err != nil {
 		return nil, fmt.Errorf("backup: create sealed temp: %w", err)
 	}
 	sealedPath := sealedFile.Name()
-	defer func() { _ = os.Remove(sealedPath) }()
+	defer func() { _ = st.Remove(context.Background(), sealedPath) }()
 
-	rawPayload, err := os.Open(payloadPath)
+	rawPayload, err := st.Open(ctx, payloadPath)
 	if err != nil {
 		_ = sealedFile.Close()
 		return nil, fmt.Errorf("backup: reopen payload: %w", err)
@@ -329,14 +395,14 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 	}
 	finalPath := filepath.Join(outDir, fname)
 	partialPath := finalPath + ".partial"
-	outFile, err := os.OpenFile(partialPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	outFile, err := st.Create(ctx, partialPath, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open partial: %w", err)
 	}
-	sealedIn, err := os.Open(sealedPath)
+	sealedIn, err := st.Open(ctx, sealedPath)
 	if err != nil {
 		_ = outFile.Close()
-		_ = os.Remove(partialPath)
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: reopen sealed: %w", err)
 	}
 	err = WriteBundleStream(outFile, manifest, sealedIn, sealedSize)
@@ -345,16 +411,16 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (*CreateR
 		err = cerr
 	}
 	if err != nil {
-		_ = os.Remove(partialPath)
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, err
 	}
-	info, err := os.Stat(partialPath)
+	info, err := st.Stat(ctx, partialPath)
 	if err != nil {
-		_ = os.Remove(partialPath)
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: stat partial: %w", err)
 	}
-	if err := os.Rename(partialPath, finalPath); err != nil {
-		_ = os.Remove(partialPath)
+	if err := st.Rename(ctx, partialPath, finalPath); err != nil {
+		_ = st.Remove(context.Background(), partialPath)
 		return nil, fmt.Errorf("backup: rename final bundle: %w", err)
 	}
 
@@ -384,6 +450,10 @@ type RestoreOptions struct {
 	// messages (e.g. "docker phase skipped …"). The CLI wires this
 	// into stderr; the REST handler can log to slog.
 	Logger func(string)
+	// Storage overrides file-system operations used while reading the
+	// bundle. Nil uses LocalStorageOps (see CreateOptions.Storage for
+	// the rationale).
+	Storage StorageOps
 }
 
 // RestoreResult summarises what was restored.
@@ -403,7 +473,7 @@ type RestoreResult struct {
 //
 // In MVP this is gated to workspace / crew scope; instance scope
 // produces ErrInvalidScope until PR 4 lands.
-func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*RestoreResult, error) {
+func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result *RestoreResult, retErr error) {
 	if opts.Actor.UserID == "" {
 		return nil, fmt.Errorf("backup: RestoreOptions.Actor.UserID required")
 	}
@@ -413,8 +483,56 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 	if opts.Path == "" {
 		return nil, fmt.Errorf("backup: RestoreOptions.Path required")
 	}
+	st := resolveStorage(opts.Storage)
 
-	f, err := os.Open(opts.Path)
+	// Manifest metadata captured as the restore progresses, so the
+	// webhook can report scope/workspace even on failure paths that
+	// abort before `result` is populated. Updated right after
+	// ReadBundleStream parses the manifest below.
+	var (
+		manifestScope       string
+		manifestWorkspaceID string
+	)
+	// Observability: classify outcome regardless of return path. Do NOT
+	// observe a DryRun — it is not a "real" restore and would skew the
+	// restored_total counter.
+	defer func() {
+		if opts.DryRun {
+			return
+		}
+		ObserveRestore(retErr)
+		cfg := WebhookConfigFromEnv()
+		event := "backup.restored"
+		errStr := ""
+		scope := manifestScope
+		workspaceID := manifestWorkspaceID
+		if result != nil && result.Manifest != nil {
+			scope = string(result.Manifest.Scope)
+			if ws := result.Manifest.Contents.Workspace; ws != nil {
+				workspaceID = ws.ID
+			}
+		}
+		// result.RestoredWorkspaceID takes precedence when the admin
+		// used --as-workspace — that's the NEW id after RemapIDs, not
+		// the one the bundle carried.
+		if result != nil && result.RestoredWorkspaceID != "" {
+			workspaceID = result.RestoredWorkspaceID
+		}
+		if retErr != nil {
+			event = "backup.failed"
+			errStr = retErr.Error()
+		}
+		SendEventAsync(cfg, WebhookEvent{
+			Event:       event,
+			Timestamp:   time.Now().UTC(),
+			WorkspaceID: workspaceID,
+			Scope:       scope,
+			Path:        opts.Path,
+			Error:       errStr,
+		}, nil)
+	}()
+
+	f, err := st.Open(ctx, opts.Path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open bundle: %w", err)
 	}
@@ -429,6 +547,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 			_ = closeBundle()
 		}
 	}()
+	// Capture manifest metadata so the deferred webhook above can
+	// still emit scope + workspace on failure paths that never reach
+	// a successful `result`.
+	manifestScope = string(manifest.Scope)
+	if ws := manifest.Contents.Workspace; ws != nil {
+		manifestWorkspaceID = ws.ID
+	}
 	if manifest.Scope == ScopeInstance {
 		return nil, fmt.Errorf("%w: instance scope restore is not supported yet (V1.5)", ErrInvalidScope)
 	}
@@ -492,7 +617,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 	// Large per-crew sections live in temp files owned by the returned
 	// ExtractedPayload — Close must fire on every exit path to clean
 	// them up.
-	extracted, err := ExtractPayload(effectivePayload)
+	extracted, err := ExtractPayload(ctx, effectivePayload)
 	if err != nil {
 		return nil, err
 	}
@@ -618,6 +743,25 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 		}
 	}
 
+	// Replay forward-migration backfill hooks. The bundle's manifest
+	// records the migrations applied on the source instance; any
+	// migration applied on the TARGET but absent from the manifest
+	// represents schema that did not exist when the backup was taken.
+	// Pure ADD COLUMN migrations need no special handling (DB DEFAULT
+	// covers them); migrations that need to populate new columns on
+	// existing rows register a RestoreBackfillFunc via migrate.go so
+	// the restored rows get the same treatment.
+	//
+	// Runs AFTER RestoreDumpTx commits — the rows we want to backfill
+	// must already be visible. A hook failure surfaces as
+	// ErrRestoreBackfillFailed; the admin must investigate because the
+	// main restore is already committed.
+	if extracted.DBDump != nil && !opts.DryRun && len(manifest.SchemaMigrationVersions) > 0 {
+		if err := replayRestoreBackfills(ctx, db, manifest.SchemaMigrationVersions, opts.Logger); err != nil {
+			return nil, err
+		}
+	}
+
 	// No-op restore detection: the bundle carried rows but every one
 	// of them collided with an existing primary key and INSERT OR
 	// IGNORE silently dropped it. The classic cause is "restore into
@@ -663,8 +807,14 @@ func firstWorkspaceID(dump *DBDump) string {
 // ListBackups returns metadata for every bundle currently in dir. The
 // result is stable-ordered by CreatedAt descending so the newest
 // bundle is first (matches what most users want in the CLI output).
-func ListBackups(dir string) ([]ListEntry, error) {
-	entries, err := os.ReadDir(dir)
+func ListBackups(ctx context.Context, dir string) ([]ListEntry, error) {
+	// Capture the backend once so every entry in this list is
+	// inspected against the SAME storage. Without the capture a
+	// concurrent SetDefaultStorage swap could have ReadDir return
+	// paths from one backend and Inspect read manifests from another,
+	// silently returning stale or unrelated data.
+	st := getDefaultStorage()
+	entries, err := st.ReadDir(ctx, dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -685,10 +835,14 @@ func ListBackups(dir string) ([]ListEntry, error) {
 		if err != nil {
 			continue
 		}
-		m, inspectErr := Inspect(path)
+		m, inspectErr := inspectWithStorage(ctx, st, path)
 		le := ListEntry{
 			Path: path,
 			Size: info.Size(),
+			// Fall back to the filesystem mtime so sort has a
+			// reasonable ordering even when Inspect cannot read the
+			// manifest (corrupted bundle, permission issue).
+			CreatedAt: info.ModTime(),
 		}
 		if inspectErr == nil && m != nil {
 			le.Scope = m.Scope
@@ -701,6 +855,12 @@ func ListBackups(dir string) ([]ListEntry, error) {
 		}
 		out = append(out, le)
 	}
+	// Newest-first ordering is part of the ListBackups contract
+	// (StorageOps.ReadDir leaves ordering undefined), so a remote
+	// backend would otherwise return entries in arbitrary order.
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
 	return out, nil
 }
 
@@ -723,8 +883,17 @@ type ListEntry struct {
 
 // Inspect opens a bundle and returns its manifest without decrypting
 // the payload. Used by `crewship backup inspect` and ListBackups.
-func Inspect(path string) (*Manifest, error) {
-	f, err := os.Open(path)
+func Inspect(ctx context.Context, path string) (*Manifest, error) {
+	return inspectWithStorage(ctx, getDefaultStorage(), path)
+}
+
+// inspectWithStorage is the shared body behind Inspect. Having a
+// storage-parameterised variant lets ListBackups / Delete keep a
+// single StorageOps for the whole operation — otherwise a concurrent
+// SetDefaultStorage swap could make iteration and per-entry inspect
+// talk to different backends.
+func inspectWithStorage(ctx context.Context, st StorageOps, path string) (*Manifest, error) {
+	f, err := st.Open(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
@@ -756,17 +925,17 @@ type VerifyResult struct {
 // Used by `crewship backup verify <file>` so admins can confirm a
 // stored bundle is still restorable without actually committing to a
 // restore against a test instance.
-func Verify(path string) (*VerifyResult, error) {
-	f, err := os.Open(path)
+func Verify(ctx context.Context, path string) (*VerifyResult, error) {
+	st := getDefaultStorage()
+	info, err := st.Stat(ctx, path)
+	if err != nil {
+		return nil, fmt.Errorf("backup: stat %s: %w", path, err)
+	}
+	f, err := st.Open(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("backup: open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("backup: stat %s: %w", path, err)
-	}
 
 	manifest, sealed, closeBundle, err := ReadBundleStream(f)
 	if err != nil {
@@ -815,8 +984,8 @@ func ForceReleaseLock(ctx context.Context, db *sql.DB, workspaceID string) error
 // keepLast ≤ 0 disables the count-based rule; keepDays ≤ 0 disables
 // the age-based rule. When both are set, both are applied (a bundle
 // survives only if it is within keepLast AND newer than cutoff).
-func Rotate(dir, workspaceID string, keepLast int, keepDays int, dryRun bool) ([]string, error) {
-	entries, err := ListBackups(dir)
+func Rotate(ctx context.Context, dir, workspaceID string, keepLast int, keepDays int, dryRun bool) ([]string, error) {
+	entries, err := ListBackups(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -860,7 +1029,7 @@ func Rotate(dir, workspaceID string, keepLast int, keepDays int, dryRun bool) ([
 		return toDelete, nil
 	}
 	for _, p := range toDelete {
-		if err := Delete(p); err != nil {
+		if err := Delete(ctx, p); err != nil {
 			return toDelete, err
 		}
 	}
@@ -874,14 +1043,15 @@ func Rotate(dir, workspaceID string, keepLast int, keepDays int, dryRun bool) ([
 // for anything that passed API-level path validation.
 //
 // Callers emit an audit log row after a successful delete.
-func Delete(path string) error {
+func Delete(ctx context.Context, path string) error {
 	if !strings.HasSuffix(path, ".tar.zst") {
 		return fmt.Errorf("backup: refuse to delete %q: not a .tar.zst bundle", path)
 	}
-	if _, err := Inspect(path); err != nil {
+	st := getDefaultStorage()
+	if _, err := inspectWithStorage(ctx, st, path); err != nil {
 		return fmt.Errorf("backup: refuse to delete %q: failed inspect (%v)", path, err)
 	}
-	if err := os.Remove(path); err != nil {
+	if err := st.Remove(ctx, path); err != nil {
 		return fmt.Errorf("backup: delete %s: %w", path, err)
 	}
 	return nil
@@ -976,8 +1146,11 @@ func compatibleTargetsFor(s Scope) []Target {
 // this sweep they accumulate forever. Errors are swallowed — the only
 // consequence of a failed cleanup is a file that will be retried on
 // the next backup, not a correctness issue.
-func cleanupStalePartials(dir string, maxAge time.Duration) {
-	entries, err := os.ReadDir(dir)
+func cleanupStalePartials(ctx context.Context, st StorageOps, dir string, maxAge time.Duration) {
+	if st == nil {
+		st = getDefaultStorage()
+	}
+	entries, err := st.ReadDir(ctx, dir)
 	if err != nil {
 		return
 	}
@@ -994,7 +1167,7 @@ func cleanupStalePartials(dir string, maxAge time.Duration) {
 			continue
 		}
 		if info.ModTime().Before(cutoff) {
-			_ = os.Remove(filepath.Join(dir, e.Name()))
+			_ = st.Remove(ctx, filepath.Join(dir, e.Name()))
 		}
 	}
 }
@@ -1110,6 +1283,65 @@ func rewriteCrewSlug(dump *DBDump, crewID, newSlug string) {
 			return
 		}
 	}
+}
+
+// replayRestoreBackfills walks the migrations the TARGET has applied
+// but the BUNDLE did not, and invokes any registered backfill hook so
+// columns added post-backup get sensible values on the restored rows.
+// Each hook runs in its own transaction so one failure does not strand
+// a half-applied backfill. Failure returns ErrRestoreBackfillFailed
+// with the offending version wrapped.
+func replayRestoreBackfills(ctx context.Context, db *sql.DB, bundleVersions []int, logger func(string)) error {
+	applied := AppliedMigrationVersions(ctx, db)
+	if len(applied) == 0 {
+		return nil
+	}
+	bundleSet := make(map[int]bool, len(bundleVersions))
+	for _, v := range bundleVersions {
+		bundleSet[v] = true
+	}
+	var missing []int
+	for _, v := range applied {
+		if !bundleSet[v] {
+			missing = append(missing, v)
+		}
+	}
+	sort.Ints(missing)
+	for _, v := range missing {
+		fn := database.RestoreBackfillFor(v)
+		if fn == nil {
+			continue
+		}
+		if logger != nil {
+			logger(fmt.Sprintf("restore backfill: replaying v%d", v))
+		}
+		// errors.Join keeps both the sentinel (so callers can use
+		// errors.Is(err, ErrRestoreBackfillFailed)) AND the underlying
+		// DB/tx error (so errors.As can reach the driver's concrete
+		// type). A plain %w chain here could only carry one of the two
+		// because fmt.Errorf supports a single wrapped error.
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return errors.Join(
+				ErrRestoreBackfillFailed,
+				fmt.Errorf("backup: begin tx for backfill v%d: %w", v, err),
+			)
+		}
+		if err := fn(ctx, tx, slog.Default()); err != nil {
+			_ = tx.Rollback()
+			return errors.Join(
+				ErrRestoreBackfillFailed,
+				fmt.Errorf("backup: run backfill v%d: %w", v, err),
+			)
+		}
+		if err := tx.Commit(); err != nil {
+			return errors.Join(
+				ErrRestoreBackfillFailed,
+				fmt.Errorf("backup: commit backfill v%d: %w", v, err),
+			)
+		}
+	}
+	return nil
 }
 
 // firstWorkspaceSlug returns the slug of the first (and typically only)

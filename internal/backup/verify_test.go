@@ -39,7 +39,7 @@ func newTestBundle(t *testing.T, passphrase string) string {
 
 func TestVerify_ValidBundle(t *testing.T) {
 	path := newTestBundle(t, "")
-	res, err := Verify(path)
+	res, err := Verify(t.Context(), path)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestVerify_TamperedBundle(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write tampered: %v", err)
 	}
-	res, err := Verify(path)
+	res, err := Verify(t.Context(), path)
 	if err != nil {
 		t.Fatalf("Verify should return a result even on tamper: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestVerify_TamperedBundle(t *testing.T) {
 }
 
 func TestVerify_MissingFile(t *testing.T) {
-	_, err := Verify(filepath.Join(t.TempDir(), "nonexistent.tar.zst"))
+	_, err := Verify(t.Context(), filepath.Join(t.TempDir(), "nonexistent.tar.zst"))
 	if err == nil {
 		t.Error("expected error for missing file")
 	}
@@ -144,7 +144,7 @@ func TestRotate_KeepLast(t *testing.T) {
 	}
 
 	// Dry-run first — should report 2 deletions but leave disk intact.
-	deleted, err := Rotate(dir, "ws_scope", 1 /*keepLast*/, 0 /*keepDays*/, true /*dryRun*/)
+	deleted, err := Rotate(t.Context(), dir, "ws_scope", 1 /*keepLast*/, 0 /*keepDays*/, true /*dryRun*/)
 	if err != nil {
 		t.Fatalf("dry rotate: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestRotate_KeepLast(t *testing.T) {
 	}
 
 	// Real rotate.
-	deleted, err = Rotate(dir, "ws_scope", 1, 0, false)
+	deleted, err = Rotate(t.Context(), dir, "ws_scope", 1, 0, false)
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestRotate_IgnoresOtherWorkspaces(t *testing.T) {
 	// keep-last=1 would delete one of the two bundles if cross-workspace
 	// scoping were broken; scoped to ws_mine there is only one bundle
 	// in the pool and keep-last=1 leaves it alone.
-	deleted, err := Rotate(dir, "ws_mine", 1, 0, false)
+	deleted, err := Rotate(t.Context(), dir, "ws_mine", 1, 0, false)
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestRotate_ChecksumMismatchSurfaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "crewship-workspace-corrupt.tar.zst"), []byte("not a tar"), 0o600); err != nil {
 		t.Fatalf("write corrupt: %v", err)
 	}
-	deleted, err := Rotate(dir, "ws", 1, 0, true)
+	deleted, err := Rotate(t.Context(), dir, "ws", 1, 0, true)
 	if err != nil {
 		t.Fatalf("rotate should tolerate a corrupt file, got %v", err)
 	}
