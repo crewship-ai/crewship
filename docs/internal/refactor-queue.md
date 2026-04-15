@@ -44,7 +44,7 @@ item `blocked:<reason>`.
       `loadCrewIDsBatch`, `setCrewIDs`. Handler file drops to ~600.
       Risk: low.
 
-- [~] **3. agents-loaders** — `internal/api/agents.go` (917 LOC).
+- [x] **3. agents-loaders** — `internal/api/agents.go` (917 LOC).
       Extract `batchCountByAgentID` + related helpers to
       `internal/api/agents_loaders.go`. Risk: low.
 
@@ -109,4 +109,5 @@ Each completed item appends one line here via the nightly commit.
 <!-- start:progress -->
 - `#1 integrations-page` — 1627 → 669 LOC in page.tsx, 6-way split to `components/features/integrations/{types,helpers,oauth-auto-connect,template-popover,test-connection-button,expanded-panel}` (2026-04-15)
 - `#2 credentials-loaders` — 926 → 800 LOC in credentials.go; 5 batch/junction loaders moved to `internal/api/credentials_loaders.go` (140 LOC) (2026-04-15)
+- `#3 agents-loaders` — 917 → 885 LOC in agents.go; batchCountByAgentID moved to `internal/api/agents_loaders.go` (49 LOC); parseListPagination left in place (cross-file helper, followup refactor) (2026-04-16)
 <!-- end:progress -->
