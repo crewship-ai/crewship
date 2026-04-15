@@ -29,7 +29,7 @@ item `blocked:<reason>`.
 
 ### Low risk — extract-only refactors (start here)
 
-- [ ] **1. integrations-page** — `app/(dashboard)/integrations/page.tsx`
+- [~] **1. integrations-page** — `app/(dashboard)/integrations/page.tsx`
       (1627 LOC, 5 colocated components). Split into:
       `components/features/integrations/oauth-auto-connect.tsx`,
       `template-popover.tsx`, `test-connection-button.tsx`,
