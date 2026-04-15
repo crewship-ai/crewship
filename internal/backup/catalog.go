@@ -215,7 +215,7 @@ func boolToInt(b bool) int {
 // Separating it from CreateBackup keeps the runner free of DB-layout
 // concerns — the caller (CLI / REST handler) calls UpsertCatalogEntry
 // once a successful CreateResult comes back.
-func CatalogEntryFromResult(res *CreateResult, m *Manifest, _ string) CatalogEntry {
+func CatalogEntryFromResult(res *CreateResult, m *Manifest) CatalogEntry {
 	e := CatalogEntry{
 		FilePath:      res.Path,
 		Scope:         string(m.Scope),

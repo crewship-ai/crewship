@@ -43,13 +43,16 @@ var instanceBackupLimiter = &instanceLimiter{
 // Older samples are pruned opportunistically (no background GC) so
 // the map stays bounded under normal usage.
 func AllowInstanceBackup(userID string) (bool, time.Duration) {
-	// Empty userID bypasses the limiter because the caller lost the
-	// authenticated context — the HTTP layer should have rejected the
-	// request already, and an anonymous attempt would produce a
-	// permanent deny (every anonymous call would share the same bucket).
-	// Callers MUST NOT feed unauthenticated requests through here.
+	// Fail-closed on missing identity. The HTTP layer SHOULD have
+	// rejected an unauthenticated request already; if anything
+	// reaches here without a userID it's either a programming error
+	// or an attempted bypass — both deserve a deny rather than a
+	// silent free pass on the most expensive backup operation.
+	// Callers MUST supply the authenticated user's ID. A non-zero
+	// retry-after is returned so clients that key off it get a
+	// sensible backoff rather than spamming immediately.
 	if userID == "" {
-		return true, 0
+		return false, defaultInstanceBackupWindow
 	}
 	instanceBackupLimiter.mu.Lock()
 	defer instanceBackupLimiter.mu.Unlock()

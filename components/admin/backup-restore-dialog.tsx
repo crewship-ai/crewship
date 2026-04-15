@@ -31,6 +31,17 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
   const [asCrew, setAsCrew] = useState("")
   const [dryRun, setDryRun] = useState(false)
 
+  // Single close path so secrets and rewrite targets get wiped no
+  // matter how the dialog dismissed (Cancel, ESC, overlay click,
+  // success). Symmetric with backup-create-dialog.
+  function resetAndClose() {
+    setPassphrase("")
+    setAsWorkspace("")
+    setAsCrew("")
+    setDryRun(false)
+    close()
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!selectedPath) return
@@ -43,15 +54,14 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
         dry_run: dryRun,
       })
       toast.success(dryRun ? "Dry-run passed — no writes performed" : "Restore completed")
-      close()
-      setPassphrase("")
+      resetAndClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to restore backup")
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && close()}>
+    <Dialog open={open} onOpenChange={(v) => !v && resetAndClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Restore backup</DialogTitle>
@@ -104,7 +114,7 @@ export function BackupRestoreDialog({ workspaceId }: { workspaceId: string | und
             Dry run (validate checksum + compat, no writes)
           </label>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={close}>
+            <Button type="button" variant="ghost" onClick={resetAndClose}>
               Cancel
             </Button>
             <Button type="submit" disabled={restore.isPending}>

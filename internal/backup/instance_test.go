@@ -124,6 +124,10 @@ INSERT INTO instance_config (id, hostname) VALUES (1, '');
 
 func TestAllowInstanceBackup_EnforcesWindow(t *testing.T) {
 	ResetInstanceBackupLimiter()
+	// Reset on exit too — the limiter is package-global, so a later
+	// test reusing "u-1" would otherwise inherit this test's recorded
+	// attempts and see a spurious deny.
+	t.Cleanup(ResetInstanceBackupLimiter)
 	ok, _ := AllowInstanceBackup("u-1")
 	if !ok {
 		t.Fatal("first attempt must be allowed")
@@ -138,6 +142,10 @@ func TestAllowInstanceBackup_EnforcesWindow(t *testing.T) {
 	// Different user must be independent.
 	if ok2, _ := AllowInstanceBackup("u-2"); !ok2 {
 		t.Error("per-user isolation broken")
+	}
+	// Empty userID is fail-closed with a non-zero retry hint.
+	if ok3, retry3 := AllowInstanceBackup(""); ok3 || retry3 <= 0 {
+		t.Errorf("empty userID must deny with retry-after > 0, got ok=%v retry=%v", ok3, retry3)
 	}
 }
 

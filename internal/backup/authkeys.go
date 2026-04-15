@@ -29,12 +29,17 @@ type CollectedAuthKeys struct {
 // process env. On a correctly-configured instance the env must be
 // set before crewshipd starts; an absent secret produces an error so
 // instance backup never silently writes an empty authkeys section.
+//
+// The returned NextAuthSecret is the RAW env value — TrimSpace is
+// used only to detect an unset / whitespace-only env. Mutating the
+// secret would change the HKDF inputs and silently invalidate every
+// existing JWE on restore.
 func CollectAuthKeys() (*CollectedAuthKeys, error) {
-	sec := strings.TrimSpace(os.Getenv(NextAuthSecretEnv))
-	if sec == "" {
+	raw := os.Getenv(NextAuthSecretEnv)
+	if strings.TrimSpace(raw) == "" {
 		return nil, fmt.Errorf("backup: %s not set — refuse to backup auth keys section", NextAuthSecretEnv)
 	}
-	return &CollectedAuthKeys{NextAuthSecret: sec}, nil
+	return &CollectedAuthKeys{NextAuthSecret: raw}, nil
 }
 
 // RotateAuthKeys generates a fresh 64-byte NEXTAUTH_SECRET, persists

@@ -95,7 +95,12 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope must be 'crew' or 'workspace'"})
 		return
 	}
-	if scope == backup.ScopeCrew && req.CrewID == "" {
+	// Normalise + validate the trimmed crew_id so a whitespace-only
+	// value is rejected server-side and the canonical form is what
+	// CreateBackup sees. Direct API callers that skip the UI trim also
+	// get caught by this.
+	trimmedCrewID := strings.TrimSpace(req.CrewID)
+	if scope == backup.ScopeCrew && trimmedCrewID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required for crew scope"})
 		return
 	}
@@ -169,7 +174,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	result, err := backup.CreateBackup(ctx, h.db, backup.CreateOptions{
 		Scope:             scope,
 		WorkspaceID:       workspaceID,
-		CrewID:            req.CrewID,
+		CrewID:            trimmedCrewID,
 		OutputDir:         outputDir,
 		CrewshipVersion:   h.crewshipVersion,
 		Actor:             backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
@@ -198,7 +203,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// catalogue does NOT fail the create — the bundle is safely on
 	// disk either way; the admin just loses the fast-list affordance
 	// for that row and gets back-filled on next startup scan.
-	catEntry := backup.CatalogEntryFromResult(result, result.Manifest, workspaceID)
+	catEntry := backup.CatalogEntryFromResult(result, result.Manifest)
 	if catEntry.CreatedBy == "" {
 		catEntry.CreatedBy = user.Email
 	}
@@ -227,6 +232,46 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	type outEntry struct {
+		Path          string    `json:"path"`
+		FileName      string    `json:"file_name"`
+		Size          int64     `json:"size_bytes"`
+		Scope         string    `json:"scope"`
+		Encrypted     bool      `json:"encrypted"`
+		CreatedAt     time.Time `json:"created_at,omitempty"`
+		FormatVersion int       `json:"format_version,omitempty"`
+	}
+
+	// Prefer the backup_catalog index — since CRE-128 every create/
+	// delete keeps it in sync, so a workspace-scoped SELECT is O(rows)
+	// instead of O(bundles) filesystem scan + per-file Inspect. Fall
+	// back to the filesystem when the catalog is empty (fresh install,
+	// pre-migration data, or a startup backfill that hasn't run yet).
+	cat, err := backup.ListCatalog(ctx, h.db, workspaceID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if len(cat) > 0 {
+		out := make([]outEntry, 0, len(cat))
+		for _, e := range cat {
+			out = append(out, outEntry{
+				Path:          e.FilePath,
+				FileName:      filepath.Base(e.FilePath),
+				Size:          e.Size,
+				Scope:         e.Scope,
+				Encrypted:     e.Encrypted,
+				CreatedAt:     e.CreatedAt,
+				FormatVersion: e.FormatVersion,
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": out})
+		return
+	}
+
+	// Legacy / fallback path — scan the filesystem and filter per
+	// workspace. Kept so an admin with pre-catalog bundles can still
+	// list without a manual backfill step.
 	dir, err := backup.DefaultBackupsDir()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -237,9 +282,6 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	// Filter entries to just this caller's workspace. DefaultBackupsDir
-	// is host-shared, so without this filter an admin of workspace A
-	// would see bundles from every other workspace on the host.
 	filtered := entries[:0]
 	for _, e := range entries {
 		if bundleBelongsToWorkspace(ctx, e.Path, workspaceID) {
@@ -248,15 +290,6 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	entries = filtered
 
-	type outEntry struct {
-		Path          string    `json:"path"`
-		FileName      string    `json:"file_name"`
-		Size          int64     `json:"size_bytes"`
-		Scope         string    `json:"scope"`
-		Encrypted     bool      `json:"encrypted"`
-		CreatedAt     time.Time `json:"created_at,omitempty"`
-		FormatVersion int       `json:"format_version,omitempty"`
-	}
 	out := make([]outEntry, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, outEntry{

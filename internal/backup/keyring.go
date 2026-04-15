@@ -29,12 +29,15 @@ var ErrKeyringEntryNotFound = errors.New("backup keyring: entry not found")
 // per workspace, AES-256-GCM at rest via internal/encryption, and a
 // per-process mutex so writes within the same process serialise.
 //
-// The mutex does NOT cover multiple concurrent CLI invocations — two
-// `crewship backup create --use-keyring` processes racing on the
-// same file will last-write-wins and may clobber an entry. In
-// practice the CLI is interactive, so a real race is unlikely; a
-// future OS-level file lock (flock) can tighten this without
-// changing the API.
+// TODO(CRE-130 follow-up): the mutex does NOT cover concurrent CLI
+// invocations — two `crewship backup ... --use-keyring` processes
+// racing on the same file are last-write-wins and can clobber an
+// entry. In practice the CLI is interactive so a real race is
+// unlikely; a proper fix adds an OS-level advisory lock
+// (syscall.Flock on POSIX) around the full load-modify-save sequence.
+// Deliberately deferred: fix requires either golang.org/x/sys/unix or
+// a new dep, and the failure mode (single passphrase lost, never data
+// corruption) does not justify the surface-area growth mid-PR.
 //
 // We do not adopt 99designs/keyring because it pulls cgo (macOS
 // Security framework, libsecret) on all platforms, which conflicts

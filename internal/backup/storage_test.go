@@ -1,8 +1,9 @@
 package backup
 
 import (
+	"errors"
 	"io"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"testing"
 )
@@ -41,9 +42,11 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	got, err := io.ReadAll(r)
-	_ = r.Close()
 	if err != nil {
 		t.Fatalf("ReadAll: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 	if string(got) != string(payload) {
 		t.Fatalf("round-trip content mismatch: got %q want %q", got, payload)
@@ -110,8 +113,11 @@ func TestLocalStorageOps_RoundTrip(t *testing.T) {
 	if err := ops.RemoveAll(t.Context(), filepath.Join(root, "nested")); err != nil {
 		t.Fatalf("RemoveAll: %v", err)
 	}
-	if _, err := ops.Stat(t.Context(), filepath.Join(root, "nested")); !os.IsNotExist(err) {
-		t.Fatalf("expected ErrNotExist after RemoveAll, got %v", err)
+	// errors.Is instead of os.IsNotExist because LocalStorageOps now
+	// wraps os errors with fmt.Errorf %w — os.IsNotExist only unwraps
+	// *fs.PathError / *os.LinkError, so the chain is invisible to it.
+	if _, err := ops.Stat(t.Context(), filepath.Join(root, "nested")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("expected fs.ErrNotExist after RemoveAll, got %v", err)
 	}
 
 	// MkdirTemp + RemoveAll cleanup.

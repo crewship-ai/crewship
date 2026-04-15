@@ -31,6 +31,13 @@ type ExtractedPayload struct {
 	// MiseBySlug is the mise.toml counterpart to DevcontainerBySlug.
 	MiseBySlug map[string][]byte
 
+	// storage is the StorageOps that ExtractPayload used to create the
+	// temp directory. Close / Open* helpers route every subsequent I/O
+	// through this same backend so a later SetDefaultStorage() swap
+	// cannot orphan temp files or send reopen traffic to the wrong
+	// implementation.
+	storage StorageOps
+
 	// tempDir is the directory that holds every on-disk section tar.
 	// Removed by Close().
 	tempDir string
@@ -39,6 +46,16 @@ type ExtractedPayload struct {
 	workspacePathBySlug map[string]string
 	volumePathsBySlug   map[string]map[string]string // crew → volume name → path
 	memoryPathBySlug    map[string]string
+}
+
+// storageOrDefault returns the payload's captured StorageOps, or the
+// package default if the struct was constructed without one (e.g.
+// legacy tests).
+func (p *ExtractedPayload) storageOrDefault() StorageOps {
+	if p.storage != nil {
+		return p.storage
+	}
+	return getDefaultStorage()
 }
 
 // Close removes the temp directory and every temp file backing
@@ -53,7 +70,7 @@ func (p *ExtractedPayload) Close() error {
 	if p == nil || p.tempDir == "" {
 		return nil
 	}
-	err := getDefaultStorage().RemoveAll(context.Background(), p.tempDir)
+	err := p.storageOrDefault().RemoveAll(context.Background(), p.tempDir)
 	p.tempDir = ""
 	p.workspacePathBySlug = nil
 	p.volumePathsBySlug = nil
@@ -76,7 +93,7 @@ func (p *ExtractedPayload) OpenWorkspace(ctx context.Context, slug string) (io.R
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := getDefaultStorage().Open(ctx, path)
+	f, err := p.storageOrDefault().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open workspace section %s: %w", slug, err)
 	}
@@ -94,7 +111,7 @@ func (p *ExtractedPayload) OpenVolume(ctx context.Context, slug, vol string) (io
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := getDefaultStorage().Open(ctx, path)
+	f, err := p.storageOrDefault().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open volume section %s/%s: %w", slug, vol, err)
 	}
@@ -108,7 +125,7 @@ func (p *ExtractedPayload) OpenMemory(ctx context.Context, slug string) (io.Read
 	if !ok {
 		return nil, false, nil
 	}
-	f, err := getDefaultStorage().Open(ctx, path)
+	f, err := p.storageOrDefault().Open(ctx, path)
 	if err != nil {
 		return nil, true, fmt.Errorf("backup: open memory section %s: %w", slug, err)
 	}
@@ -124,11 +141,16 @@ func (p *ExtractedPayload) OpenMemory(ctx context.Context, slug string) (io.Read
 // MUST call Close() once finished with all sections (typically via
 // defer in RestoreBackup).
 func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, error) {
-	tempDir, err := getDefaultStorage().MkdirTemp(ctx, "", "crewship-restore-*")
+	// Capture the storage backend NOW so a later SetDefaultStorage
+	// swap cannot send cleanup / reopen traffic to a different
+	// implementation than the one that created the temp files.
+	st := getDefaultStorage()
+	tempDir, err := st.MkdirTemp(ctx, "", "crewship-restore-*")
 	if err != nil {
 		return nil, fmt.Errorf("backup: temp dir: %w", err)
 	}
 	out := &ExtractedPayload{
+		storage:             st,
 		DevcontainerBySlug:  map[string][]byte{},
 		MiseBySlug:          map[string][]byte{},
 		tempDir:             tempDir,
@@ -162,7 +184,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 			return s, nil
 		}
 		safe := strings.ReplaceAll(key, "/", "_")
-		f, err := getDefaultStorage().CreateTemp(ctx, tempDir, safe+"-*.tar")
+		f, err := st.CreateTemp(ctx, tempDir, safe+"-*.tar")
 		if err != nil {
 			return nil, fmt.Errorf("backup: create section temp %s: %w", key, err)
 		}

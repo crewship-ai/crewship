@@ -222,6 +222,10 @@ export function useRestoreBackup(workspaceId: string | undefined) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["backups", workspaceId] })
+      // Restore acquires + releases the workspace lock; refresh the
+      // status query so the banner reflects reality without waiting
+      // for the next 5-second poll.
+      qc.invalidateQueries({ queryKey: ["backup-status", workspaceId] })
     },
   })
 }

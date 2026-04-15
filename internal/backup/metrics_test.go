@@ -79,20 +79,30 @@ func TestMetrics_LockHeldLifecycle(t *testing.T) {
 
 func TestMetrics_DurationQuantiles(t *testing.T) {
 	ResetMetrics()
-	// Feed a known distribution so we can assert p50 falls in the
-	// middle. The quantile math is integer-indexed; exact sample
-	// returned depends on the index. We just assert it is a plausible
-	// value from the sample set, not a specific slot.
-	for i := 0; i < 100; i++ {
-		done := ObserveCreateStart("test")
-		done(nil, int64(i))
+	// Inject a known [1.0, 2.0, … 100.0] distribution directly into
+	// the ring. Going through ObserveCreateStart would only record
+	// real wall-clock micros and would not let us assert exact
+	// percentile values, so a broken P50/P95/mean computation could
+	// still pass. We're in the same package, so direct mutation
+	// under the existing mutex is fair game for a test.
+	metrics.mu.Lock()
+	for i := 1; i <= 100; i++ {
+		metrics.durationsSeconds = append(metrics.durationsSeconds, float64(i))
 	}
+	metrics.mu.Unlock()
+
 	snap := Snapshot()
-	if snap.DurationSecondsP50 < 0 {
-		t.Errorf("p50 must be non-negative, got %v", snap.DurationSecondsP50)
+	// snapshot uses sorted[n/2] for p50 — index 50 of 0-99 = 51.
+	if snap.DurationSecondsP50 != 51 {
+		t.Errorf("p50: got %v want 51", snap.DurationSecondsP50)
 	}
-	if snap.DurationSecondsMean < 0 {
-		t.Errorf("mean must be non-negative, got %v", snap.DurationSecondsMean)
+	// p95 uses sorted[min(n-1, (n*95)/100)] = sorted[95] = 96.
+	if snap.DurationSecondsP95 != 96 {
+		t.Errorf("p95: got %v want 96", snap.DurationSecondsP95)
+	}
+	// mean of 1..100 = 5050/100 = 50.5.
+	if snap.DurationSecondsMean != 50.5 {
+		t.Errorf("mean: got %v want 50.5", snap.DurationSecondsMean)
 	}
 }
 

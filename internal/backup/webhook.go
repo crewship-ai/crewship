@@ -6,11 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
+
+// redactURL strips userinfo and query from the configured webhook URL
+// so error messages do not leak basic-auth credentials, signed URLs,
+// or admin-supplied query secrets into logs / audit trails. A
+// malformed URL falls back to the host string we can extract; if even
+// parsing fails (very unusual) we return a fixed marker.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "<invalid-url>"
+	}
+	return u.Scheme + "://" + u.Host + u.Path
+}
 
 // WebhookConfig drives outbound backup event POSTs. Empty URL disables
 // delivery entirely — the runner detects this and skips the work so
@@ -85,11 +99,15 @@ func SendEvent(ctx context.Context, cfg WebhookConfig, event WebhookEvent) error
 	req.Header.Set("X-Crewship-Signature", "sha256="+webhook.ComputeHMAC(body, cfg.Secret))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("backup webhook: POST %s: %w", cfg.URL, err)
+		// Do NOT include cfg.URL in the error: it can carry basic-auth
+		// userinfo or signed-URL query params that would land in logs.
+		// The host context is occasionally useful for debugging, so
+		// embed only the redacted scheme+host+path shape.
+		return fmt.Errorf("backup webhook: POST %s failed: %w", redactURL(cfg.URL), err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("backup webhook: %s returned %d", cfg.URL, resp.StatusCode)
+		return fmt.Errorf("backup webhook: %s returned status %d", redactURL(cfg.URL), resp.StatusCode)
 	}
 	return nil
 }
