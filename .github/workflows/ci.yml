@@ -212,6 +212,9 @@ jobs:
           CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
           CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
           CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          # SQLite DB — also redirected, and exported so the e2e script can
+          # read the same file the server is writing to.
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
           CREWSHIP_NEXTJS_URL: http://localhost:8080
           CREWSHIP_SKIP_SIDECAR: "1"
         run: |
@@ -235,6 +238,7 @@ jobs:
         env:
           CREWSHIP_SERVER: http://localhost:8080
           CREWSHIP: ./crewship
+          CREWSHIP_DB: ${{ github.workspace }}/.crewship-data/crewship.db
 
       - name: Dump server log on failure
         if: failure()
