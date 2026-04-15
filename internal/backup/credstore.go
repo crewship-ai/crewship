@@ -30,9 +30,21 @@ type EncryptedCredential struct {
 	SecurityLevel  int
 	KeeperCrewID   string
 	EncryptedValue string
-	CreatedBy      string // NOT NULL FK → users.id — MUST be exported
-	CreatedAt      string
-	UpdatedAt      string
+	// OAuth metadata — refresh tokens are encrypted on disk; copying
+	// the cipher across hosts preserves long-lived sessions exactly
+	// the same way EncryptedValue does for the primary secret.
+	EncryptedRefreshToken string
+	TokenExpiresAt        string
+	// Account context displayed in the UI / used by the keeper. None
+	// of these are secrets but losing them on restore makes
+	// reconnect/heal flows unable to identify the linked account.
+	AccountLabel  string
+	AccountEmail  string
+	LastCheckedAt string
+	LastError     string
+	CreatedBy     string // NOT NULL FK → users.id — MUST be exported
+	CreatedAt     string
+	UpdatedAt     string
 }
 
 // ExportEncryptedCredentials reads every ACTIVE credential row across
@@ -54,8 +66,11 @@ func ExportEncryptedCredentials(ctx context.Context, db *sql.DB) ([]EncryptedCre
 SELECT id, workspace_id, COALESCE(crew_id,''), name, COALESCE(description,''),
        type, COALESCE(scope,'WORKSPACE'), COALESCE(status,''),
        COALESCE(provider,''), COALESCE(security_level,0),
-       COALESCE(keeper_crew_id,''), encrypted_value, created_by,
-       COALESCE(created_at,''), COALESCE(updated_at,'')
+       COALESCE(keeper_crew_id,''), encrypted_value,
+       COALESCE(encrypted_refresh_token,''), COALESCE(token_expires_at,''),
+       COALESCE(account_label,''), COALESCE(account_email,''),
+       COALESCE(last_checked_at,''), COALESCE(last_error,''),
+       created_by, COALESCE(created_at,''), COALESCE(updated_at,'')
 FROM credentials
 WHERE deleted_at IS NULL AND status = 'ACTIVE'
 ORDER BY created_at`)
@@ -70,7 +85,11 @@ ORDER BY created_at`)
 			&c.ID, &c.WorkspaceID, &c.CrewID, &c.Name, &c.Description,
 			&c.Type, &c.Scope, &c.Status,
 			&c.Provider, &c.SecurityLevel, &c.KeeperCrewID,
-			&c.EncryptedValue, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt,
+			&c.EncryptedValue,
+			&c.EncryptedRefreshToken, &c.TokenExpiresAt,
+			&c.AccountLabel, &c.AccountEmail,
+			&c.LastCheckedAt, &c.LastError,
+			&c.CreatedBy, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("backup: scan credential: %w", err)
 		}
@@ -123,26 +142,38 @@ func ImportEncryptedCredentials(ctx context.Context, db *sql.DB, creds []Encrypt
 INSERT INTO credentials
   (id, workspace_id, crew_id, name, description, type, scope, status,
    provider, security_level, keeper_crew_id, encrypted_value,
+   encrypted_refresh_token, token_expires_at, account_label, account_email,
+   last_checked_at, last_error,
    created_by, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING`)
 	if err != nil {
 		return 0, fmt.Errorf("backup: prepare credential insert: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
+	// emptyAsNull keeps nullable text columns NULL when the source
+	// row had no value — important for token_expires_at /
+	// last_checked_at where downstream code does IS NULL checks
+	// rather than empty-string comparisons.
+	emptyAsNull := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
 	var inserted int
 	for _, c := range creds {
 		// NULL out empty crew_id since the FK is nullable; sqlite's
 		// empty-string → FK "crews.id = ''" would fail constraint.
-		var crewID any
-		if c.CrewID != "" {
-			crewID = c.CrewID
-		}
 		res, err := stmt.ExecContext(ctx,
-			c.ID, c.WorkspaceID, crewID, c.Name, c.Description,
+			c.ID, c.WorkspaceID, emptyAsNull(c.CrewID), c.Name, c.Description,
 			c.Type, c.Scope, c.Status,
 			c.Provider, c.SecurityLevel, c.KeeperCrewID,
-			c.EncryptedValue, c.CreatedBy, c.CreatedAt, c.UpdatedAt,
+			c.EncryptedValue,
+			emptyAsNull(c.EncryptedRefreshToken), emptyAsNull(c.TokenExpiresAt),
+			emptyAsNull(c.AccountLabel), emptyAsNull(c.AccountEmail),
+			emptyAsNull(c.LastCheckedAt), emptyAsNull(c.LastError),
+			c.CreatedBy, c.CreatedAt, c.UpdatedAt,
 		)
 		if err != nil {
 			return 0, fmt.Errorf("backup: insert credential %s: %w", c.ID, err)

@@ -59,7 +59,12 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
       toast.error("Crew ID or slug is required for crew scope")
       return
     }
-    if (encryption === "passphrase" && !passphrase) {
+    if (encryption === "passphrase" && !passphrase.trim()) {
+      // Reject whitespace-only passphrases up front (a "   " input
+      // would otherwise reach the server and surface as a confusing
+      // "decryption failed" later). The check is on the trimmed
+      // value; we still send the ORIGINAL bytes verbatim so the user
+      // gets exactly what they typed at restore time.
       toast.error("Passphrase required")
       return
     }
