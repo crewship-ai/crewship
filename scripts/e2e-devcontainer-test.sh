@@ -45,11 +45,7 @@ step "Pre-flight"
 [ -f "./entrypoint.sh" ] || fail "Entrypoint not found at ./entrypoint.sh. Run 'make build:sidecar' first."
 [ -f "$DB" ] || fail "Database not found at $DB"
 docker info >/dev/null 2>&1 || fail "Docker daemon not reachable"
-curl -sf -o /dev/null "$SERVER/api/v1/features/catalog" || {
-    # Ignore 401 (auth required), only fail on connection errors
-    curl -s -o /dev/null -w "%{http_code}" "$SERVER/api/v1/features/catalog" | grep -qE '^(401|200)$' || \
-        fail "Crewship server not reachable at $SERVER"
-}
+curl -sf -o /dev/null "$SERVER/healthz" || fail "Crewship server not reachable at $SERVER"
 
 echo "OK: binaries present, Docker up, server reachable"
 
