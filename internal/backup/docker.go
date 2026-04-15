@@ -34,6 +34,11 @@ type DockerOps interface {
 	// container. The container must exist (created or running); dstPath
 	// must already exist — docker does not create parent directories.
 	CopyTo(ctx context.Context, containerID, dstPath string, content io.Reader) error
+
+	// ContainerExists reports whether a container with the given ID or
+	// name is known to the daemon. Used by restore preflight so CopyTo
+	// does not fail with a cryptic "No such container" mid-stream.
+	ContainerExists(ctx context.Context, containerID string) (bool, error)
 }
 
 // MobyDockerOps is the production implementation backed by the moby
@@ -75,6 +80,21 @@ func (m *MobyDockerOps) CopyFrom(ctx context.Context, containerID, srcPath strin
 		return nil, fmt.Errorf("backup: docker cp from %s:%s: %w", containerID, srcPath, err)
 	}
 	return r, nil
+}
+
+// ContainerExists implements DockerOps by probing the daemon. Any
+// error containing "No such container" resolves to (false, nil);
+// other errors (daemon unreachable, permission denied) bubble up.
+func (m *MobyDockerOps) ContainerExists(ctx context.Context, containerID string) (bool, error) {
+	_, err := m.Client.ContainerInspect(ctx, containerID)
+	if err == nil {
+		return true, nil
+	}
+	if strings.Contains(err.Error(), "No such container") ||
+		strings.Contains(err.Error(), "not found") {
+		return false, nil
+	}
+	return false, fmt.Errorf("backup: docker inspect %s: %w", containerID, err)
 }
 
 // CopyTo implements DockerOps.

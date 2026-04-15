@@ -269,17 +269,26 @@ var backupRestoreCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			RestoredWs   string `json:"restored_ws"`
-			CrewsCount   int    `json:"crews_count"`
-			RowsInserted int    `json:"rows_inserted"`
+			RestoredWs          string `json:"restored_ws"`
+			RestoredWorkspaceID string `json:"restored_workspace_id"`
+			CrewsCount          int    `json:"crews_count"`
+			RowsInserted        int    `json:"rows_inserted"`
+			DockerPhaseSkipped  bool   `json:"docker_phase_skipped"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf(
-			"Restore complete — workspace=%s, crews=%d, rows=%d",
+		msg := fmt.Sprintf(
+			"Restore complete — workspace=%s crews=%d rows=%d",
 			out.RestoredWs, out.CrewsCount, out.RowsInserted,
-		))
+		)
+		if out.RestoredWorkspaceID != "" {
+			msg += " id=" + out.RestoredWorkspaceID
+		}
+		cli.PrintSuccess(msg)
+		if out.DockerPhaseSkipped {
+			cli.PrintWarning("Docker phase skipped (--as-workspace/--as-crew supplied). Provision the new crews with `crewship crew provision` and re-run restore without the rewrite flag to land container state.")
+		}
 		return nil
 	},
 }
@@ -340,6 +349,25 @@ var backupDeleteCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
+		force, _ := cmd.Flags().GetBool("force")
+		// Interactive confirmation unless --force. Silent deletion of
+		// a multi-GB bundle from a fat-fingered command is exactly the
+		// kind of footgun we want to put behind a speed bump. When
+		// stdin isn't a TTY (scripts, CI) we require --force instead
+		// of prompting.
+		if !force {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				return fmt.Errorf("refusing to delete %s without --force in a non-interactive session", args[0])
+			}
+			fmt.Fprintf(os.Stderr, "Delete backup %s? [y/N] ", args[0])
+			reader := bufio.NewReader(os.Stdin)
+			line, _ := reader.ReadString('\n')
+			line = strings.TrimSpace(strings.ToLower(line))
+			if line != "y" && line != "yes" {
+				fmt.Fprintln(os.Stderr, "Aborted.")
+				return nil
+			}
+		}
 		client := newAPIClient()
 		resp, err := client.Delete("/api/v1/admin/backups?path=" + encodeQuery(args[0]))
 		if err != nil {
@@ -365,6 +393,8 @@ func init() {
 	backupRestoreCmd.Flags().String("as-workspace", "", "Restore the workspace under a new slug")
 	backupRestoreCmd.Flags().String("as-crew", "", "Restore the crew under a new slug (scope=crew only)")
 	backupRestoreCmd.Flags().String("passphrase-file", "", "Read passphrase from file instead of prompting")
+
+	backupDeleteCmd.Flags().Bool("force", false, "Delete without interactive confirmation (required in non-interactive sessions)")
 
 	backupCmd.AddCommand(backupCreateCmd)
 	backupCmd.AddCommand(backupListCmd)

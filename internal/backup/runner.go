@@ -361,14 +361,20 @@ type RestoreOptions struct {
 	Actor        Actor
 	DockerOps    DockerOps
 	ContainerFor func(slug string) string // map crew slug -> container ID
+	// Logger, if set, receives human-readable progress/warning
+	// messages (e.g. "docker phase skipped …"). The CLI wires this
+	// into stderr; the REST handler can log to slog.
+	Logger func(string)
 }
 
 // RestoreResult summarises what was restored.
 type RestoreResult struct {
-	Manifest     *Manifest
-	RestoredWs   string
-	CrewsCount   int
-	RowsInserted int
+	Manifest            *Manifest
+	RestoredWs          string
+	RestoredWorkspaceID string // new CUID when --as-workspace remapped IDs
+	CrewsCount          int
+	RowsInserted        int
+	DockerPhaseSkipped  bool
 }
 
 // RestoreBackup applies a bundle to the target DB + docker engine. It
@@ -406,6 +412,32 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 	}()
 	if manifest.Scope == ScopeInstance {
 		return nil, fmt.Errorf("%w: instance scope restore is not supported yet (V1.5)", ErrInvalidScope)
+	}
+
+	// Schema skew detection. The bundle records which DB migrations
+	// had been applied on the source; the target might be newer (OK —
+	// migrations are additive), or older (NOT OK — missing columns
+	// would silently drop on INSERT because RestoreDumpTx skips
+	// unknown columns). Fail loudly rather than silently corrupting
+	// a restore.
+	if len(manifest.SchemaMigrationVersions) > 0 {
+		applied := AppliedMigrationVersions(ctx, db)
+		appliedSet := map[int]bool{}
+		for _, v := range applied {
+			appliedSet[v] = true
+		}
+		var missing []int
+		for _, v := range manifest.SchemaMigrationVersions {
+			if !appliedSet[v] {
+				missing = append(missing, v)
+			}
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf(
+				"backup: target schema is older than the bundle — missing migrations %v. Upgrade Crewship on this host to at least the version that introduced those migrations, then retry restore",
+				missing,
+			)
+		}
 	}
 
 	// Wrap the sealed stream with a hashing reader so we can verify
@@ -476,9 +508,44 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 	// the commit to preCommit, so a CopyTo failure leaves the target
 	// DB untouched — no half-restored workspace rows with no volume
 	// data behind them.
+	//
+	// When the admin picked --as-workspace / --as-crew we SKIP the
+	// Docker phase entirely. manifest.Contents.Crews carries the
+	// ORIGINAL slugs, so ContainerFor(slug) would resolve to the
+	// source crew's containers — CopyTo would then clobber the
+	// original workspace's live container data. The new crews do not
+	// yet have provisioned containers anyway (their DB rows were only
+	// just inserted in this very transaction). Admins restoring under
+	// a new slug therefore get DB rows only; they must provision the
+	// new crews via `crewship crew provision` and then re-run restore
+	// without --as-* to land the container state.
+	skipDocker := opts.AsWorkspace != "" || opts.AsCrew != ""
 	dockerRestore := func(_ context.Context) error {
+		if skipDocker {
+			if opts.Logger != nil {
+				opts.Logger("docker phase skipped because --as-workspace / --as-crew was supplied; provision the new crews and re-run restore without the rewrite flag to land container state")
+			}
+			return nil
+		}
 		if opts.DockerOps == nil || opts.ContainerFor == nil {
 			return nil
+		}
+		// Preflight: every target container must exist before we start
+		// writing. Without this, a missing crew container surfaces as
+		// "No such container" from deep inside CopyTo, after other
+		// crews have already been mutated — partial restore state.
+		for _, c := range manifest.Contents.Crews {
+			containerID := opts.ContainerFor(c.Slug)
+			if containerID == "" {
+				continue
+			}
+			exists, err := opts.DockerOps.ContainerExists(ctx, containerID)
+			if err != nil {
+				return fmt.Errorf("backup: preflight crew %s: %w", c.Slug, err)
+			}
+			if !exists {
+				return fmt.Errorf("backup: crew %q container %q is not provisioned on this instance; run `crewship crew provision %s` then re-run restore", c.Slug, containerID, c.Slug)
+			}
 		}
 		for _, c := range manifest.Contents.Crews {
 			containerID := opts.ContainerFor(c.Slug)
@@ -520,11 +587,30 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (*Resto
 	}
 
 	return &RestoreResult{
-		Manifest:     manifest,
-		RestoredWs:   firstWorkspaceSlug(extracted.DBDump),
-		CrewsCount:   len(manifest.Contents.Crews),
-		RowsInserted: stats.RowsInserted,
+		Manifest:            manifest,
+		RestoredWs:          firstWorkspaceSlug(extracted.DBDump),
+		RestoredWorkspaceID: firstWorkspaceID(extracted.DBDump),
+		CrewsCount:          len(manifest.Contents.Crews),
+		RowsInserted:        stats.RowsInserted,
+		DockerPhaseSkipped:  skipDocker,
 	}, nil
+}
+
+// firstWorkspaceID returns the "id" of the first workspace row in
+// the dump — after RemapIDs this is the freshly generated CUID, so
+// the CLI / audit log can surface it back to the admin.
+func firstWorkspaceID(dump *DBDump) string {
+	if dump == nil {
+		return ""
+	}
+	rows, ok := dump.Tables["workspaces"]
+	if !ok || len(rows) == 0 {
+		return ""
+	}
+	if s, ok := rows[0]["id"].(string); ok {
+		return s
+	}
+	return ""
 }
 
 // ListBackups returns metadata for every bundle currently in dir. The
