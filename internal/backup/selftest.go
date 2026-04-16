@@ -238,11 +238,15 @@ func BackupSelfTest(ctx context.Context, ops DockerOps, opts SelfTestOpts) (*Sel
 			len(canaryContent), len(got))
 	}
 
-	// 6. Cleanup — best-effort overwrite with empty bytes so the
-	//    seeded /workspace isn't left holding a test marker. Failure
-	//    here is not fatal; the test already has its verdict.
+	// 6. Cleanup — best-effort overwrite with empty bytes. Wipe both the
+	//    original write path AND the nested path where the restore
+	//    actually re-materialised the canary (see note at step 5), so
+	//    a passing self-test doesn't leave zero-byte markers littering
+	//    the seeded /workspace.
 	cleanTar, _ := buildSingleFileTar(canaryName, []byte{})
 	_ = ops.CopyTo(ctx, opts.ContainerID, ContainerWorkspacePath, bytes.NewReader(cleanTar))
+	cleanTarNested, _ := buildSingleFileTar(canaryName, []byte{})
+	_ = ops.CopyTo(ctx, opts.ContainerID, ContainerWorkspacePath+"/workspace", bytes.NewReader(cleanTarNested))
 
 	return result, nil
 }

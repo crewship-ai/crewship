@@ -195,8 +195,10 @@ func runSeed(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if len(startedTargets) == 0 {
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Skipping --test-backup: no crews successfully started provisioning.")
+			// The operator asked for a self-test; silently skipping and
+			// exiting 0 would let CI and scripts treat a broken
+			// provisioning step as green.
+			return fmt.Errorf("--test-backup requested, but no crew successfully started provisioning")
 		} else {
 			// Prefer "research" — it's the Python crew with a minimal feature
 			// set, so the bundle stays small and the collector/restorer
@@ -286,6 +288,12 @@ func runBackupSelfTest(ctx context.Context, client *cli.Client, target provision
 		return fmt.Errorf("backup self-test request: %w", err)
 	}
 	defer resp.Body.Close()
+	// Check the HTTP status before decoding — on 4xx/5xx the server
+	// returns {"error": ...} and decoding that into the success struct
+	// would leave zero values and mask the real reason.
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("backup self-test request: %w", err)
+	}
 
 	var result struct {
 		OK          bool   `json:"ok"`

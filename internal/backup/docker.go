@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // DockerOps abstracts the Docker operations the backup / restore flow
@@ -136,11 +137,19 @@ func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []stri
 	}
 	defer resp.Close()
 
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, resp.Reader); err != nil {
+	// ContainerExecAttach returns a multiplexed stream when Tty is false
+	// (our default): each chunk is prefixed with an 8-byte header
+	// (stream type + big-endian length). Using io.Copy here would smuggle
+	// those bytes into the caller's buffer. stdcopy.StdCopy parses the
+	// framing and de-interleaves stdout and stderr correctly.
+	var stdout, stderr bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdout, &stderr, resp.Reader); err != nil {
 		// Best-effort read; still try to report the exit code below.
 		_ = err
 	}
+	var buf bytes.Buffer
+	buf.Write(stdout.Bytes())
+	buf.Write(stderr.Bytes())
 	inspect, err := m.Client.ContainerExecInspect(ctx, exec.ID)
 	if err != nil {
 		return -1, buf.Bytes(), fmt.Errorf("backup: exec inspect %s: %w", containerID, err)
