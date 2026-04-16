@@ -74,11 +74,14 @@
               "cli/crew",
               "cli/mission",
               "cli/issue",
+              "cli/label",
+              "cli/notification",
               "cli/credential",
               "cli/skill",
               "cli/captain",
               "cli/memory",
               "cli/config",
+              "cli/backup",
               "cli/system"
             ]
           }

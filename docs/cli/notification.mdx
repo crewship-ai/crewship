@@ -1,0 +1,87 @@
+---
+title: "Notification Commands"
+description: "List, read, and delete in-app notifications for the current user."
+icon: "bell"
+---
+
+# crewship notification
+
+Manage per-user notifications. Notifications are emitted when an issue
+is assigned to you, a mission you're part of changes state, an
+escalation is raised on your crew, and similar events.
+
+```bash
+crewship notification <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List notifications for the current user. |
+| `count` | Show the number of unread notifications. |
+| `read` | Mark a single notification as read. |
+| `read-all` | Mark every notification as read. |
+| `delete` | Delete a notification. |
+
+---
+
+## `crewship notification list`
+
+```bash
+crewship notification list
+crewship notification list --unread
+crewship notification list --limit 20
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--unread` | `bool` | `false` | Show only unread notifications. |
+| `--limit` | `int` | _(server default)_ | Maximum number of rows to return. `0` uses the server default. |
+
+---
+
+## `crewship notification count`
+
+Return the number of unread notifications for the current user — used
+as a status-bar ping in scripts.
+
+```bash
+crewship notification count
+```
+
+---
+
+## `crewship notification read`
+
+Mark one notification as read.
+
+```bash
+crewship notification read <id>
+```
+
+---
+
+## `crewship notification read-all`
+
+Mark every notification for the current user as read.
+
+```bash
+crewship notification read-all
+```
+
+---
+
+## `crewship notification delete`
+
+Delete a single notification. Interactive confirmation required unless
+`--yes` is passed.
+
+```bash
+crewship notification delete <id>
+crewship notification delete <id> --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip interactive confirmation. Required in non-TTY sessions. |

@@ -34,7 +34,7 @@ func TestParseMiseConfig_Empty(t *testing.T) {
 	if len(cfg.Tools) != 0 {
 		t.Errorf("Tools = %v, want empty", cfg.Tools)
 	}
-	if cfg.Env != nil && len(cfg.Env) != 0 {
+	if len(cfg.Env) != 0 {
 		t.Errorf("Env = %v, want nil or empty", cfg.Env)
 	}
 }

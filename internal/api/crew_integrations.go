@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // --- Response types ---
@@ -695,8 +698,11 @@ func parseMCPConfigBlob(mcpJSON string) ([]parsedMCPServer, error) {
 			command = &srv.Command
 		}
 
+		// strings.Title is deprecated in Go 1.18; cases.Title handles
+		// Unicode word boundaries correctly. NoLower preserves any
+		// uppercase the caller already supplied in `name`.
 		displayName := strings.ReplaceAll(name, "-", " ")
-		displayName = strings.Title(displayName) //nolint:staticcheck
+		displayName = cases.Title(language.English, cases.NoLower).String(displayName)
 
 		servers = append(servers, parsedMCPServer{
 			name:        name,

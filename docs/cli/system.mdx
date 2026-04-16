@@ -440,6 +440,7 @@ crewship project <subcommand> [flags]
 | `list` | List all projects |
 | `get` | Show project details |
 | `create` | Create a project |
+| `milestone` | Manage milestones attached to a project (see below) |
 
 ---
 
@@ -485,6 +486,61 @@ crewship project create --name "Auth Rewrite" --status in_progress --priority hi
 | `--priority` | `string` | `none` | Priority: `none`, `low`, `medium`, `high`, `urgent`. |
 | `--icon` | `string` | | Lucide icon name. |
 | `--target-date` | `string` | | Target date in ISO format. |
+
+---
+
+## `crewship project milestone`
+
+Manage milestones within a project. Milestones are dated checkpoints
+used to group issues toward a shared deadline.
+
+```bash
+crewship project milestone <subcommand> [flags]
+```
+
+### `crewship project milestone list`
+
+```bash
+crewship project milestone list <project-id-or-slug>
+```
+
+### `crewship project milestone create`
+
+```bash
+crewship project milestone create <project-id-or-slug> --name "Beta launch" --target-date 2026-06-01
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | _(required)_ | Milestone name. |
+| `--description` | `string` | | Description. |
+| `--target-date` | `string` | | Target date (ISO 8601, e.g. `2026-06-01`). |
+| `--status` | `string` | `active` | Milestone status. |
+
+### `crewship project milestone update`
+
+```bash
+crewship project milestone update <milestone-id> --status completed
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | | New name. |
+| `--description` | `string` | | New description. |
+| `--target-date` | `string` | | New target date (ISO 8601). |
+| `--status` | `string` | | New status. |
+| `--position` | `int` | | New position in the milestone list. |
+
+### `crewship project milestone delete`
+
+```bash
+crewship project milestone delete <milestone-id>
+crewship project milestone delete <milestone-id> --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip interactive confirmation. Required in non-TTY sessions. |
 
 ---
 
