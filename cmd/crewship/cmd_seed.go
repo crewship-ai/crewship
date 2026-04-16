@@ -47,6 +47,7 @@ func init() {
 	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
 	seedCmd.Flags().Int("smoke-timeout", 60, "Per-agent timeout (seconds) for smoke test")
 	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
+	seedCmd.Flags().Bool("wait-provision", false, "Block until all crews finish provisioning (default: fire-and-forget, seed returns while provisioning runs in the background)")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
@@ -57,6 +58,12 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	smokeTest, _ := cmd.Flags().GetBool("smoke-test")
 	smokeTimeout, _ := cmd.Flags().GetInt("smoke-timeout")
 	provisionTimeoutSec, _ := cmd.Flags().GetInt("provision-timeout")
+	waitProvision, _ := cmd.Flags().GetBool("wait-provision")
+	// Smoke test runs agents which require provisioned crews — force
+	// synchronous wait even if the user didn't pass --wait-provision.
+	if smokeTest {
+		waitProvision = true
+	}
 	if password == "" {
 		password = devDefaultPassword
 		fmt.Fprintf(os.Stderr, "  Using dev default admin password: %s\n", password)
@@ -93,13 +100,18 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 
 	// ── Phase 2b: Provision crews with devcontainer config (parallel) ──
-	// Without this, `crewship run <agent>` fails with "Crew has devcontainer
-	// configuration but no provisioned image". Seed is supposed to produce a
-	// demo environment that works out of the box.
+	// Without provisioning, `crewship run <agent>` fails with "Crew has
+	// devcontainer configuration but no provisioned image". In default
+	// (async) mode we fire triggers and let the server pull images / install
+	// features in the background while the rest of the seed (agents, skills,
+	// credentials, issues) runs. Users who need a runnable environment right
+	// away pass --wait-provision (or --smoke-test, which implies it).
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	provisionCrews(ctx, client, crewIDs, time.Duration(provisionTimeoutSec)*time.Second)
+	provisionTimeout := time.Duration(provisionTimeoutSec) * time.Second
+	provisionTargets := collectProvisionTargets(crewIDs)
+	triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
 
 	// ── Phase 3: Agents ──
 	if err := ctx.Err(); err != nil {
@@ -144,6 +156,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// ── Phase 10b: Wait for background provisioning (only if requested) ──
+	// Provisioning was triggered in Phase 2b; in async mode we skip the wait
+	// entirely and tell the user how to check status. With --wait-provision
+	// we block here so the other seed phases had a chance to run in parallel
+	// with the image build.
+	if waitProvision {
+		waitForProvisions(ctx, client, provisionTargets, provisionTimeout)
+	} else if len(provisionTargets) > 0 {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintf(os.Stderr, "Provisioning %d crew(s) in the background.\n", len(provisionTargets))
+		fmt.Fprintln(os.Stderr, "  Agents in these crews become runnable once provisioning finishes (~few minutes).")
+		fmt.Fprintln(os.Stderr, "  Status: crewship crew provision status <slug>   (or re-run `crewship seed --wait-provision`)")
+	}
+
 	// ── Phase 11: Summary ──
 	fmt.Fprintln(os.Stderr, "")
 	cli.PrintSuccess(fmt.Sprintf("Seed complete: %d crews, %d agents", len(crewIDs), len(agentIDs)))
@@ -169,50 +195,87 @@ func runSeed(cmd *cobra.Command, args []string) error {
 // Phase 2b: Provisioning
 // ════════════════════════════════════════════════════════════════════════════
 
-// provisionCrews triggers devcontainer provisioning for every crew that has a
-// devcontainer_config and waits for all to finish (in parallel). Errors are
-// reported but do not abort the whole seed — a partially-provisioned demo env
-// is still better than bailing out before agents/skills/issues are created.
-func provisionCrews(ctx context.Context, client *cli.Client, crewIDs map[string]string, timeout time.Duration) {
-	// Map slug → has devcontainer config, from static seed data. If the seed
-	// data evolves to skip devcontainers we silently skip those crews.
+// provisionTarget is one crew that needs devcontainer provisioning.
+type provisionTarget struct {
+	slug string
+	id   string
+}
+
+// collectProvisionTargets returns the crews (from seeded data) that have a
+// devcontainer_config and therefore need provisioning. Sorted by slug for
+// deterministic logs.
+func collectProvisionTargets(crewIDs map[string]string) []provisionTarget {
 	hasDevcontainer := map[string]bool{}
 	for _, c := range seeddata.Crews {
 		if c.DevcontainerConfig != "" {
 			hasDevcontainer[c.Slug] = true
 		}
 	}
-
-	// Collect only crews we actually need to provision.
-	type target struct{ slug, id string }
-	var targets []target
+	var targets []provisionTarget
 	for slug, id := range crewIDs {
 		if hasDevcontainer[slug] {
-			targets = append(targets, target{slug: slug, id: id})
+			targets = append(targets, provisionTarget{slug: slug, id: id})
 		}
 	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].slug < targets[j].slug })
+	return targets
+}
+
+// triggerProvisions fires the provision-start request for every target in
+// parallel. It does NOT wait for builds to complete — the server handles the
+// long-running work asynchronously. This is called early in the seed flow so
+// the server can pull images / install features while the seed continues to
+// create agents, skills, credentials, and issues via other endpoints.
+//
+// 429 rate-limit responses are retried with backoff so that a seed of N crews
+// can cope with a server-side concurrency cap smaller than N. The per-target
+// timeout bounds how long we're willing to keep retrying the trigger alone.
+func triggerProvisions(ctx context.Context, client *cli.Client, targets []provisionTarget, timeout time.Duration) {
 	if len(targets) == 0 {
 		return
 	}
-	sort.Slice(targets, func(i, j int) bool { return targets[i].slug < targets[j].slug })
-
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Provisioning demo crews (pulling images, installing features)...")
+	fmt.Fprintln(os.Stderr, "Triggering crew provisioning (runs in background on the server)...")
+
+	var wg sync.WaitGroup
+	for _, t := range targets {
+		wg.Add(1)
+		go func(t provisionTarget) {
+			defer wg.Done()
+			if err := triggerProvisionOnce(ctx, client, t.id, timeout); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: trigger failed: %v\n", t.slug, err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "  + %s: provisioning started\n", t.slug)
+		}(t)
+	}
+	wg.Wait()
+}
+
+// waitForProvisions polls each target's status until completion, failure, or
+// timeout. Used only when the caller explicitly asked for sync behavior
+// (--wait-provision or --smoke-test). Assumes triggerProvisions was already
+// called — we only poll here, we don't re-trigger.
+func waitForProvisions(ctx context.Context, client *cli.Client, targets []provisionTarget, timeout time.Duration) {
+	if len(targets) == 0 {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Waiting for crew provisioning to finish...")
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(targets))
 	for _, t := range targets {
 		wg.Add(1)
-		go func(slug, id string) {
+		go func(t provisionTarget) {
 			defer wg.Done()
-			fmt.Fprintf(os.Stderr, "  Provisioning %s...\n", slug)
-			if err := provisionCrewAndWait(ctx, client, id, timeout); err != nil {
-				fmt.Fprintf(os.Stderr, "  X %s: %v\n", slug, err)
-				errCh <- fmt.Errorf("%s: %w", slug, err)
+			if err := pollProvisionStatus(ctx, client, t.id, timeout); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: %v\n", t.slug, err)
+				errCh <- fmt.Errorf("%s: %w", t.slug, err)
 				return
 			}
-			fmt.Fprintf(os.Stderr, "  + %s provisioned\n", slug)
-		}(t.slug, t.id)
+			fmt.Fprintf(os.Stderr, "  + %s provisioned\n", t.slug)
+		}(t)
 	}
 	wg.Wait()
 	close(errCh)
@@ -231,39 +294,63 @@ func provisionCrews(ctx context.Context, client *cli.Client, crewIDs map[string]
 	}
 }
 
-// provisionCrewAndWait triggers provisioning for a crew and polls until
-// completion, failure, or timeout. The trigger endpoint returns 202 Accepted
-// (or 409 if a job is already running, which we treat as "fine, keep polling").
-func provisionCrewAndWait(ctx context.Context, client *cli.Client, crewID string, timeout time.Duration) error {
-	// Bound the whole operation with a sub-context so the poll loop terminates
-	// cleanly on timeout / Ctrl-C.
+// triggerProvisionOnce POSTs the provision-start endpoint once and returns
+// when the server has accepted the work. Handles 202/200/409 as success,
+// retries 429 with exponential backoff (server caps concurrent provisions so
+// firing >N triggers at once can 429 before all slots open). Any other status
+// is a hard error. Does NOT poll for completion — that's pollProvisionStatus's
+// job.
+func triggerProvisionOnce(ctx context.Context, client *cli.Client, crewID string, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	pollClient := client.WithContext(ctx)
+	reqClient := client.WithContext(ctx)
 
-	// Kick off provisioning. 202 = started; 409 = already in progress (still OK
-	// to poll); anything else is an error.
-	resp, err := pollClient.Post("/api/v1/crews/"+crewID+"/provision", nil)
-	if err != nil {
-		return fmt.Errorf("trigger provision: %w", err)
-	}
-	if resp.StatusCode != http.StatusAccepted &&
-		resp.StatusCode != http.StatusOK &&
-		resp.StatusCode != http.StatusConflict {
+	backoff := 3 * time.Second
+	for {
+		resp, err := reqClient.Post("/api/v1/crews/"+crewID+"/provision", nil)
+		if err != nil {
+			return fmt.Errorf("trigger provision: %w", err)
+		}
+		if resp.StatusCode == http.StatusAccepted ||
+			resp.StatusCode == http.StatusOK ||
+			resp.StatusCode == http.StatusConflict {
+			resp.Body.Close()
+			return nil
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("timeout waiting for provision slot")
+			case <-time.After(backoff):
+			}
+			// Exponential backoff capped at 30s — slots usually free up in
+			// tens of seconds once a peer provision completes.
+			if backoff < 30*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		return fmt.Errorf("trigger provision: HTTP %d: %s",
 			resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	resp.Body.Close()
+}
+
+// pollProvisionStatus polls the server status endpoint until the provision
+// completes or fails. Call this only AFTER triggerProvisionOnce has returned
+// nil for the same crewID — this function does not trigger work itself.
+func pollProvisionStatus(ctx context.Context, client *cli.Client, crewID string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	pollClient := client.WithContext(ctx)
 
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	var lastStatus string
 	for {
-		// Check status immediately (so a fast provision returns quickly) then
-		// again on every tick.
 		st, err := fetchProvisionStatus(pollClient, crewID)
 		if err != nil {
 			return fmt.Errorf("poll status: %w", err)
@@ -495,13 +582,15 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 		fmt.Fprintf(os.Stderr, "  Workspace: %s\n", result.WorkspaceID)
 		return cli.NewClient(server, result.CLIToken, result.WorkspaceID).WithContext(ctx), result.UserID, nil
 	}
-	// Only fall through to auth for 409 (already initialized).
-	// Other errors are real failures.
+	// Fall through to auth for 409 (already initialized) or any other status
+	// whose body mentions the "already initialized" sentinel. Server currently
+	// returns 403 with "Already initialized — …" for this case, so match
+	// case-insensitively. Anything else is a real failure.
 	if resp.StatusCode != http.StatusConflict {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		bodyStr := strings.TrimSpace(string(bodyBytes))
-		if !strings.Contains(bodyStr, "already initialized") {
+		if !strings.Contains(strings.ToLower(bodyStr), "already initialized") {
 			return nil, "", fmt.Errorf("bootstrap failed: HTTP %d: %s", resp.StatusCode, bodyStr)
 		}
 	} else {

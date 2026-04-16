@@ -93,11 +93,13 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 	// 3. Build environment variables from options.
 	env := buildFeatureEnv(containerID, featureID, options)
 
-	// 4. Execute install.sh as root. `bash -e` stops on first error, so a
+	// 4. Execute install.sh as root, with the feature directory as CWD so that
+	// relative paths inside install.sh (e.g., `./scripts/vendor/...`) resolve
+	// against feature-provided resources. `bash -e` stops on first error, so a
 	// failing command surfaces as non-zero exit instead of being silently
 	// ignored. Scripts that explicitly opt out with `set +e` still work.
 	installScript := destDir + "/install.sh"
-	output, exitCode, err = inst.execInContainer(installCtx, containerID, []string{"bash", "-e", installScript}, env)
+	output, exitCode, err = inst.execInContainerInDir(installCtx, containerID, destDir, []string{"bash", "-e", installScript}, env)
 	if err != nil {
 		return fmt.Errorf("executing install.sh for feature %s: %w", featureID, err)
 	}
@@ -126,13 +128,28 @@ func (inst *Installer) execInContainer(ctx context.Context, containerID string, 
 	return inst.execInContainerAsUser(ctx, containerID, cmd, "0:0", env)
 }
 
+// execInContainerInDir runs a command inside the container as root (0:0) with
+// the given working directory. Used for feature install.sh so relative paths
+// inside the script resolve against the feature's own directory layout.
+func (inst *Installer) execInContainerInDir(ctx context.Context, containerID, workDir string, cmd, env []string) (string, int, error) {
+	return inst.execInContainerFull(ctx, containerID, cmd, "0:0", workDir, env)
+}
+
 // execInContainerAsUser runs a command inside the container as the given user.
 // This matches the ExecFunc signature needed by the mise integration.
 func (inst *Installer) execInContainerAsUser(ctx context.Context, containerID string, cmd []string, user string, env []string) (string, int, error) {
+	return inst.execInContainerFull(ctx, containerID, cmd, user, "", env)
+}
+
+// execInContainerFull is the single underlying exec path. workDir is optional —
+// when empty, no WorkingDir override is applied and the container's default
+// WORKDIR is used.
+func (inst *Installer) execInContainerFull(ctx context.Context, containerID string, cmd []string, user, workDir string, env []string) (string, int, error) {
 	execCfg := container.ExecOptions{
 		Cmd:          cmd,
 		Env:          env,
 		User:         user,
+		WorkingDir:   workDir,
 		AttachStdout: true,
 		AttachStderr: true,
 	}

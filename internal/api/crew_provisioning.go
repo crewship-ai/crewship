@@ -86,9 +86,16 @@ type cachedImageList struct {
 const imageListCacheTTL = 10 * time.Second
 
 // Rate limit constants. Per-workspace bucket.
+//
+// maxConcurrentProvisionsPerWorkspace must be at least as large as the number
+// of crews a fresh seed creates (currently 4) so `crewship seed` can fire all
+// trigger requests without any of them blocking behind the rate limiter. We
+// picked 8 as a modest ceiling above the seed count — high enough for demo
+// and small-team workspaces to provision everything in parallel, low enough
+// to keep goroutine and Docker-IO load bounded on a single Crewship instance.
 const (
-	maxConcurrentProvisionsPerWorkspace = 3
-	maxProvisionStartsPerMinute         = 10
+	maxConcurrentProvisionsPerWorkspace = 8
+	maxProvisionStartsPerMinute         = 20
 )
 
 // provisionRateLimiter tracks in-flight provisions per workspace and caps the
