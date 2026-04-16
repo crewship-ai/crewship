@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
@@ -281,39 +280,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// batchCountByAgentID runs a "SELECT agent_id, COUNT(*) ... WHERE agent_id IN (?) GROUP BY agent_id"
-// query with a placeholder list matching len(ids) and returns the id->count map.
-// The caller passes the template with a single "%s" where the placeholder list goes.
-func batchCountByAgentID(ctx context.Context, db *sql.DB, tmpl string, ids []string) (map[string]int, error) {
-	if len(ids) == 0 {
-		return map[string]int{}, nil
-	}
-	placeholders := strings.Repeat("?,", len(ids))
-	placeholders = placeholders[:len(placeholders)-1]
-	query := fmt.Sprintf(tmpl, placeholders)
-
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make(map[string]int, len(ids))
-	for rows.Next() {
-		var id string
-		var n int
-		if err := rows.Scan(&id, &n); err != nil {
-			return nil, err
-		}
-		out[id] = n
-	}
-	return out, rows.Err()
-}
+// batchCountByAgentID lives in agents_loaders.go — agent-specific
+// batch helper kept out of the handler file.
 
 // parseListPagination pulls standard ?limit=&offset= params, clamping to sane
 // bounds. defaultLimit is used when unspecified; maxLimit caps what clients
