@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -114,13 +115,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	provisionTimeout := time.Duration(provisionTimeoutSec) * time.Second
 	provisionTargets := collectProvisionTargets(crewIDs)
 	startedTargets, triggerErr := triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
-	if triggerErr != nil && waitProvision {
-		// In sync mode a trigger that never started is a hard fail — we
-		// promised the caller a runnable env. In async mode we still
-		// continue so the rest of the seed completes; the user sees the
-		// "X <slug>" lines already printed.
-		return triggerErr
-	}
+	// Deliberately do NOT early-return on triggerErr, even in sync mode:
+	// the async design of Phase 2b is "trigger, continue seeding while
+	// images build". Returning here would also skip agents/skills/issues.
+	// We remember the error and surface it at the end joined with
+	// whatever waitForProvisions produces.
 
 	// ── Phase 3: Agents ──
 	if err := ctx.Err(); err != nil {
@@ -170,12 +169,13 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	// entirely and tell the user how to check status. With --wait-provision
 	// we block here so the other seed phases had a chance to run in parallel
 	// with the image build.
+	var waitErr error
 	if waitProvision {
 		// Poll only the targets whose triggers actually succeeded — polling
 		// a crew whose trigger 429'd or errored would just time out idle.
-		if err := waitForProvisions(ctx, client, startedTargets, provisionTimeout); err != nil {
-			return err
-		}
+		// Save the error and fall through; we'll combine it with any
+		// triggerErr from Phase 2b after the optional self-test runs.
+		waitErr = waitForProvisions(ctx, client, startedTargets, provisionTimeout)
 	} else if len(startedTargets) > 0 {
 		// Report only the crews whose triggers actually landed. Failed triggers
 		// were already logged with an "X <slug>" line by triggerProvisions, so
@@ -218,7 +218,19 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// ── Phase 11: Summary ──
+	// ── Phase 11: Summary + deferred provisioning errors ──
+	// Surface whatever triggerProvisions or waitForProvisions reported
+	// now that the rest of the seed has completed. In async mode triggerErr
+	// is reported but non-fatal (matches the existing async semantics);
+	// in sync mode both are returned so a caller exits non-zero.
+	if waitProvision {
+		if err := errors.Join(triggerErr, waitErr); err != nil {
+			return err
+		}
+	} else if triggerErr != nil {
+		fmt.Fprintf(os.Stderr, "\nNote: provisioning trigger reported errors (continuing): %v\n", triggerErr)
+	}
+
 	fmt.Fprintln(os.Stderr, "")
 	cli.PrintSuccess(fmt.Sprintf("Seed complete: %d crews, %d agents", len(crewIDs), len(agentIDs)))
 	fmt.Fprintln(os.Stderr, "Login: demo@crewship.ai / "+password)
