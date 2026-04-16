@@ -1,0 +1,206 @@
+---
+title: "Backup Commands"
+description: "Admin-only backup and restore — create, inspect, verify, restore, rotate, and unlock encrypted workspace / crew bundles."
+icon: "database-backup"
+---
+
+# crewship backup
+
+Create, list, inspect and restore workspace / crew backups. Every
+subcommand requires the **OWNER** or **ADMIN** role on the target
+workspace — other roles are refused at both the CLI and the server.
+
+```bash
+crewship backup <subcommand> [flags]
+```
+
+For the conceptual overview (bundle layout, lock semantics, encryption
+chain, admin UI, instance-scope details) see the
+[Backup & Restore guide](/guides/backup). This page is the flat flag
+reference.
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `create` | Create a new backup bundle. |
+| `list` | List bundles in `~/.crewship/backups`. |
+| `inspect` | Show the manifest of a bundle without decrypting the payload. |
+| `verify` | Recompute and check the bundle SHA-256 without restoring. |
+| `restore` | Restore a workspace or crew from a bundle. |
+| `rotate` | Apply retention — drop bundles over `--keep-last` / `--keep-days`. |
+| `delete` | Remove a single bundle from disk. |
+| `status` | Show the active advisory lock for this workspace. |
+| `unlock` | Force-release a stale advisory lock (emergency only). |
+
+---
+
+## `crewship backup create`
+
+Produce a new AGE-encrypted `.tar.zst` bundle for a workspace or crew.
+
+```bash
+crewship backup create --scope=workspace
+crewship backup create --scope=crew --crew dev-team
+crewship backup create --scope=workspace --recipient age1ql3z7hjy54...
+crewship backup create --scope=workspace --use-keyring
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--scope` | `string` | `workspace` | Backup scope: `workspace` or `crew`. |
+| `--crew` | `string` | | Crew slug or ID (required when `--scope=crew`). |
+| `--no-encrypt` | `bool` | `false` | Write a plaintext payload instead of AGE-encrypting. Test / CI only. |
+| `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
+| `--use-keyring` | `bool` | `false` | Cache and reuse the passphrase via `~/.crewship/backup-keyring.enc`. |
+| `--recipient` | `string` | | AGE X25519 public key (`age1…`) for asymmetric encryption. |
+| `--output` | `string` | `~/.crewship/backups` | Override the output directory on the server. |
+
+`--recipient`, `--passphrase-file`, and `--no-encrypt` are mutually
+exclusive.
+
+The CLI prompts twice for a passphrase to guard against typos. In a
+non-interactive session without `--passphrase-file` / `--use-keyring`,
+a single line is read from stdin.
+
+---
+
+## `crewship backup list`
+
+List bundles on disk for the current workspace's default backup
+directory.
+
+```bash
+crewship backup list
+```
+
+**Output columns:** FILE, SCOPE, SIZE, ENCRYPTED, FORMAT, CREATED_AT.
+
+---
+
+## `crewship backup inspect`
+
+Print the plaintext MANIFEST of a bundle — `format_version`, `scope`,
+timestamps, source instance, SHA-256 of the sealed payload. Never
+touches the encrypted payload, so no passphrase is needed.
+
+```bash
+crewship backup inspect ~/.crewship/backups/crewship-workspace-acme-...tar.zst
+```
+
+---
+
+## `crewship backup verify`
+
+Recompute the SHA-256 of the sealed payload and check it against the
+manifest. Confirms the bundle was not truncated or tampered with. Does
+not decrypt or restore anything.
+
+```bash
+crewship backup verify ~/.crewship/backups/crewship-workspace-acme-...tar.zst
+```
+
+---
+
+## `crewship backup restore`
+
+Restore a workspace or crew from a bundle. The server refuses a
+restore if a workspace (or crew) with the same slug already exists;
+pass `--as-workspace` / `--as-crew` to land the payload under a fresh
+identity.
+
+```bash
+crewship backup restore ~/.crewship/backups/bundle.tar.zst
+crewship backup restore bundle.tar.zst --as-workspace acme-dr
+crewship backup restore bundle.tar.zst --dry-run
+crewship backup restore bundle.tar.zst --use-keyring
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--as-workspace` | `string` | | Restore the workspace under a new slug. Docker phase is skipped. |
+| `--as-crew` | `string` | | Restore the crew under a new slug (`--scope=crew` only). |
+| `--passphrase-file` | `string` | | Read the passphrase from a file instead of prompting. |
+| `--use-keyring` | `bool` | `false` | Read the passphrase from `~/.crewship/backup-keyring.enc` before prompting. |
+| `--dry-run` | `bool` | `false` | Verify format / checksum / decrypt, replay the restore tx, then roll back. Writes a `backup.restore.dry_run` audit row. |
+
+A dry-run leaves only the audit row — no DB rows, no docker changes.
+Use it to prove a bundle is restorable before cutover.
+
+---
+
+## `crewship backup rotate`
+
+Retention sweep. Either flag on its own is valid; both together apply
+the stricter cutoff.
+
+```bash
+crewship backup rotate --keep-last 10
+crewship backup rotate --keep-days 30
+crewship backup rotate --keep-last 10 --keep-days 30 --dry-run
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--keep-last` | `int` | `0` | Keep only the N newest bundles (0 disables). |
+| `--keep-days` | `int` | `0` | Drop bundles older than N days (0 disables). |
+| `--dry-run` | `bool` | `false` | List bundles that would be deleted without touching disk. |
+
+Rotation applies per workspace — it never touches another workspace's
+bundles.
+
+---
+
+## `crewship backup delete`
+
+Remove a single bundle from disk. Interactive confirmation is required
+unless `--force` is passed.
+
+```bash
+crewship backup delete ~/.crewship/backups/old.tar.zst
+crewship backup delete old.tar.zst --force
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force` | `bool` | `false` | Delete without interactive confirmation. Required in non-TTY sessions. |
+
+---
+
+## `crewship backup status`
+
+Show the advisory lock state for the current workspace — who holds it,
+when it was acquired, and when the 1-hour TTL expires.
+
+```bash
+crewship backup status
+```
+
+**Output columns:** WORKSPACE, ACQUIRED_BY, ACQUIRED_AT, EXPIRES_AT.
+
+---
+
+## `crewship backup unlock`
+
+Force-release a stale backup lock. Emergency only — use when the
+previous CLI session crashed and the 1-hour TTL has not yet fired.
+
+```bash
+crewship backup unlock --force
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force` | `bool` | `false` | Skip interactive confirmation. Required in non-TTY sessions. |
+
+<Warning>
+  Forcibly releasing a live backup's lock lets a second backup start
+  alongside it; the two will race on the Docker pause / unpause
+  sequence. Confirm no backup is actually running before invoking this.
+</Warning>
+
+## See also
+
+- [Backup & Restore guide](/guides/backup) — concepts, lock semantics, keyring, webhooks, metrics, instance scope.
+- [Backup API reference](/api-reference/backup) — REST endpoint shapes.
+- [Security → Instance-Scope Backup Security](/security/backup-instance-security) — threat model for instance backups.

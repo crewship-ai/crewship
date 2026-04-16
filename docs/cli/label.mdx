@@ -1,0 +1,84 @@
+---
+title: "Label Commands"
+description: "Manage workspace-level labels — create, list, update, delete. Labels apply to issues across every crew."
+icon: "tag"
+---
+
+# crewship label
+
+Manage workspace labels. Labels are shared across every crew in the
+workspace and attached to issues via `crewship issue update --labels`.
+
+```bash
+crewship label <subcommand> [flags]
+```
+
+**Alias:** `crewship labels`
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List labels in the current workspace. |
+| `create` | Create a new label. |
+| `update` | Update a label. |
+| `delete` | Delete a label. |
+
+---
+
+## `crewship label list`
+
+```bash
+crewship label list
+```
+
+**Output columns:** ID, NAME, COLOR, GROUP.
+
+---
+
+## `crewship label create`
+
+```bash
+crewship label create --name "Bug" --color "#EF4444"
+crewship label create --name "P0" --color "#DC2626" --group priority
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | _(required)_ | Label name. |
+| `--color` | `string` | _(required)_ | Hex color, e.g. `#3B82F6` or `#abc`. Validated client-side. |
+| `--group` | `string` | | Optional label group (e.g. `priority`, `status`). |
+
+---
+
+## `crewship label update`
+
+```bash
+crewship label update <label-id> --name "Critical" --color "#B91C1C"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | | New label name. |
+| `--color` | `string` | | New hex color. |
+| `--group` | `string` | | New label group. Pass empty string to clear. |
+
+---
+
+## `crewship label delete`
+
+```bash
+crewship label delete <label-id>
+crewship label delete <label-id> --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip interactive confirmation. Required in non-TTY sessions. |
+
+Deleting a label automatically detaches it from every issue that had
+it attached.
+
+## See also
+
+- [Issue commands](/cli/issue) — `crewship issue update --labels <id>` attaches labels to issues.
