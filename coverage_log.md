@@ -27,3 +27,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 6 | A | internal/sidecar/port_expose.go | ok | fc0402c | 2026-04-17T00:50Z |
 | 7 | B | cmd/crewship/cmd_audit.go (B2 cmd_backup 722ř + B4 cmd_agent 803ř too large; B3 cmd_captain deprecated) | ok | 3cd1c9d | 2026-04-17T01:10Z |
 | 8 | C | hooks/use-agent-activity.ts | ok | f3d9ccc | 2026-04-17T01:30Z |
+| 9 | D | components/features/chat/chat-tree-row.tsx (D1/D2 too large, D3 done, D4/D5 deprecated) | ok | 7d4487e | 2026-04-17T01:50Z |
