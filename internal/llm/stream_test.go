@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -377,14 +378,28 @@ func TestAnthropic_RetriesOnRateLimit(t *testing.T) {
 // (so Anthropic enables prompt caching).
 func TestAnthropicComplete_BuildsCacheControlSystem(t *testing.T) {
 	t.Parallel()
+	// Capture handler errors via closure to avoid t.Fatal/Error from a separate
+	// goroutine (runtime.Goexit only exits the handler goroutine, not the test).
+	var (
+		handlerMu  sync.Mutex
+		handlerErr error
+	)
+	captureErr := func(err error) {
+		handlerMu.Lock()
+		defer handlerMu.Unlock()
+		if handlerErr == nil {
+			handlerErr = err
+		}
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode body: %v", err)
+			captureErr(fmt.Errorf("decode body: %w", err))
+			return
 		}
 		sys, ok := body["system"].([]any)
 		if !ok || len(sys) != 1 {
-			t.Errorf("expected system as array, got %T %v", body["system"], body["system"])
+			captureErr(fmt.Errorf("expected system as array, got %T %v", body["system"], body["system"]))
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"content":     []map[string]string{{"type": "text", "text": "ok"}},
@@ -400,6 +415,11 @@ func TestAnthropicComplete_BuildsCacheControlSystem(t *testing.T) {
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	}); err != nil {
 		t.Fatalf("complete: %v", err)
+	}
+	handlerMu.Lock()
+	defer handlerMu.Unlock()
+	if handlerErr != nil {
+		t.Fatal(handlerErr)
 	}
 }
 

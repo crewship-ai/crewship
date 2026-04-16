@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -322,8 +321,8 @@ func TestOnboardingSetup_DuplicateCrewSlug(t *testing.T) {
 // TestOnboardingSetup_EncryptionMissing rolls back when ENCRYPTION_KEY is
 // unset (Encrypt fails) and credential was requested.
 func TestOnboardingSetup_EncryptionMissing(t *testing.T) {
-	// Explicitly clear ENCRYPTION_KEY in this test.
-	os.Unsetenv("ENCRYPTION_KEY")
+	// Set ENCRYPTION_KEY to empty to trigger encryption failure (parallel-safe).
+	t.Setenv("ENCRYPTION_KEY", "")
 
 	db, uid, wid := setupOnboardingDB(t)
 	svc := newTestSvc(t, db)
@@ -341,12 +340,16 @@ func TestOnboardingSetup_EncryptionMissing(t *testing.T) {
 	// Atomicity check: nothing should have been committed (no crew, no agent,
 	// onboarding flag still 0).
 	var crews int
-	_ = db.QueryRow("SELECT COUNT(*) FROM crews").Scan(&crews)
+	if err := db.QueryRow("SELECT COUNT(*) FROM crews").Scan(&crews); err != nil {
+		t.Fatalf("count crews: %v", err)
+	}
 	if crews != 0 {
 		t.Errorf("expected 0 crews after rollback, got %d", crews)
 	}
 	var oc int
-	_ = db.QueryRow("SELECT onboarding_completed FROM users WHERE id=?", uid).Scan(&oc)
+	if err := db.QueryRow("SELECT onboarding_completed FROM users WHERE id=?", uid).Scan(&oc); err != nil {
+		t.Fatalf("query onboarding flag: %v", err)
+	}
 	if oc != 0 {
 		t.Errorf("expected onboarding_completed=0 after rollback, got %d", oc)
 	}

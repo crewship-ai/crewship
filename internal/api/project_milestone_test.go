@@ -31,7 +31,9 @@ func TestProject_Create(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp projectResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if resp.Slug != "apollo" {
 		t.Errorf("slug = %q want apollo", resp.Slug)
 	}
@@ -84,7 +86,9 @@ func TestProject_List_AndGet(t *testing.T) {
 		t.Fatalf("list: %d", rr.Code)
 	}
 	var ps []projectResponse
-	json.Unmarshal(rr.Body.Bytes(), &ps)
+	if err := json.Unmarshal(rr.Body.Bytes(), &ps); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if len(ps) != 2 {
 		t.Errorf("got %d projects, want 2", len(ps))
 	}
@@ -127,7 +131,9 @@ func TestProject_Update(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp projectResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 	if resp.Name != "Alpha Renamed" {
 		t.Errorf("name = %q", resp.Name)
 	}
@@ -253,7 +259,9 @@ func TestMilestone_CRUD(t *testing.T) {
 		t.Fatalf("create: %d body=%s", rr.Code, rr.Body.String())
 	}
 	var ms milestoneResponse
-	json.Unmarshal(rr.Body.Bytes(), &ms)
+	if err := json.Unmarshal(rr.Body.Bytes(), &ms); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+	}
 
 	// List
 	req2 := httptest.NewRequest("GET", "/", nil)
@@ -265,7 +273,9 @@ func TestMilestone_CRUD(t *testing.T) {
 		t.Fatalf("list: %d", rr2.Code)
 	}
 	var list []milestoneResponse
-	json.Unmarshal(rr2.Body.Bytes(), &list)
+	if err := json.Unmarshal(rr2.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rr2.Body.String())
+	}
 	if len(list) != 1 {
 		t.Errorf("list len = %d want 1", len(list))
 	}

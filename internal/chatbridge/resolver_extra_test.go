@@ -84,7 +84,9 @@ func TestCreateRunNilMetadataOmitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload map[string]interface{}
-	_ = json.Unmarshal(rec.body, &payload)
+	if err := json.Unmarshal(rec.body, &payload); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
 	if _, ok := payload["metadata"]; ok {
 		t.Error("metadata key must be absent when nil")
 	}
@@ -143,7 +145,9 @@ func TestUpdateRunIncludesAllFields(t *testing.T) {
 		t.Errorf("path not escaped: %s", rec.path)
 	}
 	var payload map[string]interface{}
-	_ = json.Unmarshal(rec.body, &payload)
+	if err := json.Unmarshal(rec.body, &payload); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
 	if payload["status"] != "FAILED" {
 		t.Errorf("status: %v", payload["status"])
 	}
@@ -172,7 +176,9 @@ func TestUpdateRunOmitsNilOptionals(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload map[string]interface{}
-	_ = json.Unmarshal(rec.body, &payload)
+	if err := json.Unmarshal(rec.body, &payload); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
 	for _, key := range []string{"exit_code", "error_message", "metadata"} {
 		if _, ok := payload[key]; ok {
 			t.Errorf("%s should be omitted when nil", key)
@@ -213,7 +219,9 @@ func TestIncrementMessageCount(t *testing.T) {
 		t.Errorf("path not escaped: %s", rec.path)
 	}
 	var payload map[string]int
-	_ = json.Unmarshal(rec.body, &payload)
+	if err := json.Unmarshal(rec.body, &payload); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
 	if payload["delta"] != 3 {
 		t.Errorf("delta: %d", payload["delta"])
 	}
@@ -249,7 +257,9 @@ func TestUpdateChatTitle(t *testing.T) {
 		t.Errorf("method = %s", rec.method)
 	}
 	var payload map[string]string
-	_ = json.Unmarshal(rec.body, &payload)
+	if err := json.Unmarshal(rec.body, &payload); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
 	if payload["title"] != "hello" {
 		t.Errorf("title: %q", payload["title"])
 	}

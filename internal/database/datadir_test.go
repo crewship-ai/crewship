@@ -179,7 +179,9 @@ func TestSeedBuiltinTemplates_Idempotent(t *testing.T) {
 		t.Fatalf("seed second: %v", err)
 	}
 	var n2 int
-	_ = db.QueryRow("SELECT COUNT(*) FROM workflow_templates WHERE workspace_id='ws1' AND is_builtin=1").Scan(&n2)
+	if err := db.QueryRow("SELECT COUNT(*) FROM workflow_templates WHERE workspace_id='ws1' AND is_builtin=1").Scan(&n2); err != nil {
+		t.Fatalf("count second: %v", err)
+	}
 	if n2 != n1 {
 		t.Errorf("templates duplicated: %d -> %d", n1, n2)
 	}
@@ -213,7 +215,9 @@ func TestSeedBuiltinCrewTemplates_Idempotent(t *testing.T) {
 		t.Fatalf("seed second: %v", err)
 	}
 	var n2 int
-	_ = db.QueryRow("SELECT COUNT(*) FROM crew_templates WHERE is_builtin=1").Scan(&n2)
+	if err := db.QueryRow("SELECT COUNT(*) FROM crew_templates WHERE is_builtin=1").Scan(&n2); err != nil {
+		t.Fatalf("count second: %v", err)
+	}
 	if n2 != n1 {
 		t.Errorf("crew templates duplicated: %d -> %d", n1, n2)
 	}

@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -30,7 +29,7 @@ func TestRecurring_Create(t *testing.T) {
 		t.Fatalf("create: %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp recurringIssueResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	mustUnmarshal(t, rr, &resp)
 	if resp.NextRun == nil {
 		t.Error("next_run not set")
 	}
@@ -85,7 +84,7 @@ func TestRecurring_List_Update_Delete(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)
 	var resp recurringIssueResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	mustUnmarshal(t, rr, &resp)
 
 	// List
 	req2 := httptest.NewRequest("GET", "/?crew_id="+crewID, nil)
@@ -139,7 +138,7 @@ func TestRecurring_Update_BadCron(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)
 	var resp recurringIssueResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	mustUnmarshal(t, rr, &resp)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"cron_expression":"bogus"}`))
 	req2.SetPathValue("id", resp.ID)
@@ -160,7 +159,7 @@ func TestRecurring_Update_NoFields(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.Create(rr, req)
 	var resp recurringIssueResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	mustUnmarshal(t, rr, &resp)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{}`))
 	req2.SetPathValue("id", resp.ID)
@@ -234,7 +233,7 @@ func TestTriage_CRUD(t *testing.T) {
 		t.Fatalf("create: %d body=%s", rr.Code, rr.Body.String())
 	}
 	var tr triageRuleResponse
-	json.Unmarshal(rr.Body.Bytes(), &tr)
+	mustUnmarshal(t, rr, &tr)
 
 	// List
 	req2 := httptest.NewRequest("GET", "/", nil)
@@ -276,7 +275,7 @@ func TestTriage_UpdateRule_BadMatchType(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.CreateRule(rr, req)
 	var tr triageRuleResponse
-	json.Unmarshal(rr.Body.Bytes(), &tr)
+	mustUnmarshal(t, rr, &tr)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"match_type":"yolo"}`))
 	req2.SetPathValue("id", tr.ID)
@@ -297,7 +296,7 @@ func TestTriage_UpdateRule_BadRegex(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.CreateRule(rr, req)
 	var tr triageRuleResponse
-	json.Unmarshal(rr.Body.Bytes(), &tr)
+	mustUnmarshal(t, rr, &tr)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"pattern":"[","match_type":"regex"}`))
 	req2.SetPathValue("id", tr.ID)
@@ -318,7 +317,7 @@ func TestTriage_UpdateRule_NoFields(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.CreateRule(rr, req)
 	var tr triageRuleResponse
-	json.Unmarshal(rr.Body.Bytes(), &tr)
+	mustUnmarshal(t, rr, &tr)
 
 	req2 := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{}`))
 	req2.SetPathValue("id", tr.ID)
@@ -381,7 +380,7 @@ func TestTriage_Process(t *testing.T) {
 		t.Fatalf("process: %d body=%s", rr2.Code, rr2.Body.String())
 	}
 	var resp map[string]int
-	json.Unmarshal(rr2.Body.Bytes(), &resp)
+	mustUnmarshal(t, rr2, &resp)
 	if resp["matched"] != 1 {
 		t.Errorf("matched = %d, want 1", resp["matched"])
 	}

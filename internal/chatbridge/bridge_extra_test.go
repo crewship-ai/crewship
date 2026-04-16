@@ -86,6 +86,9 @@ func TestGenerateMsgIDUniqueness(t *testing.T) {
 		if id == "" {
 			t.Fatalf("empty ID at iteration %d", i)
 		}
+		if !strings.HasPrefix(id, "msg_") {
+			t.Fatalf("id missing msg_ prefix at iteration %d: %q", i, id)
+		}
 		if _, dup := seen[id]; dup {
 			t.Fatalf("duplicate ID: %q", id)
 		}
@@ -134,7 +137,10 @@ func TestHandleChatMessageBlocksWhenDevcontainerNotProvisioned(t *testing.T) {
 		t.Errorf("expected error event mentioning provision, got %+v", events)
 	}
 	// User message must NOT have been persisted (fail-fast before append).
-	msgs, _ := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+	msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+	if err != nil {
+		t.Fatalf("read conversation: %v", err)
+	}
 	if len(msgs) != 0 {
 		t.Errorf("expected no persisted messages on fail-fast, got %d", len(msgs))
 	}
