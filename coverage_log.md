@@ -21,3 +21,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 0 | — | bootstrap (tato hlavička) | init | — | 2026-04-16 |
 | 1 | A | internal/keeper/types.go | ok | fd3a059 | 2026-04-16T21:05Z |
 | 2 | B | cmd/crewship/cmd_expose.go | ok | cce1ef8 | 2026-04-16T21:15Z |
+| 3 | C | hooks/use-pending-escalations.ts (C1/C2 deprecated, skipped) | ok | d931943 | 2026-04-16T21:52Z |
