@@ -70,8 +70,23 @@ func (o *CreateOptions) Validate() error {
 	if err := RequireAdmin(o.Actor.Role); err != nil {
 		return err
 	}
-	if o.Passphrase == "" && len(o.Recipients) == 0 && !o.NoEncrypt {
-		return fmt.Errorf("backup: must supply Passphrase, Recipients, or NoEncrypt=true")
+	// Reject conflicting encryption modes up front. Letting a bad combo
+	// (e.g. Passphrase + Recipients) slip past here means it fails
+	// later, after we've already acquired the lock and written a
+	// .partial, which leaves cleanup on the caller. Exactly one of the
+	// three must be set.
+	modes := 0
+	if o.Passphrase != "" {
+		modes++
+	}
+	if len(o.Recipients) > 0 {
+		modes++
+	}
+	if o.NoEncrypt {
+		modes++
+	}
+	if modes != 1 {
+		return fmt.Errorf("backup: exactly one of Passphrase, Recipients, or NoEncrypt=true must be set")
 	}
 	return nil
 }

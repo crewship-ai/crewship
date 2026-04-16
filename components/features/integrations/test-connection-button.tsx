@@ -84,7 +84,12 @@ export function TestConnectionButton({
         Test Connection
       </Button>
       {result && (
-        <span className="inline-flex items-center gap-1.5">
+        <span
+          className="inline-flex items-center gap-1.5"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           {result.status === "ok" && (
             <StatusBadge status="COMPLETED" label={<span className="inline-flex items-center gap-1"><Check className="h-3 w-3" />Connected</span>} />
           )}

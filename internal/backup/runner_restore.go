@@ -148,6 +148,23 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, fmt.Errorf("%w: instance scope restore is not supported yet (V1.5)", ErrInvalidScope)
 	}
 
+	// Enforce that --as-workspace / --as-crew match the bundle scope
+	// BEFORE we start rewriting IDs. Without this the CLI can point
+	// --as-crew at a workspace bundle (silently ignored, admin confused
+	// why nothing happened) or --as-workspace at a crew bundle (rewrites
+	// the workspace row even though the restore is scoped to a single
+	// crew). Both are wrong, neither triggers a useful error later, so
+	// fail loudly here.
+	if opts.AsWorkspace != "" && opts.AsCrew != "" {
+		return nil, fmt.Errorf("%w: supply only one of --as-workspace or --as-crew", ErrInvalidScope)
+	}
+	if opts.AsWorkspace != "" && manifest.Scope != ScopeWorkspace {
+		return nil, fmt.Errorf("%w: --as-workspace is only valid for workspace-scope bundles (this bundle is %s)", ErrInvalidScope, manifest.Scope)
+	}
+	if opts.AsCrew != "" && manifest.Scope != ScopeCrew {
+		return nil, fmt.Errorf("%w: --as-crew is only valid for crew-scope bundles (this bundle is %s)", ErrInvalidScope, manifest.Scope)
+	}
+
 	// Schema skew detection. The bundle records which DB migrations
 	// had been applied on the source; the target might be newer (OK —
 	// migrations are additive), or older (NOT OK — missing columns

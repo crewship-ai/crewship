@@ -34,6 +34,11 @@ export function OAuthAutoConnect({
   const [error, setError] = React.useState("")
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
   const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Guards against double-firing onCredentialCreated. If a poll
+  // response is in flight when a second tick observes ACTIVE, both
+  // would otherwise invoke the parent callback and duplicate agent
+  // binding writes. Reset on every fresh handleConnect.
+  const completedRef = React.useRef(false)
 
   React.useEffect(() => {
     return () => {
@@ -46,6 +51,7 @@ export function OAuthAutoConnect({
     if (!workspaceId) return
     setStatus("discovering")
     setError("")
+    completedRef.current = false
 
     try {
       const res = await fetch(`/api/v1/oauth/auto-connect?workspace_id=${workspaceId}`, {
@@ -56,9 +62,16 @@ export function OAuthAutoConnect({
       const data = await res.json()
 
       if (data.status === "authorize") {
+        // Open browser for OAuth consent FIRST — if the popup is
+        // blocked, skip the authorizing-state dance entirely so the
+        // user gets a concrete error instead of a 2-minute silent wait.
+        const popup = window.open(data.auth_url, "_blank", "width=600,height=700")
+        if (!popup) {
+          setStatus("error")
+          setError("Popup blocked. Allow popups for this site and try again.")
+          return
+        }
         setStatus("authorizing")
-        // Open browser for OAuth consent
-        window.open(data.auth_url, "_blank", "width=600,height=700")
 
         // Poll credential status until ACTIVE
         const credId = data.credential_id
@@ -67,7 +80,11 @@ export function OAuthAutoConnect({
             const credRes = await fetch(`/api/v1/credentials/${credId}?workspace_id=${workspaceId}`)
             if (credRes.ok) {
               const cred = await credRes.json()
-              if (cred.status === "ACTIVE") {
+              if (cred.status === "ACTIVE" && !completedRef.current) {
+                // Mark completed FIRST so a concurrent tick that
+                // already fetched this response can't also fall
+                // through to the callback.
+                completedRef.current = true
                 if (pollRef.current) clearInterval(pollRef.current)
                 pollRef.current = null
                 if (timeoutRef.current) clearTimeout(timeoutRef.current)

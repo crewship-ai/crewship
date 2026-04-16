@@ -14,7 +14,11 @@ import type { MCPTemplate } from "@/components/features/mcp/types"
 interface TemplatePopoverProps {
   open: boolean
   onOpenChange: (v: boolean) => void
-  onSelect: (t: MCPTemplate | null) => void
+  // Consumers like the integrations page hand an async handler here
+  // (handleAddServer, which creates the server via the API). We accept
+  // both sync and async so the click handlers below can `.catch()`
+  // without the typing war warning on every call site.
+  onSelect: (t: MCPTemplate | null) => void | Promise<void>
   onBrowseRegistry: () => void
   trigger: React.ReactNode
 }
@@ -45,7 +49,13 @@ export function TemplatePopover({
                   key={t.name}
                   type="button"
                   className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-body hover:bg-muted/60 transition-colors"
-                  onClick={() => onSelect(t)}
+                  onClick={() => {
+                    void Promise.resolve(onSelect(t)).catch(() => {
+                      /* onSelect surfaces its own errors via toast; we
+                         swallow here so React doesn't emit an
+                         unhandled-rejection warning. */
+                    })
+                  }}
                 >
                   <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                   {t.label}
@@ -57,7 +67,9 @@ export function TemplatePopover({
             <button
               type="button"
               className="flex flex-1 items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-body text-muted-foreground hover:bg-muted/60 transition-colors"
-              onClick={() => onSelect(null)}
+              onClick={() => {
+                void Promise.resolve(onSelect(null)).catch(() => {})
+              }}
             >
               <Terminal className="h-4 w-4" />
               Custom server

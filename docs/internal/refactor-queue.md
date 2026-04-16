@@ -10,8 +10,10 @@ item `blocked:<reason>`.
 
 - ONE item per pass. Don't chain refactors in a single commit —
   bisection must stay clean.
-- Start from `git pull origin refactor/nightly && git rebase main`.
-  If rebase conflicts, stop and escalate.
+- Start from `git fetch origin && git rebase origin/refactor/nightly &&
+  git rebase origin/main`. The explicit fetch + rebase against the
+  remote ref avoids the `git pull` merge-commit trap, keeping the
+  nightly branch bisect-clean. If rebase conflicts, stop and escalate.
 - Before committing: `go test ./... -count=1 && go vet ./... &&
   pnpm lint && pnpm build`. All four must be green.
 - Write new tests for moved / extracted code when the original had

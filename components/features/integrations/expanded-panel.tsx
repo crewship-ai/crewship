@@ -37,6 +37,13 @@ import { TestConnectionButton } from "./test-connection-button"
 import { parseArgs, parseEnv, serializeArgs, serializeEnv } from "./helpers"
 import type { AgentInfo, CrewInfo, CrewIntegration } from "./types"
 
+// Endpoint-based MCP transports — the server side (oauth/discover +
+// mcp/test) treats all three as URL+HTTP-ish flows, so the UI must
+// gate OAuth/auto-connect on the same set. Previously the gates were
+// hard-coded to "streamable-http" alone, which silently hid the OAuth
+// flow from http/sse integrations.
+const ENDPOINT_TRANSPORTS = new Set(["streamable-http", "http", "sse"])
+
 interface ExpandedPanelProps {
   server: CrewIntegration
   crews: CrewInfo[]
@@ -162,7 +169,7 @@ export function ExpandedPanel({
   const [discovering, setDiscovering] = React.useState(false)
 
   async function discoverOAuth(mcpUrl: string) {
-    if (!workspaceId || transport !== "streamable-http") return
+    if (!workspaceId || !ENDPOINT_TRANSPORTS.has(transport)) return
     try {
       const parsed = new URL(mcpUrl)
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return
@@ -194,7 +201,7 @@ export function ExpandedPanel({
 
   // Auto-discover on mount if URL is already set
   React.useEffect(() => {
-    if (server.transport === "streamable-http" && server.endpoint && server.auth_status === "none") {
+    if (ENDPOINT_TRANSPORTS.has(server.transport) && server.endpoint && server.auth_status === "none") {
       discoverOAuth(server.endpoint)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -408,7 +415,7 @@ export function ExpandedPanel({
       </SectionCard>
 
       {/* Section 3: OAuth Auto-Connect (HTTP servers only) */}
-      {canManage && transport === "streamable-http" && (url || server.endpoint) && (server.auth_status !== "none" || oauthDiscovered) && (
+      {canManage && ENDPOINT_TRANSPORTS.has(transport) && (url || server.endpoint) && (server.auth_status !== "none" || oauthDiscovered) && (
         <OAuthAutoConnect
           serverName={server.name}
           mcpURL={url || server.endpoint || ""}

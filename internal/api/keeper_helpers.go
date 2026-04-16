@@ -17,7 +17,13 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // language interpreter with inline code. An attacker can bypass the
 // metachar filter by wrapping a payload inside single quotes passed
 // to "bash -c '...|...'".
-var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b\s+(-[ceE]|--eval)\b`)
+//
+// The short-option match is intentionally permissive about clustered
+// flags — `bash -lc '…'`, `sh -ec '…'`, and other combinations where a
+// `c`/`e`/`E` is glommed together with login/errexit letters all
+// re-parse the quoted payload, so they need to trigger the precheck
+// just as surely as the bare `-c` form.
+var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b\s+(-[A-Za-z]*[cEe][A-Za-z]*|--eval)\b`)
 
 // scriptToolPattern matches tools with built-in shell execution
 // capabilities.
