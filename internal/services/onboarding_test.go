@@ -210,7 +210,9 @@ func TestOnboardingSetup_DuplicateAgentSlug(t *testing.T) {
 	}
 	// Crew "fresh" must NOT exist (rollback).
 	var n int
-	_ = db.QueryRow("SELECT COUNT(*) FROM crews WHERE slug='fresh'").Scan(&n)
+	if err := db.QueryRow("SELECT COUNT(*) FROM crews WHERE slug='fresh'").Scan(&n); err != nil {
+		t.Fatalf("count fresh crews: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("expected rollback to discard crew, got %d", n)
 	}
@@ -255,7 +257,9 @@ func TestOnboardingSetup_WithoutCredential(t *testing.T) {
 	}
 	// No agent_credential link inserted.
 	var n int
-	_ = db.QueryRow("SELECT COUNT(*) FROM agent_credentials WHERE agent_id=?", res.AgentID).Scan(&n)
+	if err := db.QueryRow("SELECT COUNT(*) FROM agent_credentials WHERE agent_id=?", res.AgentID).Scan(&n); err != nil {
+		t.Fatalf("count agent credentials: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("expected zero agent_credentials, got %d", n)
 	}
@@ -283,7 +287,9 @@ func TestOnboardingSetup_NoWorkspaceNameLeavesItAlone(t *testing.T) {
 	}
 	// Workspace name should remain "WS" (the seed value).
 	var name string
-	_ = db.QueryRow("SELECT name FROM workspaces WHERE id=?", wid).Scan(&name)
+	if err := db.QueryRow("SELECT name FROM workspaces WHERE id=?", wid).Scan(&name); err != nil {
+		t.Fatalf("query workspace name: %v", err)
+	}
 	if name != "WS" {
 		t.Errorf("workspace name unexpectedly changed to %q", name)
 	}
@@ -312,7 +318,9 @@ func TestOnboardingSetup_DuplicateCrewSlug(t *testing.T) {
 	}
 	// onboarding_completed must be back to 0 (rollback worked).
 	var oc int
-	_ = db.QueryRow("SELECT onboarding_completed FROM users WHERE id=?", uid).Scan(&oc)
+	if err := db.QueryRow("SELECT onboarding_completed FROM users WHERE id=?", uid).Scan(&oc); err != nil {
+		t.Fatalf("query onboarding flag: %v", err)
+	}
 	if oc != 0 {
 		t.Errorf("expected onboarding rolled back, got %d", oc)
 	}

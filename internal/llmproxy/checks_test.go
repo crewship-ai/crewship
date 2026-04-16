@@ -67,10 +67,17 @@ func TestCredentialMonitor_ValidateAnthropic_AllStatusCodes(t *testing.T) {
 // sk-ant-oat must use Bearer auth instead of x-api-key.
 func TestCredentialMonitor_ValidateAnthropic_OAuthHeader(t *testing.T) {
 	t.Parallel()
-	var seenAuth, seenAPIKey string
+	// Header captures live in the httptest handler goroutine; protect with a
+	// mutex so the race detector sees a clean happens-before to the assertions.
+	var (
+		mu                   sync.Mutex
+		seenAuth, seenAPIKey string
+	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		seenAuth = r.Header.Get("Authorization")
 		seenAPIKey = r.Header.Get("x-api-key")
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -83,11 +90,15 @@ func TestCredentialMonitor_ValidateAnthropic_OAuthHeader(t *testing.T) {
 		ID: "c", Provider: ProviderAnthropic, AccessToken: "sk-ant-oat-secret",
 	})
 
-	if !strings.HasPrefix(seenAuth, "Bearer ") {
-		t.Errorf("expected Bearer auth, got %q", seenAuth)
+	mu.Lock()
+	auth, apiKey := seenAuth, seenAPIKey
+	mu.Unlock()
+
+	if !strings.HasPrefix(auth, "Bearer ") {
+		t.Errorf("expected Bearer auth, got %q", auth)
 	}
-	if seenAPIKey != "" {
-		t.Errorf("expected x-api-key empty, got %q", seenAPIKey)
+	if apiKey != "" {
+		t.Errorf("expected x-api-key empty, got %q", apiKey)
 	}
 }
 
@@ -248,9 +259,15 @@ func TestCredentialMonitor_Validate_UnknownProvider(t *testing.T) {
 func TestTokenSyncer_Run_SyncsOnceThenStops(t *testing.T) {
 	t.Parallel()
 	hits := int32(0)
+	// Buffered (cap=1) so the handler never blocks on subsequent syncs.
+	synced := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&hits, 1)
-		w.Write([]byte("[]"))
+		select {
+		case synced <- struct{}{}:
+		default:
+		}
+		_, _ = w.Write([]byte("[]"))
 	}))
 	defer srv.Close()
 
@@ -263,8 +280,13 @@ func TestTokenSyncer_Run_SyncsOnceThenStops(t *testing.T) {
 		syncer.Run(ctx)
 		close(done)
 	}()
-	// Allow at least the initial sync.
-	time.Sleep(120 * time.Millisecond)
+	// Wait for at least one sync instead of sleeping a fixed duration.
+	select {
+	case <-synced:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("syncer did not perform initial sync within 2s")
+	}
 	cancel()
 	select {
 	case <-done:
