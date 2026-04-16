@@ -30,6 +30,19 @@ CREDENTIALS:
 - CLI tokens and secrets are available as files in /secrets/{your-slug}/ (e.g., /secrets/{your-slug}/GH_TOKEN)
 - The .env file in /secrets/{your-slug}/.env maps env var names to file paths
 - API keys for LLM providers are injected automatically via the sidecar proxy
+
+EXPOSE PORT (show a running server to the user):
+- When you run a TCP server inside this container (HTTP, dev preview, etc.) the user
+  cannot reach it directly because the container has no host port mapping.
+- To get a public URL the user can paste into their browser, call the sidecar:
+    curl -s -X POST http://localhost:9119/expose-port \
+      -H "Content-Type: application/json" \
+      -d '{"port": <port>, "description": "<short why>"}'
+- Response: {"id": "...", "token": "...", "url": "http://<host>/exposed/<token>/", "expires_at": "..."}
+- Share the "url" field with the user. It expires in 1 hour by default; pass
+  "ttl_seconds": N to request a different TTL (max 24h). The URL is a capability
+  — anyone with it reaches the server, so avoid posting it to public channels.
+- Bind your server to 0.0.0.0 (not 127.0.0.1) so the reverse proxy can reach it.
 `
 
 // BuildCLICommand constructs the CLI command and arguments for the configured

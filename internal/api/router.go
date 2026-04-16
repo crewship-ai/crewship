@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/backup"
@@ -22,6 +25,11 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/docker/docker/client"
 )
+
+// errPortExposeNoNetwork is returned by the router's DockerInspector adapter
+// when the target container is not attached to the crew bridge network, so
+// the handler turns it into a 502 instead of a misleading 500.
+var errPortExposeNoNetwork = errors.New("container not attached to crew network")
 
 // keeperWSBroadcaster adapts ws.Hub to the KeeperBroadcaster interface.
 type keeperWSBroadcaster struct {
@@ -65,8 +73,10 @@ type Router struct {
 	runtimeFetcher       *devcontainer.RuntimeFetcher
 	dockerClient         *dockerclient.Client
 	featureCacheDir      string
-	authRateLimitedMux   http.Handler // mux wrapped with auth rate limiter
-	apiRateLimitedMux    http.Handler // mux wrapped with general API rate limiter
+	portExposeRegistry   *PortExposeRegistry // closed via Shutdown() on server stop
+	portExposePublicURL  string              // e.g. http://192.168.1.201:8080, used to build capability URLs
+	authRateLimitedMux   http.Handler        // mux wrapped with auth rate limiter
+	apiRateLimitedMux    http.Handler        // mux wrapped with general API rate limiter
 }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.
@@ -129,6 +139,17 @@ func WithInternalToken(token string) RouterOption {
 func WithInternalBaseURL(url string) RouterOption {
 	return func(r *Router) {
 		r.internalBaseURL = url
+	}
+}
+
+// WithPortExposePublicURL sets the base URL used when handing capability URLs
+// back to agents for exposed container ports. Should be the externally
+// reachable origin of this crewshipd (e.g. "http://192.168.1.201:8080").
+// If unset, the handler falls back to "http://localhost:8080" which is fine
+// for unit tests but not reachable from a user's browser.
+func WithPortExposePublicURL(u string) RouterOption {
+	return func(r *Router) {
+		r.portExposePublicURL = u
 	}
 }
 
@@ -825,6 +846,57 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/internal/keeper/request", internalAuth(http.HandlerFunc(keeperH.HandleRequest)))
 	r.mux.Handle("GET /api/v1/internal/keeper/request/{requestId}", internalAuth(http.HandlerFunc(keeperH.GetRequest)))
 	r.mux.Handle("POST /api/v1/internal/keeper/execute", internalAuth(http.HandlerFunc(keeperH.HandleExecute)))
+
+	// Port exposures — agent-initiated reverse proxy for container ports.
+	// MVP uses AllowAllPolicy; the registry + proxy route + CLI list/revoke
+	// are all wired here in one place so swapping in a future ApprovalPolicy
+	// only touches the policy argument below.
+	r.portExposeRegistry = NewPortExposeRegistry(r.db, r.logger)
+	// Rehydrate active exposures from DB so they survive crewshipd restarts,
+	// then kick off the TTL purge goroutine. Errors are logged but don't
+	// abort router setup — an empty registry is still functional.
+	if err := r.portExposeRegistry.LoadFromDB(context.Background()); err != nil {
+		r.logger.Warn("port expose registry: initial load failed", "error", err)
+	}
+	r.portExposeRegistry.StartPurger(30 * time.Second)
+
+	peCfg := DefaultPortExposeConfig()
+	if r.portExposePublicURL != "" {
+		peCfg.PublicBaseURL = r.portExposePublicURL
+	}
+	var peInspector DockerInspector
+	if r.dockerClient != nil {
+		dc := r.dockerClient
+		peInspector = DockerInspectorFunc(func(ctx context.Context, id, network string) (string, error) {
+			inspect, err := dc.ContainerInspect(ctx, id)
+			if err != nil {
+				return "", err
+			}
+			if inspect.NetworkSettings == nil {
+				return "", errPortExposeNoNetwork
+			}
+			ns, ok := inspect.NetworkSettings.Networks[network]
+			if !ok || ns == nil || ns.IPAddress == "" {
+				return "", errPortExposeNoNetwork
+			}
+			return ns.IPAddress, nil
+		})
+	}
+	portExposeH := NewPortExposeHandler(r.db, r.portExposeRegistry, peInspector, AllowAllPolicy{}, r.hub, peCfg, r.logger)
+
+	// Capability URL — no auth; the token IS the auth. Patterns without a
+	// method prefix match every HTTP verb (Go 1.22+ ServeMux), so one handler
+	// entry covers GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS for the reverse
+	// proxy. Two variants because trailing-slash and bare-token forms are
+	// both legitimate ways users / curl might hit the capability.
+	r.mux.HandleFunc("/exposed/{token}/", portExposeH.ServeExposed)
+	r.mux.HandleFunc("/exposed/{token}", portExposeH.ServeExposed)
+
+	// Sidecar IPC — the agent-initiated request flow.
+	r.mux.Handle("POST /api/v1/internal/port-expose", internalAuth(http.HandlerFunc(portExposeH.RequestExpose)))
+	// User-facing audit + lifecycle.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/port-expose", authed(wsCtx(http.HandlerFunc(portExposeH.List))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/port-expose/{id}/revoke", authed(wsCtx(http.HandlerFunc(portExposeH.Revoke))))
 
 	// Webhooks (public, HMAC-secret protected)
 	if r.orch != nil && r.keeperContainer != nil && r.logWriter != nil && r.internalToken != "" {

@@ -269,6 +269,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/keeper/execute":
 				s.handleKeeperExecute(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/expose-port":
+				s.handleExposePort(w, r)
+				return
 			case r.Method == http.MethodGet && r.URL.Path == "/crews":
 				s.handleListCrews(w, r)
 				return
