@@ -26,3 +26,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 5 | E | e2e/credentials.spec.ts | skipped: no dev server (Playwright webServer needs localhost:3001; Mac has none — remote dev is on 192.168.1.201) | — | 2026-04-17T00:30Z |
 | 6 | A | internal/sidecar/port_expose.go | ok | fc0402c | 2026-04-17T00:50Z |
 | 7 | B | cmd/crewship/cmd_audit.go (B2 cmd_backup 722ř + B4 cmd_agent 803ř too large; B3 cmd_captain deprecated) | ok | 3cd1c9d | 2026-04-17T01:10Z |
+| 8 | C | hooks/use-agent-activity.ts | ok | f3d9ccc | 2026-04-17T01:30Z |
