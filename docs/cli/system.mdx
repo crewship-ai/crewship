@@ -544,6 +544,104 @@ crewship project milestone delete <milestone-id> --yes
 
 ---
 
+# crewship features
+
+Browse the devcontainer feature catalog. Features are reusable
+build-time installers (mounted at `.features/`) that extend a
+`devcontainer.json` — the same ones you'd find on the upstream
+[`containers.dev`](https://containers.dev/) spec, plus Crewship's own
+curated additions.
+
+```bash
+crewship features <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List available devcontainer features. |
+| `info` | Show details for a specific feature. |
+| `base-images` | List recommended base container images for crews. |
+
+### `crewship features list`
+
+```bash
+crewship features list
+crewship features list --search docker
+crewship features list --search "cloud cli"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--search` | `string` | | Filter features by name, description, or category. |
+
+### `crewship features info`
+
+```bash
+crewship features info ghcr.io/devcontainers/features/docker-in-docker
+```
+
+Prints the feature's options, default values, and compatible runtimes.
+
+### `crewship features base-images`
+
+```bash
+crewship features base-images
+```
+
+Prints the curated list of base images suitable for `crewship crew config --runtime-image`. Images are tagged with their expected use (general-purpose, minimal, language-specific).
+
+See [`crewship crew config --runtime-image`](/cli/crew#crewship-crew-config) for how to apply one to a crew.
+
+---
+
+# crewship runtimes
+
+Browse the [mise](https://mise.jdx.dev/)-managed runtime and tool
+catalog. Entries here are installable via a crew's mise config — use
+`crewship crew config --mise` to apply a manifest.
+
+```bash
+crewship runtimes <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List available runtimes / tools from the mise catalog. |
+| `info` | Show details for a specific runtime / tool. |
+
+### `crewship runtimes list`
+
+```bash
+crewship runtimes list
+crewship runtimes list --category languages
+crewship runtimes list --search go
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--search` | `string` | | Filter runtimes by name, tool, description, or category. |
+| `--category` | `string` | | Filter by category: `languages`, `tools`, `cloud`, `databases`. |
+
+### `crewship runtimes info`
+
+```bash
+crewship runtimes info go
+crewship runtimes info terraform
+```
+
+Prints the tool's description, available versions, mise backend, and example mise config snippet.
+
+## See also
+
+- [`crewship crew config`](/cli/crew#crewship-crew-config) — apply a mise manifest to a crew.
+- [Guides → Devcontainers & Runtime Images](/guides/devcontainers) — how `features` and `runtimes` fit into the provisioning pipeline.
+
+---
+
 # crewship version
 
 Print version information.
