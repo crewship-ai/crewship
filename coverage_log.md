@@ -22,3 +22,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 1 | A | internal/keeper/types.go | ok | fd3a059 | 2026-04-16T21:05Z |
 | 2 | B | cmd/crewship/cmd_expose.go | ok | cce1ef8 | 2026-04-16T21:15Z |
 | 3 | C | hooks/use-pending-escalations.ts (C1/C2 deprecated, skipped) | ok | d931943 | 2026-04-16T21:52Z |
+| 4 | D | components/features/chat/turn-renderer.tsx (D1/D2 too large for timebox, D4/D5 deprecated) | ok | 72a60f1 | 2026-04-17T00:10Z |
