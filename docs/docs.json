@@ -48,7 +48,8 @@
               "security/encryption",
               "security/container-isolation",
               "security/audit",
-              "security/security-headers"
+              "security/security-headers",
+              "security/backup-instance-security"
             ]
           },
           {

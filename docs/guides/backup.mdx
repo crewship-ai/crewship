@@ -24,6 +24,12 @@ Every backup subcommand requires the **OWNER** or **ADMIN** role on the workspac
 | `crewship backup status` | Show the advisory lock state for the current workspace. |
 | `crewship backup unlock` | Release a stale lock owned by this host (admin-only, confirm required). |
 
+<Note>
+  `create` and `restore` accept `--use-keyring` to cache and reuse the
+  workspace passphrase via `~/.crewship/backup-keyring.enc`. See
+  [Passphrase keyring](#passphrase-keyring) below.
+</Note>
+
 ## Bundle layout
 
 ```
@@ -167,15 +173,179 @@ crewship backup unlock --force
 
 Restore and verify stream the sealed payload to a temp directory rather than buffering per-crew sections in a `map[slug][]byte`. Peak heap stays bounded by the zstd decoder window regardless of bundle size, so multi-GB restores run cleanly on small hosts. The extraction scratch directory is `os.TempDir()/crewship-backup-…` and is removed on `Close()`; a killed process leaves it behind for the next `os.TempDir` cleanup.
 
-## Known caveats (CRE-130)
+## Passphrase keyring
 
-The following items are intentionally deferred to follow-up work. They do **not** block MVP use but are worth knowing:
+The `--use-keyring` flag on `create` and `restore` caches the workspace
+passphrase in `~/.crewship/backup-keyring.enc` so scripts and repeat
+rehearsals don't re-prompt. The file is an AES-256-GCM-encrypted JSON
+map keyed by workspace ID, using the same `v1:<base64>` envelope as the
+credstore — without the host's `ENCRYPTION_KEY` the contents are
+unreadable even if the file leaks.
 
-- **Forward migration replay on restore** — the restorer detects a bundle produced by an older schema, but does not yet replay the missing migrations. For now, restore onto an instance whose schema version equals or exceeds the bundle's.
-- **`preBackup` / `postBackup` hooks** — no user-defined hooks yet. If your workspace has services that need an app-level flush, run them manually before invoking `crewship backup create`.
-- **Remote backends (S3 / B2 / GCS)** — bundles live on the server's local disk only. Use `scp` / `rclone` / `restic` to ship them off-box. REST `GET /api/v1/admin/backups/download` streams a single bundle over HTTP if you prefer that.
-- **Scheduled backups** — no built-in scheduler. Wrap `crewship backup create` in `cron` or `systemd.timer`.
-- **Instance-scope backup** — credstore + auth keys are intentionally **never** in MVP bundles. Workspace/crew bundles are portable across instances; instance-scope backup is tracked under CRE-129.
+```bash
+# First use on this workspace: prompts, then persists.
+crewship backup create --scope=workspace --use-keyring
+
+# Subsequent runs: silent, no prompt.
+crewship backup create --scope=workspace --use-keyring
+crewship backup restore bundle.tar.zst --use-keyring
+```
+
+Semantics worth knowing:
+
+- **No silent fallback on failure.** Opening the keyring or reading an
+  entry reports the real error and aborts; only `ErrKeyringEntryNotFound`
+  (first use on this workspace) falls through to a prompt.
+- **Write failures are non-fatal** on `create`. The bundle is already
+  written when the keyring save runs; the CLI logs a warning and
+  continues.
+- **Keyring is local to the operator's host.** `--use-keyring` always
+  writes to `~/.crewship/` on the invoking machine — even if a future
+  remote bundle backend (S3 / GCS) is configured, the passphrase never
+  travels with the bundle.
+- **Single-process mutex, not file-locked.** Two concurrent CLI
+  invocations against the same workspace are last-write-wins (the file
+  is small and the failure mode is "one passphrase lost, never data
+  corruption"); tracked as a CRE-130 follow-up.
+- **`--passphrase-file` takes precedence.** When both flags are passed,
+  the file wins and the keyring is not consulted.
+
+## Webhooks
+
+Set `CREWSHIP_BACKUP_WEBHOOK_URL` (and `CREWSHIP_BACKUP_WEBHOOK_SECRET`)
+on the server process to receive a signed POST for each backup lifecycle
+event. Delivery is fire-and-forget from a goroutine — a slow or down
+webhook never blocks the backup run.
+
+```bash
+export CREWSHIP_BACKUP_WEBHOOK_URL=https://hooks.example.com/crewship
+export CREWSHIP_BACKUP_WEBHOOK_SECRET=$(openssl rand -hex 32)
+```
+
+Each event is JSON with the shape:
+
+```json
+{
+  "event":          "backup.created",
+  "timestamp":      "2026-04-15T12:05:01Z",
+  "workspace_id":   "ws_abc123",
+  "scope":          "workspace",
+  "path":           "/home/admin/.crewship/backups/...tar.zst",
+  "bytes":          13421772,
+  "payload_sha256": "…",
+  "error":          ""
+}
+```
+
+Events: `backup.created`, `backup.failed`, `backup.restored`.
+
+Each request carries an `X-Crewship-Signature: sha256=<hex>` header —
+HMAC-SHA256 over the raw body using `CREWSHIP_BACKUP_WEBHOOK_SECRET`.
+Receivers **must** verify the signature (same scheme as Crewship's
+inbound webhooks; validate via `webhook.ValidateHMAC` after stripping
+the `sha256=` prefix). The secret is required whenever `URL` is set —
+sending a body unsigned would let any network listener forge events to
+a downstream consumer that trusts the feed. URLs with userinfo or query
+strings are redacted before ever appearing in logs / audit rows, so
+basic-auth credentials or signed-URL tokens do not leak.
+
+## Metrics
+
+`GET /api/v1/admin/backups/metrics` (instance OWNER only; see below)
+returns a point-in-time snapshot of process-lifetime counters. The
+numbers reset on restart — persistent observability belongs in the
+audit log and its dashboards.
+
+```json
+{
+  "created_total":                5,
+  "created_by_scope":             { "workspace": 4, "crew": 1 },
+  "failed_total":                 0,
+  "failed_by_reason":             {},
+  "restored_total":               2,
+  "size_bytes_total":             67108864,
+  "duration_seconds_p50":         4.1,
+  "duration_seconds_p95":         12.7,
+  "duration_seconds_mean":        6.3,
+  "lock_held_seconds_by_workspace": { "ws_abc123": 0 }
+}
+```
+
+Duration quantiles are approximated from an in-memory ring buffer —
+fine for the dozens-to-hundreds of samples a single host accumulates
+between restarts; not a general-purpose histogram. For long-horizon
+reporting, ingest the `backup.*` rows from `audit_log`.
+
+## Instance-scope backup
+
+An instance-scope backup bundles **every workspace** on a Crewship host
+plus the cross-workspace surfaces that make the install usable — the
+credstore, the auth signing secret, and the instance identity
+(`instance_config.hostname`). It is the disaster-recovery path for an
+entire host, not a normal operational tool.
+
+Key differences from workspace/crew scope:
+
+- **Access control.** Gated by the `CREWSHIP_OWNER_EMAIL` env var
+  (server-level OWNER), not workspace role. A workspace OWNER / ADMIN
+  on their own is refused with HTTP 403.
+- **Rate limit.** One instance backup per user per sliding hour. A
+  runaway cron cannot DoS the host.
+- **Encryption is recipient-only.** `--passphrase-file` is refused for
+  this scope — the surface is too broad (every workspace's secrets in
+  one blob) to trust a brute-forceable passphrase. Callers must supply
+  an AGE `age1…` X25519 public key and hold the matching private key
+  offline.
+- **Cross-host restores force session-key rotation.** The bundle records
+  the source hostname; a restore onto a different target invalidates
+  every existing JWE session to prevent source-host tokens from
+  remaining valid after DR.
+
+Full threat model, crypto chain, and operational checklist:
+[Security → Instance-Scope Backup Security](/security/backup-instance-security).
+
+## Admin UI
+
+A Backups tab lives in `/admin` for OWNER / ADMIN users. It wraps the
+same REST endpoints the CLI drives and adds:
+
+- A status banner for the advisory lock (who holds it, TTL remaining).
+- Create / restore dialogs with passphrase input (no keyring — the
+  keyring is a CLI-side convenience; the browser never sees
+  `~/.crewship/`).
+- An inspect panel that renders the plaintext manifest without
+  decrypting the payload (same as `crewship backup inspect`).
+- A bundle list with size, scope, format version, and created-at,
+  fetched via `hooks/use-backups.ts`.
+
+The UI does **not** expose instance-scope operations — they remain
+CLI + env-gated to reduce blast radius from a compromised admin session.
+
+## Known caveats (CRE-130 follow-ups)
+
+The following items are intentionally deferred to post-v2 work. They do
+**not** block production use but are worth knowing:
+
+- **`preBackup` / `postBackup` hooks** — no user-defined hooks yet. If
+  your workspace has services that need an app-level flush, run them
+  manually before invoking `crewship backup create`.
+- **Remote backends (S3 / B2 / GCS)** — bundles live on the server's
+  local disk only. The storage layer is now abstracted behind a
+  `StorageOps` interface so a future backend swap won't require a
+  second refactor of every call-site. Today: use `scp` / `rclone` /
+  `restic` to ship bundles off-box, or stream a single bundle via
+  `GET /api/v1/admin/backups/download`.
+- **Scheduled backups** — no built-in scheduler. Wrap `crewship backup
+  create` in `cron` or `systemd.timer`.
+- **Forward migration replay hooks.** The plumbing is wired —
+  migrations can register a per-version `restoreBackfill` function and
+  the restorer walks the `applied ∖ manifest` set in ascending order
+  after the main transaction commits — but no migration registers a
+  hook yet. A failed backfill surfaces as `ErrRestoreBackfillFailed`;
+  the restored rows are visible but may be missing backfilled columns
+  until an admin investigates.
+- **Cross-process keyring lock.** The per-process mutex does not cover
+  two concurrent CLI invocations racing on the same keyring file.
 
 ## Security notes
 
