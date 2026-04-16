@@ -108,7 +108,11 @@ export function ExpandedPanel({
   const [transport, setTransport] = React.useState(normalizeTransport(server.transport))
   const [envVars, setEnvVars] = React.useState(parseEnv(server.env_json))
 
-  // Sync local state if server data changes (after refetch)
+  // Sync local state if server data changes (after refetch). The deps
+  // list names only the fields this editor actually displays — keying
+  // on the whole `server` object would re-run every time an unrelated
+  // field (auth_status, updated_at, audit metadata) changes, wiping
+  // any in-flight user edits.
   React.useEffect(() => {
     setName(server.name)
     setDisplayName(server.display_name || "")
@@ -117,7 +121,15 @@ export function ExpandedPanel({
     setUrl(server.endpoint ?? "")
     setTransport(normalizeTransport(server.transport))
     setEnvVars(parseEnv(server.env_json))
-  }, [server])
+  }, [
+    server.name,
+    server.display_name,
+    server.command,
+    server.args_json,
+    server.endpoint,
+    server.transport,
+    server.env_json,
+  ])
 
   const hasAnyBindings = (agentBindings[server.id]?.size ?? 0) > 0
 
@@ -178,14 +190,20 @@ export function ExpandedPanel({
   // OAuth discovery state
   const [oauthDiscovered, setOauthDiscovered] = React.useState(false)
   const [discovering, setDiscovering] = React.useState(false)
+  // Sequence token guarding against stale discovery responses — when
+  // the user types several URLs in quick succession only the last
+  // fetch may mutate state, otherwise an older response could flip
+  // the OAuth badge back after a newer one already resolved.
+  const oauthDiscoverySeq = React.useRef(0)
 
   async function discoverOAuth(mcpUrl: string) {
     if (!workspaceId || !ENDPOINT_TRANSPORTS.has(transport)) return
+    const seq = ++oauthDiscoverySeq.current
     try {
       const parsed = new URL(mcpUrl)
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return
     } catch {
-      setOauthDiscovered(false)
+      if (seq === oauthDiscoverySeq.current) setOauthDiscovered(false)
       return
     }
     setDiscovering(true)
@@ -198,15 +216,12 @@ export function ExpandedPanel({
           body: JSON.stringify({ mcp_url: mcpUrl }),
         },
       )
-      if (res.ok) {
-        setOauthDiscovered(true)
-      } else {
-        setOauthDiscovered(false)
-      }
+      if (seq !== oauthDiscoverySeq.current) return
+      setOauthDiscovered(res.ok)
     } catch {
-      setOauthDiscovered(false)
+      if (seq === oauthDiscoverySeq.current) setOauthDiscovered(false)
     } finally {
-      setDiscovering(false)
+      if (seq === oauthDiscoverySeq.current) setDiscovering(false)
     }
   }
 

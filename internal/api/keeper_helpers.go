@@ -30,7 +30,13 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // flags to push the dangerous option past the simple "first token"
 // boundary and slip under a regex that demanded it be adjacent to
 // the interpreter name.
-var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b(?:\s+--?[A-Za-z][A-Za-z0-9-]*(?:=[^\s]+)?)*\s+(-[A-Za-z]*[cEe][A-Za-z]*|--eval)\b`)
+//
+// Each option may carry its value either attached (`--key=value`) or
+// in a separate token (`--rcfile /tmp/x`, `python -W ignore -c …`).
+// Both forms need to be skipped; a regex that only recognised `=…`
+// would let `bash --rcfile /tmp/x -c '…'` through because the
+// `/tmp/x` value token looked like a new argument.
+var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b(?:\s+--?[A-Za-z][A-Za-z0-9-]*(?:(?:=[^\s]+)|(?:\s+[^\s'"-][^\s]*))?)*\s+(-[A-Za-z]*[cEe][A-Za-z]*|--eval)\b`)
 
 // scriptToolPattern matches tools with built-in shell execution
 // capabilities.
