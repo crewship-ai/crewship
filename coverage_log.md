@@ -25,3 +25,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 4 | D | components/features/chat/turn-renderer.tsx (D1/D2 too large for timebox, D4/D5 deprecated) | ok | 72a60f1 | 2026-04-17T00:10Z |
 | 5 | E | e2e/credentials.spec.ts | skipped: no dev server (Playwright webServer needs localhost:3001; Mac has none — remote dev is on 192.168.1.201) | — | 2026-04-17T00:30Z |
 | 6 | A | internal/sidecar/port_expose.go | ok | fc0402c | 2026-04-17T00:50Z |
+| 7 | B | cmd/crewship/cmd_audit.go (B2 cmd_backup 722ř + B4 cmd_agent 803ř too large; B3 cmd_captain deprecated) | ok | 3cd1c9d | 2026-04-17T01:10Z |
