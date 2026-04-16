@@ -48,6 +48,7 @@ func init() {
 	seedCmd.Flags().Int("smoke-timeout", 60, "Per-agent timeout (seconds) for smoke test")
 	seedCmd.Flags().Int("provision-timeout", 900, "Per-crew provisioning timeout (seconds)")
 	seedCmd.Flags().Bool("wait-provision", false, "Block until all crews finish provisioning (default: fire-and-forget, seed returns while provisioning runs in the background)")
+	seedCmd.Flags().Bool("test-backup", false, "After seeding, run a backup/restore round-trip self-test on one crew (implies --wait-provision)")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
@@ -59,9 +60,10 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	smokeTimeout, _ := cmd.Flags().GetInt("smoke-timeout")
 	provisionTimeoutSec, _ := cmd.Flags().GetInt("provision-timeout")
 	waitProvision, _ := cmd.Flags().GetBool("wait-provision")
-	// Smoke test runs agents which require provisioned crews — force
-	// synchronous wait even if the user didn't pass --wait-provision.
-	if smokeTest {
+	testBackup, _ := cmd.Flags().GetBool("test-backup")
+	// Smoke test + test-backup both need a provisioned, running container
+	// to do anything useful, so they implicitly force --wait-provision.
+	if smokeTest || testBackup {
 		waitProvision = true
 	}
 	if password == "" {
@@ -184,6 +186,36 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "  Status: crewship crew provision status <slug>   (or re-run `crewship seed --wait-provision`)")
 	}
 
+	// ── Phase 10c: Backup self-test (optional) ──
+	// Requires a provisioned crew (--wait-provision forced above). We pick
+	// the first deterministic target — testing all four would be 4× slower
+	// for no extra coverage; one roundtrip exercises the full pipeline.
+	if testBackup {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if len(startedTargets) == 0 {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "Skipping --test-backup: no crews successfully started provisioning.")
+		} else {
+			// Prefer "research" — it's the Python crew with a minimal feature
+			// set, so the bundle stays small and the collector/restorer
+			// don't hit quirky installs (e.g. terraform on devops creates
+			// version-alias symlinks the manifest validator rejects, a
+			// pre-existing issue unrelated to this self-test).
+			target := startedTargets[0]
+			for _, t := range startedTargets {
+				if t.slug == "research" {
+					target = t
+					break
+				}
+			}
+			if err := runBackupSelfTest(ctx, client, target, crewIDs, agentIDs); err != nil {
+				return err
+			}
+		}
+	}
+
 	// ── Phase 11: Summary ──
 	fmt.Fprintln(os.Stderr, "")
 	cli.PrintSuccess(fmt.Sprintf("Seed complete: %d crews, %d agents", len(crewIDs), len(agentIDs)))
@@ -202,6 +234,74 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "To test that agents work end-to-end:")
 		fmt.Fprintln(os.Stderr, "  crewship seed --smoke-test")
 	}
+	return nil
+}
+
+// runBackupSelfTest invokes the admin self-test endpoint for the chosen
+// crew and prints a one-line verdict. Returns a non-nil error when the
+// pipeline itself failed or when the canary round-trip didn't verify —
+// mirrors runSmokeTest's "fail the command on a red test" behaviour so
+// `crewship seed --test-backup` is CI-usable.
+//
+// "Provisioned" means the image is cached; the crew *container* is only
+// instantiated on the first agent run. We trigger one short agent run as
+// a warm-up so the server endpoint finds a running container to pause.
+func runBackupSelfTest(ctx context.Context, client *cli.Client, target provisionTarget, crewIDs map[string]string, agentIDs map[string]string) error {
+	crewID, ok := crewIDs[target.slug]
+	if !ok || crewID == "" {
+		return fmt.Errorf("backup self-test: no crew id for slug %q", target.slug)
+	}
+
+	// Find one agent in the target crew to wake its container. Prefer the
+	// LEAD for stable-ordering, fall back to any member.
+	var warmupSlug string
+	for _, a := range seeddata.Agents {
+		if a.CrewSlug == target.slug {
+			if a.AgentRole == "LEAD" {
+				warmupSlug = a.Slug
+				break
+			}
+			if warmupSlug == "" {
+				warmupSlug = a.Slug
+			}
+		}
+	}
+	if warmupSlug == "" {
+		return fmt.Errorf("backup self-test: no agent found in crew %q", target.slug)
+	}
+	if _, ok := agentIDs[warmupSlug]; !ok {
+		return fmt.Errorf("backup self-test: warmup agent %q missing from seeded agents", warmupSlug)
+	}
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintf(os.Stderr, "Warming up %s container via %s...\n", target.slug, warmupSlug)
+	if err := warmupAgentForBackupTest(ctx, warmupSlug); err != nil {
+		return fmt.Errorf("backup self-test warmup: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Running backup self-test against %s...\n", target.slug)
+	resp, err := client.WithContext(ctx).Post("/api/v1/admin/backups/self-test",
+		map[string]string{"crew_id": crewID})
+	if err != nil {
+		return fmt.Errorf("backup self-test request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK          bool   `json:"ok"`
+		CrewSlug    string `json:"crew_slug"`
+		BundleBytes int    `json:"bundle_bytes"`
+		ElapsedMS   int64  `json:"elapsed_ms"`
+		Error       string `json:"error,omitempty"`
+	}
+	if err := cli.ReadJSON(resp, &result); err != nil {
+		return fmt.Errorf("backup self-test decode: %w", err)
+	}
+	if !result.OK {
+		fmt.Fprintf(os.Stderr, "  X %s: %s\n", target.slug, result.Error)
+		return fmt.Errorf("backup self-test failed on %s: %s", target.slug, result.Error)
+	}
+	fmt.Fprintf(os.Stderr, "  + %s: %d bytes, %dms\n", target.slug, result.BundleBytes, result.ElapsedMS)
 	return nil
 }
 
@@ -414,6 +514,18 @@ func pollProvisionStatus(ctx context.Context, client *cli.Client, crewID string,
 	for {
 		st, err := fetchProvisionStatus(pollClient, crewID)
 		if err != nil {
+			// Transient 429s from the workspace API rate-limiter shouldn't
+			// abort an in-flight wait — the status endpoint gets polled
+			// many times and the server's window is short. Treat as
+			// "unknown, try again next tick" instead of a hard failure.
+			if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "Too Many Requests") {
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("timeout after %s (last status: %s)", timeout, lastStatus)
+				case <-ticker.C:
+					continue
+				}
+			}
 			return fmt.Errorf("poll status: %w", err)
 		}
 		lastStatus = st.Status
@@ -497,6 +609,55 @@ func runSmokeTest(ctx context.Context, agentIDs map[string]string, timeout time.
 // smokeTestAgent invokes `crewship run` as a subprocess and collects its
 // stdout. Returns a result struct — errors are captured, not returned, so the
 // caller can keep iterating through the remaining agents.
+// warmupAgentForBackupTest runs one agent with a trivial prompt to force the
+// orchestrator to start the crew container (`provisioned` only means the
+// image exists; the container is created lazily on first run). Reuses the
+// same subprocess pattern as the smoke test so we don't have to duplicate
+// the HTTP dance the CLI already does.
+//
+// Seed hits the API hard enough that the auth-rate-limit (used for
+// ws-token issuance on `crewship run`) can trip briefly. Retries a
+// handful of times on 429 before giving up so we don't fail the whole
+// --test-backup flow on transient rate-limiting.
+func warmupAgentForBackupTest(ctx context.Context, agentSlug string) error {
+	server := cli.ResolveServer(flagServer, cliCfg)
+	backoff := 10 * time.Second
+	for attempt := 1; attempt <= 4; attempt++ {
+		ctx2, cancel := context.WithTimeout(ctx, 90*time.Second)
+		args := []string{
+			"run", agentSlug,
+			"ready?",
+			"--no-stream", "--quiet",
+			"--timeout", "60",
+			"--server", server,
+		}
+		cmd := exec.CommandContext(ctx2, os.Args[0], args...)
+		out, err := cmd.CombinedOutput()
+		cancel()
+		if ctx2.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("warmup timed out after 90s (attempt %d)", attempt)
+		}
+		if err == nil {
+			return nil
+		}
+		outStr := strings.TrimSpace(string(out))
+		if (strings.Contains(outStr, "429") || strings.Contains(outStr, "Too Many Requests")) && attempt < 4 {
+			fmt.Fprintf(os.Stderr, "  warmup 429 (attempt %d/4), waiting %s...\n", attempt, backoff)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			if backoff < 30*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+		return fmt.Errorf("warmup exec: %w (output: %s)", err, outStr)
+	}
+	return fmt.Errorf("warmup exhausted retries")
+}
+
 func smokeTestAgent(ctx context.Context, crewshipBin, agentSlug, crewSlug, serverURL string, timeout time.Duration) smokeTestResult {
 	start := time.Now()
 	res := smokeTestResult{CrewSlug: crewSlug, AgentSlug: agentSlug}

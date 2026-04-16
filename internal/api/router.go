@@ -630,6 +630,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/admin/backups/rotate", authed(wsCtx(http.HandlerFunc(backupH.Rotate))))
 	r.mux.Handle("GET /api/v1/admin/backups/download", authed(wsCtx(http.HandlerFunc(backupH.Download))))
 	r.mux.Handle("POST /api/v1/admin/backups/restore", authed(wsCtx(http.HandlerFunc(backupH.Restore))))
+	r.mux.Handle("POST /api/v1/admin/backups/self-test", authed(wsCtx(http.HandlerFunc(backupH.SelfTest))))
 	r.mux.Handle("DELETE /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Delete))))
 
 	// MCP tool call audit (require workspace context)

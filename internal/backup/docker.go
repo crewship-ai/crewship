@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -39,6 +40,13 @@ type DockerOps interface {
 	// name is known to the daemon. Used by restore preflight so CopyTo
 	// does not fail with a cryptic "No such container" mid-stream.
 	ContainerExists(ctx context.Context, containerID string) (bool, error)
+
+	// Exec runs a single command inside the container as root, collects
+	// its combined stdout+stderr, and returns the exit code. Used by the
+	// backup self-test to destroy a canary file between collect and
+	// restore. Not performance-critical; the implementation blocks on the
+	// command finishing.
+	Exec(ctx context.Context, containerID string, cmd []string) (exitCode int, output []byte, err error)
 }
 
 // MobyDockerOps is the production implementation backed by the moby
@@ -106,6 +114,38 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 		return fmt.Errorf("backup: docker cp to %s:%s: %w", containerID, dstPath, err)
 	}
 	return nil
+}
+
+// Exec implements DockerOps. Runs cmd as root (0:0) with stdout and stderr
+// attached so the caller gets a single combined buffer back — matches the
+// semantics of exec_test patterns elsewhere in the codebase (see
+// internal/devcontainer/installer.go:execInContainerFull).
+func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []string) (int, []byte, error) {
+	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		User:         "0:0",
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return -1, nil, fmt.Errorf("backup: exec create %s: %w", containerID, err)
+	}
+	resp, err := m.Client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	if err != nil {
+		return -1, nil, fmt.Errorf("backup: exec attach %s: %w", containerID, err)
+	}
+	defer resp.Close()
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, resp.Reader); err != nil {
+		// Best-effort read; still try to report the exit code below.
+		_ = err
+	}
+	inspect, err := m.Client.ContainerExecInspect(ctx, exec.ID)
+	if err != nil {
+		return -1, buf.Bytes(), fmt.Errorf("backup: exec inspect %s: %w", containerID, err)
+	}
+	return inspect.ExitCode, buf.Bytes(), nil
 }
 
 // ErrPauseUnpauseLost is returned by WithPaused when unpause fails
