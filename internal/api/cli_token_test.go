@@ -246,3 +246,156 @@ func TestCLITokenCreateUnauthorized(t *testing.T) {
 		t.Errorf("status = %d, want 401", rr.Code)
 	}
 }
+
+// ---- New / extended cases ----
+
+func TestCLITokenValidate_HandlerOK(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	req := httptest.NewRequest("POST", "/api/v1/auth/cli-tokens/validate", nil)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com"}))
+	rr := httptest.NewRecorder()
+	h.Validate(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+}
+
+func TestCLITokenValidate_HandlerUnauthorized(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	req := httptest.NewRequest("POST", "/api/v1/auth/cli-tokens/validate", nil)
+	rr := httptest.NewRecorder()
+	h.Validate(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestCLITokenList_Unauthorized(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	req := httptest.NewRequest("GET", "/api/v1/auth/cli-tokens", nil)
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestCLITokenList_OnlyOwnTokens(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	userA := seedTestUser(t, db)
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('user-b', 'b@b.com', 'B')`); err != nil {
+		t.Fatalf("seed userB: %v", err)
+	}
+
+	// userA has 1 token, userB has 1 token
+	for i, uid := range []string{userA, "user-b"} {
+		body, _ := json.Marshal(map[string]string{"name": "tok-" + string(rune('A'+i))})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: uid}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+	}
+
+	// List as userA — must see only their own
+	req := httptest.NewRequest("GET", "/", nil)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userA}))
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	var resp struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if len(resp.Data) != 1 {
+		t.Errorf("user A should see only own token, got %d", len(resp.Data))
+	}
+}
+
+func TestCLITokenRevoke_Unauthorized(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	req := httptest.NewRequest("DELETE", "/api/v1/auth/cli-tokens/x", nil)
+	req.SetPathValue("tokenId", "x")
+	rr := httptest.NewRecorder()
+	h.Revoke(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestCLITokenRevoke_OtherUserCannotRevoke(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	userA := seedTestUser(t, db)
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('user-b', 'b@b.com', 'B')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// userA creates a token
+	body, _ := json.Marshal(map[string]string{"name": "userA-tok"})
+	createReq := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+	createReq = createReq.WithContext(withUser(createReq.Context(), &AuthUser{ID: userA}))
+	createRR := httptest.NewRecorder()
+	h.Create(createRR, createReq)
+	var created struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(createRR.Body.Bytes(), &created)
+
+	// userB tries to revoke userA's token — should 404 (not their token)
+	req := httptest.NewRequest("DELETE", "/api/v1/auth/cli-tokens/"+created.ID, nil)
+	req.SetPathValue("tokenId", created.ID)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: "user-b"}))
+	rr := httptest.NewRecorder()
+	h.Revoke(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("cross-user revoke status = %d, want 404 (cannot reveal existence)", rr.Code)
+	}
+}
+
+func TestCLITokenCreate_TokenIsRandomAndUnique(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewCLITokenHandler(db, logger)
+
+	tokens := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		body, _ := json.Marshal(map[string]string{"name": "n"})
+		req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+		rr := httptest.NewRecorder()
+		h.Create(rr, req)
+		var resp struct {
+			Token string `json:"token"`
+		}
+		json.Unmarshal(rr.Body.Bytes(), &resp)
+		if tokens[resp.Token] {
+			t.Errorf("duplicate token generated: %q", resp.Token)
+		}
+		tokens[resp.Token] = true
+		// 13 (prefix) + 40 (hex) = 53
+		if len(resp.Token) != 53 {
+			t.Errorf("token length = %d, want 53", len(resp.Token))
+		}
+	}
+}
