@@ -19,3 +19,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | Iter | Kat. | Cíl | Status | Commit | Čas |
 |---|---|---|---|---|---|
 | 0 | — | bootstrap (tato hlavička) | init | — | 2026-04-16 |
+| 1 | A | internal/keeper/types.go | ok | fd3a059 | 2026-04-16T21:05Z |
