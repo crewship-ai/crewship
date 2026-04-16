@@ -9,10 +9,22 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// memoryInstructionsEntry caches the rendered instruction string for a single
+// date. Since buildMemoryInstructions' output depends only on `today`, the
+// string is identical for every agent run on a given day — we cache it and
+// swap atomically when the date rolls over.
+type memoryInstructionsEntry struct {
+	date         string
+	instructions string
+}
+
+var memoryInstructionsCache atomic.Pointer[memoryInstructionsEntry]
 
 const (
 	defaultMemoryContextChars = 15000
@@ -230,6 +242,17 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 // buildMemoryInstructions returns the instruction block that teaches the agent
 // how to use persistent memory, including crew shared memory.
 func buildMemoryInstructions(today string) string {
+	if cached := memoryInstructionsCache.Load(); cached != nil && cached.date == today {
+		return cached.instructions
+	}
+	rendered := renderMemoryInstructions(today)
+	memoryInstructionsCache.Store(&memoryInstructionsEntry{date: today, instructions: rendered})
+	return rendered
+}
+
+// renderMemoryInstructions formats the template. Kept separate from the
+// cached accessor so tests can exercise the raw template when needed.
+func renderMemoryInstructions(today string) string {
 	return fmt.Sprintf(`[MEMORY INSTRUCTIONS]
 You have persistent memory across sessions. Your long-term memory and recent daily
 logs are shown above (if any exist).
