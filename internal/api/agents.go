@@ -83,10 +83,16 @@ func (h *AgentHandler) FleetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// validAgentRoles lists all accepted agent_role values.
+//
+// NOTE: "COORDINATOR" is deprecated (2026-04-16). See
+// [BuildCoordinatorContext] in internal/orchestrator/lead.go and
+// docs/guides/coordinator.mdx. Retained for backward compatibility with
+// existing COORDINATOR agents. Do not create new COORDINATOR agents.
 var validAgentRoles = map[string]bool{
 	"AGENT":       true,
 	"LEAD":        true,
-	"COORDINATOR": true,
+	"COORDINATOR": true, // Deprecated — see comment above.
 }
 
 var validLeadModes = map[string]bool{

@@ -49,8 +49,8 @@ type ChatInfo struct {
 	WorkspaceID        string
 	MemoryEnabled      bool
 	CrewMembers        []orchestrator.CrewMember
-	AllCrews           []orchestrator.CrewInfo
-	ActiveMissions     []orchestrator.MissionSummary
+	AllCrews           []orchestrator.CrewInfo       // Deprecated: COORDINATOR-only; see orchestrator.BuildCoordinatorContext.
+	ActiveMissions     []orchestrator.MissionSummary // Deprecated: COORDINATOR-only; see orchestrator.BuildCoordinatorContext.
 	NetworkMode        string
 	AllowedDomains     []string
 	MemoryMB           int
@@ -74,7 +74,7 @@ type ChatInfo struct {
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
 	PreferredLanguage  string
-	WorkspaceMemPath   string // Host path to workspace memory (for COORDINATOR)
+	WorkspaceMemPath   string // Deprecated: COORDINATOR-only; see orchestrator.BuildCoordinatorContext.
 }
 
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
@@ -181,7 +181,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
 
-	// For COORDINATOR agents (no crew), use a synthetic crew identity for container management
+	// For COORDINATOR agents (no crew), use a synthetic crew identity for container management.
+	// Deprecated: COORDINATOR role is deprecated (see orchestrator.BuildCoordinatorContext);
+	// branch retained for backward compat with existing COORDINATOR agents.
 	containerKey := info.CrewID
 	if info.AgentRole == "COORDINATOR" && info.CrewID == "" {
 		containerKey = "coordinator-" + info.WorkspaceID

@@ -1,5 +1,17 @@
 package sidecar
 
+// File: coordinator.go — sidecar handlers used by the deprecated COORDINATOR
+// agent role to reach workspace-wide crewshipd endpoints.
+//
+// DEPRECATED (2026-04-16): COORDINATOR role is no longer actively developed.
+// The role has no autonomous behavior — it activates only when a user
+// explicitly chats with a coordinator agent or includes it in a mission.
+// Its workspace-level context has ~98% overlap with normal AGENT role.
+// New cross-crew orchestration should use the scheduler pattern with AGENT
+// role or rely on external MCP clients for workspace queries.
+// See docs/guides/coordinator.mdx for migration notes.
+// Handlers retained for backward compatibility.
+
 import (
 	"bytes"
 	"context"
@@ -11,6 +23,7 @@ import (
 
 // handleListCrews proxies GET /crews to the crewshipd internal API.
 // Used by COORDINATOR agents to discover all workspace crews.
+// Deprecated: see file-level notice.
 func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})

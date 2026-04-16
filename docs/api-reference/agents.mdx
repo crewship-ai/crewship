@@ -183,7 +183,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 |---|---|---|
 | `AGENT` | Worker that executes tasks | Yes |
 | `LEAD` | Crew leader that plans and delegates | Yes (max 1 per crew) |
-| `COORDINATOR` | Cross-crew orchestrator | No (must NOT have crew_id) |
+| `COORDINATOR` *(deprecated 2026-04-16)* | Cross-crew orchestrator | No (must NOT have crew_id) |
 
 **CLI Adapters:** `CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`
 

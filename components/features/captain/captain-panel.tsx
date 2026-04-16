@@ -1,5 +1,13 @@
 "use client"
 
+/**
+ * @deprecated Captain UI is no longer actively developed (2026-04-16).
+ * The Captain feature (built-in workspace AI assistant) was started but never
+ * completed. Workspace-level AI should be delivered via MCP gateway or
+ * user-created agents instead. See docs/guides/captain.mdx.
+ * Component retained for backward compatibility.
+ */
+
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react"
 import { Loader2, Send, Square, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"

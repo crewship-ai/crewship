@@ -1,5 +1,13 @@
 package api
 
+// File: internal_status.go — internal API handlers used by the sidecar on
+// behalf of agents for workspace-level operations.
+//
+// NOTE: Most handlers in this file were designed for the COORDINATOR role
+// (deprecated 2026-04-16). They remain callable by any agent via sidecar for
+// backward compatibility. See docs/guides/coordinator.mdx and
+// internal/orchestrator/lead.go (BuildCoordinatorContext).
+
 import (
 	"encoding/json"
 	"fmt"
@@ -9,6 +17,9 @@ import (
 
 // ListCrews handles GET /api/v1/internal/crews?workspace_id=...
 // Used by the sidecar on behalf of COORDINATOR agents.
+//
+// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
+// backward compat; see file header.
 func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -44,6 +55,9 @@ func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 
 // CreateCrew handles POST /api/v1/internal/crews?workspace_id=...
 // Allows COORDINATOR agents (via sidecar) to create a new crew in the workspace.
+//
+// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
+// backward compat; see file header.
 func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -120,6 +134,9 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 
 // CreateAgent handles POST /api/v1/internal/agents?workspace_id=...
 // Allows COORDINATOR agents (via sidecar) to create a new agent within a crew.
+//
+// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
+// backward compat; see file header.
 func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -224,6 +241,9 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 // ListCrewConnections handles GET /api/v1/internal/crew-connections?workspace_id=...&crew_id=...
 // Used by the sidecar on behalf of COORDINATOR agents.
 // When crew_id is provided, only connections involving that crew are returned.
+//
+// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
+// backward compat; see file header.
 func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {

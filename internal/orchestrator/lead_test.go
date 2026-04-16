@@ -152,6 +152,9 @@ func TestBuildLeadContext(t *testing.T) {
 	}
 }
 
+// TestBuildCoordinatorContext tests the deprecated COORDINATOR context builder.
+// See BuildCoordinatorContext in lead.go (deprecated 2026-04-16).
+// Retained for regression safety while COORDINATOR role remains valid.
 func TestBuildCoordinatorContext(t *testing.T) {
 	tests := []struct {
 		name         string

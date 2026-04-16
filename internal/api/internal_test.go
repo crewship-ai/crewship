@@ -806,6 +806,7 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 // so two crews CAN share a name. The SELECT must tie-break ORDER BY on c.id
 // or same-named crews will interleave their agent rows and the streaming
 // grouping loop will produce duplicate crew entries.
+// Deprecated: COORDINATOR role is deprecated (2026-04-16); test retained for regression safety.
 func TestResolveCoordinatorCrews_SameNameCrews(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))

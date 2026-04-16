@@ -1,5 +1,15 @@
 package api
 
+// File: captain.go — Captain (built-in workspace AI assistant) feature.
+//
+// DEPRECATED (2026-04-16): Captain is no longer actively developed. The
+// feature was started but never completed. In the 2026 architecture,
+// workspace-level AI should be delivered via the MCP gateway pattern (see
+// CRE-48) or as user-created agents. Existing code is retained for backward
+// compatibility and will not receive new features. Do not build on it.
+//
+// See docs/guides/captain.mdx for migration notes.
+
 import (
 	"context"
 	"database/sql"
@@ -71,6 +81,10 @@ func captainCheckRateLimit(userID string) bool {
 }
 
 // CaptainHandler powers the Captain AI assistant that helps users manage their workspace via natural language.
+//
+// Deprecated: Captain (built-in workspace AI assistant) is no longer actively
+// developed. Use the MCP gateway pattern or user-created agents instead.
+// See docs/guides/captain.mdx.
 type CaptainHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -79,16 +93,22 @@ type CaptainHandler struct {
 }
 
 // NewCaptainHandler creates a CaptainHandler with the given database and logger.
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 func NewCaptainHandler(db *sql.DB, logger *slog.Logger) *CaptainHandler {
 	return &CaptainHandler{db: db, logger: logger}
 }
 
 // SetProvider attaches the LLM provider used for Captain conversations.
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 func (h *CaptainHandler) SetProvider(p llm.Provider) {
 	h.provider = p
 }
 
 // SetMissionEngine attaches the mission engine for Captain to start missions on behalf of users.
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 func (h *CaptainHandler) SetMissionEngine(ms MissionStarter) {
 	h.missionEngine = ms
 }
@@ -152,6 +172,8 @@ func writeCaptainTextSSE(w http.ResponseWriter, text string) {
 
 // Chat handles POST /api/v1/captain/chat with SSE streaming.
 // Uses direct LLM API calls with native tool calling.
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())
@@ -313,6 +335,8 @@ func (h *CaptainHandler) chatViaDirect(
 }
 
 // Context handles GET /api/v1/captain/context
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 func (h *CaptainHandler) Context(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -343,6 +367,8 @@ func (h *CaptainHandler) Context(w http.ResponseWriter, r *http.Request) {
 }
 
 // History handles GET /api/v1/captain/history
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 func (h *CaptainHandler) History(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())
@@ -365,6 +391,8 @@ func (h *CaptainHandler) History(w http.ResponseWriter, r *http.Request) {
 }
 
 // ClearHistory handles DELETE /api/v1/captain/history
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 func (h *CaptainHandler) ClearHistory(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())

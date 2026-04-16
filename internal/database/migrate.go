@@ -126,10 +126,16 @@ var migrations = []migration{
 	{version: 18, name: "add_crew_network_policy", sql: migrationAddCrewNetworkPolicy},
 	{version: 19, name: "add_workflow_templates", sql: migrationAddWorkflowTemplates},
 	{version: 20, name: "add_crew_connections", sql: migrationAddCrewConnections},
+	// NOTE: mission_proposals was written by Captain (deprecated) and COORDINATOR
+	// (deprecated) as of 2026-04-16. Table RETAINED for potential reuse in a
+	// future human-in-the-loop approval flow. Do not drop without HITL decision.
 	{version: 21, name: "add_mission_proposals", sql: migrationAddMissionProposals},
 	{version: 22, name: "add_escalation_type_and_resolve", sql: migrationAddEscalationTypeAndResolve},
 	{version: 23, name: "add_crew_templates", sql: migrationAddCrewTemplates},
 	{version: 24, name: "add_agent_schedule", sql: migrationAddAgentSchedule},
+	// Deprecated: backs the deprecated Captain feature (see internal/api/captain.go).
+	// Do NOT drop — MVP policy "ship fast, gate later" keeps the table while the
+	// Captain code remains for backward compat.
 	{version: 25, name: "add_captain_chats", sql: migrationAddCaptainChats},
 	{version: 26, name: "add_crew_templates_workspace_id", sql: migrationAddCrewTemplatesWorkspaceID},
 	{version: 27, name: "add_escalation_action", sql: migrationAddEscalationAction},
@@ -1051,6 +1057,8 @@ CREATE INDEX IF NOT EXISTS idx_crew_templates_slug ON crew_templates(slug);
 CREATE INDEX IF NOT EXISTS idx_crew_templates_category ON crew_templates(category);
 `
 
+// migrationAddCaptainChats: Deprecated schema for the deprecated Captain feature.
+// Retained for backward compat. See internal/api/captain.go for deprecation details.
 const migrationAddCaptainChats = `
 CREATE TABLE IF NOT EXISTS captain_chats (
 	id TEXT PRIMARY KEY,

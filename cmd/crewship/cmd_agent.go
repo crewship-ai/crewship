@@ -651,7 +651,7 @@ func init() {
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("slug", "", "Agent slug (auto-generated from name if empty)")
 	agentCreateCmd.Flags().String("crew", "", "Crew slug or ID")
-	agentCreateCmd.Flags().String("role", "AGENT", "Agent role: AGENT|LEAD|COORDINATOR")
+	agentCreateCmd.Flags().String("role", "AGENT", "Agent role: AGENT|LEAD|COORDINATOR (deprecated)")
 	agentCreateCmd.Flags().String("role-title", "", "Human-readable role title")
 	agentCreateCmd.Flags().String("cli-adapter", "CLAUDE_CODE", "CLI adapter: CLAUDE_CODE|CODEX_CLI|GEMINI_CLI|OPENCODE")
 	agentCreateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")

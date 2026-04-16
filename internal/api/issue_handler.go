@@ -11,7 +11,8 @@ import (
 )
 
 // IssueHandler implements endpoints for the issue tracker (Linear-like).
-// Uses MissionStarter interface defined in captain.go.
+// Uses MissionStarter interface, declared in captain.go (Captain is deprecated
+// 2026-04-16, but the interface itself is general-purpose and retained here).
 type IssueHandler struct {
 	db            *sql.DB
 	hub           *ws.Hub

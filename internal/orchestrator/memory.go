@@ -38,6 +38,9 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	today := time.Now().UTC().Format("2006-01-02")
 
 	// --- Workspace memory for Coordinator (read from host FS, cap at 20%) ---
+	//
+	// Deprecated: COORDINATOR role is deprecated (see [BuildCoordinatorContext]).
+	// Branch retained for backward compat with existing COORDINATOR agents.
 	var wsBlock string
 	var wsUsed int
 	if req.AgentRole == "COORDINATOR" && req.WorkspaceID != "" {
@@ -130,6 +133,9 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 // resolveWorkspaceMemPath determines the workspace memory directory path.
 // If explicit path is provided (WorkspaceMemPath), use it. Otherwise, derive
 // from WorkspaceID using the default data directory layout.
+//
+// Deprecated: used only by the deprecated COORDINATOR role. See
+// [BuildCoordinatorContext] in internal/orchestrator/lead.go.
 func resolveWorkspaceMemPath(explicit, workspaceID string) string {
 	if explicit != "" {
 		return explicit
@@ -148,6 +154,9 @@ func resolveWorkspaceMemPath(explicit, workspaceID string) string {
 // buildWorkspaceMemoryBlock reads workspace memory files from the host filesystem
 // (not from a container). Returns a formatted [WORKSPACE MEMORY] block.
 // This runs in the orchestrator process which has host FS access.
+//
+// Deprecated: used only by the deprecated COORDINATOR role. See
+// [BuildCoordinatorContext] in internal/orchestrator/lead.go.
 func buildWorkspaceMemoryBlock(wsPath string, budget int) (string, int) {
 	var sections []memorySection
 

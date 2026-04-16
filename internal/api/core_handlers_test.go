@@ -2058,6 +2058,7 @@ func TestResolveAgent_LeadAgentWithCrewMembers(t *testing.T) {
 	}
 }
 
+// Deprecated: COORDINATOR role is deprecated (2026-04-16); test retained for regression safety.
 func TestResolveAgent_Coordinator(t *testing.T) {
 	ensureEncryptionKey(t)
 	db := setupTestDB(t)
@@ -2862,6 +2863,7 @@ func TestAgentBinding_Update_BadCredential(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Additional resolver branches: Coordinator with active missions
+// Deprecated: COORDINATOR role is deprecated (2026-04-16); tests retained for regression safety.
 // ---------------------------------------------------------------------------
 
 func TestResolveCoordinatorCrews_WithMissions(t *testing.T) {

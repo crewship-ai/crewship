@@ -116,6 +116,12 @@ func BuildLeadContext(members []CrewMember) string {
 }
 
 // CrewInfo represents a crew and its members for the coordinator context.
+//
+// NOTE: Despite living in lead.go, this type is COORDINATOR-specific (historical
+// artifact — coordinator types were co-located with lead types during early
+// development). See deprecation notice on [BuildCoordinatorContext].
+//
+// Deprecated: COORDINATOR role is deprecated. See [BuildCoordinatorContext].
 type CrewInfo struct {
 	ID      string
 	Name    string
@@ -124,6 +130,8 @@ type CrewInfo struct {
 }
 
 // MissionSummary is a lightweight mission status snapshot for coordinator context.
+//
+// Deprecated: COORDINATOR role is deprecated. See [BuildCoordinatorContext].
 type MissionSummary struct {
 	ID       string
 	CrewSlug string
@@ -134,6 +142,14 @@ type MissionSummary struct {
 // BuildCoordinatorContext formats a [COORDINATOR CONTEXT] block listing all
 // workspace crews and their agents. The coordinator can create cross-crew
 // missions, submit proposals for human review, and monitor all workspace missions.
+//
+// Deprecated (2026-04-16): COORDINATOR role is no longer actively developed.
+// The role has no autonomous behavior — it activates only when a user
+// explicitly chats with a coordinator agent or includes it in a mission.
+// Workspace-level context overlap with AGENT role is ~98%. New cross-crew
+// orchestration should use the scheduler pattern with AGENT role or rely on
+// external MCP clients. Retained for backward compatibility; do not build on it.
+// See docs/guides/coordinator.mdx for migration notes.
 func BuildCoordinatorContext(crews []CrewInfo, activeMissions []MissionSummary) string {
 	if len(crews) == 0 {
 		return ""
@@ -213,6 +229,7 @@ func BuildCoordinatorContext(crews []CrewInfo, activeMissions []MissionSummary) 
 	b.WriteString("      \"agent_role\":\"LEAD\",\"description\":\"...\",\"system_prompt\":\"You are...\",\n")
 	b.WriteString("      \"cli_adapter\":\"CLAUDE_CODE\",\"tool_profile\":\"CODING\"}'\n")
 	b.WriteString("  agent_role options: LEAD, AGENT, COORDINATOR\n")
+	b.WriteString("  Note: COORDINATOR is deprecated (2026-04-16); avoid creating new COORDINATOR agents.\n")
 	b.WriteString("  tool_profile options: CODING, MINIMAL, FULL\n")
 	b.WriteString("  Returns: {\"id\":\"<agent_id>\",\"name\":\"...\",\"slug\":\"...\",\"crew_id\":\"...\"}\n")
 
