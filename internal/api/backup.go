@@ -850,3 +850,82 @@ func statusForBackupError(err error) int {
 func crewContainerNameFunc() func(slug string) string {
 	return func(slug string) string { return "crewship-team-" + slug }
 }
+
+// selfTestRequest is the JSON body of POST /api/v1/admin/backups/self-test.
+type selfTestRequest struct {
+	CrewID string `json:"crew_id"`
+}
+
+// SelfTest handles POST /api/v1/admin/backups/self-test. Runs the canary
+// round-trip server-side so the seed CLI (and future CI harness) can
+// validate the backup pipeline end-to-end without depending on a
+// bundle-on-disk CLI roundtrip. Lightweight: no encryption, no DB dump,
+// just collect → destroy canary → restore → verify → cleanup.
+//
+// Admin-only. The BackupHandler's DockerOps must be wired; otherwise
+// the endpoint 503s since there's nothing to talk to.
+func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	role := RoleFromContext(ctx)
+	workspaceID := WorkspaceIDFromContext(ctx)
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		return
+	}
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		return
+	}
+	if h.dockerOps == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "backup self-test unavailable: docker not configured",
+		})
+		return
+	}
+
+	var req selfTestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	crewID := strings.TrimSpace(req.CrewID)
+	if crewID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
+		return
+	}
+
+	// Resolve crew. The row must belong to the caller's workspace so an
+	// ADMIN in workspace A can't self-test crews in workspace B.
+	var crewSlug string
+	err := h.db.QueryRowContext(ctx, `
+		SELECT slug FROM crews
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+	`, crewID, workspaceID).Scan(&crewSlug)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			return
+		}
+		h.logger.Error("backup self-test: lookup crew", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	containerID := crewContainerNameFunc()(crewSlug)
+	result, err := backup.BackupSelfTest(ctx, h.dockerOps, backup.SelfTestOpts{
+		ContainerID: containerID,
+		Crew: backup.CrewTarget{
+			ID:          crewID,
+			Slug:        crewSlug,
+			ContainerID: containerID,
+		},
+	})
+	if err != nil {
+		h.logger.Error("backup self-test: pipeline", "crew_id", crewID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Happy and content-mismatch paths both return 200 with the result
+	// body — the "ok" field tells the caller what happened.
+	writeJSON(w, http.StatusOK, result)
+}

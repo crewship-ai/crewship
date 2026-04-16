@@ -262,6 +262,18 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithInternalBaseURL(ipcBase))
+		// Port-expose capability URLs hand an externally reachable origin
+		// back to the agent. CREWSHIP_PUBLIC_URL must be set to the host a
+		// user's browser can actually reach (e.g. http://10.0.0.1:8080).
+		// Left unset, the port-expose endpoint returns 503 with a message
+		// pointing at this env var — better to fail loudly than to hand out
+		// localhost URLs that silently 404 for anyone not on the host.
+		publicURL := os.Getenv("CREWSHIP_PUBLIC_URL")
+		if publicURL == "" {
+			logger.Warn("CREWSHIP_PUBLIC_URL not set — /expose-port will return 503 until configured",
+				"fix", "export CREWSHIP_PUBLIC_URL=http://<reachable-host>:8080")
+		}
+		opts = append(opts, goapi.WithPortExposePublicURL(publicURL))
 		opts = append(opts, goapi.WithHub(wsHub))
 		opts = append(opts, goapi.WithOrchestrator(orch))
 		opts = append(opts, goapi.WithLogWriter(logW))
@@ -336,6 +348,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		} else {
 			s.apiRouter = apiRouter
 			mux.Handle("/api/", apiRouter)
+			// /exposed/{token}/... needs two things: (a) combinedHandler has
+			// to pick s.mux over spaHandler for this prefix (done there),
+			// and (b) s.mux needs a route entry so the request actually
+			// reaches apiRouter. Both.
+			mux.Handle("/exposed/", apiRouter)
 			logger.Info("Go API routes mounted")
 		}
 		// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues
@@ -384,12 +401,15 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// combinedHandler routes /api/, /healthz, /readyz, /metrics, /ws to the mux,
-// and everything else to the SPA static file handler.
+// combinedHandler routes /api/, /exposed/, /healthz, /readyz, /metrics, /ws
+// to the mux, and everything else to the SPA static file handler.
+// /exposed/{token}/... must bypass the SPA handler so the port-expose reverse
+// proxy sees the request instead of serving the Next.js fallback.
 func (s *Server) combinedHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if strings.HasPrefix(path, "/api/") ||
+			strings.HasPrefix(path, "/exposed/") ||
 			path == "/healthz" || path == "/readyz" ||
 			path == "/metrics" || path == "/ws" ||
 			path == "/ws/terminal" {
@@ -528,6 +548,12 @@ func (s *Server) Shutdown() error {
 	// explicit Close() is a no-op but signals intent.
 	if s.fileWatcher != nil {
 		s.fileWatcher.Close()
+	}
+	// Stop background goroutines owned by the API router (e.g. port-expose
+	// registry's TTL purger). Done after the HTTP listener is drained so
+	// no handler is still touching the registry.
+	if s.apiRouter != nil {
+		s.apiRouter.Shutdown()
 	}
 
 	if s.state != nil {

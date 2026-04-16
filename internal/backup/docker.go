@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/stdcopy"
 )
 
 // DockerOps abstracts the Docker operations the backup / restore flow
@@ -39,6 +41,13 @@ type DockerOps interface {
 	// name is known to the daemon. Used by restore preflight so CopyTo
 	// does not fail with a cryptic "No such container" mid-stream.
 	ContainerExists(ctx context.Context, containerID string) (bool, error)
+
+	// Exec runs a single command inside the container as root, collects
+	// its combined stdout+stderr, and returns the exit code. Used by the
+	// backup self-test to destroy a canary file between collect and
+	// restore. Not performance-critical; the implementation blocks on the
+	// command finishing.
+	Exec(ctx context.Context, containerID string, cmd []string) (exitCode int, output []byte, err error)
 }
 
 // MobyDockerOps is the production implementation backed by the moby
@@ -106,6 +115,46 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 		return fmt.Errorf("backup: docker cp to %s:%s: %w", containerID, dstPath, err)
 	}
 	return nil
+}
+
+// Exec implements DockerOps. Runs cmd as root (0:0) with stdout and stderr
+// attached so the caller gets a single combined buffer back — matches the
+// semantics of exec_test patterns elsewhere in the codebase (see
+// internal/devcontainer/installer.go:execInContainerFull).
+func (m *MobyDockerOps) Exec(ctx context.Context, containerID string, cmd []string) (int, []byte, error) {
+	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          cmd,
+		User:         "0:0",
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return -1, nil, fmt.Errorf("backup: exec create %s: %w", containerID, err)
+	}
+	resp, err := m.Client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	if err != nil {
+		return -1, nil, fmt.Errorf("backup: exec attach %s: %w", containerID, err)
+	}
+	defer resp.Close()
+
+	// ContainerExecAttach returns a multiplexed stream when Tty is false
+	// (our default): each chunk is prefixed with an 8-byte header
+	// (stream type + big-endian length). Using io.Copy here would smuggle
+	// those bytes into the caller's buffer. stdcopy.StdCopy parses the
+	// framing and de-interleaves stdout and stderr correctly.
+	var stdout, stderr bytes.Buffer
+	if _, err := stdcopy.StdCopy(&stdout, &stderr, resp.Reader); err != nil {
+		// Best-effort read; still try to report the exit code below.
+		_ = err
+	}
+	var buf bytes.Buffer
+	buf.Write(stdout.Bytes())
+	buf.Write(stderr.Bytes())
+	inspect, err := m.Client.ContainerExecInspect(ctx, exec.ID)
+	if err != nil {
+		return -1, buf.Bytes(), fmt.Errorf("backup: exec inspect %s: %w", containerID, err)
+	}
+	return inspect.ExitCode, buf.Bytes(), nil
 }
 
 // ErrPauseUnpauseLost is returned by WithPaused when unpause fails
