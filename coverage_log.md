@@ -24,3 +24,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 3 | C | hooks/use-pending-escalations.ts (C1/C2 deprecated, skipped) | ok | d931943 | 2026-04-16T21:52Z |
 | 4 | D | components/features/chat/turn-renderer.tsx (D1/D2 too large for timebox, D4/D5 deprecated) | ok | 72a60f1 | 2026-04-17T00:10Z |
 | 5 | E | e2e/credentials.spec.ts | skipped: no dev server (Playwright webServer needs localhost:3001; Mac has none — remote dev is on 192.168.1.201) | — | 2026-04-17T00:30Z |
+| 6 | A | internal/sidecar/port_expose.go | ok | fc0402c | 2026-04-17T00:50Z |
