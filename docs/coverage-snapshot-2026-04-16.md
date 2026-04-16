@@ -40,8 +40,8 @@ numbers drift as code and tests land in parallel.
 | `internal/webhook` | 81.6% | — | 🟢 good |
 | `internal/keeper/secrets` | 84.6% | — | ✅ strong |
 | `internal/provider/bbolt` | 86.2% | — | ✅ strong |
-| `internal/encryption` | 88.9% | — | ✅ strong |
 | `internal/logcollector` | 88.3% | — | ✅ strong |
+| `internal/encryption` | 88.9% | — | ✅ strong |
 | `internal/conversation` | 89.1% | — | ✅ strong |
 | `internal/logging` | 89.5% | — | ✅ strong |
 | `internal/keeper/gatekeeper` | 90.1% | — | ✅ strong |
