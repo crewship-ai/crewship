@@ -33,10 +33,12 @@ export function OAuthAutoConnect({
   >(authStatus === "connected" ? "done" : "idle")
   const [error, setError] = React.useState("")
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+  const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   React.useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
   }, [])
 
@@ -68,6 +70,8 @@ export function OAuthAutoConnect({
               if (cred.status === "ACTIVE") {
                 if (pollRef.current) clearInterval(pollRef.current)
                 pollRef.current = null
+                if (timeoutRef.current) clearTimeout(timeoutRef.current)
+                timeoutRef.current = null
                 setStatus("done")
                 await onCredentialCreated(credId)
               }
@@ -75,14 +79,17 @@ export function OAuthAutoConnect({
           } catch { /* keep polling */ }
         }, 2000)
 
-        // Stop polling after 2 minutes
-        setTimeout(() => {
+        // Stop polling after 2 minutes. Stored in a ref so the cleanup
+        // useEffect can clear it when the component unmounts — otherwise
+        // the 2-minute timer would fire against unmounted state.
+        timeoutRef.current = setTimeout(() => {
           if (pollRef.current) {
             clearInterval(pollRef.current)
             pollRef.current = null
             setStatus("error")
             setError("Authorization timed out. Please try again.")
           }
+          timeoutRef.current = null
         }, 120000)
       } else if (data.status === "needs_client_id") {
         setStatus("error")

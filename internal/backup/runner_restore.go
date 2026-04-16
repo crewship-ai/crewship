@@ -60,8 +60,9 @@ type RestoreResult struct {
 // the usual devcontainer path before calling this function, so the
 // mount points exist and CopyTo has somewhere to land.
 //
-// In MVP this is gated to workspace / crew scope; instance scope
-
+// In MVP this is gated to workspace / crew scope; instance scope is
+// rejected up-front because it requires cross-workspace orchestration
+// that lives outside this package.
 func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result *RestoreResult, retErr error) {
 	if opts.Actor.UserID == "" {
 		return nil, fmt.Errorf("backup: RestoreOptions.Actor.UserID required")
@@ -378,7 +379,8 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 
 // firstWorkspaceID returns the "id" of the first workspace row in
 // the dump — after RemapIDs this is the freshly generated CUID, so
-
+// callers can populate RestoreResult.RestoredWorkspaceID without a
+// second lookup.
 func firstWorkspaceID(dump *DBDump) string {
 	if dump == nil {
 		return ""
@@ -393,9 +395,9 @@ func firstWorkspaceID(dump *DBDump) string {
 	return ""
 }
 
-// ListBackups returns metadata for every bundle currently in dir. The
-// result is stable-ordered by CreatedAt descending so the newest
-
+// rewriteWorkspaceSlug updates the single workspace row in the dump
+// so --as-workspace <slug> lands under the new identity. The ID (PK)
+// stays stable; only slug + display name change here.
 func rewriteWorkspaceSlug(dump *DBDump, newSlug string) {
 	rows, ok := dump.Tables["workspaces"]
 	if !ok || len(rows) == 0 {
@@ -425,7 +427,7 @@ func rewriteCrewSlug(dump *DBDump, crewID, newSlug string) {
 // columns added post-backup get sensible values on the restored rows.
 // Each hook runs in its own transaction so one failure does not strand
 // a half-applied backfill. Failure returns ErrRestoreBackfillFailed
-
+// wrapping the inner error.
 func replayRestoreBackfills(ctx context.Context, db *sql.DB, bundleVersions []int, logger func(string)) error {
 	applied := AppliedMigrationVersions(ctx, db)
 	if len(applied) == 0 {
@@ -480,7 +482,7 @@ func replayRestoreBackfills(ctx context.Context, db *sql.DB, bundleVersions []in
 }
 
 // firstWorkspaceSlug returns the slug of the first (and typically only)
-
+// workspace row in the dump, for populating RestoreResult.RestoredWs.
 func firstWorkspaceSlug(dump *DBDump) string {
 	if dump == nil {
 		return ""

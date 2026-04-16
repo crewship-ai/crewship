@@ -416,37 +416,53 @@ export function ExpandedPanel({
           authStatus={server.auth_status}
           onCredentialCreated={async (credId: string) => {
             if (!workspaceId) return
+            const failures: string[] = []
             // Update existing bindings with credential
             const bindingsForServer = agentBindings[server.id]
             if (bindingsForServer && bindingsForServer.size > 0) {
               for (const agentId of Array.from(bindingsForServer)) {
                 const bId = bindingIds[server.id]?.[agentId]
                 if (bId) {
-                  await fetch(`/api/v1/agents/${agentId}/integrations/${bId}?workspace_id=${workspaceId}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ credential_id: credId, cred_type: "bearer" }),
-                  })
+                  try {
+                    const res = await fetch(`/api/v1/agents/${agentId}/integrations/${bId}?workspace_id=${workspaceId}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ credential_id: credId, cred_type: "bearer" }),
+                    })
+                    if (!res.ok) failures.push(`patch agent ${agentId}: HTTP ${res.status}`)
+                  } catch (e) {
+                    failures.push(`patch agent ${agentId}: ${String(e)}`)
+                  }
                 }
               }
             } else {
               // No bindings yet — auto-grant access to ALL agents in the crew with credential
               for (const agent of agents) {
-                await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    mcp_server_id: server.id,
-                    mcp_server_scope: "crew",
-                    credential_id: credId,
-                    cred_type: "bearer",
-                    enabled: true,
-                  }),
-                })
+                try {
+                  const res = await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      mcp_server_id: server.id,
+                      mcp_server_scope: "crew",
+                      credential_id: credId,
+                      cred_type: "bearer",
+                      enabled: true,
+                    }),
+                  })
+                  if (!res.ok) failures.push(`grant agent ${agent.id}: HTTP ${res.status}`)
+                } catch (e) {
+                  failures.push(`grant agent ${agent.id}: ${String(e)}`)
+                }
               }
             }
             onRefresh()
-            toast.success("OAuth connected! All agents have access.")
+            if (failures.length > 0) {
+              toast.error(`OAuth connected but ${failures.length} binding(s) failed — check logs`)
+              console.error("agent binding failures after OAuth connect", failures)
+            } else {
+              toast.success("OAuth connected! All agents have access.")
+            }
           }}
         />
       )}

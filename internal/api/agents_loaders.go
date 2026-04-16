@@ -32,7 +32,7 @@ func batchCountByAgentID(ctx context.Context, db *sql.DB, tmpl string, ids []str
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("batchCountByAgentID: query: %w", err)
 	}
 	defer rows.Close()
 
@@ -41,9 +41,12 @@ func batchCountByAgentID(ctx context.Context, db *sql.DB, tmpl string, ids []str
 		var id string
 		var n int
 		if err := rows.Scan(&id, &n); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("batchCountByAgentID: scan: %w", err)
 		}
 		out[id] = n
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("batchCountByAgentID: iterate: %w", err)
+	}
+	return out, nil
 }

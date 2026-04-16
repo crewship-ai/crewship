@@ -209,7 +209,22 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			nil, nil, "")
 		if initErr == nil {
 			_ = p.client.ContainerStart(ctx, initResp.ID, container.StartOptions{})
-			p.client.ContainerWait(ctx, initResp.ID, container.WaitConditionNotRunning)
+			// ContainerWait returns two channels; drain one of them (or
+			// cancel) so we do not leak a goroutine inside the docker client
+			// when the wait completes. A short timeout keeps us from hanging
+			// indefinitely on a wedged daemon.
+			waitCtx, waitCancel := context.WithTimeout(ctx, 30*time.Second)
+			statusCh, waitErrCh := p.client.ContainerWait(waitCtx, initResp.ID, container.WaitConditionNotRunning)
+			select {
+			case <-statusCh:
+			case werr := <-waitErrCh:
+				if werr != nil {
+					p.logger.Debug("init container wait returned error", "error", werr)
+				}
+			case <-waitCtx.Done():
+				p.logger.Debug("init container wait timed out", "error", waitCtx.Err())
+			}
+			waitCancel()
 			_ = p.client.ContainerRemove(ctx, initResp.ID, container.RemoveOptions{})
 			p.logger.Debug("init container fixed bind-mount ownership")
 		} else {
@@ -353,34 +368,45 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// image originally built from a musl base would silently ship a broken
 	// sidecar. Now fires whenever team.Image is set.
 	if team.Image != "" {
-		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		execCfg := container.ExecOptions{
-			Cmd:          []string{"/usr/local/bin/crewship-sidecar", "--version"},
-			User:         "0:0",
-			AttachStdout: true,
-			AttachStderr: true,
-		}
-		ex, execErr := p.client.ContainerExecCreate(checkCtx, resp.ID, execCfg)
-		if execErr == nil {
-			if startErr := p.client.ContainerExecStart(checkCtx, ex.ID, container.ExecStartOptions{}); startErr == nil {
-				// Poll exit code briefly.
-				for i := 0; i < 20; i++ {
-					inspect, ierr := p.client.ContainerExecInspect(checkCtx, ex.ID)
-					if ierr != nil {
-						break
-					}
-					if !inspect.Running {
-						if inspect.ExitCode != 0 {
-							p.logger.Error("sidecar binary incompatible with container libc — " +
-								"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
-							return "", fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", inspect.ExitCode, team.Image)
-						}
-						break
-					}
-					time.Sleep(50 * time.Millisecond)
-				}
+		// Wrapped in an inline func so the WithTimeout's cancel is
+		// released as soon as the sanity check returns, rather than
+		// leaking until EnsureCrewRuntime itself returns (which may be
+		// much later — post-start hooks, etc.).
+		if err := func() error {
+			checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			execCfg := container.ExecOptions{
+				Cmd:          []string{"/usr/local/bin/crewship-sidecar", "--version"},
+				User:         "0:0",
+				AttachStdout: true,
+				AttachStderr: true,
 			}
+			ex, execErr := p.client.ContainerExecCreate(checkCtx, resp.ID, execCfg)
+			if execErr != nil {
+				return nil
+			}
+			if startErr := p.client.ContainerExecStart(checkCtx, ex.ID, container.ExecStartOptions{}); startErr != nil {
+				return nil
+			}
+			// Poll exit code briefly.
+			for i := 0; i < 20; i++ {
+				inspect, ierr := p.client.ContainerExecInspect(checkCtx, ex.ID)
+				if ierr != nil {
+					return nil
+				}
+				if !inspect.Running {
+					if inspect.ExitCode != 0 {
+						p.logger.Error("sidecar binary incompatible with container libc — " +
+							"host-built sidecar expects glibc; Alpine/musl bases must use a glibc-compatible image")
+						return fmt.Errorf("sidecar sanity check failed (exit %d) — custom base image %q is likely musl-based or missing glibc symbols; use a glibc base (debian, ubuntu, mcr devcontainers)", inspect.ExitCode, team.Image)
+					}
+					return nil
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			return nil
+		}(); err != nil {
+			return "", err
 		}
 	}
 

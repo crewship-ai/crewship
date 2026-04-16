@@ -389,7 +389,8 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	}, nil
 }
 
-// the manifest's compatible_targets slice. Crew bundles are only
+// compatibleTargetsFor returns the Target set recorded in the
+// manifest's compatible_targets slice. Crew bundles are only
 // same-instance (FK / skills references); workspace and instance are
 // any-instance.
 func compatibleTargetsFor(s Scope) []Target {
@@ -401,14 +402,10 @@ func compatibleTargetsFor(s Scope) []Target {
 	}
 }
 
-// cleanupStalePartials removes *.partial files older than maxAge in
-// dir. A crashed or cancelled CreateBackup leaves one behind; without
-// this sweep they accumulate forever. Errors are swallowed — the only
-// consequence of a failed cleanup is a file that will be retried on
-
-// Contents summary. We mark every section as "included" for every
-// crew because CollectCrew streams all of them; skipping would require
-// per-crew introspection which is not useful in MVP.
+// buildContents assembles the manifest's Contents summary. We mark
+// every section as "included" for every crew because CollectCrew
+// streams all of them; skipping would require per-crew introspection
+// which is not useful in MVP.
 func buildContents(t *WorkspaceTarget) Contents {
 	contents := Contents{
 		Workspace: &WorkspaceSummary{
