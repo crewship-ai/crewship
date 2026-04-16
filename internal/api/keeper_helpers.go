@@ -23,7 +23,14 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // `c`/`e`/`E` is glommed together with login/errexit letters all
 // re-parse the quoted payload, so they need to trigger the precheck
 // just as surely as the bare `-c` form.
-var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b\s+(-[A-Za-z]*[cEe][A-Za-z]*|--eval)\b`)
+//
+// Additionally, we allow any sequence of non-dangerous flags BEFORE
+// the `-c`/`--eval` trigger (e.g. `bash --noprofile --norc -c '…'`,
+// `python -B -c '…'`). Without this, attackers can prepend benign
+// flags to push the dangerous option past the simple "first token"
+// boundary and slip under a regex that demanded it be adjacent to
+// the interpreter name.
+var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b(?:\s+--?[A-Za-z][A-Za-z0-9-]*(?:=[^\s]+)?)*\s+(-[A-Za-z]*[cEe][A-Za-z]*|--eval)\b`)
 
 // scriptToolPattern matches tools with built-in shell execution
 // capabilities.

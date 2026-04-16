@@ -72,6 +72,15 @@ func TestCreateOptionsValidate_EncryptionModes(t *testing.T) {
 			wantErrSub: "exactly one",
 		},
 		{
+			name: "recipients + no-encrypt — rejected",
+			mutate: func(o *CreateOptions) {
+				o.Recipients = []age.Recipient{rcpt}
+				o.NoEncrypt = true
+			},
+			wantErr:    true,
+			wantErrSub: "exactly one",
+		},
+		{
 			name: "all three — rejected",
 			mutate: func(o *CreateOptions) {
 				o.Passphrase = "hunter2"

@@ -44,6 +44,17 @@ import type { AgentInfo, CrewInfo, CrewIntegration } from "./types"
 // flow from http/sse integrations.
 const ENDPOINT_TRANSPORTS = new Set(["streamable-http", "http", "sse"])
 
+// normalizeTransport collapses the three endpoint variants into the
+// single canonical value the editor UI exposes as a <Select> option
+// (`"streamable-http"`). Without this, a DB row carrying legacy
+// `transport: "http"` or `"sse"` renders the Select with a value that
+// has no matching item and the dropdown goes blank. The raw
+// server.transport is still consulted for mount-time auto-discover
+// (via ENDPOINT_TRANSPORTS.has) so behaviour is preserved.
+function normalizeTransport(t: string): string {
+  return ENDPOINT_TRANSPORTS.has(t) ? "streamable-http" : t
+}
+
 interface ExpandedPanelProps {
   server: CrewIntegration
   crews: CrewInfo[]
@@ -94,7 +105,7 @@ export function ExpandedPanel({
   const [command, setCommand] = React.useState(server.command ?? "")
   const [args, setArgs] = React.useState(parseArgs(server.args_json))
   const [url, setUrl] = React.useState(server.endpoint ?? "")
-  const [transport, setTransport] = React.useState(server.transport)
+  const [transport, setTransport] = React.useState(normalizeTransport(server.transport))
   const [envVars, setEnvVars] = React.useState(parseEnv(server.env_json))
 
   // Sync local state if server data changes (after refetch)
@@ -104,7 +115,7 @@ export function ExpandedPanel({
     setCommand(server.command ?? "")
     setArgs(parseArgs(server.args_json))
     setUrl(server.endpoint ?? "")
-    setTransport(server.transport)
+    setTransport(normalizeTransport(server.transport))
     setEnvVars(parseEnv(server.env_json))
   }, [server])
 
@@ -476,8 +487,11 @@ export function ExpandedPanel({
 
       {/* Section 4: Environment Variables
           Hidden only for HTTP servers that actually use OAuth. Non-OAuth
-          streamable-http servers still need API keys or other env-based auth. */}
-      {!(transport === "streamable-http" && (server.auth_status !== "none" || oauthDiscovered)) && <SectionCard surface="subtle" className="p-4 space-y-4">
+          endpoint-transport servers still need API keys or other env-based auth.
+          `transport` is already normalised to "streamable-http" for http/sse
+          values, but we use the full set here so a future DB row with a new
+          endpoint-like transport keeps the OAuth exemption intact. */}
+      {!(ENDPOINT_TRANSPORTS.has(transport) && (server.auth_status !== "none" || oauthDiscovered)) && <SectionCard surface="subtle" className="p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-body font-medium">
             <KeyRound className="h-4 w-4 text-muted-foreground" />

