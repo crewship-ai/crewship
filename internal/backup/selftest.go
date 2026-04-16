@@ -103,6 +103,24 @@ func BackupSelfTest(ctx context.Context, ops DockerOps, opts SelfTestOpts) (*Sel
 		return nil, fmt.Errorf("backup self-test: write canary: %w", err)
 	}
 
+	// Canary is now on disk inside the container. Every return path
+	// below this point needs to wipe it so a failed self-test doesn't
+	// leave markers in the seeded /workspace. Both the direct and the
+	// nested restore location get cleaned because we can't tell ahead
+	// of time which path actually held the final write.
+	defer func() {
+		cleanTar, err := buildSingleFileTar(canaryName, []byte{})
+		if err != nil {
+			return
+		}
+		_ = ops.CopyTo(ctx, opts.ContainerID, ContainerWorkspacePath, bytes.NewReader(cleanTar))
+		cleanTarNested, err := buildSingleFileTar(canaryName, []byte{})
+		if err != nil {
+			return
+		}
+		_ = ops.CopyTo(ctx, opts.ContainerID, ContainerWorkspacePath+"/workspace", bytes.NewReader(cleanTarNested))
+	}()
+
 	// 1b. Read the canary back immediately so a misbehaving CopyTo
 	//     (e.g. extraction to the wrong destination, silent zero-copy)
 	//     surfaces as a specific error rather than the later ambiguous
@@ -238,16 +256,9 @@ func BackupSelfTest(ctx context.Context, ops DockerOps, opts SelfTestOpts) (*Sel
 			len(canaryContent), len(got))
 	}
 
-	// 6. Cleanup — best-effort overwrite with empty bytes. Wipe both the
-	//    original write path AND the nested path where the restore
-	//    actually re-materialised the canary (see note at step 5), so
-	//    a passing self-test doesn't leave zero-byte markers littering
-	//    the seeded /workspace.
-	cleanTar, _ := buildSingleFileTar(canaryName, []byte{})
-	_ = ops.CopyTo(ctx, opts.ContainerID, ContainerWorkspacePath, bytes.NewReader(cleanTar))
-	cleanTarNested, _ := buildSingleFileTar(canaryName, []byte{})
-	_ = ops.CopyTo(ctx, opts.ContainerID, ContainerWorkspacePath+"/workspace", bytes.NewReader(cleanTarNested))
-
+	// Cleanup (wipe both direct + nested canary paths) runs via the
+	// defer installed right after the canary write, so every return
+	// path below clears the marker — nothing to do here.
 	return result, nil
 }
 

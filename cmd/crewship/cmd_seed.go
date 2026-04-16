@@ -194,27 +194,34 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// A started target only means the trigger was accepted. If the
+		// wait phase reported a failure, don't proceed — the self-test
+		// would then fail on warmup or ContainerExists and mask the
+		// provisioning error behind a less useful message. Surface the
+		// provisioning failure directly.
+		if waitErr != nil {
+			return errors.Join(triggerErr, waitErr)
+		}
 		if len(startedTargets) == 0 {
 			// The operator asked for a self-test; silently skipping and
 			// exiting 0 would let CI and scripts treat a broken
 			// provisioning step as green.
 			return fmt.Errorf("--test-backup requested, but no crew successfully started provisioning")
-		} else {
-			// Prefer "research" — it's the Python crew with a minimal feature
-			// set, so the bundle stays small and the collector/restorer
-			// don't hit quirky installs (e.g. terraform on devops creates
-			// version-alias symlinks the manifest validator rejects, a
-			// pre-existing issue unrelated to this self-test).
-			target := startedTargets[0]
-			for _, t := range startedTargets {
-				if t.slug == "research" {
-					target = t
-					break
-				}
+		}
+		// Prefer "research" — it's the Python crew with a minimal feature
+		// set, so the bundle stays small and the collector/restorer
+		// don't hit quirky installs (e.g. terraform on devops creates
+		// version-alias symlinks the manifest validator rejects, a
+		// pre-existing issue unrelated to this self-test).
+		target := startedTargets[0]
+		for _, t := range startedTargets {
+			if t.slug == "research" {
+				target = t
+				break
 			}
-			if err := runBackupSelfTest(ctx, client, target, crewIDs, agentIDs); err != nil {
-				return err
-			}
+		}
+		if err := runBackupSelfTest(ctx, client, target, crewIDs, agentIDs); err != nil {
+			return err
 		}
 	}
 
