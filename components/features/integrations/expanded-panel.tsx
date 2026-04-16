@@ -99,6 +99,32 @@ export function ExpandedPanel({
     canManage ? (workspaceId ?? undefined) : undefined,
   )
 
+  // Track in-flight patches so the server→local sync effect below
+  // does not clobber newer local edits with a stale refetched
+  // snapshot. The parent's onPatch triggers a full list refetch on
+  // success; two edits landing out of order (slow network, blur +
+  // immediate second blur) can otherwise replay an older server
+  // version of the field that's still being edited.
+  const pendingPatchesRef = React.useRef(0)
+  const [patchSettledTick, setPatchSettledTick] = React.useState(0)
+  const patchTracked = React.useCallback(
+    async (fields: Record<string, unknown>) => {
+      pendingPatchesRef.current++
+      try {
+        await onPatch(fields)
+      } finally {
+        pendingPatchesRef.current--
+        if (pendingPatchesRef.current === 0) {
+          // Bump tick so the sync effect re-runs once no patches are
+          // pending — otherwise a skipped sync would leave local
+          // state permanently out of date if deps don't change again.
+          setPatchSettledTick((n) => n + 1)
+        }
+      }
+    },
+    [onPatch],
+  )
+
   // Local state for inputs (save on blur)
   const [name, setName] = React.useState(server.name)
   const [displayName, setDisplayName] = React.useState(server.display_name || "")
@@ -113,7 +139,14 @@ export function ExpandedPanel({
   // on the whole `server` object would re-run every time an unrelated
   // field (auth_status, updated_at, audit metadata) changes, wiping
   // any in-flight user edits.
+  //
+  // While any patch is in flight we skip the sync: the parent refetch
+  // that triggered this effect might have raced with an earlier PATCH
+  // that hasn't hit the DB yet, so `server.*` could be stale relative
+  // to what the user just typed. `patchSettledTick` forces a re-sync
+  // once the last patch settles.
   React.useEffect(() => {
+    if (pendingPatchesRef.current > 0) return
     setName(server.name)
     setDisplayName(server.display_name || "")
     setCommand(server.command ?? "")
@@ -129,6 +162,7 @@ export function ExpandedPanel({
     server.endpoint,
     server.transport,
     server.env_json,
+    patchSettledTick,
   ])
 
   const hasAnyBindings = (agentBindings[server.id]?.size ?? 0) > 0
@@ -136,19 +170,19 @@ export function ExpandedPanel({
   function handleBlur(field: string, value: string) {
     switch (field) {
       case "name":
-        if (value !== server.name) onPatch({ name: value })
+        if (value !== server.name) void patchTracked({ name: value })
         break
       case "display_name":
-        if (value !== (server.display_name || "")) onPatch({ display_name: value })
+        if (value !== (server.display_name || "")) void patchTracked({ display_name: value })
         break
       case "command":
-        if (value !== (server.command ?? "")) onPatch({ command: value })
+        if (value !== (server.command ?? "")) void patchTracked({ command: value })
         break
       case "args":
-        if (value !== parseArgs(server.args_json)) onPatch({ args_json: serializeArgs(value) })
+        if (value !== parseArgs(server.args_json)) void patchTracked({ args_json: serializeArgs(value) })
         break
       case "url":
-        if (value !== (server.endpoint ?? "")) onPatch({ endpoint: value })
+        if (value !== (server.endpoint ?? "")) void patchTracked({ endpoint: value })
         break
     }
   }
@@ -156,7 +190,7 @@ export function ExpandedPanel({
   function handleTransportChange(newTransport: string) {
     setTransport(newTransport)
     if (newTransport !== server.transport) {
-      onPatch({ transport: newTransport })
+      void patchTracked({ transport: newTransport })
     }
   }
 
@@ -164,7 +198,7 @@ export function ExpandedPanel({
     const newJson = serializeEnv(envVars)
     const oldJson = server.env_json ?? "{}"
     if (newJson !== oldJson) {
-      onPatch({ env_json: newJson })
+      void patchTracked({ env_json: newJson })
     }
   }
 
@@ -179,7 +213,7 @@ export function ExpandedPanel({
     const newJson = serializeEnv(updated)
     const oldJson = server.env_json ?? "{}"
     if (newJson !== oldJson) {
-      onPatch({ env_json: newJson })
+      void patchTracked({ env_json: newJson })
     }
   }
 
@@ -201,7 +235,17 @@ export function ExpandedPanel({
     const seq = ++oauthDiscoverySeq.current
     try {
       const parsed = new URL(mcpUrl)
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        // `new URL()` accepts ftp:, ws:, file:, etc. If the previous
+        // check-ed URL was HTTP(S) and discovered OAuth, that stale
+        // badge would otherwise stick around for the non-HTTP value.
+        // Clear it explicitly so the UI matches the current endpoint.
+        if (seq === oauthDiscoverySeq.current) {
+          setOauthDiscovered(false)
+          setDiscovering(false)
+        }
+        return
+      }
     } catch {
       if (seq === oauthDiscoverySeq.current) setOauthDiscovered(false)
       return
@@ -555,7 +599,7 @@ export function ExpandedPanel({
                         updateEnvVar(idx, "value", val)
                         // Save immediately after credential selection
                         const updated = envVars.map((e, i) => (i === idx ? { ...e, value: val } : e))
-                        onPatch({ env_json: serializeEnv(updated) })
+                        void patchTracked({ env_json: serializeEnv(updated) })
                       }}
                     />
                   </div>
