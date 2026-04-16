@@ -174,9 +174,12 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		if err := waitForProvisions(ctx, client, startedTargets, provisionTimeout); err != nil {
 			return err
 		}
-	} else if len(provisionTargets) > 0 {
+	} else if len(startedTargets) > 0 {
+		// Report only the crews whose triggers actually landed. Failed triggers
+		// were already logged with an "X <slug>" line by triggerProvisions, so
+		// counting them here would lie to the user.
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintf(os.Stderr, "Provisioning %d crew(s) in the background.\n", len(provisionTargets))
+		fmt.Fprintf(os.Stderr, "Provisioning %d crew(s) in the background.\n", len(startedTargets))
 		fmt.Fprintln(os.Stderr, "  Agents in these crews become runnable once provisioning finishes (~few minutes).")
 		fmt.Fprintln(os.Stderr, "  Status: crewship crew provision status <slug>   (or re-run `crewship seed --wait-provision`)")
 	}
@@ -380,9 +383,12 @@ func triggerProvisionOnce(ctx context.Context, client *cli.Client, crewID string
 			case <-time.After(backoff):
 			}
 			// Exponential backoff capped at 30s — slots usually free up in
-			// tens of seconds once a peer provision completes.
-			if backoff < 30*time.Second {
-				backoff *= 2
+			// tens of seconds once a peer provision completes. Doubling
+			// before the cap check would overshoot (e.g. 24s → 48s stays
+			// at 48s), so we compute the next value and clamp.
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
 			}
 			continue
 		}
