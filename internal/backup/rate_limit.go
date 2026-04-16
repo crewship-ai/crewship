@@ -11,7 +11,9 @@ import (
 // host. We copy the sliding-window pattern from internal/api/
 // captain.go rather than pulling in golang.org/x/time/rate — the
 // captain limiter already proves this shape is fine for the handful
-// of admin calls in question.
+// of admin calls in question. (Captain is deprecated 2026-04-16, but
+// the rate-limit pattern itself is reusable and this comment is kept
+// for historical reference.)
 
 // defaultInstanceBackupLimit is how many instance-scope backups a
 // single user may create per window. One per hour is generous for

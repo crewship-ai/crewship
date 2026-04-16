@@ -315,7 +315,9 @@ export function SettingsPageClient() {
                 <SelectContent>
                   <SelectItem value="AGENT">Agent</SelectItem>
                   <SelectItem value="LEAD">Lead</SelectItem>
-                  <SelectItem value="COORDINATOR">Coordinator</SelectItem>
+                  {/* COORDINATOR role is deprecated (2026-04-16) — see docs/guides/coordinator.mdx.
+                      Option kept so existing COORDINATOR agents can still be edited. */}
+                  <SelectItem value="COORDINATOR">Coordinator (deprecated)</SelectItem>
                 </SelectContent>
               </Select>
             </PropertyRow>

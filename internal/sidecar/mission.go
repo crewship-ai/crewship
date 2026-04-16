@@ -13,7 +13,7 @@ type missionCreateRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Plan        string `json:"plan,omitempty"`
-	CrewID      string `json:"crew_id,omitempty"` // Required for COORDINATOR (no default crew)
+	CrewID      string `json:"crew_id,omitempty"` // Required for COORDINATOR (deprecated) — regular LEAD/AGENT inherit sidecar's crew.
 	Tasks       []struct {
 		Title         string   `json:"title"`
 		Description   string   `json:"description,omitempty"`
@@ -85,7 +85,8 @@ func (s *Server) handleMissionCreate(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, it)
 	}
 
-	// Use explicit crew_id if provided (COORDINATOR), otherwise use sidecar's crew
+	// Use explicit crew_id if provided (COORDINATOR — deprecated), otherwise use sidecar's crew.
+	// The explicit-crew_id branch exists for the deprecated COORDINATOR role; retained for backward compat.
 	crewID := s.ipc.CrewID
 	if req.CrewID != "" {
 		crewID = req.CrewID

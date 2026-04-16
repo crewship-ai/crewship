@@ -1,5 +1,11 @@
 package api
 
+// File: captain_test.go — tests for the deprecated Captain feature.
+//
+// DEPRECATED (2026-04-16): See captain.go file header for context.
+// Tests retained for regression safety while the deprecated code remains in
+// the tree. Do not add new Captain tests here.
+
 import (
 	"context"
 	"strings"

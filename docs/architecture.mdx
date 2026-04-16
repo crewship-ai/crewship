@@ -141,7 +141,7 @@ The system prompt is built in two stages:
 **Stage 2** — Runtime context (`internal/orchestrator/orchestrator.go`):
 ```
 6. Conversation history (60% of remaining token budget)
-7. [CREW CONTEXT] (Lead) OR [COORDINATOR CONTEXT] OR [PEER CONTEXT]
+7. [CREW CONTEXT] (Lead) OR [COORDINATOR CONTEXT] (deprecated 2026-04-16) OR [PEER CONTEXT]
 8. [AGENT MEMORY] (40% of remaining token budget)
 9. [MEMORY INSTRUCTIONS] — how to read/write memory files
 ```

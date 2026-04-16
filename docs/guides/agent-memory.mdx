@@ -4,6 +4,13 @@ description: "4-tier persistent memory (agent, crew, workspace, session) with FT
 icon: "brain"
 ---
 
+<Note>
+  The **workspace memory** tier is read and written only by the deprecated
+  Captain and COORDINATOR. See [Captain](/guides/captain) and
+  [Coordinator](/guides/coordinator) for deprecation context. Agent, crew,
+  and session memory tiers are **not** deprecated.
+</Note>
+
 # Memory System
 
 Crewship has a 4-tier memory hierarchy that gives agents persistent knowledge across sessions, shared context within crews, and organization-wide visibility for coordinators.

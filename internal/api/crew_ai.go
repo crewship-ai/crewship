@@ -49,7 +49,7 @@ Given a user's description of what they want their crew to do, return a JSON obj
 
 Rules:
 - Return ONLY valid JSON. No markdown fences, no explanation.
-- Exactly one agent must have agent_role="LEAD" — this is the coordinator.
+- Exactly one agent must have agent_role="LEAD" — this one coordinates the crew's work.
 - All other agents have agent_role="AGENT".
 - Each slug must be lowercase, hyphenated, unique within the crew, max 30 chars.
 - Each system_prompt should be 2-4 focused sentences describing what that agent does, its tools, and its working style.

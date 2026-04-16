@@ -1,9 +1,19 @@
 "use client"
 
+/**
+ * @deprecated Captain feature is no longer actively developed (2026-04-16).
+ * See components/features/captain/captain-panel.tsx for deprecation details
+ * and docs/guides/captain.mdx for migration notes.
+ * Store retained for backward compatibility.
+ */
+
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 
-/** A message in the Captain chat panel, with optional tool call/result metadata. */
+/**
+ * A message in the Captain chat panel, with optional tool call/result metadata.
+ * @deprecated Captain feature is deprecated. See module-level notice.
+ */
 export interface CaptainMessage {
   id: string
   role: "user" | "assistant"

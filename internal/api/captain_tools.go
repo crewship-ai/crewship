@@ -1,5 +1,9 @@
 package api
 
+// File: captain_tools.go — 11 tool executors for the deprecated Captain feature.
+//
+// DEPRECATED (2026-04-16): See captain.go file header for context.
+
 import (
 	"context"
 	"database/sql"
@@ -13,6 +17,8 @@ import (
 )
 
 // CaptainTools is the set of tool definitions passed to the LLM on every Captain request.
+//
+// Deprecated: Captain feature is deprecated. See [CaptainHandler].
 var CaptainTools = []llm.ToolDef{
 	{
 		Name:        "get_workspace_stats",

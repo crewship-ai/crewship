@@ -119,6 +119,12 @@ export default function NewCrewPage() {
       .finally(() => setLoadingTemplates(false))
   }, [workspaceId, wsLoading])
 
+  /**
+   * @deprecated COORDINATOR role is no longer actively developed (2026-04-16).
+   * See docs/guides/coordinator.mdx. The "Create with AI" flow will be
+   * reworked to use MCP-connected external LLMs or a scheduler-driven AGENT.
+   * Function retained for backward compatibility with existing COORDINATOR agents.
+   */
   const handleCreateWithAI = async () => {
     if (!workspaceId) return
     setFindingCoordinator(true)

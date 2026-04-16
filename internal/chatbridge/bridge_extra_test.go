@@ -285,6 +285,7 @@ func TestHandleChatMessageColdStartStatusEvents(t *testing.T) {
 }
 
 // COORDINATOR agents (no crew) get a synthetic crew identity for container management.
+// Deprecated: COORDINATOR role is deprecated (2026-04-16); test retained for regression safety.
 func TestHandleChatMessageCoordinatorSyntheticCrew(t *testing.T) {
 	t.Parallel()
 	resolver := &mockResolver{

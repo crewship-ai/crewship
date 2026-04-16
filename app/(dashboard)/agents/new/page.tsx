@@ -266,7 +266,9 @@ export default function NewAgentPage() {
                   <SelectContent>
                     <SelectItem value="AGENT">Agent</SelectItem>
                     <SelectItem value="LEAD">Lead</SelectItem>
-                    <SelectItem value="COORDINATOR">Coordinator</SelectItem>
+                    {/* COORDINATOR role is deprecated (2026-04-16) — see docs/guides/coordinator.mdx.
+                        Option kept for backward compat with existing workspaces. */}
+                    <SelectItem value="COORDINATOR">Coordinator (deprecated)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

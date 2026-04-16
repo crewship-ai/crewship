@@ -4,6 +4,14 @@ description: "Multi-agent missions with task dependencies, retry loops, deadlock
 icon: "sitemap"
 ---
 
+<Note>
+  Sections below covering **Coordinator** (proposal workflow, `/proposal`,
+  `/missions/all`, `[COORDINATOR CONTEXT]`) describe the **deprecated**
+  COORDINATOR role (see [Coordinator guide](/guides/coordinator)). Missions,
+  tasks, leads, and assignments are **not** deprecated. Retained here for
+  reference while existing COORDINATOR agents remain supported.
+</Note>
+
 # Orchestration
 
 Crewship's orchestration system manages multi-agent missions through the `MissionEngine` (`internal/orchestrator/mission.go`). It handles task scheduling, dependency resolution, failure recovery, and cross-crew coordination.
@@ -433,6 +441,6 @@ Lead agents interact with the orchestration system through the sidecar proxy at 
 
 ## What's Next
 
-- [Captain](/guides/captain) -- natural language crew and agent management
+- [Captain](/guides/captain) *(deprecated 2026-04-16)* -- natural language crew and agent management
 - [Keeper](/guides/keeper) -- persistent agent memory across sessions
 - [Scheduling](/guides/scheduling) -- cron-based automated agent runs

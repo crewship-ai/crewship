@@ -27,7 +27,7 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 type AgentRunRequest struct {
 	AgentID            string
 	AgentSlug          string
-	AgentRole          string // AGENT, LEAD, COORDINATOR
+	AgentRole          string // AGENT, LEAD, COORDINATOR (deprecated — see docs/guides/coordinator.mdx)
 	CrewID             string
 	CrewSlug           string
 	ChatID             string
@@ -42,8 +42,8 @@ type AgentRunRequest struct {
 	TimeoutSecs        int
 	MemoryEnabled      bool
 	CrewMembers        []CrewMember     // Populated by bridge for LEAD agents
-	AllCrews           []CrewInfo       // Populated by bridge for COORDINATOR agents
-	ActiveMissions     []MissionSummary // Active missions in workspace (for COORDINATOR)
+	AllCrews           []CrewInfo       // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
+	ActiveMissions     []MissionSummary // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
 	SkipSidecar        bool             // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
 	SkipConvHistory    bool             // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode        string           // "free" (default) or "restricted" — crew-level network policy
@@ -55,7 +55,7 @@ type AgentRunRequest struct {
 	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
-	WorkspaceMemPath   string            // Host path to workspace memory dir (for COORDINATOR)
+	WorkspaceMemPath   string            // Deprecated: used only by COORDINATOR role; see [BuildCoordinatorContext].
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.
@@ -333,7 +333,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
-	// Inject coordinator context listing all workspace crews
+	// Inject coordinator context listing all workspace crews.
+	// Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
+	// Branch retained for backward compat so existing COORDINATOR agents keep working.
 	if req.AgentRole == "COORDINATOR" && len(req.AllCrews) > 0 {
 		coordCtx := BuildCoordinatorContext(req.AllCrews, req.ActiveMissions)
 		if coordCtx != "" {
@@ -394,6 +396,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// Build IPC config for agents in a crew so the sidecar can forward
 		// assignment requests (LEAD), peer queries, and escalations (all roles)
 		var ipcCfg *SidecarIPCConfig
+		// COORDINATOR branch is deprecated (see [BuildCoordinatorContext]); retained for backward compat.
 		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || req.AgentRole == "COORDINATOR" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,

@@ -1,8 +1,31 @@
 ---
-title: "Captain"
-description: "Your workspace-level AI assistant with 11 tools, SSE streaming, and onboarding-aware context."
+title: "Captain (deprecated)"
+description: "Deprecated 2026-04-16. Workspace-level AI assistant with 11 tools, SSE streaming, and onboarding-aware context. See migration notes inside."
 icon: "compass"
 ---
+
+<Warning>
+  **Deprecated (2026-04-16):** Captain is no longer actively developed.
+
+  The feature was started but never completed. In the 2026 architecture, the
+  consensus across competitors (Paperclip AI, CrewAI, Agency Swarm, AutoGen,
+  LangGraph) is to deliver workspace-level AI via a **framework approach**:
+  the platform exposes tools and state, and intelligence is provided either
+  by an external LLM client (Claude Code, Claude Desktop, Cursor) over MCP,
+  or by a user-created agent.
+
+  **Migration path:**
+  - For interactive workspace queries, connect an MCP-capable LLM client to
+    Crewship's MCP gateway (see CRE-48).
+  - For autonomous workspace-level orchestration, combine the scheduler with
+    a user-defined `AGENT`-role agent.
+  - The CLI (`crewship mission`, `crewship crew`, `crewship agent`, etc.)
+    already covers all Captain tool operations — and is the recommended
+    day-to-day interface.
+
+  Existing Captain code is retained for backward compatibility and will not
+  receive new features. Do not build on it.
+</Warning>
 
 # Captain
 

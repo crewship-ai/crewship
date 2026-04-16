@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   createAgentSchema,
+  updateAgentSchema,
   createCrewSchema,
   updateCrewSchema,
   createCredentialSchema,
@@ -78,6 +79,94 @@ describe("createAgentSchema", () => {
     expect(result.cli_adapter).toBe("CLAUDE_CODE")
     expect(result.timeout_seconds).toBe(1800)
     expect(result.tool_profile).toBe("CODING")
+  })
+
+  // Role ↔ crew_id conditional validation — mirrors backend rules in
+  // internal/api/agents.go (LEAD requires crew_id, COORDINATOR forbids it,
+  // AGENT requires one by convention).
+  describe("role-based crew_id rules", () => {
+    const base = { name: "Code Writer", slug: "code-writer" }
+
+    it("AGENT with crew_id passes", () => {
+      const result = createAgentSchema.safeParse({
+        ...base,
+        agent_role: "AGENT",
+        crew_id: randomUUID(),
+      })
+      expect(result.success).toBe(true)
+    })
+
+    it("AGENT without crew_id fails", () => {
+      const result = createAgentSchema.safeParse({
+        ...base,
+        agent_role: "AGENT",
+      })
+      expect(result.success).toBe(false)
+    })
+
+    it("LEAD with crew_id passes", () => {
+      const result = createAgentSchema.safeParse({
+        ...base,
+        agent_role: "LEAD",
+        crew_id: randomUUID(),
+      })
+      expect(result.success).toBe(true)
+    })
+
+    it("LEAD without crew_id fails", () => {
+      const result = createAgentSchema.safeParse({
+        ...base,
+        agent_role: "LEAD",
+      })
+      expect(result.success).toBe(false)
+    })
+
+    it("COORDINATOR without crew_id passes (workspace-level agent)", () => {
+      const result = createAgentSchema.safeParse({
+        ...base,
+        agent_role: "COORDINATOR",
+      })
+      expect(result.success).toBe(true)
+    })
+
+    it("COORDINATOR with crew_id fails", () => {
+      const result = createAgentSchema.safeParse({
+        ...base,
+        agent_role: "COORDINATOR",
+        crew_id: randomUUID(),
+      })
+      expect(result.success).toBe(false)
+    })
+  })
+})
+
+describe("updateAgentSchema", () => {
+  it("empty object is a valid partial update", () => {
+    const result = updateAgentSchema.safeParse({})
+    expect(result.success).toBe(true)
+  })
+
+  it("updating only name passes", () => {
+    const result = updateAgentSchema.safeParse({ name: "Renamed" })
+    expect(result.success).toBe(true)
+  })
+
+  it("changing role to LEAD without crew_id fails", () => {
+    const result = updateAgentSchema.safeParse({ agent_role: "LEAD" })
+    expect(result.success).toBe(false)
+  })
+
+  it("changing role to COORDINATOR with crew_id fails", () => {
+    const result = updateAgentSchema.safeParse({
+      agent_role: "COORDINATOR",
+      crew_id: randomUUID(),
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it("changing role to COORDINATOR without crew_id passes", () => {
+    const result = updateAgentSchema.safeParse({ agent_role: "COORDINATOR" })
+    expect(result.success).toBe(true)
   })
 })
 

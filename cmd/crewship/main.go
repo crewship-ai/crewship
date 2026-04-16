@@ -74,6 +74,8 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(configCmd)
+	// captainCmd is deprecated (2026-04-16) — see cmd_captain.go file header.
+	// Registered for backward compat with existing user scripts.
 	rootCmd.AddCommand(captainCmd)
 	rootCmd.AddCommand(proposalCmd)
 	rootCmd.AddCommand(escalationCmd)
