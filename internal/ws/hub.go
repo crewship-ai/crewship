@@ -82,6 +82,21 @@ type ChannelMessage struct {
 	Data    []byte
 }
 
+// Pre-marshaled heartbeat frames. These payloads never vary, so we pay the
+// JSON encoding cost once at init instead of on every ping/pong event.
+var (
+	pingMessageBytes = mustMarshalServerMessage("ping")
+	pongMessageBytes = mustMarshalServerMessage("pong")
+)
+
+func mustMarshalServerMessage(typ string) []byte {
+	b, err := json.Marshal(ServerMessage{Type: typ, Payload: nil})
+	if err != nil {
+		panic("ws: marshal " + typ + " message: " + err.Error())
+	}
+	return b
+}
+
 // NewHub creates a WebSocket hub. Optional deps are inspected for a *auth.JWTValidator
 // to enable token-based authentication on upgrade.
 func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *Hub {
@@ -306,8 +321,7 @@ func (c *Client) readPump() {
 		case "unsubscribe":
 			c.unsubscribe(msg.Channel)
 		case "ping":
-			resp, _ := json.Marshal(ServerMessage{Type: "pong", Payload: nil})
-			c.send <- resp
+			c.send <- pongMessageBytes
 		case "send_message":
 			c.hub.logger.Debug("message received", "user_id", c.userID, "channel", msg.Channel)
 			c.handleSendMessage(msg)
@@ -335,8 +349,7 @@ func (c *Client) writePump() {
 				return
 			}
 		case <-ticker.C:
-			ping, _ := json.Marshal(ServerMessage{Type: "ping", Payload: nil})
-			if _, err := c.conn.Write(ping); err != nil {
+			if _, err := c.conn.Write(pingMessageBytes); err != nil {
 				return
 			}
 		}
