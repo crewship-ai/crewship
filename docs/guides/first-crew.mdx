@@ -4,6 +4,15 @@ description: "Create a team of AI agents, assign roles and credentials, and run 
 icon: "users"
 ---
 
+<Note>
+  This guide still mentions **Captain** and the **COORDINATOR** role. Both are
+  **deprecated as of 2026-04-16** — see the [Captain guide](/guides/captain)
+  and [Coordinator guide](/guides/coordinator) for migration notes. Existing
+  references below still work for backward compatibility, but new workspaces
+  should use the CLI (`crewship crew`, `crewship agent`) or connect an
+  MCP-capable LLM client.
+</Note>
+
 # Your First Crew
 
 A **crew** is a team of AI agents that work together on tasks. Each crew runs inside a shared Docker container, and agents communicate through the sidecar proxy.
@@ -30,7 +39,7 @@ Every agent has one of three roles that determines their capabilities:
 |------|---------|-------------|
 | **AGENT** | Individual contributor | Executes assigned tasks, writes code, runs tools |
 | **LEAD** | Team orchestrator | Assigns tasks to agents, creates missions, monitors progress |
-| **COORDINATOR** | Workspace-level strategist | Sees all crews, creates cross-crew missions, submits proposals |
+| **COORDINATOR** *(deprecated 2026-04-16)* | Workspace-level strategist | Sees all crews, creates cross-crew missions, submits proposals |
 
 <Note>
   Roles are functional, not hierarchical. A Lead is an equal colleague with orchestration responsibility -- not a boss. This is a core Crewship philosophy (the "Crewship Adventure" ethos).
@@ -73,11 +82,17 @@ Every agent has one of three roles that determines their capabilities:
     Settings -> Credentials -> Add Credential
     ```
 
-    Agents created from templates or by Captain get credentials auto-assigned. Agents created via CLI/UI assign credentials manually.
+    Agents created from templates get credentials auto-assigned. Agents created via CLI/UI assign credentials manually. (Captain-based creation is deprecated — see [Captain guide](/guides/captain).)
   </Step>
 </Steps>
 
 ## Using Captain to Create a Crew
+
+<Warning>
+  **Deprecated (2026-04-16):** The Captain-based crew creation flow below is
+  retained for backward compat. Prefer the CLI (`crewship crew create`),
+  the Settings UI, or a crew template. See [Captain guide](/guides/captain).
+</Warning>
 
 The fastest way to create a crew is through **Captain**, the workspace AI assistant:
 

@@ -1,5 +1,12 @@
 package main
 
+// File: cmd_captain.go — CLI commands for the deprecated Captain feature.
+//
+// DEPRECATED (2026-04-16): Captain (built-in workspace AI assistant) is no
+// longer actively developed. See internal/api/captain.go and
+// docs/guides/captain.mdx for context and migration notes.
+// Commands retained so existing scripts keep working.
+
 import (
 	"bufio"
 	"encoding/json"
@@ -14,12 +21,15 @@ import (
 
 var captainCmd = &cobra.Command{
 	Use:   "captain",
-	Short: "Chat with Captain (workspace AI assistant)",
+	Short: "(deprecated) Chat with Captain (workspace AI assistant)",
+	Long: "DEPRECATED: The Captain feature is no longer actively developed.\n" +
+		"See docs/guides/captain.mdx for migration notes.\n" +
+		"Commands remain functional for backward compatibility.",
 }
 
 var captainChatCmd = &cobra.Command{
 	Use:   "chat <message>",
-	Short: "Send a message to Captain and stream the response",
+	Short: "(deprecated) Send a message to Captain and stream the response",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -100,7 +110,7 @@ var captainChatCmd = &cobra.Command{
 
 var captainContextCmd = &cobra.Command{
 	Use:   "context",
-	Short: "Show Captain's workspace context (phase, counts)",
+	Short: "(deprecated) Show Captain's workspace context (phase, counts)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -155,7 +165,7 @@ var captainContextCmd = &cobra.Command{
 
 var captainHistoryCmd = &cobra.Command{
 	Use:   "history",
-	Short: "Show Captain chat history",
+	Short: "(deprecated) Show Captain chat history",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -207,7 +217,7 @@ var captainHistoryCmd = &cobra.Command{
 
 var captainHistoryClearCmd = &cobra.Command{
 	Use:   "clear",
-	Short: "Clear Captain chat history",
+	Short: "(deprecated) Clear Captain chat history",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err

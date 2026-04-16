@@ -18,10 +18,16 @@ Every state-changing operation is recorded in the audit log:
 | **Crews** | `create`, `update`, `delete` | Crew settings updated |
 | **Missions** | `create`, `update`, `delete` | Mission started |
 | **Credentials** | `create`, `update`, `delete` | Credential assigned to agent |
-| **Captain** | `captain_tool_call` | Captain invoked a tool (tool_id, tool_name recorded) |
+| **Captain** (*deprecated 2026-04-16*) | `captain_tool_call` | Captain invoked a tool (tool_id, tool_name recorded) |
 | **Keeper** | `credential`, `execute` | Keeper evaluated a credential access or command execution request |
 
 ### Captain Tool Call Auditing
+
+<Note>
+  Captain is deprecated (2026-04-16). The `captain_tool_call` audit action
+  remains recorded while Captain endpoints are still wired, but new
+  integrations should not rely on it. See [Captain guide](/guides/captain).
+</Note>
 
 When Captain (the AI assistant) invokes a tool, the audit log records:
 

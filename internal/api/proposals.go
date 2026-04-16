@@ -15,6 +15,15 @@ import (
 )
 
 // ProposalHandler manages Captain-generated mission proposals that users can approve or reject.
+//
+// NOTE: Mission proposals were written by two deprecated sources:
+//   - Captain's approve_proposal tool (see internal/api/captain_tools.go)
+//   - COORDINATOR agents via sidecar POST /proposal (see internal/sidecar/coordinator.go)
+//
+// Both are deprecated as of 2026-04-16. The ProposalHandler and the
+// mission_proposals table are retained for potential reuse in future
+// human-in-the-loop approval flows. Do NOT remove without a decision on
+// the HITL roadmap.
 type ProposalHandler struct {
 	db            *sql.DB
 	hub           *ws.Hub

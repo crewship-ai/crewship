@@ -2369,6 +2369,13 @@ func TestStrInput(t *testing.T) {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Captain feature tests — DEPRECATED (2026-04-16).
+// See internal/api/captain.go file header and docs/guides/captain.mdx.
+// Tests retained for regression safety while the deprecated code lives in the tree.
+// Do not add new Captain tests below this line.
+// ─────────────────────────────────────────────────────────────────────────────
+
 func TestCaptainExec_GetWorkspaceStats(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)

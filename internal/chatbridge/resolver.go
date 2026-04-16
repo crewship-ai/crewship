@@ -393,7 +393,9 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		allowedDomains = []string{}
 	}
 
-	// Convert all_crews for COORDINATOR agents
+	// Convert all_crews for COORDINATOR agents.
+	// Deprecated: COORDINATOR role is deprecated (see orchestrator.BuildCoordinatorContext).
+	// Branch retained for backward compat with existing COORDINATOR agents.
 	var allCrews []orchestrator.CrewInfo
 	for _, c := range data.AllCrews {
 		ci := orchestrator.CrewInfo{

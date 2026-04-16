@@ -21,6 +21,8 @@ func buildEthosBlock(agentRole string) string {
 			`colleague who carries the soul and mission of the expedition to the whole team, ` +
 			`and that is how the ship sails towards adventure. Your crew trusts you because ` +
 			`you are one of them, just with a different task.`
+	// COORDINATOR role is deprecated (2026-04-16); see orchestrator.BuildCoordinatorContext.
+	// Ethos text retained so existing COORDINATOR agents still get a coherent system prompt.
 	case "COORDINATOR":
 		roleText = `You are a workspace member with coordination responsibility on the Crewship -- ` +
 			`connecting the expeditions of all crews towards one shared goal. You are not above ` +

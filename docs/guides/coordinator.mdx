@@ -4,6 +4,27 @@ description: "The workspace-level strategist who sees all crews, submits mission
 icon: "compass"
 ---
 
+<Warning>
+  **Deprecated (2026-04-16):** The `COORDINATOR` agent role is no longer
+  actively developed.
+
+  In practice, the role has **no autonomous behavior** — it activates only
+  when a user explicitly chats with a coordinator agent or includes it in a
+  mission. Its workspace-wide context (all crews, all missions, workspace
+  memory) has ~98% overlap with what a regular `AGENT`-role agent can
+  already reach via MCP or scheduled triggers.
+
+  **Migration path:**
+  - For human-driven cross-crew exploration, use an MCP-capable LLM client
+    (Claude Code / Claude Desktop / Cursor) against Crewship's MCP gateway.
+  - For autonomous cross-crew orchestration, combine the scheduler with a
+    user-defined `AGENT`-role agent that the scheduler wakes up on a cron.
+
+  Existing COORDINATOR agents continue to work (role remains valid in
+  `agent_role` enum). Do not create new COORDINATOR agents for new
+  functionality.
+</Warning>
+
 # Coordinator
 
 The Coordinator is a workspace-level agent role in Crewship. While a **Lead** manages a single crew, the **Coordinator** sees every crew and every agent across the entire workspace. Its job is to decompose complex, multi-crew objectives into targeted missions, submit proposals for human approval, and monitor progress across all teams.

@@ -1,5 +1,12 @@
 "use client"
 
+/**
+ * @deprecated Captain feature is no longer actively developed (2026-04-16).
+ * See components/features/captain/captain-panel.tsx for deprecation details
+ * and docs/guides/captain.mdx for migration notes.
+ * Hook retained for backward compatibility.
+ */
+
 import { useCallback, useEffect, useRef } from "react"
 import { useCaptainStore, type CaptainMessage } from "./use-captain-store"
 import { useWorkspace } from "./use-workspace"

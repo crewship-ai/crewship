@@ -43,6 +43,7 @@ func (h *InternalHandler) resolveCrewMembers(r *http.Request, data *agentConfigD
 	if data.agentRole.Valid && data.agentRole.String != "" {
 		roleStr = data.agentRole.String
 	}
+	// COORDINATOR branch is deprecated (see [BuildCoordinatorContext]); retained for backward compat.
 	if (roleStr == "LEAD" || roleStr == "COORDINATOR") && len(crewMembers) > 0 {
 		memberIdx := make(map[string]int, len(crewMembers))
 		placeholders := make([]string, len(crewMembers))
@@ -92,6 +93,10 @@ func (h *InternalHandler) resolveCrewMembers(r *http.Request, data *agentConfigD
 //
 // Ported from PR #132 after the feat/code-quality file-splits refactor moved
 // this function out of agent_config_resolver.go.
+//
+// Deprecated: COORDINATOR role is deprecated (2026-04-16). See
+// [BuildCoordinatorContext] in internal/orchestrator/lead.go. Retained for
+// backward compat with existing COORDINATOR agents.
 func (h *InternalHandler) resolveCoordinatorCrews(r *http.Request, data *agentConfigData) []crewInfoEntry {
 	roleStr := "AGENT"
 	if data.agentRole.Valid && data.agentRole.String != "" {

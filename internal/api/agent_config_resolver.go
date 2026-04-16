@@ -61,6 +61,9 @@ type crewMemberEntry struct {
 }
 
 // crewInfoEntry describes a crew and its agents (used for COORDINATOR context).
+//
+// Deprecated: used only by the deprecated COORDINATOR role. See
+// [BuildCoordinatorContext] in internal/orchestrator/lead.go.
 type crewInfoEntry struct {
 	ID      string            `json:"id"`
 	Name    string            `json:"name"`
@@ -144,6 +147,8 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		// Non-fatal: continue with empty members
 	}
 
+	// resolveCoordinatorCrews is deprecated (COORDINATOR role deprecated 2026-04-16);
+	// returns nil for non-COORDINATOR agents, so this is a cheap no-op for the common path.
 	allCrews := h.resolveCoordinatorCrews(r, data)
 
 	networkMode, allowedDomains := h.resolveNetworkPolicy(data)
@@ -230,7 +235,8 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	if len(allCrews) > 0 {
 		resp["all_crews"] = allCrews
 
-		// Load active missions for COORDINATOR context
+		// Load active missions for COORDINATOR context.
+		// Deprecated: COORDINATOR role is deprecated; branch retained for backward compat.
 		missionRows, err := h.db.QueryContext(r.Context(), `
 			SELECT m.id, c.slug, m.title, m.status
 			FROM missions m

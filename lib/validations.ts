@@ -31,6 +31,8 @@ export const createAgentSchema = z.object({
   crew_id: z.string().min(1),
   description: z.string().max(1000).optional(),
   role_title: z.string().max(100).optional(),
+  // COORDINATOR role is deprecated (2026-04-16); see docs/guides/coordinator.mdx.
+  // Kept in the enum for backward compat so existing agents still validate.
   agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).default("AGENT"),
   lead_mode: z.enum(["active", "passive"]).default("active").optional(),
   cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"]).default("CLAUDE_CODE"),

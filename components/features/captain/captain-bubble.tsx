@@ -1,11 +1,20 @@
 "use client"
 
+/**
+ * @deprecated Captain UI is no longer actively developed (2026-04-16).
+ * The floating compass bubble opens the deprecated Captain chat panel.
+ * See captain-panel.tsx for deprecation details and
+ * docs/guides/captain.mdx for migration notes.
+ * Component retained for backward compatibility.
+ */
+
 import { useEffect } from "react"
 import { Compass } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useCaptainStore } from "@/hooks/use-captain-store"
 import { cn } from "@/lib/utils"
 
+/** @deprecated See module-level deprecation notice. */
 export function CaptainBubble() {
   const { isOpen, toggle, badgeCount } = useCaptainStore()
 

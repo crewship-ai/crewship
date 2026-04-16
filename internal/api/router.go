@@ -52,6 +52,8 @@ type Router struct {
 	missionCallback      MissionCallback
 	scheduleUpdater      ScheduleUpdater
 	logWriter            *logcollector.Writer
+	// Deprecated: Captain feature is deprecated (see captain.go).
+	// Fields retained so the router continues to wire Captain for backward compat.
 	captainLLM           llm.Provider
 	captainMissionEngine MissionStarter
 	allowSignup          bool
@@ -624,6 +626,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/oauth/auto-connect", authed(wsCtx(http.HandlerFunc(oauth.AutoConnect))))
 
 	// Captain (require auth + workspace context)
+	//
+	// Deprecated: Captain routes back the deprecated Captain feature (see
+	// internal/api/captain.go). Kept registered for backward compatibility
+	// with existing UI/CLI clients. Do not add new routes here.
 	captain := NewCaptainHandler(r.db, r.logger)
 	if r.captainLLM != nil {
 		captain.SetProvider(r.captainLLM)

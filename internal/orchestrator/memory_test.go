@@ -468,6 +468,7 @@ func TestAssembleSections_BudgetRespected(t *testing.T) {
 	}
 }
 
+// Deprecated: COORDINATOR role is deprecated (2026-04-16); test retained for regression safety.
 func TestBuildMemoryContext_CoordinatorWithWorkspace(t *testing.T) {
 	// Create workspace memory dir on host (temp)
 	wsDir := t.TempDir()

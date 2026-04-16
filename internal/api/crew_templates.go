@@ -29,7 +29,9 @@ type deployCrewResult struct {
 	AgentIDs   []string `json:"agent_ids"`
 }
 
-// deployCrewTemplate is a package-level helper shared by CrewTemplateHandler and captain tool executors.
+// deployCrewTemplate is a package-level helper shared by CrewTemplateHandler and
+// (deprecated) Captain tool executors. CrewTemplateHandler is the primary caller;
+// the Captain executor is retained for backward compat only (Captain deprecated 2026-04-16).
 // crewSlugInput may be empty — if so, it is derived from crewName via slugify.
 func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
 	crewSlug := crewSlugInput
