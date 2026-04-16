@@ -287,12 +287,12 @@ func startSidecar(
 		if s.Transport != "streamable-http" {
 			continue
 		}
-		mcpInput = append(mcpInput, sidecarMCPServer{
-			ID: s.ID, Name: s.Name, DisplayName: s.DisplayName,
-			Transport: s.Transport, Endpoint: s.Endpoint,
-			Command: s.Command, Args: s.Args, Env: s.Env,
-			Credential: s.Credential,
-		})
+		// sidecarMCPServer has identical fields & JSON tags to
+		// MCPServerConfig; the anonymous type exists only so the JSON
+		// envelope stays scoped to this function. A direct conversion
+		// keeps the two in lockstep — field-by-field copy would silently
+		// drift if orchestrator.MCPServerConfig gains a field.
+		mcpInput = append(mcpInput, sidecarMCPServer(s))
 	}
 
 	input := sidecarInput{

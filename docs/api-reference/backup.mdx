@@ -15,6 +15,7 @@ Routes are registered in `internal/api/router.go`; handlers live in `internal/ap
 | `POST` | `/api/v1/admin/backups` | Create a new bundle |
 | `GET` | `/api/v1/admin/backups` | List bundles for the current workspace |
 | `GET` | `/api/v1/admin/backups/status` | Inspect the per-workspace advisory lock |
+| `GET` | `/api/v1/admin/backups/metrics` | Process-lifetime counters (instance OWNER only) |
 | `DELETE` | `/api/v1/admin/backups/status` | Force-release the lock |
 | `GET` | `/api/v1/admin/backups/inspect` | Read the plaintext MANIFEST |
 | `GET` | `/api/v1/admin/backups/verify` | Recompute sealed-payload SHA-256 |
@@ -118,6 +119,40 @@ Report the workspace's advisory lock.
 ```
 
 `held: false` omits the detail fields. The lock TTL is 1 hour (`backup.DefaultLockTTL`).
+
+## GET /api/v1/admin/backups/metrics
+
+Return a point-in-time snapshot of process-lifetime counters for the backup subsystem — created / failed / restored totals, size bytes, approximate duration quantiles, and per-workspace lock-hold seconds. Counters reset on every restart; persistent reporting should read `audit_log` instead.
+
+<Warning>
+  Authorisation is **stricter** than the other backup endpoints. This route is gated by `backup.IsInstanceOwner`, which checks `CREWSHIP_OWNER_EMAIL` — a server-level env var, not the workspace role. A workspace OWNER / ADMIN on their own is refused with `403 Forbidden` (`{"error": "instance owner required"}`). The env is intentionally not stored in the database so a compromised SQL session cannot grant itself access.
+</Warning>
+
+### Response — `200 OK`
+
+```json
+{
+  "created_total":                5,
+  "created_by_scope":             { "workspace": 4, "crew": 1 },
+  "failed_total":                 0,
+  "failed_by_reason":             {},
+  "restored_total":               2,
+  "size_bytes_total":             67108864,
+  "duration_seconds_p50":         4.1,
+  "duration_seconds_p95":         12.7,
+  "duration_seconds_mean":        6.3,
+  "lock_held_seconds_by_workspace": { "ws_abc123": 0 }
+}
+```
+
+Duration quantiles are approximated from an in-memory ring buffer (tens-to-hundreds of samples between restarts) — adequate for a dashboard tile, not a general-purpose histogram.
+
+### Errors
+
+| Status | When |
+|---|---|
+| `401 Unauthorized` | No authenticated session. |
+| `403 Forbidden` | Authenticated, but email does not match `CREWSHIP_OWNER_EMAIL`. |
 
 ## DELETE /api/v1/admin/backups/status
 
