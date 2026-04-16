@@ -166,6 +166,23 @@ func TestInstallFeature_Success(t *testing.T) {
 	if !strings.Contains(installExec.Cmd[2], "python/install.sh") {
 		t.Errorf("exec Cmd[2] = %q, want path containing python/install.sh", installExec.Cmd[2])
 	}
+
+	// install.sh must run with the feature directory as CWD so that relative
+	// paths inside the script (e.g., `./scripts/vendor/...`) resolve against
+	// the feature's own files. Regression guard for the aws-cli feature
+	// which failed with "cp: cannot stat './scripts/vendor/aws_bash_completer'"
+	// when WorkingDir was not set.
+	wantWorkDir := "/tmp/devcontainer-features/python"
+	if installExec.WorkingDir != wantWorkDir {
+		t.Errorf("install.sh exec WorkingDir = %q, want %q", installExec.WorkingDir, wantWorkDir)
+	}
+	// mkdir and rm run without a WorkingDir override (absolute paths).
+	if mock.execCreated[0].WorkingDir != "" {
+		t.Errorf("mkdir exec WorkingDir = %q, want empty", mock.execCreated[0].WorkingDir)
+	}
+	if mock.execCreated[2].WorkingDir != "" {
+		t.Errorf("rm exec WorkingDir = %q, want empty", mock.execCreated[2].WorkingDir)
+	}
 }
 
 func TestInstallFeature_TarContainsFiles(t *testing.T) {

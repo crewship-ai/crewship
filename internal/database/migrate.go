@@ -234,6 +234,34 @@ CREATE TABLE IF NOT EXISTS instance_config (
 );
 INSERT OR IGNORE INTO instance_config (id, hostname) VALUES (1, '');
 `},
+	// Port exposures — agent-initiated reverse proxy registrations. A row
+	// holds the opaque token (capability URL), the target container endpoint,
+	// and the lifecycle state. MVP defaults every new row to ACTIVE via an
+	// open-by-default policy; PENDING is reserved for a future approval layer
+	// that can be added without breaking the schema. Indexed on token for
+	// proxy lookups and on (status, expires_at) for the TTL purge goroutine.
+	{version: 51, name: "add_port_exposures", sql: `
+CREATE TABLE IF NOT EXISTS port_exposures (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    crew_id TEXT NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+    token TEXT NOT NULL UNIQUE,
+    container_id TEXT NOT NULL,
+    container_ip TEXT NOT NULL,
+    container_port INTEGER NOT NULL CHECK(container_port BETWEEN 1 AND 65535),
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('PENDING','ACTIVE','REVOKED','EXPIRED')),
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    revoked_reason TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- token already has an implicit index from the UNIQUE constraint.
+CREATE INDEX IF NOT EXISTS idx_port_exposures_workspace ON port_exposures(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_port_exposures_expires ON port_exposures(status, expires_at);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
