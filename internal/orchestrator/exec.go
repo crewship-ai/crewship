@@ -38,7 +38,7 @@ EXPOSE PORT (show a running server to the user):
     curl -s -X POST http://localhost:9119/expose-port \
       -H "Content-Type: application/json" \
       -d '{"port": <port>, "description": "<short why>"}'
-- Response: {"id": "...", "token": "...", "url": "http://<host>/exposed/<token>/", "expires_at": "..."}
+- Response: {"token": "...", "url": "http://<host>/exposed/<token>/", "expires_at": "..."}
 - Share the "url" field with the user. It expires in 1 hour by default; pass
   "ttl_seconds": N to request a different TTL (max 24h). The URL is a capability
   — anyone with it reaches the server, so avoid posting it to public channels.

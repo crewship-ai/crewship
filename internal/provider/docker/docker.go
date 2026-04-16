@@ -528,7 +528,7 @@ func (p *Provider) HostAddress() string {
 func (p *Provider) ContainerIP(ctx context.Context, containerID, network string) (string, error) {
 	inspect, err := p.client.ContainerInspect(ctx, containerID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("inspect container %s on network %q: %w", containerID, network, err)
 	}
 	if inspect.NetworkSettings == nil {
 		return "", fmt.Errorf("container %s has no network settings", containerID)

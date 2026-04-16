@@ -3,13 +3,29 @@ package api
 import (
 	"context"
 	"database/sql"
+	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+// portExposeTestLogger returns a slog logger tuned for test output: writes
+// to stderr at WARN and above so happy-path runs stay quiet but real
+// failures (error logs) still surface in -v output. Matches the pattern
+// used elsewhere in the api package test suite.
+func portExposeTestLogger() *slog.Logger {
+	var w io.Writer = os.Stderr
+	if testing.Verbose() {
+		// keep stderr for -v runs
+	} else {
+		w = io.Discard
+	}
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
 
 // newRegistryTestDB spins up an in-memory SQLite with the migrations applied.
 // We reuse the real migration runner so the schema matches production exactly
@@ -63,7 +79,7 @@ VALUES (?, 'ws', 'crew', 'agent', ?, 'ct', '10.0.0.1', ?, 'ACTIVE', ?)
 
 func TestRegistry_AddLookupRemove(t *testing.T) {
 	db := newRegistryTestDB(t)
-	r := NewPortExposeRegistry(db, slog.Default())
+	r := NewPortExposeRegistry(db, portExposeTestLogger())
 
 	entry := &ExposeEntry{
 		Token:         "abc",
@@ -94,7 +110,7 @@ func TestRegistry_AddLookupRemove(t *testing.T) {
 }
 
 func TestRegistry_AddIgnoresNilAndEmptyToken(t *testing.T) {
-	r := NewPortExposeRegistry(newRegistryTestDB(t), slog.Default())
+	r := NewPortExposeRegistry(newRegistryTestDB(t), portExposeTestLogger())
 	r.Add(nil)
 	r.Add(&ExposeEntry{Token: ""})
 	if r.Len() != 0 {
@@ -120,7 +136,7 @@ func TestRegistry_LoadFromDB_SkipsAndMarksExpired(t *testing.T) {
 	insertActiveRow(t, db, "id-active", "tok-active", 8000, now.Add(time.Hour))
 	insertActiveRow(t, db, "id-stale", "tok-stale", 9000, now.Add(-5*time.Minute))
 
-	r := NewPortExposeRegistry(db, slog.Default())
+	r := NewPortExposeRegistry(db, portExposeTestLogger())
 	if err := r.LoadFromDB(context.Background()); err != nil {
 		t.Fatalf("LoadFromDB: %v", err)
 	}
@@ -145,7 +161,7 @@ func TestRegistry_LoadFromDB_SkipsAndMarksExpired(t *testing.T) {
 
 func TestRegistry_PurgeOnce_ExpiresActiveRows(t *testing.T) {
 	db := newRegistryTestDB(t)
-	r := NewPortExposeRegistry(db, slog.Default())
+	r := NewPortExposeRegistry(db, portExposeTestLogger())
 
 	now := time.Now().UTC()
 	insertActiveRow(t, db, "id-1", "tok-1", 8000, now.Add(-1*time.Minute))
@@ -166,7 +182,7 @@ func TestRegistry_PurgeOnce_ExpiresActiveRows(t *testing.T) {
 }
 
 func TestRegistry_Concurrent(t *testing.T) {
-	r := NewPortExposeRegistry(newRegistryTestDB(t), slog.Default())
+	r := NewPortExposeRegistry(newRegistryTestDB(t), portExposeTestLogger())
 
 	// Hammer Add/Lookup/Remove from N goroutines; the race detector should
 	// be clean. Correctness spot-check: after all goroutines finish we can

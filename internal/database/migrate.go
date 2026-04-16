@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS port_exposures (
     revoked_reason TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_port_exposures_token ON port_exposures(token);
+-- token already has an implicit index from the UNIQUE constraint.
 CREATE INDEX IF NOT EXISTS idx_port_exposures_workspace ON port_exposures(workspace_id, status);
 CREATE INDEX IF NOT EXISTS idx_port_exposures_expires ON port_exposures(status, expires_at);
 `},

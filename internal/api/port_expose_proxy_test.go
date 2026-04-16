@@ -18,7 +18,7 @@ import (
 func newProxyTestHandler(t *testing.T, token string, upstreamURL *url.URL, expiresAt time.Time) http.Handler {
 	t.Helper()
 	db := newRegistryTestDB(t)
-	reg := NewPortExposeRegistry(db, slog.Default())
+	reg := NewPortExposeRegistry(db, portExposeTestLogger())
 	host := upstreamURL.Host
 	// Split "host:port" to feed the Entry struct. httptest.NewServer returns
 	// a URL whose Host is already host:port.
@@ -38,7 +38,7 @@ func newProxyTestHandler(t *testing.T, token string, upstreamURL *url.URL, expir
 		ContainerPort: port,
 		ExpiresAt:     expiresAt,
 	})
-	h := NewPortExposeHandler(db, reg, nil, AllowAllPolicy{}, nil, DefaultPortExposeConfig(), slog.Default())
+	h := NewPortExposeHandler(db, reg, nil, AllowAllPolicy{}, nil, DefaultPortExposeConfig(), portExposeTestLogger())
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /exposed/{token}/", h.ServeExposed)
 	mux.HandleFunc("GET /exposed/{token}", h.ServeExposed)

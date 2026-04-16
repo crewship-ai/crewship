@@ -549,6 +549,12 @@ func (s *Server) Shutdown() error {
 	if s.fileWatcher != nil {
 		s.fileWatcher.Close()
 	}
+	// Stop background goroutines owned by the API router (e.g. port-expose
+	// registry's TTL purger). Done after the HTTP listener is drained so
+	// no handler is still touching the registry.
+	if s.apiRouter != nil {
+		s.apiRouter.Shutdown()
+	}
 
 	if s.state != nil {
 		if err := s.state.Close(); err != nil {

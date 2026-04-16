@@ -95,8 +95,8 @@ func newRequestExposeHandler(t *testing.T, db *sql.DB, cfg PortExposeConfig, doc
 	if cfg.PublicBaseURL == "" {
 		cfg.PublicBaseURL = "http://test.local:8080"
 	}
-	reg := NewPortExposeRegistry(db, slog.Default())
-	return NewPortExposeHandler(db, reg, docker, AllowAllPolicy{}, nil, cfg, slog.Default())
+	reg := NewPortExposeRegistry(db, portExposeTestLogger())
+	return NewPortExposeHandler(db, reg, docker, AllowAllPolicy{}, nil, cfg, portExposeTestLogger())
 }
 
 func postJSON(t *testing.T, h http.HandlerFunc, body any) *httptest.ResponseRecorder {

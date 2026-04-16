@@ -258,6 +258,16 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// A misconfigured deployment (no Docker client wired) would panic on the
+	// next call — match the ServeExposed nil-guard so we 503 cleanly.
+	if h.docker == nil {
+		h.logger.Error("port_expose: docker inspector not configured")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "port-expose not available: container inspection not configured",
+		})
+		return
+	}
+
 	// Look up the container's IP on the crew bridge. Rejecting here also
 	// blocks the agent from asking us to proxy to crewshipd or host
 	// services — those aren't on the crewship-agents network.

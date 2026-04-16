@@ -111,7 +111,14 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	provisionTimeout := time.Duration(provisionTimeoutSec) * time.Second
 	provisionTargets := collectProvisionTargets(crewIDs)
-	triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
+	startedTargets, triggerErr := triggerProvisions(ctx, client, provisionTargets, provisionTimeout)
+	if triggerErr != nil && waitProvision {
+		// In sync mode a trigger that never started is a hard fail — we
+		// promised the caller a runnable env. In async mode we still
+		// continue so the rest of the seed completes; the user sees the
+		// "X <slug>" lines already printed.
+		return triggerErr
+	}
 
 	// ── Phase 3: Agents ──
 	if err := ctx.Err(); err != nil {
@@ -162,7 +169,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	// we block here so the other seed phases had a chance to run in parallel
 	// with the image build.
 	if waitProvision {
-		waitForProvisions(ctx, client, provisionTargets, provisionTimeout)
+		// Poll only the targets whose triggers actually succeeded — polling
+		// a crew whose trigger 429'd or errored would just time out idle.
+		if err := waitForProvisions(ctx, client, startedTargets, provisionTimeout); err != nil {
+			return err
+		}
 	} else if len(provisionTargets) > 0 {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintf(os.Stderr, "Provisioning %d crew(s) in the background.\n", len(provisionTargets))
@@ -230,68 +241,112 @@ func collectProvisionTargets(crewIDs map[string]string) []provisionTarget {
 // 429 rate-limit responses are retried with backoff so that a seed of N crews
 // can cope with a server-side concurrency cap smaller than N. The per-target
 // timeout bounds how long we're willing to keep retrying the trigger alone.
-func triggerProvisions(ctx context.Context, client *cli.Client, targets []provisionTarget, timeout time.Duration) {
+//
+// Returns the subset of targets whose triggers actually succeeded and an
+// aggregated error summarising the rest (nil if everything started). Callers
+// should only poll the returned targets — polling a crew that never started
+// would just time out on an idle status.
+func triggerProvisions(ctx context.Context, client *cli.Client, targets []provisionTarget, timeout time.Duration) ([]provisionTarget, error) {
 	if len(targets) == 0 {
-		return
+		return nil, nil
 	}
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Triggering crew provisioning (runs in background on the server)...")
 
+	type result struct {
+		t   provisionTarget
+		err error
+	}
+	results := make(chan result, len(targets))
 	var wg sync.WaitGroup
 	for _, t := range targets {
 		wg.Add(1)
 		go func(t provisionTarget) {
 			defer wg.Done()
-			if err := triggerProvisionOnce(ctx, client, t.id, timeout); err != nil {
+			err := triggerProvisionOnce(ctx, client, t.id, timeout)
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "  X %s: trigger failed: %v\n", t.slug, err)
-				return
+			} else {
+				fmt.Fprintf(os.Stderr, "  + %s: provisioning started\n", t.slug)
 			}
-			fmt.Fprintf(os.Stderr, "  + %s: provisioning started\n", t.slug)
+			results <- result{t: t, err: err}
 		}(t)
 	}
 	wg.Wait()
+	close(results)
+
+	var started []provisionTarget
+	var failedSlugs []string
+	for r := range results {
+		if r.err == nil {
+			started = append(started, r.t)
+			continue
+		}
+		failedSlugs = append(failedSlugs, r.t.slug)
+	}
+	sort.Slice(started, func(i, j int) bool { return started[i].slug < started[j].slug })
+	sort.Strings(failedSlugs)
+
+	if len(failedSlugs) == 0 {
+		return started, nil
+	}
+	return started, fmt.Errorf("provisioning trigger failed for %d/%d crews: %s",
+		len(failedSlugs), len(targets), strings.Join(failedSlugs, ", "))
 }
 
 // waitForProvisions polls each target's status until completion, failure, or
 // timeout. Used only when the caller explicitly asked for sync behavior
 // (--wait-provision or --smoke-test). Assumes triggerProvisions was already
-// called — we only poll here, we don't re-trigger.
-func waitForProvisions(ctx context.Context, client *cli.Client, targets []provisionTarget, timeout time.Duration) {
+// called — we only poll here, we don't re-trigger. Returns an aggregated
+// error listing the slugs that failed; nil if everything completed.
+func waitForProvisions(ctx context.Context, client *cli.Client, targets []provisionTarget, timeout time.Duration) error {
 	if len(targets) == 0 {
-		return
+		return nil
 	}
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Waiting for crew provisioning to finish...")
 
+	type result struct {
+		slug string
+		err  error
+	}
+	results := make(chan result, len(targets))
 	var wg sync.WaitGroup
-	errCh := make(chan error, len(targets))
 	for _, t := range targets {
 		wg.Add(1)
 		go func(t provisionTarget) {
 			defer wg.Done()
-			if err := pollProvisionStatus(ctx, client, t.id, timeout); err != nil {
+			err := pollProvisionStatus(ctx, client, t.id, timeout)
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "  X %s: %v\n", t.slug, err)
-				errCh <- fmt.Errorf("%s: %w", t.slug, err)
-				return
+			} else {
+				fmt.Fprintf(os.Stderr, "  + %s provisioned\n", t.slug)
 			}
-			fmt.Fprintf(os.Stderr, "  + %s provisioned\n", t.slug)
+			results <- result{slug: t.slug, err: err}
 		}(t)
 	}
 	wg.Wait()
-	close(errCh)
+	close(results)
 
-	failed := 0
-	for range errCh {
-		failed++
+	var failedSlugs []string
+	for r := range results {
+		if r.err != nil {
+			failedSlugs = append(failedSlugs, r.slug)
+		}
 	}
-	if failed > 0 {
-		fmt.Fprintf(os.Stderr,
-			"  WARNING: %d/%d crews failed to provision. Agents in those crews will not run.\n",
-			failed, len(targets),
-		)
-		fmt.Fprintf(os.Stderr,
-			"           Retry with: crewship crew provision <slug>\n")
+	sort.Strings(failedSlugs)
+
+	if len(failedSlugs) == 0 {
+		return nil
 	}
+	fmt.Fprintf(os.Stderr,
+		"  WARNING: %d/%d crews failed to provision. Agents in those crews will not run.\n",
+		len(failedSlugs), len(targets),
+	)
+	fmt.Fprintf(os.Stderr,
+		"           Retry with: crewship crew provision <slug>\n")
+	return fmt.Errorf("%d/%d crews failed to provision: %s",
+		len(failedSlugs), len(targets), strings.Join(failedSlugs, ", "))
 }
 
 // triggerProvisionOnce POSTs the provision-start endpoint once and returns
