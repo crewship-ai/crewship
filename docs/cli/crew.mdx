@@ -32,6 +32,12 @@ crewship crew <subcommand> [flags]
 | `disconnect` | Remove a crew connection |
 | `connections` | List all crew connections in the workspace |
 | `mcp` | Show or set MCP server configuration for a crew |
+| `config` | Manage runtime configuration (devcontainer, mise, runtime image) |
+| `provision` | Trigger devcontainer provisioning |
+| `provision status` | Check provisioning status |
+| `rebuild` | Invalidate the cache and re-provision the container |
+| `cache list` | List cached devcontainer images (`crewship-cache:*`) |
+| `cache prune` | Remove old or unreferenced cached images |
 
 ---
 
@@ -273,3 +279,119 @@ crewship crew mcp <crew-slug> --set ''
 <Note>
 `--set` and `--set-file` are mutually exclusive. The JSON must contain a `"mcpServers"` top-level object.
 </Note>
+
+---
+
+## `crewship crew config`
+
+Manage runtime configuration for a crew — the devcontainer `devcontainer.json`, mise tool config, and optional runtime base image override. Together these drive what `crewship crew provision` builds.
+
+```bash
+# Inspect current config
+crewship crew config <slug-or-id> --show
+
+# Emit as JSON (pipe into jq / stash in a secret store)
+crewship crew config <slug-or-id> --export
+
+# Upload a devcontainer.json
+crewship crew config <slug-or-id> --devcontainer ./devcontainer.json
+
+# Upload a mise config alongside the devcontainer
+crewship crew config <slug-or-id> --devcontainer ./devcontainer.json --mise ./.mise.toml.json
+
+# Pin a custom base image instead of the default runtime
+crewship crew config <slug-or-id> --runtime-image debian:bookworm-slim
+
+# Reset everything back to defaults
+crewship crew config <slug-or-id> --clear
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--show` | `bool` | `false` | Pretty-print the current runtime configuration. |
+| `--export` | `bool` | `false` | Export runtime configuration as JSON to stdout. |
+| `--clear` | `bool` | `false` | Clear all runtime configuration (sets to NULL in the DB). |
+| `--devcontainer` | `string` | | Path to a `devcontainer.json` file to upload. |
+| `--mise` | `string` | | Path to a mise config JSON file to upload. |
+| `--runtime-image` | `string` | | Custom base image reference (e.g. `debian:bookworm-slim`). |
+
+`--show`, `--export`, and `--clear` are read-or-reset operations; the three upload flags apply a new value. Combine upload flags in one invocation to update multiple fields atomically.
+
+After changing runtime configuration, run `crewship crew rebuild` to invalidate the container cache and apply the new build.
+
+---
+
+## `crewship crew provision`
+
+Trigger devcontainer provisioning for a crew. Kicks off the same build pipeline the server runs when an agent first starts in a fresh workspace.
+
+```bash
+crewship crew provision <slug-or-id>
+```
+
+### `crewship crew provision status`
+
+Check provisioning status for a crew. Prints the current status, cached image tag, config hash, and resolved devcontainer config. Exit code is always `0` — branch on the `Status` field (`ready`, `building`, `failed`, `not-provisioned`) in downstream scripts rather than relying on the exit code.
+
+```bash
+crewship crew provision status <slug-or-id>
+```
+
+---
+
+## `crewship crew rebuild`
+
+Invalidate the crew's cached devcontainer image and re-provision. Use after changing `crewship crew config` values — `provision` alone will reuse the cached layer keyed by the old config hash.
+
+```bash
+crewship crew rebuild <slug-or-id>
+```
+
+---
+
+## `crewship crew cache`
+
+Manage the devcontainer image cache shared across crews. Cache tags use the `crewship-cache:*` prefix and are keyed by a hash of `devcontainer.json` + mise config + runtime image, so two crews with identical configs share a single image.
+
+### `crewship crew cache list`
+
+```bash
+crewship crew cache list
+```
+
+**Output columns:** TAG, SIZE, CREATED, USED BY (comma-joined list of crew slugs that reference the image — empty when unreferenced).
+
+### `crewship crew cache prune`
+
+Remove old or unreferenced cached images. With no flags, defaults to `--older-than 30d` and leaves referenced images alone.
+
+```bash
+# Default — drop images older than 30 days, keep referenced ones
+crewship crew cache prune
+
+# Drop only images no crew currently points at
+crewship crew cache prune --unused
+
+# Tighter window
+crewship crew cache prune --older-than 7d
+
+# Scripted / CI
+crewship crew cache prune --older-than 7d --force
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--older-than` | `string` | `30d` _(when no flags set)_ | Remove images older than this duration (e.g. `30d`, `72h`). |
+| `--unused` | `bool` | `false` | Remove only images not referenced by any crew. |
+| `--force` | `bool` | `false` | Skip interactive confirmation. Required in non-TTY sessions. |
+
+<Warning>
+  Pruning a referenced image forces the next `crewship crew provision` on that crew to rebuild from scratch (seconds to minutes). `--force` bypasses the confirmation prompt — use it only in scripts.
+</Warning>
+
+## See also
+
+- [Guides → Devcontainers & Runtime Images](/guides/devcontainers) — end-to-end walkthrough of the provisioning pipeline.
+- [Configuration → Devcontainers](/configuration/devcontainers) — flat reference for config fields and env vars.
+- [`crewship features`](/cli/system#crewship-features) — browse the devcontainer feature catalog before editing `devcontainer.json`.
+- [`crewship runtimes`](/cli/system#crewship-runtimes) — browse the mise runtime catalog before editing the mise config.
