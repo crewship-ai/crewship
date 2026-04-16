@@ -331,7 +331,7 @@ crewship crew provision <slug-or-id>
 
 ### `crewship crew provision status`
 
-Check provisioning status for a crew. Polls the provision job; exits non-zero if the latest build failed.
+Check provisioning status for a crew. Prints the current status, cached image tag, config hash, and resolved devcontainer config. Exit code is always `0` — branch on the `Status` field (`ready`, `building`, `failed`, `not-provisioned`) in downstream scripts rather than relying on the exit code.
 
 ```bash
 crewship crew provision status <slug-or-id>
@@ -359,7 +359,7 @@ Manage the devcontainer image cache shared across crews. Cache tags use the `cre
 crewship crew cache list
 ```
 
-**Output columns:** TAG, SIZE, CREATED, REFERENCED_BY (number of crews), AGE.
+**Output columns:** TAG, SIZE, CREATED, USED BY (comma-joined list of crew slugs that reference the image — empty when unreferenced).
 
 ### `crewship crew cache prune`
 
