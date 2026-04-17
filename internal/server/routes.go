@@ -787,19 +787,31 @@ func (s *Server) ensureFileWatcher(crewID string) {
 // sanitizeMetadata filters agent event metadata to a safe allowlist before
 // broadcasting to workspace WebSocket clients, preventing leakage of tool
 // inputs, error details, or MCP configuration.
+// sanitizeMetadataAllowed lists the metadata keys that are safe to surface
+// on the "agent.log" WS broadcast. Hoisted to package level so the per-event
+// hot path doesn't rebuild the map literal on every AgentEvent.
+var sanitizeMetadataAllowed = map[string]struct{}{
+	"source":         {},
+	"summary":        {},
+	"duration":       {},
+	"duration_ms":    {},
+	"tool_name":      {},
+	"num_turns":      {},
+	"total_cost_usd": {},
+	"usage":          {},
+	"model":          {},
+	"session_id":     {},
+	"exit_code":      {},
+}
+
 func sanitizeMetadata(raw any) map[string]interface{} {
 	m, ok := raw.(map[string]interface{})
 	if !ok || m == nil {
 		return nil
 	}
-	allowed := map[string]bool{
-		"source": true, "summary": true, "duration": true, "duration_ms": true,
-		"tool_name": true, "num_turns": true, "total_cost_usd": true,
-		"usage": true, "model": true, "session_id": true, "exit_code": true,
-	}
 	safe := make(map[string]interface{}, len(m))
 	for k, v := range m {
-		if allowed[k] {
+		if _, ok := sanitizeMetadataAllowed[k]; ok {
 			safe[k] = v
 		}
 	}
