@@ -12,11 +12,50 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 const currentKeyVersion = "v1"
 
 var versionPattern = regexp.MustCompile(`^v\d+$`)
+
+// aeadCache caches AES-256-GCM AEADs keyed by the raw key bytes so Encrypt /
+// Decrypt don't rebuild the cipher + GCM precomputed tables on every call.
+// Keying on the raw bytes (not the version) means a caller rotating
+// ENCRYPTION_KEY at runtime transparently gets a fresh AEAD — callers that
+// re-use the same key benefit from the cache.
+var (
+	aeadCacheMu sync.RWMutex
+	aeadCache   = map[string]cipher.AEAD{}
+)
+
+func aeadForKey(key []byte) (cipher.AEAD, error) {
+	// Zero-alloc lookup: Go elides the string(b) conversion for map indexing.
+	aeadCacheMu.RLock()
+	if a, ok := aeadCache[string(key)]; ok {
+		aeadCacheMu.RUnlock()
+		return a, nil
+	}
+	aeadCacheMu.RUnlock()
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCMWithNonceSize(block, 16)
+	if err != nil {
+		return nil, fmt.Errorf("create gcm: %w", err)
+	}
+
+	aeadCacheMu.Lock()
+	if a, ok := aeadCache[string(key)]; ok {
+		aeadCacheMu.Unlock()
+		return a, nil
+	}
+	aeadCache[string(key)] = gcm
+	aeadCacheMu.Unlock()
+	return gcm, nil
+}
 
 func getEncryptionKey(version string) ([]byte, error) {
 	envVar := "ENCRYPTION_KEY"
@@ -44,14 +83,9 @@ func Encrypt(plaintext string) (string, error) {
 		return "", err
 	}
 
-	block, err := aes.NewCipher(key)
+	gcm, err := aeadForKey(key)
 	if err != nil {
-		return "", fmt.Errorf("create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCMWithNonceSize(block, 16)
-	if err != nil {
-		return "", fmt.Errorf("create gcm: %w", err)
+		return "", err
 	}
 
 	iv := make([]byte, 16)
@@ -112,14 +146,9 @@ func Decrypt(ciphertextStr string) (string, error) {
 	authTag := data[16:32]
 	ciphertext := data[32:]
 
-	block, err := aes.NewCipher(key)
+	gcm, err := aeadForKey(key)
 	if err != nil {
-		return "", fmt.Errorf("create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCMWithNonceSize(block, 16)
-	if err != nil {
-		return "", fmt.Errorf("create gcm: %w", err)
+		return "", err
 	}
 
 	// Reconstruct sealed data: ciphertext + authTag (Go GCM expects this format)
