@@ -7,7 +7,7 @@ import (
 )
 
 // BenchmarkTokenPoolSelect exercises TokenPool.SelectToken with a realistic
-// pool (3 workspaces × 3 providers × 3 connections = 9 active tokens). This
+// pool (3 workspaces × 3 providers × 3 connections = 27 active tokens). This
 // runs on every LLM request routed through the llmproxy server.
 func BenchmarkTokenPoolSelect(b *testing.B) {
 	pool := NewTokenPool(slog.New(slog.NewTextHandler(io.Discard, nil)))
