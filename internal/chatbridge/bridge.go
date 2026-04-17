@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -157,10 +158,23 @@ func devcontainerNeedsProvision(cfgJSON, miseJSON string) bool {
 
 func generateMsgID() string {
 	b := make([]byte, 8)
+	now := time.Now().UnixNano()
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("msg_%d", time.Now().UnixNano())
+		// Fallback format preserved: "msg_<unix-nano>" (no random suffix).
+		var buf [32]byte
+		out := append(buf[:0], "msg_"...)
+		out = strconv.AppendInt(out, now, 10)
+		return string(out)
 	}
-	return fmt.Sprintf("msg_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
+	// "msg_" + up-to-19-digit int64 + "_" + 16 hex chars ≤ 40 bytes.
+	// Direct byte-append avoids the fmt.Sprintf + hex.EncodeToString
+	// intermediate string allocations of the previous implementation.
+	var buf [48]byte
+	out := append(buf[:0], "msg_"...)
+	out = strconv.AppendInt(out, now, 10)
+	out = append(out, '_')
+	out = hex.AppendEncode(out, b)
+	return string(out)
 }
 
 // HandleChatMessage processes an incoming chat message by resolving the session,
