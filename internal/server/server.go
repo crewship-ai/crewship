@@ -18,9 +18,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/fileserver"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/presence"
+	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
@@ -60,12 +64,13 @@ type Server struct {
 	apiRouter       *goapi.Router
 	fileWatcher     *fileserver.Watcher
 	watchedCrews    sync.Map
-	statsCollector  *StatsCollector
-	terminalHandler *terminal.Handler
-	journalWriter   *journal.Writer
-	startedAt       time.Time
-	runCtx          context.Context
-	runCancel       context.CancelFunc
+	statsCollector    *StatsCollector
+	terminalHandler   *terminal.Handler
+	journalWriter     *journal.Writer
+	telemetryShutdown func()
+	startedAt         time.Time
+	runCtx            context.Context
+	runCancel         context.CancelFunc
 }
 
 // Deps holds the external dependencies injected into the server at startup.
@@ -267,6 +272,23 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// entries before the process exits.
 		s.journalWriter = journal.NewWriter(deps.DB, logger, journal.WriterOptions{})
 		opts = append(opts, goapi.WithJournal(s.journalWriter))
+
+		// OTel GenAI telemetry. Endpoint defaults to OTEL_EXPORTER_OTLP_ENDPOINT
+		// and silently degrades to a noop tracer when unset so local dev
+		// runs without an observability stack keep working.
+		otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+		if otelShutdown, err := telemetry.Init(context.Background(), otelEndpoint, "crewshipd"); err != nil {
+			logger.Warn("telemetry init failed, falling back to noop tracer", "err", err)
+		} else {
+			s.telemetryShutdown = otelShutdown
+			// Wire the current span's trace+span ID into every journal
+			// entry emit. No-op when the tracer is noop, so entries just
+			// get empty trace IDs (backwards compatible).
+			telemetry.RegisterJournalResolver()
+			if otelEndpoint != "" {
+				logger.Info("OTel GenAI telemetry enabled", "endpoint", otelEndpoint)
+			}
+		}
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithInternalBaseURL(ipcBase))
@@ -512,6 +534,41 @@ func (s *Server) Start(ctx context.Context) error {
 		go s.credMonitor.Run(ctx)
 	}
 
+	// Crew Journal background workers. Each is a small goroutine that
+	// only runs when s.db and the journal writer are live — early init
+	// paths that come up without DB (tests, --dry-run) skip silently.
+	if s.db != nil && s.journalWriter != nil {
+		// Harbor Master timeout sweeper: every 30s, flip past-due pending
+		// approvals to 'timeout' status so blocked agents unstick
+		// deterministically even if the UI is down.
+		go harbormaster.StartTimeoutSweeper(ctx, s.db, s.journalWriter, 30*time.Second)
+
+		// Watch Roster offline sweeper: every 60s, flip agents idle >5min
+		// to offline. The transition itself emits agent.status_change so
+		// the journal records the timeout rather than silent disappearance.
+		go func() {
+			t := time.NewTicker(60 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if err := presence.SweepOffline(ctx, s.db, s.journalWriter, 5*time.Minute); err != nil {
+						s.logger.Warn("presence sweep failed", "err", err)
+					}
+				}
+			}
+		}()
+
+		// Memory consolidation + compaction workers run on their own
+		// schedules (6h consolidation, daily 03:00 UTC compaction). The
+		// SummarizerClient stays nil here — consolidation is skipped with
+		// a log line until an LLM provider is wired. Compaction runs
+		// regardless; it doesn't need an LLM.
+		consolidate.StartBackground(ctx, s.db, s.journalWriter, nil, consolidate.RunnerOptions{})
+	}
+
 	select {
 	case err := <-errCh:
 		cancel()
@@ -560,6 +617,11 @@ func (s *Server) Shutdown() error {
 		if err := s.journalWriter.Close(); err != nil {
 			s.logger.Error("journal writer close error", "error", err)
 		}
+	}
+	// Flush any OTel spans still buffered in the exporter before process
+	// exit. Noop tracer's shutdown is a no-op so this is always safe.
+	if s.telemetryShutdown != nil {
+		s.telemetryShutdown()
 	}
 	// fileWatcher goroutines are closed via context cancellation (runCancel above);
 	// explicit Close() is a no-op but signals intent.
