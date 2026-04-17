@@ -213,7 +213,11 @@ export default function CrowsNestCrewPage() {
     )
   }
 
-  const sseConnected = streamStatus === "connected"
+  // Treat polling the same as connected — data is still live-tailing to
+  // the client, just via fallback polling instead of SSE. Users reading
+  // "IDLE" when entries are actually arriving is more confusing than the
+  // subtle difference in transport.
+  const sseConnected = streamStatus === "connected" || streamStatus === "polling"
   const crewSlug = crew?.slug ?? params.crewId.slice(0, 6)
 
   return (
