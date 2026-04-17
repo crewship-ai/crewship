@@ -2,7 +2,6 @@ package api
 
 import (
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
