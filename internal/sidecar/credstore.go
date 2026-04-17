@@ -1,7 +1,6 @@
 package sidecar
 
 import (
-	"sort"
 	"sync"
 )
 
@@ -54,40 +53,46 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	var candidates []int
-	for i, c := range cs.creds {
-		if c.Provider == provider {
-			candidates = append(candidates, i)
+	// Pass 1: find the best (lowest-numeric) Priority for this provider and
+	// count how many creds sit in that top tier. Done in a single scan instead
+	// of building an intermediate `candidates` slice.
+	bestPriority := 0
+	topCount := 0
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.Provider != provider {
+			continue
+		}
+		if topCount == 0 || c.Priority < bestPriority {
+			bestPriority = c.Priority
+			topCount = 1
+		} else if c.Priority == bestPriority {
+			topCount++
 		}
 	}
-	if len(candidates) == 0 {
+	if topCount == 0 {
 		return nil
 	}
 
-	// Find the highest priority (lowest numeric value) among candidates
-	bestPriority := cs.creds[candidates[0]].Priority
-	for _, idx := range candidates[1:] {
-		if cs.creds[idx].Priority < bestPriority {
-			bestPriority = cs.creds[idx].Priority
+	target := cs.idx[provider] % topCount
+	cs.idx[provider] = target + 1
+
+	// Pass 2: iterate again and return the Nth match in the top tier. Scanning
+	// in source-slice order is naturally stable (ascending original index) and
+	// matches the previous `sort.Ints(topTier)` ordering exactly.
+	seen := 0
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.Provider != provider || c.Priority != bestPriority {
+			continue
 		}
-	}
-
-	// Filter to only the top-priority tier
-	var topTier []int
-	for _, idx := range candidates {
-		if cs.creds[idx].Priority == bestPriority {
-			topTier = append(topTier, idx)
+		if seen == target {
+			result := *c
+			return &result
 		}
+		seen++
 	}
-
-	// Stable ordering within tier for deterministic round-robin
-	sort.Ints(topTier)
-
-	rrIdx := cs.idx[provider] % len(topTier)
-	cs.idx[provider] = rrIdx + 1
-
-	result := cs.creds[topTier[rrIdx]]
-	return &result
+	return nil // unreachable: topCount > 0 guarantees a hit above.
 }
 
 // Remove removes a credential by ID (e.g. when revoked).
