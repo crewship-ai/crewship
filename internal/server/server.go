@@ -18,8 +18,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/consolidate"
+	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/fileserver"
+	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/presence"
+	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
@@ -59,11 +65,13 @@ type Server struct {
 	apiRouter       *goapi.Router
 	fileWatcher     *fileserver.Watcher
 	watchedCrews    sync.Map
-	statsCollector  *StatsCollector
-	terminalHandler *terminal.Handler
-	startedAt       time.Time
-	runCtx          context.Context
-	runCancel       context.CancelFunc
+	statsCollector    *StatsCollector
+	terminalHandler   *terminal.Handler
+	journalWriter     *journal.Writer
+	telemetryShutdown func()
+	startedAt         time.Time
+	runCtx            context.Context
+	runCancel         context.CancelFunc
 }
 
 // Deps holds the external dependencies injected into the server at startup.
@@ -259,6 +267,63 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if deps.License != nil {
 			opts = append(opts, goapi.WithLicense(deps.License))
 		}
+		// Crew Journal emitter lives for the lifetime of the server; the
+		// batched writer owns a goroutine and a buffered channel, so we
+		// stash it on Server so Shutdown can Close it and flush pending
+		// entries before the process exits.
+		s.journalWriter = journal.NewWriter(deps.DB, logger, journal.WriterOptions{})
+		opts = append(opts, goapi.WithJournal(s.journalWriter))
+
+		// Wire the journal into the orchestrator so Docker exec, network,
+		// and filesystem hook points inside the orchestrator can emit
+		// Crow's Nest entries with full scope (workspace / crew / agent /
+		// mission). The adapter bridges the orchestrator's narrow
+		// JournalEmitter interface to the full journal.Emitter so the
+		// orchestrator package stays independent of internal/journal.
+		orch.SetJournal(newOrchestratorJournalAdapter(s.journalWriter))
+
+		// Wire the journal into the stats collector so Crow's Nest's
+		// resource sparklines and replay view get container.metrics rows
+		// every 30s (or sooner on >10pp CPU/RAM swings). Live WebSocket
+		// broadcast is unaffected — this is purely the persistence layer.
+		if s.statsCollector != nil {
+			s.statsCollector.SetJournal(s.journalWriter)
+		}
+
+		// Wire the three orchestrator integration points (hooks dispatch,
+		// approval gate, episodic recall) now that the journal is
+		// available. Each adapter is small and lives in
+		// orchestrator_adapters.go. Episodic recall needs an Ollama
+		// embedder; if Keeper Ollama isn't configured we pass nil so
+		// recall returns empty silently rather than blocking every run
+		// on an unreachable service.
+		orch.SetHooksDispatcher(newHooksAdapter(deps.DB, s.journalWriter))
+		orch.SetApprovalGate(newApprovalGateAdapter(deps.DB, s.journalWriter))
+		var embedder episodic.Embedder
+		if cfg.Keeper.OllamaURL != "" {
+			// nomic-embed-text is the expected model on the Ollama host
+			// per episodic/embedder.go defaults. Workspaces can override
+			// via future config; for now use the same base URL as Keeper.
+			embedder = episodic.NewOllamaEmbedder(cfg.Keeper.OllamaURL)
+		}
+		orch.SetEpisodicRecall(newEpisodicRecallAdapter(deps.DB, embedder))
+
+		// OTel GenAI telemetry. Endpoint defaults to OTEL_EXPORTER_OTLP_ENDPOINT
+		// and silently degrades to a noop tracer when unset so local dev
+		// runs without an observability stack keep working.
+		otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+		if otelShutdown, err := telemetry.Init(context.Background(), otelEndpoint, "crewshipd"); err != nil {
+			logger.Warn("telemetry init failed, falling back to noop tracer", "err", err)
+		} else {
+			s.telemetryShutdown = otelShutdown
+			// Wire the current span's trace+span ID into every journal
+			// entry emit. No-op when the tracer is noop, so entries just
+			// get empty trace IDs (backwards compatible).
+			telemetry.RegisterJournalResolver()
+			if otelEndpoint != "" {
+				logger.Info("OTel GenAI telemetry enabled", "endpoint", otelEndpoint)
+			}
+		}
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithInternalBaseURL(ipcBase))
@@ -320,8 +385,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
 		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))
 		if cfg.Keeper.Enabled {
-			provider := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
-			gk := gatekeeper.New(provider, cfg.Keeper.Model, logger)
+			// Wrap the Ollama provider with the full middleware stack so
+			// gatekeeper LLM calls are cost-tracked, guardrail-scanned,
+			// and trace-instrumented. Local Ollama has zero dollar cost
+			// but the paymaster ledger still records token counts, which
+			// feeds the cache-hit metric and per-agent usage visibility.
+			base := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
+			wrapped := llm.Middleware(base, s.journalWriter, deps.DB)
+			gk := gatekeeper.New(wrapped, cfg.Keeper.Model, logger)
 			opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 			logger.Info("keeper gatekeeper enabled", "ollama_url", cfg.Keeper.OllamaURL, "model", cfg.Keeper.Model)
 		} else {
@@ -504,6 +575,63 @@ func (s *Server) Start(ctx context.Context) error {
 		go s.credMonitor.Run(ctx)
 	}
 
+	// Crew Journal background workers. Each is a small goroutine that
+	// only runs when s.db and the journal writer are live — early init
+	// paths that come up without DB (tests, --dry-run) skip silently.
+	if s.db != nil && s.journalWriter != nil {
+		// Harbor Master timeout sweeper: every 30s, flip past-due pending
+		// approvals to 'timeout' status so blocked agents unstick
+		// deterministically even if the UI is down.
+		go harbormaster.StartTimeoutSweeper(ctx, s.db, s.journalWriter, 30*time.Second)
+
+		// Crow's Nest port scanner: every 10s, diff the ACTIVE set of
+		// port_exposures rows and emit network.port_opened /
+		// network.port_closed journal entries for each change. See
+		// port_exposure_scanner.go for why we poll instead of subscribing
+		// to Docker events.
+		go runPortExposureScanner(ctx, s.db, s.journalWriter, s.logger)
+
+		// Watch Roster offline sweeper: every 60s, flip agents idle >5min
+		// to offline. The transition itself emits agent.status_change so
+		// the journal records the timeout rather than silent disappearance.
+		go func() {
+			t := time.NewTicker(60 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if err := presence.SweepOffline(ctx, s.db, s.journalWriter, 5*time.Minute); err != nil {
+						s.logger.Warn("presence sweep failed", "err", err)
+					}
+				}
+			}
+		}()
+
+		// Memory consolidation + compaction workers run on their own
+		// schedules (6h consolidation, daily 03:00 UTC compaction).
+		// Consolidation needs an LLM to extract semantic rules from the
+		// journal; we use the same local Ollama instance Keeper uses so
+		// no cloud credentials are required for the local-first path.
+		// If Ollama isn't configured, pass nil and consolidation skips
+		// silently — compaction still runs, it doesn't need an LLM.
+		var summarizer consolidate.SummarizerClient
+		if s.cfg.Keeper.OllamaURL != "" && s.cfg.Keeper.Model != "" {
+			// Reuse the middleware-wrapped provider so consolidation LLM
+			// calls are cost-accounted + trace-instrumented like every
+			// other LLM call in the platform. Model stays small for the
+			// short rule-extraction prompt; no gain from Sonnet-class here.
+			summBase := llm.NewOllama(s.cfg.Keeper.OllamaURL, s.cfg.Keeper.Model)
+			summWrapped := llm.Middleware(summBase, s.journalWriter, s.db)
+			summarizer = newLLMSummarizer(summWrapped, s.cfg.Keeper.Model)
+			s.logger.Info("memory consolidation enabled", "model", s.cfg.Keeper.Model)
+		} else {
+			s.logger.Info("memory consolidation disabled (set KEEPER_OLLAMA_URL + KEEPER_MODEL to enable)")
+		}
+		consolidate.StartBackground(ctx, s.db, s.journalWriter, summarizer, consolidate.RunnerOptions{})
+	}
+
 	select {
 	case err := <-errCh:
 		cancel()
@@ -544,6 +672,20 @@ func (s *Server) Shutdown() error {
 
 	s.logWriter.Close()
 	s.convStore.Close()
+	// Close the journal writer after HTTP shutdown so any handlers still
+	// draining requests have flushed their emits. Close drains the
+	// buffered channel synchronously, so entries that made it in before
+	// shutdown hit the DB.
+	if s.journalWriter != nil {
+		if err := s.journalWriter.Close(); err != nil {
+			s.logger.Error("journal writer close error", "error", err)
+		}
+	}
+	// Flush any OTel spans still buffered in the exporter before process
+	// exit. Noop tracer's shutdown is a no-op so this is always safe.
+	if s.telemetryShutdown != nil {
+		s.telemetryShutdown()
+	}
 	// fileWatcher goroutines are closed via context cancellation (runCancel above);
 	// explicit Close() is a no-op but signals intent.
 	if s.fileWatcher != nil {

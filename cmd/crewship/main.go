@@ -70,6 +70,8 @@ func init() {
 	rootCmd.AddCommand(integrationCmd)
 	rootCmd.AddCommand(missionCmd)
 	rootCmd.AddCommand(activityCmd)
+	rootCmd.AddCommand(journalCmd)
+	rootCmd.AddCommand(paymasterCmd)
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(tokenCmd)

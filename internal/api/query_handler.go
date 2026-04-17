@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -24,12 +25,16 @@ type QueryHandler struct {
 	hub           *ws.Hub
 	logger        *slog.Logger
 	internalToken string
+	journal       journal.Emitter
 
 	escalationMu      sync.Mutex
 	escalationWaiters map[string]chan escalationResult
 }
 
 // NewQueryHandler creates a QueryHandler with the given orchestrator, hub, and internal token.
+// Callers that want journal emits wire them after construction with SetJournal.
+// The default is a no-op emitter so tests that don't care about journal
+// integration continue to work without touching every test call site.
 func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *QueryHandler {
 	return &QueryHandler{
 		db:                db,
@@ -37,8 +42,33 @@ func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, i
 		hub:               hub,
 		logger:            logger,
 		internalToken:     internalToken,
+		journal:           noopEmitter{},
 		escalationWaiters: make(map[string]chan escalationResult),
 	}
+}
+
+// SetJournal wires a journal emitter. nil is accepted and maps to the
+// no-op so callers don't have to branch on whether the server wired one.
+func (h *QueryHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
+}
+
+// truncate clips s to n runes, appending "…" when cut. Used for journal
+// summaries which must fit a single UI line — the raw content stays in
+// payload for anyone who wants it.
+func truncate(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }
 
 type createQueryBody struct {
@@ -124,6 +154,32 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Dual-write into the Crew Journal. The old peer_conversations table
+	// stays the source of truth for existing UI queries; the journal is
+	// the new canonical stream once handlers migrate. State=running is
+	// flagged so downstream consumers know a follow-up completed/failed
+	// entry is coming on the same thread_id.
+	_, _ = h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     fromAgentID,
+		Type:        journal.EntryPeerConversation,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorAgent,
+		ActorID:     fromAgentID,
+		Summary:     fmt.Sprintf("%s asked %s: %s", body.FromSlug, body.TargetSlug, truncate(body.Question, 140)),
+		Payload: map[string]any{
+			"message_type": "question",
+			"question":     body.Question,
+			"from_slug":    body.FromSlug,
+			"target_slug":  body.TargetSlug,
+			"target_id":    target.ID,
+			"state":        "running",
+			"thread_id":    convID,
+		},
+		Refs: map[string]any{"peer_conversation_id": convID, "chat_id": body.ChatID},
+	})
+
 	// Create agent_runs record for dashboard visibility
 	runID := generateCUID()
 	metadataMap := map[string]string{
@@ -158,7 +214,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if h.orch == nil {
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available", startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", "orchestrator not available", startTime)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "orchestrator not available"})
 		return
 	}
@@ -167,7 +223,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	containerID, err := h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
 			fmt.Sprintf("container error: %v", err), startTime)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container error"})
 		return
@@ -218,7 +274,7 @@ Question: %s`, body.FromSlug, body.Question)
 	guardRelease, guardErr := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID)
 	if guardErr != nil {
 		h.logger.Warn("peer query refused — backup in progress", "query_id", convID, "workspace_id", body.WorkspaceID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", guardErr.Error(), startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", guardErr.Error(), startTime)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": guardErr.Error(), "query_id": convID})
 		return
 	}
@@ -226,7 +282,7 @@ Question: %s`, body.FromSlug, body.Question)
 
 	if err := h.orch.RunAgentForAssignment(r.Context(), req, handler); err != nil {
 		h.logger.Error("peer query execution failed", "error", err, "query_id", convID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
 			fmt.Sprintf("execution error: %v", err), startTime)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":    "query execution failed",
@@ -241,7 +297,7 @@ Question: %s`, body.FromSlug, body.Question)
 		result = result[:10000] + "...(truncated)"
 	}
 
-	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, result, "", startTime)
+	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, result, "", startTime)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query_id": convID,
@@ -254,9 +310,14 @@ Question: %s`, body.FromSlug, body.Question)
 }
 
 // finishQuery updates peer_conversations and agent_runs records.
+// crewID + targetAgentID are threaded through so the closing answer
+// journal entry carries the same scope as the opening question entry —
+// without them, crew/agent-filtered journal views see the running row
+// but never the completion, which makes the UI look like every peer
+// query is permanently running.
 func (h *QueryHandler) finishQuery(
 	ctx context.Context,
-	convID, runID, chatID, fromSlug, targetSlug, workspaceID, result, errMsg string,
+	convID, runID, chatID, fromSlug, targetSlug, workspaceID, crewID, targetAgentID, result, errMsg string,
 	startTime time.Time,
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -277,6 +338,39 @@ func (h *QueryHandler) finishQuery(
 		status, responseVal, durationMs, now, convID); err != nil {
 		h.logger.Error("update peer_conversation", "error", err, "id", convID)
 	}
+
+	// Emit the answer entry on the same thread. Severity elevates to
+	// error when the call failed so the journal filters surface failed
+	// peer queries without having to read payload.state on every row.
+	answerSev := journal.SeverityInfo
+	if errMsg != "" {
+		answerSev = journal.SeverityError
+	}
+	summary := fmt.Sprintf("%s → %s: %s (%dms)", fromSlug, targetSlug, strings.ToLower(status), durationMs)
+	if errMsg != "" {
+		summary = fmt.Sprintf("%s → %s: FAILED (%s)", fromSlug, targetSlug, truncate(errMsg, 120))
+	}
+	_, _ = h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		AgentID:     targetAgentID,
+		Type:        journal.EntryPeerConversation,
+		Severity:    answerSev,
+		ActorType:   journal.ActorAgent,
+		ActorID:     targetAgentID,
+		Summary:     summary,
+		Payload: map[string]any{
+			"message_type": "answer",
+			"response":     result,
+			"error":        errMsg,
+			"from_slug":    fromSlug,
+			"target_slug":  targetSlug,
+			"state":        strings.ToLower(status),
+			"duration_ms":  durationMs,
+			"thread_id":    convID,
+		},
+		Refs: map[string]any{"peer_conversation_id": convID, "chat_id": chatID},
+	})
 
 	// Update agent_runs
 	if runID != "" {

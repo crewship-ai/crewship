@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
 
@@ -90,6 +91,18 @@ type CaptainHandler struct {
 	logger        *slog.Logger
 	provider      llm.Provider
 	missionEngine MissionStarter
+	journal       journal.Emitter
+}
+
+// SetJournal wires the emitter so Captain's on-demand LLM construction
+// can wrap providers with the paymaster+lookout+telemetry stack. Called
+// by the router; tests can leave the nil default in which case the
+// middleware wrap falls back to a no-op emitter and behaves transparently.
+func (h *CaptainHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		j = noopEmitter{}
+	}
+	h.journal = j
 }
 
 // NewCaptainHandler creates a CaptainHandler with the given database and logger.
@@ -458,9 +471,9 @@ func (h *CaptainHandler) getProvider(r *http.Request, wsID string) (llm.Provider
 		}
 		switch c.Provider {
 		case "ANTHROPIC":
-			return llm.NewAnthropic(plain), nil
+			return llm.Middleware(llm.NewAnthropic(plain), h.journal, h.db), nil
 		case "OPENAI":
-			return llm.NewOpenAI(plain), nil
+			return llm.Middleware(llm.NewOpenAI(plain), h.journal, h.db), nil
 		}
 	}
 	if err := rows.Err(); err != nil {

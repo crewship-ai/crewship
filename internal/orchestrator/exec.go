@@ -417,6 +417,18 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 
 	useStreamJSON := req.CLIAdapter == "CLAUDE_CODE"
 
+	// Crow's Nest: capture the first 16 KB of raw stdout+stderr so the live
+	// terminal panel can show a replayable snapshot. We deliberately do NOT
+	// emit per-line — at 50 lines/sec that would flood the journal. The live
+	// WebSocket stream (handler → wsHub) already carries real-time output to
+	// the UI; this journal entry is the persistence + replay layer, so a
+	// single end-of-stream summary is the right grain. totalBytes records
+	// the full byte count (un-truncated) so consumers know how much was
+	// dropped from the snapshot.
+	const captureCap = 16 * 1024 // 16 KB cap for in-memory buffer
+	captureBuf := make([]byte, 0, captureCap)
+	var totalBytes int64
+
 	for scanner.Scan() {
 		// scanner.Bytes() aliases the scanner's internal buffer, so it's
 		// valid only until the next Scan(). handleStreamJSONLine consumes
@@ -425,6 +437,22 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
+		}
+
+		// Accumulate for the end-of-stream journal emit. Once the buffer is
+		// full we still count totalBytes so the summary reflects the real
+		// volume even though the sample is capped.
+		totalBytes += int64(len(line)) + 1 // +1 for the newline the scanner strips
+		if len(captureBuf) < captureCap {
+			remaining := captureCap - len(captureBuf)
+			if len(line) <= remaining {
+				captureBuf = append(captureBuf, line...)
+				if len(captureBuf) < captureCap {
+					captureBuf = append(captureBuf, '\n')
+				}
+			} else {
+				captureBuf = append(captureBuf, line[:remaining]...)
+			}
 		}
 
 		if useStreamJSON {
@@ -443,6 +471,39 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
 		o.logger.Debug("scanner error", "error", err, "agent_id", req.AgentID)
 	}
+
+	// End-of-stream Crow's Nest emit. We run unconditionally (even when
+	// totalBytes is 0) because an empty-output run is still interesting for
+	// debugging — the UI can render "agent produced no stdout" explicitly
+	// instead of showing a hanging block. Use a fresh context in case the
+	// request context was cancelled (user pressed stop); we still want the
+	// capture recorded for post-mortem. ExecID lives on the provider
+	// ExecResult so we record it in the payload for correlation with the
+	// exec.command end event.
+	emitCtx := ctx
+	if emitCtx.Err() != nil {
+		emitCtx = context.Background()
+	}
+	payload := map[string]any{
+		"output":      string(captureBuf),
+		"total_bytes": totalBytes,
+		"truncated":   totalBytes > int64(len(captureBuf)),
+	}
+	if result != nil && result.ExecID != "" {
+		payload["exec_id"] = result.ExecID
+	}
+	_, _ = o.getJournal().Emit(emitCtx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "exec.output_chunk",
+		Severity:    "info",
+		ActorType:   "sidecar",
+		ActorID:     req.AgentID,
+		Summary:     fmt.Sprintf("%s stdout+stderr capture (%d bytes)", req.AgentSlug, totalBytes),
+		Payload:     payload,
+		Refs:        map[string]any{"chat_id": req.ChatID},
+	})
 }
 
 // emitToolResultBlock sends a tool_result event for the given content block.
