@@ -247,9 +247,33 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 		conds = append(conds, "mission_id = ?")
 		args = append(args, q.MissionID)
 	}
+	// Mirror List's Type / Severity / Until filters so Count matches
+	// the result set you'd actually paginate through. Previously Count
+	// ignored these, so filtered UI views would show a total that
+	// didn't line up with the rows the user could see.
+	if len(q.Types) > 0 {
+		placeholders := strings.Repeat("?,", len(q.Types))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "entry_type IN ("+placeholders+")")
+		for _, t := range q.Types {
+			args = append(args, string(t))
+		}
+	}
+	if len(q.Severities) > 0 {
+		placeholders := strings.Repeat("?,", len(q.Severities))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "severity IN ("+placeholders+")")
+		for _, s := range q.Severities {
+			args = append(args, string(s))
+		}
+	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "ts >= ?")
 		args = append(args, q.Since.UTC().Format(time.RFC3339Nano))
+	}
+	if !q.Until.IsZero() {
+		conds = append(conds, "ts <= ?")
+		args = append(args, q.Until.UTC().Format(time.RFC3339Nano))
 	}
 	query := `SELECT COUNT(*) FROM journal_entries WHERE ` + strings.Join(conds, " AND ")
 	var n int64

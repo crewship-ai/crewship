@@ -126,7 +126,14 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Checkpoint, 
 
 // List returns checkpoints for a mission, newest first. limit <= 0 picks
 // a sane default (50); the handler caps it before this runs.
-func List(ctx context.Context, db *sql.DB, missionID string, limit int) ([]Checkpoint, error) {
+// workspaceID is enforced at the query layer so a caller who knows
+// another workspace's mission ID can't read its checkpoints —
+// cross-tenant risk closed at the store, not just at the handler
+// (defence in depth since the handler already pre-checks mission scope).
+func List(ctx context.Context, db *sql.DB, workspaceID, missionID string, limit int) ([]Checkpoint, error) {
+	if workspaceID == "" {
+		return nil, errors.New("cartographer: workspace_id required")
+	}
 	if missionID == "" {
 		return nil, errors.New("cartographer: mission_id required")
 	}
@@ -135,9 +142,9 @@ func List(ctx context.Context, db *sql.DB, missionID string, limit int) ([]Check
 	}
 	rows, err := db.QueryContext(ctx, `SELECT
 		id, workspace_id, crew_id, mission_id, label, journal_cursor, state_snapshot, fork_of, created_by, created_at
-		FROM checkpoints WHERE mission_id = ?
+		FROM checkpoints WHERE workspace_id = ? AND mission_id = ?
 		ORDER BY created_at DESC, id DESC
-		LIMIT ?`, missionID, limit)
+		LIMIT ?`, workspaceID, missionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("cartographer: list: %w", err)
 	}

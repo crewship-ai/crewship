@@ -152,6 +152,13 @@ func (w *Writer) Flush(ctx context.Context) error {
 
 // Close stops the writer goroutine and flushes remaining entries. Safe to
 // call multiple times.
+// Close signals the worker goroutine to drain and exit. Does NOT close
+// w.queue — a concurrent Emit that already passed the `<-w.closed` check
+// but hasn't reached `w.queue <- e` would panic with send-on-closed-
+// channel. The worker treats `<-w.closed` as "drain and return", and
+// anything queued after the close signal is still drainable because
+// the channel stays open; any Emit arriving after the signal takes the
+// inline persistOne path via the `case <-w.closed:` branch in Emit.
 func (w *Writer) Close() error {
 	w.closeMu.Lock()
 	select {
@@ -162,7 +169,6 @@ func (w *Writer) Close() error {
 		close(w.closed)
 	}
 	w.closeMu.Unlock()
-	close(w.queue)
 	w.wg.Wait()
 	return nil
 }
@@ -199,6 +205,23 @@ func (w *Writer) run() {
 		case req := <-w.done:
 			drain()
 			close(req.ack)
+		case <-w.closed:
+			// Shutdown signal from Close(). Drain anything already
+			// buffered in the channel so Close->Wait doesn't race
+			// with in-flight writers, then exit. Inline persistOne
+			// handles any new Emit that lands after this point.
+			for {
+				select {
+				case e := <-w.queue:
+					batch = append(batch, e)
+					if len(batch) >= w.flushN {
+						drain()
+					}
+				default:
+					drain()
+					return
+				}
+			}
 		}
 	}
 }

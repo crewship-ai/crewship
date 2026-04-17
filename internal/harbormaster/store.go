@@ -206,15 +206,21 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 // requested approval terminates / aborts before a human responds. Cancel
 // is a no-op on already-resolved requests and returns ErrNotPending so
 // the caller can log loudly if that wasn't expected.
-func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, id, reason string) error {
+// Cancel withdraws an approval on behalf of the requesting agent.
+// workspaceID scope is load-bearing for tenant isolation — the same class
+// of bug Decide had before round 2. Without it a caller who learned
+// another workspace's approval ID could cancel it cross-tenant, and the
+// ErrNotPending vs ErrNotFound distinction would leak whether that
+// foreign ID existed at all.
+func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id, reason string) error {
 	if id == "" {
 		return ErrNotFound
 	}
 	now := time.Now().UTC()
 	const updateSQL = `UPDATE approvals_queue
 		SET status = 'cancelled', decided_at = ?, decision_comment = ?
-		WHERE id = ? AND status = 'pending'`
-	res, err := db.ExecContext(ctx, updateSQL, now.Format(timeFmt), nullable(reason), id)
+		WHERE id = ? AND workspace_id = ? AND status = 'pending'`
+	res, err := db.ExecContext(ctx, updateSQL, now.Format(timeFmt), nullable(reason), id, workspaceID)
 	if err != nil {
 		return fmt.Errorf("harbormaster: cancel: %w", err)
 	}
@@ -223,7 +229,7 @@ func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, id, reason strin
 		return fmt.Errorf("harbormaster: rows affected: %w", err)
 	}
 	if n == 0 {
-		row, err := Get(ctx, db, "", id)
+		row, err := Get(ctx, db, workspaceID, id)
 		if err != nil {
 			return err
 		}
@@ -233,7 +239,7 @@ func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, id, reason strin
 		return ErrNotPending
 	}
 	if j != nil {
-		row, _ := Get(ctx, db, "", id)
+		row, _ := Get(ctx, db, workspaceID, id)
 		if row != nil {
 			_, _ = j.Emit(ctx, journal.Entry{
 				WorkspaceID: row.WorkspaceID,
@@ -302,20 +308,35 @@ func SweepTimeouts(ctx context.Context, db *sql.DB, j journal.Emitter) (int, err
 		return 0, nil
 	}
 
-	const updateSQL = `UPDATE approvals_queue
-		SET status = 'timeout', decided_at = ?
-		WHERE status = 'pending' AND timeout_at IS NOT NULL AND timeout_at <= ?`
-	res, err := db.ExecContext(ctx, updateSQL, now, now)
-	if err != nil {
-		return 0, fmt.Errorf("harbormaster: sweep update: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("harbormaster: sweep rows: %w", err)
+	// Per-row UPDATE instead of a bulk UPDATE so we can tell exactly
+	// which rows actually flipped. If an approve/deny raced between
+	// the SELECT above and the UPDATE, the row stayed resolved — we
+	// must NOT emit EntryApprovalTimeout for it or the journal
+	// disagrees with the canonical status. Previously the bulk
+	// UPDATE + unconditional emit loop corrupted the audit trail in
+	// exactly that race window.
+	var n int64
+	flipped := make([]stale, 0, len(pending))
+	for _, s := range pending {
+		res, err := db.ExecContext(ctx, `UPDATE approvals_queue
+			SET status = 'timeout', decided_at = ?
+			WHERE id = ? AND status = 'pending' AND timeout_at IS NOT NULL AND timeout_at <= ?`,
+			now, s.id, now)
+		if err != nil {
+			return 0, fmt.Errorf("harbormaster: sweep update %s: %w", s.id, err)
+		}
+		rowsAffected, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("harbormaster: sweep rows %s: %w", s.id, err)
+		}
+		if rowsAffected == 1 {
+			n++
+			flipped = append(flipped, s)
+		}
 	}
 
 	if j != nil {
-		for _, s := range pending {
+		for _, s := range flipped {
 			_, _ = j.Emit(ctx, journal.Entry{
 				WorkspaceID: s.ws,
 				CrewID:      s.crew,

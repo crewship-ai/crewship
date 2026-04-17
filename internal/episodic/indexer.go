@@ -71,9 +71,27 @@ func (x *Indexer) IndexOne(ctx context.Context, entry journal.Entry) error {
 // the selective-embedding filter. Types get a blanket yes/no from
 // shouldEmbed; the conversation type is special-cased because only the
 // ones that escalated should be indexed.
+//
+// refs["episodic"]=true is a bounded override: it can upgrade an entry
+// whose type is in EmbeddableEntryTypes (e.g., a peer.conversation that
+// didn't escalate) but it CANNOT force-index forbidden types
+// (exec.output_chunk, container.metrics, network.*, file.*). This is
+// the coding-guideline boundary — callers must not be able to persist
+// embeddings for the high-volume low-signal corpus.
 func (x *Indexer) qualifies(e journal.Entry) bool {
 	if shouldEmbed(string(e.Type), string(e.Severity)) {
 		return true
+	}
+	// Type must be on the allowlist for any override path to apply.
+	typeAllowed := false
+	for _, t := range EmbeddableEntryTypes {
+		if string(e.Type) == t {
+			typeAllowed = true
+			break
+		}
+	}
+	if !typeAllowed {
+		return false
 	}
 	if e.Type == journal.EntryPeerConversation {
 		// Hand-tagged by the refs flag, or the state ended in escalation.
@@ -84,8 +102,9 @@ func (x *Indexer) qualifies(e journal.Entry) bool {
 			return true
 		}
 	}
-	// Explicit opt-in via refs.episodic=true overrides the default filter
-	// so operators can force-index anything.
+	// refs.episodic=true as upgrade for allowlisted-but-severity-gated
+	// types (e.g., an info-level keeper.decision an operator explicitly
+	// wants remembered).
 	if v, ok := e.Refs["episodic"].(bool); ok && v {
 		return true
 	}
@@ -116,7 +135,7 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 		  LEFT JOIN journal_embeddings em ON em.entry_id = e.id
 		 WHERE em.entry_id IS NULL
 		   AND e.entry_type IN (`+placeholders+`)
-		 ORDER BY e.ts DESC
+		 ORDER BY e.ts ASC, e.id ASC
 		 LIMIT ?`, args...)
 	if err != nil {
 		x.logger.Warn("episodic: sweep query failed", "err", err)

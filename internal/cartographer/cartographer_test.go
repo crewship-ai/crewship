@@ -287,7 +287,7 @@ func TestListNewestFirst(t *testing.T) {
 		time.Sleep(15 * time.Millisecond)
 	}
 
-	list, err := List(ctx, db, "mis_1", 10)
+	list, err := List(ctx, db, "ws_test", "mis_1", 10)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

@@ -164,7 +164,9 @@ var paymasterTopCmd = &cobra.Command{
 // printSpendTable renders any rollup slice whose elements have CostUSD,
 // CallCount, TotalTokens, plus an identifying ID/Name pair. Uses
 // reflection-free casting via any → the small duplication below is
-// cheaper than a generic interface.
+// cheaper than a generic interface. Unsupported row types fall through
+// to an error so call sites see a loud failure instead of silent
+// empty output.
 func printSpendTable(scopeLabel string, rows any) error {
 	f := newFormatter()
 	if f.Format == "json" {
@@ -207,6 +209,8 @@ func printSpendTable(scopeLabel string, rows any) error {
 			fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
 				truncateString(name, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.TotalTokens)
 		}
+	default:
+		return fmt.Errorf("printSpendTable: unsupported rows type %T", rows)
 	}
 	return nil
 }

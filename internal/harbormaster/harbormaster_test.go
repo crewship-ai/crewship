@@ -414,7 +414,7 @@ func TestCancelPending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	if err := Cancel(ctx, db, rec, id, "agent aborted"); err != nil {
+	if err := Cancel(ctx, db, rec, "ws_test", id, "agent aborted"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	got, _ := Get(ctx, db, "ws_test", id)
@@ -422,7 +422,7 @@ func TestCancelPending(t *testing.T) {
 		t.Errorf("status: got %q want cancelled", got.Status)
 	}
 	// Cancelling again is ErrNotPending.
-	if err := Cancel(ctx, db, rec, id, "again"); err != ErrNotPending {
+	if err := Cancel(ctx, db, rec, "ws_test", id, "again"); err != ErrNotPending {
 		t.Errorf("re-cancel: got %v want ErrNotPending", err)
 	}
 }

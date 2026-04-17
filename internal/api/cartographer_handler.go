@@ -72,7 +72,7 @@ func (h *CartographerHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, err := cartographer.List(r.Context(), h.db, missionID, limit)
+	rows, err := cartographer.List(r.Context(), h.db, workspaceID, missionID, limit)
 	if err != nil {
 		h.logger.Error("cartographer list failed", "err", err, "mission_id", missionID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})

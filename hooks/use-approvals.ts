@@ -125,7 +125,20 @@ export async function decideApproval(
     body: JSON.stringify({ status: decision, comment }),
   })
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`)
+    // Mirror the list path: surface the backend's structured error
+    // payload instead of hiding it behind a bare HTTP code. The decide
+    // endpoint returns 401 / 403 / 409 with real messages users can act
+    // on ("already decided", "approval decisions require OWNER or
+    // ADMIN role") — losing that in a generic "HTTP 403" wastes the
+    // toast.
+    let msg = `HTTP ${res.status}`
+    try {
+      const body = (await res.json()) as { error?: unknown }
+      if (body && typeof body.error === "string") msg = body.error
+    } catch {
+      // fall through
+    }
+    throw new Error(msg)
   }
   const json = await res.json()
   const parsed = approvalDecideResponseSchema.safeParse(json)

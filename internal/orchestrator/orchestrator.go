@@ -45,6 +45,7 @@ type AgentRunRequest struct {
 	AllCrews           []CrewInfo       // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
 	ActiveMissions     []MissionSummary // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
 	SkipSidecar        bool             // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	ApprovalMode       string           // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
 	SkipConvHistory    bool             // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode        string           // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains     []string         // Extra allowed domains for restricted mode
@@ -504,10 +505,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	o.mu.RUnlock()
 
 	// Harbor Master: gate the run before we spend containers/tokens on
-	// something a human should approve. Mode=none (default) → Check
-	// evaluates rules but rules lists are empty unless configured, so
-	// the common path returns Approved immediately. Sync mode blocks
-	// here until a human decides; deny returns an error to the caller.
+	// something a human should approve. ApprovalMode comes off the
+	// request — ModeNone short-circuits with Approved, ModeSync blocks
+	// here until a human decides, ModeAsync enqueues and returns
+	// Pending. Rules hit only fire when ApprovalMode != "none".
+	approvalMode := req.ApprovalMode
+	if approvalMode == "" {
+		approvalMode = "none"
+	}
 	gateDecision, gateErr := o.getApprovalGate().Check(ctx, ApprovalCheckInput{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
@@ -518,14 +523,26 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			"agent_role":  req.AgentRole,
 			"user_prompt": truncateStr(req.UserMessage, 500),
 		},
-		Mode:   "none", // future: thread through from AgentRunRequest
+		Mode:   approvalMode,
 		UserID: req.AgentID,
 	})
 	if gateErr != nil {
 		return fmt.Errorf("approval gate: %w", gateErr)
 	}
+	// Only proceed when the gate explicitly says so. Denied, Pending,
+	// and "Required but not Approved" must all halt the run — a
+	// pending approval still means a human hasn't said yes yet, and
+	// falling through in that state would defeat the point of HITL.
 	if gateDecision.Denied {
 		return fmt.Errorf("run denied by approval: %s", gateDecision.Reason)
+	}
+	if gateDecision.Required && !gateDecision.Approved {
+		state := "pending"
+		if gateDecision.Pending {
+			state = "pending"
+		}
+		return fmt.Errorf("run requires approval (%s): request_id=%s reason=%s",
+			state, gateDecision.RequestID, gateDecision.Reason)
 	}
 
 	// Hooks: fire pre_agent_start. Blocking hooks can abort the run;
@@ -1070,6 +1087,38 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		cleanCtx := context.Background()
 		o.updateRunStatus(cleanCtx, runState.ID, "cancelled")
 		o.logger.Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
+		// Close the Crow's Nest exec.command block and flip the Watch
+		// Roster off busy on cancellation too — otherwise stopped
+		// runs leave the live terminal hanging and presence stuck on
+		// "busy" until the 5-min idle sweeper corrects it. Uses
+		// cleanCtx so journal writes complete even after ctx expired.
+		_, _ = j.Emit(cleanCtx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Type:        "exec.command",
+			Severity:    "warn",
+			ActorType:   "agent",
+			ActorID:     req.AgentID,
+			Summary:     fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
+			Payload: map[string]any{
+				"cmd":         cmd,
+				"phase":       "end",
+				"cancelled":   true,
+				"duration_ms": time.Since(execStart).Milliseconds(),
+			},
+			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
+		})
+		_, _ = j.Emit(cleanCtx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Type:        "agent.status_change",
+			Severity:    "info",
+			ActorType:   "system",
+			Summary:     fmt.Sprintf("agent %s: online (cancelled)", req.AgentSlug),
+			Payload:     map[string]any{"status": "online", "reason": "cancelled"},
+		})
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
