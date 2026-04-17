@@ -44,3 +44,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 23 | C | hooks/use-tick.ts + hooks/use-fleet-status.ts (small untested hooks, combined into one commit) | ok | 9b8958d | 2026-04-17T06:30Z |
 | 24 | D | components/features/chat/hooks/use-file-editor.ts (core chat D1-D5 exhausted; chat/hooks/ untouched) | ok | 8c78d04 | 2026-04-17T06:50Z |
 | 25 | E | e2e/* | skipped: no dev server (5th E skip — unchanged since iter 5) | — | 2026-04-17T07:10Z |
+| 26 | A | internal/backup/catalog.go (DB-backed, SQLite in-memory with backup_catalog schema) | ok | 0399d95 | 2026-04-17T07:30Z |
