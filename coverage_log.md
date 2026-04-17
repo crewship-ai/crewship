@@ -47,3 +47,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 26 | A | internal/backup/catalog.go (DB-backed, SQLite in-memory with backup_catalog schema) | ok | 0399d95 | 2026-04-17T07:30Z |
 | 27 | B | cmd/crewship/cmd_features.go (3 subcommands + static baseImagesCatalog) | ok | 4b55be0 | 2026-04-17T07:50Z |
 | 28 | C | hooks/use-auth.tsx (NextAuth-like session Provider with Zod validation) | ok | de267d4 | 2026-04-17T08:10Z |
+| 29 | D→E | D exhausted (D1/D2/D3/D4/D5 + bonus chat-tree-row/status-indicator/use-file-editor all done or deprecated), rolled to E per spec → also blocked | skipped: both rotated categories unavailable | — | 2026-04-17T08:30Z |
