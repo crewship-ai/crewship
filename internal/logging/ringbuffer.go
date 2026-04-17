@@ -120,28 +120,44 @@ func (h *RingHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle captures the log record into the ring buffer and forwards it to the inner handler.
 func (h *RingHandler) Handle(ctx context.Context, r slog.Record) error {
-	attrs := make(map[string]string)
-	for _, a := range h.attrs {
-		attrs[a.Key] = a.Value.String()
-	}
-	r.Attrs(func(a slog.Attr) bool {
-		key := a.Key
-		if h.group != "" {
-			key = h.group + "." + key
+	// Only allocate the attrs map when there's something to put in it. The
+	// steady-state logging path (short info/debug lines with no attrs) then
+	// costs zero allocations here. Two branches so the hot path avoids a
+	// per-attr nil check on the populated-handler-attrs side.
+	var attrs map[string]string
+	if len(h.attrs) > 0 {
+		attrs = make(map[string]string, len(h.attrs))
+		for _, a := range h.attrs {
+			attrs[a.Key] = a.Value.String()
 		}
-		attrs[key] = a.Value.String()
-		return true
-	})
+		r.Attrs(func(a slog.Attr) bool {
+			key := a.Key
+			if h.group != "" {
+				key = h.group + "." + key
+			}
+			attrs[key] = a.Value.String()
+			return true
+		})
+	} else {
+		r.Attrs(func(a slog.Attr) bool {
+			if attrs == nil {
+				attrs = make(map[string]string)
+			}
+			key := a.Key
+			if h.group != "" {
+				key = h.group + "." + key
+			}
+			attrs[key] = a.Value.String()
+			return true
+		})
+	}
 
-	record := LogRecord{
+	h.buffer.Append(LogRecord{
 		Time:    r.Time,
 		Level:   r.Level.String(),
 		Message: r.Message,
-	}
-	if len(attrs) > 0 {
-		record.Attrs = attrs
-	}
-	h.buffer.Append(record)
+		Attrs:   attrs,
+	})
 
 	return h.inner.Handle(ctx, r)
 }
