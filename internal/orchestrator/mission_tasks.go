@@ -229,14 +229,17 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 
 	b.WriteString("[MISSION]\n")
 	if missionTitle.Valid {
-		b.WriteString(fmt.Sprintf("Name: %s\n", missionTitle.String))
+		// fmt.Fprintf streams into the Builder directly; the previous
+		// b.WriteString(fmt.Sprintf(...)) allocated an intermediate string
+		// per call just to copy it into the same buffer.
+		fmt.Fprintf(&b, "Name: %s\n", missionTitle.String)
 	}
 	if missionDesc.Valid && missionDesc.String != "" {
-		b.WriteString(fmt.Sprintf("Goal: %s\n", missionDesc.String))
+		fmt.Fprintf(&b, "Goal: %s\n", missionDesc.String)
 	}
 
 	// DAG overview — list all tasks so the agent knows the bigger picture
-	b.WriteString(fmt.Sprintf("Tasks in pipeline: %d\n", len(allTasks)))
+	fmt.Fprintf(&b, "Tasks in pipeline: %d\n", len(allTasks))
 	for _, t := range allTasks {
 		marker := "  "
 		switch t.Status {
@@ -251,7 +254,7 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 		if t.AgentSlug != nil {
 			agentLabel = "@" + *t.AgentSlug
 		}
-		b.WriteString(fmt.Sprintf("  %s#%d %s (%s, %s)\n", marker, t.TaskOrder, t.Title, agentLabel, t.Status))
+		fmt.Fprintf(&b, "  %s#%d %s (%s, %s)\n", marker, t.TaskOrder, t.Title, agentLabel, t.Status)
 	}
 	b.WriteString("\n")
 
