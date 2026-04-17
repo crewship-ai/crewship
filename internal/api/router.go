@@ -662,6 +662,22 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
 
+	// Paymaster: cost + budget read endpoints backed by the cost_ledger
+	// rollup queries. Writes to the ledger happen inside the LLM
+	// middleware chain, not through this handler.
+	ph := NewPaymasterHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/paymaster/spend/by-crew", authed(wsCtx(http.HandlerFunc(ph.SpendByCrew))))
+	r.mux.Handle("GET /api/v1/paymaster/spend/by-agent/{crewId}", authed(wsCtx(http.HandlerFunc(ph.SpendByAgent))))
+	r.mux.Handle("GET /api/v1/paymaster/spend/by-mission/{missionId}", authed(wsCtx(http.HandlerFunc(ph.SpendByMission))))
+	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
+
+	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
+	// the orchestrator's gate; this handler is list + decide for humans.
+	ah := NewApprovalsHandler(r.db, r.logger, r.Journal())
+	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
+	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
+	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
+
 	// Backups (admin-only; require workspace context for scoping). See
 	// .claude/context/prd/BACKUP.md for the full API contract.
 	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))

@@ -1,0 +1,307 @@
+package consolidate
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
+)
+
+// RunnerOptions configures the background runner's cadence and paths.
+// A zero value yields sensible production defaults: consolidation every
+// 6h, compaction daily at 03:00 UTC, 30-day retention, look-back window
+// 6h. Tests can override ConsolidationTick and CompactionTick to run the
+// workers immediately and measure a single pass.
+type RunnerOptions struct {
+	// ConsolidationInterval is how often the consolidation loop wakes up.
+	// Defaults to 6h. The runner scans every crew in every workspace on
+	// each tick; cost is proportional to (#crews * avg entries in the
+	// look-back window), not to tick frequency.
+	ConsolidationInterval time.Duration
+
+	// ConsolidationSince is the look-back window passed to each
+	// Consolidator.Run. Defaults to ConsolidationInterval — i.e. each
+	// run consolidates the events since the last run.
+	ConsolidationSince time.Duration
+
+	// CompactionHourUTC is the hour of the day (0..23) at which the
+	// compaction worker fires. Defaults to 3 (03:00 UTC).
+	CompactionHourUTC int
+
+	// CompactionOlderThan is the retention cutoff for compaction.
+	// Defaults to 30 days. Entries younger than this are always left
+	// alone.
+	CompactionOlderThan time.Duration
+
+	// MinEntries is threshold below which consolidation is skipped for
+	// a crew. Defaults to 10.
+	MinEntries int
+
+	// LLMModel is an informational label stored in the memory.consolidated
+	// payload. No runtime meaning.
+	LLMModel string
+
+	// CrewMemoryRoot is the parent directory under which each crew's
+	// learned-*.md files are written. The effective output directory for
+	// a crew is filepath.Join(CrewMemoryRoot, crewSlug, "topics"). If
+	// empty the runner defaults to "/crew/shared/.memory".
+	CrewMemoryRoot string
+
+	// Logger for runner events (tick fires, skips, errors). Default: slog.Default().
+	Logger *slog.Logger
+}
+
+// StartBackground spawns the two worker goroutines and returns a cancel
+// function that stops both. The function returns immediately; work
+// happens in the background until the returned cancel is invoked or the
+// provided ctx is cancelled.
+//
+// The runner is deliberately conservative about errors: a failure to
+// consolidate one crew does not stop the loop. All per-crew errors are
+// collected per-tick and logged; the goroutine sleeps until the next
+// tick regardless.
+func StartBackground(
+	ctx context.Context,
+	db *sql.DB,
+	j journal.Emitter,
+	summarizer SummarizerClient,
+	opts RunnerOptions,
+) context.CancelFunc {
+	opts = applyDefaults(opts)
+	logger := opts.Logger
+
+	ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+
+	consolidator := &Consolidator{
+		DB:         db,
+		Journal:    j,
+		Summarizer: summarizer,
+		Logger:     logger,
+	}
+	compactor := &Compactor{
+		DB:      db,
+		Journal: j,
+		Logger:  logger,
+	}
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		runConsolidationLoop(ctx, db, consolidator, opts)
+	}()
+	go func() {
+		defer wg.Done()
+		runCompactionLoop(ctx, db, compactor, opts)
+	}()
+
+	return func() {
+		cancel()
+		wg.Wait()
+	}
+}
+
+func applyDefaults(opts RunnerOptions) RunnerOptions {
+	if opts.ConsolidationInterval <= 0 {
+		opts.ConsolidationInterval = 6 * time.Hour
+	}
+	if opts.ConsolidationSince <= 0 {
+		opts.ConsolidationSince = opts.ConsolidationInterval
+	}
+	if opts.CompactionHourUTC < 0 || opts.CompactionHourUTC > 23 {
+		opts.CompactionHourUTC = 3
+	}
+	if opts.CompactionOlderThan <= 0 {
+		opts.CompactionOlderThan = 30 * 24 * time.Hour
+	}
+	if opts.MinEntries <= 0 {
+		opts.MinEntries = 10
+	}
+	if opts.CrewMemoryRoot == "" {
+		opts.CrewMemoryRoot = "/crew/shared/.memory"
+	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+	return opts
+}
+
+// runConsolidationLoop wakes every ConsolidationInterval, iterates every
+// (workspace, crew), and invokes Consolidator.Run per crew. Per-crew
+// errors are aggregated into a single errors.Join for the tick so the
+// log carries one structured line per tick rather than one per crew.
+func runConsolidationLoop(ctx context.Context, db *sql.DB, c *Consolidator, opts RunnerOptions) {
+	ticker := time.NewTicker(opts.ConsolidationInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := consolidateAllCrews(ctx, db, c, opts); err != nil {
+				opts.Logger.Warn("consolidation tick completed with errors", "err", err)
+			}
+		}
+	}
+}
+
+// consolidateAllCrews enumerates every non-deleted crew and runs the
+// consolidator against it. Errors are collected with errors.Join so each
+// crew fails independently; a single crew's LLM timeout does not shadow
+// successful work on its siblings.
+func consolidateAllCrews(ctx context.Context, db *sql.DB, c *Consolidator, opts RunnerOptions) error {
+	crews, err := listCrews(ctx, db)
+	if err != nil {
+		return fmt.Errorf("list crews: %w", err)
+	}
+	var errs []error
+	for _, cr := range crews {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		cfg := Config{
+			WorkspaceID: cr.WorkspaceID,
+			CrewID:      cr.ID,
+			Since:       opts.ConsolidationSince,
+			MinEntries:  opts.MinEntries,
+			LLMModel:    opts.LLMModel,
+			OutputDir:   filepath.Join(opts.CrewMemoryRoot, cr.Slug, "topics"),
+		}
+		res, rerr := c.Run(ctx, cfg)
+		switch {
+		case rerr != nil:
+			errs = append(errs, fmt.Errorf("crew %s: %w", cr.ID, rerr))
+		case res.Skipped:
+			// Deliberately not logging — skips are the common case and
+			// spamming an info line per crew per tick drowns out real
+			// events. The journal has the authoritative record.
+		default:
+			opts.Logger.Info("consolidation ran",
+				"workspace_id", cr.WorkspaceID,
+				"crew_id", cr.ID,
+				"entries_scanned", res.EntriesScanned,
+				"rules_appended", res.RulesAppended,
+				"output", res.OutputPath,
+			)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// runCompactionLoop fires once per day at CompactionHourUTC. We compute
+// the next fire time from the current time rather than using a ticker
+// so the loop is robust to machine sleep/resume — after a suspend, it
+// simply targets the next 03:00 ahead of `now` instead of drifting.
+func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts RunnerOptions) {
+	for {
+		next := nextDailyAt(time.Now().UTC(), opts.CompactionHourUTC)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(next)):
+		}
+		if err := compactAllWorkspaces(ctx, db, comp, opts); err != nil {
+			opts.Logger.Warn("compaction tick completed with errors", "err", err)
+		}
+	}
+}
+
+// compactAllWorkspaces runs compaction for each workspace. Each workspace
+// is independent: a failure in one does not cancel siblings. Logging is
+// one line per workspace so operator dashboards can attribute throughput.
+func compactAllWorkspaces(ctx context.Context, db *sql.DB, comp *Compactor, opts RunnerOptions) error {
+	ws, err := listWorkspaces(ctx, db)
+	if err != nil {
+		return fmt.Errorf("list workspaces: %w", err)
+	}
+	var errs []error
+	for _, id := range ws {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		res, rerr := comp.Run(ctx, id, opts.CompactionOlderThan)
+		if rerr != nil {
+			errs = append(errs, fmt.Errorf("workspace %s: %w", id, rerr))
+			continue
+		}
+		if res.BucketsCreated == 0 {
+			continue
+		}
+		opts.Logger.Info("compaction ran",
+			"workspace_id", id,
+			"entries_deleted", res.EntriesDeleted,
+			"buckets_created", res.BucketsCreated,
+			"bytes_freed", res.BytesFreed,
+		)
+	}
+	return errors.Join(errs...)
+}
+
+// nextDailyAt returns the next UTC instant whose hour equals hour and
+// minute/second are zero. If `now` is already past today's target hour,
+// the result is tomorrow's; otherwise it's today's.
+func nextDailyAt(now time.Time, hour int) time.Time {
+	now = now.UTC()
+	target := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, time.UTC)
+	if !target.After(now) {
+		target = target.Add(24 * time.Hour)
+	}
+	return target
+}
+
+type crewRow struct {
+	ID          string
+	WorkspaceID string
+	Slug        string
+}
+
+// listCrews returns every live crew across every workspace. The query is
+// local to this file so the consolidate package does not pick up a
+// dependency on the crews package; the two columns we care about are
+// a stable public surface of the schema.
+func listCrews(ctx context.Context, db *sql.DB) ([]crewRow, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, workspace_id, slug FROM crews WHERE deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]crewRow, 0, 8)
+	for rows.Next() {
+		var r crewRow
+		if err := rows.Scan(&r.ID, &r.WorkspaceID, &r.Slug); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// listWorkspaces returns every workspace ID. Workspaces do not currently
+// have a deleted_at column so we return them all.
+func listWorkspaces(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id FROM workspaces`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0, 4)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
