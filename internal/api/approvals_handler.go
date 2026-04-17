@@ -78,9 +78,12 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // Decide serves POST /api/v1/approvals/{id}/decide with body
-// {"status":"approved|denied","comment":"..."}. The authenticated user
-// becomes decided_by — any workspace member with approval scope can
-// decide, role-based gating lives at the middleware layer.
+// {"status":"approved|denied","comment":"..."}. Only OWNER or ADMIN
+// workspace roles may decide — approval gates exist specifically to
+// keep high-risk actions out of unprivileged members' hands, so the
+// decide path enforces the same bar. The original Decide comment
+// claimed role-based gating lived "at the middleware layer" but no
+// such middleware wrapped this route; the check is inline here now.
 func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
@@ -90,6 +93,11 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "auth required"})
+		return
+	}
+	role := RoleFromContext(r.Context())
+	if role != "OWNER" && role != "ADMIN" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "approval decisions require OWNER or ADMIN role"})
 		return
 	}
 	id := r.PathValue("id")

@@ -663,6 +663,18 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
 
+	// Cartographer: mission checkpoint / restore / fork API. The package
+	// owns the row writes + journal emits; this handler is the HTTP
+	// surface for the /missions/[id]/timeline UI.
+	ch := NewCartographerHandler(r.db, r.logger)
+	ch.SetJournal(r.Journal())
+	r.mux.Handle("GET /api/v1/missions/{missionId}/checkpoints", authed(wsCtx(http.HandlerFunc(ch.List))))
+	r.mux.Handle("POST /api/v1/missions/{missionId}/checkpoints", authed(wsCtx(http.HandlerFunc(ch.Create))))
+	r.mux.Handle("GET /api/v1/checkpoints/{id}", authed(wsCtx(http.HandlerFunc(ch.Get))))
+	r.mux.Handle("POST /api/v1/checkpoints/{id}/restore", authed(wsCtx(http.HandlerFunc(ch.Restore))))
+	r.mux.Handle("POST /api/v1/checkpoints/{id}/fork", authed(wsCtx(http.HandlerFunc(ch.Fork))))
+	r.mux.Handle("DELETE /api/v1/checkpoints/{id}", authed(wsCtx(http.HandlerFunc(ch.Delete))))
+
 	// Paymaster: cost + budget read endpoints backed by the cost_ledger
 	// rollup queries. Writes to the ledger happen inside the LLM
 	// middleware chain, not through this handler.
@@ -845,6 +857,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/internal/agents", internalAuth(http.HandlerFunc(internal.CreateAgent)))
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 	r.mux.Handle("POST /api/v1/internal/mcp-tool-calls", internalAuth(http.HandlerFunc(internal.RecordMCPToolCall)))
+	// Sidecar-emitted Crow's Nest journal events (network.egress, file.written).
+	// Handler enforces a strict entry-type allowlist so agents can't fabricate
+	// assignment.completed / approval.granted rows via the sidecar.
+	r.mux.Handle("POST /api/v1/internal/journal/emit", internalAuth(http.HandlerFunc(r.handleSidecarEmit)))
 
 	// Cross-crew messaging and file sharing (called by sidecar)
 	crewMsg := NewCrewMessagingHandler(r.db, r.storagePath, r.logger)

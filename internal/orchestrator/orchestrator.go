@@ -160,6 +160,134 @@ type Orchestrator struct {
 	// container.metrics) so live visibility into containers flows through
 	// the same append-only stream as everything else.
 	journal JournalEmitter
+
+	// hooks + approvalGate + episodicRecall are optional integration
+	// points. Each is nil-safe: callers always exercise them through the
+	// getter helpers which fall back to no-ops. SetHooksDispatcher /
+	// SetApprovalGate / SetEpisodicRecall wire them from server.New.
+	hooks          HookDispatcher
+	approvalGate   ApprovalGate
+	episodicRecall EpisodicRecaller
+}
+
+// HookDispatcher is the narrow interface the orchestrator uses to fire
+// lifecycle hook events (pre/post agent start, pre/post LLM call, etc.)
+// without importing internal/hooks directly. The adapter in server/ maps
+// this to the full hooks.Dispatch signature.
+type HookDispatcher interface {
+	Dispatch(ctx context.Context, event string, eventCtx HookEventContext) error
+}
+
+// HookEventContext mirrors hooks.EventContext in a narrow form so
+// orchestrator stays independent of internal/hooks.
+type HookEventContext struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	ToolName    string
+	Severity    string
+	Payload     map[string]any
+}
+
+// ApprovalGate is the narrow interface the orchestrator uses to check
+// whether an action needs human approval before proceeding. The
+// adapter in server/ wraps harbormaster.Gate so this package stays
+// decoupled.
+type ApprovalGate interface {
+	Check(ctx context.Context, input ApprovalCheckInput) (ApprovalDecision, error)
+}
+
+type ApprovalCheckInput struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	Tool        string
+	Args        map[string]any
+	Mode        string // "none" | "async" | "sync"
+	UserID      string
+}
+
+type ApprovalDecision struct {
+	Required  bool
+	Approved  bool
+	Denied    bool
+	Pending   bool
+	RequestID string
+	Reason    string
+}
+
+// EpisodicRecaller retrieves past similar journal entries for prompt
+// injection. A nil recaller produces an empty recall — the orchestrator
+// just skips the injection without erroring.
+type EpisodicRecaller interface {
+	Recall(ctx context.Context, input EpisodicRecallInput) (string, error)
+}
+
+type EpisodicRecallInput struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	Role        string // AGENT / LEAD / COORDINATOR
+	Query       string
+	MaxChars    int
+}
+
+// SetHooksDispatcher wires the hooks dispatcher. nil → no-op so
+// emit sites never need to nil-check.
+func (o *Orchestrator) SetHooksDispatcher(h HookDispatcher) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.hooks = h
+}
+
+// SetApprovalGate wires the Harbor Master approval gate.
+func (o *Orchestrator) SetApprovalGate(g ApprovalGate) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.approvalGate = g
+}
+
+// SetEpisodicRecall wires episodic memory recall for prompt injection.
+func (o *Orchestrator) SetEpisodicRecall(r EpisodicRecaller) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.episodicRecall = r
+}
+
+func (o *Orchestrator) getHooks() HookDispatcher {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.hooks == nil {
+		return noopHooks{}
+	}
+	return o.hooks
+}
+
+func (o *Orchestrator) getApprovalGate() ApprovalGate {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.approvalGate == nil {
+		return noopGate{}
+	}
+	return o.approvalGate
+}
+
+func (o *Orchestrator) getEpisodicRecall() EpisodicRecaller {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.episodicRecall // nil allowed; caller checks
+}
+
+type noopHooks struct{}
+
+func (noopHooks) Dispatch(_ context.Context, _ string, _ HookEventContext) error { return nil }
+
+type noopGate struct{}
+
+func (noopGate) Check(_ context.Context, _ ApprovalCheckInput) (ApprovalDecision, error) {
+	return ApprovalDecision{Required: false, Approved: true}, nil
 }
 
 // JournalEmitter is a narrow interface the orchestrator uses to emit Crow's
@@ -216,6 +344,20 @@ type noopJournal struct{}
 
 func (noopJournal) Emit(_ context.Context, _ JournalEntry) (string, error) {
 	return "", nil
+}
+
+// truncateStr clips a string to n runes with an ellipsis, used for
+// approval-gate payloads where the full user message is unnecessary
+// (and potentially sensitive).
+func truncateStr(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }
 
 // truncateCmd renders an argv slice into a single-line summary suitable for
@@ -357,6 +499,61 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.mu.RUnlock()
 
+	// Harbor Master: gate the run before we spend containers/tokens on
+	// something a human should approve. Mode=none (default) → Check
+	// evaluates rules but rules lists are empty unless configured, so
+	// the common path returns Approved immediately. Sync mode blocks
+	// here until a human decides; deny returns an error to the caller.
+	gateDecision, gateErr := o.getApprovalGate().Check(ctx, ApprovalCheckInput{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Tool:        "agent_run",
+		Args: map[string]any{
+			"agent_slug":  req.AgentSlug,
+			"agent_role":  req.AgentRole,
+			"user_prompt": truncateStr(req.UserMessage, 500),
+		},
+		Mode:   "none", // future: thread through from AgentRunRequest
+		UserID: req.AgentID,
+	})
+	if gateErr != nil {
+		return fmt.Errorf("approval gate: %w", gateErr)
+	}
+	if gateDecision.Denied {
+		return fmt.Errorf("run denied by approval: %s", gateDecision.Reason)
+	}
+
+	// Hooks: fire pre_agent_start. Blocking hooks can abort the run;
+	// non-blocking hooks run in goroutines and don't affect latency.
+	// The dispatcher returns *hooks.BlockedError for blocking-hook
+	// refusal; we surface that to the caller as-is so the UI can
+	// render the block reason.
+	if hookErr := o.getHooks().Dispatch(ctx, "pre_agent_start", HookEventContext{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		ToolName:    "agent_run",
+		Severity:    "info",
+		Payload: map[string]any{
+			"agent_slug": req.AgentSlug,
+			"chat_id":    req.ChatID,
+		},
+	}); hookErr != nil {
+		return fmt.Errorf("pre_agent_start hook blocked: %w", hookErr)
+	}
+	// Always fire post_agent_stop on return so logging and cleanup
+	// hooks observe every run regardless of exit path.
+	defer func() {
+		_ = o.getHooks().Dispatch(context.Background(), "post_agent_stop", HookEventContext{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			ToolName:    "agent_run",
+			Payload:     map[string]any{"agent_slug": req.AgentSlug, "chat_id": req.ChatID},
+		})
+	}()
+
 	if req.ContainerID != "" {
 		o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
 		defer o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
@@ -434,6 +631,32 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug); peerCtx != "" {
 			promptBuf.WriteString("\n\n")
 			promptBuf.WriteString(peerCtx)
+		}
+	}
+
+	// Episodic recall: ask the memory layer for past high-value events
+	// similar to the current user prompt. Regular agents see only their
+	// own history; LEAD / COORDINATOR see crew-shared entries too (the
+	// scope rule is inside the recaller). The injection is best-effort
+	// — a recall failure logs and continues so a flaky Ollama embed
+	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
+	// reserved in promptBuf.Grow above.
+	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" {
+		recallCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		rendered, err := recaller.Recall(recallCtx, EpisodicRecallInput{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Role:        req.AgentRole,
+			Query:       req.UserMessage,
+			MaxChars:    2000,
+		})
+		cancel()
+		if err != nil {
+			o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
+		} else if rendered != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(rendered)
 		}
 	}
 

@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/consolidate"
+	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -280,6 +281,32 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// JournalEmitter interface to the full journal.Emitter so the
 		// orchestrator package stays independent of internal/journal.
 		orch.SetJournal(newOrchestratorJournalAdapter(s.journalWriter))
+
+		// Wire the journal into the stats collector so Crow's Nest's
+		// resource sparklines and replay view get container.metrics rows
+		// every 30s (or sooner on >10pp CPU/RAM swings). Live WebSocket
+		// broadcast is unaffected — this is purely the persistence layer.
+		if s.statsCollector != nil {
+			s.statsCollector.SetJournal(s.journalWriter)
+		}
+
+		// Wire the three orchestrator integration points (hooks dispatch,
+		// approval gate, episodic recall) now that the journal is
+		// available. Each adapter is small and lives in
+		// orchestrator_adapters.go. Episodic recall needs an Ollama
+		// embedder; if Keeper Ollama isn't configured we pass nil so
+		// recall returns empty silently rather than blocking every run
+		// on an unreachable service.
+		orch.SetHooksDispatcher(newHooksAdapter(deps.DB, s.journalWriter))
+		orch.SetApprovalGate(newApprovalGateAdapter(deps.DB, s.journalWriter))
+		var embedder episodic.Embedder
+		if cfg.Keeper.OllamaURL != "" {
+			// nomic-embed-text is the expected model on the Ollama host
+			// per episodic/embedder.go defaults. Workspaces can override
+			// via future config; for now use the same base URL as Keeper.
+			embedder = episodic.NewOllamaEmbedder(cfg.Keeper.OllamaURL)
+		}
+		orch.SetEpisodicRecall(newEpisodicRecallAdapter(deps.DB, embedder))
 
 		// OTel GenAI telemetry. Endpoint defaults to OTEL_EXPORTER_OTLP_ENDPOINT
 		// and silently degrades to a noop tracer when unset so local dev
@@ -556,6 +583,13 @@ func (s *Server) Start(ctx context.Context) error {
 		// approvals to 'timeout' status so blocked agents unstick
 		// deterministically even if the UI is down.
 		go harbormaster.StartTimeoutSweeper(ctx, s.db, s.journalWriter, 30*time.Second)
+
+		// Crow's Nest port scanner: every 10s, diff the ACTIVE set of
+		// port_exposures rows and emit network.port_opened /
+		// network.port_closed journal entries for each change. See
+		// port_exposure_scanner.go for why we poll instead of subscribing
+		// to Docker events.
+		go runPortExposureScanner(ctx, s.db, s.journalWriter, s.logger)
 
 		// Watch Roster offline sweeper: every 60s, flip agents idle >5min
 		// to offline. The transition itself emits agent.status_change so
