@@ -418,8 +418,12 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	useStreamJSON := req.CLIAdapter == "CLAUDE_CODE"
 
 	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+		// scanner.Bytes() aliases the scanner's internal buffer, so it's
+		// valid only until the next Scan(). handleStreamJSONLine consumes
+		// the slice synchronously (json.Unmarshal copies strings out), and
+		// the non-JSON fallback below converts to string immediately.
+		line := scanner.Bytes()
+		if len(line) == 0 {
 			continue
 		}
 
@@ -429,7 +433,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 			if handler != nil {
 				handler(AgentEvent{
 					Type:      "text",
-					Content:   line + "\n",
+					Content:   string(line) + "\n",
 					Timestamp: time.Now(),
 				})
 			}
@@ -469,15 +473,16 @@ func emitImageBlock(block contentBlock, handler EventHandler) {
 	}
 }
 
-func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
+func (o *Orchestrator) handleStreamJSONLine(line []byte, handler EventHandler) {
 	if handler == nil {
 		return
 	}
 
 	var msg streamJSONMessage
-	if err := json.Unmarshal([]byte(line), &msg); err != nil {
-		// Not valid JSON -- emit as plain text (fallback)
-		handler(AgentEvent{Type: "text", Content: line + "\n", Timestamp: time.Now()})
+	if err := json.Unmarshal(line, &msg); err != nil {
+		// Not valid JSON -- emit as plain text (fallback). Convert to string
+		// here so we don't alias the scanner buffer after this return.
+		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 		return
 	}
 
