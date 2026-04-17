@@ -45,6 +45,7 @@ type AgentRunRequest struct {
 	AllCrews           []CrewInfo       // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
 	ActiveMissions     []MissionSummary // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
 	SkipSidecar        bool             // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	ApprovalMode       string           // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
 	SkipConvHistory    bool             // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode        string           // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains     []string         // Extra allowed domains for restricted mode
@@ -154,6 +155,230 @@ type Orchestrator struct {
 	// container is recreated (new ID) so stale entries are harmless.
 	tmuxCacheMu sync.RWMutex
 	tmuxCache   map[string]bool
+
+	// journal is the Crew Journal emitter. Nil-safe: SetJournal replaces it
+	// with a no-op. Used by Crow's Nest emit points (exec.command,
+	// container.metrics) so live visibility into containers flows through
+	// the same append-only stream as everything else.
+	journal JournalEmitter
+
+	// hooks + approvalGate + episodicRecall are optional integration
+	// points. Each is nil-safe: callers always exercise them through the
+	// getter helpers which fall back to no-ops. SetHooksDispatcher /
+	// SetApprovalGate / SetEpisodicRecall wire them from server.New.
+	hooks          HookDispatcher
+	approvalGate   ApprovalGate
+	episodicRecall EpisodicRecaller
+}
+
+// HookDispatcher is the narrow interface the orchestrator uses to fire
+// lifecycle hook events (pre/post agent start, pre/post LLM call, etc.)
+// without importing internal/hooks directly. The adapter in server/ maps
+// this to the full hooks.Dispatch signature.
+type HookDispatcher interface {
+	Dispatch(ctx context.Context, event string, eventCtx HookEventContext) error
+}
+
+// HookEventContext mirrors hooks.EventContext in a narrow form so
+// orchestrator stays independent of internal/hooks.
+type HookEventContext struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	ToolName    string
+	Severity    string
+	Payload     map[string]any
+}
+
+// ApprovalGate is the narrow interface the orchestrator uses to check
+// whether an action needs human approval before proceeding. The
+// adapter in server/ wraps harbormaster.Gate so this package stays
+// decoupled.
+type ApprovalGate interface {
+	Check(ctx context.Context, input ApprovalCheckInput) (ApprovalDecision, error)
+}
+
+type ApprovalCheckInput struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	Tool        string
+	Args        map[string]any
+	Mode        string // "none" | "async" | "sync"
+	UserID      string
+}
+
+type ApprovalDecision struct {
+	Required  bool
+	Approved  bool
+	Denied    bool
+	Pending   bool
+	RequestID string
+	Reason    string
+}
+
+// EpisodicRecaller retrieves past similar journal entries for prompt
+// injection. A nil recaller produces an empty recall — the orchestrator
+// just skips the injection without erroring.
+type EpisodicRecaller interface {
+	Recall(ctx context.Context, input EpisodicRecallInput) (string, error)
+}
+
+type EpisodicRecallInput struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	Role        string // AGENT / LEAD / COORDINATOR
+	Query       string
+	MaxChars    int
+}
+
+// SetHooksDispatcher wires the hooks dispatcher. nil → no-op so
+// emit sites never need to nil-check.
+func (o *Orchestrator) SetHooksDispatcher(h HookDispatcher) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.hooks = h
+}
+
+// SetApprovalGate wires the Harbor Master approval gate.
+func (o *Orchestrator) SetApprovalGate(g ApprovalGate) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.approvalGate = g
+}
+
+// SetEpisodicRecall wires episodic memory recall for prompt injection.
+func (o *Orchestrator) SetEpisodicRecall(r EpisodicRecaller) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.episodicRecall = r
+}
+
+func (o *Orchestrator) getHooks() HookDispatcher {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.hooks == nil {
+		return noopHooks{}
+	}
+	return o.hooks
+}
+
+func (o *Orchestrator) getApprovalGate() ApprovalGate {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.approvalGate == nil {
+		return noopGate{}
+	}
+	return o.approvalGate
+}
+
+func (o *Orchestrator) getEpisodicRecall() EpisodicRecaller {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.episodicRecall // nil allowed; caller checks
+}
+
+type noopHooks struct{}
+
+func (noopHooks) Dispatch(_ context.Context, _ string, _ HookEventContext) error { return nil }
+
+type noopGate struct{}
+
+func (noopGate) Check(_ context.Context, _ ApprovalCheckInput) (ApprovalDecision, error) {
+	return ApprovalDecision{Required: false, Approved: true}, nil
+}
+
+// JournalEmitter is a narrow interface the orchestrator uses to emit Crow's
+// Nest events without importing the full journal package (avoids an import
+// cycle with internal/api, which imports orchestrator).
+type JournalEmitter interface {
+	Emit(ctx context.Context, e JournalEntry) (string, error)
+}
+
+// JournalEntry mirrors the subset of journal.Entry fields the orchestrator
+// populates. Callers should map it to journal.Entry at the boundary.
+type JournalEntry struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	Type        string
+	Severity    string
+	ActorType   string
+	ActorID     string
+	Summary     string
+	Payload     map[string]any
+	Refs        map[string]any
+}
+
+// SetJournal wires the journal emitter. nil is accepted and swapped with
+// a no-op emitter so emit call sites never need to nil-check. Called by
+// server.New after the journal writer is constructed.
+func (o *Orchestrator) SetJournal(j JournalEmitter) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if j == nil {
+		o.journal = noopJournal{}
+		return
+	}
+	o.journal = j
+}
+
+// getJournal returns the configured emitter or a no-op. Safe under
+// concurrent reads because SetJournal holds mu.Lock and readers use
+// mu.RLock via this helper.
+func (o *Orchestrator) getJournal() JournalEmitter {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.journal == nil {
+		return noopJournal{}
+	}
+	return o.journal
+}
+
+// noopJournal is the fallback used in tests and pre-wiring code paths so
+// emit calls never panic and never need an `if j != nil` guard.
+type noopJournal struct{}
+
+func (noopJournal) Emit(_ context.Context, _ JournalEntry) (string, error) {
+	return "", nil
+}
+
+// truncateStr clips a string to n runes with an ellipsis, used for
+// approval-gate payloads where the full user message is unnecessary
+// (and potentially sensitive).
+func truncateStr(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	// Operate on runes consistently — the prior `len(s) <= n` byte
+	// early-return let multi-byte UTF-8 strings shorter than n bytes
+	// but longer than n runes slip through without truncation, giving
+	// journal summaries unexpected width for non-ASCII content.
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
+// truncateCmd renders an argv slice into a single-line summary suitable for
+// journal.Entry.Summary. argv is joined with spaces; the result is clipped
+// to n runes with an ellipsis so the UI table row stays one line. Full
+// argv lives in payload.cmd for anyone who needs the unabridged form.
+func truncateCmd(argv []string, n int) string {
+	s := strings.Join(argv, " ")
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }
 
 // New creates an Orchestrator with the given container and state providers.
@@ -279,6 +504,77 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.mu.RUnlock()
 
+	// Harbor Master: gate the run before we spend containers/tokens on
+	// something a human should approve. ApprovalMode comes off the
+	// request — ModeNone short-circuits with Approved, ModeSync blocks
+	// here until a human decides, ModeAsync enqueues and returns
+	// Pending. Rules hit only fire when ApprovalMode != "none".
+	approvalMode := req.ApprovalMode
+	if approvalMode == "" {
+		approvalMode = "none"
+	}
+	gateDecision, gateErr := o.getApprovalGate().Check(ctx, ApprovalCheckInput{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Tool:        "agent_run",
+		Args: map[string]any{
+			"agent_slug":  req.AgentSlug,
+			"agent_role":  req.AgentRole,
+			"user_prompt": truncateStr(req.UserMessage, 500),
+		},
+		Mode:   approvalMode,
+		UserID: req.AgentID,
+	})
+	if gateErr != nil {
+		return fmt.Errorf("approval gate: %w", gateErr)
+	}
+	// Only proceed when the gate explicitly says so. Denied, Pending,
+	// and "Required but not Approved" must all halt the run — a
+	// pending approval still means a human hasn't said yes yet, and
+	// falling through in that state would defeat the point of HITL.
+	if gateDecision.Denied {
+		return fmt.Errorf("run denied by approval: %s", gateDecision.Reason)
+	}
+	if gateDecision.Required && !gateDecision.Approved {
+		state := "pending"
+		if gateDecision.Pending {
+			state = "pending"
+		}
+		return fmt.Errorf("run requires approval (%s): request_id=%s reason=%s",
+			state, gateDecision.RequestID, gateDecision.Reason)
+	}
+
+	// Hooks: fire pre_agent_start. Blocking hooks can abort the run;
+	// non-blocking hooks run in goroutines and don't affect latency.
+	// The dispatcher returns *hooks.BlockedError for blocking-hook
+	// refusal; we surface that to the caller as-is so the UI can
+	// render the block reason.
+	if hookErr := o.getHooks().Dispatch(ctx, "pre_agent_start", HookEventContext{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		ToolName:    "agent_run",
+		Severity:    "info",
+		Payload: map[string]any{
+			"agent_slug": req.AgentSlug,
+			"chat_id":    req.ChatID,
+		},
+	}); hookErr != nil {
+		return fmt.Errorf("pre_agent_start hook blocked: %w", hookErr)
+	}
+	// Always fire post_agent_stop on return so logging and cleanup
+	// hooks observe every run regardless of exit path.
+	defer func() {
+		_ = o.getHooks().Dispatch(context.Background(), "post_agent_stop", HookEventContext{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			ToolName:    "agent_run",
+			Payload:     map[string]any{"agent_slug": req.AgentSlug, "chat_id": req.ChatID},
+		})
+	}()
+
 	if req.ContainerID != "" {
 		o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
 		defer o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
@@ -356,6 +652,32 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug); peerCtx != "" {
 			promptBuf.WriteString("\n\n")
 			promptBuf.WriteString(peerCtx)
+		}
+	}
+
+	// Episodic recall: ask the memory layer for past high-value events
+	// similar to the current user prompt. Regular agents see only their
+	// own history; LEAD / COORDINATOR see crew-shared entries too (the
+	// scope rule is inside the recaller). The injection is best-effort
+	// — a recall failure logs and continues so a flaky Ollama embed
+	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
+	// reserved in promptBuf.Grow above.
+	if recaller := o.getEpisodicRecall(); recaller != nil && req.UserMessage != "" {
+		recallCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		rendered, err := recaller.Recall(recallCtx, EpisodicRecallInput{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Role:        req.AgentRole,
+			Query:       req.UserMessage,
+			MaxChars:    2000,
+		})
+		cancel()
+		if err != nil {
+			o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
+		} else if rendered != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(rendered)
 		}
 	}
 
@@ -689,10 +1011,67 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", cmd)
 
+	// Crow's Nest: emit the command start so the live terminal UI can
+	// open a new block before any output streams. Payload carries the
+	// argv for the UI and the container ID + agent scope; full stdout
+	// is streamed separately by the existing handler pipeline.
+	execStart := time.Now()
+	j := o.getJournal()
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "exec.command",
+		Severity:    "info",
+		ActorType:   "agent",
+		ActorID:     req.AgentID,
+		Summary:     fmt.Sprintf("%s runs %s", req.AgentSlug, truncateCmd(cmd, 120)),
+		Payload: map[string]any{
+			"cmd":          cmd,
+			"container_id": cIDShort,
+			"adapter":      req.CLIAdapter,
+			"model":        req.LLMModel,
+			"phase":        "start",
+		},
+		Refs: map[string]any{"chat_id": req.ChatID, "container_id": req.ContainerID},
+	})
+	// Flip agent to busy for the Watch Roster. The presence sweeper
+	// reverts to offline after idle timeout if the agent crashes before
+	// the matching "online" emit at end-of-run fires.
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "agent.status_change",
+		Severity:    "info",
+		ActorType:   "system",
+		Summary:     fmt.Sprintf("agent %s: busy", req.AgentSlug),
+		Payload:     map[string]any{"status": "busy", "current_chat_id": req.ChatID},
+	})
+
 	result, err := o.container.Exec(execCtx, execCfg)
 	if err != nil {
 		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
 		o.updateRunStatus(ctx, runState.ID, "error")
+		// Emit the terminal exec.command event for the failure path
+		// too so Crow's Nest doesn't show a hanging "running" block
+		// when Docker exec create/attach fails before the command runs.
+		_, _ = j.Emit(ctx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Type:        "exec.command",
+			Severity:    "error",
+			ActorType:   "agent",
+			ActorID:     req.AgentID,
+			Summary:     fmt.Sprintf("%s exec FAILED: %v", req.AgentSlug, err),
+			Payload: map[string]any{
+				"cmd":         cmd,
+				"phase":       "end",
+				"error":       err.Error(),
+				"duration_ms": time.Since(execStart).Milliseconds(),
+			},
+		})
 		return fmt.Errorf("exec agent: %w", err)
 	}
 
@@ -708,11 +1087,84 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		cleanCtx := context.Background()
 		o.updateRunStatus(cleanCtx, runState.ID, "cancelled")
 		o.logger.Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
+		// Close the Crow's Nest exec.command block and flip the Watch
+		// Roster off busy on cancellation too — otherwise stopped
+		// runs leave the live terminal hanging and presence stuck on
+		// "busy" until the 5-min idle sweeper corrects it. Uses
+		// cleanCtx so journal writes complete even after ctx expired.
+		_, _ = j.Emit(cleanCtx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Type:        "exec.command",
+			Severity:    "warn",
+			ActorType:   "agent",
+			ActorID:     req.AgentID,
+			Summary:     fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
+			Payload: map[string]any{
+				"cmd":         cmd,
+				"phase":       "end",
+				"cancelled":   true,
+				"duration_ms": time.Since(execStart).Milliseconds(),
+			},
+			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
+		})
+		_, _ = j.Emit(cleanCtx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Type:        "agent.status_change",
+			Severity:    "info",
+			ActorType:   "system",
+			Summary:     fmt.Sprintf("agent %s: online (cancelled)", req.AgentSlug),
+			Payload:     map[string]any{"status": "online", "reason": "cancelled"},
+		})
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
 	running, exitCode, _ := o.container.ExecInspect(ctx, result.ExecID)
 	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
+
+	// Crow's Nest: closing exec.command entry with exit code + duration
+	// so the live terminal UI can mark the block done and the dashboard
+	// can tally success/failure rates. Severity switches to warn when
+	// the command exited non-zero — the default warn+ filter surfaces
+	// failures without consumers having to parse payload.
+	endSeverity := "info"
+	if exitCode != 0 {
+		endSeverity = "warn"
+	}
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "exec.command",
+		Severity:    endSeverity,
+		ActorType:   "agent",
+		ActorID:     req.AgentID,
+		Summary:     fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
+		Payload: map[string]any{
+			"cmd":         cmd,
+			"phase":       "end",
+			"exit_code":   exitCode,
+			"duration_ms": time.Since(execStart).Milliseconds(),
+			"running":     running,
+		},
+		Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
+	})
+	// Flip agent back to online for the Watch Roster now that the run
+	// is done. If the agent stays in-session, the presence sweeper
+	// still tracks idleness separately.
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "agent.status_change",
+		Severity:    "info",
+		ActorType:   "system",
+		Summary:     fmt.Sprintf("agent %s: online", req.AgentSlug),
+		Payload:     map[string]any{"status": "online"},
+	})
 
 	if running {
 		o.updateRunStatus(ctx, runState.ID, "running")

@@ -31,6 +31,19 @@ var hopByHopHeaders = []string{
 	"Upgrade",
 }
 
+// EgressObserver receives a notification for every allowed outbound HTTP
+// request that the sidecar proxy forwards. Host, method, and status are
+// captured; path and body are NOT because they can carry user content or
+// credentials that we must never persist. The hook runs synchronously on
+// the proxy goroutine, so implementations should return quickly and do
+// any heavy work (HTTP, DB) asynchronously.
+//
+// `provider` is the LLM-provider label (e.g. "anthropic") when the
+// request was to a known LLM endpoint, empty otherwise. Useful for
+// Crow's Nest filters that want to separate "agent talked to Anthropic"
+// from "agent fetched generic HTTPS".
+type EgressObserver func(host, method, provider string, statusCode int)
+
 // Proxy is an HTTP forward proxy that intercepts agent outbound requests,
 // injects LLM API credentials, and blocks non-allowed domains.
 type Proxy struct {
@@ -40,6 +53,7 @@ type Proxy struct {
 	logger    *slog.Logger
 	transport http.RoundTripper
 	freeMode  bool
+	onEgress  EgressObserver
 }
 
 // ProxyConfig configures the sidecar proxy.
@@ -49,6 +63,12 @@ type ProxyConfig struct {
 	Scrubber  *scrubber.Scrubber
 	Logger    *slog.Logger
 	FreeMode  bool // When true, skip domain allowlist checks (allow all domains)
+	// OnEgress is invoked after a successful upstream request. Optional —
+	// leaving it nil disables observability emits. The proxy holds the
+	// callback by reference (no copy), so installing a new observer
+	// requires rebuilding the Proxy; for the sidecar's lifecycle that
+	// happens at startup only, which keeps this lock-free on the hot path.
+	OnEgress EgressObserver
 }
 
 // NewProxy creates a forward proxy with credential injection.
@@ -59,6 +79,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		scrubber:  cfg.Scrubber,
 		logger:    cfg.Logger,
 		freeMode:  cfg.FreeMode,
+		onEgress:  cfg.OnEgress,
 		transport: &http.Transport{
 			DialContext: (&net.Dialer{
 				Timeout:   10 * time.Second,
@@ -143,9 +164,24 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		p.logger.Error("upstream request failed", "host", host, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		// Still notify the observer so Crow's Nest surfaces failed egress
+		// too — otherwise a flapping outbound endpoint looks like silent
+		// success from the journal's perspective. statusCode 0 marks the
+		// "transport error" case distinctly from any HTTP 5xx response.
+		if p.onEgress != nil {
+			p.onEgress(host, r.Method, string(provider), 0)
+		}
 		return
 	}
 	defer resp.Body.Close()
+
+	// Fire the egress observer BEFORE streaming the body so a slow
+	// upstream doesn't delay the Crow's Nest event. Passing only host /
+	// method / provider / status keeps PII and credentials out of the
+	// journal — path and body are deliberately excluded.
+	if p.onEgress != nil {
+		p.onEgress(host, r.Method, string(provider), resp.StatusCode)
+	}
 
 	// Copy response headers
 	for k, vv := range resp.Header {
@@ -174,7 +210,19 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		p.logger.Error("CONNECT dial failed", "host", host, "error", err)
 		http.Error(w, "failed to connect", http.StatusBadGateway)
+		if p.onEgress != nil {
+			p.onEgress(host, http.MethodConnect, "", 0)
+		}
 		return
+	}
+
+	// Crow's Nest: one egress event per successful tunnel setup.
+	// CONNECT hides the eventual method / status inside TLS, so we record
+	// 200 as the setup result. The event marks "agent opened an HTTPS
+	// connection to host X" which is the level of resolution Crow's Nest
+	// needs — we deliberately do NOT decrypt or inspect the tunnel.
+	if p.onEgress != nil {
+		p.onEgress(host, http.MethodConnect, "", http.StatusOK)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -257,9 +305,16 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		p.logger.Error("reverse proxy upstream failed", "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		if p.onEgress != nil {
+			p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), 0)
+		}
 		return
 	}
 	defer resp.Body.Close()
+
+	if p.onEgress != nil {
+		p.onEgress("api.anthropic.com", r.Method, string(ProviderAnthropic), resp.StatusCode)
+	}
 
 	for k, vv := range resp.Header {
 		for _, v := range vv {

@@ -19,7 +19,7 @@ import { CrewMissions } from "@/components/features/crews/crew-missions"
 import { CrewAssignments } from "@/components/features/crews/crew-assignments"
 import { CrewPeerConversations } from "@/components/features/crews/crew-peer-conversations"
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
-import { CrewStandup } from "@/components/features/crews/crew-standup"
+import { CrewJournal } from "@/components/features/crews/crew-journal"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
 import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
 import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
@@ -496,8 +496,8 @@ export default function CrewDetailPage() {
       {/* Escalations */}
       <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
 
-      {/* Standup */}
-      <CrewStandup crewId={crew.id} workspaceId={workspaceId} />
+      {/* Crew Journal (last 24h) */}
+      <CrewJournal crewId={crew.id} workspaceId={workspaceId} />
 
       {/* Credentials reminder */}
       {agents.length > 0 && (

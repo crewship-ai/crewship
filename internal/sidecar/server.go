@@ -146,23 +146,28 @@ func NewServer(cfg ServerConfig) *Server {
 
 	allowlist := NewDomainAllowlist(domains)
 
+	// s is created BEFORE the proxy so the observer closure can capture
+	// a stable reference to the server for journal emission. Proxy holds
+	// the closure as a function pointer, so rotating the credential store
+	// or IPC config on s later still gets picked up on the next emit.
+	s := &Server{
+		credStore:   credStore,
+		allowlist:   allowlist,
+		ipc:         cfg.IPC,
+		crewMembers: cfg.CrewMembers,
+		logger:      cfg.Logger,
+		readyCh:     make(chan struct{}),
+	}
+
 	proxy := NewProxy(ProxyConfig{
 		CredStore: credStore,
 		Allowlist: allowlist,
 		Scrubber:  scrubber.New(),
 		Logger:    cfg.Logger,
 		FreeMode:  freeMode,
+		OnEgress:  s.buildEgressObserver(),
 	})
-
-	s := &Server{
-		credStore:   credStore,
-		allowlist:   allowlist,
-		proxy:       proxy,
-		ipc:         cfg.IPC,
-		crewMembers: cfg.CrewMembers,
-		logger:      cfg.Logger,
-		readyCh:     make(chan struct{}),
-	}
+	s.proxy = proxy
 
 	// Initialize memory engine if configured
 	if cfg.Memory != nil && cfg.Memory.Enabled && cfg.Memory.BasePath != "" {

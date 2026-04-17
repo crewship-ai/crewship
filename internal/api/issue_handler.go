@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/statuses"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -18,15 +19,28 @@ type IssueHandler struct {
 	hub           *ws.Hub
 	missionEngine MissionStarter
 	logger        *slog.Logger
+	journal       journal.Emitter
 }
 
 // NewIssueHandler creates a new IssueHandler.
 func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Logger) *IssueHandler {
-	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger}
+	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger, journal: noopEmitter{}}
 }
 
-// logActivity inserts a row into mission_activity. Errors are logged but not
-// returned — activity logging is best-effort and should not fail the caller.
+// SetJournal wires a journal emitter after construction so the router can
+// pass its shared emitter in without breaking existing test call sites.
+func (h *IssueHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
+}
+
+// logActivity inserts a row into mission_activity AND emits a journal entry.
+// Errors are logged but not returned — activity logging is best-effort and
+// should not fail the caller. The journal emit is fire-and-forget via the
+// batched writer so the caller never waits on a DB round-trip here.
 func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
 	actID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -35,6 +49,35 @@ func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, ac
 		actID, missionID, actorType, actorID, action, details, now); err != nil {
 		h.logger.Error("insert mission activity", "action", action, "mission_id", missionID, "error", err)
 	}
+
+	// The mission row carries workspace_id; we grab it here rather than
+	// threading it through every logActivity caller. One extra light
+	// query per activity is cheap compared with the benefit of a
+	// single-argument signature at every call site.
+	var workspaceID, crewID string
+	_ = h.db.QueryRowContext(ctx, `SELECT workspace_id, crew_id FROM missions WHERE id = ?`, missionID).
+		Scan(&workspaceID, &crewID)
+	if workspaceID == "" {
+		// Mission may not exist yet (some callers pass chatID as missionID
+		// legacy). Journal write needs workspace_id, so skip silently.
+		return
+	}
+	actor := journal.ActorType(actorType)
+	if actor != journal.ActorAgent && actor != journal.ActorUser && actor != journal.ActorSystem {
+		actor = journal.ActorSystem
+	}
+	_, _ = h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		MissionID:   missionID,
+		Type:        journal.EntryMissionStatus,
+		Severity:    journal.SeverityInfo,
+		ActorType:   actor,
+		ActorID:     actorID,
+		Summary:     action + ": " + truncate(details, 120),
+		Payload:     map[string]any{"action": action, "details": details},
+		Refs:        map[string]any{"mission_id": missionID, "activity_id": actID},
+	})
 }
 
 // broadcastIssueEvent sends a workspace-scoped WebSocket event.

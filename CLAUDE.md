@@ -34,6 +34,31 @@ All development happens on a **remote Proxmox VM** via SSH. Never build or run s
 - **VS Code / Cursor:** `code --remote ssh-remote+crewship-dev /opt/crewship`
 - Go PATH on the server requires: `export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin` (already in `.bashrc`)
 
+## Crew Journal architecture (added 2026-04, shipped on feat/crew-journal)
+
+Single append-only event stream (`journal_entries` table, migration 52) is the canonical source of truth for every observable action. All new platform surfaces are read-models or middleware over this one stream.
+
+Package layout:
+- `internal/journal/` — Emit API + batched writer + typed entry catalog. Router exposes `Router.Journal()` getter; handlers call `h.journal.Emit(ctx, Entry{...})` without nil-checking (noopEmitter default).
+- `internal/paymaster/` — LLM cost tracking + hierarchical budget enforcement (workspace → crew → mission → agent). Writes `cost_ledger`, emits `llm.call` + `cost.incurred` + `budget.exceeded` entries.
+- `internal/lookout/` — guardrails: prompt injection detect, tool arg JSON-schema validation, output parser, secrets redaction. Emits `guardrail.input_blocked` / `guardrail.output_blocked`.
+- `internal/harbormaster/` — HITL approval queue. Gate() with Mode none/async/sync; sync polls `approvals_queue` until decided or timed out. Emits `approval.requested/granted/denied/timeout`.
+- `internal/cartographer/` — checkpoints + fork + restore over journal cursor. Restore is READ-ONLY (returns divergence warnings); actual state rewind is UX decision in the handler.
+- `internal/hooks/` — lifecycle intercept framework (shell/http/subagent handlers, 15 event types). Shell requires `allowedShell=true` at register time.
+- `internal/quartermaster/` — trajectory eval + regression detection + LLM-as-judge with rubric-shuffle anti-bias. Provider-neutral `JudgeInterface`.
+- `internal/reflection/` — role-based reflection (Logician/Skeptic/DomainExpert critiques → synthesized via quartermaster judge) + Evaluator-Optimizer loop.
+- `internal/episodic/` — vector recall over journal (SQLite BLOB brute-force cosine; no pgvector). Selective embedding only: peer.escalation, summary, denied keeper, failed/completed mission, eval regression. NEVER embed exec.output_chunk/metrics/network (prevents memory drift).
+- `internal/presence/` — agent Watch Roster (online/busy/blocked/offline). Upsert emits `agent.status_change` only on actual transition.
+- `internal/consolidate/` — daily workers: Consolidator extracts semantic rules from journal → `.memory/topics/learned-YYYY-MM-DD.md`; Compactor kompaktuje low-signal entries older than 30 days, emits `system.compaction`.
+- `internal/telemetry/` — OTel GenAI spans with W3C trace context propagation. `RegisterJournalResolver()` wires `journal.SetTraceResolver` so every entry carries trace_id/span_id.
+- `internal/llm/middleware.go` — unified stack: `telemetry → paymaster → lookout → raw provider`. Compose via `llm.Middleware(base, j, db)`.
+
+**Write path order is load-bearing.** paymaster outside lookout so a blocked call still records a partial ledger row (attempted-but-blocked audit). lookout outside raw so bad inputs never reach the LLM.
+
+**UI surfaces**: `/journal` (workspace timeline), `/crows-nest/[crewId]` (live terminal + network + filesystem + resources, OWNER/ADMIN only), `/paymaster`, `/approvals`, `/eval`, `/missions/[id]/timeline`. All read from the same journal SSE stream; Crow's Nest filters on exec/network/file/metrics entry types.
+
+**Legacy `standup_handler`** (migration 6 vintage) stays functional for existing sidecar + CLI callers but is deprecated — replaced by Crew Journal + optional LLM summary. Remove after all consumers migrate.
+
 ## Project-specific knowledge (not derivable from code)
 
 - Single binary: `make build` → Next.js static export (`out/`) → `web/out/` → Go `//go:embed`. No Node.js at runtime.

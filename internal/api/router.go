@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -79,7 +80,32 @@ type Router struct {
 	portExposePublicURL  string              // e.g. http://192.168.1.201:8080, used to build capability URLs
 	authRateLimitedMux   http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux    http.Handler        // mux wrapped with general API rate limiter
+	journal              journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 }
+
+// Journal returns the journal emitter or a no-op if unset. Handlers should
+// use this instead of accessing the field directly so the nil-guard lives
+// in one place.
+func (r *Router) Journal() journal.Emitter {
+	if r.journal == nil {
+		return noopEmitter{}
+	}
+	return r.journal
+}
+
+// noopEmitter swallows Emit calls so early-init code paths and tests that
+// don't wire a real writer still compile and run. It returns a synthesized
+// ID so callers treating the return value as "something happened" stay
+// correct. Flush is a no-op.
+type noopEmitter struct{}
+
+func (noopEmitter) Emit(_ context.Context, e journal.Entry) (string, error) {
+	if e.ID != "" {
+		return e.ID, nil
+	}
+	return "noop", nil
+}
+func (noopEmitter) Flush(_ context.Context) error { return nil }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -276,6 +302,15 @@ func WithLogWriter(lw *logcollector.Writer) RouterOption {
 	}
 }
 
+// WithJournal wires the Crew Journal emitter used by all handlers to log
+// structured events. When unset, Router.Journal() returns a no-op so code
+// can emit unconditionally without nil-checking.
+func WithJournal(j journal.Emitter) RouterOption {
+	return func(r *Router) {
+		r.journal = j
+	}
+}
+
 // WithLicense attaches the license for enforcing feature gates and seat limits.
 func WithLicense(lic *license.License) RouterOption {
 	return func(r *Router) {
@@ -466,6 +501,7 @@ func (r *Router) registerRoutes() {
 
 	// AI crew wizard
 	crewAI := NewCrewAIHandler(r.db, r.logger)
+	crewAI.SetJournal(r.Journal())
 	r.mux.Handle("POST /api/v1/crew-ai-suggest", authed(wsCtx(http.HandlerFunc(crewAI.Suggest))))
 
 	// Missions
@@ -498,6 +534,7 @@ func (r *Router) registerRoutes() {
 		issueStarter = missionEngineForPublic
 	}
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
+	issues.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/issues", authed(wsCtx(http.HandlerFunc(issues.List))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.GetByIdentifier))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/issues", authed(wsCtx(http.HandlerFunc(issues.Create))))
@@ -620,6 +657,40 @@ func (r *Router) registerRoutes() {
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
 
+	// Crew Journal: workspace-wide event stream. Reads only — writes are
+	// internal via journal.Writer emits from handlers across the codebase.
+	jh := NewJournalHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
+	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
+
+	// Cartographer: mission checkpoint / restore / fork API. The package
+	// owns the row writes + journal emits; this handler is the HTTP
+	// surface for the /missions/[id]/timeline UI.
+	ch := NewCartographerHandler(r.db, r.logger)
+	ch.SetJournal(r.Journal())
+	r.mux.Handle("GET /api/v1/missions/{missionId}/checkpoints", authed(wsCtx(http.HandlerFunc(ch.List))))
+	r.mux.Handle("POST /api/v1/missions/{missionId}/checkpoints", authed(wsCtx(http.HandlerFunc(ch.Create))))
+	r.mux.Handle("GET /api/v1/checkpoints/{id}", authed(wsCtx(http.HandlerFunc(ch.Get))))
+	r.mux.Handle("POST /api/v1/checkpoints/{id}/restore", authed(wsCtx(http.HandlerFunc(ch.Restore))))
+	r.mux.Handle("POST /api/v1/checkpoints/{id}/fork", authed(wsCtx(http.HandlerFunc(ch.Fork))))
+	r.mux.Handle("DELETE /api/v1/checkpoints/{id}", authed(wsCtx(http.HandlerFunc(ch.Delete))))
+
+	// Paymaster: cost + budget read endpoints backed by the cost_ledger
+	// rollup queries. Writes to the ledger happen inside the LLM
+	// middleware chain, not through this handler.
+	ph := NewPaymasterHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/paymaster/spend/by-crew", authed(wsCtx(http.HandlerFunc(ph.SpendByCrew))))
+	r.mux.Handle("GET /api/v1/paymaster/spend/by-agent/{crewId}", authed(wsCtx(http.HandlerFunc(ph.SpendByAgent))))
+	r.mux.Handle("GET /api/v1/paymaster/spend/by-mission/{missionId}", authed(wsCtx(http.HandlerFunc(ph.SpendByMission))))
+	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
+
+	// Harbor Master: HITL approvals inbox. Enqueue side runs inside
+	// the orchestrator's gate; this handler is list + decide for humans.
+	ah := NewApprovalsHandler(r.db, r.logger, r.Journal())
+	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
+	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
+	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
+
 	// Backups (admin-only; require workspace context for scoping). See
 	// .claude/context/prd/BACKUP.md for the full API contract.
 	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))
@@ -664,6 +735,7 @@ func (r *Router) registerRoutes() {
 	// internal/api/captain.go). Kept registered for backward compatibility
 	// with existing UI/CLI clients. Do not add new routes here.
 	captain := NewCaptainHandler(r.db, r.logger)
+	captain.SetJournal(r.Journal())
 	if r.captainLLM != nil {
 		captain.SetProvider(r.captainLLM)
 	}
@@ -785,6 +857,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/internal/agents", internalAuth(http.HandlerFunc(internal.CreateAgent)))
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 	r.mux.Handle("POST /api/v1/internal/mcp-tool-calls", internalAuth(http.HandlerFunc(internal.RecordMCPToolCall)))
+	// Sidecar-emitted Crow's Nest journal events (network.egress, file.written).
+	// Handler enforces a strict entry-type allowlist so agents can't fabricate
+	// assignment.completed / approval.granted rows via the sidecar.
+	r.mux.Handle("POST /api/v1/internal/journal/emit", internalAuth(http.HandlerFunc(r.handleSidecarEmit)))
 
 	// Cross-crew messaging and file sharing (called by sidecar)
 	crewMsg := NewCrewMessagingHandler(r.db, r.storagePath, r.logger)
@@ -835,6 +911,7 @@ func (r *Router) registerRoutes() {
 
 	// Query routes (peer-to-peer communication, standup summaries, escalations)
 	queries := NewQueryHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	queries.SetJournal(r.Journal())
 	r.mux.Handle("POST /api/v1/internal/queries", internalAuth(http.HandlerFunc(queries.Create)))
 	r.mux.Handle("GET /api/v1/internal/standup", internalAuth(http.HandlerFunc(queries.Standup)))
 	r.mux.Handle("POST /api/v1/internal/escalations", internalAuth(http.HandlerFunc(queries.CreateEscalation)))
