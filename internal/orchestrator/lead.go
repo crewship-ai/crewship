@@ -24,6 +24,64 @@ type CrewMember struct {
 	Integrations []MemberIntegration
 }
 
+// leadContextStaticTail is the static orchestration cheat-sheet appended after
+// the dynamic crew-member list. Collapsing ~50 per-call WriteString calls into
+// a single raw string literal cuts both allocations and wall-clock time on
+// every LEAD agent run.
+const leadContextStaticTail = `
+To assign a task to a crew member, use your bash tool:
+  curl -s -X POST http://localhost:9119/assign \
+    -H "Content-Type: application/json" \
+    -d '{"target":"<slug>","task":"<description>"}'
+To wait for and get the result:
+  curl -s http://localhost:9119/results/<assignment_id>
+(Poll /results/<id> until status is COMPLETED or FAILED.)
+
+To ask a crew member a quick question (not a task):
+  curl -s -X POST http://localhost:9119/query \
+    -H "Content-Type: application/json" \
+    -d '{"target":"<slug>","question":"<question>"}'
+
+To get crew standup summary:
+  curl -s http://localhost:9119/standup
+  curl -s "http://localhost:9119/standup?since=2025-01-01T00:00:00Z"
+
+TASK SCALING RULES (follow these when planning work):
+Before assigning tasks, classify each by complexity:
+  SIMPLE  — fact-finding, single operation, quick lookup
+            → 1 agent, 3-10 tool calls, ~5 min, ~10K tokens
+  MEDIUM  — comparison, multi-step, code changes in 1-2 files
+            → 1-2 agents, 10-15 tool calls, ~15 min, ~50K tokens
+  COMPLEX — research, multi-file changes, architecture decisions
+            → 2-4 agents, 15+ tool calls, ~30 min, ~100K tokens
+Match effort to complexity. Do NOT over-invest in simple tasks.
+For SIMPLE tasks, prefer /assign (direct). For COMPLEX, use /mission/create.
+
+STRUCTURED HANDOFF (required for all task outputs):
+When you receive results from crew members, expect this structure:
+  * summary: 1-3 sentence description of what was done
+  * confidence: self-assessed quality (low/medium/high)
+  * artifacts: list of files created or modified
+If a result lacks summary or has low confidence, request clarification before proceeding.
+
+To create a multi-task mission (advanced orchestration):
+  curl -s -X POST http://localhost:9119/mission/create \
+    -H "Content-Type: application/json" \
+    -d '{"title":"...","description":"...","tasks":[
+      {"title":"...","assigned_to":"<slug>","task_order":1},
+      {"title":"...","assigned_to":"<slug>","task_order":2,"depends_on":["<task_id>"]}]}'
+Then start it: curl -s -X POST http://localhost:9119/mission/<id>/start
+Check status:  curl -s http://localhost:9119/mission/<id>
+List templates: curl -s http://localhost:9119/mission/templates
+Available templates: sequential, parallel, dev-test-loop, pipeline
+Tasks with max_iterations will auto-retry on failure (Ralph Loop pattern).
+
+CROSS-CREW MISSIONS:
+Mission tasks can reference agents from connected crews.
+The system auto-routes assignments to the correct crew container.
+Crew connections must be established by workspace admins before use.
+[END CREW CONTEXT]`
+
 // BuildLeadContext formats a [CREW CONTEXT] block for the lead agent's system prompt.
 // Returns empty string if there are no crew members (solo lead).
 func BuildLeadContext(members []CrewMember) string {
@@ -31,7 +89,10 @@ func BuildLeadContext(members []CrewMember) string {
 		return ""
 	}
 
+	// Pre-size: [CREW CONTEXT] header + static tail + rough member budget.
 	var b strings.Builder
+	b.Grow(64 + len(leadContextStaticTail) + len(members)*128)
+
 	b.WriteString("[CREW CONTEXT]\n")
 	b.WriteString("Your fellow crew members:\n")
 
@@ -58,60 +119,7 @@ func BuildLeadContext(members []CrewMember) string {
 		}
 	}
 
-	b.WriteString("\n")
-	b.WriteString("To assign a task to a crew member, use your bash tool:\n")
-	b.WriteString("  curl -s -X POST http://localhost:9119/assign \\\n")
-	b.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("    -d '{\"target\":\"<slug>\",\"task\":\"<description>\"}'\n")
-	b.WriteString("To wait for and get the result:\n")
-	b.WriteString("  curl -s http://localhost:9119/results/<assignment_id>\n")
-	b.WriteString("(Poll /results/<id> until status is COMPLETED or FAILED.)\n")
-	b.WriteString("\n")
-	b.WriteString("To ask a crew member a quick question (not a task):\n")
-	b.WriteString("  curl -s -X POST http://localhost:9119/query \\\n")
-	b.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("    -d '{\"target\":\"<slug>\",\"question\":\"<question>\"}'\n")
-	b.WriteString("\n")
-	b.WriteString("To get crew standup summary:\n")
-	b.WriteString("  curl -s http://localhost:9119/standup\n")
-	b.WriteString("  curl -s \"http://localhost:9119/standup?since=2025-01-01T00:00:00Z\"\n")
-	b.WriteString("\n")
-	b.WriteString("TASK SCALING RULES (follow these when planning work):\n")
-	b.WriteString("Before assigning tasks, classify each by complexity:\n")
-	b.WriteString("  SIMPLE  — fact-finding, single operation, quick lookup\n")
-	b.WriteString("            → 1 agent, 3-10 tool calls, ~5 min, ~10K tokens\n")
-	b.WriteString("  MEDIUM  — comparison, multi-step, code changes in 1-2 files\n")
-	b.WriteString("            → 1-2 agents, 10-15 tool calls, ~15 min, ~50K tokens\n")
-	b.WriteString("  COMPLEX — research, multi-file changes, architecture decisions\n")
-	b.WriteString("            → 2-4 agents, 15+ tool calls, ~30 min, ~100K tokens\n")
-	b.WriteString("Match effort to complexity. Do NOT over-invest in simple tasks.\n")
-	b.WriteString("For SIMPLE tasks, prefer /assign (direct). For COMPLEX, use /mission/create.\n\n")
-
-	b.WriteString("STRUCTURED HANDOFF (required for all task outputs):\n")
-	b.WriteString("When you receive results from crew members, expect this structure:\n")
-	b.WriteString("  * summary: 1-3 sentence description of what was done\n")
-	b.WriteString("  * confidence: self-assessed quality (low/medium/high)\n")
-	b.WriteString("  * artifacts: list of files created or modified\n")
-	b.WriteString("If a result lacks summary or has low confidence, request clarification before proceeding.\n\n")
-
-	b.WriteString("To create a multi-task mission (advanced orchestration):\n")
-	b.WriteString("  curl -s -X POST http://localhost:9119/mission/create \\\n")
-	b.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("    -d '{\"title\":\"...\",\"description\":\"...\",\"tasks\":[\n")
-	b.WriteString("      {\"title\":\"...\",\"assigned_to\":\"<slug>\",\"task_order\":1},\n")
-	b.WriteString("      {\"title\":\"...\",\"assigned_to\":\"<slug>\",\"task_order\":2,\"depends_on\":[\"<task_id>\"]}]}'\n")
-	b.WriteString("Then start it: curl -s -X POST http://localhost:9119/mission/<id>/start\n")
-	b.WriteString("Check status:  curl -s http://localhost:9119/mission/<id>\n")
-	b.WriteString("List templates: curl -s http://localhost:9119/mission/templates\n")
-	b.WriteString("Available templates: sequential, parallel, dev-test-loop, pipeline\n")
-	b.WriteString("Tasks with max_iterations will auto-retry on failure (Ralph Loop pattern).\n")
-	b.WriteString("\n")
-	b.WriteString("CROSS-CREW MISSIONS:\n")
-	b.WriteString("Mission tasks can reference agents from connected crews.\n")
-	b.WriteString("The system auto-routes assignments to the correct crew container.\n")
-	b.WriteString("Crew connections must be established by workspace admins before use.\n")
-
-	b.WriteString("[END CREW CONTEXT]")
+	b.WriteString(leadContextStaticTail)
 	return b.String()
 }
 
