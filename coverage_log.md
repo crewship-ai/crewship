@@ -30,3 +30,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 9 | D | components/features/chat/chat-tree-row.tsx (D1/D2 too large, D3 done, D4/D5 deprecated) | ok | 7d4487e | 2026-04-17T01:50Z |
 | 10 | E | e2e/* | skipped: no local dev server (2nd E skip — unchanged since iter 5; unblock by either starting local `pnpm dev` on Mac or making playwright.config.ts baseURL env-overridable to point at 192.168.1.201) | — | 2026-04-17T02:10Z |
 | 11 | A | internal/encryption/encryption.go (A1/A2 done; A3 backup/selftest + A4 orchestrator/failover already had tests; new layout/versioning tests added on top of existing) | ok | 7414d0f | 2026-04-17T02:30Z |
+| 12 | B | cmd/crewship/cmd_activity.go (B1/B5 done, B2/B4 too large, B3 deprecated) | ok | 1da1e94 | 2026-04-17T02:50Z |
