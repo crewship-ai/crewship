@@ -36,11 +36,13 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	if a == nil || a.db == nil || userID == "" {
 		return false
 	}
-	parts := strings.SplitN(channel, ":", 2)
-	if len(parts) != 2 || parts[1] == "" {
+	// Parse "type:id" without allocating a []string — previously strings.SplitN
+	// cost one slice header per subscription call.
+	idx := strings.IndexByte(channel, ':')
+	if idx <= 0 || idx == len(channel)-1 {
 		return false
 	}
-	chType, chID := parts[0], parts[1]
+	chType, chID := channel[:idx], channel[idx+1:]
 
 	switch chType {
 	case "workspace":
