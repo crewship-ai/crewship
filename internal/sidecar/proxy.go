@@ -320,6 +320,21 @@ func isLocalhost(host string) bool {
 // isLoopbackIP checks if an IP string is a loopback address.
 // Covers: 127.0.0.0/8 (entire range), ::1, 0:0:0:0:0:0:0:1
 func isLoopbackIP(s string) bool {
+	// Fast-path: loopback IPs only contain digits, '.', ':', and hex letters
+	// (a–f / A–F). Any other character means `s` cannot be an IP, so we can
+	// short-circuit and skip net.ParseIP — which otherwise allocates a 16-byte
+	// IP buffer even on parse failure.
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		case c == '.' || c == ':':
+		default:
+			return false
+		}
+	}
 	ip := net.ParseIP(s)
 	if ip == nil {
 		return false
