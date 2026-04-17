@@ -38,7 +38,9 @@ func BenchmarkBuildMissionBrief(b *testing.B) {
 	}
 
 	missionID := "mission-bench"
-	db.Exec(`INSERT INTO missions (id, title, description) VALUES (?, 'Bench', 'Benchmark mission')`, missionID)
+	if _, err := db.Exec(`INSERT INTO missions (id, title, description) VALUES (?, 'Bench', 'Benchmark mission')`, missionID); err != nil {
+		b.Fatalf("seed mission: %v", err)
+	}
 
 	summary := "Completed the work. Produced a clean artifact ready for downstream consumption."
 	slug := "anna"
