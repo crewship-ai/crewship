@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"sync/atomic"
 	"time"
 )
@@ -20,37 +21,45 @@ var remapCounter atomic.Uint64
 // internal/api.generateCUID (`c<base36 ts><4-hex counter><8-hex rand>`)
 // so a remapped row is indistinguishable at a glance from a row that
 // came out of the normal API paths.
+//
+// Direct byte-append into a stack buffer — the previous
+// fmt.Sprintf + manual base36-prepend + hex.EncodeToString(..)[:8]
+// version paid ~20 heap allocations per ID on the restore hot path.
 func newRemapCUID() string {
 	ts := time.Now().UnixMilli()
 	c := remapCounter.Add(1)
-	b := make([]byte, 8)
+	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
-		// On RNG failure we salt the random slot with counter + ts so
+		// On RNG failure salt the random slot with counter + ts so
 		// collisions are still astronomically unlikely for a single
 		// restore batch.
-		b[0] = byte(c >> 56)
-		b[1] = byte(c >> 48)
-		b[2] = byte(c >> 40)
-		b[3] = byte(c >> 32)
-		b[4] = byte(ts >> 24)
-		b[5] = byte(ts >> 16)
-		b[6] = byte(ts >> 8)
-		b[7] = byte(ts)
+		b[0] = byte(c >> 24)
+		b[1] = byte(c >> 16)
+		b[2] = byte(ts >> 8)
+		b[3] = byte(ts)
 	}
-	return fmt.Sprintf("c%s%04x%s", base36(ts), c%65536, hex.EncodeToString(b)[:8])
+
+	// "c" + base36(ts) (~8 chars) + %04x counter + 8 hex chars = ≤ 21 chars;
+	// 32-byte stack buffer is ample.
+	var buf [32]byte
+	out := append(buf[:0], 'c')
+	out = strconv.AppendInt(out, ts, 36)
+	tail := c % 65536
+	const hexdigits = "0123456789abcdef"
+	out = append(out,
+		hexdigits[(tail>>12)&0xF],
+		hexdigits[(tail>>8)&0xF],
+		hexdigits[(tail>>4)&0xF],
+		hexdigits[tail&0xF],
+	)
+	out = hex.AppendEncode(out, b)
+	return string(out)
 }
 
+// base36 remains a thin wrapper around strconv.FormatInt so any external
+// users (or tests) that depend on the public shape keep working.
 func base36(n int64) string {
-	const chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-	if n == 0 {
-		return "0"
-	}
-	var out []byte
-	for n > 0 {
-		out = append([]byte{chars[n%36]}, out...)
-		n /= 36
-	}
-	return string(out)
+	return strconv.FormatInt(n, 36)
 }
 
 // foreignKeyEdge captures one FK column's destination.
