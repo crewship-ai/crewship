@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -423,5 +424,13 @@ func generateID() string {
 	if _, err := rand.Read(b); err != nil {
 		panic("crypto/rand failed: " + err.Error())
 	}
-	return fmt.Sprintf("sched_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
+	// Direct byte-append: "sched_" + <unix-nano> + "_" + 24 hex chars.
+	// Previous fmt.Sprintf + hex.EncodeToString chain paid 4 heap
+	// allocations per call; this shape needs just the final string.
+	var buf [64]byte
+	out := append(buf[:0], "sched_"...)
+	out = strconv.AppendInt(out, time.Now().UnixNano(), 10)
+	out = append(out, '_')
+	out = hex.AppendEncode(out, b)
+	return string(out)
 }
