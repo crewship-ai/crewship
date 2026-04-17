@@ -24,13 +24,20 @@ type LogEntry struct {
 	Metadata  any       `json:"metadata,omitempty"`
 }
 
+// fileKey identifies an open per-agent log file without a per-call string
+// concatenation: struct equality is zero-alloc when used as a map key.
+type fileKey struct {
+	crewID  string
+	agentID string
+}
+
 // Writer appends structured log entries to per-agent JSONL files organized
 // under basePath/crews/{crewID}/agents/{agentID}/current.jsonl.
 type Writer struct {
 	basePath string
 	logger   *slog.Logger
 	mu       sync.Mutex
-	files    map[string]*os.File
+	files    map[fileKey]*os.File
 }
 
 // NewWriter creates a Writer that stores agent logs under the given base path.
@@ -38,7 +45,7 @@ func NewWriter(basePath string, logger *slog.Logger) *Writer {
 	return &Writer{
 		basePath: basePath,
 		logger:   logger,
-		files:    make(map[string]*os.File),
+		files:    make(map[fileKey]*os.File),
 	}
 }
 
@@ -75,7 +82,7 @@ func (w *Writer) Append(crewID, agentID string, entry LogEntry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	key := crewID + "/" + agentID
+	key := fileKey{crewID: crewID, agentID: agentID}
 	f, ok := w.files[key]
 	if !ok {
 		dir := filepath.Join(w.basePath, "crews", crewID, "agents", agentID)
