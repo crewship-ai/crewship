@@ -325,11 +325,19 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
 	}
 
+	// Assemble the final system prompt in a single strings.Builder pass.
+	// The previous `systemPrompt = systemPrompt + "\n\n" + section` chain was
+	// O(n²) — each step copied the full accumulated prompt, which is 5–15 kB
+	// in realistic workloads.
+	var promptBuf strings.Builder
+	promptBuf.Grow(len(req.SystemPrompt) + 8192) // headroom for up to 4 contexts
+	promptBuf.WriteString(req.SystemPrompt)
+
 	// Inject lead crew context into system prompt (before memory, after conversation history)
 	if req.AgentRole == "LEAD" && len(req.CrewMembers) > 0 {
-		leadCtx := BuildLeadContext(req.CrewMembers)
-		if leadCtx != "" {
-			req.SystemPrompt = req.SystemPrompt + "\n\n" + leadCtx
+		if leadCtx := BuildLeadContext(req.CrewMembers); leadCtx != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(leadCtx)
 		}
 	}
 
@@ -337,32 +345,38 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
 	// Branch retained for backward compat so existing COORDINATOR agents keep working.
 	if req.AgentRole == "COORDINATOR" && len(req.AllCrews) > 0 {
-		coordCtx := BuildCoordinatorContext(req.AllCrews, req.ActiveMissions)
-		if coordCtx != "" {
-			req.SystemPrompt = req.SystemPrompt + "\n\n" + coordCtx
+		if coordCtx := BuildCoordinatorContext(req.AllCrews, req.ActiveMissions); coordCtx != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(coordCtx)
 		}
 	}
 
 	// Inject peer communication context for non-LEAD agents in a crew
 	if req.AgentRole != "LEAD" && len(req.CrewMembers) > 0 {
-		peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug)
-		if peerCtx != "" {
-			req.SystemPrompt = req.SystemPrompt + "\n\n" + peerCtx
+		if peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug); peerCtx != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(peerCtx)
 		}
 	}
 
 	// Inject agent memory context into system prompt (after conversation history)
 	if req.MemoryEnabled {
-		memoryCtx := o.buildMemoryContext(ctx, req, tokenutil.CharsForTokens(memTokenBudget))
-		if memoryCtx != "" {
-			req.SystemPrompt = req.SystemPrompt + "\n\n" + memoryCtx
+		if memoryCtx := o.buildMemoryContext(ctx, req, tokenutil.CharsForTokens(memTokenBudget)); memoryCtx != "" {
+			promptBuf.WriteString("\n\n")
+			promptBuf.WriteString(memoryCtx)
 		}
 	}
 
 	// Inject workspace language preference so agents respond in the right language
 	if req.PreferredLanguage != "" {
-		req.SystemPrompt = req.SystemPrompt + "\n\n[LANGUAGE]\nAlways respond and write comments in " + req.PreferredLanguage + ". All your output, summaries, and handoff descriptions must be in " + req.PreferredLanguage + ".\n[END LANGUAGE]"
+		promptBuf.WriteString("\n\n[LANGUAGE]\nAlways respond and write comments in ")
+		promptBuf.WriteString(req.PreferredLanguage)
+		promptBuf.WriteString(". All your output, summaries, and handoff descriptions must be in ")
+		promptBuf.WriteString(req.PreferredLanguage)
+		promptBuf.WriteString(".\n[END LANGUAGE]")
 	}
+
+	req.SystemPrompt = promptBuf.String()
 
 	o.logger.Info("system prompt assembled",
 		"agent", req.AgentSlug,
