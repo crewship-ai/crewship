@@ -35,3 +35,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 14 | D | components/features/chat/status-indicator.tsx (D1/D2 too large; D3/D-chat-tree done; D4/D5 deprecated; right-panel 652ř too large) | ok | d9be952 | 2026-04-17T03:30Z |
 | 15 | E | e2e/* | skipped: no dev server (3rd E skip — same blocker as iter 5, 10) | — | 2026-04-17T03:50Z |
 | 16 | A | internal/backup/checksum.go (A1/A2/A5 done; A3 selftest/A4 failover/A6 llm already covered) | ok | 99ec1c8 | 2026-04-17T04:10Z |
+| 17 | B | cmd/crewship/cmd_config.go (B1/B5/B6 done; B2/B4 too large; B3 deprecated) | ok | e013568 | 2026-04-17T04:30Z |
