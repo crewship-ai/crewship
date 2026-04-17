@@ -282,6 +282,40 @@ CREATE INDEX IF NOT EXISTS idx_port_exposures_expires ON port_exposures(status, 
 	// (hooks_config), and Watch Roster (agent_status). They are created
 	// together because they are interdependent and shipped as one feature set.
 	{version: 52, name: "add_crew_journal", sql: migrationAddCrewJournal},
+	// eval_runs: durable index of every quartermaster replay / regression
+	// invocation. The journal already records each run as an
+	// eval.run_started entry + per-metric eval.metric entries, but that
+	// is a write-only trail optimised for audit, not list / filter /
+	// paginate. This table gives the /api/v1/eval/runs endpoint a tight
+	// SELECT over run rows plus status/result, so the UI (and CLI)
+	// doesn't have to reconstruct a run by walking the journal.
+	//
+	// workspace_id is a hard scope predicate — cross-tenant leakage here
+	// would expose full trajectory metrics from other customers, so the
+	// handler always includes workspace_id in the WHERE clause.
+	{version: 53, name: "add_eval_runs", sql: `
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('replay','regression')),
+    mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL,
+    baseline_mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL,
+    candidate_mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','completed','failed')),
+    result TEXT,
+    seed INTEGER NOT NULL DEFAULT 0,
+    signature TEXT,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost_usd REAL NOT NULL DEFAULT 0,
+    regressed INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_ws_created ON eval_runs(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_kind ON eval_runs(kind, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_mission ON eval_runs(mission_id, created_at DESC) WHERE mission_id IS NOT NULL;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -90,8 +90,11 @@ const (
 	EntryHookBlocked EntryType = "hook.blocked"
 
 	// System
-	EntrySystemCompaction EntryType = "system.compaction"
-	EntrySystemMigration  EntryType = "system.migration"
+	EntrySystemCompaction             EntryType = "system.compaction"
+	EntrySystemMigration              EntryType = "system.migration"
+	EntrySystemHookToggled            EntryType = "system.hook_toggled"
+	EntrySystemConsolidationTriggered EntryType = "system.consolidation_triggered"
+	EntrySystemConsolidationCompleted EntryType = "system.consolidation_completed"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI
