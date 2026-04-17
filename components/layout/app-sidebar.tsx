@@ -21,6 +21,8 @@ import {
   MousePointer2,
   ChevronDown,
   Ship,
+  BookOpen,
+  Binoculars,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -71,6 +73,8 @@ const navSections = [
     label: "Monitor",
     items: [
       { title: "Runs", href: "/runs", icon: Activity },
+      { title: "Journal", href: "/journal", icon: BookOpen },
+      { title: "Crow's Nest", href: "/crows-nest", icon: Binoculars },
       { title: "Audit Log", href: "/audit", icon: Shield },
     ],
   },
