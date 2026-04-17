@@ -23,7 +23,9 @@ var ErrNotFound = errors.New("cartographer: checkpoint not found")
 // humans, not by hot-path code.
 func newCheckpointID() string {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return "cp_" + hex.EncodeToString(b[:])
 }
 

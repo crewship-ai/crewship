@@ -37,7 +37,13 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := harbormaster.Status(r.URL.Query().Get("status"))
-	if status == "" {
+	// The documented "?status=all" is shorthand for "no status filter".
+	// harbormaster.List treats an empty Status as the all-statuses case,
+	// so translate here — literal "all" would otherwise pin the filter
+	// to a non-existent status value and return zero rows.
+	if status == "all" {
+		status = ""
+	} else if status == "" {
 		status = harbormaster.StatusPending
 	}
 	limit := 50
@@ -72,6 +78,15 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("approvals get", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get failed"})
+		return
+	}
+	if row == nil {
+		// harbormaster.Get returns (nil, nil) for a missing row that
+		// didn't map to ErrNotFound (e.g., an ID that's malformed but
+		// the driver didn't complain). Surface as 404 so the UI
+		// renders the right empty state instead of a successful null
+		// response.
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
 	writeJSON(w, http.StatusOK, row)

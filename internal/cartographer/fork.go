@@ -182,7 +182,9 @@ func Fork(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, fromC
 // cycle — cartographer is leaf-level.
 func newRandID(prefix string) string {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return prefix + hex.EncodeToString(b[:])
 }
 

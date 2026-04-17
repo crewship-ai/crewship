@@ -170,6 +170,8 @@ func nullable(s string) any {
 // IDs self-identifying when grepping logs.
 func newLedgerID() string {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return "cl_" + hex.EncodeToString(b[:])
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -56,6 +57,17 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
 		return
 	}
+	// Workspace isolation: paymaster.SpendByAgent filters by crew_id
+	// alone, so without this guard a caller who learned another
+	// workspace's crew ID could read that crew's LLM spend —
+	// a cross-tenant read vulnerability. Confirm the crew belongs to
+	// the caller's workspace before reading the ledger. 404 (not 403)
+	// so the wrong-workspace case is indistinguishable from the
+	// crew-doesn't-exist case — no existence leak.
+	if !crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		return
+	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SpendByAgent(r.Context(), h.db, crewID, since, until)
 	if err != nil {
@@ -64,6 +76,23 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "crew_id": crewID})
+}
+
+// crewBelongsToWorkspace and missionBelongsToWorkspace centralise the
+// scope pre-check used by the paymaster drill-downs. Returning bool
+// instead of error lets the caller render a flat 404 without leaking
+// whether the row exists in another workspace — the whole point of
+// the check.
+func crewBelongsToWorkspace(ctx context.Context, db *sql.DB, crewID, workspaceID string) bool {
+	var n int
+	_ = db.QueryRowContext(ctx, `SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?`, crewID, workspaceID).Scan(&n)
+	return n == 1
+}
+
+func missionBelongsToWorkspace(ctx context.Context, db *sql.DB, missionID, workspaceID string) bool {
+	var n int
+	_ = db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id = ? AND workspace_id = ?`, missionID, workspaceID).Scan(&n)
+	return n == 1
 }
 
 // SpendByMission returns per-mission totals. Used by the mission
@@ -77,6 +106,14 @@ func (h *PaymasterHandler) SpendByMission(w http.ResponseWriter, r *http.Request
 	missionID := r.PathValue("missionId")
 	if missionID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
+		return
+	}
+	// Same workspace-isolation check as SpendByAgent above —
+	// SpendByMission filters by mission_id alone, so cross-tenant
+	// reads would be possible without this gate. Flat 404 on miss
+	// to avoid leaking existence across tenants.
+	if !missionBelongsToWorkspace(r.Context(), h.db, missionID, workspaceID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
 		return
 	}
 	row, err := paymaster.SpendByMission(r.Context(), h.db, missionID)

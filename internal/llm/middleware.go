@@ -107,8 +107,18 @@ func (w *wrappedProvider) Stream(ctx context.Context, req Request, handler func(
 			continue
 		}
 		res := lookout.ScanInput(m.Content)
-		if res.Verdict == lookout.VerdictBlock && len(res.Findings) > 0 {
-			return nil, &lookout.BlockedError{Direction: "input", Finding: res.Findings[0]}
+		if res.Verdict == lookout.VerdictBlock {
+			// VerdictBlock with zero findings would be a lookout bug,
+			// not a legitimate allow — fail closed with a synthetic
+			// finding so the caller still learns the block happened
+			// and the LLM doesn't see the payload. Prior to this
+			// guard a `Verdict==Block && len>0` gate silently passed
+			// such payloads through.
+			finding := lookout.Finding{Kind: "unknown", Detail: "blocked by lookout (no finding detail)"}
+			if len(res.Findings) > 0 {
+				finding = res.Findings[0]
+			}
+			return nil, &lookout.BlockedError{Direction: "input", Finding: finding}
 		}
 	}
 	return w.base.Stream(ctx, req, handler)

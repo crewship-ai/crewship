@@ -68,6 +68,23 @@ type Query struct {
 	K           int
 }
 
+// EmbeddableEntryTypes is the single source of truth for which entry_type
+// values the indexer's SQL selects as candidates. shouldEmbed then applies
+// the severity-aware second pass. Both the indexer's WHERE clause and the
+// shouldEmbed switch consult this slice so the coarse DB filter and the
+// Go-side refinement can't drift — if you add a type here, both queries
+// stay consistent.
+var EmbeddableEntryTypes = []string{
+	"peer.escalation",
+	"peer.conversation",
+	"summary.generated",
+	"memory.consolidated",
+	"approval.denied",
+	"eval.regression_detected",
+	"keeper.decision",
+	"mission.status_change",
+}
+
 // shouldEmbed decides whether a given entry_type is worth the embedding
 // cost + index bloat. The list is intentionally short — adding types
 // here without evidence is how vector memories get polluted. Tag an

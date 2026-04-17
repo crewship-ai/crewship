@@ -146,6 +146,9 @@ var paymasterTopCmd = &cobra.Command{
 		if f.Format == "json" {
 			return f.JSON(body.Rows)
 		}
+		if f.Format == "yaml" {
+			return f.YAML(body.Rows)
+		}
 		for i, row := range body.Rows {
 			scope := fmt.Sprintf("%v/%v", row["scope_kind"], row["scope_id"])
 			cost, _ := row["cost_usd"].(float64)

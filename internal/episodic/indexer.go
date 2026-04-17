@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -96,19 +97,27 @@ func (x *Indexer) qualifies(e journal.Entry) bool {
 // vectors. Ollama failures are logged and the entry is skipped — we'll
 // retry on the next sweep.
 func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
+	// Build the IN (...) clause from EmbeddableEntryTypes so the coarse
+	// SQL filter tracks shouldEmbed() as it evolves. Hard-coding the
+	// list in two places would let the DB query and the Go refinement
+	// drift, causing entries to be either silently skipped or re-
+	// scanned every sweep forever.
+	placeholders := strings.Repeat("?,", len(EmbeddableEntryTypes))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(EmbeddableEntryTypes)+1)
+	for _, t := range EmbeddableEntryTypes {
+		args = append(args, t)
+	}
+	args = append(args, batch)
 	rows, err := x.db.QueryContext(ctx, `
 		SELECT e.id, e.workspace_id, e.crew_id, e.agent_id, e.entry_type, e.severity,
 		       e.summary, e.payload, e.refs, e.ts
 		  FROM journal_entries e
 		  LEFT JOIN journal_embeddings em ON em.entry_id = e.id
 		 WHERE em.entry_id IS NULL
-		   AND e.entry_type IN (
-		     'peer.escalation', 'peer.conversation', 'summary.generated',
-		     'memory.consolidated', 'approval.denied', 'eval.regression_detected',
-		     'keeper.decision', 'mission.status_change'
-		   )
+		   AND e.entry_type IN (`+placeholders+`)
 		 ORDER BY e.ts DESC
-		 LIMIT ?`, batch)
+		 LIMIT ?`, args...)
 	if err != nil {
 		x.logger.Warn("episodic: sweep query failed", "err", err)
 		return

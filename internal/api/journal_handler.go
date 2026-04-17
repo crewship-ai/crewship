@@ -97,19 +97,29 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Seed with a replay of the most recent N events so a fresh client
 	// paints the full current view before switching to live updates.
 	entries, _, err := journal.List(r.Context(), h.db, q)
-	if err == nil {
+	if err != nil {
+		// Don't abort the stream on a transient seed failure — the
+		// poll loop below can still carry live traffic once the DB
+		// recovers. Log so oncall can see why the client's initial
+		// view was empty.
+		h.logger.Warn("journal stream seed failed", "err", err)
+	} else {
 		for _, e := range entries {
 			writeSSEEvent(w, "entry", e)
 		}
 		flusher.Flush()
 	}
 
-	// lastSeenTS marks the watermark for the poll loop. Using ts rather
-	// than id lets us use the existing (workspace_id, ts) index; id is
-	// the tiebreaker within a timestamp.
-	var lastSeenTS string
+	// Watermark is the compound (ts, id) of the last emitted entry so a
+	// burst of entries sharing a millisecond timestamp isn't partially
+	// skipped on the next poll — a timestamp-only watermark would drop
+	// every entry with the same ts as the last one we saw. The DB
+	// ORDER BY (ts DESC, id DESC) in journal.List guarantees the tie-
+	// breaker is deterministic.
+	var lastSeenTS, lastSeenID string
 	if len(entries) > 0 {
 		lastSeenTS = entries[0].TS.UTC().Format(time.RFC3339Nano)
+		lastSeenID = entries[0].ID
 	} else {
 		lastSeenTS = time.Now().UTC().Format(time.RFC3339Nano)
 	}
@@ -142,11 +152,17 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			// Emit oldest first so the client timeline appends in order.
 			for i := len(rows) - 1; i >= 0; i-- {
 				e := rows[i]
-				if e.TS.Format(time.RFC3339Nano) <= lastSeenTS {
+				ts := e.TS.Format(time.RFC3339Nano)
+				// Skip entries the client has already seen, tied by
+				// id when ts matches so burst-within-ms doesn't drop
+				// rows. id comparison is stable because the journal
+				// IDs are time-ordered hex tokens.
+				if ts < lastSeenTS || (ts == lastSeenTS && e.ID <= lastSeenID) {
 					continue
 				}
 				writeSSEEvent(w, "entry", e)
 				lastSeenTS = e.TS.UTC().Format(time.RFC3339Nano)
+				lastSeenID = e.ID
 			}
 			flusher.Flush()
 		}

@@ -284,7 +284,9 @@ func nullable(s string) any {
 // before birthday collision probability hits 1e-9.
 func newID() string {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return "j_" + hex.EncodeToString(b[:])
 }
 

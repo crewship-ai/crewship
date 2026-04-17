@@ -59,14 +59,28 @@ export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
       }
       setNotConfigured(false)
       if (!res.ok) {
-        setError(`HTTP ${res.status}`)
+        // Prefer the backend's `{error: "..."}` message over a bare
+        // HTTP code so operators see the real cause (e.g. "workspace
+        // required", "forbidden") instead of "HTTP 400".
+        let msg = `HTTP ${res.status}`
+        try {
+          const body = (await res.json()) as { error?: unknown }
+          if (body && typeof body.error === "string") msg = body.error
+        } catch {
+          // fall through with the HTTP-status fallback
+        }
+        setError(msg)
         return
       }
       const json = await res.json()
       const parsed = approvalListResponseSchema.safeParse(json)
       if (reqIdRef.current !== reqId) return
       if (!parsed.success) {
+        // Surface schema-validation failures instead of silently
+        // pretending the response was empty — otherwise a backend
+        // shape regression is invisible in the UI.
         setRows([])
+        setError("Malformed response from /api/v1/approvals")
         return
       }
       setRows(parsed.data.rows)

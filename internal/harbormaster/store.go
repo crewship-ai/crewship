@@ -508,6 +508,8 @@ func nullable(s string) any {
 // "ap_" prefix matches the journal's "j_" pattern so logs stay greppable.
 func newRequestID() string {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return "ap_" + hex.EncodeToString(b[:])
 }

@@ -313,6 +313,8 @@ func nullableStr(s string) any {
 // workspace, not global collision resistance.
 func newHookID() string {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		panic("crypto/rand unavailable: " + err.Error())
+	}
 	return "hk_" + hex.EncodeToString(b[:])
 }

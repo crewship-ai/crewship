@@ -157,17 +157,40 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 			return Decision{}, ctx.Err()
 		case <-deadline:
 			// Flip the row to timeout so subsequent reads are consistent
-			// with the audit log. Errors get logged at debug so oncall
-			// can grep for this string if both fail — the sweeper will
-			// still catch up on the next tick so we don't escalate them.
-			if _, err := db.ExecContext(context.Background(),
+			// with the audit log. Two correctness concerns beyond the
+			// happy path:
+			//
+			//   1. Race with a last-second decide: if the UPDATE
+			//      affects 0 rows someone already approved or denied,
+			//      so re-check and return THEIR decision instead of
+			//      misreporting a timeout for a successful call.
+			//   2. DB/journal stall: the original Background context
+			//      was unbounded, so a stuck DB could make Gate hang
+			//      past the deadline indefinitely. Cap it at 2s so
+			//      the caller gets a decision in bounded time; the
+			//      sweeper picks up the flip on its next tick.
+			bgCtx, bgCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer bgCancel()
+			res, execErr := db.ExecContext(bgCtx,
 				`UPDATE approvals_queue SET status = 'timeout', decided_at = ?
 				 WHERE id = ? AND status = 'pending'`,
-				time.Now().UTC().Format(timeFmt), id); err != nil {
-				slog.Debug("harbormaster: gate timeout update failed", "id", id, "kind", kind, "err", err)
+				time.Now().UTC().Format(timeFmt), id)
+			if execErr != nil {
+				slog.Debug("harbormaster: gate timeout update failed", "id", id, "kind", kind, "err", execErr)
+			}
+			if execErr == nil && res != nil {
+				if n, _ := res.RowsAffected(); n == 0 {
+					// Someone decided between the last poll and this
+					// deadline fire; return their decision rather
+					// than corrupting the audit trail with a false
+					// timeout emit.
+					if dec, done, err := check(); err == nil && done {
+						return dec, nil
+					}
+				}
 			}
 			if j != nil {
-				if _, err := j.Emit(context.Background(), journal.Entry{
+				if _, err := j.Emit(bgCtx, journal.Entry{
 					WorkspaceID: in.WorkspaceID,
 					CrewID:      in.CrewID,
 					AgentID:     in.AgentID,

@@ -350,9 +350,13 @@ func (noopJournal) Emit(_ context.Context, _ JournalEntry) (string, error) {
 // approval-gate payloads where the full user message is unnecessary
 // (and potentially sensitive).
 func truncateStr(s string, n int) string {
-	if n <= 0 || len(s) <= n {
+	if n <= 0 {
 		return s
 	}
+	// Operate on runes consistently — the prior `len(s) <= n` byte
+	// early-return let multi-byte UTF-8 strings shorter than n bytes
+	// but longer than n runes slip through without truncation, giving
+	// journal summaries unexpected width for non-ASCII content.
 	runes := []rune(s)
 	if len(runes) <= n {
 		return s

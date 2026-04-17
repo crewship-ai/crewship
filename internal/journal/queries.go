@@ -175,18 +175,11 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 // scope is enforced here rather than at the handler so no cross-tenant
 // leaks are possible from an API bug upstream.
 func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error) {
-	q := Query{WorkspaceID: workspaceID, Limit: 1}
-	entries, _, err := List(ctx, db, q)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range entries {
-		if e.ID == id {
-			return &e, nil
-		}
-	}
-	// Fall back to a direct lookup — the List path is ordered by ts which
-	// makes single-ID lookup unnecessarily expensive.
+	// Direct indexed lookup by (workspace_id, id). A prior version ran
+	// a List(Limit:1) first as a "fast path" but that list has no ID
+	// filter, so it returns the most recent row in the workspace, not
+	// the requested one — which means the fallback below always ran,
+	// the List call was pure waste, and CodeRabbit flagged it.
 	row := db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, agent_id, mission_id, ts,
 		entry_type, severity, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
 		FROM journal_entries WHERE workspace_id = ? AND id = ?`, workspaceID, id)
