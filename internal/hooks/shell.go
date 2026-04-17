@@ -54,6 +54,13 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 	defer cancel()
 
 	cmd := exec.CommandContext(cctx, "sh", "-c", command)
+	// Put the shell and every child it spawns in a fresh process group so
+	// context timeout can kill the whole subtree. Without Setpgid, Linux
+	// only sends SIGKILL to the immediate sh child and a grandchild
+	// `sleep 5` runs to completion while cmd.Run() blocks on its inherited
+	// stdout/stderr pipes — the symptom TestShellHandlerTimeout caught on
+	// the dev VM. cmd.Cancel kills the whole group instead of just sh.
+	configureProcessGroup(cmd)
 
 	payloadJSON, _ := json.Marshal(ec.Payload)
 	cmd.Env = []string{
