@@ -283,7 +283,10 @@ func (r *IPCResolver) UpdateChatTitle(ctx context.Context, chatID, title string)
 
 // ResolveChat resolves a chat ID to the full agent configuration via the internal API.
 func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error) {
-	resolveURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/resolve", r.baseURL, url.PathEscape(chatID))
+	// Plain multi-string concat — Go's compiler fuses this into a single
+	// allocation sized to the total length. The previous fmt.Sprintf paid
+	// for the format machinery on every chat message.
+	resolveURL := r.baseURL + "/api/v1/internal/chats/" + url.PathEscape(chatID) + "/resolve"
 	return r.resolve(ctx, resolveURL)
 }
 
