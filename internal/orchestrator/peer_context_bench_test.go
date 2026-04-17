@@ -2,6 +2,11 @@ package orchestrator
 
 import "testing"
 
+// benchmarkBuildPeerContextSink keeps BuildPeerContext's result observable to
+// the runtime so the compiler can't dead-code-eliminate the allocation the
+// benchmark is trying to measure.
+var benchmarkBuildPeerContextSink string
+
 // BenchmarkBuildPeerContext measures the cost of building the PEER
 // COMMUNICATION block. Called on every non-LEAD agent run that has crew
 // members, so it fires more often than BuildLeadContext.
@@ -15,6 +20,6 @@ func BenchmarkBuildPeerContext(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = BuildPeerContext(members, "self")
+		benchmarkBuildPeerContextSink = BuildPeerContext(members, "self")
 	}
 }
