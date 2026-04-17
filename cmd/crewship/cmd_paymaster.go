@@ -12,6 +12,28 @@ import (
 // paymasterCmd surfaces cost reports from the command line so operators
 // can spot runaway missions without opening the web UI. Narrow scope —
 // three subcommands that each map to one rollup endpoint.
+// crewSpendRow / agentSpendRow match the backend json tags exactly —
+// named so the JSON decode structs, the printSpendTable type switch,
+// and any future test fixture can't drift out of sync via copy-paste.
+// CodeRabbit round 7 nitpick: prior code had the same anonymous struct
+// declared three times and a single tag typo would have silently
+// produced $0.0000 rows via the "unsupported rows type" default case.
+type crewSpendRow struct {
+	CrewID    string  `json:"crew_id"`
+	CostUSD   float64 `json:"cost_usd"`
+	CallCount int64   `json:"call_count"`
+	InTokens  int64   `json:"input_tokens"`
+	OutTokens int64   `json:"output_tokens"`
+}
+
+type agentSpendRow struct {
+	AgentID   string  `json:"agent_id"`
+	CostUSD   float64 `json:"cost_usd"`
+	CallCount int64   `json:"call_count"`
+	InTokens  int64   `json:"input_tokens"`
+	OutTokens int64   `json:"output_tokens"`
+}
+
 var paymasterCmd = &cobra.Command{
 	Use:   "paymaster",
 	Short: "Cost and budget reports across the workspace",
@@ -51,13 +73,7 @@ var paymasterByCrewCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Rows []struct {
-				CrewID    string  `json:"crew_id"`
-				CostUSD   float64 `json:"cost_usd"`
-				CallCount int64   `json:"call_count"`
-				InTokens  int64   `json:"input_tokens"`
-				OutTokens int64   `json:"output_tokens"`
-			} `json:"rows"`
+			Rows []crewSpendRow `json:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -95,13 +111,7 @@ var paymasterByAgentCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Rows []struct {
-				AgentID   string  `json:"agent_id"`
-				CostUSD   float64 `json:"cost_usd"`
-				CallCount int64   `json:"call_count"`
-				InTokens  int64   `json:"input_tokens"`
-				OutTokens int64   `json:"output_tokens"`
-			} `json:"rows"`
+			Rows []agentSpendRow `json:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -187,24 +197,12 @@ func printSpendTable(scopeLabel string, rows any) error {
 		cli.Bold, scopeLabel, "Cost (USD)", "Calls", "Tokens", cli.Reset)
 	fmt.Println(strings.Repeat("─", 64))
 	switch typed := rows.(type) {
-	case []struct {
-		CrewID    string  `json:"crew_id"`
-		CostUSD   float64 `json:"cost_usd"`
-		CallCount int64   `json:"call_count"`
-		InTokens  int64   `json:"input_tokens"`
-		OutTokens int64   `json:"output_tokens"`
-	}:
+	case []crewSpendRow:
 		for _, r := range typed {
 			fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
 				truncateString(r.CrewID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
 		}
-	case []struct {
-		AgentID   string  `json:"agent_id"`
-		CostUSD   float64 `json:"cost_usd"`
-		CallCount int64   `json:"call_count"`
-		InTokens  int64   `json:"input_tokens"`
-		OutTokens int64   `json:"output_tokens"`
-	}:
+	case []agentSpendRow:
 		for _, r := range typed {
 			fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
 				truncateString(r.AgentID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)

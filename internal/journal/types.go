@@ -169,6 +169,13 @@ type Entry struct {
 // Validate checks that the entry has the minimum fields the schema requires.
 // Called by Emit before the write is queued so the error is returned to the
 // caller synchronously rather than logged deep in the writer goroutine.
+//
+// Side effect: defaults empty Severity to SeverityInfo on the receiver.
+// This keeps every Emit call site from having to set a field that is
+// almost always "info" — the DB column already defaults to "info" too,
+// so setting it here just makes the in-memory Entry match what would
+// land on disk. Not pure validation, but documented so the behavior
+// isn't surprising when this method is reused elsewhere.
 func (e *Entry) Validate() error {
 	if e.WorkspaceID == "" {
 		return errors.New("journal: workspace_id required")

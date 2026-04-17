@@ -425,6 +425,14 @@ func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Stat
 // Get fetches a single request. If workspaceID is non-empty the row is
 // scoped to that workspace so an API caller can't peek into another
 // tenant's queue by guessing IDs.
+//
+// INTERNAL-ONLY: the empty-workspaceID branch intentionally skips the
+// scope check so cross-workspace internal sweepers (SweepTimeouts,
+// admin audit tooling) can resolve rows without pre-knowing the owning
+// workspace. External handlers MUST always pass a non-empty
+// workspaceID — the request-scoped Decide / Cancel / Get paths already
+// fail closed on empty input. Never thread a user-controlled value
+// into the workspaceID argument without a pre-check.
 func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Request, error) {
 	if id == "" {
 		return nil, ErrNotFound
@@ -433,6 +441,8 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Request, err
 		row *sql.Row
 	)
 	if workspaceID == "" {
+		// Unscoped path — see doc comment. Reached only from internal
+		// sweepers that need cross-workspace visibility.
 		row = db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, agent_id, mission_id,
 				requested_by, kind, reason, payload, status, decided_by, decided_at,
 				decision_comment, timeout_at, created_at
