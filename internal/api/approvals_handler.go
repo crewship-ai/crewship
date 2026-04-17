@@ -114,7 +114,7 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be approved or denied"})
 		return
 	}
-	err := harbormaster.Decide(r.Context(), h.db, h.journal, id, status, user.ID, body.Comment)
+	err := harbormaster.Decide(r.Context(), h.db, h.journal, workspaceID, id, status, user.ID, body.Comment)
 	switch err {
 	case nil:
 		// ok

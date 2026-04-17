@@ -150,7 +150,7 @@ func TestDecideIdempotency(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 
-	if err := Decide(ctx, db, rec, id, StatusApproved, "alice", "looks good"); err != nil {
+	if err := Decide(ctx, db, rec, "ws_test", id, StatusApproved, "alice", "looks good"); err != nil {
 		t.Fatalf("first decide: %v", err)
 	}
 	if !rec.hasType(journal.EntryApprovalGranted) {
@@ -158,18 +158,18 @@ func TestDecideIdempotency(t *testing.T) {
 	}
 
 	// Second decide on already-resolved row must error with ErrNotPending.
-	err = Decide(ctx, db, rec, id, StatusDenied, "bob", "too late")
+	err = Decide(ctx, db, rec, "ws_test", id, StatusDenied, "bob", "too late")
 	if err != ErrNotPending {
 		t.Errorf("second decide: got %v want ErrNotPending", err)
 	}
 
 	// Bad status must reject before touching DB.
-	if err := Decide(ctx, db, rec, id, StatusPending, "alice", ""); err != ErrBadStatus {
+	if err := Decide(ctx, db, rec, "ws_test", id, StatusPending, "alice", ""); err != ErrBadStatus {
 		t.Errorf("bad status: got %v want ErrBadStatus", err)
 	}
 
 	// Unknown id is ErrNotFound.
-	if err := Decide(ctx, db, rec, "ap_nope", StatusApproved, "alice", ""); err != ErrNotFound {
+	if err := Decide(ctx, db, rec, "ws_test", "ap_nope", StatusApproved, "alice", ""); err != ErrNotFound {
 		t.Errorf("missing: got %v want ErrNotFound", err)
 	}
 }
@@ -333,7 +333,7 @@ func TestGateSyncPolls(t *testing.T) {
 			close(approveDone)
 			return
 		}
-		_ = Decide(ctx, db, rec, rows[0].ID, StatusApproved, "alice", "ok")
+		_ = Decide(ctx, db, rec, "ws_test", rows[0].ID, StatusApproved, "alice", "ok")
 		close(approveDone)
 	}()
 
@@ -435,7 +435,7 @@ func TestListFiltersByStatus(t *testing.T) {
 
 	id1, _ := Enqueue(ctx, db, rec, newReq())
 	id2, _ := Enqueue(ctx, db, rec, newReq())
-	_ = Decide(ctx, db, rec, id1, StatusApproved, "alice", "")
+	_ = Decide(ctx, db, rec, "ws_test", id1, StatusApproved, "alice", "")
 
 	pending, err := List(ctx, db, "ws_test", StatusPending, 10)
 	if err != nil {

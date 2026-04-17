@@ -121,7 +121,12 @@ var (
 // must be StatusApproved or StatusDenied; anything else is rejected with
 // ErrBadStatus so callers can't accidentally write StatusPending or
 // StatusCancelled through this path.
-func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, id string, status Status, decidedBy, comment string) error {
+// Decide flips a pending approval to approved/denied and emits the matching
+// journal entry. workspaceID is load-bearing for tenant isolation — without
+// it in the UPDATE predicate, a caller who learns another workspace's
+// approval ID could decide it cross-tenant. Callers MUST pass the
+// workspace they resolved from auth context, not one derived from the row.
+func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id string, status Status, decidedBy, comment string) error {
 	if status != StatusApproved && status != StatusDenied {
 		return ErrBadStatus
 	}
@@ -132,13 +137,14 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, id string, statu
 	now := time.Now().UTC()
 	const updateSQL = `UPDATE approvals_queue
 		SET status = ?, decided_by = ?, decided_at = ?, decision_comment = ?
-		WHERE id = ? AND status = 'pending'`
+		WHERE id = ? AND workspace_id = ? AND status = 'pending'`
 	res, err := db.ExecContext(ctx, updateSQL,
 		string(status),
 		nullable(decidedBy),
 		now.Format(timeFmt),
 		nullable(comment),
 		id,
+		workspaceID,
 	)
 	if err != nil {
 		return fmt.Errorf("harbormaster: update decision: %w", err)
@@ -148,9 +154,11 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, id string, statu
 		return fmt.Errorf("harbormaster: rows affected: %w", err)
 	}
 	if n == 0 {
-		// Distinguish missing vs. not-pending so the caller can render the
-		// right error to the operator.
-		row, err := Get(ctx, db, "", id)
+		// Distinguish missing vs. not-pending so the caller can render
+		// the right error to the operator. The Get below is scoped to
+		// the caller's workspace, so a cross-tenant ID looks identical
+		// to a nonexistent one (ErrNotFound) — no existence leak.
+		row, err := Get(ctx, db, workspaceID, id)
 		if err != nil {
 			return err
 		}
@@ -160,8 +168,9 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, id string, statu
 		return ErrNotPending
 	}
 
-	// Reload so the journal entry carries the canonical scope.
-	row, err := Get(ctx, db, "", id)
+	// Reload so the journal entry carries the canonical scope. Scoped
+	// to the caller's workspace, matching the UPDATE above.
+	row, err := Get(ctx, db, workspaceID, id)
 	if err != nil || row == nil {
 		// Decision succeeded; failing the audit emit shouldn't error out.
 		return nil

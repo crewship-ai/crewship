@@ -116,24 +116,36 @@ func Delete(ctx context.Context, db *sql.DB, workspaceID, id string) error {
 	return nil
 }
 
-// SetEnabled flips the enabled flag. Exposed as two convenience wrappers
-// below so call sites read naturally.
-func SetEnabled(ctx context.Context, db *sql.DB, id string, enabled bool) error {
-	_, err := db.ExecContext(ctx,
-		`UPDATE hooks_config SET enabled = ?, updated_at = ? WHERE id = ?`,
-		boolToInt(enabled), time.Now().UTC().Format(time.RFC3339Nano), id)
+// SetEnabled flips the enabled flag. workspaceID is load-bearing for
+// tenant isolation — without it in the WHERE predicate, a caller who
+// learned another workspace's hook ID could toggle it cross-tenant.
+// Callers MUST pass the workspace resolved from their auth context.
+// Returns sql.ErrNoRows when the id doesn't exist within the workspace,
+// so a cross-tenant ID surfaces identically to a missing one (no
+// existence leak).
+func SetEnabled(ctx context.Context, db *sql.DB, workspaceID, id string, enabled bool) error {
+	res, err := db.ExecContext(ctx,
+		`UPDATE hooks_config SET enabled = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
+		boolToInt(enabled), time.Now().UTC().Format(time.RFC3339Nano), id, workspaceID)
 	if err != nil {
 		return fmt.Errorf("hooks: set enabled: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("hooks: rows affected: %w", err)
+	}
+	if n == 0 {
+		return sql.ErrNoRows
 	}
 	return nil
 }
 
-func Enable(ctx context.Context, db *sql.DB, id string) error {
-	return SetEnabled(ctx, db, id, true)
+func Enable(ctx context.Context, db *sql.DB, workspaceID, id string) error {
+	return SetEnabled(ctx, db, workspaceID, id, true)
 }
 
-func Disable(ctx context.Context, db *sql.DB, id string) error {
-	return SetEnabled(ctx, db, id, false)
+func Disable(ctx context.Context, db *sql.DB, workspaceID, id string) error {
+	return SetEnabled(ctx, db, workspaceID, id, false)
 }
 
 // ListByEvent loads every enabled hook for (workspaceID, event) whose crew

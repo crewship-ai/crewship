@@ -184,14 +184,14 @@ func TestEnableDisable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Disable(ctx, db, id); err != nil {
+	if err := Disable(ctx, db, "ws_test", id); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := Get(ctx, db, "ws_test", id)
 	if got.Enabled {
 		t.Fatal("expected disabled")
 	}
-	if err := Enable(ctx, db, id); err != nil {
+	if err := Enable(ctx, db, "ws_test", id); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = Get(ctx, db, "ws_test", id)

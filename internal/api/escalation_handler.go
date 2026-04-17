@@ -283,6 +283,18 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// Resolution closes the escalation thread in the journal. Severity
 	// stays at notice (not warn) because the ongoing-attention signal
 	// ended — filters on "warn+ only" will drop this correctly.
+	//
+	// CRITICAL: CREDENTIAL escalations carry secret material in
+	// body.Resolution (that's why the storage path above encrypts it
+	// before writing to the escalations table). Never write the raw
+	// value into the journal payload — the journal is a broadcast
+	// stream visible to every workspace reader. Replace with an
+	// opaque marker instead; the encrypted value in `escalations.
+	// resolution` stays the canonical record.
+	resolutionForJournal := body.Resolution
+	if escalationType == "CREDENTIAL" {
+		resolutionForJournal = "***REDACTED:credential***"
+	}
 	_, _ = h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: workspaceID,
 		Type:        journal.EntryPeerEscalation,
@@ -290,10 +302,11 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		ActorType:   journal.ActorUser,
 		Summary:     fmt.Sprintf("escalation %s resolved (%s)", escalationID, body.Action),
 		Payload: map[string]any{
-			"resolution":  body.Resolution,
-			"action":      body.Action,
-			"redirect_to": body.RedirectTo,
-			"state":       "resolved",
+			"resolution":      resolutionForJournal,
+			"action":          body.Action,
+			"redirect_to":     body.RedirectTo,
+			"state":           "resolved",
+			"escalation_type": escalationType,
 		},
 		Refs: map[string]any{"escalation_id": escalationID},
 	})
