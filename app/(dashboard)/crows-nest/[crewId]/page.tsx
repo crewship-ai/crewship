@@ -124,6 +124,15 @@ export default function CrowsNestCrewPage() {
         if (!res.ok) return
         const json = await res.json()
         if (!cancelled) setCrew(json)
+      } catch (err) {
+        // Network / JSON parse failures must not escape this async IIFE
+        // as unhandled rejections — they'd surface in console but leave
+        // crewLoading stuck at true, so the page never renders anything.
+        // The page falls back to null crew (same as 404) and the UI
+        // shows the "crew not found" empty state below.
+        if (!cancelled) {
+          console.error("crows-nest: failed to load crew metadata", err)
+        }
       } finally {
         if (!cancelled) setCrewLoading(false)
       }

@@ -29,7 +29,7 @@ const INITIAL: FetchState<never> = { data: null, loading: true, error: null, not
  * Fetch `/api/v1/paymaster/spend/by-crew?range=…`. Refetches whenever
  * `range` or `enabled` changes. 404 → notConfigured; 5xx → error.
  */
-export function useCrewSpend(range: PaymasterRange, enabled = true): FetchState<CrewSpendResponse> {
+export function useCrewSpend(range: PaymasterRange, enabled = true, reloadKey = 0): FetchState<CrewSpendResponse> {
   const [state, setState] = useState<FetchState<CrewSpendResponse>>({ ...INITIAL } as FetchState<CrewSpendResponse>)
   const reqIdRef = useRef(0)
 
@@ -66,7 +66,11 @@ export function useCrewSpend(range: PaymasterRange, enabled = true): FetchState<
         }
       }
     })()
-  }, [range, enabled])
+    // reloadKey lets the page force a refetch by bumping a counter
+    // without swapping range to a different value and back (that would
+    // trigger two fetches). A naive `setRange(range)` would not change
+    // state identity so the effect wouldn't rerun — CodeRabbit flag.
+  }, [range, enabled, reloadKey])
 
   return state
 }
@@ -75,6 +79,7 @@ export function useCrewSpend(range: PaymasterRange, enabled = true): FetchState<
 export function useAgentSpend(
   crewId: string | null,
   range: PaymasterRange,
+  reloadKey = 0,
 ): FetchState<AgentSpendResponse> {
   const [state, setState] = useState<FetchState<AgentSpendResponse>>({ ...INITIAL } as FetchState<AgentSpendResponse>)
   const reqIdRef = useRef(0)
@@ -112,13 +117,13 @@ export function useAgentSpend(
         }
       }
     })()
-  }, [crewId, range])
+  }, [crewId, range, reloadKey])
 
   return state
 }
 
 /** Top spenders — shared by the KPI card and the "Top Spenders" table. */
-export function useTopSpenders(range: PaymasterRange, limit = 10): FetchState<TopSpendersResponse> {
+export function useTopSpenders(range: PaymasterRange, limit = 10, reloadKey = 0): FetchState<TopSpendersResponse> {
   const [state, setState] = useState<FetchState<TopSpendersResponse>>({ ...INITIAL } as FetchState<TopSpendersResponse>)
   const reqIdRef = useRef(0)
   const fetcher = useCallback(async () => {
@@ -148,7 +153,7 @@ export function useTopSpenders(range: PaymasterRange, limit = 10): FetchState<To
         setState({ data: null, loading: false, error: "Network error", notConfigured: false })
       }
     }
-  }, [range, limit])
+  }, [range, limit, reloadKey])
 
   useEffect(() => {
     fetcher()

@@ -22,7 +22,8 @@ interface CheckpointMarkerProps {
 /**
  * Milestone marker for `checkpoint.created` entries. Renders with a larger
  * flag icon and an actions dropdown — fork opens the dialog, restore POSTs
- * to an endpoint that may not exist yet (404 → informational toast).
+ * to /api/v1/checkpoints/{id}/restore. The endpoint is wired so 404 now
+ * means "checkpoint not found" rather than "feature not implemented".
  */
 export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
   const [restoring, setRestoring] = useState(false)
@@ -44,7 +45,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
     try {
       const res = await fetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
       if (res.status === 404) {
-        toast.info("Not yet wired to backend")
+        toast.error("Checkpoint not found or restore unavailable")
       } else if (!res.ok) {
         toast.error(`Restore failed (${res.status})`)
       } else {

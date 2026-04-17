@@ -39,7 +39,13 @@ export function useApprovals(opts: UseApprovalsOptions): UseApprovalsResult {
   const reqIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
-    if (!enabled) return
+    if (!enabled) {
+      // Disabled hooks must still drop the initial `loading=true` state
+      // or consumers render an infinite spinner. Do NOT bump reqIdRef
+      // here — we're not actually firing a request.
+      setLoading(false)
+      return
+    }
     const reqId = ++reqIdRef.current
     setLoading(true)
     setError(null)

@@ -157,14 +157,17 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 			return Decision{}, ctx.Err()
 		case <-deadline:
 			// Flip the row to timeout so subsequent reads are consistent
-			// with the audit log; ignore errors because the sweeper will
-			// catch up on the next tick.
-			_, _ = db.ExecContext(context.Background(),
+			// with the audit log. Errors get logged at debug so oncall
+			// can grep for this string if both fail — the sweeper will
+			// still catch up on the next tick so we don't escalate them.
+			if _, err := db.ExecContext(context.Background(),
 				`UPDATE approvals_queue SET status = 'timeout', decided_at = ?
 				 WHERE id = ? AND status = 'pending'`,
-				time.Now().UTC().Format(timeFmt), id)
+				time.Now().UTC().Format(timeFmt), id); err != nil {
+				slog.Debug("harbormaster: gate timeout update failed", "id", id, "kind", kind, "err", err)
+			}
 			if j != nil {
-				_, _ = j.Emit(context.Background(), journal.Entry{
+				if _, err := j.Emit(context.Background(), journal.Entry{
 					WorkspaceID: in.WorkspaceID,
 					CrewID:      in.CrewID,
 					AgentID:     in.AgentID,
@@ -176,7 +179,9 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 					Summary:     fmt.Sprintf("approval timed out (sync gate): %s", reason),
 					Payload:     map[string]any{"approval_id": id, "kind": string(kind)},
 					Refs:        map[string]any{"approval_id": id},
-				})
+				}); err != nil {
+					slog.Debug("harbormaster: gate timeout emit failed", "id", id, "kind", kind, "err", err)
+				}
 			}
 			return Decision{TimedOut: true, Status: StatusTimeout, RequestID: id, Reason: reason, Kind: kind}, nil
 		case <-ticker.C:

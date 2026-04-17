@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { BookOpen, Sparkles, ExternalLink, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -33,8 +33,14 @@ interface CrewJournalProps {
 export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
   const [summarizing, setSummarizing] = useState(false)
 
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-  const queryParams = { crew_id: crewId, since }
+  // `since` and `queryParams` get memoised so useJournalList /
+  // useJournalStream don't see a fresh object identity on every render
+  // and rip down / re-create their fetch+SSE subscription each time
+  // the parent re-renders. The 24h window is pinned to the initial
+  // mount — acceptable for a widget viewed for a few seconds; a page-
+  // level long-running view should recompute periodically instead.
+  const since = useMemo(() => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), [])
+  const queryParams = useMemo(() => ({ crew_id: crewId, since }), [crewId, since])
 
   const { entries, loading, prependLive, refresh } = useJournalList({
     workspaceId,

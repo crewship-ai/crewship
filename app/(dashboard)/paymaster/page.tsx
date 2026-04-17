@@ -19,15 +19,22 @@ import type { PaymasterRange } from "@/lib/types/paymaster"
 export default function PaymasterPage() {
   const [range, setRange] = useState<PaymasterRange>("7d")
   const [selectedCrewId, setSelectedCrewId] = useState<string | null>(null)
+  // reloadKey bumps on Retry to force the hooks to refetch without
+  // flipping range to a different value and back. setRange(range) is a
+  // no-op because React bails on identical string state.
+  const [reloadKey, setReloadKey] = useState(0)
 
-  const crewSpend = useCrewSpend(range)
-  const agentSpend = useAgentSpend(selectedCrewId, range)
-  const topSpenders = useTopSpenders(range, 10)
+  const crewSpend = useCrewSpend(range, true, reloadKey)
+  const agentSpend = useAgentSpend(selectedCrewId, range, reloadKey)
+  const topSpenders = useTopSpenders(range, 10, reloadKey)
 
-  // If any endpoint 404s, show a single "not configured" state. That's
-  // cleaner than three partial empty states for the same root cause.
+  // If either endpoint 404s we still want the "not configured" fallback
+  // rather than showing half a dashboard with confusing empty cards —
+  // both 404ing is not a precondition, either one is enough. The prior
+  // `&&` meant a partial deployment (one handler wired, the other not)
+  // still tried to render the dashboard and broke.
   const notConfigured =
-    crewSpend.notConfigured && topSpenders.notConfigured
+    crewSpend.notConfigured || topSpenders.notConfigured
 
   // Memoise raw row arrays — `?? []` otherwise creates a new array every
   // render, which cascades into downstream useMemo hooks.
@@ -46,7 +53,15 @@ export default function PaymasterPage() {
   }, [crewRows])
 
   const topAgentLabel = useMemo(() => {
-    const top = topRows.find((r) => r.agent_id || r.agent_name)
+    // Pick the actual max-cost agent rather than trusting the API's row
+    // order. The backend sorts by cost DESC today, but the KPI
+    // shouldn't silently go wrong if that ever changes (e.g., the
+    // frontend starts filtering / re-sorting before we get here).
+    const top = topRows.reduce<typeof topRows[number] | null>((best, row) => {
+      if (!row.agent_id && !row.agent_name) return best
+      if (!best) return row
+      return row.cost_usd > best.cost_usd ? row : best
+    }, null)
     if (!top) return "—"
     return top.agent_name ?? top.agent_id?.slice(0, 8) ?? "—"
   }, [topRows])
@@ -110,7 +125,7 @@ export default function PaymasterPage() {
       {crewSpend.error && (
         <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-[12px] text-red-300 flex items-center justify-between gap-2">
           <span>Couldn&apos;t load spend ({crewSpend.error}).</span>
-          <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setRange(range)}>
+          <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setReloadKey((k) => k + 1)}>
             Retry
           </Button>
         </div>
