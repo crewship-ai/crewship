@@ -46,3 +46,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 25 | E | e2e/* | skipped: no dev server (5th E skip — unchanged since iter 5) | — | 2026-04-17T07:10Z |
 | 26 | A | internal/backup/catalog.go (DB-backed, SQLite in-memory with backup_catalog schema) | ok | 0399d95 | 2026-04-17T07:30Z |
 | 27 | B | cmd/crewship/cmd_features.go (3 subcommands + static baseImagesCatalog) | ok | 4b55be0 | 2026-04-17T07:50Z |
+| 28 | C | hooks/use-auth.tsx (NextAuth-like session Provider with Zod validation) | ok | de267d4 | 2026-04-17T08:10Z |
