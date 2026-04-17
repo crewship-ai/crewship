@@ -10,45 +10,50 @@ import (
 // CrewSpend is one row of "how much each crew in a workspace spent". CallCount
 // is included alongside cost because the UI surfaces both — a high cost with
 // few calls flags expensive prompts; many cheap calls flags chatter.
+// JSON field names use snake_case to match the API contract the CLI and
+// frontend both expect. Without tags Go default-marshals to CamelCase
+// (CrewID) and downstream consumers silently get zero values when they
+// try to read crew_id — this bit us end-to-end during the dev smoke
+// test (paymaster showed $0 despite a populated cost_ledger).
 type CrewSpend struct {
-	CrewID     string
-	CostUSD    float64
-	CallCount  int64
-	InTokens   int64
-	OutTokens  int64
+	CrewID    string  `json:"crew_id"`
+	CostUSD   float64 `json:"cost_usd"`
+	CallCount int64   `json:"call_count"`
+	InTokens  int64   `json:"input_tokens"`
+	OutTokens int64   `json:"output_tokens"`
 }
 
 // AgentSpend is the per-agent rollup within one crew. Same shape as CrewSpend
 // but keyed by agent. CrewID is implicit (it's the parameter to the query).
 type AgentSpend struct {
-	AgentID    string
-	CostUSD    float64
-	CallCount  int64
-	InTokens   int64
-	OutTokens  int64
+	AgentID   string  `json:"agent_id"`
+	CostUSD   float64 `json:"cost_usd"`
+	CallCount int64   `json:"call_count"`
+	InTokens  int64   `json:"input_tokens"`
+	OutTokens int64   `json:"output_tokens"`
 }
 
 // MissionSpend rolls up everything spent against a mission, regardless of
 // which crew or agent did the spending. Useful for "what did this campaign
 // cost us in total".
 type MissionSpend struct {
-	MissionID  string
-	CostUSD    float64
-	CallCount  int64
-	InTokens   int64
-	OutTokens  int64
-	FirstTS    time.Time
-	LastTS     time.Time
+	MissionID string    `json:"mission_id"`
+	CostUSD   float64   `json:"cost_usd"`
+	CallCount int64     `json:"call_count"`
+	InTokens  int64     `json:"input_tokens"`
+	OutTokens int64     `json:"output_tokens"`
+	FirstTS   time.Time `json:"first_ts"`
+	LastTS    time.Time `json:"last_ts"`
 }
 
 // TopSpender is one row of the leaderboard. Kind is "crew" or "agent" so the
 // same query can serve both views; the UI picks based on what it wants. ID
 // is the crew_id or agent_id depending on Kind.
 type TopSpender struct {
-	Kind       string
-	ID         string
-	CostUSD    float64
-	CallCount  int64
+	Kind      string  `json:"scope_kind"`
+	ID        string  `json:"scope_id"`
+	CostUSD   float64 `json:"cost_usd"`
+	CallCount int64   `json:"call_count"`
 }
 
 // SpendByCrew aggregates ledger rows in the workspace into one row per crew
