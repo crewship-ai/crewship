@@ -161,10 +161,8 @@ type Entry struct {
 	// than a row to persist — the barrier rides the same queue as
 	// real entries, so the worker can only close the ack after it
 	// has drained every Entry that was queued before Flush was
-	// called. Exported package outside `internal/journal` must never
-	// set this field; Validate() rejects barrier-shaped entries so
-	// a misuse from outside the package can't silently bypass
-	// persistence.
+	// called. Field is unexported so external packages cannot set it
+	// — Go's visibility rules are the actual enforcement mechanism.
 	flushBarrierAck chan struct{}
 }
 
