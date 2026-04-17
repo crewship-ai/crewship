@@ -78,14 +78,44 @@ func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset
 	return
 }
 
+// sqlPlaceholderCache stores pre-built placeholder strings for the sizes that
+// show up on the batch-loader hot path (single-digit to low-double-digit
+// IN clauses). A cache hit is a zero-alloc table lookup; a miss falls
+// through to the single-allocation builder below.
+var sqlPlaceholderCache = func() [64]string {
+	var cache [64]string
+	for n := 1; n < len(cache); n++ {
+		cache[n] = buildPlaceholders(n)
+	}
+	return cache
+}()
+
+// buildPlaceholders writes "?,?,?..." of length n directly into a single
+// byte buffer, avoiding the intermediate []string + strings.Join that the
+// previous implementation paid.
+func buildPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	buf := make([]byte, 2*n-1)
+	buf[0] = '?'
+	for i := 1; i < n; i++ {
+		buf[2*i-1] = ','
+		buf[2*i] = '?'
+	}
+	return string(buf)
+}
+
 // sqlPlaceholders returns a comma-separated string of n "?" placeholders
 // for use in SQL IN clauses (e.g. "?,?,?").
 func sqlPlaceholders(n int) string {
-	p := make([]string, n)
-	for i := range p {
-		p[i] = "?"
+	if n <= 0 {
+		return ""
 	}
-	return strings.Join(p, ",")
+	if n < len(sqlPlaceholderCache) {
+		return sqlPlaceholderCache[n]
+	}
+	return buildPlaceholders(n)
 }
 
 // agentExists checks that an agent with the given ID belongs to the workspace
