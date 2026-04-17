@@ -154,6 +154,84 @@ type Orchestrator struct {
 	// container is recreated (new ID) so stale entries are harmless.
 	tmuxCacheMu sync.RWMutex
 	tmuxCache   map[string]bool
+
+	// journal is the Crew Journal emitter. Nil-safe: SetJournal replaces it
+	// with a no-op. Used by Crow's Nest emit points (exec.command,
+	// container.metrics) so live visibility into containers flows through
+	// the same append-only stream as everything else.
+	journal JournalEmitter
+}
+
+// JournalEmitter is a narrow interface the orchestrator uses to emit Crow's
+// Nest events without importing the full journal package (avoids an import
+// cycle with internal/api, which imports orchestrator).
+type JournalEmitter interface {
+	Emit(ctx context.Context, e JournalEntry) (string, error)
+}
+
+// JournalEntry mirrors the subset of journal.Entry fields the orchestrator
+// populates. Callers should map it to journal.Entry at the boundary.
+type JournalEntry struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	Type        string
+	Severity    string
+	ActorType   string
+	ActorID     string
+	Summary     string
+	Payload     map[string]any
+	Refs        map[string]any
+}
+
+// SetJournal wires the journal emitter. nil is accepted and swapped with
+// a no-op emitter so emit call sites never need to nil-check. Called by
+// server.New after the journal writer is constructed.
+func (o *Orchestrator) SetJournal(j JournalEmitter) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if j == nil {
+		o.journal = noopJournal{}
+		return
+	}
+	o.journal = j
+}
+
+// getJournal returns the configured emitter or a no-op. Safe under
+// concurrent reads because SetJournal holds mu.Lock and readers use
+// mu.RLock via this helper.
+func (o *Orchestrator) getJournal() JournalEmitter {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.journal == nil {
+		return noopJournal{}
+	}
+	return o.journal
+}
+
+// noopJournal is the fallback used in tests and pre-wiring code paths so
+// emit calls never panic and never need an `if j != nil` guard.
+type noopJournal struct{}
+
+func (noopJournal) Emit(_ context.Context, _ JournalEntry) (string, error) {
+	return "", nil
+}
+
+// truncateCmd renders an argv slice into a single-line summary suitable for
+// journal.Entry.Summary. argv is joined with spaces; the result is clipped
+// to n runes with an ellipsis so the UI table row stays one line. Full
+// argv lives in payload.cmd for anyone who needs the unabridged form.
+func truncateCmd(argv []string, n int) string {
+	s := strings.Join(argv, " ")
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }
 
 // New creates an Orchestrator with the given container and state providers.
@@ -689,10 +767,67 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", cmd)
 
+	// Crow's Nest: emit the command start so the live terminal UI can
+	// open a new block before any output streams. Payload carries the
+	// argv for the UI and the container ID + agent scope; full stdout
+	// is streamed separately by the existing handler pipeline.
+	execStart := time.Now()
+	j := o.getJournal()
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "exec.command",
+		Severity:    "info",
+		ActorType:   "agent",
+		ActorID:     req.AgentID,
+		Summary:     fmt.Sprintf("%s runs %s", req.AgentSlug, truncateCmd(cmd, 120)),
+		Payload: map[string]any{
+			"cmd":          cmd,
+			"container_id": cIDShort,
+			"adapter":      req.CLIAdapter,
+			"model":        req.LLMModel,
+			"phase":        "start",
+		},
+		Refs: map[string]any{"chat_id": req.ChatID, "container_id": req.ContainerID},
+	})
+	// Flip agent to busy for the Watch Roster. The presence sweeper
+	// reverts to offline after idle timeout if the agent crashes before
+	// the matching "online" emit at end-of-run fires.
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "agent.status_change",
+		Severity:    "info",
+		ActorType:   "system",
+		Summary:     fmt.Sprintf("agent %s: busy", req.AgentSlug),
+		Payload:     map[string]any{"status": "busy", "current_chat_id": req.ChatID},
+	})
+
 	result, err := o.container.Exec(execCtx, execCfg)
 	if err != nil {
 		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
 		o.updateRunStatus(ctx, runState.ID, "error")
+		// Emit the terminal exec.command event for the failure path
+		// too so Crow's Nest doesn't show a hanging "running" block
+		// when Docker exec create/attach fails before the command runs.
+		_, _ = j.Emit(ctx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			Type:        "exec.command",
+			Severity:    "error",
+			ActorType:   "agent",
+			ActorID:     req.AgentID,
+			Summary:     fmt.Sprintf("%s exec FAILED: %v", req.AgentSlug, err),
+			Payload: map[string]any{
+				"cmd":         cmd,
+				"phase":       "end",
+				"error":       err.Error(),
+				"duration_ms": time.Since(execStart).Milliseconds(),
+			},
+		})
 		return fmt.Errorf("exec agent: %w", err)
 	}
 
@@ -713,6 +848,47 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	running, exitCode, _ := o.container.ExecInspect(ctx, result.ExecID)
 	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
+
+	// Crow's Nest: closing exec.command entry with exit code + duration
+	// so the live terminal UI can mark the block done and the dashboard
+	// can tally success/failure rates. Severity switches to warn when
+	// the command exited non-zero — the default warn+ filter surfaces
+	// failures without consumers having to parse payload.
+	endSeverity := "info"
+	if exitCode != 0 {
+		endSeverity = "warn"
+	}
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "exec.command",
+		Severity:    endSeverity,
+		ActorType:   "agent",
+		ActorID:     req.AgentID,
+		Summary:     fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
+		Payload: map[string]any{
+			"cmd":         cmd,
+			"phase":       "end",
+			"exit_code":   exitCode,
+			"duration_ms": time.Since(execStart).Milliseconds(),
+			"running":     running,
+		},
+		Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
+	})
+	// Flip agent back to online for the Watch Roster now that the run
+	// is done. If the agent stays in-session, the presence sweeper
+	// still tracks idleness separately.
+	_, _ = j.Emit(ctx, JournalEntry{
+		WorkspaceID: req.WorkspaceID,
+		CrewID:      req.CrewID,
+		AgentID:     req.AgentID,
+		Type:        "agent.status_change",
+		Severity:    "info",
+		ActorType:   "system",
+		Summary:     fmt.Sprintf("agent %s: online", req.AgentSlug),
+		Payload:     map[string]any{"status": "online"},
+	})
 
 	if running {
 		o.updateRunStatus(ctx, runState.ID, "running")

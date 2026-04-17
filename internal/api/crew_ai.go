@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
 
@@ -18,13 +19,25 @@ var errNoActiveAnthropicCredential = errors.New("no active Anthropic credential 
 
 // CrewAIHandler uses an LLM to suggest crew compositions based on a natural-language description.
 type CrewAIHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
 }
 
 // NewCrewAIHandler creates a CrewAIHandler with the given database and logger.
 func NewCrewAIHandler(db *sql.DB, logger *slog.Logger) *CrewAIHandler {
-	return &CrewAIHandler{db: db, logger: logger}
+	return &CrewAIHandler{db: db, logger: logger, journal: noopEmitter{}}
+}
+
+// SetJournal wires the Crew Journal emitter so the LLM middleware stack
+// (telemetry → paymaster → lookout) records spans, costs, and guardrail
+// blocks against every suggest call. Called by the router after
+// construction so tests can leave the noop default.
+func (h *CrewAIHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		j = noopEmitter{}
+	}
+	h.journal = j
 }
 
 // AISuggestedAgent represents a single agent suggested by the AI crew designer.
@@ -139,7 +152,11 @@ func (h *CrewAIHandler) getLLMProvider(ctx context.Context, wsID string) (llm.Pr
 	if err != nil {
 		return nil, fmt.Errorf("decrypt credential: %w", err)
 	}
-	return llm.NewAnthropic(plain), nil
+	// Wrap the raw provider with the full middleware stack so every
+	// call is cost-accounted (paymaster), guardrail-scanned (lookout),
+	// and trace-instrumented (telemetry). Without this wrap the
+	// Paymaster ledger stays empty and Lookout never fires.
+	return llm.Middleware(llm.NewAnthropic(plain), h.journal, h.db), nil
 }
 
 // suggest calls the LLM provider to generate a crew definition from a description.

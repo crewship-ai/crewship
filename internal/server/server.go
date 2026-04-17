@@ -273,6 +273,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		s.journalWriter = journal.NewWriter(deps.DB, logger, journal.WriterOptions{})
 		opts = append(opts, goapi.WithJournal(s.journalWriter))
 
+		// Wire the journal into the orchestrator so Docker exec, network,
+		// and filesystem hook points inside the orchestrator can emit
+		// Crow's Nest entries with full scope (workspace / crew / agent /
+		// mission). The adapter bridges the orchestrator's narrow
+		// JournalEmitter interface to the full journal.Emitter so the
+		// orchestrator package stays independent of internal/journal.
+		orch.SetJournal(newOrchestratorJournalAdapter(s.journalWriter))
+
 		// OTel GenAI telemetry. Endpoint defaults to OTEL_EXPORTER_OTLP_ENDPOINT
 		// and silently degrades to a noop tracer when unset so local dev
 		// runs without an observability stack keep working.
@@ -350,8 +358,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
 		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))
 		if cfg.Keeper.Enabled {
-			provider := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
-			gk := gatekeeper.New(provider, cfg.Keeper.Model, logger)
+			// Wrap the Ollama provider with the full middleware stack so
+			// gatekeeper LLM calls are cost-tracked, guardrail-scanned,
+			// and trace-instrumented. Local Ollama has zero dollar cost
+			// but the paymaster ledger still records token counts, which
+			// feeds the cache-hit metric and per-agent usage visibility.
+			base := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
+			wrapped := llm.Middleware(base, s.journalWriter, deps.DB)
+			gk := gatekeeper.New(wrapped, cfg.Keeper.Model, logger)
 			opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 			logger.Info("keeper gatekeeper enabled", "ollama_url", cfg.Keeper.OllamaURL, "model", cfg.Keeper.Model)
 		} else {
@@ -562,11 +576,26 @@ func (s *Server) Start(ctx context.Context) error {
 		}()
 
 		// Memory consolidation + compaction workers run on their own
-		// schedules (6h consolidation, daily 03:00 UTC compaction). The
-		// SummarizerClient stays nil here — consolidation is skipped with
-		// a log line until an LLM provider is wired. Compaction runs
-		// regardless; it doesn't need an LLM.
-		consolidate.StartBackground(ctx, s.db, s.journalWriter, nil, consolidate.RunnerOptions{})
+		// schedules (6h consolidation, daily 03:00 UTC compaction).
+		// Consolidation needs an LLM to extract semantic rules from the
+		// journal; we use the same local Ollama instance Keeper uses so
+		// no cloud credentials are required for the local-first path.
+		// If Ollama isn't configured, pass nil and consolidation skips
+		// silently — compaction still runs, it doesn't need an LLM.
+		var summarizer consolidate.SummarizerClient
+		if s.cfg.Keeper.OllamaURL != "" && s.cfg.Keeper.Model != "" {
+			// Reuse the middleware-wrapped provider so consolidation LLM
+			// calls are cost-accounted + trace-instrumented like every
+			// other LLM call in the platform. Model stays small for the
+			// short rule-extraction prompt; no gain from Sonnet-class here.
+			summBase := llm.NewOllama(s.cfg.Keeper.OllamaURL, s.cfg.Keeper.Model)
+			summWrapped := llm.Middleware(summBase, s.journalWriter, s.db)
+			summarizer = newLLMSummarizer(summWrapped, s.cfg.Keeper.Model)
+			s.logger.Info("memory consolidation enabled", "model", s.cfg.Keeper.Model)
+		} else {
+			s.logger.Info("memory consolidation disabled (set KEEPER_OLLAMA_URL + KEEPER_MODEL to enable)")
+		}
+		consolidate.StartBackground(ctx, s.db, s.journalWriter, summarizer, consolidate.RunnerOptions{})
 	}
 
 	select {

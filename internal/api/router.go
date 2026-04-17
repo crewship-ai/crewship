@@ -501,6 +501,7 @@ func (r *Router) registerRoutes() {
 
 	// AI crew wizard
 	crewAI := NewCrewAIHandler(r.db, r.logger)
+	crewAI.SetJournal(r.Journal())
 	r.mux.Handle("POST /api/v1/crew-ai-suggest", authed(wsCtx(http.HandlerFunc(crewAI.Suggest))))
 
 	// Missions
@@ -722,6 +723,7 @@ func (r *Router) registerRoutes() {
 	// internal/api/captain.go). Kept registered for backward compatibility
 	// with existing UI/CLI clients. Do not add new routes here.
 	captain := NewCaptainHandler(r.db, r.logger)
+	captain.SetJournal(r.Journal())
 	if r.captainLLM != nil {
 		captain.SetProvider(r.captainLLM)
 	}
