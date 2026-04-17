@@ -32,3 +32,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 11 | A | internal/encryption/encryption.go (A1/A2 done; A3 backup/selftest + A4 orchestrator/failover already had tests; new layout/versioning tests added on top of existing) | ok | 7414d0f | 2026-04-17T02:30Z |
 | 12 | B | cmd/crewship/cmd_activity.go (B1/B5 done, B2/B4 too large, B3 deprecated) | ok | 1da1e94 | 2026-04-17T02:50Z |
 | 13 | C | hooks/use-agent-detail.tsx | ok | 82f6d83 | 2026-04-17T03:10Z |
+| 14 | D | components/features/chat/status-indicator.tsx (D1/D2 too large; D3/D-chat-tree done; D4/D5 deprecated; right-panel 652ř too large) | ok | d9be952 | 2026-04-17T03:30Z |
