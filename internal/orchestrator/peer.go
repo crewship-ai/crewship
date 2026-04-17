@@ -5,6 +5,29 @@ import (
 	"strings"
 )
 
+// peerContextQueryPrefix through peerContextTail hold the three static spans
+// that surround the two selfSlug interpolations in the PEER COMMUNICATION
+// block. Collapsing the previous ~10 WriteString + 2 string-concat calls into
+// 5 direct WriteStrings saves allocations on every non-LEAD agent run.
+const (
+	peerContextQueryPrefix = `
+To ask a crew member a question:
+  curl -s -X POST http://localhost:9119/query \
+    -H "Content-Type: application/json" \
+    -d '{"target":"<slug>","question":"<question>","from":"`
+
+	peerContextEscalatePrefix = `"}'
+The response will contain the crew member's answer.
+
+To escalate to the lead (when you discover something needs a decision):
+  curl -s -X POST http://localhost:9119/escalate \
+    -H "Content-Type: application/json" \
+    -d '{"from":"`
+
+	peerContextTail = `","reason":"<why>","context":"<optional details>"}'
+[END PEER COMMUNICATION]`
+)
+
 // BuildPeerContext formats a [PEER COMMUNICATION] block for non-lead agents
 // that are part of a crew. This enables peer-to-peer Q&A between agents.
 // Returns empty string if there are no other crew members.
@@ -21,6 +44,11 @@ func BuildPeerContext(members []CrewMember, selfSlug string) string {
 	}
 
 	var b strings.Builder
+	// Pre-size: the three static spans dominate the total length; give the
+	// member list a small budget on top so appending doesn't rehash.
+	b.Grow(64 + len(peerContextQueryPrefix) + len(peerContextEscalatePrefix) +
+		len(peerContextTail) + 2*len(selfSlug) + len(others)*96)
+
 	b.WriteString("[PEER COMMUNICATION]\n")
 	b.WriteString("Your crew members:\n")
 
@@ -36,18 +64,10 @@ func BuildPeerContext(members []CrewMember, selfSlug string) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n")
-	b.WriteString("To ask a crew member a question:\n")
-	b.WriteString("  curl -s -X POST http://localhost:9119/query \\\n")
-	b.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("    -d '{\"target\":\"<slug>\",\"question\":\"<question>\",\"from\":\"" + selfSlug + "\"}'\n")
-	b.WriteString("The response will contain the crew member's answer.\n")
-	b.WriteString("\n")
-	b.WriteString("To escalate to the lead (when you discover something needs a decision):\n")
-	b.WriteString("  curl -s -X POST http://localhost:9119/escalate \\\n")
-	b.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	b.WriteString("    -d '{\"from\":\"" + selfSlug + "\",\"reason\":\"<why>\",\"context\":\"<optional details>\"}'\n")
-
-	b.WriteString("[END PEER COMMUNICATION]")
+	b.WriteString(peerContextQueryPrefix)
+	b.WriteString(selfSlug)
+	b.WriteString(peerContextEscalatePrefix)
+	b.WriteString(selfSlug)
+	b.WriteString(peerContextTail)
 	return b.String()
 }
