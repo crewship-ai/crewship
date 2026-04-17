@@ -42,3 +42,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 21 | A | internal/backup/rate_limit.go (had thin test in instance_test.go; added dedicated coverage for prune/retry-after/reset/concurrency) | ok | ea5ca0d | 2026-04-17T05:50Z |
 | 22 | B | cmd/crewship/cmd_label.go (B1/B5/B6/cmd_config done) | ok | 2a2d22b | 2026-04-17T06:10Z |
 | 23 | C | hooks/use-tick.ts + hooks/use-fleet-status.ts (small untested hooks, combined into one commit) | ok | 9b8958d | 2026-04-17T06:30Z |
+| 24 | D | components/features/chat/hooks/use-file-editor.ts (core chat D1-D5 exhausted; chat/hooks/ untouched) | ok | 8c78d04 | 2026-04-17T06:50Z |
