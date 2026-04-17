@@ -514,13 +514,17 @@ func injectMCPOAuthTokens(
 	return nil
 }
 
+// mcpNameUnsafeRE matches characters that must be stripped from MCP server/package
+// names. Hoisted to package level so it compiles once at init, not per call.
+var mcpNameUnsafeRE = regexp.MustCompile(`[^a-zA-Z0-9._@-]`)
+
 // sanitizeMCPName restricts a server or package name to a safe basename,
 // preventing path traversal and shell metacharacter injection.
 func sanitizeMCPName(name string) string {
 	// Take only the last path component.
 	name = path.Base(name)
 	// Remove any characters that aren't alphanumeric, dash, underscore, dot, or @.
-	safe := regexp.MustCompile(`[^a-zA-Z0-9._@-]`).ReplaceAllString(name, "")
+	safe := mcpNameUnsafeRE.ReplaceAllString(name, "")
 	if safe == "" || safe == "." || safe == ".." {
 		safe = "mcp-server"
 	}
