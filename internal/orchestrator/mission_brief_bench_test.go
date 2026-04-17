@@ -49,7 +49,7 @@ func BenchmarkBuildMissionBrief(b *testing.B) {
 	for i := 0; i < nTasks; i++ {
 		id := fmt.Sprintf("t_%d", i)
 		status := "COMPLETED"
-		if i > nTasks-5 {
+		if i >= nTasks-5 {
 			status = "PENDING"
 		}
 		resSum := summary
