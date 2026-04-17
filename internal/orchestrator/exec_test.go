@@ -13,7 +13,7 @@ func TestHandleStreamJSONLine_TextDelta(t *testing.T) {
 	line := `{"type":"stream_event","event":{"type":"delta","delta":{"type":"text_delta","text":"Hello "}}}`
 
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
@@ -34,7 +34,7 @@ func TestHandleStreamJSONLine_ThinkingBlock(t *testing.T) {
 
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	// text and thinking blocks from assistant messages are skipped to avoid duplication
 	if len(events) != 0 {
@@ -48,7 +48,7 @@ func TestHandleStreamJSONLine_ThinkingDelta(t *testing.T) {
 
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
@@ -76,7 +76,7 @@ func TestHandleStreamJSONLine_ToolCallMetadata(t *testing.T) {
 
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
@@ -110,7 +110,7 @@ func TestHandleStreamJSONLine_ToolResultContent(t *testing.T) {
 
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
@@ -135,13 +135,13 @@ func TestHandleStreamJSONLine_ToolResultContent(t *testing.T) {
 func TestHandleStreamJSONLine_NilHandler(t *testing.T) {
 	o := New(nil, nil, slog.Default())
 	// Should not panic with nil handler
-	o.handleStreamJSONLine(`{"type":"assistant","content":[{"type":"text","text":"hello"}]}`, nil)
+	o.handleStreamJSONLine([]byte(`{"type":"assistant","content":[{"type":"text","text":"hello"}]}`), nil)
 }
 
 func TestHandleStreamJSONLine_InvalidJSON(t *testing.T) {
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
-	o.handleStreamJSONLine("not json at all", func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte("not json at all"), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 fallback event, got %d", len(events))
@@ -157,7 +157,7 @@ func TestHandleStreamJSONLine_Result(t *testing.T) {
 	line := `{"type":"result","subtype":"success","result":"Final answer","duration_ms":1234.5,"total_cost_usd":0.05,"num_turns":3,"usage":{"input_tokens":100,"output_tokens":50}}`
 
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 result event, got %d", len(events))
@@ -189,7 +189,7 @@ func TestHandleStreamJSONLine_SystemInit(t *testing.T) {
 	line := `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514","tools":["Read","Write","Bash"],"cwd":"/home/user"}`
 
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 system event, got %d", len(events))
@@ -221,7 +221,7 @@ func TestHandleStreamJSONLine_ImageBlock(t *testing.T) {
 	line := `{"type":"assistant","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAA"}}]}}`
 
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 image event, got %d", len(events))
@@ -246,7 +246,7 @@ func TestHandleStreamJSONLine_ImageBlockInToolResult(t *testing.T) {
 	line := `{"type":"tool","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"AQIDBA=="}}]}`
 
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 image event, got %d", len(events))
@@ -269,7 +269,7 @@ func TestHandleStreamJSONLine_ToolTypeMessage(t *testing.T) {
 
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
@@ -490,7 +490,7 @@ func TestHandleStreamJSONLine_MixedContentBlocks(t *testing.T) {
 
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
-	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+	o.handleStreamJSONLine([]byte(line), func(e AgentEvent) { events = append(events, e) })
 
 	// Only tool_use is emitted; thinking and text are skipped (already streamed via deltas)
 	if len(events) != 1 {
