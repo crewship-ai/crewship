@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/fileserver"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -61,6 +62,7 @@ type Server struct {
 	watchedCrews    sync.Map
 	statsCollector  *StatsCollector
 	terminalHandler *terminal.Handler
+	journalWriter   *journal.Writer
 	startedAt       time.Time
 	runCtx          context.Context
 	runCancel       context.CancelFunc
@@ -259,6 +261,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if deps.License != nil {
 			opts = append(opts, goapi.WithLicense(deps.License))
 		}
+		// Crew Journal emitter lives for the lifetime of the server; the
+		// batched writer owns a goroutine and a buffered channel, so we
+		// stash it on Server so Shutdown can Close it and flush pending
+		// entries before the process exits.
+		s.journalWriter = journal.NewWriter(deps.DB, logger, journal.WriterOptions{})
+		opts = append(opts, goapi.WithJournal(s.journalWriter))
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithInternalBaseURL(ipcBase))
@@ -544,6 +552,15 @@ func (s *Server) Shutdown() error {
 
 	s.logWriter.Close()
 	s.convStore.Close()
+	// Close the journal writer after HTTP shutdown so any handlers still
+	// draining requests have flushed their emits. Close drains the
+	// buffered channel synchronously, so entries that made it in before
+	// shutdown hit the DB.
+	if s.journalWriter != nil {
+		if err := s.journalWriter.Close(); err != nil {
+			s.logger.Error("journal writer close error", "error", err)
+		}
+	}
 	// fileWatcher goroutines are closed via context cancellation (runCancel above);
 	// explicit Close() is a no-op but signals intent.
 	if s.fileWatcher != nil {

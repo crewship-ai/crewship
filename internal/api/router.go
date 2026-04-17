@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -79,7 +80,32 @@ type Router struct {
 	portExposePublicURL  string              // e.g. http://192.168.1.201:8080, used to build capability URLs
 	authRateLimitedMux   http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux    http.Handler        // mux wrapped with general API rate limiter
+	journal              journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 }
+
+// Journal returns the journal emitter or a no-op if unset. Handlers should
+// use this instead of accessing the field directly so the nil-guard lives
+// in one place.
+func (r *Router) Journal() journal.Emitter {
+	if r.journal == nil {
+		return noopEmitter{}
+	}
+	return r.journal
+}
+
+// noopEmitter swallows Emit calls so early-init code paths and tests that
+// don't wire a real writer still compile and run. It returns a synthesized
+// ID so callers treating the return value as "something happened" stay
+// correct. Flush is a no-op.
+type noopEmitter struct{}
+
+func (noopEmitter) Emit(_ context.Context, e journal.Entry) (string, error) {
+	if e.ID != "" {
+		return e.ID, nil
+	}
+	return "noop", nil
+}
+func (noopEmitter) Flush(_ context.Context) error { return nil }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -273,6 +299,15 @@ func WithMissionCallback(cb MissionCallback) RouterOption {
 func WithLogWriter(lw *logcollector.Writer) RouterOption {
 	return func(r *Router) {
 		r.logWriter = lw
+	}
+}
+
+// WithJournal wires the Crew Journal emitter used by all handlers to log
+// structured events. When unset, Router.Journal() returns a no-op so code
+// can emit unconditionally without nil-checking.
+func WithJournal(j journal.Emitter) RouterOption {
+	return func(r *Router) {
+		r.journal = j
 	}
 }
 
