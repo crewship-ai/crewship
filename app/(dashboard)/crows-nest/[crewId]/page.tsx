@@ -4,9 +4,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, Binoculars, Loader2, Radio, RadioTower, Wifi, WifiOff } from "lucide-react"
+import {
+  ArrowLeft,
+  Binoculars,
+  FolderTree,
+  Gauge,
+  Loader2,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Radio,
+  RadioTower,
+  Terminal,
+  Wifi,
+  WifiOff,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -15,6 +30,7 @@ import { useJournalStream } from "@/hooks/use-journal-stream"
 import { NetworkPanel } from "@/components/features/crows-nest/network-panel"
 import { FilesystemPanel } from "@/components/features/crows-nest/filesystem-panel"
 import { ResourceSparklines } from "@/components/features/crows-nest/resource-sparklines"
+import { useIsMobile } from "@/hooks/use-mobile"
 import type { JournalEntry } from "@/lib/types/journal"
 
 // xterm is a client-only library — dynamic import with ssr:false keeps it out
@@ -41,17 +57,33 @@ const OBSERVABILITY_TYPES = [
   "container.metrics",
 ].join(",")
 
+type SeverityFilter = "all" | "info" | "warn" | "error"
+
 /**
  * Crow's Nest — live observability dashboard for a single crew container.
+ *
+ * Layout pattern: "3-panel master-detail" (sidebar + center grid + top strip).
+ * See `docs/design/patterns.md` #1.
+ *
  * Subscribes to the journal stream filtered to the observability entry types
- * and fans the feed out to the four child panels. Admin-only.
+ * and fans the feed out to the child panels (terminal, network, resources,
+ * filesystem). Admin-only.
  */
 export default function CrowsNestCrewPage() {
   const params = useParams<{ crewId: string }>()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { role, loading: rolesLoading } = useAbilities()
+  const isMobile = useIsMobile()
+
   const [crew, setCrew] = useState<Crew | null>(null)
   const [crewLoading, setCrewLoading] = useState(true)
+  const [allCrews, setAllCrews] = useState<Crew[]>([])
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all")
+
+  useEffect(() => {
+    if (isMobile) setLeftCollapsed(true)
+  }, [isMobile])
 
   const queryParams = useMemo(
     () => ({
@@ -104,14 +136,22 @@ export default function CrowsNestCrewPage() {
     return out
   }, [liveEntries, historyEntries])
 
+  // Apply severity filter — note the hook returns all entries; filtering
+  // happens here so each panel gets a consistent slice.
+  const filteredEntries = useMemo(() => {
+    if (severityFilter === "all") return mergedEntries
+    return mergedEntries.filter((e) => e.severity === severityFilter)
+  }, [mergedEntries, severityFilter])
+
   // Terminal wants oldest→newest to play back in order.
   const terminalEntries = useMemo(() => {
-    return mergedEntries
+    return filteredEntries
       .filter((e) => e.entry_type === "exec.command" || e.entry_type === "exec.output_chunk")
       .slice()
       .reverse()
-  }, [mergedEntries])
+  }, [filteredEntries])
 
+  // Fetch current crew + sibling crews for the sidebar picker.
   useEffect(() => {
     if (!workspaceId || !params.crewId) {
       if (!wsLoading) setCrewLoading(false)
@@ -120,10 +160,18 @@ export default function CrowsNestCrewPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/crews/${encodeURIComponent(params.crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (!res.ok) return
-        const json = await res.json()
-        if (!cancelled) setCrew(json)
+        const [crewRes, listRes] = await Promise.all([
+          fetch(`/api/v1/crews/${encodeURIComponent(params.crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`),
+          fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`),
+        ])
+        if (crewRes.ok) {
+          const json = await crewRes.json()
+          if (!cancelled) setCrew(json)
+        }
+        if (listRes.ok) {
+          const list = await listRes.json()
+          if (!cancelled && Array.isArray(list)) setAllCrews(list)
+        }
       } catch (err) {
         // Network / JSON parse failures must not escape this async IIFE
         // as unhandled rejections — they'd surface in console but leave
@@ -166,41 +214,182 @@ export default function CrowsNestCrewPage() {
   }
 
   const sseConnected = streamStatus === "connected"
+  const crewSlug = crew?.slug ?? params.crewId.slice(0, 6)
 
   return (
-    <div className="p-4 md:p-6 flex flex-col gap-3 h-[calc(100vh-48px)]">
-      <div className="flex items-center justify-between gap-3 flex-wrap shrink-0">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild>
-            <Link href="/crows-nest">
-              <ArrowLeft className="h-3 w-3 mr-1" /> Back
-            </Link>
-          </Button>
-          <Binoculars className="h-4 w-4 text-foreground/60" />
-          <h1 className="text-body font-medium text-foreground/80">
-            {crew?.name ?? "Crow's Nest"}
-          </h1>
-          <Badge variant="outline" className="text-[10px] border-border/60 font-mono">
-            crewship-team-{crew?.slug ?? params.crewId.slice(0, 6)}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <StreamPill status={streamStatus} />
-        </div>
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+      {/* ---- Top strip (h-9) ---- */}
+      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-border/60 px-2 sm:px-3 gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs shrink-0" asChild>
+          <Link href="/crows-nest">
+            <ArrowLeft className="h-3 w-3 mr-1" /> Back
+          </Link>
+        </Button>
+        <Binoculars className="h-3.5 w-3.5 text-foreground/60 shrink-0" />
+        <h1 className="text-body font-medium text-foreground/80 truncate">
+          {crew?.name ?? "Crow's Nest"}
+        </h1>
+        <Badge variant="outline" className="text-[10px] border-border/60 font-mono shrink-0">
+          crewship-team-{crewSlug}
+        </Badge>
+        <div className="flex-1" />
+        <StreamPill status={streamStatus} />
       </div>
 
-      {/* 3-column grid, collapses on small screens. The left (terminal) takes
-           the most space; middle and right are stacked panels. */}
-      <div className="grid flex-1 min-h-0 gap-3 grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="min-h-[320px] lg:min-h-0">
-          <LiveTerminal entries={terminalEntries} connected={sseConnected} />
-        </div>
-        <div className="min-h-[320px] lg:min-h-0">
-          <NetworkPanel entries={mergedEntries} />
-        </div>
-        <div className="grid gap-3 grid-rows-2 min-h-[640px] lg:min-h-0">
-          <ResourceSparklines entries={mergedEntries} />
-          <FilesystemPanel entries={mergedEntries} />
+      {/* ---- Main 2-column layout (collapsible sidebar + center grid) ---- */}
+      <div
+        className="flex-1 min-h-0 grid transition-all duration-200 relative"
+        style={{
+          gridTemplateColumns: isMobile
+            ? "1fr"
+            : `${leftCollapsed ? "48px" : "300px"} 1fr`,
+        }}
+      >
+        {/* ---- Left sidebar ---- */}
+        {!isMobile && (
+          <div className="border-r border-border/60 bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden">
+            <div className="flex items-center justify-between px-2 py-1.5 border-b border-border/60 shrink-0">
+              {!leftCollapsed && (
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Crews
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
+                onClick={() => setLeftCollapsed(!leftCollapsed)}
+                aria-label={leftCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                {leftCollapsed
+                  ? <PanelLeftOpen className="h-3.5 w-3.5" />
+                  : <PanelLeftClose className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+
+            {!leftCollapsed && (
+              <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-4">
+                {/* Crew list */}
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 font-semibold mb-1.5 px-1">
+                    Watching
+                  </div>
+                  <ul className="space-y-0.5">
+                    {allCrews.length === 0 ? (
+                      <li className="text-[11px] text-muted-foreground px-2 py-1">No crews.</li>
+                    ) : (
+                      allCrews.map((c) => {
+                        const active = c.id === params.crewId
+                        return (
+                          <li key={c.id}>
+                            <Link
+                              href={`/crows-nest/${c.id}`}
+                              className={cn(
+                                "flex items-center gap-2 px-2 py-1.5 rounded-md text-[12px] transition-colors",
+                                active
+                                  ? "bg-primary/10 text-primary"
+                                  : "text-foreground/80 hover:bg-accent/50",
+                              )}
+                            >
+                              <Binoculars className="h-3 w-3 shrink-0 opacity-70" />
+                              <span className="truncate">{c.name}</span>
+                            </Link>
+                          </li>
+                        )
+                      })
+                    )}
+                  </ul>
+                </div>
+
+                {/* Severity filter */}
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 font-semibold mb-1.5 px-1">
+                    Severity
+                  </div>
+                  <div className="inline-flex w-full rounded-md border border-border/60 bg-card p-0.5">
+                    {(["all", "info", "warn", "error"] as SeverityFilter[]).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setSeverityFilter(s)}
+                        className={cn(
+                          "flex-1 h-6 px-1 text-[10px] font-mono uppercase tracking-wider rounded transition-colors",
+                          severityFilter === s
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Stats */}
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 font-semibold mb-1.5 px-1">
+                    Events buffered
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-2 py-1.5">
+                    <span className="text-[11px] text-muted-foreground">In view</span>
+                    <span className="text-[11px] font-mono tabular-nums text-foreground/80">
+                      {filteredEntries.length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ---- Center content (3-column grid of observability panels) ---- */}
+        <div className="min-h-0 overflow-hidden">
+          <div className="p-3 h-full grid gap-3 grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <Card className="py-0 gap-0 min-h-[320px] lg:min-h-0 flex flex-col overflow-hidden">
+              <CardHeader className="px-3 py-2 border-b border-border/50">
+                <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Terminal className="h-3 w-3 opacity-70" /> Terminal
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 flex-1 min-h-0">
+                <LiveTerminal entries={terminalEntries} connected={sseConnected} />
+              </CardContent>
+            </Card>
+
+            <Card className="py-0 gap-0 min-h-[320px] lg:min-h-0 flex flex-col overflow-hidden">
+              <CardHeader className="px-3 py-2 border-b border-border/50">
+                <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Network className="h-3 w-3 opacity-70" /> Network
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 flex-1 min-h-0 overflow-auto">
+                <NetworkPanel entries={filteredEntries} />
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-3 grid-rows-2 min-h-[640px] lg:min-h-0">
+              <Card className="py-0 gap-0 flex flex-col overflow-hidden">
+                <CardHeader className="px-3 py-2 border-b border-border/50">
+                  <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Gauge className="h-3 w-3 opacity-70" /> Resources
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 flex-1 min-h-0 overflow-auto">
+                  <ResourceSparklines entries={filteredEntries} />
+                </CardContent>
+              </Card>
+              <Card className="py-0 gap-0 flex flex-col overflow-hidden">
+                <CardHeader className="px-3 py-2 border-b border-border/50">
+                  <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <FolderTree className="h-3 w-3 opacity-70" /> Filesystem
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 flex-1 min-h-0 overflow-auto">
+                  <FilesystemPanel entries={filteredEntries} />
+                </CardContent>
+              </Card>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -210,27 +399,27 @@ export default function CrowsNestCrewPage() {
 function StreamPill({ status }: { status: string }) {
   if (status === "connected") {
     return (
-      <Badge variant="outline" className={cn("gap-1 text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30")}>
+      <Badge variant="outline" className={cn("gap-1 text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30 shrink-0")}>
         <Wifi className="h-3 w-3" /> Live
       </Badge>
     )
   }
   if (status === "polling") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30">
+      <Badge variant="outline" className="gap-1 text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 shrink-0">
         <RadioTower className="h-3 w-3" /> Polling
       </Badge>
     )
   }
   if (status === "connecting") {
     return (
-      <Badge variant="outline" className="gap-1 text-[10px] bg-blue-500/10 text-blue-300 border-blue-500/30">
+      <Badge variant="outline" className="gap-1 text-[10px] bg-blue-500/10 text-blue-300 border-blue-500/30 shrink-0">
         <Radio className="h-3 w-3" /> Connecting…
       </Badge>
     )
   }
   return (
-    <Badge variant="outline" className="gap-1 text-[10px] bg-red-500/10 text-red-300 border-red-500/30">
+    <Badge variant="outline" className="gap-1 text-[10px] bg-red-500/10 text-red-300 border-red-500/30 shrink-0">
       <WifiOff className="h-3 w-3" /> Offline
     </Badge>
   )

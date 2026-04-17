@@ -1,15 +1,31 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { BookOpen, Radio, RadioTower, RefreshCw, Zap } from "lucide-react"
+import {
+  BarChart3,
+  BookOpen,
+  Clock,
+  ListOrdered,
+  Radio,
+  RadioTower,
+  RefreshCw,
+  ShieldCheck,
+  Zap,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
-import { JournalFilters, DEFAULT_JOURNAL_FILTERS, type JournalFilterValue } from "@/components/features/journal/journal-filters"
+import {
+  JournalFilters,
+  DEFAULT_JOURNAL_FILTERS,
+  type JournalFilterValue,
+} from "@/components/features/journal/journal-filters"
 import { JournalTimeline } from "@/components/features/journal/journal-timeline"
 
 /** Convert the UI `timeRange` selection into an RFC3339 `since` string. */
@@ -24,10 +40,21 @@ function sinceFromRange(range: JournalFilterValue["timeRange"]): string | undefi
   }
 }
 
+type JournalTab = "timeline" | "stats" | "audit"
+
+const JOURNAL_TABS: Array<{ id: JournalTab; label: string; icon: typeof ListOrdered }> = [
+  { id: "timeline", label: "Timeline", icon: ListOrdered },
+  { id: "stats", label: "Stats", icon: BarChart3 },
+  { id: "audit", label: "Audit", icon: ShieldCheck },
+]
+
 /**
  * Crew Journal — workspace-wide, append-only event stream. Uses
  * `/api/v1/journal` for paginated history and `/api/v1/journal/stream`
  * (SSE) for live updates, with graceful fallback to polling.
+ *
+ * Layout pattern: "Sidebar + main" (filter rail + content) with a
+ * tab strip above the timeline. See `docs/design/patterns.md` #2.
  */
 export default function JournalPage() {
   const searchParams = useSearchParams()
@@ -49,6 +76,7 @@ export default function JournalPage() {
   }, [])
 
   const [filters, setFilters] = useState<JournalFilterValue>(initialFilters)
+  const [activeTab, setActiveTab] = useState<JournalTab>("timeline")
 
   // Apply UI filters to backend query params. The backend accepts CSV for
   // list-shaped filters (entry_type, severity).
@@ -96,7 +124,7 @@ export default function JournalPage() {
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 bg-background min-h-[calc(100vh-48px)]">
-      {/* Main column — header + timeline */}
+      {/* Main column — header + tab strip + content */}
       <div className="flex-1 min-w-0 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
@@ -121,14 +149,87 @@ export default function JournalPage() {
           </div>
         </div>
 
-        <JournalTimeline
-          entries={visibleEntries}
-          loading={loading}
-          loadingMore={loadingMore}
-          hasMore={Boolean(nextCursor)}
-          error={error}
-          onLoadMore={loadMore}
-        />
+        {/* ---- Tab strip (matches /orchestration vocabulary) ---- */}
+        <div
+          role="tablist"
+          aria-label="Journal views"
+          className="flex items-center h-9 bg-card border-b border-border/60 px-1 gap-0 rounded-t-md overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        >
+          {JOURNAL_TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={activeTab === id}
+              onClick={() => setActiveTab(id)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
+                activeTab === id
+                  ? "border-blue-400 text-blue-400"
+                  : "border-transparent text-muted-foreground hover:text-foreground/80",
+              )}
+            >
+              <Icon className="h-3 w-3 opacity-75" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ---- Tab panels ---- */}
+        {activeTab === "timeline" && (
+          <JournalTimeline
+            entries={visibleEntries}
+            loading={loading}
+            loadingMore={loadingMore}
+            hasMore={Boolean(nextCursor)}
+            error={error}
+            onLoadMore={loadMore}
+          />
+        )}
+
+        {activeTab === "stats" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <BarChart3 className="h-3.5 w-3.5" />
+                Journal statistics
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
+              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                <Clock className="h-4 w-4 text-muted-foreground/60" />
+              </div>
+              <div className="text-sm font-medium text-foreground/80">Coming soon</div>
+              <div className="text-[11px] text-muted-foreground max-w-sm">
+                Breakdowns by entry type, crew, and time-of-day will land here. For
+                now, the Timeline tab surfaces the raw feed.
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeTab === "audit" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Audit trail
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
+              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground/60" />
+              </div>
+              <div className="text-sm font-medium text-foreground/80">Audit lives in its own section</div>
+              <div className="text-[11px] text-muted-foreground max-w-sm">
+                Security-relevant actions (login, credential use, permission changes) are
+                tracked separately with stricter retention.
+              </div>
+              <Button asChild variant="outline" size="sm" className="h-7 px-2.5 text-xs mt-1">
+                <Link href="/audit">Open Audit</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Filter rail */}
