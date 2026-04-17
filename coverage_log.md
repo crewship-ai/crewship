@@ -28,3 +28,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 7 | B | cmd/crewship/cmd_audit.go (B2 cmd_backup 722ř + B4 cmd_agent 803ř too large; B3 cmd_captain deprecated) | ok | 3cd1c9d | 2026-04-17T01:10Z |
 | 8 | C | hooks/use-agent-activity.ts | ok | f3d9ccc | 2026-04-17T01:30Z |
 | 9 | D | components/features/chat/chat-tree-row.tsx (D1/D2 too large, D3 done, D4/D5 deprecated) | ok | 7d4487e | 2026-04-17T01:50Z |
+| 10 | E | e2e/* | skipped: no local dev server (2nd E skip — unchanged since iter 5; unblock by either starting local `pnpm dev` on Mac or making playwright.config.ts baseURL env-overridable to point at 192.168.1.201) | — | 2026-04-17T02:10Z |
