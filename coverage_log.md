@@ -39,3 +39,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 18 | C | hooks/use-backups.ts | ok | e4d3234 | 2026-04-17T04:50Z |
 | 19 | D | components/features/chat/assistant-turn.tsx (D2 — covered focused dispatch logic with mocked ai-elements) | ok | d8125a3 | 2026-04-17T05:10Z |
 | 20 | E | e2e/* | skipped: no dev server (4th E skip — same blocker as iter 5/10/15) | — | 2026-04-17T05:30Z |
+| 21 | A | internal/backup/rate_limit.go (had thin test in instance_test.go; added dedicated coverage for prune/retry-after/reset/concurrency) | ok | ea5ca0d | 2026-04-17T05:50Z |
