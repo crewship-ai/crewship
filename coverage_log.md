@@ -38,3 +38,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 17 | B | cmd/crewship/cmd_config.go (B1/B5/B6 done; B2/B4 too large; B3 deprecated) | ok | e013568 | 2026-04-17T04:30Z |
 | 18 | C | hooks/use-backups.ts | ok | e4d3234 | 2026-04-17T04:50Z |
 | 19 | D | components/features/chat/assistant-turn.tsx (D2 — covered focused dispatch logic with mocked ai-elements) | ok | d8125a3 | 2026-04-17T05:10Z |
+| 20 | E | e2e/* | skipped: no dev server (4th E skip — same blocker as iter 5/10/15) | — | 2026-04-17T05:30Z |
