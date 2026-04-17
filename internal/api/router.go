@@ -656,6 +656,12 @@ func (r *Router) registerRoutes() {
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
 
+	// Crew Journal: workspace-wide event stream. Reads only — writes are
+	// internal via journal.Writer emits from handlers across the codebase.
+	jh := NewJournalHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
+	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
+
 	// Backups (admin-only; require workspace context for scoping). See
 	// .claude/context/prd/BACKUP.md for the full API contract.
 	r.mux.Handle("POST /api/v1/admin/backups", authed(wsCtx(http.HandlerFunc(backupH.Create))))
