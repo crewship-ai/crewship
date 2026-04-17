@@ -54,18 +54,25 @@ type ProviderConnection struct {
 	Status         ConnectionStatus `json:"status"`
 }
 
+// rrKey is the composite key for round-robin token selection — used as a map
+// key so we don't allocate a concatenated string on every SelectToken call.
+type rrKey struct {
+	workspaceID string
+	provider    ProviderType
+}
+
 // TokenPool manages provider connection tokens fetched from Next.js
 type TokenPool struct {
 	mu          sync.RWMutex
 	connections []ProviderConnection
-	roundRobin  map[string]int // workspaceID+provider -> index
+	roundRobin  map[rrKey]int // (workspaceID, provider) -> next index
 	logger      *slog.Logger
 }
 
 // NewTokenPool creates an empty TokenPool.
 func NewTokenPool(logger *slog.Logger) *TokenPool {
 	return &TokenPool{
-		roundRobin: make(map[string]int),
+		roundRobin: make(map[rrKey]int),
 		logger:     logger,
 	}
 }
@@ -83,23 +90,35 @@ func (tp *TokenPool) SelectToken(workspaceID string, provider ProviderType) *Pro
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 
-	key := workspaceID + ":" + string(provider)
-	var candidates []int
-	for i, conn := range tp.connections {
-		if conn.WorkspaceID == workspaceID && conn.Provider == provider && conn.Status == StatusActive {
-			candidates = append(candidates, i)
+	// First pass: count eligible connections without allocating a candidates
+	// slice. Second pass below picks the target directly.
+	count := 0
+	for i := range tp.connections {
+		c := &tp.connections[i]
+		if c.WorkspaceID == workspaceID && c.Provider == provider && c.Status == StatusActive {
+			count++
 		}
 	}
-
-	if len(candidates) == 0 {
+	if count == 0 {
 		return nil
 	}
 
-	idx := tp.roundRobin[key] % len(candidates)
-	tp.roundRobin[key] = idx + 1
+	key := rrKey{workspaceID: workspaceID, provider: provider}
+	target := tp.roundRobin[key] % count
+	tp.roundRobin[key] = target + 1
 
-	result := tp.connections[candidates[idx]]
-	return &result
+	seen := 0
+	for i := range tp.connections {
+		c := &tp.connections[i]
+		if c.WorkspaceID == workspaceID && c.Provider == provider && c.Status == StatusActive {
+			if seen == target {
+				result := *c
+				return &result
+			}
+			seen++
+		}
+	}
+	return nil // unreachable: count > 0 guarantees a match above.
 }
 
 // MarkStatus updates a connection's status in the pool.
