@@ -3,9 +3,10 @@ package sidecar
 import "testing"
 
 // BenchmarkIsLocalhost_Remote measures the typical proxy hot-path: an
-// outbound request to a legitimate LLM host. The function currently
-// falls through to net.ParseIP even though the hostname can't possibly
-// be a loopback IP.
+// outbound request to a legitimate LLM host. With the new fast-path,
+// isLocalhost short-circuits to false before calling net.ParseIP when
+// the hostname obviously can't be a loopback IP, avoiding the parse
+// allocation that previously dominated this benchmark.
 func BenchmarkIsLocalhost_Remote(b *testing.B) {
 	host := "api.anthropic.com:443"
 	b.ReportAllocs()
