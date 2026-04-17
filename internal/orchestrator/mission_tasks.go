@@ -1118,16 +1118,20 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 		return nil
 	}
 
-	// Build the planning prompt
+	// Build the planning prompt. Pre-size and use fmt.Fprintf so the three
+	// dynamic lines don't each pay a Sprintf intermediate-string allocation
+	// on top of the Builder's own growth. Output bytes are byte-identical
+	// to the previous WriteString(Sprintf(...)) shape.
 	var b strings.Builder
+	b.Grow(3072)
 	b.WriteString("[MISSION PLANNING REQUEST]\n")
 	b.WriteString("You are the Lead agent for this crew. A new mission has been assigned to you WITHOUT pre-defined tasks.\n")
 	b.WriteString("Your job is to analyze the objective, break it down into concrete tasks, and assign them to your crew members.\n\n")
-	b.WriteString(fmt.Sprintf("Mission: %s\n", title.String))
+	fmt.Fprintf(&b, "Mission: %s\n", title.String)
 	if desc.Valid && desc.String != "" {
-		b.WriteString(fmt.Sprintf("Description: %s\n", desc.String))
+		fmt.Fprintf(&b, "Description: %s\n", desc.String)
 	}
-	b.WriteString(fmt.Sprintf("Mission ID: %s\n\n", ms.ID))
+	fmt.Fprintf(&b, "Mission ID: %s\n\n", ms.ID)
 	b.WriteString("SCALING RULES — classify before planning:\n")
 	b.WriteString("  SIMPLE  (fact-finding, single op):    1 agent, 3-10 tool calls, ~5 min\n")
 	b.WriteString("  MEDIUM  (multi-step, 1-2 files):      1-2 agents, 10-15 tool calls, ~15 min\n")
