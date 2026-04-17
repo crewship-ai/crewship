@@ -52,11 +52,17 @@ func (al *DomainAllowlist) Add(domain string) {
 
 // stripPort removes the port from a host string, handling IPv6 bracket notation.
 func stripPort(host string) string {
-	// Try net.SplitHostPort first (handles [::1]:443, host:port, etc.)
+	// Fast path: bare hostnames have no colon and no brackets — return as-is
+	// instead of paying for net.SplitHostPort's error-alloc on every port-less
+	// call from the proxy's IsAllowed / providerForHost hot path.
+	if strings.IndexByte(host, ':') < 0 && strings.IndexByte(host, '[') < 0 {
+		return host
+	}
+	// Try net.SplitHostPort (handles [::1]:443, host:port, etc.)
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		return h
 	}
-	// No port present -- strip brackets if bare IPv6
+	// No port present — strip brackets if bare IPv6 (e.g. "[::1]").
 	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
 }
 
