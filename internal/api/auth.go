@@ -66,6 +66,11 @@ type signupRequest struct {
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
+// emailSlugCleanRE replaces characters that aren't valid in workspace slugs
+// with hyphens. Hoisted to package level so Signup / Bootstrap don't
+// recompile the regex on every call.
+var emailSlugCleanRE = regexp.MustCompile(`[^a-z0-9-]`)
+
 // Signup registers a new user, creates their default workspace, and sets a session cookie.
 // POST /api/v1/auth/signup — disabled when CREWSHIP_ALLOW_SIGNUP is false.
 func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +118,7 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slugBase := strings.Split(req.Email, "@")[0]
-	slugBase = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(strings.ToLower(slugBase), "-")
+	slugBase = emailSlugCleanRE.ReplaceAllString(strings.ToLower(slugBase), "-")
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	userID := generateCUID()
@@ -198,7 +203,7 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slugBase := strings.Split(req.Email, "@")[0]
-	slugBase = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(strings.ToLower(slugBase), "-")
+	slugBase = emailSlugCleanRE.ReplaceAllString(strings.ToLower(slugBase), "-")
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	userID := generateCUID()
