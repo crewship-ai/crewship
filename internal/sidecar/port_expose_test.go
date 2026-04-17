@@ -359,3 +359,66 @@ func TestHandleExposePort_DescriptionTrimmedBeforeLengthCheck(t *testing.T) {
 		t.Errorf("description was not trimmed: got %q", got)
 	}
 }
+
+// Security boundary: even if a malicious agent stuffs spoofed identity ids
+// into the request body, the bridge MUST overwrite them with values from
+// s.ipc. The agent container is untrusted; the only trusted source of
+// workspace/crew/agent/container/chat ids is the IPC config injected at
+// sidecar startup by crewshipd.
+func TestHandleExposePort_AgentSuppliedIdsAreIgnored(t *testing.T) {
+	t.Parallel()
+
+	var capturedBody map[string]any
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &capturedBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer mock.Close()
+
+	srv := newPortExposeServer(t, &IPCConfig{
+		BaseURL:     mock.URL,
+		Token:       "tok",
+		WorkspaceID: "ws-trusted",
+		CrewID:      "crew-trusted",
+		AgentID:     "agent-trusted",
+		ContainerID: "container-trusted",
+		ChatID:      "chat-trusted",
+	})
+
+	// Agent sends a payload that ALSO contains identity ids — a privilege
+	// escalation attempt. These must be silently dropped (json decoder
+	// ignores unknown fields on exposePortRequestBody).
+	reqBody, _ := json.Marshal(map[string]any{
+		"port":         8080,
+		"description":  "spoof attempt",
+		"workspace_id": "ws-EVIL",
+		"crew_id":      "crew-EVIL",
+		"agent_id":     "agent-EVIL",
+		"container_id": "container-EVIL",
+		"chat_id":      "chat-EVIL",
+	})
+	w := httptest.NewRecorder()
+	srv.handleExposePort(w, httptest.NewRequest(http.MethodPost, "/expose-port", bytes.NewReader(reqBody)))
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("code: got %d want 201 (body=%s)", w.Code, w.Body.String())
+	}
+	for _, want := range []struct {
+		key string
+		val string
+	}{
+		{"workspace_id", "ws-trusted"},
+		{"crew_id", "crew-trusted"},
+		{"agent_id", "agent-trusted"},
+		{"container_id", "container-trusted"},
+		{"chat_id", "chat-trusted"},
+	} {
+		got, _ := capturedBody[want.key].(string)
+		if got != want.val {
+			t.Errorf("ipc body[%q]: got %q want %q (agent spoof leaked through)",
+				want.key, got, want.val)
+		}
+	}
+}
