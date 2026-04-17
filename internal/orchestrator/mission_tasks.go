@@ -1021,12 +1021,13 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 
 // unblockDependentTasks transitions BLOCKED tasks to PENDING when all deps are done.
 func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, completedTaskID string) {
-	// Collect blocked tasks first to avoid nested queries on the same SQLite connection.
-	rows, err := e.db.QueryContext(ctx,
-		`SELECT id, depends_on FROM mission_tasks WHERE mission_id = ? AND status = 'BLOCKED'`,
+	// Load every task's status for this mission in one scan, so dep-readiness checks
+	// below are O(1) map lookups instead of one QueryRowContext per dep (was N*K queries).
+	statusRows, err := e.db.QueryContext(ctx,
+		`SELECT id, status, depends_on FROM mission_tasks WHERE mission_id = ?`,
 		missionID)
 	if err != nil {
-		e.logger.Error("query blocked tasks", "error", err)
+		e.logger.Error("query mission tasks", "error", err)
 		return
 	}
 
@@ -1034,10 +1035,15 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 		id   string
 		deps []string
 	}
+	statusByID := make(map[string]string)
 	var candidates []blockedTask
-	for rows.Next() {
-		var id, depsJSON string
-		if err := rows.Scan(&id, &depsJSON); err != nil {
+	for statusRows.Next() {
+		var id, status, depsJSON string
+		if err := statusRows.Scan(&id, &status, &depsJSON); err != nil {
+			continue
+		}
+		statusByID[id] = status
+		if status != "BLOCKED" {
 			continue
 		}
 		deps, err := parseDependsOn(depsJSON)
@@ -1055,14 +1061,13 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 			candidates = append(candidates, blockedTask{id: id, deps: deps})
 		}
 	}
-	rows.Close()
+	statusRows.Close()
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, bt := range candidates {
 		allDone := true
 		for _, d := range bt.deps {
-			var s string
-			if err := e.db.QueryRowContext(ctx, `SELECT status FROM mission_tasks WHERE id = ?`, d).Scan(&s); err != nil || s != "COMPLETED" {
+			if statusByID[d] != "COMPLETED" {
 				allDone = false
 				break
 			}
