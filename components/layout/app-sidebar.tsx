@@ -23,6 +23,9 @@ import {
   Ship,
   BookOpen,
   Binoculars,
+  DollarSign,
+  Gavel,
+  LineChart,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -75,6 +78,9 @@ const navSections = [
       { title: "Runs", href: "/runs", icon: Activity },
       { title: "Journal", href: "/journal", icon: BookOpen },
       { title: "Crow's Nest", href: "/crows-nest", icon: Binoculars },
+      { title: "Paymaster", href: "/paymaster", icon: DollarSign },
+      { title: "Approvals", href: "/approvals", icon: Gavel },
+      { title: "Eval", href: "/eval", icon: LineChart },
       { title: "Audit Log", href: "/audit", icon: Shield },
     ],
   },
