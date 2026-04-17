@@ -950,11 +950,18 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 	}
 
 	var b strings.Builder
+	// Pre-size: header + per-message overhead + already-counted totalChars + trailer.
+	// Avoids the Builder's geometric-growth reallocations over the loop.
+	b.Grow(totalChars + len(selected)*16 + 256)
+
 	b.WriteString("[CONVERSATION HISTORY - previous messages in this session]\n")
 	for _, msg := range selected {
-		b.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+		// fmt.Fprintf streams directly into the Builder — the previous
+		// b.WriteString(fmt.Sprintf(...)) allocated an intermediate string
+		// per line that the Builder then copied into the same buffer.
+		fmt.Fprintf(&b, "[%s]: %s\n", msg.Role, msg.Content)
 		if msg.ToolSummary != "" {
-			b.WriteString(fmt.Sprintf("  %s\n", msg.ToolSummary))
+			fmt.Fprintf(&b, "  %s\n", msg.ToolSummary)
 		}
 	}
 	b.WriteString("[END CONVERSATION HISTORY]\n")
