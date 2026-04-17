@@ -43,3 +43,4 @@ Další iterace: `next_iter = iter_count (viz poslední řádek tabulky níže) 
 | 22 | B | cmd/crewship/cmd_label.go (B1/B5/B6/cmd_config done) | ok | 2a2d22b | 2026-04-17T06:10Z |
 | 23 | C | hooks/use-tick.ts + hooks/use-fleet-status.ts (small untested hooks, combined into one commit) | ok | 9b8958d | 2026-04-17T06:30Z |
 | 24 | D | components/features/chat/hooks/use-file-editor.ts (core chat D1-D5 exhausted; chat/hooks/ untouched) | ok | 8c78d04 | 2026-04-17T06:50Z |
+| 25 | E | e2e/* | skipped: no dev server (5th E skip — unchanged since iter 5) | — | 2026-04-17T07:10Z |
