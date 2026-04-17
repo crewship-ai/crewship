@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -197,13 +196,3 @@ func shortContainerID(id string) string {
 	}
 	return id[:12]
 }
-
-// scannerSync lets tests drive a single scan cycle without spinning up the
-// full goroutine. Kept in this file (not _test.go) because a sister package
-// may want to trigger a scan after seeding rows, e.g. for the Crow's Nest
-// live-demo fixture that prepopulates port_exposures.
-type scannerSync struct {
-	mu sync.Mutex
-}
-
-var _ = scannerSync{} // suppress unused-type lint on initial rollout

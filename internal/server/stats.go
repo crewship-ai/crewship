@@ -49,10 +49,10 @@ type StatsCollector struct {
 	// journal, journalEmitInterval, and lastEmit together gate writes to
 	// the Crew Journal. journal is nil when the server starts without a
 	// live DB (tests, --dry-run), so all emit attempts become no-ops.
-	journalMu            sync.RWMutex
-	journal              journal.Emitter
-	journalEmitInterval  time.Duration
-	lastEmit             map[string]lastEmitted
+	journalMu           sync.RWMutex
+	journal             journal.Emitter
+	journalEmitInterval time.Duration
+	lastEmit            map[string]lastEmitted
 }
 
 // NewStatsCollector creates a StatsCollector that polls container metrics at
@@ -262,9 +262,9 @@ func (sc *StatsCollector) maybeEmitJournalMetrics(ctx context.Context, tc tracke
 		Type:        journal.EntryContainerMetrics,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorSystem,
-		Summary: formatMetricsSummary(tc.CrewID, m.CPUPercent, memMB),
-		Payload: payload,
-		Refs:    map[string]any{"container_id": tc.ContainerID},
+		Summary:     formatMetricsSummary(tc.CrewID, m.CPUPercent, memMB),
+		Payload:     payload,
+		Refs:        map[string]any{"container_id": tc.ContainerID},
 	}
 	if _, err := j.Emit(ctx, entry); err != nil {
 		sc.logger.Debug("container.metrics journal emit failed", "err", err, "container_id", tc.ContainerID)
