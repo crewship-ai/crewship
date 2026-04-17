@@ -52,11 +52,11 @@ var paymasterByCrewCmd = &cobra.Command{
 		}
 		var body struct {
 			Rows []struct {
-				CrewID      string  `json:"crew_id"`
-				CrewName    string  `json:"crew_name"`
-				CostUSD     float64 `json:"cost_usd"`
-				CallCount   int64   `json:"call_count"`
-				TotalTokens int64   `json:"total_tokens"`
+				CrewID    string  `json:"crew_id"`
+				CostUSD   float64 `json:"cost_usd"`
+				CallCount int64   `json:"call_count"`
+				InTokens  int64   `json:"input_tokens"`
+				OutTokens int64   `json:"output_tokens"`
 			} `json:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
@@ -96,11 +96,11 @@ var paymasterByAgentCmd = &cobra.Command{
 		}
 		var body struct {
 			Rows []struct {
-				AgentID     string  `json:"agent_id"`
-				AgentName   string  `json:"agent_name"`
-				CostUSD     float64 `json:"cost_usd"`
-				CallCount   int64   `json:"call_count"`
-				TotalTokens int64   `json:"total_tokens"`
+				AgentID   string  `json:"agent_id"`
+				CostUSD   float64 `json:"cost_usd"`
+				CallCount int64   `json:"call_count"`
+				InTokens  int64   `json:"input_tokens"`
+				OutTokens int64   `json:"output_tokens"`
 			} `json:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
@@ -136,8 +136,18 @@ var paymasterTopCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		// Typed struct — a prior version used map[string]any + unchecked
+		// assertions which silently rendered zeros whenever the backend
+		// shape drifted. Matches the TopSpender json tags exactly so
+		// missing / renamed fields surface as decode errors instead of
+		// misleading $0.0000 rows.
 		var body struct {
-			Rows []map[string]any `json:"rows"`
+			Rows []struct {
+				ScopeKind string  `json:"scope_kind"`
+				ScopeID   string  `json:"scope_id"`
+				CostUSD   float64 `json:"cost_usd"`
+				CallCount int64   `json:"call_count"`
+			} `json:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -150,12 +160,10 @@ var paymasterTopCmd = &cobra.Command{
 			return f.YAML(body.Rows)
 		}
 		for i, row := range body.Rows {
-			scope := fmt.Sprintf("%v/%v", row["scope_kind"], row["scope_id"])
-			cost, _ := row["cost_usd"].(float64)
-			calls, _ := row["call_count"].(float64)
+			scope := fmt.Sprintf("%s/%s", row.ScopeKind, row.ScopeID)
 			fmt.Printf("%2d. %s%-40s%s  %s$%8.4f%s  %d calls\n",
 				i+1, cli.Bold, truncateString(scope, 40), cli.Reset,
-				cli.Yellow, cost, cli.Reset, int(calls))
+				cli.Yellow, row.CostUSD, cli.Reset, row.CallCount)
 		}
 		return nil
 	},
@@ -180,34 +188,26 @@ func printSpendTable(scopeLabel string, rows any) error {
 	fmt.Println(strings.Repeat("─", 64))
 	switch typed := rows.(type) {
 	case []struct {
-		CrewID      string  `json:"crew_id"`
-		CrewName    string  `json:"crew_name"`
-		CostUSD     float64 `json:"cost_usd"`
-		CallCount   int64   `json:"call_count"`
-		TotalTokens int64   `json:"total_tokens"`
+		CrewID    string  `json:"crew_id"`
+		CostUSD   float64 `json:"cost_usd"`
+		CallCount int64   `json:"call_count"`
+		InTokens  int64   `json:"input_tokens"`
+		OutTokens int64   `json:"output_tokens"`
 	}:
 		for _, r := range typed {
-			name := r.CrewName
-			if name == "" {
-				name = r.CrewID
-			}
 			fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
-				truncateString(name, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.TotalTokens)
+				truncateString(r.CrewID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
 		}
 	case []struct {
-		AgentID     string  `json:"agent_id"`
-		AgentName   string  `json:"agent_name"`
-		CostUSD     float64 `json:"cost_usd"`
-		CallCount   int64   `json:"call_count"`
-		TotalTokens int64   `json:"total_tokens"`
+		AgentID   string  `json:"agent_id"`
+		CostUSD   float64 `json:"cost_usd"`
+		CallCount int64   `json:"call_count"`
+		InTokens  int64   `json:"input_tokens"`
+		OutTokens int64   `json:"output_tokens"`
 	}:
 		for _, r := range typed {
-			name := r.AgentName
-			if name == "" {
-				name = r.AgentID
-			}
 			fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
-				truncateString(name, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.TotalTokens)
+				truncateString(r.AgentID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
 		}
 	default:
 		return fmt.Errorf("printSpendTable: unsupported rows type %T", rows)

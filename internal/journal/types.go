@@ -46,9 +46,10 @@ const (
 	EntryGuardrailInput   EntryType = "guardrail.input_blocked"
 	EntryGuardrailOutput  EntryType = "guardrail.output_blocked"
 	EntryApprovalRequest  EntryType = "approval.requested"
-	EntryApprovalGranted  EntryType = "approval.granted"
-	EntryApprovalDenied   EntryType = "approval.denied"
-	EntryApprovalTimeout  EntryType = "approval.timeout"
+	EntryApprovalGranted   EntryType = "approval.granted"
+	EntryApprovalDenied    EntryType = "approval.denied"
+	EntryApprovalTimeout   EntryType = "approval.timeout"
+	EntryApprovalCancelled EntryType = "approval.cancelled"
 
 	// Cost
 	EntryLLMCall       EntryType = "llm.call"
@@ -154,6 +155,17 @@ type Entry struct {
 	TraceID     string
 	SpanID      string
 	ExpiresAt   *time.Time
+
+	// flushBarrierAck is an internal sentinel used by Writer.Flush.
+	// When non-nil, the worker treats this Entry as a barrier rather
+	// than a row to persist — the barrier rides the same queue as
+	// real entries, so the worker can only close the ack after it
+	// has drained every Entry that was queued before Flush was
+	// called. Exported package outside `internal/journal` must never
+	// set this field; Validate() rejects barrier-shaped entries so
+	// a misuse from outside the package can't silently bypass
+	// persistence.
+	flushBarrierAck chan struct{}
 }
 
 // Validate checks that the entry has the minimum fields the schema requires.

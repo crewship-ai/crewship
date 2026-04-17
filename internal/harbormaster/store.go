@@ -55,9 +55,13 @@ func Enqueue(ctx context.Context, db *sql.DB, j journal.Emitter, req Request) (s
 		t := req.CreatedAt.Add(time.Duration(secs) * time.Second)
 		req.TimeoutAt = &t
 	}
-	if req.Status == "" {
-		req.Status = StatusPending
-	}
+	// Enqueue always writes a pending row — a caller shouldn't be able
+	// to persist a pre-resolved approval via the public enqueue path,
+	// because the matching `approval.requested` journal emit below
+	// would lie about its state. Decide / Cancel / SweepTimeouts are
+	// the only ways to leave pending, and each emits its own terminal
+	// entry. Force pending regardless of what the caller set.
+	req.Status = StatusPending
 
 	payload, err := encodeJSON(req.Payload)
 	if err != nil {
@@ -131,6 +135,13 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 		return ErrBadStatus
 	}
 	if id == "" {
+		return ErrNotFound
+	}
+	// Fail closed on empty workspaceID: an empty value would make the
+	// scoped UPDATE a no-op and then the Get fallback below would have
+	// to branch on `workspaceID == ""` to avoid an unscoped lookup —
+	// easier to refuse the call here so there's exactly one safe path.
+	if workspaceID == "" {
 		return ErrNotFound
 	}
 
@@ -216,6 +227,9 @@ func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id,
 	if id == "" {
 		return ErrNotFound
 	}
+	if workspaceID == "" {
+		return ErrNotFound
+	}
 	now := time.Now().UTC()
 	const updateSQL = `UPDATE approvals_queue
 		SET status = 'cancelled', decided_at = ?, decision_comment = ?
@@ -246,12 +260,17 @@ func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id,
 				CrewID:      row.CrewID,
 				AgentID:     row.AgentID,
 				MissionID:   row.MissionID,
-				Type:        journal.EntryApprovalDenied,
-				Severity:    journal.SeverityNotice,
-				ActorType:   journal.ActorAgent,
-				ActorID:     row.RequestedBy,
-				Summary:     fmt.Sprintf("approval cancelled: %s", reason),
-				Payload:     map[string]any{"approval_id": row.ID, "cancelled": true, "reason": reason},
+				// Distinct from approval.denied: cancelled = agent
+				// withdrew the request on its own, denied = human
+				// said no. Consumers (UI filters, audit queries)
+				// need to distinguish these to report the right
+				// "who made the call" story.
+				Type:      journal.EntryApprovalCancelled,
+				Severity:  journal.SeverityNotice,
+				ActorType: journal.ActorAgent,
+				ActorID:   row.RequestedBy,
+				Summary:   fmt.Sprintf("approval cancelled: %s", reason),
+				Payload:   map[string]any{"approval_id": row.ID, "cancelled": true, "reason": reason},
 				Refs:        map[string]any{"approval_id": row.ID},
 			})
 		}

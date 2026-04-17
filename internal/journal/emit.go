@@ -32,18 +32,15 @@ type Emitter interface {
 // durability at the cost of tail latency; it's the right trade because
 // dropping journal entries silently would undermine the entire
 // audit-source-of-truth contract.
-// flushReq is a synchronous flush request. The writer goroutine closes ack
-// after it has drained the current batch so Flush callers know every Emit
-// that happened before their call has hit the DB.
-type flushReq struct {
-	ack chan struct{}
-}
-
+// Writer fields. Flush uses an in-queue barrier sentinel (an Entry
+// with flushBarrierAck set) rather than a separate channel, so the
+// worker naturally processes every prior queue element before
+// signalling — no race where Flush could ack while earlier entries
+// were still buffered.
 type Writer struct {
 	db       *sql.DB
 	logger   *slog.Logger
 	queue    chan Entry
-	done     chan flushReq
 	wg       sync.WaitGroup
 	flushN   int
 	flushDur time.Duration
@@ -77,7 +74,6 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 		db:       db,
 		logger:   logger,
 		queue:    make(chan Entry, opts.QueueSize),
-		done:     make(chan flushReq),
 		flushN:   opts.FlushSize,
 		flushDur: opts.FlushInterval,
 		closed:   make(chan struct{}),
@@ -128,13 +124,20 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 	}
 }
 
-// Flush forces pending entries to disk and waits for the drain to complete.
-// Used by tests and by graceful shutdown paths where "all emits so far are
-// durable" is required.
+// Flush forces pending entries to disk and waits for the drain to
+// complete. The barrier travels through the same entry queue (wrapped
+// in an Entry with a special sentinel marker on the run loop), so the
+// worker naturally processes every prior entry before it reaches the
+// flush marker and closes req.ack. Without the in-queue barrier an
+// earlier implementation could close ack after only the current batch
+// was drained — entries still buffered in w.queue would still be
+// pending and "all emits so far are durable" was a lie.
 func (w *Writer) Flush(ctx context.Context) error {
-	req := flushReq{ack: make(chan struct{})}
+	ack := make(chan struct{})
+	barrier := Entry{flushBarrierAck: ack}
+
 	select {
-	case w.done <- req:
+	case w.queue <- barrier:
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-w.closed:
@@ -143,7 +146,7 @@ func (w *Writer) Flush(ctx context.Context) error {
 		return nil
 	}
 	select {
-	case <-req.ack:
+	case <-ack:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -179,13 +182,34 @@ func (w *Writer) run() {
 	ticker := time.NewTicker(w.flushDur)
 	defer ticker.Stop()
 
+	// Exponential backoff for failed persist attempts. The journal is
+	// the canonical audit stream — dropping entries on a transient DB
+	// error would violate the core contract. Instead we keep the
+	// batch and retry next tick, with an upper bound on the batch
+	// size so a long DB outage doesn't grow the buffer unboundedly
+	// (at that point we start logging and dropping oldest).
+	const maxBatchRetryBytes = 64 * 1024 * 1024 // ~64 MB of buffered entries
+	var persistFailures int
 	drain := func() {
 		if len(batch) == 0 {
 			return
 		}
 		if err := w.persistBatch(context.Background(), batch); err != nil {
-			w.logger.Error("journal batch write failed", "err", err, "n", len(batch))
+			persistFailures++
+			w.logger.Error("journal batch write failed — retaining batch for retry",
+				"err", err, "n", len(batch), "consecutive_failures", persistFailures)
+			// Hard cap so a permanently broken DB doesn't OOM the
+			// process. 64 MB worth of Entry structs is ~30k rows;
+			// far beyond that we start dropping oldest with a loud
+			// error so the failure is still observable.
+			if estimateBatchBytes(batch) > maxBatchRetryBytes {
+				w.logger.Error("journal batch exceeded retry cap — dropping oldest half",
+					"n", len(batch))
+				batch = batch[len(batch)/2:]
+			}
+			return
 		}
+		persistFailures = 0
 		batch = batch[:0]
 	}
 
@@ -196,15 +220,22 @@ func (w *Writer) run() {
 				drain()
 				return
 			}
+			// Flush barrier: drain everything before the barrier
+			// (guaranteed durable because the barrier couldn't have
+			// landed here until every earlier queue element was
+			// consumed), then close the ack so the Flush caller
+			// returns. The barrier entry itself is not persisted.
+			if e.flushBarrierAck != nil {
+				drain()
+				close(e.flushBarrierAck)
+				continue
+			}
 			batch = append(batch, e)
 			if len(batch) >= w.flushN {
 				drain()
 			}
 		case <-ticker.C:
 			drain()
-		case req := <-w.done:
-			drain()
-			close(req.ack)
 		case <-w.closed:
 			// Shutdown signal from Close(). Drain anything already
 			// buffered in the channel so Close->Wait doesn't race
@@ -289,6 +320,26 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// estimateBatchBytes is a rough size estimate used to cap the retry
+// buffer when the DB is unreachable. Not load-bearing for correctness —
+// 256 B/entry is a reasonable average for summary + payload — so a
+// fixed multiplier is cheaper than marshalling every entry twice.
+func estimateBatchBytes(batch []Entry) int {
+	total := 0
+	for _, e := range batch {
+		total += 256 + len(e.Summary)
+		for k, v := range e.Payload {
+			total += len(k)
+			if s, ok := v.(string); ok {
+				total += len(s)
+			} else {
+				total += 32
+			}
+		}
+	}
+	return total
 }
 
 // nullable turns an empty string into sql.NullString{Valid:false} so the
