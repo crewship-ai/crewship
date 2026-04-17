@@ -99,7 +99,7 @@ export async function decideApproval(
   decision: "approved" | "denied",
   comment: string,
 ): Promise<{ status: string; decided_by?: string }> {
-  const res = await fetch(`/api/v1/approvals/${id}/decide`, {
+  const res = await fetch(`/api/v1/approvals/${encodeURIComponent(id)}/decide`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status: decision, comment }),

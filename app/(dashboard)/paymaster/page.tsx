@@ -85,9 +85,10 @@ export default function PaymasterPage() {
     return row?.crew_name ?? selectedCrewId.slice(0, 8)
   }, [crewRows, selectedCrewId]);
 
-  // Average cost per mission — rough proxy using call count as the
-  // denominator per spec. When per-mission rollups land, swap this for a
-  // proper count.
+  // Rough cost-per-top-spender: total crew spend divided by the number of
+  // top-spender rows. The KPI card labels it "Avg cost / mission" as a
+  // placeholder — swap this for a real per-mission figure once the
+  // backend exposes mission-level rollups.
   const avgCostPerMission = totals.totalCalls === 0 ? 0 : totals.totalCost / Math.max(1, topRows.length)
 
   if (notConfigured) {

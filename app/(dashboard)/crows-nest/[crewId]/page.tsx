@@ -120,7 +120,7 @@ export default function CrowsNestCrewPage() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/crews/${params.crewId}?workspace_id=${workspaceId}`)
+        const res = await fetch(`/api/v1/crews/${encodeURIComponent(params.crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (!res.ok) return
         const json = await res.json()
         if (!cancelled) setCrew(json)

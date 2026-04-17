@@ -52,7 +52,7 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
     setSummarizing(true)
     try {
       const res = await fetch(
-        `/api/v1/crews/${crewId}/journal/summarize?workspace_id=${workspaceId}`,
+        `/api/v1/crews/${encodeURIComponent(crewId)}/journal/summarize?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "POST", headers: { "Content-Type": "application/json" } },
       )
       if (res.ok) {
@@ -61,10 +61,12 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
       } else if (res.status === 404) {
         toast.info("Summary generation not yet available")
       } else {
-        toast.error("Failed to generate summary")
+        toast.error(`Summary failed (${res.status})`)
       }
-    } catch {
-      toast.info("Summary generation not yet available")
+    } catch (err) {
+      toast.error("Summary failed", {
+        description: err instanceof Error ? err.message : undefined,
+      })
     } finally {
       setSummarizing(false)
     }
@@ -129,7 +131,7 @@ export function CrewJournal({ crewId, workspaceId }: CrewJournalProps) {
             Generate Summary
           </Button>
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild>
-            <Link href={`/journal?crew_id=${crewId}`}>
+            <Link href={`/journal?crew_id=${encodeURIComponent(crewId)}`}>
               View full journal <ExternalLink className="h-3 w-3 ml-1" />
             </Link>
           </Button>

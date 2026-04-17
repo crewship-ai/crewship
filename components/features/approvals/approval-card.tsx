@@ -59,15 +59,30 @@ export function ApprovalCard({ row, active, onSelect }: ApprovalCardProps) {
   )
 }
 
-/** Live MM:SS countdown until `iso`. Ticks once per second. */
+/** Live MM:SS countdown until `iso`. Ticks once per second, stops at expiry. */
 function TimeoutCountdown({ iso }: { iso: string }) {
-  const [remaining, setRemaining] = useState(() => Math.max(0, new Date(iso).getTime() - Date.now()))
+  // Parse once up front — a malformed timestamp would otherwise NaN every tick.
+  const targetMs = new Date(iso).getTime()
+  const isValid = Number.isFinite(targetMs)
+  const [remaining, setRemaining] = useState(() =>
+    isValid ? Math.max(0, targetMs - Date.now()) : 0,
+  )
+
   useEffect(() => {
+    if (!isValid) return
+    // Don't even start the interval if already expired.
+    if (targetMs - Date.now() <= 0) {
+      setRemaining(0)
+      return
+    }
     const id = setInterval(() => {
-      setRemaining(Math.max(0, new Date(iso).getTime() - Date.now()))
+      const next = Math.max(0, targetMs - Date.now())
+      setRemaining(next)
+      // Stop ticking the moment we hit zero — no work after expiry.
+      if (next === 0) clearInterval(id)
     }, 1000)
     return () => clearInterval(id)
-  }, [iso])
+  }, [targetMs, isValid])
 
   const expired = remaining === 0
   const totalSec = Math.floor(remaining / 1000)

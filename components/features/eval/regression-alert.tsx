@@ -16,7 +16,10 @@ interface RegressionAlertProps {
  */
 export function RegressionAlert({ regressions, onView }: RegressionAlertProps) {
   if (regressions.length === 0) return null
-  const latest = regressions[0]
+  // Don't trust upstream sort order — compute the most recent entry locally.
+  const latest = regressions.reduce((acc, cur) =>
+    new Date(cur.ts).getTime() > new Date(acc.ts).getTime() ? cur : acc,
+  )
   const count = regressions.length
 
   return (

@@ -42,7 +42,7 @@ export function CheckpointMarker({ entry, onFork }: CheckpointMarkerProps) {
   async function handleRestore() {
     setRestoring(true)
     try {
-      const res = await fetch(`/api/v1/checkpoints/${checkpointId}/restore`, { method: "POST" })
+      const res = await fetch(`/api/v1/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST" })
       if (res.status === 404) {
         toast.info("Not yet wired to backend")
       } else if (!res.ok) {

@@ -156,15 +156,31 @@ type LakeraScanner struct {
 	client   *http.Client
 }
 
+// DefaultLakeraEndpoint is the production Lakera Guard v2 URL. Exposed
+// so callers can point at a test fixture or regional deployment via
+// WithEndpoint without hardcoding the string twice.
+const DefaultLakeraEndpoint = "https://api.lakera.ai/v2/guard"
+
 // WithLakeraAPIKey returns a scanner that augments local detection with
 // Lakera's hosted classifier. Pass an empty key to disable the remote call
-// entirely (the scanner then behaves identically to ScanInput).
+// entirely (the scanner then behaves identically to ScanInput). The
+// endpoint defaults to DefaultLakeraEndpoint and can be overridden via
+// WithEndpoint for testing (httptest.Server) or alternative hosts.
 func WithLakeraAPIKey(key string) *LakeraScanner {
 	return &LakeraScanner{
 		apiKey:   key,
-		endpoint: "https://api.lakera.ai/v2/guard",
+		endpoint: DefaultLakeraEndpoint,
 		client:   &http.Client{Timeout: 3 * time.Second},
 	}
+}
+
+// WithEndpoint overrides the Lakera endpoint. Returns the receiver so
+// the config chain reads naturally: WithLakeraAPIKey(k).WithEndpoint(url).
+func (l *LakeraScanner) WithEndpoint(url string) *LakeraScanner {
+	if url != "" {
+		l.endpoint = url
+	}
+	return l
 }
 
 // ScanInput is the LakeraScanner equivalent of the package-level ScanInput.

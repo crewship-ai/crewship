@@ -88,7 +88,7 @@ export function useAgentSpend(
     setState((s) => ({ ...s, loading: true, error: null }))
     ;(async () => {
       try {
-        const res = await fetch(`/api/v1/paymaster/spend/by-agent/${crewId}?range=${range}`)
+        const res = await fetch(`/api/v1/paymaster/spend/by-agent/${encodeURIComponent(crewId)}?range=${encodeURIComponent(range)}`)
         if (reqIdRef.current !== reqId) return
         if (res.status === 404) {
           setState({ data: null, loading: false, error: null, notConfigured: true })

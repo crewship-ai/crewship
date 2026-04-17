@@ -214,7 +214,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if h.orch == nil {
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available", startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", "orchestrator not available", startTime)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "orchestrator not available"})
 		return
 	}
@@ -223,7 +223,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	containerID, err := h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
 			fmt.Sprintf("container error: %v", err), startTime)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container error"})
 		return
@@ -274,7 +274,7 @@ Question: %s`, body.FromSlug, body.Question)
 	guardRelease, guardErr := refuseIfBackupInProgress(r.Context(), h.db, body.WorkspaceID)
 	if guardErr != nil {
 		h.logger.Warn("peer query refused — backup in progress", "query_id", convID, "workspace_id", body.WorkspaceID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", guardErr.Error(), startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", guardErr.Error(), startTime)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": guardErr.Error(), "query_id": convID})
 		return
 	}
@@ -282,7 +282,7 @@ Question: %s`, body.FromSlug, body.Question)
 
 	if err := h.orch.RunAgentForAssignment(r.Context(), req, handler); err != nil {
 		h.logger.Error("peer query execution failed", "error", err, "query_id", convID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
 			fmt.Sprintf("execution error: %v", err), startTime)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":    "query execution failed",
@@ -297,7 +297,7 @@ Question: %s`, body.FromSlug, body.Question)
 		result = result[:10000] + "...(truncated)"
 	}
 
-	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, result, "", startTime)
+	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, result, "", startTime)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query_id": convID,
@@ -310,9 +310,14 @@ Question: %s`, body.FromSlug, body.Question)
 }
 
 // finishQuery updates peer_conversations and agent_runs records.
+// crewID + targetAgentID are threaded through so the closing answer
+// journal entry carries the same scope as the opening question entry —
+// without them, crew/agent-filtered journal views see the running row
+// but never the completion, which makes the UI look like every peer
+// query is permanently running.
 func (h *QueryHandler) finishQuery(
 	ctx context.Context,
-	convID, runID, chatID, fromSlug, targetSlug, workspaceID, result, errMsg string,
+	convID, runID, chatID, fromSlug, targetSlug, workspaceID, crewID, targetAgentID, result, errMsg string,
 	startTime time.Time,
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -341,19 +346,18 @@ func (h *QueryHandler) finishQuery(
 	if errMsg != "" {
 		answerSev = journal.SeverityError
 	}
-	// workspaceID + chatID are already on the struct args; crew + agent
-	// lookup for the emit would cost another query, so we leave CrewID
-	// empty. The thread_id ref plus the prior "running" entry's scope
-	// lets consumers stitch the conversation without the duplicate lookup.
 	summary := fmt.Sprintf("%s → %s: %s (%dms)", fromSlug, targetSlug, strings.ToLower(status), durationMs)
 	if errMsg != "" {
 		summary = fmt.Sprintf("%s → %s: FAILED (%s)", fromSlug, targetSlug, truncate(errMsg, 120))
 	}
 	_, _ = h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		AgentID:     targetAgentID,
 		Type:        journal.EntryPeerConversation,
 		Severity:    answerSev,
 		ActorType:   journal.ActorAgent,
+		ActorID:     targetAgentID,
 		Summary:     summary,
 		Payload: map[string]any{
 			"message_type": "answer",

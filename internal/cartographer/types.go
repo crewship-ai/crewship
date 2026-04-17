@@ -53,8 +53,10 @@ type StateSnapshot struct {
 }
 
 // Checkpoint mirrors the `checkpoints` row plus the decoded StateSnapshot.
-// ForkOf is a pointer so the JSON omits it cleanly when the checkpoint is
-// not a fork.
+// ForkOf holds the parent checkpoint ID when this row is a fork; the
+// empty string means "this is an independent checkpoint, not a fork",
+// and the `omitempty` JSON tag drops the field from the response shape
+// so the UI can use `checkpoint.fork_of ? ... : ...` directly.
 type Checkpoint struct {
 	ID            string        `json:"id"`
 	WorkspaceID   string        `json:"workspace_id"`

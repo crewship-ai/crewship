@@ -77,6 +77,20 @@ export function JournalFilters({ workspaceId, value, onChange }: JournalFiltersP
   // Mirror external resets (e.g. "clear all") back into the input.
   useEffect(() => { setSearchLocal(value.search) }, [value.search])
 
+  // When the workspace changes, crew/agent ids from the previous workspace
+  // are meaningless — clear them so stale selections don't filter the list.
+  // Clear local option caches too so no ghosts flash in the dropdowns.
+  useEffect(() => {
+    setCrews([])
+    setAgents([])
+    if (value.crewId || value.agentId) {
+      onChange({ ...value, crewId: "", agentId: "" })
+    }
+    // Intentionally omit `value` / `onChange` — this should fire only when
+    // the workspace itself changes, not on every filter edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId])
+
   useEffect(() => {
     if (!workspaceId) return
     let cancelled = false

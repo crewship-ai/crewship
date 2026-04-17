@@ -65,8 +65,13 @@ export function TopSpendersTable({ rows, loading }: TopSpendersTableProps) {
       <TableBody>
         {rows.map((row, idx) => {
           const { label, hint } = resolveName(row)
+          // Prefer a stable id from the row itself so rows stay keyed across
+          // sort / filter changes. Fall back to the hint+label+idx combo only
+          // when no identifier is present on the payload.
+          const stableId =
+            row.mission_id ?? row.agent_id ?? row.crew_id ?? row.scope ?? `${hint}-${label}-${idx}`
           return (
-            <TableRow key={`${hint}-${label}-${idx}`}>
+            <TableRow key={stableId}>
               <TableCell className="font-mono text-[11px] text-muted-foreground">{idx + 1}</TableCell>
               <TableCell>
                 <div className="flex items-center gap-2 min-w-0">

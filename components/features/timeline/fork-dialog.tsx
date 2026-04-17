@@ -35,7 +35,7 @@ export function ForkDialog({ open, onOpenChange, missionId, checkpointId, checkp
     if (!checkpointId) return
     setSubmitting(true)
     try {
-      const res = await fetch(`/api/v1/missions/${missionId}/fork`, {
+      const res = await fetch(`/api/v1/missions/${encodeURIComponent(missionId)}/fork`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ checkpoint_id: checkpointId, label }),

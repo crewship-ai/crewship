@@ -93,11 +93,24 @@ func (w *wrappedProvider) Complete(ctx context.Context, req Request) (*Response,
 	return out, nil
 }
 
-// Stream bypasses the middleware stack (see comment on Middleware).
-// Callers that require observability on streaming should instead stream
-// through the provider directly and accept that budget/guardrails aren't
-// applied to those calls until the streaming variant lands.
+// Stream applies the lookout input guard synchronously before delegating
+// to the base provider. Paymaster budget accounting and telemetry spans
+// still aren't wired into the streaming path (that needs a streaming-
+// aware ledger variant — tracked as a follow-up), but refusing to pass
+// a prompt-injection attempt through to the LLM is the minimum the
+// security layer has to do. Without this pre-call guard, any caller
+// that picks Stream over Complete would silently bypass every guardrail
+// — the classic "optional security" trap CodeRabbit flagged.
 func (w *wrappedProvider) Stream(ctx context.Context, req Request, handler func(StreamEvent) error) (*Response, error) {
+	for _, m := range req.Messages {
+		if m.Role != RoleUser && m.Role != RoleTool {
+			continue
+		}
+		res := lookout.ScanInput(m.Content)
+		if res.Verdict == lookout.VerdictBlock && len(res.Findings) > 0 {
+			return nil, &lookout.BlockedError{Direction: "input", Finding: res.Findings[0]}
+		}
+	}
 	return w.base.Stream(ctx, req, handler)
 }
 

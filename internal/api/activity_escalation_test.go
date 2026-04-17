@@ -455,7 +455,7 @@ func newStandupHandler(t *testing.T) (*QueryHandler, string, string, string, str
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	userID, wsID, crewID, leadID, _ := seedIssueFixtures(t, db)
-	h := &QueryHandler{db: db, hub: nil, logger: logger, escalationWaiters: make(map[string]chan escalationResult)}
+	h := &QueryHandler{db: db, hub: nil, logger: logger, journal: noopEmitter{}, escalationWaiters: make(map[string]chan escalationResult)}
 	return h, userID, wsID, crewID, leadID
 }
 

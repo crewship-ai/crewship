@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -92,7 +93,10 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 	}
 
 	// Prepare the lookup statement once; every poll re-binds the same SQL.
-	const pollSQL = `SELECT status, decided_by, decision_comment, timeout_at
+	// timeout_at is no longer selected here — the client-side deadline
+	// handles the timeout transition, and reading the row value just
+	// left an unused Scan target (CodeRabbit flagged).
+	const pollSQL = `SELECT status, decided_by, decision_comment
 		FROM approvals_queue WHERE id = ?`
 	stmt, err := db.PrepareContext(ctx, pollSQL)
 	if err != nil {
@@ -114,10 +118,10 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 
 	check := func() (Decision, bool, error) {
 		var (
-			status                          string
-			decidedBy, comment, timeoutAtNS sql.NullString
+			status             string
+			decidedBy, comment sql.NullString
 		)
-		err := stmt.QueryRowContext(ctx, id).Scan(&status, &decidedBy, &comment, &timeoutAtNS)
+		err := stmt.QueryRowContext(ctx, id).Scan(&status, &decidedBy, &comment)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				// Row vanished — treat as denied so the agent fails closed.
@@ -200,7 +204,13 @@ func StartTimeoutSweeper(ctx context.Context, db *sql.DB, j journal.Emitter, int
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_, _ = SweepTimeouts(ctx, db, j)
+				// Log sweep failures so an operator notices if the
+				// DB becomes unreachable or the update loop wedges;
+				// transient errors are expected so debug level is
+				// fine, an oncall wants to grep for this string.
+				if _, err := SweepTimeouts(ctx, db, j); err != nil {
+					slog.Debug("harbormaster: sweep error", "err", err)
+				}
 			}
 		}
 	}()

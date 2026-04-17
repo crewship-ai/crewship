@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { Check, X } from "lucide-react"
 import Link from "next/link"
@@ -34,6 +34,12 @@ interface ApprovalDetailProps {
 export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalDetailProps) {
   const [comment, setComment] = useState("")
   const [submitting, setSubmitting] = useState<null | "approved" | "denied">(null)
+
+  // Reset the textarea when the selected approval changes so the previous
+  // row's comment doesn't leak into the next decision.
+  useEffect(() => {
+    setComment("")
+  }, [row?.id])
 
   async function handleDecide(status: "approved" | "denied") {
     if (!row) return

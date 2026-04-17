@@ -21,15 +21,19 @@ export function MissionTimelineClient() {
   const missionId = params?.id ?? ""
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
+  // `_` is the static-export placeholder route — bail before firing any
+  // fetch / EventSource so we don't stream for a bogus mission id.
+  const isValidMission = Boolean(missionId) && missionId !== "_"
+
   const queryParams = useMemo<Record<string, string | undefined>>(
-    () => ({ mission_id: missionId || undefined }),
-    [missionId],
+    () => ({ mission_id: isValidMission ? missionId : undefined }),
+    [missionId, isValidMission],
   )
 
   const { entries, loading, error, refresh, prependLive } = useJournalList({
     workspaceId,
     params: queryParams,
-    enabled: !wsLoading && Boolean(missionId),
+    enabled: !wsLoading && isValidMission,
     limit: 200,
   })
 
@@ -42,13 +46,13 @@ export function MissionTimelineClient() {
   useJournalStream({
     workspaceId,
     params: queryParams,
-    enabled: !wsLoading && Boolean(missionId),
+    enabled: !wsLoading && isValidMission,
     onEntry: handleLive,
   })
 
   const checkpointCount = entries.filter((e) => e.entry_type === "checkpoint.created").length
 
-  if (!missionId || missionId === "_") {
+  if (!isValidMission) {
     return (
       <div className="flex flex-col items-center gap-2 py-24 text-center">
         <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">

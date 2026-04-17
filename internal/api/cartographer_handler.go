@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -114,7 +115,7 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Body is optional — an unlabelled checkpoint is a valid "bookmark
 	// right now" gesture. Ignore EOF/invalid-JSON on empty bodies.
 	if r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, http.ErrBodyReadAfterClose) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
@@ -252,7 +253,7 @@ func (h *CartographerHandler) Fork(w http.ResponseWriter, r *http.Request) {
 		Label string `json:"label"`
 	}
 	if r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, http.ErrBodyReadAfterClose) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 			return
 		}
