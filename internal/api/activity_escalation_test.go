@@ -23,6 +23,7 @@ func newQueryHandler(t *testing.T) (*QueryHandler, string, string, string, strin
 		hub:               nil,
 		logger:            logger,
 		internalToken:     "tok",
+		journal:           noopEmitter{},
 		escalationWaiters: make(map[string]chan escalationResult),
 	}
 	return h, userID, wsID, crewID, leadID, workerID

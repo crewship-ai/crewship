@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -24,12 +25,16 @@ type QueryHandler struct {
 	hub           *ws.Hub
 	logger        *slog.Logger
 	internalToken string
+	journal       journal.Emitter
 
 	escalationMu      sync.Mutex
 	escalationWaiters map[string]chan escalationResult
 }
 
 // NewQueryHandler creates a QueryHandler with the given orchestrator, hub, and internal token.
+// Callers that want journal emits wire them after construction with SetJournal.
+// The default is a no-op emitter so tests that don't care about journal
+// integration continue to work without touching every test call site.
 func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *QueryHandler {
 	return &QueryHandler{
 		db:                db,
@@ -37,8 +42,33 @@ func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, i
 		hub:               hub,
 		logger:            logger,
 		internalToken:     internalToken,
+		journal:           noopEmitter{},
 		escalationWaiters: make(map[string]chan escalationResult),
 	}
+}
+
+// SetJournal wires a journal emitter. nil is accepted and maps to the
+// no-op so callers don't have to branch on whether the server wired one.
+func (h *QueryHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
+}
+
+// truncate clips s to n runes, appending "…" when cut. Used for journal
+// summaries which must fit a single UI line — the raw content stays in
+// payload for anyone who wants it.
+func truncate(s string, n int) string {
+	if n <= 0 || len(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }
 
 type createQueryBody struct {
@@ -123,6 +153,32 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+
+	// Dual-write into the Crew Journal. The old peer_conversations table
+	// stays the source of truth for existing UI queries; the journal is
+	// the new canonical stream once handlers migrate. State=running is
+	// flagged so downstream consumers know a follow-up completed/failed
+	// entry is coming on the same thread_id.
+	_, _ = h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     fromAgentID,
+		Type:        journal.EntryPeerConversation,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorAgent,
+		ActorID:     fromAgentID,
+		Summary:     fmt.Sprintf("%s asked %s: %s", body.FromSlug, body.TargetSlug, truncate(body.Question, 140)),
+		Payload: map[string]any{
+			"message_type": "question",
+			"question":     body.Question,
+			"from_slug":    body.FromSlug,
+			"target_slug":  body.TargetSlug,
+			"target_id":    target.ID,
+			"state":        "running",
+			"thread_id":    convID,
+		},
+		Refs: map[string]any{"peer_conversation_id": convID, "chat_id": body.ChatID},
+	})
 
 	// Create agent_runs record for dashboard visibility
 	runID := generateCUID()
@@ -277,6 +333,40 @@ func (h *QueryHandler) finishQuery(
 		status, responseVal, durationMs, now, convID); err != nil {
 		h.logger.Error("update peer_conversation", "error", err, "id", convID)
 	}
+
+	// Emit the answer entry on the same thread. Severity elevates to
+	// error when the call failed so the journal filters surface failed
+	// peer queries without having to read payload.state on every row.
+	answerSev := journal.SeverityInfo
+	if errMsg != "" {
+		answerSev = journal.SeverityError
+	}
+	// workspaceID + chatID are already on the struct args; crew + agent
+	// lookup for the emit would cost another query, so we leave CrewID
+	// empty. The thread_id ref plus the prior "running" entry's scope
+	// lets consumers stitch the conversation without the duplicate lookup.
+	summary := fmt.Sprintf("%s → %s: %s (%dms)", fromSlug, targetSlug, strings.ToLower(status), durationMs)
+	if errMsg != "" {
+		summary = fmt.Sprintf("%s → %s: FAILED (%s)", fromSlug, targetSlug, truncate(errMsg, 120))
+	}
+	_, _ = h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		Type:        journal.EntryPeerConversation,
+		Severity:    answerSev,
+		ActorType:   journal.ActorAgent,
+		Summary:     summary,
+		Payload: map[string]any{
+			"message_type": "answer",
+			"response":     result,
+			"error":        errMsg,
+			"from_slug":    fromSlug,
+			"target_slug":  targetSlug,
+			"state":        strings.ToLower(status),
+			"duration_ms":  durationMs,
+			"thread_id":    convID,
+		},
+		Refs: map[string]any{"peer_conversation_id": convID, "chat_id": chatID},
+	})
 
 	// Update agent_runs
 	if runID != "" {

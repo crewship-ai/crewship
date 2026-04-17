@@ -533,6 +533,7 @@ func (r *Router) registerRoutes() {
 		issueStarter = missionEngineForPublic
 	}
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
+	issues.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/issues", authed(wsCtx(http.HandlerFunc(issues.List))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.GetByIdentifier))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/issues", authed(wsCtx(http.HandlerFunc(issues.Create))))
@@ -870,6 +871,7 @@ func (r *Router) registerRoutes() {
 
 	// Query routes (peer-to-peer communication, standup summaries, escalations)
 	queries := NewQueryHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	queries.SetJournal(r.Journal())
 	r.mux.Handle("POST /api/v1/internal/queries", internalAuth(http.HandlerFunc(queries.Create)))
 	r.mux.Handle("GET /api/v1/internal/standup", internalAuth(http.HandlerFunc(queries.Standup)))
 	r.mux.Handle("POST /api/v1/internal/escalations", internalAuth(http.HandlerFunc(queries.CreateEscalation)))

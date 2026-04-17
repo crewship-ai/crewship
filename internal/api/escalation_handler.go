@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // PendingEscalationCount returns the number of unresolved escalations workspace-wide.
@@ -109,6 +110,29 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+
+	// Dual-write the escalation into the journal. Severity=warn because
+	// an unresolved escalation should surface in the default "things
+	// needing attention" filter (severity IN (warn, error)).
+	_, _ = h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     fromAgentID,
+		Type:        journal.EntryPeerEscalation,
+		Severity:    journal.SeverityWarn,
+		ActorType:   journal.ActorAgent,
+		ActorID:     fromAgentID,
+		Summary:     fmt.Sprintf("escalation from %s: %s", body.FromSlug, truncate(body.Reason, 140)),
+		Payload: map[string]any{
+			"reason":           body.Reason,
+			"context":          body.Context,
+			"escalation_type":  escalationType,
+			"metadata":         body.Metadata,
+			"from_slug":        body.FromSlug,
+			"state":            "pending",
+		},
+		Refs: map[string]any{"escalation_id": escalationID, "chat_id": body.ChatID},
+	})
 
 	// Broadcast escalation event
 	broadcastChannelEvent(h.hub, "session", body.ChatID, "escalation_created",
@@ -255,6 +279,24 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
 		return
 	}
+
+	// Resolution closes the escalation thread in the journal. Severity
+	// stays at notice (not warn) because the ongoing-attention signal
+	// ended — filters on "warn+ only" will drop this correctly.
+	_, _ = h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: workspaceID,
+		Type:        journal.EntryPeerEscalation,
+		Severity:    journal.SeverityNotice,
+		ActorType:   journal.ActorUser,
+		Summary:     fmt.Sprintf("escalation %s resolved (%s)", escalationID, body.Action),
+		Payload: map[string]any{
+			"resolution":  body.Resolution,
+			"action":      body.Action,
+			"redirect_to": body.RedirectTo,
+			"state":       "resolved",
+		},
+		Refs: map[string]any{"escalation_id": escalationID},
+	})
 
 	// Notify any waiting sidecar that the escalation has been resolved.
 	h.notifyEscalationWaiter(escalationID, escalationResult{
