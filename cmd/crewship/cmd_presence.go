@@ -20,7 +20,9 @@ var presenceCmd = &cobra.Command{
 
 Examples:
   crewship presence roster
-  crewship presence roster --crew backend-team`,
+  crewship presence roster --crew cmo2pe4dj0005ba0a129f
+
+Note: --crew expects the crew ID today (slug→ID resolution is TBD).`,
 }
 
 var presenceRosterCmd = &cobra.Command{
@@ -90,6 +92,6 @@ var presenceRosterCmd = &cobra.Command{
 }
 
 func init() {
-	presenceRosterCmd.Flags().String("crew", "", "Filter by crew slug or ID")
+	presenceRosterCmd.Flags().String("crew", "", "Filter by crew ID (slug resolution not yet wired)")
 	presenceCmd.AddCommand(presenceRosterCmd)
 }

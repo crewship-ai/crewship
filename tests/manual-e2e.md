@@ -1,21 +1,22 @@
 # Crew Journal — Real-Devserver E2E Evidence
 
-Ran on `crewship-dev` (ubuntu@192.168.1.201) against
-`feat/crew-journal-followup` @ `fd4a99e` (PR #204 merged as base).
-Purpose: close the "shipped but not proven" gap — produce actual
-evidence each feature works end-to-end with live services.
+Ran on the team's dev VM against `feat/crew-journal-followup`
+(PR #204 merged as base). Purpose: close the "shipped but not proven"
+gap — produce actual evidence each feature works end-to-end with live
+services.
 
 ## Environment
 
-- **Branch**: `feat/crew-journal-followup` @ `fd4a99e`
-- **Backend**: `crewshipd` on `:8080`
-- **Frontend**: Next.js dev server on `:3001`
-- **SQLite**: `/opt/crewship/crewship.db`
-- **LLM available**: Anthropic via `ANTHROPIC_API_KEY` credential (Ollama NOT installed — Keeper + consolidation cannot run locally)
-- **Workspace**: `cmo2pe4dg0002d6498183` (Demo User's Workspace)
-- **Crew**: `cmo2pe4dj0005ba0a129f` (engineering)
-- **Agents**: tomas (`cmo2pe4pl000dba2d5e16`), viktor (`cmo2pe4pm000ee55d93ef`)
-- **Test mission**: `cmo3549sw0001c27727ee` — "E2E test haiku about deployments"
+- **Branch**: `feat/crew-journal-followup`
+- **Backend**: `crewshipd` on the project's default port
+- **Frontend**: Next.js dev server on the project's default port
+- **SQLite**: the deploy's shared DB path
+- **LLM available**: Anthropic via credential (Ollama not installed on
+  this VM — Keeper + consolidation cannot run locally)
+- **Workspace / crew / agents**: the seeded demo workspace with one
+  engineering crew (lead + 3 members). Specific IDs redacted — they
+  belong to the internal dev environment.
+- **Test mission**: a throwaway CRE-42 analysis task created ad hoc
 
 ## Checklist
 
@@ -23,7 +24,7 @@ Legend: ⏳ pending | ✅ pass | ⚠️ partial / known-gap | ❌ fail
 
 | # | Feature | Command / Action | Evidence | Status |
 |---|---|---|---|---|
-| 1 | Build clean on followup branch | `go test ./... && go vet ./...` | all green, 0 errors; `pnpm lint` 0 errors (50 pre-existing warnings) | ✅ |
+| 1 | Build clean on followup branch | `go test ./... -count=1 && go vet ./...` | all green, 0 errors; `pnpm lint` 0 errors (50 pre-existing warnings) | ✅ |
 | 2 | Services start | `curl /healthz`, `curl :3001/<page>` | healthz=200; /journal /paymaster /approvals /eval /crows-nest all 200 | ✅ |
 | 3 | Migration 52 applied | `SELECT * FROM _migrations WHERE version=52` | `52\|add_crew_journal` present; 8 new tables: journal_entries, cost_ledger, approvals_queue, checkpoints, hooks_config, agent_status, journal_embeddings, + indexes | ✅ |
 | 4 | Real LLM call via Claude CLI | `crewship mission start` → tomas runs Claude | `exec.command: tomas exit 0 (28157ms)` + 7× `network.egress CONNECT api.anthropic.com:443 → 200` | ✅ |
@@ -81,7 +82,7 @@ Screenshots intended to land under `tests/e2e-evidence/` were **not captured**
 because `crewship-dev` has no chromium/chrome/firefox installed and no
 Playwright suite exists. Installing one would take >30 min (apt + deps +
 fonts); deferred. The user can capture manually in a local browser against
-`http://192.168.1.201:3001/<page>` or from the Next.js preview on macOS.
+`http://<dev-host>:3001/<page>` or from the Next.js preview on macOS.
 
 ## Known gaps (documented, not blockers for MVP)
 

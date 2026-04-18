@@ -57,7 +57,7 @@ const OBSERVABILITY_TYPES = [
   "container.metrics",
 ].join(",")
 
-type SeverityFilter = "all" | "info" | "warn" | "error"
+type SeverityFilter = "all" | "info" | "notice" | "warn" | "error"
 
 /**
  * Crow's Nest — live observability dashboard for a single crew container.
@@ -311,7 +311,7 @@ export default function CrowsNestCrewPage() {
                     Severity
                   </div>
                   <div className="inline-flex w-full rounded-md border border-border/60 bg-card p-0.5">
-                    {(["all", "info", "warn", "error"] as SeverityFilter[]).map((s) => (
+                    {(["all", "info", "notice", "warn", "error"] as SeverityFilter[]).map((s) => (
                       <button
                         key={s}
                         type="button"

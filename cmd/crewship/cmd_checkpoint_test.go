@@ -12,8 +12,6 @@ import (
 )
 
 func TestCheckpointCmdStructure(t *testing.T) {
-	t.Parallel()
-
 	if checkpointCmd.Use != "checkpoint" {
 		t.Errorf("checkpoint Use: got %q want %q", checkpointCmd.Use, "checkpoint")
 	}
@@ -29,8 +27,6 @@ func TestCheckpointCmdStructure(t *testing.T) {
 }
 
 func TestCheckpointListFlags(t *testing.T) {
-	t.Parallel()
-
 	mission := checkpointListCmd.Flags().Lookup("mission")
 	if mission == nil {
 		t.Fatal("checkpoint list missing --mission flag")
@@ -41,8 +37,6 @@ func TestCheckpointListFlags(t *testing.T) {
 }
 
 func TestCheckpointCreateFlags(t *testing.T) {
-	t.Parallel()
-
 	for _, name := range []string{"mission", "label"} {
 		if f := checkpointCreateCmd.Flags().Lookup(name); f == nil {
 			t.Errorf("checkpoint create missing --%s flag", name)
@@ -51,16 +45,12 @@ func TestCheckpointCreateFlags(t *testing.T) {
 }
 
 func TestCheckpointForkFlags(t *testing.T) {
-	t.Parallel()
-
 	if checkpointForkCmd.Flags().Lookup("label") == nil {
 		t.Error("checkpoint fork missing --label flag")
 	}
 }
 
 func TestCheckpointDeleteFlags(t *testing.T) {
-	t.Parallel()
-
 	if checkpointDeleteCmd.Flags().Lookup("yes") == nil {
 		t.Error("checkpoint delete missing --yes flag")
 	}
@@ -257,8 +247,6 @@ func TestCheckpointDeleteRunE_HappyPath(t *testing.T) {
 }
 
 func TestCheckpointRestoreArgsValidation(t *testing.T) {
-	t.Parallel()
-
 	if err := checkpointRestoreCmd.Args(checkpointRestoreCmd, []string{}); err == nil {
 		t.Error("restore with no args should error")
 	}
@@ -268,8 +256,6 @@ func TestCheckpointRestoreArgsValidation(t *testing.T) {
 }
 
 func TestCheckpointForkArgsValidation(t *testing.T) {
-	t.Parallel()
-
 	if err := checkpointForkCmd.Args(checkpointForkCmd, []string{}); err == nil {
 		t.Error("fork with no args should error")
 	}

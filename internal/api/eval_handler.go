@@ -106,16 +106,24 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		_ = updateRun(ctx, h.db, runID, "running", "", "", 0, 0, false)
+		if err := updateRun(ctx, h.db, runID, "running", "", "", 0, 0, false); err != nil {
+			h.logger.Error("eval replay: updateRun(running) failed", "err", err, "run_id", runID)
+			// Continue — the work is still worth doing and a second
+			// DB blip may succeed on the terminal update below.
+		}
 		run, err := quartermaster.Replay(ctx, h.db, h.journal, workspaceID, body.MissionID, body.Seed)
 		if err != nil {
 			h.logger.Warn("eval replay failed", "err", err, "mission_id", body.MissionID)
-			_ = updateRun(ctx, h.db, runID, "failed", safeStr(err), run.SeedSignature,
-				run.Metrics.TotalTokens, run.Metrics.TotalCostUSD, false)
+			if uerr := updateRun(ctx, h.db, runID, "failed", safeStr(err), run.SeedSignature,
+				run.Metrics.TotalTokens, run.Metrics.TotalCostUSD, false); uerr != nil {
+				h.logger.Error("eval replay: updateRun(failed) failed", "err", uerr, "run_id", runID)
+			}
 			return
 		}
-		_ = updateRun(ctx, h.db, runID, "completed", run.Result, run.SeedSignature,
-			run.Metrics.TotalTokens, run.Metrics.TotalCostUSD, false)
+		if err := updateRun(ctx, h.db, runID, "completed", run.Result, run.SeedSignature,
+			run.Metrics.TotalTokens, run.Metrics.TotalCostUSD, false); err != nil {
+			h.logger.Error("eval replay: updateRun(completed) failed", "err", err, "run_id", runID)
+		}
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -186,20 +194,26 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		_ = updateRun(ctx, h.db, runID, "running", "", "", 0, 0, false)
+		if err := updateRun(ctx, h.db, runID, "running", "", "", 0, 0, false); err != nil {
+			h.logger.Error("eval regression: updateRun(running) failed", "err", err, "run_id", runID)
+		}
 		report, err := quartermaster.DetectRegression(ctx, h.db, h.journal, workspaceID,
 			body.BaselineMissionID, body.CandidateMissionID)
 		if err != nil {
 			h.logger.Warn("eval regression failed", "err", err)
-			_ = updateRun(ctx, h.db, runID, "failed", safeStr(err), "", 0, 0, false)
+			if uerr := updateRun(ctx, h.db, runID, "failed", safeStr(err), "", 0, 0, false); uerr != nil {
+				h.logger.Error("eval regression: updateRun(failed) failed", "err", uerr, "run_id", runID)
+			}
 			return
 		}
 		result := "no_regression"
 		if report.Regressed {
 			result = "regressed: " + report.DeltaSummary
 		}
-		_ = updateRun(ctx, h.db, runID, "completed", result, "",
-			report.Candidate.TotalTokens, report.Candidate.TotalCostUSD, report.Regressed)
+		if err := updateRun(ctx, h.db, runID, "completed", result, "",
+			report.Candidate.TotalTokens, report.Candidate.TotalCostUSD, report.Regressed); err != nil {
+			h.logger.Error("eval regression: updateRun(completed) failed", "err", err, "run_id", runID)
+		}
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{

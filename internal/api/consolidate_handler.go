@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -109,7 +110,7 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// skip every crew because MinEntries is unreachable.
 	sinceDur := 24 * time.Hour
 	if body.Since != "" {
-		if d, err := time.ParseDuration(body.Since); err == nil && d > 0 {
+		if d, err := parseSinceDuration(body.Since); err == nil && d > 0 {
 			sinceDur = d
 		}
 	}
@@ -140,6 +141,12 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// audit record exists.
 	if h.consolidator.Summarizer == nil {
 		h.emitTriggered(r.Context(), workspaceID, body.CrewID, actorID, "", "no-summarizer-skip")
+		// Emit the matching completed row so operators aren't left with a
+		// dangling "triggered" entry whenever summarization is disabled.
+		// The journal comment on emitTriggered promises a completed
+		// follow-up; honour that on every code path, not just the
+		// successful full-run one.
+		h.emitCompleted(r.Context(), workspaceID, body.CrewID, "", "skipped-no-summarizer", 0, 0)
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"accepted": true,
 			"note":     "no summarizer configured, skipping",
@@ -269,6 +276,33 @@ func (h *ConsolidateHandler) emitTriggered(ctx context.Context, workspaceID, cre
 			"reason":    reason,
 		},
 	})
+}
+
+// parseSinceDuration wraps time.ParseDuration with a fallback for "d"
+// (days) and "w" (weeks) suffixes, which Go's standard parser rejects
+// on purpose. The CLI help text advertises `--since 7d` so accepting
+// that verbatim keeps the contract honest. The conversion is exact
+// (24h/day, 7*24h/week) — we deliberately ignore DST/calendar quirks
+// because journal windows are wall-clock, not calendar-scoped.
+func parseSinceDuration(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	last := s[len(s)-1]
+	if last == 'd' || last == 'w' {
+		numPart := s[:len(s)-1]
+		n, err := strconv.Atoi(numPart)
+		if err != nil {
+			return 0, err
+		}
+		switch last {
+		case 'd':
+			return time.Duration(n) * 24 * time.Hour, nil
+		case 'w':
+			return time.Duration(n) * 7 * 24 * time.Hour, nil
+		}
+	}
+	return time.ParseDuration(s)
 }
 
 func (h *ConsolidateHandler) emitCompleted(ctx context.Context, workspaceID, crewID, workerID, status string, crewsRun, rulesAppended int) {

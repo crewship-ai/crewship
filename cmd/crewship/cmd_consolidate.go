@@ -21,8 +21,12 @@ a schedule; this command forces an immediate run.
 
 Examples:
   crewship consolidate run
-  crewship consolidate run --crew backend-team
-  crewship consolidate run --since 24h`,
+  crewship consolidate run --crew cmo2pe4dj0005ba0a129f
+  crewship consolidate run --since 24h
+  crewship consolidate run --since 7d
+
+Note: --crew expects the crew ID today (slug→ID resolution is TBD).
+      --since accepts Go durations (24h, 90m) plus d/w shorthand.`,
 }
 
 var consolidateRunCmd = &cobra.Command{
@@ -86,8 +90,8 @@ var consolidateRunCmd = &cobra.Command{
 }
 
 func init() {
-	consolidateRunCmd.Flags().String("crew", "", "Limit consolidation to a single crew (slug or ID)")
-	consolidateRunCmd.Flags().String("since", "", "Only consider journal entries newer than this window (e.g. 24h, 7d)")
+	consolidateRunCmd.Flags().String("crew", "", "Limit consolidation to a single crew ID (slug resolution not yet wired)")
+	consolidateRunCmd.Flags().String("since", "", "Only consider journal entries newer than this window (e.g. 24h, 90m, 7d, 2w)")
 
 	consolidateCmd.AddCommand(consolidateRunCmd)
 }
