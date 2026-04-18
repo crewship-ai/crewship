@@ -102,28 +102,44 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	// returns 202 immediately, and the caller's context cancels the
 	// moment the response is flushed. We use a fresh context with a
 	// generous budget so the run can actually finish.
+	//
+	// Terminal updateRun calls use a separate short-lived context so
+	// that if Replay finishes because the 10-minute worker deadline
+	// fired, the DB write recording that failure still has a live
+	// context — otherwise the row is stuck in "running" forever.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		workerCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		if err := updateRun(ctx, h.db, runID, "running", "", "", 0, 0, false); err != nil {
+		statusCtx := func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), 5*time.Second)
+		}
+
+		sctx, scancel := statusCtx()
+		if err := updateRun(sctx, h.db, runID, "running", "", "", 0, 0, false); err != nil {
 			h.logger.Error("eval replay: updateRun(running) failed", "err", err, "run_id", runID)
 			// Continue — the work is still worth doing and a second
 			// DB blip may succeed on the terminal update below.
 		}
-		run, err := quartermaster.Replay(ctx, h.db, h.journal, workspaceID, body.MissionID, body.Seed)
+		scancel()
+
+		run, err := quartermaster.Replay(workerCtx, h.db, h.journal, workspaceID, body.MissionID, body.Seed)
 		if err != nil {
 			h.logger.Warn("eval replay failed", "err", err, "mission_id", body.MissionID)
-			if uerr := updateRun(ctx, h.db, runID, "failed", safeStr(err), run.SeedSignature,
+			sctx, scancel := statusCtx()
+			if uerr := updateRun(sctx, h.db, runID, "failed", safeStr(err), run.SeedSignature,
 				run.Metrics.TotalTokens, run.Metrics.TotalCostUSD, false); uerr != nil {
 				h.logger.Error("eval replay: updateRun(failed) failed", "err", uerr, "run_id", runID)
 			}
+			scancel()
 			return
 		}
-		if err := updateRun(ctx, h.db, runID, "completed", run.Result, run.SeedSignature,
+		sctx, scancel = statusCtx()
+		if err := updateRun(sctx, h.db, runID, "completed", run.Result, run.SeedSignature,
 			run.Metrics.TotalTokens, run.Metrics.TotalCostUSD, false); err != nil {
 			h.logger.Error("eval replay: updateRun(completed) failed", "err", err, "run_id", runID)
 		}
+		scancel()
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
@@ -190,30 +206,44 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Same deadline decoupling as Replay — see comment there. Worker
+	// has 10 minutes, but each status write gets its own fresh 5s
+	// context so the terminal row write survives worker deadline hit.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		workerCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		if err := updateRun(ctx, h.db, runID, "running", "", "", 0, 0, false); err != nil {
+		statusCtx := func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), 5*time.Second)
+		}
+
+		sctx, scancel := statusCtx()
+		if err := updateRun(sctx, h.db, runID, "running", "", "", 0, 0, false); err != nil {
 			h.logger.Error("eval regression: updateRun(running) failed", "err", err, "run_id", runID)
 		}
-		report, err := quartermaster.DetectRegression(ctx, h.db, h.journal, workspaceID,
+		scancel()
+
+		report, err := quartermaster.DetectRegression(workerCtx, h.db, h.journal, workspaceID,
 			body.BaselineMissionID, body.CandidateMissionID)
 		if err != nil {
 			h.logger.Warn("eval regression failed", "err", err)
-			if uerr := updateRun(ctx, h.db, runID, "failed", safeStr(err), "", 0, 0, false); uerr != nil {
+			sctx, scancel := statusCtx()
+			if uerr := updateRun(sctx, h.db, runID, "failed", safeStr(err), "", 0, 0, false); uerr != nil {
 				h.logger.Error("eval regression: updateRun(failed) failed", "err", uerr, "run_id", runID)
 			}
+			scancel()
 			return
 		}
 		result := "no_regression"
 		if report.Regressed {
 			result = "regressed: " + report.DeltaSummary
 		}
-		if err := updateRun(ctx, h.db, runID, "completed", result, "",
+		sctx, scancel = statusCtx()
+		if err := updateRun(sctx, h.db, runID, "completed", result, "",
 			report.Candidate.TotalTokens, report.Candidate.TotalCostUSD, report.Regressed); err != nil {
 			h.logger.Error("eval regression: updateRun(completed) failed", "err", err, "run_id", runID)
 		}
+		scancel()
 	}()
 
 	writeJSON(w, http.StatusAccepted, map[string]any{

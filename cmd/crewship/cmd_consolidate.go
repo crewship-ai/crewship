@@ -32,6 +32,10 @@ Note: --crew expects the crew ID today (slug→ID resolution is TBD).
 var consolidateRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Force an immediate consolidation run",
+	// `run` takes no positional args — scope is passed via --crew/--since.
+	// A bare `crewship consolidate run backend-team` would currently be
+	// silently ignored, which is a footgun when users expect slug args.
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err

@@ -117,8 +117,11 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	// Validate crew_id if supplied. Cross-workspace reads are
 	// blocked by returning a 404 that looks identical to "no such crew"
-	// so existence isn't leaked.
-	if body.CrewID != "" && !crewBelongsToWorkspace(r.Context(), h.db, body.CrewID, workspaceID) {
+	// so existence isn't leaked. Soft-deleted crews are treated as
+	// "not found" — the workspace-wide path below filters them, so
+	// the single-crew path must match or a deleted crew could still
+	// get fresh memory artifacts via an explicit ID.
+	if body.CrewID != "" && !crewLiveInWorkspace(r.Context(), h.db, body.CrewID, workspaceID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
 		return
 	}
@@ -207,7 +210,7 @@ func (h *ConsolidateHandler) runOnce(ctx context.Context, workspaceID, crewID st
 	var crews []crewInfo
 	if crewID != "" {
 		var slug string
-		err := h.db.QueryRowContext(ctx, `SELECT slug FROM crews WHERE id = ? AND workspace_id = ?`,
+		err := h.db.QueryRowContext(ctx, `SELECT slug FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 			crewID, workspaceID).Scan(&slug)
 		if err != nil {
 			h.logger.Warn("consolidate run: crew lookup failed", "err", err, "crew_id", crewID)
@@ -230,6 +233,15 @@ func (h *ConsolidateHandler) runOnce(ctx context.Context, workspaceID, crewID st
 				continue
 			}
 			crews = append(crews, c)
+		}
+		// Check iteration err BEFORE closing — a driver/context abort
+		// mid-scan leaves a partial `crews` slice, and reporting "ok"
+		// on an incomplete set would silently under-consolidate.
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			h.logger.Warn("consolidate run: crew list partial", "err", err)
+			h.emitCompleted(ctx, workspaceID, "", workerID, "enumerate-partial", 0, 0)
+			return
 		}
 		_ = rows.Close()
 	}
@@ -276,6 +288,21 @@ func (h *ConsolidateHandler) emitTriggered(ctx context.Context, workspaceID, cre
 			"reason":    reason,
 		},
 	})
+}
+
+// crewLiveInWorkspace is the soft-delete-aware variant of
+// crewBelongsToWorkspace. Memory consolidation must not touch crews
+// that have been soft-deleted — otherwise a deleted crew still grows
+// memory artifacts via explicit ID, leaking stored state across the
+// delete boundary. Kept local to this handler; other handlers can
+// keep the permissive shared helper until they opt into the same
+// stricter semantics.
+func crewLiveInWorkspace(ctx context.Context, db *sql.DB, crewID, workspaceID string) bool {
+	var n int
+	_ = db.QueryRowContext(ctx,
+		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		crewID, workspaceID).Scan(&n)
+	return n == 1
 }
 
 // parseSinceDuration wraps time.ParseDuration with a fallback for "d"
