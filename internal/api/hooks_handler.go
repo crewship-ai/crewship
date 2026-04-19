@@ -75,9 +75,17 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	// another workspace, return a 404 (shape matches the "no rows" case
 	// so we don't leak the crew's existence). crewBelongsToWorkspace
 	// lives in paymaster_handler.go.
-	if crewID != "" && !crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
-		return
+	if crewID != "" {
+		ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
+		if err != nil {
+			h.logger.Error("hooks list: crew lookup failed", "err", err, "crew_id", crewID)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "crew lookup failed"})
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			return
+		}
 	}
 
 	var (

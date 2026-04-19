@@ -43,11 +43,19 @@ func (h *PresenceHandler) Roster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	crewID := r.URL.Query().Get("crew_id")
-	if crewID != "" && !crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID) {
-		// Cross-tenant crew lookup → flat 404 so existence doesn't leak
-		// across workspaces.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
-		return
+	if crewID != "" {
+		ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
+		if err != nil {
+			h.logger.Error("presence roster: crew lookup failed", "err", err, "crew_id", crewID)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "crew lookup failed"})
+			return
+		}
+		if !ok {
+			// Cross-tenant crew lookup → flat 404 so existence doesn't leak
+			// across workspaces.
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			return
+		}
 	}
 
 	snaps, err := presence.ListByWorkspace(r.Context(), h.db, workspaceID)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -121,9 +122,17 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// "not found" — the workspace-wide path below filters them, so
 	// the single-crew path must match or a deleted crew could still
 	// get fresh memory artifacts via an explicit ID.
-	if body.CrewID != "" && !crewLiveInWorkspace(r.Context(), h.db, body.CrewID, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
-		return
+	if body.CrewID != "" {
+		live, err := crewLiveInWorkspace(r.Context(), h.db, body.CrewID, workspaceID)
+		if err != nil {
+			h.logger.Warn("consolidate run: crew existence check failed", "err", err, "crew_id", body.CrewID)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to validate crew"})
+			return
+		}
+		if !live {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			return
+		}
 	}
 
 	// Fail-fast path: handler was wired without a consolidator instance
@@ -212,9 +221,18 @@ func (h *ConsolidateHandler) runOnce(ctx context.Context, workspaceID, crewID st
 		var slug string
 		err := h.db.QueryRowContext(ctx, `SELECT slug FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 			crewID, workspaceID).Scan(&slug)
-		if err != nil {
-			h.logger.Warn("consolidate run: crew lookup failed", "err", err, "crew_id", crewID)
+		if errors.Is(err, sql.ErrNoRows) {
+			h.logger.Warn("consolidate run: crew not found", "crew_id", crewID)
 			h.emitCompleted(ctx, workspaceID, crewID, workerID, "crew-not-found", 0, 0)
+			return
+		}
+		if err != nil {
+			// Distinguish real DB failures from "no such crew" so
+			// the journal reflects the actual root cause. Emitting
+			// "crew-not-found" for a DB outage made operators chase
+			// the wrong ghost.
+			h.logger.Warn("consolidate run: crew lookup failed", "err", err, "crew_id", crewID)
+			h.emitCompleted(ctx, workspaceID, crewID, workerID, "crew-lookup-failed", 0, 0)
 			return
 		}
 		crews = []crewInfo{{ID: crewID, Slug: slug}}
@@ -296,13 +314,21 @@ func (h *ConsolidateHandler) emitTriggered(ctx context.Context, workspaceID, cre
 // memory artifacts via explicit ID, leaking stored state across the
 // delete boundary. Kept local to this handler; other handlers can
 // keep the permissive shared helper until they opt into the same
-// stricter semantics.
-func crewLiveInWorkspace(ctx context.Context, db *sql.DB, crewID, workspaceID string) bool {
+// stricter semantics. Distinguishes sql.ErrNoRows (→ caller 404)
+// from transient DB failures (→ caller 500) so outages aren't
+// silently masked as "crew not found".
+func crewLiveInWorkspace(ctx context.Context, db *sql.DB, crewID, workspaceID string) (bool, error) {
 	var n int
-	_ = db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		crewID, workspaceID).Scan(&n)
-	return n == 1
+	if err == nil {
+		return n == 1, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("lookup live crew workspace: %w", err)
 }
 
 // parseSinceDuration wraps time.ParseDuration with a fallback for "d"

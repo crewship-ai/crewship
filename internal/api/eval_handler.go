@@ -78,12 +78,24 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
 		return
 	}
-	if !missionBelongsToWorkspace(r.Context(), h.db, body.MissionID, workspaceID) {
+	ok, err := missionBelongsToWorkspace(r.Context(), h.db, body.MissionID, workspaceID)
+	if err != nil {
+		h.logger.Error("eval replay: mission lookup failed", "err", err, "mission_id", body.MissionID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		return
+	}
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
 		return
 	}
 
-	runID := "er_" + newEvalToken()
+	token, err := newEvalToken()
+	if err != nil {
+		h.logger.Error("eval replay: token generation failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		return
+	}
+	runID := "er_" + token
 	rec := quartermaster.RunRecord{
 		ID:          runID,
 		WorkspaceID: workspaceID,
@@ -185,13 +197,33 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "baseline_mission_id and candidate_mission_id required"})
 		return
 	}
-	if !missionBelongsToWorkspace(r.Context(), h.db, body.BaselineMissionID, workspaceID) ||
-		!missionBelongsToWorkspace(r.Context(), h.db, body.CandidateMissionID, workspaceID) {
+	// Check each mission independently — a partial spoof (valid
+	// baseline + foreign candidate) still 404s. Split the boolean+err
+	// return so DB outages surface as 500, not spurious 404s.
+	baseOK, err := missionBelongsToWorkspace(r.Context(), h.db, body.BaselineMissionID, workspaceID)
+	if err != nil {
+		h.logger.Error("eval regression: baseline lookup failed", "err", err, "mission_id", body.BaselineMissionID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		return
+	}
+	candOK, err := missionBelongsToWorkspace(r.Context(), h.db, body.CandidateMissionID, workspaceID)
+	if err != nil {
+		h.logger.Error("eval regression: candidate lookup failed", "err", err, "mission_id", body.CandidateMissionID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		return
+	}
+	if !baseOK || !candOK {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
 		return
 	}
 
-	runID := "er_" + newEvalToken()
+	token, err := newEvalToken()
+	if err != nil {
+		h.logger.Error("eval regression: token generation failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		return
+	}
+	runID := "er_" + token
 	rec := quartermaster.RunRecord{
 		ID:                 runID,
 		WorkspaceID:        workspaceID,
@@ -286,12 +318,17 @@ func updateRun(ctx context.Context, db *sql.DB, id, status, result, signature st
 }
 
 // newEvalToken returns 8 random bytes hex-encoded, matching the
-// quartermaster-internal newRunID. Kept here so the handler doesn't
-// import a private helper.
-func newEvalToken() string {
+// quartermaster-internal newRunID. Propagates rand.Read errors so
+// the caller can return 500 instead of letting every failed read
+// collapse to the same deterministic `0000000000000000` token —
+// which would cascade into eval_runs PK collisions and make
+// entropy outages look like ordinary constraint violations.
+func newEvalToken() (string, error) {
 	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // safeStr is a small nil-guard so we can stash an error message in the
