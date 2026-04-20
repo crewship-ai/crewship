@@ -68,6 +68,7 @@ type Server struct {
 	statsCollector    *StatsCollector
 	terminalHandler   *terminal.Handler
 	journalWriter     *journal.Writer
+	consolidator      *consolidate.Consolidator
 	telemetryShutdown func()
 	startedAt         time.Time
 	runCtx            context.Context
@@ -413,6 +414,27 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			opts = append(opts, goapi.WithKeeperConversations(&convStoreAdapter{store: convStore}))
 		}
 
+		// Build the shared Consolidator so the router-backed manual
+		// trigger (/api/v1/consolidate/run) and the 6-hourly background
+		// runner use the same instance. Summarizer is nil when Ollama
+		// isn't configured; the handler surfaces that as 202 +
+		// "no summarizer configured, skipping" so operators see the
+		// feature is off without the request failing outright.
+		var summarizerEarly consolidate.SummarizerClient
+		if s.cfg.Keeper.OllamaURL != "" && s.cfg.Keeper.Model != "" {
+			summBase := llm.NewOllama(s.cfg.Keeper.OllamaURL, s.cfg.Keeper.Model)
+			summWrapped := llm.Middleware(summBase, s.journalWriter, s.db)
+			summarizerEarly = newLLMSummarizer(summWrapped, s.cfg.Keeper.Model)
+		}
+		s.consolidator = &consolidate.Consolidator{
+			DB:         deps.DB,
+			Journal:    s.journalWriter,
+			Summarizer: summarizerEarly,
+			Logger:     logger,
+		}
+		opts = append(opts, goapi.WithConsolidator(s.consolidator))
+		opts = append(opts, goapi.WithConsolidateMemoryRoot("/crew/shared/.memory"))
+
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)
@@ -611,20 +633,14 @@ func (s *Server) Start(ctx context.Context) error {
 
 		// Memory consolidation + compaction workers run on their own
 		// schedules (6h consolidation, daily 03:00 UTC compaction).
-		// Consolidation needs an LLM to extract semantic rules from the
-		// journal; we use the same local Ollama instance Keeper uses so
-		// no cloud credentials are required for the local-first path.
-		// If Ollama isn't configured, pass nil and consolidation skips
-		// silently — compaction still runs, it doesn't need an LLM.
+		// Reuse the summarizer already built for the shared
+		// consolidator (router path), so the background + manual runs
+		// go through one LLM instance with one set of middleware.
 		var summarizer consolidate.SummarizerClient
-		if s.cfg.Keeper.OllamaURL != "" && s.cfg.Keeper.Model != "" {
-			// Reuse the middleware-wrapped provider so consolidation LLM
-			// calls are cost-accounted + trace-instrumented like every
-			// other LLM call in the platform. Model stays small for the
-			// short rule-extraction prompt; no gain from Sonnet-class here.
-			summBase := llm.NewOllama(s.cfg.Keeper.OllamaURL, s.cfg.Keeper.Model)
-			summWrapped := llm.Middleware(summBase, s.journalWriter, s.db)
-			summarizer = newLLMSummarizer(summWrapped, s.cfg.Keeper.Model)
+		if s.consolidator != nil {
+			summarizer = s.consolidator.Summarizer
+		}
+		if summarizer != nil {
 			s.logger.Info("memory consolidation enabled", "model", s.cfg.Keeper.Model)
 		} else {
 			s.logger.Info("memory consolidation disabled (set KEEPER_OLLAMA_URL + KEEPER_MODEL to enable)")

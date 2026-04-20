@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -64,7 +66,13 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 	// the caller's workspace before reading the ledger. 404 (not 403)
 	// so the wrong-workspace case is indistinguishable from the
 	// crew-doesn't-exist case — no existence leak.
-	if !crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID) {
+	ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("paymaster spend-by-agent: crew lookup failed", "err", err, "crew_id", crewID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "crew lookup failed"})
+		return
+	}
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
 		return
 	}
@@ -79,20 +87,33 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 }
 
 // crewBelongsToWorkspace and missionBelongsToWorkspace centralise the
-// scope pre-check used by the paymaster drill-downs. Returning bool
-// instead of error lets the caller render a flat 404 without leaking
-// whether the row exists in another workspace — the whole point of
-// the check.
-func crewBelongsToWorkspace(ctx context.Context, db *sql.DB, crewID, workspaceID string) bool {
+// scope pre-check used by the paymaster drill-downs. Returning
+// (bool, error) lets callers render a flat 404 when the row truly
+// doesn't exist without leaking cross-workspace existence, while
+// surfacing real DB failures as 500 instead of silently masking them
+// as "not found" (which hid transient outages in earlier revisions).
+func crewBelongsToWorkspace(ctx context.Context, db *sql.DB, crewID, workspaceID string) (bool, error) {
 	var n int
-	_ = db.QueryRowContext(ctx, `SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?`, crewID, workspaceID).Scan(&n)
-	return n == 1
+	err := db.QueryRowContext(ctx, `SELECT 1 FROM crews WHERE id = ? AND workspace_id = ?`, crewID, workspaceID).Scan(&n)
+	if err == nil {
+		return n == 1, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("lookup crew workspace: %w", err)
 }
 
-func missionBelongsToWorkspace(ctx context.Context, db *sql.DB, missionID, workspaceID string) bool {
+func missionBelongsToWorkspace(ctx context.Context, db *sql.DB, missionID, workspaceID string) (bool, error) {
 	var n int
-	_ = db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id = ? AND workspace_id = ?`, missionID, workspaceID).Scan(&n)
-	return n == 1
+	err := db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id = ? AND workspace_id = ?`, missionID, workspaceID).Scan(&n)
+	if err == nil {
+		return n == 1, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, fmt.Errorf("lookup mission workspace: %w", err)
 }
 
 // SpendByMission returns per-mission totals. Used by the mission
@@ -112,7 +133,13 @@ func (h *PaymasterHandler) SpendByMission(w http.ResponseWriter, r *http.Request
 	// SpendByMission filters by mission_id alone, so cross-tenant
 	// reads would be possible without this gate. Flat 404 on miss
 	// to avoid leaking existence across tenants.
-	if !missionBelongsToWorkspace(r.Context(), h.db, missionID, workspaceID) {
+	ok, err := missionBelongsToWorkspace(r.Context(), h.db, missionID, workspaceID)
+	if err != nil {
+		h.logger.Error("paymaster spend-by-mission: mission lookup failed", "err", err, "mission_id", missionID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		return
+	}
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
 		return
 	}

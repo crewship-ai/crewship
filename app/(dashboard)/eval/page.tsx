@@ -5,6 +5,7 @@ import { Activity, LineChart, RefreshCw } from "lucide-react"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -56,6 +57,9 @@ function runSignature(entry: JournalEntry): string {
  * Quartermaster Eval dashboard. Reads the journal for `eval.*` entry
  * types and renders recent runs plus a regression banner and overview
  * metrics. Per-run detail opens a drawer with the trajectory diff.
+ *
+ * Layout pattern: "Top strip + grid cards" (pure dashboard, no sidebar).
+ * See `docs/design/patterns.md` #3.
  */
 export default function EvalPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
@@ -123,131 +127,139 @@ export default function EvalPage() {
   }, [metrics])
 
   return (
-    <div className="p-4 md:p-6 space-y-5">
-      <header className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <LineChart className="h-4 w-4 text-foreground/60" />
-          <h1 className="text-body font-medium text-foreground/80">Eval</h1>
-          <Badge variant="outline" className="text-[10px] border-border/60">
-            last 7d
-          </Badge>
-        </div>
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+      {/* ---- Top strip (h-9) ---- */}
+      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-border/60 px-3 gap-2">
+        <LineChart className="h-3.5 w-3.5 text-foreground/60 shrink-0" />
+        <h1 className="text-body font-medium text-foreground/80 truncate">Eval</h1>
+        <Badge variant="outline" className="text-[10px] border-border/60 shrink-0">
+          last 7d
+        </Badge>
+        <div className="flex-1" />
         <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => refresh()} disabled={loading}>
           <RefreshCw className={cn("h-3 w-3 mr-1.5", loading && "animate-spin")} />
           Refresh
         </Button>
-      </header>
+      </div>
 
-      {error && (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-[12px] text-red-300 flex items-center justify-between gap-2">
-          <span>Couldn&apos;t load eval data ({error}).</span>
-          <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => refresh()}>
-            Retry
-          </Button>
-        </div>
-      )}
-
-      <RegressionAlert regressions={regressions} onView={openRun} />
-
-      <section className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <MetricCard label="Missions evaluated" value={runs.length} subtitle="last 7 days" />
-        <MetricCard
-          label="Regressions"
-          value={regressions.length}
-          subtitle="last 7 days"
-          deltaDirection={regressions.length > 0 ? "up" : "flat"}
-          deltaLabel={regressions.length > 0 ? "needs review" : undefined}
-          upIsGood={false}
-        />
-        <MetricCard
-          label="Avg tool success"
-          value={avgToolSuccess === null ? "—" : `${(avgToolSuccess * 100).toFixed(1)}%`}
-          subtitle={`${metrics.length} metric entries`}
-        />
-      </section>
-
-      <section className="rounded-xl border border-border/60 bg-card overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
-          <div className="flex items-center gap-2">
-            <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Recent eval runs
-            </span>
-          </div>
-          <span className="text-[11px] text-muted-foreground font-mono tabular-nums">{runs.length}</span>
-        </div>
-
-        {runs.length === 0 && !loading && !error ? (
-          <div className="py-12 text-center">
-            <div className="text-sm font-medium text-foreground/80">No eval runs yet</div>
-            <div className="mt-1 text-[11px] text-muted-foreground max-w-sm mx-auto">
-              Kick off a replay to compare a candidate model against its baseline.
+      {/* ---- Main content ---- */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="p-4 md:p-5 space-y-4">
+          {error && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/5 px-3 py-2 text-[12px] text-red-300 flex items-center justify-between gap-2">
+              <span>Couldn&apos;t load eval data ({error}).</span>
+              <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]" onClick={() => refresh()}>
+                Retry
+              </Button>
             </div>
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Started</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Mission</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Signature</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Status</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {runs.map((run) => {
-                const missionId = runMissionId(run)
-                const status =
-                  typeof run.payload?.status === "string" ? (run.payload.status as string) : "running"
-                return (
-                  <TableRow
-                    key={run.id}
-                    className="cursor-pointer"
-                    onClick={() => openRun(run)}
-                  >
-                    <TableCell className="text-[11px] text-muted-foreground font-mono tabular-nums">
-                      {formatRelativeTime(run.ts)}
-                    </TableCell>
-                    <TableCell className="text-[12px]">
-                      {missionId ? (
-                        <Link
-                          href={`/missions/${missionId}/timeline`}
-                          className="font-mono text-primary hover:underline"
-                          onClick={(e) => e.stopPropagation()}
+          )}
+
+          <RegressionAlert regressions={regressions} onView={openRun} />
+
+          <section className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <MetricCard label="Missions evaluated" value={runs.length} subtitle="last 7 days" />
+            <MetricCard
+              label="Regressions"
+              value={regressions.length}
+              subtitle="last 7 days"
+              deltaDirection={regressions.length > 0 ? "up" : "flat"}
+              deltaLabel={regressions.length > 0 ? "needs review" : undefined}
+              upIsGood={false}
+            />
+            <MetricCard
+              label="Avg tool success"
+              value={avgToolSuccess === null ? "—" : `${(avgToolSuccess * 100).toFixed(1)}%`}
+              subtitle={`${metrics.length} metric entries`}
+            />
+          </section>
+
+          <Card className="py-0 gap-0 overflow-hidden">
+            <CardHeader className="px-4 py-2 border-b border-border/50">
+              <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+                  Recent eval runs
+                </span>
+                <span className="text-[11px] text-muted-foreground font-mono tabular-nums font-normal normal-case tracking-normal">
+                  {runs.length}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {runs.length === 0 && !loading && !error ? (
+                <div className="py-12 text-center">
+                  <div className="text-sm font-medium text-foreground/80">No eval runs yet</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground max-w-sm mx-auto">
+                    Kick off a replay to compare a candidate model against its baseline.
+                  </div>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Started</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Mission</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Signature</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wider text-muted-foreground">Status</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => {
+                      const missionId = runMissionId(run)
+                      const status =
+                        typeof run.payload?.status === "string" ? (run.payload.status as string) : "running"
+                      return (
+                        <TableRow
+                          key={run.id}
+                          className="cursor-pointer"
+                          onClick={() => openRun(run)}
                         >
-                          {missionId.slice(0, 8)}
-                        </Link>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-[12px] text-foreground/80 truncate max-w-xs">
-                      {runSignature(run)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[10px] border",
-                          status === "completed" && "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
-                          status === "running" && "bg-blue-500/15 text-blue-300 border-blue-500/40",
-                          status === "failed" && "bg-red-500/15 text-red-300 border-red-500/40",
-                        )}
-                      >
-                        {status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <span className="text-[11px] text-muted-foreground">View</span>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </section>
+                          <TableCell className="text-[11px] text-muted-foreground font-mono tabular-nums">
+                            {formatRelativeTime(run.ts)}
+                          </TableCell>
+                          <TableCell className="text-[12px]">
+                            {missionId ? (
+                              <Link
+                                href={`/missions/${missionId}/timeline`}
+                                className="font-mono text-primary hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {missionId.slice(0, 8)}
+                              </Link>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-[12px] text-foreground/80 truncate max-w-xs">
+                            {runSignature(run)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[10px] border",
+                                status === "completed" && "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
+                                status === "running" && "bg-blue-500/15 text-blue-300 border-blue-500/40",
+                                status === "failed" && "bg-red-500/15 text-red-300 border-red-500/40",
+                              )}
+                            >
+                              {status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className="text-[11px] text-muted-foreground">View</span>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent className="sm:max-w-xl w-full">
@@ -265,16 +277,29 @@ export default function EvalPage() {
                 </SheetDescription>
               </SheetHeader>
               <div className="px-4 space-y-4 overflow-y-auto flex-1 min-h-0">
-                <TrajectoryDiff run={selectedRun} metrics={selectedRunMetrics} />
+                <Card className="py-0 gap-0 overflow-hidden">
+                  <CardHeader className="px-3 py-2 border-b border-border/50">
+                    <CardTitle className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Trajectory diff
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3">
+                    <TrajectoryDiff run={selectedRun} metrics={selectedRunMetrics} />
+                  </CardContent>
+                </Card>
                 {selectedRun.payload && Object.keys(selectedRun.payload).length > 0 && (
-                  <section>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 font-semibold mb-1">
-                      Run payload
-                    </div>
-                    <pre className="max-h-64 overflow-auto rounded border border-border/50 bg-muted/30 p-2 text-[10px] font-mono text-muted-foreground">
-                      {JSON.stringify(selectedRun.payload, null, 2)}
-                    </pre>
-                  </section>
+                  <Card className="py-0 gap-0 overflow-hidden">
+                    <CardHeader className="px-3 py-2 border-b border-border/50">
+                      <CardTitle className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                        Run payload
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <pre className="max-h-64 overflow-auto bg-muted/30 p-2 text-[10px] font-mono text-muted-foreground">
+                        {JSON.stringify(selectedRun.payload, null, 2)}
+                      </pre>
+                    </CardContent>
+                  </Card>
                 )}
               </div>
             </>
