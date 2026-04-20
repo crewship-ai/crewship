@@ -31,6 +31,7 @@ type AgentRunRequest struct {
 	CrewID             string
 	CrewSlug           string
 	ChatID             string
+	MissionID          string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
 	WorkspaceID        string
 	ContainerID        string
 	CLIAdapter         string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
@@ -1021,6 +1022,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		Type:        "exec.command",
 		Severity:    "info",
 		ActorType:   "agent",
@@ -1042,6 +1044,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		Type:        "agent.status_change",
 		Severity:    "info",
 		ActorType:   "system",
@@ -1060,6 +1063,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
 			Type:        "exec.command",
 			Severity:    "error",
 			ActorType:   "agent",
@@ -1096,6 +1100,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
 			Type:        "exec.command",
 			Severity:    "warn",
 			ActorType:   "agent",
@@ -1113,6 +1118,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
 			Type:        "agent.status_change",
 			Severity:    "info",
 			ActorType:   "system",
@@ -1138,6 +1144,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		Type:        "exec.command",
 		Severity:    endSeverity,
 		ActorType:   "agent",
@@ -1159,6 +1166,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		Type:        "agent.status_change",
 		Severity:    "info",
 		ActorType:   "system",

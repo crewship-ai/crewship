@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -81,6 +82,8 @@ type Router struct {
 	authRateLimitedMux   http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux    http.Handler        // mux wrapped with general API rate limiter
 	journal              journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
+	consolidator         *consolidate.Consolidator
+	consolidateMemoryRoot string
 }
 
 // Journal returns the journal emitter or a no-op if unset. Handlers should
@@ -315,6 +318,25 @@ func WithJournal(j journal.Emitter) RouterOption {
 func WithLicense(lic *license.License) RouterOption {
 	return func(r *Router) {
 		r.license = lic
+	}
+}
+
+// WithConsolidator wires the shared consolidate.Consolidator so the
+// manual /api/v1/consolidate/run endpoint can re-use the same
+// summarizer + logger the background runner does. Unset → the endpoint
+// returns 503 (feature not configured).
+func WithConsolidator(c *consolidate.Consolidator) RouterOption {
+	return func(r *Router) {
+		r.consolidator = c
+	}
+}
+
+// WithConsolidateMemoryRoot sets the parent directory manual consolidation
+// runs write learned-*.md into. Should match consolidate.RunnerOptions.
+// CrewMemoryRoot so scheduled + manual runs share an output tree.
+func WithConsolidateMemoryRoot(path string) RouterOption {
+	return func(r *Router) {
+		r.consolidateMemoryRoot = path
 	}
 }
 
@@ -690,6 +712,38 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
 	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
 	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
+
+	// Hooks registry: lifecycle intercepts. List is available to every
+	// workspace member for auditability; enable/disable is OWNER/ADMIN
+	// only because flipping a hook can invoke shell commands.
+	hh := NewHooksHandler(r.db, r.logger)
+	hh.SetJournal(r.Journal())
+	r.mux.Handle("GET /api/v1/hooks", authed(wsCtx(http.HandlerFunc(hh.List))))
+	r.mux.Handle("POST /api/v1/hooks/{id}/enable", authed(wsCtx(http.HandlerFunc(hh.Enable))))
+	r.mux.Handle("POST /api/v1/hooks/{id}/disable", authed(wsCtx(http.HandlerFunc(hh.Disable))))
+
+	// Watch Roster: per-workspace presence snapshot. Read-only — agent
+	// runtime owns status, so there's no POST here.
+	preH := NewPresenceHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/presence/roster", authed(wsCtx(http.HandlerFunc(preH.Roster))))
+
+	// Consolidate: manual trigger for the memory-consolidation worker.
+	// Lock is per-workspace + kept inside the handler so two workspaces
+	// don't serialise through each other.
+	conH := NewConsolidateHandler(r.db, r.logger)
+	conH.SetJournal(r.Journal())
+	conH.SetConsolidator(r.consolidator)
+	conH.SetMemoryRoot(r.consolidateMemoryRoot)
+	r.mux.Handle("POST /api/v1/consolidate/run", authed(wsCtx(http.HandlerFunc(conH.Run))))
+
+	// Quartermaster eval: mission replay + regression + list. Both
+	// mutating calls run in a goroutine and return 202 with a run_id
+	// the caller can later poll for in the list endpoint.
+	evH := NewEvalHandler(r.db, r.logger)
+	evH.SetJournal(r.Journal())
+	r.mux.Handle("POST /api/v1/eval/replay", authed(wsCtx(http.HandlerFunc(evH.Replay))))
+	r.mux.Handle("POST /api/v1/eval/regression", authed(wsCtx(http.HandlerFunc(evH.Regression))))
+	r.mux.Handle("GET /api/v1/eval/runs", authed(wsCtx(http.HandlerFunc(evH.ListRuns))))
 
 	// Backups (admin-only; require workspace context for scoping). See
 	// .claude/context/prd/BACKUP.md for the full API contract.

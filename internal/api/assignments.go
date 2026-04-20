@@ -54,8 +54,9 @@ type createAssignmentBody struct {
 	CrewID       string                    `json:"crew_id"`
 	WorkspaceID  string                    `json:"workspace_id"`
 	ChatID       string                    `json:"chat_id"`
-	CrewMembers  []orchestrator.CrewMember `json:"-"` // populated internally for mission dispatches
-	LeadPlanning bool                      `json:"-"` // when true, run as LEAD with sidecar
+	MissionID    string                    `json:"mission_id,omitempty"` // optional — mission this assignment belongs to; threaded into journal entries so Cartographer checkpoints can anchor on per-mission journal cursors.
+	CrewMembers  []orchestrator.CrewMember `json:"-"`                    // populated internally for mission dispatches
+	LeadPlanning bool                      `json:"-"`                    // when true, run as LEAD with sidecar
 }
 
 // Create handles POST /api/v1/internal/assignments.
@@ -359,6 +360,7 @@ func (h *AssignmentHandler) runAssignment(
 		AgentRole:       agentRole,
 		CrewID:          body.CrewID,
 		CrewSlug:        target.CrewSlug,
+		MissionID:       body.MissionID,
 		WorkspaceID:     body.WorkspaceID,
 		ChatID:          body.ChatID,
 		ContainerID:     containerID,
@@ -702,6 +704,7 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		CrewID:       req.CrewID,
 		WorkspaceID:  req.WorkspaceID,
 		ChatID:       req.ChatID,
+		MissionID:    req.MissionID,
 		CrewMembers:  crewMembers,
 		LeadPlanning: req.LeadPlanning,
 	}
