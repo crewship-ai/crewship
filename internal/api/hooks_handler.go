@@ -146,11 +146,20 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 		hk.Blocking = blockingInt != 0
 		hk.Matcher = hooks.Matcher{}
 		hk.HandlerConfig = map[string]any{}
+		// Log parse failures so operators can catch DB schema drift or
+		// data corruption. The hook row still renders (with the
+		// zero-value Matcher / empty HandlerConfig), matching prior
+		// silent-fallback behaviour — we only add visibility, not
+		// changing the list contract.
 		if matcherStr != "" && matcherStr != "{}" {
-			_ = json.Unmarshal([]byte(matcherStr), &hk.Matcher)
+			if err := json.Unmarshal([]byte(matcherStr), &hk.Matcher); err != nil {
+				h.logger.Warn("hooks list: malformed matcher JSON", "id", hk.ID, "err", err)
+			}
 		}
 		if handlerCfgStr != "" && handlerCfgStr != "{}" {
-			_ = json.Unmarshal([]byte(handlerCfgStr), &hk.HandlerConfig)
+			if err := json.Unmarshal([]byte(handlerCfgStr), &hk.HandlerConfig); err != nil {
+				h.logger.Warn("hooks list: malformed handler_config JSON", "id", hk.ID, "err", err)
+			}
 		}
 		if t, perr := time.Parse(time.RFC3339Nano, createdAt); perr == nil {
 			hk.CreatedAt = t
