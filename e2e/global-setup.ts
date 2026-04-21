@@ -22,7 +22,15 @@ export default async function globalSetup(config: FullConfig) {
     throw new Error("E2E_EMAIL and E2E_PASSWORD environment variables must be set for e2e")
   }
 
-  const baseURL = (config.projects[0]?.use?.baseURL as string) || "http://localhost:3001"
+  // Fallback baseURL follows the multi-instance convention
+  // (CLAUDE.md: "crewship_N dirs → Go :8080+N, Next.js :3010+N").
+  // NEXT_PORT takes precedence when set by the caller; otherwise
+  // default to 3010 — NOT 3001 — so a second instance started via
+  // `crewship_2/dev.sh start` doesn't silently authenticate against
+  // instance 1's session cookies on shared CI runners.
+  const baseURL =
+    (config.projects[0]?.use?.baseURL as string) ||
+    `http://localhost:${process.env.NEXT_PORT || "3010"}`
   const browser = await chromium.launch()
   try {
     const ctx = await browser.newContext({ baseURL })
@@ -79,7 +87,17 @@ export default async function globalSetup(config: FullConfig) {
 // auth. CREWSHIP_INSTANCE_ID comes from the multi-instance convention
 // in CLAUDE.md; falls back to the port so local single-instance runs
 // keep a stable filename.
+//
+// The parent dir (~/.crewship/e2e-auth) is created eagerly with mode
+// 0o700 so an attacker on the same host can't pre-plant a symlink at
+// the deterministic target path and trick Playwright into writing
+// the session cookie to an attacker-controlled location. This closes
+// the symlink-race window that existed when we wrote directly into
+// os.tmpdir() — that directory is world-readable/writable by design
+// on most Linux distros.
 export function storageFilePath(): string {
   const instance = process.env.CREWSHIP_INSTANCE_ID || process.env.NEXT_PORT || "default"
-  return path.join(os.tmpdir(), `crewship-e2e-auth-${instance}.json`)
+  const authDir = path.join(os.homedir(), ".crewship", "e2e-auth")
+  fs.mkdirSync(authDir, { recursive: true, mode: 0o700 })
+  return path.join(authDir, `crewship-e2e-auth-${instance}.json`)
 }
