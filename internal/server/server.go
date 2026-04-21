@@ -300,6 +300,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// on an unreachable service.
 		orch.SetHooksDispatcher(newHooksAdapter(deps.DB, s.journalWriter))
 		orch.SetApprovalGate(newApprovalGateAdapter(deps.DB, s.journalWriter))
+		orch.SetPresenceTracker(newPresenceAdapter(deps.DB, s.journalWriter, logger))
 		var embedder episodic.Embedder
 		if cfg.Keeper.OllamaURL != "" {
 			// nomic-embed-text is the expected model on the Ollama host
