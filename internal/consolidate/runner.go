@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -210,6 +211,16 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 		}
 		if err := compactAllWorkspaces(ctx, db, comp, opts); err != nil {
 			opts.Logger.Warn("compaction tick completed with errors", "err", err)
+		}
+		// Fold the memory decay pass into the same daily tick. Both
+		// operate on the same storage and benefit from running at
+		// off-peak hours; adding a third goroutine would complicate
+		// shutdown for no real benefit. Errors are logged but do not
+		// affect compaction — these are independent best-efforts.
+		if n, err := episodic.DecayAndReinforce(ctx, db, time.Now()); err != nil {
+			opts.Logger.Warn("memory decay tick failed", "err", err)
+		} else {
+			opts.Logger.Info("memory decay tick completed", "rows_updated", n)
 		}
 	}
 }

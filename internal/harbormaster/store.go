@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -216,14 +217,19 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 	// The tool + args live in the original request payload — we pull
 	// them from the reloaded row so this works regardless of caller.
 	// Failures here are non-fatal: auto-tuning is best-effort and
-	// shouldn't cause a human decision to return an error.
+	// shouldn't cause a human decision to return an error. But we DO
+	// log so an oncall engineer can see why auto-tuning stops working
+	// if the reward table is having issues.
 	tool, args := extractToolArgs(row.Payload)
 	if tool != "" {
 		outcome := OutcomeDenied
 		if status == StatusApproved {
 			outcome = OutcomeApproved
 		}
-		_ = RecordOutcome(ctx, db, row.WorkspaceID, tool, args, outcome, decidedBy, row.ID)
+		if err := RecordOutcome(ctx, db, row.WorkspaceID, tool, args, outcome, decidedBy, row.ID); err != nil {
+			slog.Default().Warn("harbormaster: reward history insert failed",
+				"err", err, "tool", tool, "outcome", outcome, "approval_id", row.ID)
+		}
 	}
 	return nil
 }

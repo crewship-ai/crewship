@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -143,12 +144,13 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 	// DecayAndReinforce run lifts frequently-cited rows, so recall
 	// gets demonstrably better the more it's used. Errors are NOT
 	// fatal — losing a reference stamp is strictly less bad than
-	// failing recall over a DB hiccup.
+	// failing recall over a DB hiccup — but they ARE logged so an
+	// ops engineer greping for "episodic" doesn't silently lose the
+	// reinforcement signal during an outage.
 	if len(picked) > 0 {
 		if markErr := MarkReferenced(ctx, db, picked, time.Now()); markErr != nil {
-			// Caller of Recall has no logger; swallow silently and
-			// let the nightly decay job catch up on the next run.
-			_ = markErr
+			slog.Default().Warn("episodic: mark referenced failed",
+				"err", markErr, "hits", len(picked), "workspace_id", q.WorkspaceID)
 		}
 	}
 	return out, nil
