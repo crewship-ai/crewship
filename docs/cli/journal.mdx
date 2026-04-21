@@ -1,0 +1,90 @@
+---
+title: "Journal Commands"
+description: "View the Crew Journal event stream from the command line."
+icon: "book-open"
+---
+
+# crewship journal
+
+Read the [Crew Journal](/guides/crew-journal) -- the canonical append-only event stream for every observable action in the platform. Filter by crew, agent, mission, entry type, severity, or time window.
+
+```bash
+crewship journal [flags]
+```
+
+There are no subcommands -- the top-level command is the list view. Live tail (`--follow`) will require SSE client support and is not yet implemented; use the web UI `/journal` page for live view.
+
+## Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--lines` | `int` | `50` | Max entries to fetch (1-500). |
+| `--crew` | `string` | | Filter by crew slug or ID. |
+| `--agent` | `string` | | Filter by agent ID. |
+| `--mission` | `string` | | Filter by mission ID. |
+| `--type` | `string` | | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). |
+| `--severity` | `string` | | Comma-separated severities (`info`, `notice`, `warn`, `error`). |
+| `--since` | `string` | | Time window (`1h`, `24h`, `7d`, or RFC3339). |
+| `--follow` | `bool` | `false` | Live tail via SSE (not yet implemented; use the web UI). |
+
+Global output flags apply: `--format table|json|yaml` (default table).
+
+## Examples
+
+```bash
+# Last 50 entries across the workspace
+crewship journal
+
+# Last 24h of a specific crew
+crewship journal --crew backend-team --since 24h
+
+# Every warn/error
+crewship journal --severity warn,error
+
+# Recent escalations and keeper decisions
+crewship journal --type peer.escalation,keeper.decision --lines 100
+
+# Mission timeline as JSON for scripting
+crewship journal --mission MIS-42 --format json
+```
+
+## Sample output
+
+```
+2026-04-17 10:23:41  [info    ]  peer.conversation       agent       viktor → eva: "pushing hotfix"
+2026-04-17 10:24:02  [warn    ]  keeper.decision         keeper      denied production SSH (risk=8)
+2026-04-17 10:24:15  [error   ]  budget.exceeded         system      crew/day at 103.2% ($51.62 / $50.00)
+```
+
+Columns: timestamp, severity chip (color-coded), entry type (bold), actor type, summary.
+
+## Entry type catalog
+
+See the [Crew Journal guide](/guides/crew-journal#entry-type-catalog) for the full list. Common filters:
+
+| `--type` value | When to use |
+|---|---|
+| `keeper.decision` | Every credential access decision. |
+| `peer.escalation` | Cross-agent handoffs (often tied to `approval.requested`). |
+| `budget.exceeded,budget.warning` | Cost oversight. |
+| `approval.requested,approval.granted,approval.denied,approval.timeout` | HITL audit. |
+| `hook.fired,hook.blocked` | Lifecycle hook activity. |
+| `eval.regression_detected` | Eval surfaced regression. |
+
+## Parsing `--since`
+
+Accepted formats:
+
+- Duration suffixes: `30m`, `1h`, `24h`, `7d` (the `d` suffix is handled locally; Go's `time.ParseDuration` doesn't support it).
+- RFC3339: `2026-04-17T00:00:00Z`.
+
+## Notes
+
+- Output is scoped to the caller's workspace automatically -- there is no way to query another workspace from the CLI.
+- Pagination is keyset-based on the server; the CLI does not currently expose the cursor (it fetches `--lines` rows and stops).
+- For structured programmatic access prefer `--format json`.
+
+## Related
+
+- [Crew Journal guide](/guides/crew-journal).
+- [Journal API](/api-reference/journal).

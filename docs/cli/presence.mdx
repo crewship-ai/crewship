@@ -1,0 +1,75 @@
+---
+title: "Presence Commands"
+description: "Watch Roster — who is online, busy, blocked, or offline."
+icon: "eye"
+---
+
+# crewship presence
+
+Show the [Watch Roster](/guides/watch-roster) -- the live presence board tracking agent status across a crew or the full workspace.
+
+```bash
+crewship presence <subcommand> [flags]
+```
+
+Presence transitions are emitted by the agent runtime, not by this CLI -- the command is read-only.
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `roster` | Show the current presence roster. |
+
+---
+
+## `crewship presence roster`
+
+```bash
+crewship presence roster
+crewship presence roster --crew cmo2pe4dj0005ba0a129f
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--crew` | `string` | Filter by crew ID. Slug resolution is not yet wired -- pass the ID. |
+
+Sample output:
+
+```
+AGENT             CREW              STATUS      SINCE
+agt_viktor        crw_backend       busy        2026-04-17T10:23:41Z
+agt_eva           crw_backend       online      2026-04-17T10:18:02Z
+agt_oliver        crw_platform      blocked     2026-04-17T10:05:33Z
+agt_lisa          crw_marketing     offline     2026-04-17T08:30:00Z
+```
+
+Status values: `online` (idle, reachable), `busy` (running), `blocked` (awaiting keeper/approval), `offline` (not seen in >5 min).
+
+## JSON output
+
+```bash
+crewship presence roster --format json
+```
+
+```json
+[
+  {
+    "agent_id": "agt_viktor",
+    "crew_id": "crw_backend",
+    "status": "busy",
+    "since": "2026-04-17T10:23:41.000Z",
+    "details": { "current_task_id": "T-42" }
+  }
+]
+```
+
+## Notes
+
+- Roster is workspace-scoped; there is no way to see another workspace's roster from the CLI.
+- Cross-tenant crew IDs return 404 with the same shape as "no such crew" so existence is not leaked.
+- Empty roster output (`(roster empty - no presence entries for scope)`) means either the agents have never emitted a status or the sweeper flipped them all offline and someone purged the rows -- check the journal's `agent.status_change` history.
+
+## Related
+
+- [Watch Roster guide](/guides/watch-roster).
+- [Presence API](/api-reference/presence).

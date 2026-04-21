@@ -51,8 +51,6 @@ function ok(name, condition, detail = '') {
   else { console.log(`  ✗ ${name}${detail ? ': ' + detail : ''}`); failed++; }
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
 async function run() {
   console.log('Escalation E2E Test');
   console.log('===================');

@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils"
 import {
   Search, Download, Copy, Check, ChevronRight, ChevronDown,
   FolderOpen, FolderClosed, FileText, FileCode, FileJson,
-  GitBranch, GitCommit, GitPullRequest, HardDrive, Home,
-  Users, RefreshCw, Filter, SortAsc, MoreHorizontal,
-  Terminal, Box, Eye, Columns3, LayoutList, PanelLeft,
-  Plus, Settings, Trash2, Upload, Archive,
+  GitBranch, GitCommit, HardDrive, Home,
+  Users, RefreshCw,
+  Terminal, Box, Eye, PanelLeft,
+  Plus, Settings,
   File as FileIcon,
 } from "lucide-react"
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity,
@@ -12,7 +12,6 @@ import {
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import dynamic from "next/dynamic"
 import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
@@ -74,9 +73,9 @@ export function OrchestrationLayout({
   connections,
   workspaceId,
   selectedMissionId,
-  onMissionChange,
+  onMissionChange: _onMissionChange,
   onRefresh,
-  onMissionCreated,
+  onMissionCreated: _onMissionCreated,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -88,8 +87,8 @@ export function OrchestrationLayout({
   // Content state
   const [activeTab, setActiveTab] = useState("issues")
   const [_selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
-  const [selectedCrewId, setSelectedCrewId] = useState<string | null>(null)
-  const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null)
+  const [selectedCrewId] = useState<string | null>(null)
+  const [selectedAgentSlug] = useState<string | null>(null)
   const [detailContext, setDetailContext] = useState<DetailContext>({ type: "none" })
 
   // Issues state
@@ -104,7 +103,7 @@ export function OrchestrationLayout({
   // Project filter applied via saved views — does NOT open the detail panel.
   // `selectedProjectId` is for explicit project clicks (opens detail panel);
   // `filterProjectId` is only for filtering the issues list.
-  const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
+  const [filterProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
   const [showCreateIssue, setShowCreateIssue] = useState(false)
@@ -155,18 +154,6 @@ export function OrchestrationLayout({
     return crews.filter((c) => crewIds.has(c.id))
   }, [selectedMissionId, missions, crews, agents])
 
-  const panelAgents = useMemo(() => {
-    // Only show agents that have tasks in the visible missions
-    const activeSlugs = new Set<string>()
-    const visibleMissions = selectedMissionId === "all" ? missions : missions.filter((m) => m.id === selectedMissionId)
-    for (const m of visibleMissions) {
-      for (const t of m.tasks || []) {
-        if (t.agent_slug) activeSlugs.add(t.agent_slug)
-      }
-    }
-    if (activeSlugs.size === 0) return agents // fallback: show all if no missions
-    return agents.filter((a) => activeSlugs.has(a.slug))
-  }, [selectedMissionId, missions, agents])
 
   const panelMissions = useMemo(() => {
     if (selectedMissionId === "all") return missions
@@ -384,7 +371,7 @@ export function OrchestrationLayout({
     }
     setBreadcrumbs(items)
     return () => setBreadcrumbs([])
-  }, [selectedProject?.id, selectedProject?.name, selectedIssue?.id, selectedIssue?.identifier, setBreadcrumbs])
+  }, [selectedProject, selectedIssue, setBreadcrumbs])
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">

@@ -1,0 +1,136 @@
+---
+title: "Approvals"
+description: "Harbor Master human-in-the-loop approval queue."
+icon: "anchor"
+---
+
+All endpoints require authentication and are workspace-scoped. Decision endpoints additionally require `OWNER` or `ADMIN` role. Enqueue is internal-only -- it fires from `harbormaster.Gate` when an agent hits a rule-matching action. See the [Harbor Master guide](/guides/harbormaster).
+
+---
+
+## List approvals
+
+```
+GET /api/v1/approvals?status=pending&limit=50
+```
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `status` | string | `pending` | One of `pending`, `approved`, `denied`, `timeout`, `cancelled`, `all`. `all` removes the status filter. |
+| `limit` | integer | `50` | 1-200. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    {
+      "id": "req_01HXYZABCDEF",
+      "workspace_id": "ws_123",
+      "crew_id": "crw_backend",
+      "agent_id": "agt_viktor",
+      "mission_id": "MIS-42",
+      "requested_by": "agt_viktor",
+      "kind": "destructive_op",
+      "reason": "rm -rf /data/*",
+      "payload": { "tool": "Bash", "args": { "command": "rm -rf /data/*" } },
+      "status": "pending",
+      "decided_by": null,
+      "decided_at": null,
+      "decision_comment": null,
+      "timeout_at": "2026-04-17T11:23:41Z",
+      "created_at": "2026-04-17T10:23:41Z"
+    }
+  ],
+  "status": "pending",
+  "count": 1
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `rows[].kind` | string | `tool_call`, `cost_threshold`, `destructive_op`, `target_environment`, `custom`. |
+| `rows[].status` | string | See Status values above. |
+| `rows[].payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). |
+| `rows[].timeout_at` | string? | RFC3339 deadline; the sweeper flips past-due rows to `timeout`. |
+
+---
+
+## Get approval
+
+```
+GET /api/v1/approvals/{id}
+```
+
+Returns the full request object (same schema as list rows).
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No workspace. |
+| 404 | ID not found or belongs to another workspace. |
+
+---
+
+## Decide
+
+```
+POST /api/v1/approvals/{id}/decide
+```
+
+**Auth:** `OWNER` or `ADMIN` only. 403 for any other role.
+
+**Request body:**
+
+```json
+{
+  "status": "approved",
+  "comment": "reviewed with staging validation"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `status` | string | Yes | `approved` or `denied`. Any other value = 400. |
+| `comment` | string | No | Free-form decision rationale. Stored in `approvals_queue.decision_comment`. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "approved",
+  "decided_by": "user_123"
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Bad JSON, missing/invalid `status`. |
+| 401 | Not authenticated. |
+| 403 | Not OWNER/ADMIN. |
+| 404 | Request not found. |
+| 409 | Request already decided (status != `pending`). |
+
+## Journal side-effects
+
+Every write emits a journal entry:
+
+| Action | Entry |
+|---|---|
+| Enqueue | `approval.requested` (info) |
+| Decide approved | `approval.granted` (info) |
+| Decide denied | `approval.denied` (warn) |
+| Timeout sweep | `approval.timeout` (warn) |
+| Cancel (internal) | `approval.cancelled` (notice) |
+
+See [Crew Journal](/guides/crew-journal) for payload shapes.
+
+## Related
+
+- [Harbor Master guide](/guides/harbormaster).
+- [`crewship approvals`](/cli/approvals).

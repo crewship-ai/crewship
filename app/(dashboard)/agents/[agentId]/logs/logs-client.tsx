@@ -86,14 +86,17 @@ export function LogsPageClient() {
     if (!autoRefresh) return
     const payload = event.payload
     if (payload.agent_id === agentId) {
-      setLogs((prev) => [...prev, {
-        ts: payload.ts,
-        level: payload.level,
-        agent: payload.agent,
-        event: payload.event,
-        content: payload.content,
-        metadata: payload.metadata,
-      }])
+      const entry: LogEntry = {
+        ts: String(payload.ts ?? ""),
+        level: String(payload.level ?? ""),
+        agent: String(payload.agent ?? ""),
+        event: String(payload.event ?? ""),
+        content: typeof payload.content === "string" ? payload.content : undefined,
+        metadata: (payload.metadata && typeof payload.metadata === "object")
+          ? (payload.metadata as Record<string, unknown>)
+          : undefined,
+      }
+      setLogs((prev) => [...prev, entry])
     }
   }, [autoRefresh, agentId]))
 

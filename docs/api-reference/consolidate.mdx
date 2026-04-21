@@ -1,0 +1,87 @@
+---
+title: "Consolidate"
+description: "Trigger manual memory consolidation runs."
+icon: "layers"
+---
+
+Single endpoint that forces an immediate run of the memory consolidation worker. Requires authentication, workspace scope, and `OWNER` or `ADMIN` role. See the [Consolidate guide](/guides/consolidate).
+
+The scheduled runner ticks every 6h regardless; this endpoint exists so operators can force an immediate pass after curating a crew or auditing new rules.
+
+---
+
+## Trigger run
+
+```
+POST /api/v1/consolidate/run
+```
+
+**Auth:** `OWNER` or `ADMIN` only (403 otherwise).
+
+**Request body (optional):**
+
+```json
+{
+  "crew_id": "crw_backend",
+  "since": "24h"
+}
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `crew_id` | string | No | all crews | Limit run to a single crew. Must be live in the caller's workspace. |
+| `since` | string | No | `24h` | Look-back window. Go duration (`90m`, `24h`) plus shorthand `d` (days) and `w` (weeks). Zero/negative falls back to 24h. |
+
+Body may be empty; the defaults run consolidation across every non-deleted crew in the workspace for the last 24h.
+
+**Response: `202 Accepted`** -- run started:
+
+```json
+{
+  "triggered": true,
+  "worker_id": "csd_a1b2c3d4e5f6"
+}
+```
+
+**Response: `202 Accepted`** -- no summarizer configured, run skipped:
+
+```json
+{
+  "accepted": true,
+  "note": "no summarizer configured, skipping"
+}
+```
+
+In both cases the journal records a `system.consolidation_triggered` + `system.consolidation_completed` pair so the audit trail is complete.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid JSON body. |
+| 401 | Not authenticated. |
+| 403 | Not OWNER/ADMIN. |
+| 404 | `crew_id` not in your workspace, or soft-deleted. |
+| 409 | A consolidation is already running for this workspace (per-workspace in-flight guard). |
+| 500 | DB error. |
+| 503 | Consolidator not wired in this build (dev/test). |
+
+## Side effects
+
+A successful run:
+
+1. Loads recent journal entries per crew (filtered to candidate types: `peer.escalation`, `summary.generated`, `keeper.decision`, `mission.status_change`, `eval.regression_detected`).
+2. Calls the summarizer LLM (Ollama in production).
+3. Appends extracted rules to `{memoryRoot}/{crewSlug}/topics/learned-YYYY-MM-DD.md`.
+4. Emits `memory.consolidated` per crew with `rules_count` and output path in the payload.
+5. Emits `system.consolidation_completed` once with aggregate `crews_run` and `rules_appended`.
+
+## Scheduling
+
+Background scheduler: every 6h. Compactor: daily at 03:00 UTC. Both wired at server startup via `consolidate.StartBackground`.
+
+## Related
+
+- [Consolidate guide](/guides/consolidate).
+- [`crewship consolidate`](/cli/consolidate).
+- [Episodic memory](/guides/episodic-memory) -- indexer runs on the same tick.

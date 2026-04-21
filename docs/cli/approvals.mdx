@@ -1,0 +1,92 @@
+---
+title: "Approvals Commands"
+description: "List and decide Harbor Master human-in-the-loop approval requests."
+icon: "anchor"
+---
+
+# crewship approvals
+
+Manage the [Harbor Master](/guides/harbormaster) approval queue. `list` is safe for any workspace member; `approve` and `deny` require `OWNER` or `ADMIN` role server-side (403 otherwise).
+
+```bash
+crewship approvals <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `list` | List approval requests. |
+| `approve <id>` | Approve a pending request. |
+| `deny <id>` | Deny a pending request. |
+
+`cancel` is deliberately absent -- the backend does not expose `POST /api/v1/approvals/{id}/cancel` yet.
+
+---
+
+## `crewship approvals list`
+
+```bash
+crewship approvals list                                    # pending only (default)
+crewship approvals list --status approved --limit 100
+crewship approvals list --status all                        # full history
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--status` | `string` | `pending` | One of `pending`, `approved`, `denied`, `timeout`, `cancelled`, `all`. |
+| `--limit` | `int` | `50` | Max rows (server caps at 200). |
+
+Sample output:
+
+```
+req_01HXYZABCDEF         [pending ]  destructive_op    backend-team      viktor            rm -rf /data/*
+req_01HXYZGHIJKL         [approved]  cost_threshold    backend-team      eva               Claude Opus 4.7 $7.20 estimate
+req_01HXYZMNOPQR         [denied  ]  target_environm   platform          oliver            ssh ops@prod-db-01
+```
+
+Columns: ID, status chip (colored), kind, crew, agent, reason (truncated).
+
+---
+
+## `crewship approvals approve <id>`
+
+```bash
+crewship approvals approve req_01HXYZABCDEF --comment "reviewed with staging validation"
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--comment` | `string` | | Optional comment recorded with the decision. |
+
+Sample output:
+
+```
+✓ Approval req_01HXYZABCDEF: approved (by user_123)
+```
+
+---
+
+## `crewship approvals deny <id>`
+
+```bash
+crewship approvals deny req_01HXYZABCDEF --comment "wrong mission target"
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--comment` | `string` | | Optional comment recorded with the decision. |
+
+## Errors
+
+| Exit | Meaning |
+|---|---|
+| 401 | Not authenticated. Run `crewship login`. |
+| 403 | Logged in but not `OWNER` or `ADMIN`. |
+| 404 | Request ID not found in your workspace. |
+| 409 | Request already decided (status is no longer `pending`). |
+
+## Related
+
+- [Harbor Master guide](/guides/harbormaster).
+- [Approvals API](/api-reference/approvals).

@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { IssueCard } from "./issue-card"
-import { StatusIcon, statusLabel, statusColor } from "./status-icon"
+import { StatusIcon, statusLabel } from "./status-icon"
 import { cn } from "@/lib/utils"
 import { CirclePlus } from "lucide-react"
 import type { Mission, MissionStatus } from "@/lib/types/mission"

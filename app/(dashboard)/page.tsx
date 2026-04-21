@@ -293,15 +293,16 @@ export default function DashboardPage() {
   // Container stats stream — per-container CPU history for sparklines
   useRealtimeEvent("container.stats", useCallback((event: RealtimeEvent) => {
     const p = event.payload
-    if (typeof p.container_id !== "string") return
+    const containerId = p.container_id
+    if (typeof containerId !== "string") return
     setContainerStats((prev) => {
       const next = new Map(prev)
-      const existing = next.get(p.container_id)
+      const existing = next.get(containerId)
       const cpu = Number(p.cpu_percent) || 0
       const history = existing?.cpu_history ? [...existing.cpu_history, cpu] : [cpu]
       if (history.length > 30) history.shift()
-      next.set(p.container_id, {
-        container_id: p.container_id,
+      next.set(containerId, {
+        container_id: containerId,
         crew_id: String(p.crew_id ?? ""),
         crew_slug: (p.crew_slug as string | undefined) ?? existing?.crew_slug ?? null,
         crew_name: (p.crew_name as string | undefined) ?? existing?.crew_name ?? null,
@@ -331,13 +332,10 @@ export default function DashboardPage() {
     ? `${Math.round(((runsToday - runsFailed) / runsToday) * 100)}%`
     : "—"
   const successRatePct = runsToday > 0 ? Math.round(((runsToday - runsFailed) / runsToday) * 100) : null
-  const missionsInReview = missions.filter((m) => m.status === "REVIEW").length
 
   const openIssues = missions.filter(
     (m) => (m.mission_type === "issue" || !m.mission_type) && m.status !== "COMPLETED" && m.status !== "CANCELLED" && m.status !== "FAILED",
   ).length
-
-  const pendingKeeperCount = keeperRequests.filter((k) => !k.decision || k.decision === "PENDING").length
 
   // Mission status donut
   const donutData = useMemo<StatusDonutDatum[]>(() => {

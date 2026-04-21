@@ -3,12 +3,14 @@ package server
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/presence"
 )
 
 // Three tiny adapters that wire orchestrator's narrow integration
@@ -108,6 +110,42 @@ type episodicRecallAdapter struct {
 
 func newEpisodicRecallAdapter(db *sql.DB, embedder episodic.Embedder) *episodicRecallAdapter {
 	return &episodicRecallAdapter{db: db, embedder: embedder}
+}
+
+// presenceAdapter bridges orchestrator.PresenceTracker to the presence
+// package. Before this adapter existed the orchestrator emitted
+// agent.status_change journal entries directly but never wrote the
+// underlying agent_status row, so /crows-nest and
+// /api/v1/presence/roster always returned empty. Track() calls
+// presence.Upsert which both writes the row and emits the matching
+// journal entry on real transitions (idempotent on same-status).
+type presenceAdapter struct {
+	db     *sql.DB
+	journ  journal.Emitter
+	logger *slog.Logger
+}
+
+func newPresenceAdapter(db *sql.DB, j journal.Emitter, logger *slog.Logger) *presenceAdapter {
+	return &presenceAdapter{db: db, journ: j, logger: logger}
+}
+
+func (a *presenceAdapter) Track(ctx context.Context, in orchestrator.PresenceInput) error {
+	err := presence.Upsert(ctx, a.db, a.journ, presence.Snapshot{
+		AgentID:     in.AgentID,
+		WorkspaceID: in.WorkspaceID,
+		CrewID:      in.CrewID,
+		MissionID:   in.MissionID,
+		Status:      presence.Status(in.Status),
+		Details:     in.Details,
+	})
+	if err != nil && a.logger != nil {
+		// Watch Roster updates are best-effort — log but don't
+		// propagate. A DB blip shouldn't abort an agent run just
+		// because we couldn't flip the roster row.
+		a.logger.Warn("presence track failed", "err", err,
+			"agent_id", in.AgentID, "status", in.Status)
+	}
+	return nil
 }
 
 func (a *episodicRecallAdapter) Recall(ctx context.Context, in orchestrator.EpisodicRecallInput) (string, error) {

@@ -170,6 +170,7 @@ type Orchestrator struct {
 	hooks          HookDispatcher
 	approvalGate   ApprovalGate
 	episodicRecall EpisodicRecaller
+	presence       PresenceTracker
 }
 
 // HookDispatcher is the narrow interface the orchestrator uses to fire
@@ -257,6 +258,58 @@ func (o *Orchestrator) SetEpisodicRecall(r EpisodicRecaller) {
 	defer o.mu.Unlock()
 	o.episodicRecall = r
 }
+
+// PresenceTracker is the narrow interface the orchestrator uses to flip
+// an agent's Watch Roster row (busy / online / offline) on lifecycle
+// transitions. A real adapter (in server/) wraps presence.Upsert;
+// the no-op fallback keeps call sites nil-free — the orchestrator
+// never imports internal/presence directly (that would form a cycle
+// via internal/api).
+type PresenceTracker interface {
+	// Track writes the new snapshot row. The implementation is
+	// responsible for emitting agent.status_change only on actual
+	// transitions (same-status writes are idempotent).
+	Track(ctx context.Context, in PresenceInput) error
+}
+
+// PresenceInput carries the minimum the tracker needs to upsert. Status
+// uses the same string values as presence.Status (online/busy/blocked/
+// offline) — keeping the string form here avoids pulling the presence
+// package into orchestrator's import set.
+//
+// MissionID is forwarded to the journal.Entry emitted by
+// presence.Upsert on a real transition, keeping the mission-scoped
+// timeline correct (mirrors the AgentRunRequest → JournalEntry
+// MissionID threading fixed in PR #205).
+type PresenceInput struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	MissionID   string
+	Status      string
+	Details     map[string]any
+}
+
+// SetPresenceTracker wires the Watch Roster tracker. nil is accepted
+// and swapped with a no-op so emit sites can stay nil-check-free.
+func (o *Orchestrator) SetPresenceTracker(p PresenceTracker) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.presence = p
+}
+
+func (o *Orchestrator) getPresence() PresenceTracker {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.presence == nil {
+		return noopPresence{}
+	}
+	return o.presence
+}
+
+type noopPresence struct{}
+
+func (noopPresence) Track(_ context.Context, _ PresenceInput) error { return nil }
 
 func (o *Orchestrator) getHooks() HookDispatcher {
 	o.mu.RLock()
@@ -530,6 +583,31 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if gateErr != nil {
 		return fmt.Errorf("approval gate: %w", gateErr)
 	}
+	// If the gate enqueued an approval (Required && !Approved → Pending,
+	// or Denied with an existing request row), fire the
+	// on_approval_requested hook so integrations can notify a human
+	// (Slack, PagerDuty, etc.) without waiting for the journal poller.
+	// Fire on any gated decision — denied and pending both mean "a
+	// human needs to know about this", approved means the rule matched
+	// and a prior approval auto-satisfied it.
+	if gateDecision.Required {
+		_ = o.getHooks().Dispatch(ctx, "on_approval_requested", HookEventContext{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
+			ToolName:    "agent_run",
+			Severity:    "notice",
+			Payload: map[string]any{
+				"request_id": gateDecision.RequestID,
+				"reason":     gateDecision.Reason,
+				"approved":   gateDecision.Approved,
+				"denied":     gateDecision.Denied,
+				"pending":    gateDecision.Pending,
+				"agent_slug": req.AgentSlug,
+			},
+		})
+	}
 	// Only proceed when the gate explicitly says so. Denied, Pending,
 	// and "Required but not Approved" must all halt the run — a
 	// pending approval still means a human hasn't said yes yet, and
@@ -555,6 +633,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		ToolName:    "agent_run",
 		Severity:    "info",
 		Payload: map[string]any{
@@ -571,6 +650,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
 			ToolName:    "agent_run",
 			Payload:     map[string]any{"agent_slug": req.AgentSlug, "chat_id": req.ChatID},
 		})
@@ -1040,16 +1120,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Flip agent to busy for the Watch Roster. The presence sweeper
 	// reverts to offline after idle timeout if the agent crashes before
 	// the matching "online" emit at end-of-run fires.
-	_, _ = j.Emit(ctx, JournalEntry{
+	// Flip the Watch Roster to busy AND emit the agent.status_change
+	// journal entry on transition. Tracker implementation
+	// (server/presence_adapter.go) owns both writes so the row and
+	// the journal stay in lock-step — previously only the journal
+	// entry fired and /crows-nest always showed an empty roster.
+	_ = o.getPresence().Track(ctx, PresenceInput{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
 		MissionID:   req.MissionID,
-		Type:        "agent.status_change",
-		Severity:    "info",
-		ActorType:   "system",
-		Summary:     fmt.Sprintf("agent %s: busy", req.AgentSlug),
-		Payload:     map[string]any{"status": "busy", "current_chat_id": req.ChatID},
+		Status:      "busy",
+		Details:     map[string]any{"current_chat_id": req.ChatID},
 	})
 
 	result, err := o.container.Exec(execCtx, execCfg)
@@ -1114,16 +1196,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			},
 			Refs: map[string]any{"chat_id": req.ChatID, "exec_id": result.ExecID},
 		})
-		_, _ = j.Emit(cleanCtx, JournalEntry{
+		_ = o.getPresence().Track(cleanCtx, PresenceInput{
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
 			MissionID:   req.MissionID,
-			Type:        "agent.status_change",
-			Severity:    "info",
-			ActorType:   "system",
-			Summary:     fmt.Sprintf("agent %s: online (cancelled)", req.AgentSlug),
-			Payload:     map[string]any{"status": "online", "reason": "cancelled"},
+			Status:      "online",
+			Details:     map[string]any{"reason": "cancelled"},
 		})
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
@@ -1162,16 +1241,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Flip agent back to online for the Watch Roster now that the run
 	// is done. If the agent stays in-session, the presence sweeper
 	// still tracks idleness separately.
-	_, _ = j.Emit(ctx, JournalEntry{
+	_ = o.getPresence().Track(ctx, PresenceInput{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
 		MissionID:   req.MissionID,
-		Type:        "agent.status_change",
-		Severity:    "info",
-		ActorType:   "system",
-		Summary:     fmt.Sprintf("agent %s: online", req.AgentSlug),
-		Payload:     map[string]any{"status": "online"},
+		Status:      "online",
 	})
 
 	if running {

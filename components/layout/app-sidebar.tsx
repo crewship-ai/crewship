@@ -17,7 +17,6 @@ import {
   ShieldCheck,
   PanelLeftClose,
   Pin,
-  PinOff,
   MousePointer2,
   ChevronDown,
   Ship,
@@ -96,7 +95,7 @@ const navSections = [
 export function AppSidebar() {
   const pathname = usePathname()
   const { role } = useAbilities()
-  const { state, sidebarMode, setSidebarMode } = useSidebar()
+  const { sidebarMode, setSidebarMode } = useSidebar()
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">

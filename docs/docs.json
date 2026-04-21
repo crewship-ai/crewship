@@ -38,7 +38,20 @@
               "guides/coordinator",
               "guides/scheduling",
               "guides/files-and-output",
-              "guides/backup"
+              "guides/backup",
+              "guides/crew-journal",
+              "guides/paymaster",
+              "guides/lookout",
+              "guides/harbormaster",
+              "guides/cartographer",
+              "guides/hooks",
+              "guides/quartermaster",
+              "guides/reflection",
+              "guides/episodic-memory",
+              "guides/watch-roster",
+              "guides/consolidate",
+              "guides/telemetry",
+              "guides/llm-middleware"
             ]
           },
           {
@@ -82,7 +95,15 @@
               "cli/memory",
               "cli/config",
               "cli/backup",
-              "cli/system"
+              "cli/system",
+              "cli/journal",
+              "cli/paymaster",
+              "cli/approvals",
+              "cli/checkpoint",
+              "cli/eval",
+              "cli/hooks",
+              "cli/presence",
+              "cli/consolidate"
             ]
           }
         ]
@@ -104,7 +125,15 @@
               "api-reference/webhooks",
               "api-reference/websocket",
               "api-reference/admin",
-              "api-reference/backup"
+              "api-reference/backup",
+              "api-reference/journal",
+              "api-reference/paymaster",
+              "api-reference/approvals",
+              "api-reference/checkpoints",
+              "api-reference/hooks",
+              "api-reference/presence",
+              "api-reference/eval",
+              "api-reference/consolidate"
             ]
           }
         ]

@@ -1,0 +1,180 @@
+---
+title: "Checkpoints"
+description: "Cartographer mission checkpoints: list, create, restore (advisory), fork, delete."
+icon: "map"
+---
+
+All endpoints require authentication and are workspace-scoped. Cross-tenant IDs return 404 (same shape as "not found"). See the [Cartographer guide](/guides/cartographer).
+
+---
+
+## List checkpoints
+
+```
+GET /api/v1/missions/{missionId}/checkpoints?limit=50
+```
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `missionId` | Mission ID. Must belong to caller's workspace. |
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 50 | 1-200. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "mission_id": "MIS-42",
+  "checkpoints": [
+    {
+      "id": "chk_a1b2c3d4e5f60718",
+      "workspace_id": "ws_123",
+      "crew_id": "crw_backend",
+      "mission_id": "MIS-42",
+      "label": "green build",
+      "journal_cursor": "j_7f3e2a1b8c9d0e12",
+      "state": { "...snapshot json..." },
+      "fork_of": null,
+      "created_by": "user_123",
+      "created_at": "2026-04-17T10:23:41Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `missionId`. |
+| 404 | Mission not in your workspace. |
+
+---
+
+## Create checkpoint
+
+```
+POST /api/v1/missions/{missionId}/checkpoints
+```
+
+**Request body (optional):**
+
+```json
+{ "label": "green build" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | string | No | Human-readable label. Body may be empty. |
+
+**Response:** `201 Created` -- full checkpoint object.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid JSON body. |
+| 404 | Mission not in your workspace. |
+| 409 | Mission has no journal entries to anchor a checkpoint. |
+
+---
+
+## Get checkpoint
+
+```
+GET /api/v1/checkpoints/{id}
+```
+
+**Response:** `200 OK` -- full checkpoint object.
+
+**Errors:** `404` on missing or cross-tenant.
+
+---
+
+## Restore (advisory)
+
+```
+POST /api/v1/checkpoints/{id}/restore
+```
+
+Returns the checkpoint plus the list of journal entries that have diverged since it was made. **No mission state is mutated.**
+
+**Response:** `200 OK`
+
+```json
+{
+  "checkpoint": { "id": "chk_...", "label": "green build", ... },
+  "journal_cursor": "j_7f3e2a1b8c9d0e12",
+  "warn_divergence": [
+    "mission.status_change at j_8a4f3b2c9d0e1234",
+    "exec.command at j_9b5f4c3d0e1f2345"
+  ]
+}
+```
+
+`warn_divergence` is always an array (empty when no drift). Callers should treat a long list as a signal to fork, not restore.
+
+**Errors:** `404` on missing or cross-tenant.
+
+---
+
+## Fork
+
+```
+POST /api/v1/checkpoints/{id}/fork
+```
+
+Creates a new mission anchored at the checkpoint's cursor, plus a matching fresh checkpoint in the new mission with `fork_of = <source checkpoint id>`.
+
+**Request body (optional):**
+
+```json
+{ "label": "experiment-1" }
+```
+
+**Auth:** Authenticated user required (the checkpoint's `created_by` is stamped with the caller's user ID).
+
+**Response:** `201 Created`
+
+```json
+{
+  "new_mission_id": "MIS-43",
+  "new_checkpoint_id": "chk_new0001"
+}
+```
+
+**Errors:** `401` if no user; `404` on missing or cross-tenant.
+
+---
+
+## Delete
+
+```
+DELETE /api/v1/checkpoints/{id}
+```
+
+**Response:** `204 No Content`.
+
+**Errors:** `404` on missing or cross-tenant.
+
+**Gotcha:** Forks that referenced the deleted checkpoint via `fork_of` are orphaned (their reference is set to NULL) -- no cascade. The forked missions themselves are untouched.
+
+## Journal side-effects
+
+| Operation | Entry |
+|---|---|
+| Create | `checkpoint.created` (info) |
+| Restore | `checkpoint.restored` (info, payload includes divergence count) |
+| Fork | `fork.created` (notice) |
+
+## Related
+
+- [Cartographer guide](/guides/cartographer).
+- [`crewship checkpoint`](/cli/checkpoint).

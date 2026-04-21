@@ -68,7 +68,7 @@ interface CreateProjectModalProps {
 export function CreateProjectModal({
   open,
   onOpenChange,
-  crews,
+  crews: _crews,
   labels,
   workspaceId,
   onCreated,

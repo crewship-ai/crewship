@@ -37,7 +37,7 @@ export type RealtimeEventType =
 /** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {
   type: RealtimeEventType
-  payload: Record<string, any>
+  payload: Record<string, unknown>
   timestamp: Date
 }
 

@@ -42,10 +42,16 @@ func (s Status) Validate() error {
 // Snapshot is one roster row — last-write-wins view of an agent's state.
 // Details carries status-specific metadata (current_task_id for busy,
 // blocked_reason for blocked).
+//
+// MissionID is not stored in the agent_status row (it'd require a
+// schema migration and a single agent can legitimately be between
+// missions). It IS threaded into the agent.status_change journal
+// entry so the per-mission timeline doesn't drop status transitions.
 type Snapshot struct {
 	AgentID     string
 	WorkspaceID string
 	CrewID      string
+	MissionID   string
 	Status      Status
 	Since       time.Time
 	Details     map[string]any
@@ -101,6 +107,7 @@ func Upsert(ctx context.Context, db *sql.DB, j journal.Emitter, s Snapshot) erro
 			WorkspaceID: s.WorkspaceID,
 			CrewID:      s.CrewID,
 			AgentID:     s.AgentID,
+			MissionID:   s.MissionID,
 			Type:        journal.EntryAgentStatus,
 			Severity:    journal.SeverityInfo,
 			ActorType:   journal.ActorSystem,
