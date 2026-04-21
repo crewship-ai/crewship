@@ -1,0 +1,173 @@
+---
+title: "Paymaster"
+description: "Cost rollups across crew, agent, and mission scopes."
+icon: "credit-card"
+---
+
+All endpoints require authentication and are workspace-scoped. Write path is **exclusively internal** via the [LLM middleware](/guides/llm-middleware) -- no POST endpoints. See the [Paymaster guide](/guides/paymaster) for the cost ledger and budget model, and the [known limitation](/guides/paymaster#known-limitation-agent-claude-cli-calls-bypass-the-middleware) about agent Claude CLI bypass.
+
+## Time window parameters
+
+Every endpoint accepts the same window parameters:
+
+| Param | Type | Description |
+|---|---|---|
+| `range` | string | One of `1h`, `24h`, `7d`, `30d`. Default `7d`. |
+| `since` | string | Explicit RFC3339 lower bound. Overrides `range` when set. |
+| `until` | string | Explicit RFC3339 upper bound. Defaults to now. |
+
+---
+
+## Spend by crew
+
+```
+GET /api/v1/paymaster/spend/by-crew?range=7d
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    {
+      "crew_id": "crw_backend",
+      "cost_usd": 14.3210,
+      "call_count": 132,
+      "input_tokens": 1024583,
+      "output_tokens": 457758
+    }
+  ],
+  "since": "2026-04-10T10:00:00Z",
+  "until": "2026-04-17T10:00:00Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `rows[].crew_id` | string | Crew identifier. |
+| `rows[].cost_usd` | number | Sum of `cost_ledger.cost_usd` for the crew in the window. |
+| `rows[].call_count` | integer | Number of LLM calls. |
+| `rows[].input_tokens` | integer | Sum of `input_tokens`. |
+| `rows[].output_tokens` | integer | Sum of `output_tokens`. |
+
+**Errors:** `401` no workspace; `500` DB error.
+
+---
+
+## Spend by agent (within a crew)
+
+```
+GET /api/v1/paymaster/spend/by-agent/{crewId}?range=24h
+```
+
+**Path parameters:**
+
+| Param | Description |
+|---|---|
+| `crewId` | Crew ID. Must belong to the caller's workspace. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "crew_id": "crw_backend",
+  "rows": [
+    {
+      "agent_id": "agt_viktor",
+      "cost_usd": 4.2103,
+      "call_count": 42,
+      "input_tokens": 158421,
+      "output_tokens": 73119
+    }
+  ]
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `crewId`. |
+| 401 | No workspace. |
+| 404 | `crewId` not in your workspace (same shape as "not found"). |
+| 500 | DB error. |
+
+---
+
+## Spend by mission
+
+```
+GET /api/v1/paymaster/spend/by-mission/{missionId}
+```
+
+Mission-scoped spend. Window-less -- sums the full mission.
+
+**Response:** `200 OK`
+
+```json
+{
+  "mission_id": "MIS-42",
+  "row": {
+    "mission_id": "MIS-42",
+    "cost_usd": 7.8945,
+    "call_count": 28,
+    "input_tokens": 542108,
+    "output_tokens": 192743
+  }
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `missionId`. |
+| 404 | `missionId` not in your workspace. |
+
+---
+
+## Top spenders
+
+```
+GET /api/v1/paymaster/top-spenders?limit=10&range=7d
+```
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 10 | 1-100. |
+| `range` / `since` / `until` | | 7d | Window. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    {
+      "scope_kind": "crew",
+      "scope_id": "crw_backend",
+      "cost_usd": 14.3210,
+      "call_count": 132
+    },
+    {
+      "scope_kind": "agent",
+      "scope_id": "agt_viktor",
+      "cost_usd": 4.2103,
+      "call_count": 42
+    }
+  ],
+  "limit": 10,
+  "since": "2026-04-10T10:00:00Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `rows[].scope_kind` | string | `workspace`, `crew`, `mission`, or `agent`. |
+| `rows[].scope_id` | string | Matching ID for the scope_kind. |
+
+## Related
+
+- [Paymaster guide](/guides/paymaster).
+- [`crewship paymaster`](/cli/paymaster).

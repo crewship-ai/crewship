@@ -68,17 +68,6 @@ export interface FleetLayoutProps {
   onRefresh: () => void
 }
 
-const ACTIVITY_TYPE_COLORS: Record<string, string> = {
-  status: "text-blue-400", run: "text-emerald-400", mission: "text-purple-400",
-}
-
-const HEALTH_STATUS_COLORS: Record<string, string> = {
-  RUNNING: "text-emerald-400",
-  IDLE: "text-muted-foreground",
-  ERROR: "text-red-400",
-  STOPPED: "text-amber-400",
-}
-
 const FLEET_TABS = [
   { id: "overview" as const, label: "Overview", icon: LayoutGrid },
   { id: "activity" as const, label: "Activity", icon: Activity },
@@ -90,7 +79,7 @@ const FLEET_TABS = [
 // during the drawer component split). The top-level layout only renders
 // <FleetBottomDrawer> and does not need the tab list here.
 
-export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }: FleetLayoutProps) {
+export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _onRefresh }: FleetLayoutProps) {
   const isMobile = useIsMobile()
 
   // Panel state

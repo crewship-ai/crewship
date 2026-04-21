@@ -1,0 +1,92 @@
+---
+title: "Presence"
+description: "Watch Roster -- live agent status across a workspace or crew."
+icon: "eye"
+---
+
+All endpoints require authentication and are workspace-scoped. This is a read-only API -- presence writes come from the agent runtime via `presence.Upsert`. See the [Watch Roster guide](/guides/watch-roster).
+
+---
+
+## Roster
+
+```
+GET /api/v1/presence/roster?crew_id=<optional>
+```
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `crew_id` | string | Optional. Filter to a single crew. Cross-tenant crew IDs return 404. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    {
+      "agent_id": "agt_viktor",
+      "crew_id": "crw_backend",
+      "status": "busy",
+      "since": "2026-04-17T10:23:41.000Z",
+      "details": {
+        "current_task_id": "T-42"
+      }
+    },
+    {
+      "agent_id": "agt_eva",
+      "crew_id": "crw_backend",
+      "status": "blocked",
+      "since": "2026-04-17T10:05:33.000Z",
+      "details": {
+        "blocked_reason": "awaiting_approval",
+        "approval_id": "req_01HXYZABCDEF"
+      }
+    }
+  ],
+  "count": 2
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `rows[].agent_id` | string | Agent identifier. |
+| `rows[].crew_id` | string? | Crew containing the agent; omitted for solo/coordinator agents. |
+| `rows[].status` | string | `online`, `busy`, `blocked`, or `offline`. |
+| `rows[].since` | string | RFC3339Nano. Wall-clock time of the last status write. |
+| `rows[].details` | object? | Status-specific metadata. Omitted when empty. |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No workspace. |
+| 404 | `crew_id` filter points to cross-tenant crew. |
+| 500 | DB error. |
+
+## Details field conventions
+
+| Status | Common keys |
+|---|---|
+| `online` | _(usually empty)_ |
+| `busy` | `current_task_id`, `current_mission_id`, `started_at` |
+| `blocked` | `blocked_reason` (`awaiting_approval`, `awaiting_keeper`, `awaiting_user_input`), `approval_id` when relevant |
+| `offline` | `reason` (`idle_timeout` when the sweeper flipped the row) |
+
+Schema is loose -- the orchestrator stamps what is useful at the transition point.
+
+## Writes
+
+There is no `POST` endpoint. Status is owned by the system; operators influence it only indirectly by starting/stopping agents.
+
+Internal writers:
+
+- `presenceAdapter.Track` (orchestrator) -> `presence.Upsert` on lifecycle transitions.
+- `presence.SweepOffline` (server boot wires a 60s ticker) flips idle agents past the 5-min threshold.
+
+## Related
+
+- [Watch Roster guide](/guides/watch-roster).
+- [`crewship presence`](/cli/presence).
+- [Crew Journal](/guides/crew-journal) -- `agent.status_change` history.

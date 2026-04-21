@@ -1,0 +1,153 @@
+---
+title: "Episodic Memory"
+description: "Vector-similarity recall over the Crew Journal with selective embedding and SQLite BLOB brute-force cosine scan."
+icon: "database"
+---
+
+# Episodic Memory
+
+Episodic is a narrow vector-recall layer over the [Crew Journal](/guides/crew-journal). It embeds a **selective** subset of journal entries and serves top-K similarity queries to agents planning new work.
+
+The "selective" part is load-bearing. Per 2025-2026 multi-agent memory research, indexing every event causes catastrophic drift: high-volume low-signal types (`exec.output_chunk`, `container.metrics`, `network.*`) drown the embedding space and dilute recall. Episodic refuses to embed those types and ingests only escalations, summaries, terminal mission status, denied keeper calls, eval regressions, and operator-tagged entries.
+
+## Embedding criteria
+
+```go
+// internal/episodic/types.go
+func shouldEmbed(entryType string, severity string) bool {
+    switch entryType {
+    case "peer.escalation",
+         "summary.generated",
+         "memory.consolidated",
+         "approval.denied",
+         "eval.regression_detected":
+        return true
+    case "keeper.decision":
+        return severity == "warn" || severity == "error"
+    case "mission.status_change":
+        return severity == "warn" || severity == "error"
+    }
+    return false
+}
+```
+
+| Entry type | When embedded |
+|---|---|
+| `peer.escalation` | Always |
+| `summary.generated` | Always |
+| `memory.consolidated` | Always |
+| `approval.denied` | Always |
+| `eval.regression_detected` | Always |
+| `keeper.decision` | Only at severity warn/error (denied or risky) |
+| `mission.status_change` | Only at severity warn/error (failed or problematic) |
+| `exec.output_chunk`, `container.metrics`, `network.*` | **Never** |
+
+To force an embedding on an otherwise-filtered entry, tag it with `refs.episodic = true` in the journal payload. The indexer checks this flag before applying the type/severity filter.
+
+## Storage
+
+`journal_embeddings` (added in migration 52 alongside `journal_entries`):
+
+```sql
+CREATE TABLE journal_embeddings (
+  entry_id  TEXT PRIMARY KEY REFERENCES journal_entries(id) ON DELETE CASCADE,
+  vector    BLOB NOT NULL,     -- raw float32 bytes
+  dim       INTEGER NOT NULL,
+  model     TEXT NOT NULL,     -- "nomic-embed-text", etc.
+  indexed_at TEXT NOT NULL
+);
+```
+
+Vectors are stored as little-endian float32 BLOBs -- native Go slice serialisation. SQLite has no `pgvector`, so recall is a **brute-force cosine scan** over the scope-filtered rows. For the expected scale (~1% of entries embedded, low thousands per agent) the scan finishes in low milliseconds. If this outgrows SQLite the right move is an external vector store, not a SQLite extension -- so storage sits behind an interface.
+
+## Scopes
+
+```go
+type Scope string
+const (
+    ScopeOwn        Scope = "own"         // agent's own past only
+    ScopeCrewShared Scope = "crew_shared" // own + high-value crew entries
+)
+```
+
+`ScopeForRole(role)` maps role strings to scopes:
+
+| Role | Scope |
+|---|---|
+| `AGENT` (default) | `own` |
+| `LEAD` | `crew_shared` |
+| `COORDINATOR` | `crew_shared` |
+
+**Workspace isolation is always enforced** at the query boundary -- a cross-workspace recall is impossible even with a misconfigured scope.
+
+## Recall API
+
+```go
+hits, err := episodic.Recall(ctx, db, embedder, episodic.Query{
+    WorkspaceID: ws,
+    CrewID:      crew,
+    AgentID:     agent,
+    Scope:       episodic.ScopeOwn,
+    QueryText:   "production deployment keeper denied",
+    K:           5,
+})
+```
+
+- `WorkspaceID` is required.
+- `ScopeOwn` requires `AgentID`; `ScopeCrewShared` requires `CrewID`.
+- `K` caps results (1-50, default 5).
+
+Returns `[]Hit`:
+
+```go
+type Hit struct {
+    EntryID   string
+    Score     float64       // cosine similarity in [0,1], 1=identical
+    Age       time.Duration // since original entry's ts
+    Summary   string
+    EntryType string
+    AgentID   string
+    Payload   map[string]any
+}
+```
+
+Consumers typically weight fresher hits higher when injecting into prompts. `episodic.RenderInjection(hits, maxChars)` does this and returns a prompt-ready string, truncated to fit a char budget -- used by the orchestrator's `episodicRecallAdapter` before every agent run.
+
+## Embedder
+
+The `Embedder` interface is provider-neutral:
+
+```go
+type Embedder interface {
+    Embed(ctx context.Context, text string) ([]float32, error)
+    Dim() int
+    ModelID() string
+}
+```
+
+Production wiring uses the Ollama adapter (`embedder.go`) against `nomic-embed-text`. The adapter follows the `OLLAMA_HOST` env var and falls back to `http://host.docker.internal:11434`.
+
+If the embedder is nil (Ollama unreachable at startup), `Recall` returns an empty slice silently -- agent runs don't fail on embedding outages. This is configured in `server/orchestrator_adapters.go:newEpisodicRecallAdapter`.
+
+## Indexer
+
+`episodic.IndexNew(ctx, db, embedder)` walks unindexed journal entries that pass `shouldEmbed`, computes embeddings, and inserts them into `journal_embeddings`. The background consolidator runs this on its 6h tick; you can trigger it manually:
+
+```go
+n, err := episodic.IndexNew(ctx, db, embedder)
+```
+
+Only entries whose type survives the coarse SQL filter (the `EmbeddableEntryTypes` slice) are candidates; the Go-side `shouldEmbed` then applies the severity-aware refinement.
+
+## Gotchas
+
+- **Ollama dependency.** No Ollama = no episodic memory. Set `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"` (external SSD) and `ollama serve` before `./dev.sh start` when testing locally.
+- **Embedding is best-effort.** An embedder error during `IndexNew` logs and skips; the entry is retried next run.
+- **Cosine on small sets is fine.** Don't pre-optimise for a vector DB until the per-agent scan latency exceeds 50ms.
+- **Do not add `exec.output_chunk` to the embeddable list.** Doing so will flood the embedding space with low-signal log chatter and kill recall quality. The comment in `types.go` is not a suggestion.
+
+## Related
+
+- [Crew Journal](/guides/crew-journal) -- source of entries.
+- [Consolidate](/guides/consolidate) -- runs `IndexNew` on the daily tick.
+- [Reflection](/guides/reflection) -- emits `summary.generated` entries that land in the index.

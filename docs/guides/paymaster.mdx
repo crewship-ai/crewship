@@ -1,0 +1,139 @@
+---
+title: "Paymaster"
+description: "Cost ledger and hierarchical budget enforcement for every LLM call the platform makes."
+icon: "credit-card"
+---
+
+# Paymaster
+
+Paymaster owns cost accounting and budget enforcement. It is the read/write side of the `cost_ledger` and `budget_limits` tables (migration 52) and it ships as middleware on the [LLM call stack](/guides/llm-middleware). Every priced LLM round-trip produces exactly one `cost_ledger` row plus journal entries (`llm.call`, `cost.incurred`, optionally `budget.warning` / `budget.exceeded`).
+
+## Data model
+
+```sql
+-- One row per LLM round-trip.
+CREATE TABLE cost_ledger (
+  id                    TEXT PRIMARY KEY,
+  workspace_id          TEXT NOT NULL,
+  crew_id               TEXT,
+  agent_id              TEXT,
+  mission_id            TEXT,
+  provider              TEXT NOT NULL,
+  model                 TEXT NOT NULL,
+  input_tokens          INTEGER NOT NULL DEFAULT 0,
+  output_tokens         INTEGER NOT NULL DEFAULT 0,
+  cached_input_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd              REAL NOT NULL DEFAULT 0,
+  tags                  TEXT NOT NULL DEFAULT '{}',
+  ts                    TEXT NOT NULL
+);
+
+-- Optional per-scope limit. Walked hierarchically before every call.
+CREATE TABLE budget_limits (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  scope_kind   TEXT NOT NULL CHECK (scope_kind IN ('workspace','crew','mission','agent')),
+  scope_id     TEXT NOT NULL,
+  window       TEXT NOT NULL CHECK (window IN ('hour','day','week','month','mission')),
+  limit_usd    REAL NOT NULL,
+  mode         TEXT NOT NULL CHECK (mode IN ('soft','hard','tiered')),
+  enabled      INTEGER NOT NULL DEFAULT 1
+);
+```
+
+## Budget scopes
+
+Budgets apply at four levels, narrowing from workspace down to agent. All applicable budgets are checked before every call; the most restrictive breach wins:
+
+| ScopeKind | Applies when the call's scope has... | Example |
+|---|---|---|
+| `workspace` | (always, when `scope_id = workspace_id`) | "This workspace cannot spend more than $500/day." |
+| `crew` | `crew_id` set | "backend-team is capped at $50/hour." |
+| `mission` | `mission_id` set | "MIS-42 must finish under $20 total." |
+| `agent` | `agent_id` set | "viktor cannot exceed $5/day." |
+
+Windows: `hour`, `day`, `week`, `month`, and `mission` (window-less; sums the whole mission regardless of duration). Hour/day/week/month are calendar-aligned in UTC -- dashboards reset on the hour, at 00:00 UTC, Monday 00:00 UTC, and the 1st respectively.
+
+## Enforcement modes
+
+```go
+const (
+    ModeSoft   EnforcementMode = "soft"   // never blocks, reports state=exceeded
+    ModeHard   EnforcementMode = "hard"   // blocks at 100%, no warn tier
+    ModeTiered EnforcementMode = "tiered" // warn at 80%, block at 100%
+)
+```
+
+- **soft** -- `Enforce` never returns an error. Emits `budget.warning` when over 100% so the UI still paints it red. Use for cost-curious teams that want visibility without the platform pulling the plug.
+- **hard** -- `BudgetExceededError` at 100%. No warn band. Emits `budget.exceeded`.
+- **tiered** -- emits `budget.warning` at 80% (no block) and `budget.exceeded` at 100% (block). The default for new budgets; gives operators a window to react.
+
+A tiered budget ties one emit per tick to the state it's in, so a once-warned call stays in the journal even if the subsequent call pushes it over the line.
+
+## The call path
+
+`paymaster.Middleware(next, j, db)` wraps an `LLMCaller`. Order of operations:
+
+1. **Enforce** -- `Check` resolves every applicable budget; a hard/tiered breach short-circuits with `*BudgetExceededError`. The underlying call is never made, no ledger row is written, but `budget.exceeded` lands in the journal.
+2. **Call** -- delegate to the inner caller.
+3. **Record** -- fill `cost_usd` via `Estimate(provider, model, tokens)` if the provider didn't price the call inline, then `INSERT` the row and emit `llm.call` + `cost.incurred`.
+
+Billing errors do NOT fail the call: if the provider succeeded the response is returned unchanged and the operator sees the audit gap in logs. If the call failed, Paymaster still attempts a partial-billing record so the trail isn't lost.
+
+See [llm.middleware.go](/guides/llm-middleware) for the full stack (`telemetry -> paymaster -> lookout -> raw`).
+
+## Read endpoints
+
+- `GET /api/v1/paymaster/spend/by-crew?range=7d` -- one row per crew.
+- `GET /api/v1/paymaster/spend/by-agent/{crewId}?range=24h` -- per-agent rollup inside a crew.
+- `GET /api/v1/paymaster/spend/by-mission/{missionId}` -- single-mission total.
+- `GET /api/v1/paymaster/top-spenders?limit=10&range=7d` -- highest-cost scopes.
+
+Window syntax: `range=1h|24h|7d|30d` or explicit `since=<RFC3339>&until=<RFC3339>`. Default is 7 days.
+
+Workspace isolation: the `by-agent` and `by-mission` handlers reject cross-tenant IDs with 404 (same shape as "not found") so existence isn't leaked. See `crewBelongsToWorkspace` / `missionBelongsToWorkspace` in `internal/api/paymaster_handler.go`.
+
+## CLI
+
+```bash
+crewship paymaster by-crew --range 7d
+crewship paymaster by-agent backend-team --range 24h
+crewship paymaster top --limit 5 --range 30d
+```
+
+Full reference: [`crewship paymaster`](/cli/paymaster).
+
+## Creating a budget
+
+Budgets are inserted directly into `budget_limits` today -- there is no dedicated API. The UI's settings panel drives the same table. Example workspace-wide hard cap of $250/day:
+
+```sql
+INSERT INTO budget_limits (id, workspace_id, scope_kind, scope_id, window, limit_usd, mode, enabled)
+VALUES ('bl_default_daily', 'ws_123', 'workspace', 'ws_123', 'day', 250.0, 'hard', 1);
+```
+
+## Known limitation: agent Claude CLI calls bypass the middleware
+
+Paymaster wraps `llm.Provider.Complete()` -- the path used by internal server-side generation (summaries, Keeper, consolidation, reflection, quartermaster judge). It does **not** see calls made by the agent's own CLI adapter (`claude`, `codex`, `gemini`) running inside the crew container: those shell out to a vendor binary that talks directly to the provider's API using the credentials we injected.
+
+Consequence: agent-driven spend shows up in the provider's dashboard but not in `cost_ledger`, and budgets configured at `agent` scope will not block an agent from continuing past its limit. Work is tracked to re-route those calls through an OpenAI-compatible local proxy so every token is metered; until then:
+
+- **Workspace-level budgets are reliable** because the raw provider API key is metered externally and top-level operators still see the cost on their provider bill.
+- **Per-agent/mission budgets are advisory** for agent-driven work. Treat the UI numbers as a floor, not a ceiling, and use `mode=soft` so you don't give operators a false sense of blocking.
+- **Keeper, summaries, consolidation, reflection, and eval all ARE captured** -- they use `internal/llm` which is wrapped.
+
+Look for the `llm.call` journal entry: if it exists, the call flowed through Paymaster. If you see activity on `exec.command` with a `claude` binary but no `llm.call`, you've hit the bypass.
+
+## Gotchas
+
+- **Soft budgets still emit entries.** A soft budget at 120% still writes `budget.warning` to the journal -- the UI uses this to paint red. Don't filter out "soft" when looking for "who was over".
+- **Stream path is unmetered.** `wrappedProvider.Stream()` bypasses the full middleware (token counts arrive in the terminal `message_delta` event, which the sync `CallResponse` shape can't carry). Streaming callers pay through orchestrator-level accounting that predates this package.
+- **Pricing is estimated.** `pricing.go` hard-codes per-token prices per (provider, model). When the provider ships a new model the estimate falls to zero until pricing is added -- check `internal/paymaster/pricing.go` after any provider upgrade.
+
+## Related
+
+- [LLM middleware](/guides/llm-middleware) -- layer order and composition.
+- [`crewship paymaster`](/cli/paymaster) -- CLI.
+- [Paymaster API](/api-reference/paymaster).
+- [Crew Journal](/guides/crew-journal) -- `llm.call`, `cost.incurred`, `budget.*` entry types.

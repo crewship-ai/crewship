@@ -16,7 +16,6 @@ import { LabelBadge } from "./label-badge"
 import { formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
-import { STATUS_STYLES_SUBTLE, type StatusConfigEntry } from "@/lib/status-config"
 
 interface IssuesListViewProps {
   issues: Mission[]
@@ -24,18 +23,6 @@ interface IssuesListViewProps {
   selectedIssueId?: string | null
   onBulkAction?: (ids: string[], updates: Record<string, unknown>) => void
   workspaceId?: string | null
-}
-
-const STATUS_CONFIG: Record<string, StatusConfigEntry> = {
-  BACKLOG:     { label: "Backlog",     className: STATUS_STYLES_SUBTLE.slate },
-  TODO:        { label: "Todo",        className: STATUS_STYLES_SUBTLE.slate },
-  PLANNING:    { label: "Planning",    className: STATUS_STYLES_SUBTLE.slate },
-  IN_PROGRESS: { label: "In Progress", className: STATUS_STYLES_SUBTLE.blue },
-  REVIEW:      { label: "In Review",   className: STATUS_STYLES_SUBTLE.amber },
-  COMPLETED:   { label: "Done",        className: STATUS_STYLES_SUBTLE.green },
-  FAILED:      { label: "Failed",      className: STATUS_STYLES_SUBTLE.red },
-  CANCELLED:   { label: "Cancelled",   className: STATUS_STYLES_SUBTLE.gray },
-  DUPLICATE:   { label: "Duplicate",   className: STATUS_STYLES_SUBTLE.gray },
 }
 
 const PRIORITY_ORDER: Record<IssuePriority, number> = {
@@ -323,7 +310,6 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
         </TableHeader>
         <TableBody>
           {sorted.map((issue) => {
-            const statusCfg = STATUS_CONFIG[issue.status] || STATUS_CONFIG.BACKLOG
             const isDimmed = selectedIssueId != null && issue.id !== selectedIssueId
             const isHighlighted = selectedIssueId != null && issue.id === selectedIssueId
             return (

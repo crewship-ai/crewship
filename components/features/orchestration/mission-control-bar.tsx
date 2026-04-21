@@ -48,11 +48,11 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
 
 export function MissionControlBar({ mission, workspaceId, onMissionChanged }: MissionControlBarProps) {
   const [loading, setLoading] = useState<string | null>(null)
-  const tasks = mission.tasks || []
   const cfg = statusConfig[mission.status] || statusConfig.PLANNING
   const StatusIcon = cfg.icon
 
   const { completed, failed, inProgress, total, progress, totalTokens, totalCost, earliestStart } = useMemo(() => {
+    const tasks = mission.tasks || []
     let comp = 0, fail = 0, prog = 0, tokens = 0, cost = 0
     let earliest: string | undefined
     for (const t of tasks) {
@@ -68,7 +68,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
       total: tasks.length, progress: tasks.length > 0 ? (comp / tasks.length) * 100 : 0,
       totalTokens: tokens, totalCost: cost, earliestStart: earliest,
     }
-  }, [tasks])
+  }, [mission.tasks])
 
   const handleAction = useCallback(async (action: "start" | "cancel" | "complete") => {
     setLoading(action)

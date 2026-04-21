@@ -1,0 +1,105 @@
+---
+title: "LLM Middleware"
+description: "The unified LLM call stack: telemetry → paymaster → lookout → raw provider. Composition and layer order rationale."
+icon: "layers-3"
+---
+
+# LLM Middleware
+
+`internal/llm/middleware.go` composes the full call stack that every LLM request flows through:
+
+```
+telemetry  →  paymaster  →  lookout  →  (caching: future)  →  base provider
+```
+
+Each layer matches the `paymaster.LLMCaller` signature so they compose as plain function wrappers. The returned `Provider` preserves the original `Name()` for routing and fan-out.
+
+## Composition
+
+```go
+import "github.com/crewship-ai/crewship/internal/llm"
+
+base := anthropic.NewProvider(apiKey)
+wrapped := llm.Middleware(base, journalEmitter, db)
+
+// From this point, wrapped.Complete() flows through all layers.
+resp, err := wrapped.Complete(ctx, llm.Request{
+    Model: "claude-sonnet-4-5",
+    Messages: []llm.Message{{Role: llm.RoleUser, Content: "..."}},
+})
+```
+
+The request context MUST carry a `lookout.Scope` (set by the HTTP handler chain). Without it, paymaster rejects the call because `WorkspaceID` is empty -- calls without a workspace are not billable.
+
+```go
+ctx = lookout.WithScope(ctx, lookout.Scope{
+    WorkspaceID: ws, CrewID: crew, AgentID: agent, MissionID: mission,
+})
+```
+
+## Layer order rationale
+
+Layer order is deliberate and the comment in `middleware.go` is the source of truth. Getting it wrong produces subtle bugs that only surface under load:
+
+### 1. Telemetry outermost
+
+An SRE looking at a slow trace must see every contributor: budget check, guardrails, cache lookup, network hop. If telemetry sat inside paymaster, the trace would start at "provider call" and hide the time spent on enforcement, which is often where slowness lives.
+
+### 2. Paymaster outside lookout
+
+**Load-bearing.** A pre-call budget check must refuse an over-budget request before we've done any guardrail work -- otherwise a workspace out of budget still pays in sanitization time. And the cost ledger row is written here, outside the guardrail layer, so sanitize latency is not counted toward "provider latency".
+
+### 3. Lookout inside paymaster
+
+**Load-bearing.** Running Lookout INSIDE Paymaster means: **if Lookout blocks the call, no `cost_ledger` row is written because `next.Call` is never invoked.** A blocked call is not a billable call. If the order were reversed, Paymaster would record a ledger row for work that never reached the provider.
+
+### 4. Caching (future) inside lookout
+
+Reserved slot. A cache hit must still flow through Paymaster for hit-event accounting but bypass Lookout (we already scanned the prompt on the first call) and the provider. Anthropic's own prompt caching is handled wire-side in `anthropic.go` today.
+
+### 5. Base provider innermost
+
+The innermost `providerCaller` unpacks the opaque `CallRequest.Inputs` back into a typed `llm.Request`. It trusts that guardrails have already scanned the prompt and paymaster has green-lit the spend.
+
+## Write-path order beyond LLM calls
+
+The same principle shows up elsewhere:
+
+- **Keeper**: SecretStore -> Gatekeeper LLM -> Decision. Journal emit is outermost so even rejected requests are audited.
+- **Harbor Master**: Enqueue -> (optional sync poll) -> Decide. Journal emit fires on each state transition.
+- **Hooks**: Dispatch -> blocking handlers (sequential, stop on Block) -> non-blocking goroutines. The hook.fired entry lands regardless of outcome.
+
+## Stream() path
+
+`Provider.Stream()` currently bypasses the full middleware. Reason: the paymaster ledger row depends on final token counts which arrive in the terminal `message_delta` event; wiring that through the sync `CallResponse` shape would need a streaming variant of `CallResponse`. That's deferred.
+
+**Lookout is still wired** synchronously before streaming starts -- `wrappedProvider.Stream()` scans every user/tool message with `lookout.ScanInput` and returns `*lookout.BlockedError` if any fires. Without this pre-call guard, a caller that picks `Stream` over `Complete` would silently bypass every guardrail.
+
+Streaming callers who also want paymaster accounting today fall back to the orchestrator-level accounting that predates this middleware (see [`internal/orchestrator`](https://github.com/crewship-ai/crewship/tree/main/internal/orchestrator)).
+
+## Custom composition
+
+You almost never want this -- use `llm.Middleware` -- but the layers are individually exported so tests can swap them:
+
+```go
+var caller paymaster.LLMCaller = providerCaller{p: base}
+caller = lookoutCaller(caller, j)
+caller = paymaster.Middleware(caller, j, db)
+caller = telemetry.LLMMiddleware(caller)
+```
+
+If you rearrange, understand the reasoning above. A PR that moves paymaster inside lookout will be rejected.
+
+## Gotchas
+
+- **Context scope is required.** Without `lookout.WithScope` in ctx, the paymaster rejects every call. This is by design (unscoped calls are unbillable) but produces a confusing error in tests -- always attach a scope.
+- **Type assertion failures fail fast.** `providerCaller` returns `"inputs not llm.Request (got %T)"` if something upstream handed it the wrong shape. This is always a wiring bug.
+- **Stream bypass is documented but not gated.** Nothing prevents an existing caller from picking `Stream` over `Complete`. Audit new call sites; if the caller doesn't need streaming, prefer `Complete` so the full stack runs.
+- **Journal emitter is shared.** Both paymaster and lookout emit through the same `journal.Emitter` instance. A nil emitter would no-op silently -- the production path always sets it.
+
+## Related
+
+- [Paymaster](/guides/paymaster) -- layer 2. Cost + budget.
+- [Lookout](/guides/lookout) -- layer 3. Guardrails.
+- [Telemetry](/guides/telemetry) -- layer 1. OTel spans.
+- [Architecture](/architecture#crew-journal-platform) -- where this stack fits.

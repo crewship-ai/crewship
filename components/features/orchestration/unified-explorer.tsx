@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Search, X, ChevronDown, ChevronRight, Filter } from "lucide-react"
+import { Search, X, ChevronDown, Filter } from "lucide-react"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"

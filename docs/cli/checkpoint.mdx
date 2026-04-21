@@ -1,0 +1,130 @@
+---
+title: "Checkpoint Commands"
+description: "Manage Cartographer mission checkpoints: create, list, restore (advisory), fork, delete."
+icon: "map"
+---
+
+# crewship checkpoint
+
+Create, inspect, restore (advisory), fork, and delete mission checkpoints. A checkpoint pins a [journal cursor](/guides/crew-journal) to a human-readable label so you can return to it later. See the [Cartographer guide](/guides/cartographer) for semantics.
+
+```bash
+crewship checkpoint <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `list` | List checkpoints for a mission. |
+| `create` | Create a checkpoint at the current journal cursor. |
+| `restore <id>` | Show divergence since a checkpoint (advisory). |
+| `fork <id>` | Spawn a new mission from a checkpoint. |
+| `delete <id>` | Delete a checkpoint. |
+
+---
+
+## `crewship checkpoint list`
+
+```bash
+crewship checkpoint list --mission MIS-42
+```
+
+| Flag | Type | Required | Description |
+|---|---|---|---|
+| `--mission` | `string` | Yes | Mission ID to list checkpoints for. |
+
+Sample output:
+
+```
+ID                        LABEL                         CURSOR                CREATED                  CREATED_BY
+chk_a1b2c3d4e5f60718      green build                   j_7f3e2a1b8c9d0e12    2026-04-17T10:23:41Z     user_123
+chk_b2c3d4e5f6071829      after migration               j_8a4f3b2c9d0e1234    2026-04-17T11:05:12Z     user_456
+```
+
+---
+
+## `crewship checkpoint create`
+
+```bash
+crewship checkpoint create --mission MIS-42 --label "green build"
+```
+
+| Flag | Type | Required | Description |
+|---|---|---|---|
+| `--mission` | `string` | Yes | Mission ID. |
+| `--label` | `string` | | Optional human-readable label. |
+
+Errors:
+
+| Exit | Meaning |
+|---|---|
+| 409 | Mission has no journal entries to anchor a checkpoint. Run some agent work first. |
+
+---
+
+## `crewship checkpoint restore <id>`
+
+**Advisory only.** The server returns the checkpoint cursor and any journal entries that diverged since the checkpoint was made. Mission state is not mutated -- use `fork` when you need a concrete branch.
+
+```bash
+crewship checkpoint restore chk_a1b2c3d4e5f60718
+```
+
+Sample output:
+
+```
+Checkpoint: chk_a1b2c3d4e5f60718
+Cursor:     j_7f3e2a1b8c9d0e12
+Diverged entries (3):
+  - mission.status_change at j_8a4f3b2c9d0e1234
+  - exec.command at j_9b5f4c3d0e1f2345
+  - approval.granted at j_0c6f5d4e1f203456
+```
+
+Or when there's no drift:
+
+```
+Checkpoint: chk_a1b2c3d4e5f60718
+Cursor:     j_7f3e2a1b8c9d0e12
+No divergence since checkpoint.
+```
+
+---
+
+## `crewship checkpoint fork <id>`
+
+Creates a new mission anchored at the checkpoint's cursor and a matching new checkpoint in it.
+
+```bash
+crewship checkpoint fork chk_a1b2c3d4e5f60718 --label "experiment-1"
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--label` | `string` | Optional label for the forked mission's initial checkpoint. |
+
+Sample output:
+
+```
+✓ Forked mission MIS-43 from checkpoint chk_a1b2c3d4e5f60718 (new checkpoint chk_new0001).
+```
+
+---
+
+## `crewship checkpoint delete <id>`
+
+```bash
+crewship checkpoint delete chk_a1b2c3d4e5f60718 --yes
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--yes` | `bool` | Skip confirmation prompt. |
+
+**Gotcha:** Forks that reference the deleted checkpoint via `fork_of` are orphaned (their reference is set to NULL). The forked missions themselves are not deleted.
+
+## Related
+
+- [Cartographer guide](/guides/cartographer).
+- [Checkpoints API](/api-reference/checkpoints).

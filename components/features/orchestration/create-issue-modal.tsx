@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   X, Loader2, Paperclip, ChevronRight, User, Bot, UserX, Check,
-  Tag, FolderKanban, MoreHorizontal,
+  Tag, FolderKanban,
 } from "lucide-react"
 import {
   Dialog,
@@ -27,7 +27,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
-import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
+import { StatusIcon } from "@/components/features/issues/status-icon"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"

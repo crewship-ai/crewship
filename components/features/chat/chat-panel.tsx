@@ -93,7 +93,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
       .catch(() => {})
   }, [])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     token,
     sessionId,

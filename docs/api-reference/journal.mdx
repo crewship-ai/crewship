@@ -1,0 +1,152 @@
+---
+title: "Journal"
+description: "Read and stream the Crew Journal -- the canonical append-only event log."
+icon: "book-open"
+---
+
+Every endpoint requires authentication and is workspace-scoped via the session context. There is no write endpoint -- entries come from backend code emitting via `journal.Writer`. See the [Crew Journal guide](/guides/crew-journal) for the data model and entry-type catalog.
+
+---
+
+## List entries
+
+```
+GET /api/v1/journal
+```
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `crew_id` | string | Filter by crew ID. |
+| `agent_id` | string | Filter by agent ID. |
+| `mission_id` | string | Filter by mission ID. |
+| `entry_type` | string | Comma-separated list (e.g. `peer.escalation,keeper.decision`). |
+| `severity` | string | Comma-separated: `info`, `notice`, `warn`, `error`. |
+| `since` | string | RFC3339 lower bound on `ts`. |
+| `until` | string | RFC3339 upper bound on `ts`. |
+| `cursor` | string | Opaque pagination token from a prior response. |
+| `limit` | integer | 1-500, default 100. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "entries": [
+    {
+      "id": "j_a1b2c3d4e5f60718",
+      "workspace_id": "ws_123",
+      "crew_id": "crw_backend",
+      "agent_id": "agt_viktor",
+      "mission_id": "MIS-42",
+      "ts": "2026-04-17T10:23:41.000Z",
+      "entry_type": "peer.escalation",
+      "severity": "warn",
+      "actor_type": "agent",
+      "actor_id": "agt_viktor",
+      "summary": "escalating DB migration to eva",
+      "payload": { "escalation_reason": "unsure about schema impact" },
+      "trace_id": "0af7651916cd43dd8448eb211c80319c"
+    }
+  ],
+  "next_cursor": "2026-04-17T10:23:41.000Z|j_a1b2c3d4e5f60718",
+  "count": 1
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `entries` | array | Page of entries, newest first. |
+| `entries[].id` | string | `j_<16-hex>` stable identifier. |
+| `entries[].ts` | string | RFC3339Nano (milli precision on write). |
+| `entries[].entry_type` | string | See [type catalog](/guides/crew-journal#entry-type-catalog). |
+| `entries[].severity` | string | `info`, `notice`, `warn`, or `error`. |
+| `entries[].actor_type` | string | `agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`. |
+| `entries[].summary` | string | Human-readable one-liner. |
+| `entries[].payload` | object? | Typed payload, shape varies by entry_type. Omitted when empty. |
+| `entries[].refs` | object? | Cross-entry links (`parent_entry_id`, `approval_id`, ...). Omitted when empty. |
+| `entries[].trace_id` | string? | W3C trace ID if telemetry is enabled. |
+| `next_cursor` | string? | Pass back via `?cursor=` for the next page. Absent on the last page. |
+| `count` | integer | Number of entries in this page. |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Bad `since` / `until` / `limit` / `cursor`. |
+| 401 | No workspace context. |
+| 500 | DB error. |
+
+---
+
+## Stream entries (SSE)
+
+```
+GET /api/v1/journal/stream
+```
+
+Server-Sent Events feed. Same query-param filters as List (limit is forced to 50 for the seed batch).
+
+**Response headers:**
+
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+X-Accel-Buffering: no
+```
+
+**Event frames:**
+
+```
+id: j_a1b2c3d4e5f60718
+event: entry
+data: {"id":"j_a1b2c3d4e5f60718","ts":"...","entry_type":"peer.escalation", ...}
+
+: heartbeat
+
+id: j_b2c3d4e5f6071829
+event: entry
+data: {...}
+```
+
+- **Seed:** sends the most recent 50 entries matching filters, then switches to live polling.
+- **Poll interval:** 1 second.
+- **Heartbeat:** `: heartbeat` comment every 15s to keep proxies from closing idle connections. Event handlers ignore comments.
+- **Watermark:** compound (ts, id) so bursts sharing a ms timestamp aren't partially dropped.
+- **Reconnect:** clients can use the SSE `Last-Event-ID` header; the server uses it as a lower bound so already-seen rows are skipped.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No workspace context. |
+| 400 | Bad query parameters. |
+| 500 | Streaming not supported by writer (ResponseWriter doesn't implement `http.Flusher`). |
+
+---
+
+## Get single entry
+
+```
+GET /api/v1/journal/{id}
+```
+
+Returns one entry by ID, workspace-scoped. 404 for unknown or cross-tenant IDs (same shape, no existence leak).
+
+**Response:** `200 OK` -- single entry object matching the `entries[]` schema above.
+
+**Errors:** `404` if not found; `401` on missing workspace.
+
+---
+
+## Tenancy
+
+- `workspace_id` is always pulled from the session context -- not from query params.
+- Cross-workspace reads are impossible: `journal.List` / `Get` / `Count` refuse to run without a workspace filter.
+- Unknown or cross-tenant IDs return `404` with the same body as "not found".
+
+## Related
+
+- [Crew Journal guide](/guides/crew-journal).
+- [`crewship journal`](/cli/journal).

@@ -1,0 +1,95 @@
+---
+title: "Hooks Commands"
+description: "List and toggle lifecycle hooks. Registration is config-time only."
+icon: "webhook"
+---
+
+# crewship hooks
+
+Manage the lifecycle-hook registry -- scripts or webhooks that fire on platform events (`assignment.completed`, `on_approval_requested`, `keeper.decision`, ...). See the [Hooks guide](/guides/hooks) for event catalog and handler kinds.
+
+```bash
+crewship hooks <subcommand> [flags]
+```
+
+There is no `register` subcommand by design. Hook registration is a config-time operation (seeded at provision or written directly via `hooks.Register`). The CLI and API are strictly read + enable/disable.
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `list` | List registered hooks. |
+| `enable <id>` | Enable a registered hook (OWNER/ADMIN). |
+| `disable <id>` | Disable a registered hook (OWNER/ADMIN). |
+
+---
+
+## `crewship hooks list`
+
+```bash
+crewship hooks list
+crewship hooks list --crew backend-team
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--crew` | `string` | Filter by crew slug or ID. Cross-tenant IDs return 404. |
+
+Sample output:
+
+```
+ID                 EVENT                     HANDLER    TARGET                                      ENABLED  CREATED
+hk_abc123          on_approval_requested     http       https://hooks.slack.com/services/...       yes      2026-03-01T09:00Z
+hk_def456          post_agent_stop           shell      /usr/local/bin/after-agent.sh              yes      2026-03-15T14:22Z
+hk_ghi789          on_budget_exceeded        subagent   oncall-router                              no       2026-04-01T10:10Z
+```
+
+Columns: ID, event, handler kind, target (URL for http, command for shell, subagent name for subagent, truncated to 40 chars), enabled, created_at.
+
+---
+
+## `crewship hooks enable <id>`
+
+```bash
+crewship hooks enable hk_abc123
+```
+
+Sample output:
+
+```
+Hook hk_abc123: enabled
+```
+
+Requires `OWNER` or `ADMIN` (403 otherwise). Emits `system.hook_toggled` into the [Crew Journal](/guides/crew-journal) with the actor's user ID.
+
+---
+
+## `crewship hooks disable <id>`
+
+```bash
+crewship hooks disable hk_abc123
+```
+
+Same auth and audit semantics as enable.
+
+## Errors
+
+| Exit | Meaning |
+|---|---|
+| 401 | Not authenticated. |
+| 403 | Logged in but not `OWNER` / `ADMIN`. |
+| 404 | Hook ID not found in your workspace (also returned for cross-tenant IDs). |
+
+## Currently-dispatched events
+
+As of PR #210:
+
+- `pre_agent_start`, `post_agent_stop`
+- `on_approval_requested`
+
+Other 12 events are defined but not yet dispatched at their call sites -- see the [Hooks guide coverage table](/guides/hooks#coverage-status-as-of-pr-210). Registering a hook on an undispatched event is legal but nothing will fire it.
+
+## Related
+
+- [Hooks guide](/guides/hooks).
+- [Hooks API](/api-reference/hooks).

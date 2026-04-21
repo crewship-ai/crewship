@@ -1,0 +1,131 @@
+---
+title: "Consolidate"
+description: "Nightly workers that compact old journal entries and extract semantic rules into crew memory."
+icon: "layers"
+---
+
+# Consolidate
+
+Two background workers run against the [Crew Journal](/guides/crew-journal) on a schedule:
+
+1. **Consolidator** -- every 6h, walks recent journal entries per crew and produces a set of learned rules appended to `.memory/topics/learned-YYYY-MM-DD.md`. Emits `memory.consolidated`.
+2. **Compactor** -- daily at 03:00 UTC, rolls up low-signal entries older than 30 days into a single `system.compaction` entry and deletes the originals. `warn`/`error` rows are preserved indefinitely.
+
+Both are optional (no summarizer = no rules; no Compactor window = no compaction). Manual trigger is available via the API and CLI.
+
+## Candidate entry types
+
+The consolidator considers these entry types for rule extraction:
+
+```go
+var candidateTypes = []journal.EntryType{
+    journal.EntryPeerEscalation,
+    journal.EntrySummaryGenerated,
+    journal.EntryKeeperDecision,
+    journal.EntryMissionStatus,
+    journal.EntryEvalRegression,
+}
+```
+
+Everything else (exec chunks, metrics, broadcast noise) is explicitly excluded so the LLM prompt stays dense and the rules grounded in decisions rather than activity.
+
+## Rules output
+
+Rules land in `{memoryRoot}/{crewSlug}/topics/learned-YYYY-MM-DD.md`. Format:
+
+```markdown
+# Learned Rules 2026-04-17
+
+## Rule: prefer staged deployments for schema changes
+**Source:** peer.escalation j_a1b2..., mission.status_change j_xyz...
+**Confidence:** 0.8
+
+When a migration adds a non-nullable column, roll it out in two steps
+(add nullable, backfill, alter to NOT NULL) to avoid production downtime.
+
+## Rule: ...
+```
+
+The [Lead](/guides/first-crew)'s crew memory search (FTS5) picks these up automatically -- see [Memory System](/guides/agent-memory).
+
+## Summarizer
+
+`SummarizerClient` is an interface:
+
+```go
+type SummarizerClient interface {
+    Summarize(ctx context.Context, req SummarizeRequest) (SummarizeResponse, error)
+}
+```
+
+Production wiring uses the Ollama adapter against a chat model (typically `llama3.1:8b` or similar). If no summarizer is configured:
+
+- Background runner skips every crew silently.
+- Manual trigger returns **202 Accepted** with `note: "no summarizer configured, skipping"` and emits `system.consolidation_triggered` + `system.consolidation_completed` (`status=skipped-no-summarizer`) so the audit trail captures the no-op.
+
+## Compactor
+
+Compaction target: `info` and `notice` entries older than 30 days that are NOT type `summary.generated`, `memory.consolidated`, or any checkpoint/fork/approval/regression. Rolls up into one `system.compaction` entry per (crew, day) bucket with a count and kind breakdown in the payload, then deletes the originals in a single transaction.
+
+Preserved indefinitely:
+
+- `warn` and `error` severity
+- `summary.generated`, `memory.consolidated`
+- Everything under `approval.*`, `checkpoint.*`, `fork.*`, `eval.regression_detected`
+
+If you want to tune retention, edit `RunnerOptions.CompactionOlderThan` and restart. Per-workspace retention is a follow-up.
+
+## Manual trigger
+
+```
+POST /api/v1/consolidate/run
+Body: {"crew_id": "...", "since": "24h"}  // both optional
+```
+
+`OWNER` or `ADMIN` only. Returns **202 Accepted** immediately; the actual run happens in a 10-minute background goroutine.
+
+Response shapes:
+
+| Condition | Response |
+|---|---|
+| Run started | `{"triggered": true, "worker_id": "csd_..."}` |
+| No summarizer configured | `202 {"accepted": true, "note": "no summarizer configured, skipping"}` |
+| Consolidator not wired (dev/test build) | `503 {"error": "consolidator not configured"}` |
+| Same workspace already running | `409 {"error": "already running"}` |
+| Invalid / cross-tenant crew_id | `404 {"error": "crew not found"}` |
+
+`since` accepts Go durations (`90m`, `24h`) plus shorthand `d` (days) and `w` (weeks). Default 24h if unset or unparseable. Soft-deleted crews are treated as not found -- a deleted crew can't grow fresh memory artifacts via explicit ID.
+
+## CLI
+
+```bash
+crewship consolidate run
+crewship consolidate run --crew cmo2pe4dj0005ba0a129f
+crewship consolidate run --since 24h
+crewship consolidate run --since 7d
+```
+
+Full reference: [`crewship consolidate`](/cli/consolidate).
+
+## Journal entries emitted
+
+| Entry | When |
+|---|---|
+| `system.consolidation_triggered` | On `Run()` entry. Payload includes `worker_id` and `reason` (`manual` or `scheduled`). |
+| `system.consolidation_completed` | On `Run()` exit. Payload includes `status` (`ok`, `skipped-no-summarizer`, `crew-not-found`, `enumerate-failed`), `crews_run`, `rules_appended`. |
+| `memory.consolidated` | Per crew, per successful cycle. Payload lists `rules_count` and paths to the output file. |
+| `system.compaction` | Per (crew, day) bucket after compaction. Payload lists kinds and row counts rolled up. |
+
+## Gotchas
+
+- **Ollama must be reachable.** Both the consolidator (via `SummarizerClient`) and the episodic indexer depend on Ollama. Set `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"` and `ollama serve` before starting the server locally.
+- **The triggered journal entry is always emitted.** Even the "no summarizer" skip path emits both triggered + completed so operators see the full round-trip. If you filter for `memory.consolidated` only, you'll miss skipped runs.
+- **Per-workspace in-flight guard.** A second manual trigger for the same workspace while the first is running returns 409. Track `worker_id` if you need to wait for completion.
+- **Compactor is aggressive on info/notice.** If you rely on `exec.command` entries older than 30 days for forensics, export them out-of-band before the Compactor rolls them up.
+
+## Related
+
+- [Crew Journal](/guides/crew-journal) -- input stream.
+- [Episodic memory](/guides/episodic-memory) -- indexer runs on the consolidator tick.
+- [Memory System](/guides/agent-memory) -- consumes the generated `topics/learned-*.md` files.
+- [`crewship consolidate`](/cli/consolidate), [Consolidate API](/api-reference/consolidate).

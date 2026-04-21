@@ -17,7 +17,7 @@ interface AnimatedEdgeData {
  * Wrapped in memo() to prevent unnecessary re-renders from polling.
  */
 function AnimatedEdgeInner({
-  id,
+  id: _id,
   sourceX,
   sourceY,
   targetX,

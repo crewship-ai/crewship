@@ -278,3 +278,81 @@ Three background services run alongside the main HTTP server:
 | **CredentialMonitor** | Configurable | Validates provider credentials (e.g., Anthropic API key status) and detects status changes (active, expired, rate-limited) |
 
 The StatsCollector uses up to 10 concurrent workers with a 3-second timeout per container to avoid blocking the polling loop on unresponsive containers.
+
+## Crew Journal Platform
+
+PR #204 introduced the Crew Journal platform -- a set of packages built around a single append-only event stream that is the canonical source of truth for every observable action.
+
+### Single-event-stream design
+
+The `journal_entries` table (migration 52) is the one write target. Every platform surface is either a read-model over that stream or a middleware that emits into it:
+
+```
+                  +-------------------+
+                  |  journal_entries  |
+                  |   (append-only)   |
+                  +---------+---------+
+                            |
+        +-------------------+---------+------------------+----------------+
+        |                   |         |                  |                |
+  Paymaster            Watch        Episodic        Cartographer     Quartermaster
+  (cost_ledger +       Roster       Memory          (checkpoints)    (eval_runs +
+   budget_limits       (agent_      (journal_                         regression
+   are the write       status row   embeddings                        report)
+   side; reads         is the       BLOB index)
+   come from the       live
+   journal +           projection)
+   rollups)
+```
+
+- [Paymaster](/guides/paymaster) writes `cost_ledger` rows and emits `llm.call` / `cost.incurred` / `budget.*` entries.
+- [Watch Roster](/guides/watch-roster) upserts `agent_status` and emits `agent.status_change`.
+- [Episodic memory](/guides/episodic-memory) selectively embeds a subset of journal entries into `journal_embeddings`.
+- [Cartographer](/guides/cartographer) anchors named checkpoints at journal cursors.
+- [Harbor Master](/guides/harbormaster) queues approvals; transitions emit `approval.*`.
+- [Hooks](/guides/hooks) fire on lifecycle events and emit `hook.fired` / `hook.blocked`.
+- [Quartermaster](/guides/quartermaster) derives typed trajectories and metrics from the journal.
+
+### Write-path order (LLM call stack)
+
+The full [LLM middleware](/guides/llm-middleware) stack composes as:
+
+```
+telemetry  ->  paymaster  ->  lookout  ->  raw provider
+```
+
+The order is load-bearing:
+
+- **Telemetry** outermost so the span covers budget enforcement + guardrails + the network hop.
+- **Paymaster** outside lookout so a blocked call still records a partial ledger row when appropriate (attempted-but-blocked audit) and a cache-eligible call doesn't waste time on guardrails before being short-circuited.
+- **Lookout** outside the raw provider so bad inputs never reach the LLM.
+
+See `internal/llm/middleware.go` for the composition function and the rationale comment block.
+
+### Adapter pattern: orchestrator decoupling
+
+The `orchestrator` package stays decoupled from `internal/api` to avoid an import cycle. It depends only on narrow interfaces (`HookDispatcher`, `ApprovalGate`, `EpisodicRecaller`, `PresenceTracker`) defined next to it. The concrete adapters live in `internal/server/orchestrator_adapters.go`:
+
+| Adapter | Interface | Wraps |
+|---|---|---|
+| `hooksAdapter` | `orchestrator.HookDispatcher` | `hooks.Dispatch` |
+| `approvalGateAdapter` | `orchestrator.ApprovalGate` | `harbormaster.Gate` (with `NewEvaluatorWithDefaults`) |
+| `episodicRecallAdapter` | `orchestrator.EpisodicRecaller` | `episodic.Recall` + `RenderInjection` |
+| `presenceAdapter` | `orchestrator.PresenceTracker` | `presence.Upsert` |
+
+The `server` package is the one place that imports all of them -- exactly because it owns top-level wiring. Any new feature that needs to be invoked from the orchestrator should follow the same pattern: define a narrow interface next to the orchestrator, write the adapter in `server/`, keep `internal/api` and `internal/<feature>` mutually unaware.
+
+### Schema footprint
+
+- **Migration 52** added 8 tables: `journal_entries`, `journal_embeddings`, `agent_status`, `approvals_queue`, `checkpoints`, `hooks_config`, `cost_ledger`, `budget_limits`.
+- **Migration 53** added `eval_runs` (Quartermaster's durable replay/regression index with status + metrics columns).
+
+### Journal emitter wiring
+
+The production `*journal.Writer` is built once at server boot and exposed via `Router.Journal()`. Handlers take it through a `SetJournal` setter (collapses nil to `noopEmitter{}`) so they never nil-panic on audit emits. Call sites emit without checking:
+
+```go
+_, _ = h.journal.Emit(ctx, journal.Entry{...})
+```
+
+The telemetry package's `RegisterJournalResolver()` ties OTel span context into the emit path so every entry carries `trace_id` / `span_id` when telemetry is configured.
