@@ -153,11 +153,11 @@ export function useTopSpenders(range: PaymasterRange, limit = 10, reloadKey = 0)
         setState({ data: null, loading: false, error: "Network error", notConfigured: false })
       }
     }
-  }, [range, limit, reloadKey])
+  }, [range, limit])
 
   useEffect(() => {
     fetcher()
-  }, [fetcher])
+  }, [fetcher, reloadKey])
 
   return state
 }

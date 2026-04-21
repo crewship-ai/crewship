@@ -3,12 +3,12 @@
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import {
-  Search, Download, Copy, Check, ChevronRight, ChevronDown, ChevronLeft,
+  Search, Download, Copy, Check, ChevronRight, ChevronDown,
   FolderOpen, FolderClosed, FileText, FileCode, FileJson, ArrowLeft,
-  GitBranch, HardDrive, Home, Users, RefreshCw, PanelLeft, PanelLeftClose,
-  Terminal, Box, Settings, Eye, LayoutDashboard, Zap, Key, Activity,
+  GitBranch, Home, RefreshCw,
+  Terminal, Box, Settings, LayoutDashboard, Zap, Key, Activity,
   Network, Store, Shield, ShieldCheck, Bot, MessageSquare, ScrollText,
-  Bug, History, Bell, BookOpen,
+  Bug, History, Bell,
   File as FileIcon,
 } from "lucide-react"
 

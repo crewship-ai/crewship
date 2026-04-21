@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react"
 import {
   X, CheckCircle2, XCircle, Clock, AlertTriangle, ArrowRight,
-  GitBranch, Users, Box, ChevronDown, ChevronRight, RotateCcw,
+  GitBranch, Users, ChevronDown, ChevronRight, RotateCcw,
   SkipForward, MousePointerClick,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -376,7 +376,7 @@ const traceStatusIcon: Record<string, React.ReactNode> = {
   SKIPPED: <ArrowRight className="size-3 text-muted-foreground/40" />,
 }
 
-function TraceTimeline({ tasks, missionStatus }: { tasks: MissionTask[]; missionStatus: string }) {
+function TraceTimeline({ tasks, missionStatus: _missionStatus }: { tasks: MissionTask[]; missionStatus: string }) {
   if (!tasks || tasks.length === 0) {
     return <p className="text-xs text-muted-foreground text-center py-8">No tasks to trace</p>
   }
