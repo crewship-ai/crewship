@@ -1,0 +1,166 @@
+---
+title: "Lifecycle Hooks"
+description: "Shell, HTTP, or subagent callbacks that fire on platform lifecycle events. Blocking and non-blocking modes supported."
+icon: "webhook"
+---
+
+# Lifecycle Hooks
+
+Hooks let workspace admins run arbitrary logic when platform events fire -- pre/post task delegation, agent start/stop, tool calls, LLM calls, memory writes, peer conversations, approvals, budget overruns, guardrail trips. They are the orchestration-layer equivalent of Claude Code's shell hooks but generalised across three handler kinds: **shell**, **http**, and **subagent**.
+
+## Events
+
+Defined in `internal/hooks/types.go` (15 events currently):
+
+| Bucket | Events |
+|---|---|
+| Task delegation | `pre_task_delegation`, `post_task_delegation` |
+| Agent lifecycle | `pre_agent_start`, `post_agent_stop` |
+| Tool calls | `pre_tool_call`, `post_tool_call` |
+| LLM calls | `pre_llm_call`, `post_llm_call` |
+| Memory writes | `pre_memory_write`, `post_memory_write` |
+| Peer conversations | `pre_peer_conversation`, `post_peer_conversation` |
+| Policy | `on_approval_requested`, `on_budget_exceeded`, `on_guardrail_triggered` |
+
+### Coverage status (as of PR #210)
+
+**Currently dispatched** (call sites wired):
+
+- `pre_agent_start`, `post_agent_stop` -- orchestrator agent lifecycle.
+- `on_approval_requested` -- emitted by `harbormaster.Enqueue` when a new request lands in the queue.
+
+**Defined but not yet dispatched** (add a `hooks.Dispatch` call at the relevant point when the corresponding platform path wires through):
+
+- `pre_task_delegation`, `post_task_delegation` -- hook into the assignment path (`orchestrator.RunAgentForAssignment`).
+- `pre_tool_call`, `post_tool_call` -- needs orchestrator tool-call interception.
+- `pre_llm_call`, `post_llm_call` -- fits cleanly into `llm.Middleware`.
+- `pre_memory_write`, `post_memory_write` -- memory consolidation path.
+- `pre_peer_conversation`, `post_peer_conversation` -- peer bridge.
+- `on_budget_exceeded`, `on_guardrail_triggered` -- Paymaster and Lookout already emit journal entries; hooks are the natural next step.
+
+When adding a new dispatch site, also add a row to `AllEvents` in `types.go` and test coverage in `hooks_test.go`.
+
+## Handler kinds
+
+```go
+const (
+    HandlerKindShell    HandlerKind = "shell"
+    HandlerKindHTTP     HandlerKind = "http"
+    HandlerKindSubagent HandlerKind = "subagent"
+)
+```
+
+### shell
+
+Runs a command via `exec.CommandContext`. Event context is passed as env vars (`CREWSHIP_EVENT`, `CREWSHIP_AGENT_ID`, `CREWSHIP_MISSION_ID`, `CREWSHIP_PAYLOAD`, ...). Stdout is captured as `Result.Payload`.
+
+Shell hooks require `OWNER` role at registration time -- an ADMIN cannot create a shell hook because arbitrary code execution on the host is a privilege escalation vector. The store enforces this:
+
+```go
+return nil, hooks.ErrShellHookNotAllowed // wrong role at register time
+```
+
+Also requires `allowedShell=true` on the hook row, confirming the operator consciously allowed shell execution for this entry.
+
+### http
+
+POSTs the event context as JSON to `handler_config.url`. Supports HMAC signing via `handler_config.hmac_secret` (header `X-Crewship-Signature: sha256=<hex>`). Timeout defaults to 5s.
+
+### subagent
+
+Dispatches to an LLM subagent via the orchestrator. Not wired by default -- the orchestrator registers a subagent handler at startup (`RegisterSubagentHandler`) that the dispatcher looks up.
+
+If a subagent hook fires without a handler registered, Dispatch returns `ErrSubagentHandlerNotConfigured`.
+
+## Blocking vs non-blocking
+
+```go
+type Hook struct {
+    ...
+    Blocking bool
+}
+```
+
+| Blocking | Dispatcher behaviour |
+|---|---|
+| `true` | Sequential, same goroutine. A `OutcomeBlock` result short-circuits with `*BlockedError` -- the caller uses `errors.As` to recover and abort the triggering operation. |
+| `false` | Fire-and-forget goroutine with `context.Background()`. `OutcomeBlock` is downgraded to a `hook.blocked` journal entry for audit; the triggering operation proceeds. |
+
+Errors from blocking handlers are logged but do NOT short-circuit -- a buggy webhook cannot wedge the platform. Only explicit `OutcomeBlock` blocks.
+
+## Matcher
+
+All fields optional and AND-combined. Empty matcher matches every event.
+
+| Field | Semantics |
+|---|---|
+| `tools` | Regex list against tool name (tool events only). Any-match. |
+| `agent_ids` | Exact match. |
+| `crew_ids` | Exact match; layered on top of row-level `crew_id`. |
+| `severities` | Exact match for severity-bearing events. |
+| `when` | Reserved for future CEL/expr predicate. Ignored today. |
+
+## Registration
+
+There is **no runtime create/delete endpoint** by design. Hooks are registered at config time via `hooks.Register(ctx, db, Hook{...})`, typically from a workspace seed or a dedicated provisioning script. The API surface is strictly read + enable/disable.
+
+```go
+_, err := hooks.Register(ctx, db, hooks.Hook{
+    WorkspaceID: ws,
+    CrewID:      crew, // empty = workspace-wide
+    Event:       hooks.EventOnApprovalRequested,
+    Matcher:     hooks.Matcher{Severities: []string{"high", "critical"}},
+    HandlerKind: hooks.HandlerKindHTTP,
+    HandlerConfig: map[string]any{
+        "url":    "https://hooks.slack.com/services/...",
+        "method": "POST",
+    },
+    Blocking: false,
+    Enabled:  true,
+    CreatedBy: userID,
+})
+```
+
+## Endpoints
+
+- `GET /api/v1/hooks[?crew_id=...]` -- list registered hooks (workspace-scoped).
+- `POST /api/v1/hooks/{id}/enable` -- OWNER/ADMIN only.
+- `POST /api/v1/hooks/{id}/disable` -- OWNER/ADMIN only.
+
+Toggling emits `system.hook_toggled` with the actor's user ID so the audit trail captures who flipped which hook when.
+
+See [Hooks API](/api-reference/hooks) for schemas.
+
+## CLI
+
+```bash
+crewship hooks list
+crewship hooks list --crew backend-team
+crewship hooks enable hk_abc
+crewship hooks disable hk_abc
+```
+
+Full reference: [`crewship hooks`](/cli/hooks). No `register` subcommand -- config-time only.
+
+## Journal entries
+
+- `hook.fired` -- every dispatch lands this. Severity escalates to `warn` on non-pass outcomes.
+- `hook.blocked` -- separate entry so UI filters for "what blocked" don't have to parse payloads.
+- `system.hook_toggled` -- admin enabled/disabled a hook.
+
+Payload includes `hook_id`, `handler_kind`, `outcome`, `latency_ms`, `blocking`, and the handler's response when non-empty.
+
+## Gotchas
+
+- **Shell hooks bypass container isolation.** They run on the host with the privileges of the `crewship` process. Restrict to OWNER role and audit `handler_config.command` carefully.
+- **Non-blocking goroutines use `context.Background()`.** Cancelling the request that triggered the dispatch does NOT cancel the hook; per-handler timeouts bound runtime. If a webhook hangs, the goroutine times out but is not killable from the caller.
+- **Event names are stable.** Renaming requires a migration on `hooks_config.event` -- breaks every existing registration.
+- **Matcher regex compile is cached forever.** A bad regex is cached as a nil sentinel; subsequent calls skip it silently. If a hook never fires, check the logs for `hooks: compile regex failed`.
+
+## Related
+
+- [Harbor Master](/guides/harbormaster) -- emits `on_approval_requested`.
+- [Paymaster](/guides/paymaster) -- future `on_budget_exceeded` source.
+- [Lookout](/guides/lookout) -- future `on_guardrail_triggered` source.
+- [Crew Journal](/guides/crew-journal) -- `hook.fired`, `hook.blocked`, `system.hook_toggled`.
+- [`crewship hooks`](/cli/hooks), [Hooks API](/api-reference/hooks).

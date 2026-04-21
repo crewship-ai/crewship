@@ -1,0 +1,110 @@
+---
+title: "Watch Roster"
+description: "Live agent presence tracking: online, busy, blocked, offline. Sweeper marks agents offline after 5 minutes idle."
+icon: "eye"
+---
+
+# Watch Roster
+
+The Watch Roster is the live presence board the UI shows before a lead dispatches work. It tracks whether every agent is reachable, busy, blocked on an approval, or offline. Transitions emit `agent.status_change` into the [Crew Journal](/guides/crew-journal) so the full history replays alongside every other event.
+
+## States
+
+```go
+type Status string
+const (
+    StatusOnline  Status = "online"  // idle, reachable, ready for work
+    StatusBusy    Status = "busy"    // actively running a task or assignment
+    StatusBlocked Status = "blocked" // waiting on keeper / approval / escalation
+    StatusOffline Status = "offline" // not seen in > 5 minutes
+)
+```
+
+The strings align with the `agent_status.status` CHECK constraint in migration 52. Changing them requires a migration.
+
+## Upsert semantics
+
+```go
+err := presence.Upsert(ctx, db, j, presence.Snapshot{
+    AgentID:     agentID,
+    WorkspaceID: ws,
+    CrewID:      crew,
+    MissionID:   mission, // threaded into journal entry, not stored in agent_status row
+    Status:      presence.StatusBusy,
+    Details:     map[string]any{"current_task_id": "T-42"},
+})
+```
+
+- **Idempotent on same-status.** A second `Upsert(busy -> busy)` refreshes `since` but does NOT emit a journal entry -- the journal is a transition log, not a heartbeat.
+- **Emits on transition.** `online -> busy -> blocked -> online -> offline` produces four `agent.status_change` entries, each with summary `"agent <id>: <prev> -> <new>"`.
+- **MissionID is not persisted** on the roster row (a single agent can legitimately be between missions). It IS threaded into the journal entry so the per-mission timeline doesn't drop transitions.
+
+## Sweeper
+
+`presence.SweepOffline(ctx, db, j, 5*time.Minute)` flips rows whose `since` is older than the threshold (default 5 min) to `offline` and emits the transition. The server wires this on a 60s ticker so idle agents don't linger as "online" forever.
+
+Payload on the timeout emit: `{"reason": "idle_timeout"}`.
+
+## Wiring
+
+The orchestrator tracks presence via the `presenceAdapter` in `internal/server/orchestrator_adapters.go`:
+
+```go
+adapter := newPresenceAdapter(db, journal, logger)
+// orchestrator calls adapter.Track(ctx, PresenceInput{...}) on lifecycle events
+```
+
+This replaced a prior path that emitted journal entries directly but never wrote the `agent_status` row -- so `/crows-nest` and `/api/v1/presence/roster` always returned empty. The adapter now calls `presence.Upsert` which atomically writes the row and emits the matching journal entry.
+
+Presence updates are best-effort: a DB blip logs a warning but does not abort an agent run.
+
+## Read endpoints
+
+- `GET /api/v1/presence/roster[?crew_id=...]` -- workspace-scoped list of roster rows. Optional crew filter narrows further.
+
+Response:
+
+```json
+{
+  "rows": [
+    {
+      "agent_id": "agt_viktor",
+      "crew_id":  "crw_backend",
+      "status":   "busy",
+      "since":    "2026-04-17T10:23:41.000Z",
+      "details":  { "current_task_id": "T-42" }
+    }
+  ],
+  "count": 1
+}
+```
+
+Cross-tenant crew IDs return 404 (same shape as "no such crew") so existence isn't leaked.
+
+See [Presence API](/api-reference/presence) for schemas.
+
+## CLI
+
+```bash
+crewship presence roster
+crewship presence roster --crew cmo2pe4dj0005ba0a129f
+```
+
+Note: `--crew` expects the crew ID today; slug resolution is TBD. See [`crewship presence`](/cli/presence).
+
+## Journal entries
+
+- `agent.status_change` -- one per real transition. Summary: `"agent <id>: <prev> -> <new>"` (or `"agent <id>: <new>"` on first-ever transition).
+
+Payload includes `status`, `prev`, and any `details` dict (e.g. `current_task_id`, `blocked_reason`).
+
+## Gotchas
+
+- **`since` is wall-clock.** If the server clock jumps, sweeper decisions can look weird. This is not load-bearing enough to warrant monotonic tracking.
+- **Details are typed loosely.** `details map[string]any` is serialised as JSON; callers are responsible for schema. Common fields: `current_task_id`, `blocked_reason`, `reason`.
+- **Offline is eventual.** An agent that crashes hard is not flagged offline until the sweeper next ticks (up to 60s) AND 5 min have passed since the last heartbeat. Don't rely on `offline` for liveness probes -- query the container state directly.
+
+## Related
+
+- [Crew Journal](/guides/crew-journal) -- `agent.status_change`.
+- [`crewship presence`](/cli/presence), [Presence API](/api-reference/presence).

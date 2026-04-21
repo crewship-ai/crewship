@@ -1,0 +1,144 @@
+---
+title: "Crew Journal"
+description: "Append-only event stream that is the single source of truth for every observable action in the platform."
+icon: "book-open"
+---
+
+# Crew Journal
+
+The Crew Journal is an append-only event stream backed by the `journal_entries` table (migration 52). Every observable action in Crewship lands here as one row: peer conversations, mission transitions, keeper decisions, LLM calls, approvals, checkpoints, hook fires, exec/network/file events.
+
+Downstream features -- [Paymaster](/guides/paymaster), [Watch Roster](/guides/watch-roster), [Episodic Memory](/guides/episodic-memory), [Cartographer](/guides/cartographer) -- are read-models or middleware over this one stream. If it happened in the platform and nobody can see it in the journal, it didn't happen.
+
+## Schema
+
+```sql
+CREATE TABLE journal_entries (
+  id           TEXT PRIMARY KEY,          -- j_<16-hex>
+  workspace_id TEXT NOT NULL,
+  crew_id      TEXT,
+  agent_id     TEXT,
+  mission_id   TEXT,
+  ts           TEXT NOT NULL,             -- RFC3339Nano, milli precision
+  entry_type   TEXT NOT NULL,             -- see catalog below
+  severity     TEXT NOT NULL DEFAULT 'info',
+  actor_type   TEXT NOT NULL,
+  actor_id     TEXT,
+  summary      TEXT NOT NULL,             -- one-line human string
+  payload      TEXT NOT NULL DEFAULT '{}',-- typed JSON by entry_type
+  refs         TEXT NOT NULL DEFAULT '{}',-- parent_entry_id, approval_id, ...
+  trace_id     TEXT,
+  span_id      TEXT,
+  expires_at   TEXT
+);
+```
+
+Entries are immutable -- corrections are new entries with `refs.parent_entry_id`. IDs are 64-bit random hex (`j_a1b2c3d4e5f60718`).
+
+### Entry type catalog
+
+Defined in `internal/journal/types.go`. Every type is a stable string -- renames require a backfill migration.
+
+| Bucket | Entry types |
+|---|---|
+| Communication | `peer.conversation`, `peer.escalation`, `message.broadcast`, `agent.mentioned` |
+| Mission | `mission.status_change`, `mission.comment`, `assignment.created/running/completed/failed`, `crew.action`, `task.delegated` |
+| Security | `keeper.request`, `keeper.decision`, `guardrail.input_blocked`, `guardrail.output_blocked`, `approval.requested/granted/denied/timeout/cancelled` |
+| Cost | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
+| Memory | `memory.updated`, `memory.consolidated`, `summary.generated` |
+| Observability | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics` |
+| Presence | `agent.status_change` |
+| Checkpointing | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
+| Eval | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
+| Hooks | `hook.fired`, `hook.blocked` |
+| System | `system.compaction`, `system.migration`, `system.hook_toggled`, `system.consolidation_triggered/completed` |
+
+Severity is one of `info`, `notice`, `warn`, `error`. Actor types: `agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`.
+
+## Writing
+
+The write surface is `journal.Emitter`:
+
+```go
+type Emitter interface {
+    Emit(ctx context.Context, e Entry) (string, error)
+    Flush(ctx context.Context) error
+}
+```
+
+The production `journal.Writer` is constructed once at server start and reached via `Router.Journal()`. Handlers emit without nil checking (`noopEmitter` is the default):
+
+```go
+_, _ = h.journal.Emit(ctx, journal.Entry{
+    WorkspaceID: ws, CrewID: crew, AgentID: agent,
+    Type:        journal.EntryKeeperDecision,
+    Severity:    journal.SeverityWarn,
+    ActorType:   journal.ActorKeeper,
+    Summary:     "keeper denied production SSH",
+    Payload:     map[string]any{"credential_id": credID, "risk_score": 8},
+})
+```
+
+Emit is asynchronous: entries are queued (buffer 1024), a background goroutine batches up to 64 rows or flushes every 100ms. When the queue is saturated the call falls back to a synchronous write -- durability over latency. Call `Flush` before tearing down a long-running test to guarantee all prior emits are on disk.
+
+## Reading
+
+### HTTP
+
+- `GET /api/v1/journal` -- paginated list, newest first. See the [API reference](/api-reference/journal).
+- `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, polls every 1s, emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows.
+- `GET /api/v1/journal/{id}` -- single entry (scoped to workspace).
+
+### CLI
+
+```bash
+crewship journal                                 # last 50 entries
+crewship journal --crew backend-team --since 24h
+crewship journal --severity warn,error
+crewship journal --type peer.escalation,keeper.decision --lines 100
+crewship journal --mission MIS-42 --format json
+```
+
+See [`crewship journal`](/cli/journal) for all flags. The CLI does not yet implement SSE -- use the web UI `/journal` for live tail.
+
+### Filtering
+
+Every filter is AND-combined and indexed at the DB level:
+
+| Query param | CLI flag | SQL predicate |
+|---|---|---|
+| `crew_id` | `--crew` | `crew_id = ?` |
+| `agent_id` | `--agent` | `agent_id = ?` |
+| `mission_id` | `--mission` | `mission_id = ?` |
+| `entry_type` | `--type` | CSV `IN (?,?,...)` |
+| `severity` | `--severity` | CSV `IN (?,?,...)` |
+| `since`, `until` | `--since` | `ts >= ?` / `ts <= ?` |
+| `cursor` | -- | keyset `(ts, id) <` prior page |
+
+Pagination is keyset (compound `ts, id`), not offset, so deep paging stays O(log n). `limit` is 1-500, default 100 for list, 50 for the SSE seed.
+
+## Tenancy
+
+Workspace isolation is enforced at the store level (`journal.List`/`Get`/`Count` take a workspace filter and refuse to run without one). The handler additionally pulls `workspace_id` from the session context -- there is no way for a caller to pass a foreign workspace id through a query parameter.
+
+Cross-tenant existence is never leaked: unknown IDs return 404 with the same shape as "not in your workspace". See [`paymaster_handler.go`](/api-reference/paymaster) for the shared `crewBelongsToWorkspace` / `missionBelongsToWorkspace` helpers used across every read handler.
+
+## Retention
+
+- `expires_at` is an optional TTL; compaction skips rows past it.
+- The daily **Compactor** (see [Consolidate](/guides/consolidate)) rolls up `info`/`notice` rows older than 30 days into one `system.compaction` entry and deletes the originals. `warn`/`error` rows are kept indefinitely.
+- `exec.output_chunk`, `container.metrics`, and `network.*` are never embedded into [Episodic memory](/guides/episodic-memory) because they would drown the signal.
+
+## Gotchas
+
+- **TS precision.** Writes serialise as `2006-01-02T15:04:05.000Z` (milli). Reads also accept RFC3339Nano and second-precision strings so backfilled rows don't fail to parse.
+- **Empty trace/span.** The `trace_id`/`span_id` columns are populated by the [telemetry](/guides/telemetry) package's `SetTraceResolver`. If OpenTelemetry is not initialised the columns stay NULL -- this is fine, not a bug.
+- **Do not rename entry types.** A rename breaks every existing row. Add a new type and dual-write during the transition instead.
+
+## Related
+
+- [Paymaster](/guides/paymaster) -- reads `llm.call` and `cost.incurred`.
+- [Watch Roster](/guides/watch-roster) -- emits `agent.status_change` on transitions.
+- [Cartographer](/guides/cartographer) -- anchors checkpoints to the journal cursor.
+- [Episodic memory](/guides/episodic-memory) -- selectively embeds high-signal entry types.
+- [`crewship journal`](/cli/journal) CLI, [Journal API reference](/api-reference/journal).

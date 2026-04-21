@@ -1,0 +1,99 @@
+---
+title: "Eval Commands"
+description: "Mission replay and regression evaluation via Quartermaster."
+icon: "clipboard-check"
+---
+
+# crewship eval
+
+Evaluate agent behaviour by replaying a mission with a fixed seed or diffing a candidate mission against a baseline. See the [Quartermaster guide](/guides/quartermaster) for the underlying model.
+
+```bash
+crewship eval <subcommand> [flags]
+```
+
+All mutating subcommands return a `run_id` immediately (the backend enqueues the work and processes it asynchronously with a 10-minute worker deadline). Poll completion via `crewship eval runs`.
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `replay <mission-id>` | Replay a mission deterministically. |
+| `regression <baseline-id> <candidate-id>` | Regression-diff two missions. |
+| `runs` | List recent eval runs. |
+
+---
+
+## `crewship eval replay <mission-id>`
+
+```bash
+crewship eval replay MIS-42 --seed 42
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--seed` | `int` | `0` | Deterministic seed for the replay (0 = server default). |
+
+Sample output:
+
+```
+Replay queued: run_id=er_a1b2c3d4e5f60718 status=queued
+```
+
+**Auth:** Requires `OWNER` or `ADMIN` role (403 otherwise). Mission must belong to your workspace (404 otherwise, same shape as "not found" so existence isn't leaked).
+
+---
+
+## `crewship eval regression <baseline-id> <candidate-id>`
+
+```bash
+crewship eval regression MIS-41 MIS-42
+```
+
+No flags. Both mission IDs must belong to your workspace -- a partial spoof (valid baseline + foreign candidate) still 404s.
+
+Sample output:
+
+```
+Regression queued: run_id=er_b2c3d4e5f6071829 status=queued
+```
+
+---
+
+## `crewship eval runs`
+
+```bash
+crewship eval runs
+crewship eval runs --limit 20
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--limit` | `int` | `50` | Max rows (1-500). |
+
+Sample output:
+
+```
+ID                         KIND        MISSION     BASELINE    STATUS       CREATED
+er_a1b2c3d4e5f60718        replay      MIS-42                  completed    2026-04-17T10:00:00Z
+er_b2c3d4e5f6071829        regression  MIS-42      MIS-41      completed    2026-04-17T10:15:00Z
+er_c3d4e5f607182930        replay      MIS-43                  failed       2026-04-17T10:30:00Z
+```
+
+Status progresses `queued` -> `running` -> `completed` | `failed`. For regression runs, the `result` column (visible in JSON output) contains either `no_regression` or `regressed: <delta summary>` like `regressed: tool success -8% cost +22%`.
+
+## Fetch a specific run result
+
+The CLI does not yet expose a dedicated `get` subcommand. For a specific run, query the API:
+
+```bash
+curl -H "Authorization: Bearer $CREWSHIP_TOKEN" \
+  "$CREWSHIP_URL/api/v1/eval/runs?limit=200" | jq '.rows[] | select(.id == "er_...")'
+```
+
+Or watch the [Crew Journal](/guides/crew-journal) for `eval.run_started`, `eval.metric`, `eval.regression_detected` entries correlated by the `run_id` in the payload.
+
+## Related
+
+- [Quartermaster guide](/guides/quartermaster).
+- [Eval API](/api-reference/eval).

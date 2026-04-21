@@ -1,0 +1,96 @@
+---
+title: "Paymaster Commands"
+description: "Cost and budget rollups across the workspace."
+icon: "credit-card"
+---
+
+# crewship paymaster
+
+View LLM spend rolled up by crew, agent, or mission. Reads from the `cost_ledger` table populated by the [Paymaster middleware](/guides/paymaster).
+
+```bash
+crewship paymaster <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `by-crew` | Spend per crew in the workspace. |
+| `by-agent <crew>` | Spend per agent inside a specific crew. |
+| `top` | Highest-cost scopes in the window. |
+
+---
+
+## `crewship paymaster by-crew`
+
+```bash
+crewship paymaster by-crew
+crewship paymaster by-crew --range 24h
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--range` | `string` | `7d` | Time window: `1h`, `24h`, `7d`, or `30d`. |
+
+Sample output:
+
+```
+Crew                            Cost (USD)   Calls       Tokens
+────────────────────────────────────────────────────────────────
+backend-team                    $ 14.3210      132      1,482,341
+marketing                       $  3.9802       28        281,004
+```
+
+---
+
+## `crewship paymaster by-agent <crew>`
+
+```bash
+crewship paymaster by-agent backend-team
+crewship paymaster by-agent backend-team --range 24h
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--range` | `string` | `7d` | Time window. |
+
+Takes a crew slug or ID as positional arg. Output columns: Agent, Cost (USD), Calls, Tokens.
+
+---
+
+## `crewship paymaster top`
+
+```bash
+crewship paymaster top --limit 5 --range 30d
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--limit` | `int` | `10` | Top N spenders (1-100). |
+| `--range` | `string` | `7d` | Time window. |
+
+Sample output:
+
+```
+ 1. crew/backend-team                           $ 14.3210   132 calls
+ 2. crew/marketing                              $  3.9802    28 calls
+ 3. agent/viktor                                $  2.1045    18 calls
+```
+
+Scope format: `<scope_kind>/<scope_id>` (one of `workspace`, `crew`, `mission`, `agent`).
+
+## Global output
+
+`--format json|yaml` works for every subcommand and emits the raw rollup structs from the API.
+
+## Known limitation
+
+Paymaster metering **only captures calls that flow through `internal/llm`** (Keeper, summaries, consolidation, reflection, quartermaster). Calls made by the agent's own CLI adapter (`claude`, `codex`, `gemini`) talking directly to the provider API **are not recorded in `cost_ledger`**. See [Paymaster guide](/guides/paymaster#known-limitation-agent-claude-cli-calls-bypass-the-middleware) for details.
+
+Consequence: the numbers here are accurate for server-side LLM activity; agent-driven spend is visible only on the provider's dashboard. Use workspace-wide budgets as the authoritative cap until the proxy rework lands.
+
+## Related
+
+- [Paymaster guide](/guides/paymaster).
+- [Paymaster API](/api-reference/paymaster).

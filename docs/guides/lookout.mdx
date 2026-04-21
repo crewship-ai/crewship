@@ -1,0 +1,131 @@
+---
+title: "Lookout"
+description: "In-process guardrails: prompt injection detection, tool-arg schema validation, structured output parsing, and secrets redaction."
+icon: "binoculars"
+---
+
+# Lookout
+
+Lookout is the guardrail layer that sits between agent inputs/outputs and the LLM. It is four independent scanners composed into a middleware:
+
+1. **injection** -- heuristic prompt-injection detector (role-override, system-prompt leak, jailbreak tropes, confusable unicode).
+2. **args** -- JSON Schema validation of tool-call arguments before they reach the tool implementation.
+3. **output** -- structured-output parser that strips markdown fences, validates against schema, and produces a corrective re-prompt.
+4. **secrets** -- regex-based secrets redactor for outbound text.
+
+All layers are purely in-process -- no network calls in the default build. An optional Lakera bridge is available for the injection layer but disabled unless explicitly wired.
+
+When a scanner blocks something it emits `guardrail.input_blocked` or `guardrail.output_blocked` into the [Crew Journal](/guides/crew-journal) so the action is auditable. **The matched secret value is NEVER persisted in the entry payload** -- only the finding kind and a stable redacted detail string.
+
+## Verdicts
+
+```go
+type Verdict string
+const (
+    VerdictAllow    Verdict = "allow"    // pass through unchanged
+    VerdictBlock    Verdict = "block"    // refuse to process
+    VerdictSanitize Verdict = "sanitize" // cleaned version available
+)
+```
+
+Severity maps to journal severity:
+
+| Lookout severity | Journal severity |
+|---|---|
+| `low` | `info` |
+| `medium` | `notice` |
+| `high` | `warn` |
+| `critical` | `error` |
+
+## Input guard
+
+Runs on every user/tool-result message before it reaches the LLM:
+
+```go
+guard := lookout.InputGuard(journalEmitter)
+ctx = lookout.WithScope(ctx, lookout.Scope{WorkspaceID: ws, CrewID: crew, AgentID: agent})
+
+_, err := guard(ctx, userMessage)
+if lookout.IsBlocked(err) {
+    // refuse the call; guardrail.input_blocked already emitted
+}
+```
+
+Detectors (in `injection.go`):
+
+| Kind | Detail |
+|---|---|
+| `role_override` | Phrases like "ignore previous instructions", "you are now", "disregard system prompt". |
+| `system_prompt_leak` | Attempts to exfiltrate the system prompt. |
+| `jailbreak` | Known jailbreak trope patterns (DAN, hypothetical framings, translations-as-evasion). |
+| `zero_width_unicode` | ZWJ/ZWNJ/ZWSP sequences. |
+| `rtl_override_unicode` | RTL override codepoints (U+202E, U+2066-2069). |
+| `lakera_detected` | External Lakera Guard verdict when enabled. |
+
+The guard is wired into [`llm.Middleware`](/guides/llm-middleware) so every `Complete()` call is scanned. The `Stream()` path scans up-front synchronously -- a separate guard in `llm/middleware.go` refuses prompt-injection before the first token flows.
+
+## Output guard
+
+The default output policy is sanitize-and-pass. The secrets scanner runs over every outbound text and returns a redacted copy alongside findings:
+
+```go
+guard := lookout.OutputGuard(j)
+redacted, err := guard(ctx, llmOutput)
+// redacted may differ from llmOutput; err is non-nil only on journal emit failure
+```
+
+Why sanitize instead of block? Losing an entire response because one `sk-xxxx` slipped through is too disruptive; redaction preserves the response while surfacing the finding in the journal. Callers that want hard-block semantics should re-scan the returned text and refuse downstream.
+
+Note: the output guard is NOT wired into `llm.Middleware`. Scanning output there would mutate text while leaving the provider-reported token counts intact -- a desync. Output scanning lives in the orchestrator streaming pipeline where text mutations are visible to the agent loop.
+
+## Secrets detectors
+
+Defined in `secrets.go`:
+
+| Kind | Pattern |
+|---|---|
+| `secret_openai` | `sk-[A-Za-z0-9]{32,}` / project-scoped `sk-proj-...` |
+| `secret_anthropic` | `sk-ant-api03-...` |
+| `secret_aws` | AKIA / ASIA IDs + 40-char secret pairs |
+| `secret_github_pat` | `ghp_`, `github_pat_`, classic 40-char hex |
+| `secret_github_oauth` | `gho_` |
+| `secret_github_app` | `ghs_` |
+| `secret_bearer_token` | `Bearer <long-b64>` |
+| `secret_password` | `password=...`, `PASSWORD: ...` in env-var-shaped strings |
+| `secret_api_key` | Generic `api_key=...`, `X-API-Key: ...` |
+
+The stored finding carries `kind` and a redacted `detail` like `"openai API key (prefix: sk-...)"`. The raw match is never emitted.
+
+## Tool-arg schema validation
+
+`lookout.ValidateArgs(schemaJSON, args)` runs draft-07 JSON Schema over a tool call's arguments. Use it before dispatching:
+
+```go
+if result, _ := lookout.ValidateArgs(mySchema, toolArgs); result.Verdict == lookout.VerdictBlock {
+    // Block the tool call; args didn't satisfy the schema.
+}
+```
+
+Unknown-key and type mismatches produce findings. Empty schema = pass.
+
+## Adding a detector
+
+Add a new `Kind` constant in `types.go`, a regex/detector function in the relevant layer file (`injection.go`, `secrets.go`, `output.go`), and register it in the scanner's internal rule list. Tests in `lookout_test.go` use table-driven cases -- add one for every new kind.
+
+Guidelines:
+
+- Detectors must be pure (no network, no state). The one exception, Lakera, is gated behind an explicit `WithLakeraAPIKey` option.
+- Never put the raw matched value in the `Finding.Matched` field for a secret detector. Use a prefix or a kind string.
+- Severity should reflect operational risk, not "how confident the regex is". A false-positive `secret_anthropic` at `warn` is fine; one at `critical` would flood oncall.
+
+## Gotchas
+
+- **Scope is required.** `emitGuardEntry` silently no-ops if `lookout.ScopeFromContext(ctx)` returns zero. Always wrap your request context with `lookout.WithScope(ctx, scope)` before invoking the guards -- the HTTP handler chain does this for you.
+- **Output guard is not in the LLM middleware.** If you add a new streaming consumer, wire `OutputGuard` yourself or secrets may flow through to clients unredacted.
+- **Sanitize verdict** is not a block. The returned text is the safe version; the `err` is non-nil only if the journal emit fell over.
+
+## Related
+
+- [LLM middleware](/guides/llm-middleware) -- where `InputGuard` is composed.
+- [Harbor Master](/guides/harbormaster) -- complementary: approvals gate the *action*, Lookout sanitises the *content*.
+- [Crew Journal](/guides/crew-journal) -- `guardrail.input_blocked` / `guardrail.output_blocked`.

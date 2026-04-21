@@ -1,0 +1,134 @@
+---
+title: "Harbor Master"
+description: "Human-in-the-loop (HITL) approval queue that gates high-risk agent actions behind a human decision."
+icon: "anchor"
+---
+
+# Harbor Master
+
+Harbor Master is the HITL approval workflow. Agents call `Gate` before high-risk actions (destructive ops, production targets, expensive tool calls); if a rule matches, the action is queued in `approvals_queue` and either logged-and-continued (**async**) or paused until a human decides (**sync**). Decisions and timeouts emit journal entries so the audit trail is complete.
+
+This complements [Lookout](/guides/lookout): Lookout sanitises *content*; Harbor Master gates *actions*.
+
+## Gate modes
+
+```go
+const (
+    ModeNone  Mode = iota // bypass rules entirely (trusted callers)
+    ModeAsync             // enqueue, agent keeps going
+    ModeSync              // enqueue, block agent until decided or timeout
+)
+```
+
+| Mode | Behaviour | Use |
+|---|---|---|
+| `ModeNone` | Returns `{Approved: true, NotGated: true}` without consulting rules. | Keeper or system-level callers that are trusted. |
+| `ModeAsync` | If a rule matches, enqueue and return `Pending=true`. Caller continues. | Low-risk logging; humans see a trailing record but the agent never waits. |
+| `ModeSync` | Poll `approvals_queue` every second until status leaves `pending`. | High-risk actions that must not proceed without a human yes/no. |
+
+Sync mode respects `ctx.Done()` (so request cancellation unblocks the poll) and uses a client-side deadline (`TimeoutSecs`, default 3600) on top of the server-side timeout sweeper -- either can flip the row to `timeout` and unblock the gate.
+
+## Rule evaluation
+
+The default `Evaluator` comes pre-loaded with rules for destructive ops, cost thresholds, and production target patterns (see `rules.go`). Callers can compose their own:
+
+```go
+eval := harbormaster.NewEvaluator(
+    harbormaster.RuleMatcher{
+        Name:        "destructive_shell",
+        ToolPattern: regexp.MustCompile(`(?i)^(rm|drop|delete|truncate)`),
+        MapsToKind:  harbormaster.KindDestructiveOp,
+    },
+    harbormaster.RuleMatcher{
+        Name:             "expensive_tool",
+        CostThresholdUSD: 5.0,
+        MapsToKind:       harbormaster.KindCostThreshold,
+    },
+    harbormaster.RuleMatcher{
+        Name:              "production_target",
+        TargetEnvPatterns: []string{"prod", "production"},
+        MapsToKind:        harbormaster.KindTargetEnvironment,
+    },
+)
+```
+
+A rule fires when ANY of its non-zero conditions match. `RequireWhen(tool, args)` is a free-form last-resort predicate.
+
+The orchestrator wires this via `approvalGateAdapter` in `internal/server/orchestrator_adapters.go`, which uses `NewEvaluatorWithDefaults()`.
+
+## Queue schema
+
+```sql
+CREATE TABLE approvals_queue (
+  id               TEXT PRIMARY KEY,
+  workspace_id     TEXT NOT NULL,
+  crew_id          TEXT,
+  agent_id         TEXT,
+  mission_id       TEXT,
+  requested_by     TEXT,
+  kind             TEXT NOT NULL,  -- tool_call | cost_threshold | destructive_op | target_environment | custom
+  reason           TEXT,
+  payload          TEXT NOT NULL DEFAULT '{}',
+  status           TEXT NOT NULL CHECK (status IN ('pending','approved','denied','timeout','cancelled')),
+  decided_by       TEXT,
+  decided_at       TEXT,
+  decision_comment TEXT,
+  timeout_at       TEXT,
+  created_at       TEXT NOT NULL
+);
+```
+
+## Endpoints
+
+- `GET /api/v1/approvals?status=pending&limit=50` -- inbox. Status defaults to `pending`; use `?status=all` for full history.
+- `GET /api/v1/approvals/{id}` -- full request including payload.
+- `POST /api/v1/approvals/{id}/decide` -- body `{"status":"approved|denied","comment":"..."}`. **Requires OWNER or ADMIN** workspace role; 403 otherwise.
+
+Cross-tenant IDs return 404 with the "not found" shape. Deciding a non-pending row returns 409 (`already decided`).
+
+See [Approvals API](/api-reference/approvals) for full schemas.
+
+## Timeout sweeper
+
+`harbormaster.StartTimeoutSweeper(ctx, db, j, 30*time.Second)` runs a background goroutine that flips rows past `timeout_at` from `pending` to `timeout` and emits `approval.timeout`. The server starts this once at boot.
+
+On `ModeSync`, the sweeper AND the client-side deadline both try to flip the row -- whichever wins, the row is consistent. A race with a last-second decide is handled: if the UPDATE affects zero rows Gate re-reads the row and returns the human decision rather than misreporting a timeout.
+
+## CLI
+
+```bash
+crewship approvals list                             # inbox
+crewship approvals list --status approved --limit 100
+crewship approvals approve <id> --comment "looks safe"
+crewship approvals deny <id>   --comment "wrong mission"
+```
+
+See [`crewship approvals`](/cli/approvals). `cancel` is not yet implemented -- the backend endpoint is pending.
+
+## Hook integration
+
+The [hooks](/guides/hooks) system fires `on_approval_requested` when a new request is enqueued (wired via `harbormaster.Enqueue` calling into the hooks dispatcher). Use it to page oncall, post to Slack, or auto-escalate:
+
+```yaml
+# hooks_config row (illustrative -- registration is config-time)
+event: on_approval_requested
+handler_kind: http
+handler_config:
+  url: https://hooks.slack.com/services/...
+  method: POST
+matcher:
+  severities: ["high", "critical"]
+```
+
+## Gotchas
+
+- **Only OWNER and ADMIN can decide.** The `Decide` handler inline-checks `RoleFromContext` and returns 403 for anyone else. This used to be documented as "middleware-enforced" but there was no middleware -- the check is now explicit in the handler.
+- **Soft-delete = denial.** If the row vanishes between enqueue and poll (e.g. DB cleanup), Gate fails closed with `Denied=true`.
+- **Sync mode holds an HTTP goroutine.** A long-running sync approval pins one connection. Don't route high-volume traffic through sync mode; use async + a hook for routing.
+- **TimeoutSecs is per-call.** If a caller passes 30 and the sweeper interval is 30, you can get one extra poll where the row is still pending but timeout_at has passed -- both paths converge, but test expectations should allow 1-2s of slop.
+
+## Related
+
+- [Crew Journal](/guides/crew-journal) -- `approval.requested`, `approval.granted`, `approval.denied`, `approval.timeout`, `approval.cancelled`.
+- [Hooks](/guides/hooks) -- `on_approval_requested` event.
+- [`crewship approvals`](/cli/approvals), [Approvals API](/api-reference/approvals).

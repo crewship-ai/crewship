@@ -1,0 +1,128 @@
+---
+title: "Hooks"
+description: "Lifecycle hook registry -- read + enable/disable only."
+icon: "webhook"
+---
+
+All endpoints require authentication and are workspace-scoped. There is **no register / create / delete endpoint** -- hook registration is a config-time operation (via `hooks.Register` in Go). See the [Hooks guide](/guides/hooks).
+
+---
+
+## List hooks
+
+```
+GET /api/v1/hooks?crew_id=<optional>
+```
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `crew_id` | string | Optional. Filter to hooks targeting this crew. Cross-tenant IDs return 404. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    {
+      "id": "hk_abc123",
+      "workspace_id": "ws_123",
+      "crew_id": "crw_backend",
+      "event": "on_approval_requested",
+      "handler_kind": "http",
+      "handler_config": {
+        "url": "https://hooks.slack.com/services/...",
+        "method": "POST",
+        "hmac_secret": "redacted_on_read"
+      },
+      "matcher": {
+        "severities": ["warn", "error"]
+      },
+      "enabled": true,
+      "blocking": false,
+      "created_by": "user_123",
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-04-15T14:22:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `rows[].event` | string | One of the 15 lifecycle events. See [Hooks guide](/guides/hooks#events). |
+| `rows[].handler_kind` | string | `shell`, `http`, or `subagent`. |
+| `rows[].handler_config` | object | Handler-specific config (URL for http, command for shell, subagent name for subagent). |
+| `rows[].matcher` | object | Optional filter: `tools`, `agent_ids`, `crew_ids`, `severities`. Empty = match-all. |
+| `rows[].blocking` | boolean | If true, a Block outcome short-circuits the triggering operation. Non-blocking runs in a goroutine. |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No workspace. |
+| 404 | `crew_id` filter points to cross-tenant crew. |
+| 500 | DB error. |
+
+---
+
+## Enable
+
+```
+POST /api/v1/hooks/{id}/enable
+```
+
+**Auth:** `OWNER` or `ADMIN` only (403 otherwise). Enabling a hook can invoke shell commands, hit third-party webhooks, or dispatch subagents -- the role bar matches that risk.
+
+**Response:** `200 OK`
+
+```json
+{ "id": "hk_abc123", "enabled": true }
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `id`. |
+| 401 | Not authenticated. |
+| 403 | Not OWNER/ADMIN. |
+| 404 | Hook not in your workspace. |
+| 500 | DB error. |
+
+Emits `system.hook_toggled` into the journal with the actor's user ID.
+
+---
+
+## Disable
+
+```
+POST /api/v1/hooks/{id}/disable
+```
+
+Same auth rules, same response shape with `"enabled": false`.
+
+## Registration (Go only)
+
+No HTTP endpoint. Call `hooks.Register` from workspace provisioning code:
+
+```go
+_, err := hooks.Register(ctx, db, hooks.Hook{
+    WorkspaceID: ws,
+    Event:       hooks.EventOnApprovalRequested,
+    HandlerKind: hooks.HandlerKindHTTP,
+    HandlerConfig: map[string]any{
+        "url": "https://...",
+    },
+    Enabled: true,
+})
+```
+
+Shell hooks additionally require the caller's role to be `OWNER` -- `hooks.ErrShellHookNotAllowed` otherwise.
+
+## Related
+
+- [Hooks guide](/guides/hooks).
+- [`crewship hooks`](/cli/hooks).

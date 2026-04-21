@@ -1,0 +1,77 @@
+---
+title: "Consolidate Commands"
+description: "Force an immediate memory consolidation run."
+icon: "layers"
+---
+
+# crewship consolidate
+
+Trigger the [Consolidate](/guides/consolidate) worker -- the background process that compacts recent agent/crew journal activity into semantic rules appended to `.memory/topics/learned-*.md`. Normally runs on a 6h schedule; this command forces an immediate pass.
+
+```bash
+crewship consolidate <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---|---|
+| `run` | Force an immediate consolidation run. |
+
+---
+
+## `crewship consolidate run`
+
+```bash
+crewship consolidate run
+crewship consolidate run --crew cmo2pe4dj0005ba0a129f
+crewship consolidate run --since 24h
+crewship consolidate run --since 7d
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--crew` | `string` | Limit to a single crew ID (slug resolution not yet wired). Empty = every crew in the workspace. |
+| `--since` | `string` | Only consider journal entries newer than this window. Accepts Go durations (`90m`, `24h`) plus `d`/`w` shorthand (`7d`, `2w`). Default 24h. |
+
+The command takes **no positional args** -- scope is passed via flags. A bare `crewship consolidate run backend-team` fails (`unknown command`).
+
+Sample outputs:
+
+```
+Consolidation triggered (worker_id=csd_a1b2c3d4e5f6)
+```
+
+```
+Accepted, but skipped: no summarizer configured, skipping
+```
+
+`Accepted` (202) with a note means the consolidator is wired but lacks a summarizer client -- set `OLLAMA_HOST` and install a chat model.
+
+## Requirements
+
+- **Auth:** `OWNER` or `ADMIN` role (403 otherwise).
+- **Ollama:** The consolidator needs a summarizer LLM. In local dev, start Ollama with the external-SSD model path:
+  ```bash
+  OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models" ollama serve
+  ```
+
+## Errors
+
+| Exit | Meaning |
+|---|---|
+| 401 | Not authenticated. |
+| 403 | Logged in but not `OWNER` / `ADMIN`. |
+| 404 | `--crew` points to a crew outside your workspace or soft-deleted. |
+| 409 | A consolidation is already running for this workspace. |
+| 503 | Server built without a consolidator instance (dev/test builds). |
+
+## Journal entries emitted
+
+Even when skipped, the run emits both `system.consolidation_triggered` and `system.consolidation_completed` so the audit trail captures the no-op. See the [Consolidate guide](/guides/consolidate#journal-entries-emitted) for payload shapes.
+
+## Related
+
+- [Consolidate guide](/guides/consolidate).
+- [Consolidate API](/api-reference/consolidate).
+- [Episodic memory](/guides/episodic-memory) -- indexer runs on the same schedule.

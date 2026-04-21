@@ -1,0 +1,128 @@
+---
+title: "Quartermaster"
+description: "Mission replay, regression detection, and LLM-as-judge evaluation over journal trajectories."
+icon: "clipboard-check"
+---
+
+# Quartermaster
+
+Quartermaster is the eval framework. It reads the [Crew Journal](/guides/crew-journal) and derives typed "what happened" artifacts: a step-by-step trajectory, aggregate metrics, regression reports that compare two runs, and LLM-as-judge verdicts for qualitative scoring.
+
+**Replay** in this package means **observational replay** -- rehydrate the trajectory from the journal and recompute metrics. Re-executing agents end-to-end is a later tier and not in scope.
+
+The durable index of runs lives in `eval_runs` (migration 53). Each run status is updated from `queued` -> `running` -> `completed`/`failed` by the background worker.
+
+## Metrics
+
+```go
+type EvalMetrics struct {
+    ToolCallCount    int
+    ToolSuccessRate  float64  // 0..1 passed/total over exec+keeper outcomes
+    StepsToGoal      int
+    ConvergenceRatio float64  // optimal/actual heuristic
+    TotalCostUSD     float64
+    TotalTokens      int64
+    Hallucinations   int      // guardrail.output_blocked count at warn/error
+    FailureModes     []string // MAST taxonomy from journal patterns
+}
+```
+
+Derived from the filtered trajectory -- low-value entry types (`exec.output_chunk`, `container.metrics`, `network.port_*`) are dropped during extraction so metrics reflect meaningful actions, not chatter.
+
+## Replay
+
+```
+POST /api/v1/eval/replay
+Body: {"mission_id": "MIS-42", "seed": 42}
+-> {"run_id": "er_a1b2c3d4e5f60718", "status": "queued"}
+```
+
+Reads the mission's journal, extracts a trajectory, and computes a `seed_signature` (sha256 over the step-type and tool-name sequence). If you replay the same mission twice with no drift the signature is stable -- divergence flags intermittent tool behaviour or non-determinism.
+
+Workspace-scoped: the mission must belong to the caller's workspace. `OWNER` or `ADMIN` role required.
+
+The handler returns **202 Accepted** immediately; the actual extract+compute+emit runs in a 10-minute goroutine. Poll via `crewship eval runs` or `GET /api/v1/eval/runs`.
+
+## Regression
+
+```
+POST /api/v1/eval/regression
+Body: {"baseline_mission_id": "MIS-41", "candidate_mission_id": "MIS-42"}
+-> {"run_id": "er_...", "status": "queued"}
+```
+
+Computes metrics for both missions and compares. Delta signs matter -- cost going up is a regression, tool success rate going up is an improvement:
+
+| Metric | Direction that counts as regression | Threshold |
+|---|---|---|
+| `ToolSuccessRate` | Down | > 5% |
+| `TotalCostUSD` | Up | > 20% |
+| `StepsToGoal` | Up | > 30% |
+| `Hallucinations` | Up | Any increase |
+
+When a regression is detected the run completes with `result: "regressed: <delta summary>"` and emits `eval.regression_detected` into the journal (which [Episodic memory](/guides/episodic-memory) picks up).
+
+Both mission IDs must belong to the caller's workspace -- a partial spoof (valid baseline + foreign candidate) still 404s.
+
+## List runs
+
+```
+GET /api/v1/eval/runs?limit=50
+```
+
+Returns newest-first, workspace-scoped. Limit 1-200, default 50.
+
+```json
+{
+  "rows": [
+    {
+      "id": "er_a1b2c3d4",
+      "kind": "regression",
+      "mission_id": "MIS-42",
+      "baseline_mission_id": "MIS-41",
+      "status": "completed",
+      "result": "regressed: tool success -8%",
+      "created_at": "2026-04-17T10:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+## LLM-as-judge
+
+The `Judge` interface is provider-neutral -- callers plug Ollama, Anthropic, or a stub.
+
+```go
+type JudgeInterface interface {
+    Grade(ctx context.Context, subject string, rubric []string) (JudgeVerdict, error)
+}
+```
+
+`EnsembleJudge` runs the same grade multiple times with **rubric-shuffle anti-bias** (permuting rubric order per invocation) and aggregates via median + stddev. Stddev > 0.25 lowers the verdict's `Confidence` and flips `HumanEscalate = true`.
+
+Used by [Reflection](/guides/reflection) to synthesize critiques and by future eval rubrics.
+
+## CLI
+
+```bash
+crewship eval replay MIS-42 --seed 42
+crewship eval regression MIS-41 MIS-42
+crewship eval runs --limit 20
+```
+
+Full reference: [`crewship eval`](/cli/eval).
+
+## Gotchas
+
+- **Seed is informational today.** `Replay` computes a seed signature but does not re-execute agents with that seed -- observational replay only. The seed column exists so future re-execution can anchor to it.
+- **Regression thresholds are hard-coded.** Edit `internal/quartermaster/regression.go` to change them. A DB-backed config is a follow-up.
+- **10-minute deadline on workers.** A mission with very long journals may not finish replay. If you see `failed: context deadline exceeded`, raise the `ReplayBudget` in the handler or trim the mission.
+- **Terminal updates use a fresh context.** The worker has 10 min; each status write gets 5s. If the worker deadline fires, the terminal `failed` row write still succeeds because its context is independent.
+
+## Related
+
+- [Reflection](/guides/reflection) -- uses the quartermaster `Judge` for ensemble grading.
+- [Crew Journal](/guides/crew-journal) -- `eval.run_started`, `eval.metric`, `eval.regression_detected`.
+- [Episodic memory](/guides/episodic-memory) -- embeds regression events for future recall.
+- [`crewship eval`](/cli/eval), [Eval API](/api-reference/eval).
