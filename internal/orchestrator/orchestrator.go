@@ -602,6 +602,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		ToolName:    "agent_run",
 		Severity:    "info",
 		Payload: map[string]any{
@@ -618,6 +619,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
 			ToolName:    "agent_run",
 			Payload:     map[string]any{"agent_slug": req.AgentSlug, "chat_id": req.ChatID},
 		})
