@@ -101,6 +101,34 @@ func TestAdjustModeUpgrade(t *testing.T) {
 	}
 }
 
+// Regression: quorum must count only approved+denied — timeouts and
+// cancellations are non-signal. Before the fix, 9 timeouts + 1 approve
+// passed quorum (Total=10 >= 10) and flipped sync→async after a single
+// real human decision, which is the exact opposite of the safety margin.
+func TestAdjustModeQuorumIgnoresTimeouts(t *testing.T) {
+	db := openRewardTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+	ws := "ws_reward"
+	tool := "shell.exec"
+	args := map[string]any{"cmd": "ls"}
+
+	// 9 timeouts — non-signal outcomes that must NOT count toward quorum.
+	for i := 0; i < 9; i++ {
+		if err := RecordOutcome(ctx, db, ws, tool, args, OutcomeTimeout, "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Plus 1 real approval → Total=10, decided=1. Quorum must fail.
+	if err := RecordOutcome(ctx, db, ws, tool, args, OutcomeApproved, "user", ""); err != nil {
+		t.Fatal(err)
+	}
+	adj, reason, _ := AdjustMode(ctx, db, ws, tool, args, ModeSync)
+	if adj != ModeSync {
+		t.Errorf("1 real decision + 9 timeouts must NOT tune, got %v (%s)", adj, reason)
+	}
+}
+
 func TestResetAutoTuning(t *testing.T) {
 	db := openRewardTestDB(t)
 	defer db.Close()

@@ -190,18 +190,22 @@ func AdjustMode(ctx context.Context, db *sql.DB, workspaceID, tool string,
 	if err != nil {
 		return requested, "", err
 	}
-	// Need a quorum before tuning — acting on 3 decisions flips modes
-	// too aggressively. Half-window is the minimum evidence bar.
-	if counts.Total < RewardHistorySize/2 {
+	// Need a quorum of REAL human decisions before tuning — timeouts and
+	// cancellations are non-signal by design (ApproveRate / DenyRate both
+	// exclude them). Using Total would let `9 timeouts + 1 approve` clear
+	// the bar and flip sync→async after one actual decision — exactly
+	// the opposite of the safety margin we want.
+	decided := counts.Approved + counts.Denied
+	if decided < RewardHistorySize/2 {
 		return requested, "", nil
 	}
 	if requested == ModeSync && counts.ApproveRate() > AutoDowngradeApproveRate {
 		return ModeAsync, fmt.Sprintf("auto-downgrade sync→async: %.0f%% approved over last %d decisions",
-			counts.ApproveRate()*100, counts.Total), nil
+			counts.ApproveRate()*100, decided), nil
 	}
 	if requested == ModeAsync && counts.DenyRate() > AutoUpgradeDenyRate {
 		return ModeSync, fmt.Sprintf("auto-upgrade async→sync: %.0f%% denied over last %d decisions",
-			counts.DenyRate()*100, counts.Total), nil
+			counts.DenyRate()*100, decided), nil
 	}
 	return requested, "", nil
 }
