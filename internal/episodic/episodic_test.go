@@ -52,6 +52,15 @@ CREATE TABLE journal_embeddings (
     reference_count INTEGER NOT NULL DEFAULT 0,
     last_referenced_at TEXT
 );
+
+CREATE TABLE memory_relations (
+    entry_id TEXT NOT NULL,
+    related_entry_id TEXT NOT NULL,
+    relation_kind TEXT NOT NULL,
+    score REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY(entry_id, related_entry_id, relation_kind)
+);
 `
 
 type stubEmbedder struct {

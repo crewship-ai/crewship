@@ -715,6 +715,12 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
 	r.mux.Handle("POST /api/v1/approvals/reset-auto-tuning", authed(wsCtx(http.HandlerFunc(ah.ResetAutoTuning))))
 
+	// Memory health dashboard — 5-metric score with per-crew scope.
+	// Read-only; available to every workspace member because the
+	// output is aggregate counts and ratios, no raw entry content.
+	mhh := NewMemoryHealthHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/memory/health", authed(wsCtx(http.HandlerFunc(mhh.Get))))
+
 	// Hooks registry: lifecycle intercepts. List is available to every
 	// workspace member for auditability; enable/disable is OWNER/ADMIN
 	// only because flipping a hook can invoke shell commands.

@@ -222,7 +222,39 @@ func runCompactionLoop(ctx context.Context, db *sql.DB, comp *Compactor, opts Ru
 		} else {
 			opts.Logger.Info("memory decay tick completed", "rows_updated", n)
 		}
+		// Persist one workspace-level HealthSnapshot per workspace
+		// so the dashboard has a daily time-series to plot.
+		if err := snapshotAllWorkspaces(ctx, db, opts); err != nil {
+			opts.Logger.Warn("health snapshot tick failed", "err", err)
+		}
 	}
+}
+
+// snapshotAllWorkspaces computes + persists a workspace-wide health
+// score per workspace. Crew-level snapshots stay on-demand via the
+// API because workspaces with 100+ crews would push compute past
+// what "nightly" is supposed to mean.
+func snapshotAllWorkspaces(ctx context.Context, db *sql.DB, opts RunnerOptions) error {
+	ws, err := listWorkspaces(ctx, db)
+	if err != nil {
+		return fmt.Errorf("list workspaces: %w", err)
+	}
+	for _, id := range ws {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		snap, err := ComputeHealth(ctx, db, id, "")
+		if err != nil {
+			opts.Logger.Warn("health compute failed", "err", err, "workspace_id", id)
+			continue
+		}
+		if err := PersistSnapshot(ctx, db, snap); err != nil {
+			opts.Logger.Warn("health persist failed", "err", err, "workspace_id", id)
+		}
+	}
+	return nil
 }
 
 // compactAllWorkspaces runs compaction for each workspace. Each workspace

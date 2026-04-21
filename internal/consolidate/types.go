@@ -78,9 +78,10 @@ type ConsolidationResult struct {
 // over deleted rows — it's not exact DB reclaim but is representative of
 // the cost of the removed entries.
 type CompactResult struct {
-	EntriesDeleted int64
-	BucketsCreated int64
-	BytesFreed     int64
+	EntriesDeleted  int64
+	EntriesArchived int64
+	BucketsCreated  int64
+	BytesFreed      int64
 }
 
 // SummarizerClient is the minimum surface the consolidator needs from an

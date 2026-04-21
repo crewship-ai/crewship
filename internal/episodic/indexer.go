@@ -233,7 +233,16 @@ func (x *Indexer) index(ctx context.Context, e journal.Entry) error {
 			indexed_at = excluded.indexed_at`,
 		e.ID, e.WorkspaceID, nullable(e.CrewID), nullable(e.AgentID),
 		x.embedder.Model(), x.embedder.Dim(), EncodeVector(vec), importance)
-	return err
+	if err != nil {
+		return err
+	}
+	// Link similar entries so the Reachability metric has a graph to
+	// walk and reflection prompts can surface neighbours. Best-effort
+	// — a link failure doesn't invalidate the embed itself.
+	if linkErr := LinkSimilarOnIndex(ctx, x.db, e.ID, e.WorkspaceID, e.CrewID, vec, 0.8); linkErr != nil {
+		x.logger.Warn("episodic: link similar failed", "err", linkErr, "entry", e.ID)
+	}
+	return nil
 }
 
 func nullable(s string) any {

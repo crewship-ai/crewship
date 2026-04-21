@@ -171,6 +171,7 @@ type Orchestrator struct {
 	approvalGate   ApprovalGate
 	episodicRecall EpisodicRecaller
 	presence       PresenceTracker
+	memoryMetrics  MemoryMetricsReader
 }
 
 // HookDispatcher is the narrow interface the orchestrator uses to fire
@@ -310,6 +311,51 @@ func (o *Orchestrator) getPresence() PresenceTracker {
 type noopPresence struct{}
 
 func (noopPresence) Track(_ context.Context, _ PresenceInput) error { return nil }
+
+// MemoryMetricsReader is the narrow surface the orchestrator uses to
+// build the in-session nudge + cost-awareness blocks. Same adapter
+// pattern as the other integration points: orchestrator stays
+// decoupled from internal/journal + cost_ledger SQL; a server-side
+// adapter wraps *sql.DB. Both methods are best-effort — errors
+// degrade to "skip the nudge / cost line" rather than blocking a run.
+type MemoryMetricsReader interface {
+	// EntriesSinceLastMemoryUpdate returns how many journal entries
+	// the agent has emitted since its last memory.updated entry,
+	// falling back to a 30-day window when no memory.updated exists.
+	EntriesSinceLastMemoryUpdate(ctx context.Context, workspaceID, agentID string) (int64, error)
+
+	// AgentSpendLast24h returns the paymaster rollup for a single
+	// agent over the last 24h. Zero counts mean no calls — caller
+	// should skip the block rather than print "0 calls / 0 spent".
+	AgentSpendLast24h(ctx context.Context, workspaceID, agentID string) (usd float64, tokens int64, calls int64, err error)
+}
+
+// SetMemoryMetrics wires the nudge / cost-awareness reader. nil is
+// accepted and swapped with a no-op so call sites don't need a
+// nil check.
+func (o *Orchestrator) SetMemoryMetrics(m MemoryMetricsReader) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.memoryMetrics = m
+}
+
+func (o *Orchestrator) getMemoryMetrics() MemoryMetricsReader {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.memoryMetrics == nil {
+		return noopMemoryMetrics{}
+	}
+	return o.memoryMetrics
+}
+
+type noopMemoryMetrics struct{}
+
+func (noopMemoryMetrics) EntriesSinceLastMemoryUpdate(_ context.Context, _, _ string) (int64, error) {
+	return 0, nil
+}
+func (noopMemoryMetrics) AgentSpendLast24h(_ context.Context, _, _ string) (float64, int64, int64, error) {
+	return 0, 0, 0, nil
+}
 
 func (o *Orchestrator) getHooks() HookDispatcher {
 	o.mu.RLock()
