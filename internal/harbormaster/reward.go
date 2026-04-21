@@ -53,16 +53,7 @@ func RecordOutcome(ctx context.Context, db *sql.DB, workspaceID, tool string,
 	if workspaceID == "" || tool == "" {
 		return fmt.Errorf("harbormaster: RecordOutcome requires workspace_id + tool")
 	}
-	id := "grh_" + randomToken(8)
-	_, err := db.ExecContext(ctx, `INSERT INTO gate_reward_history
-		(id, workspace_id, tool_name, args_hash, outcome, decided_by, decided_at, request_id)
-		VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
-		id, workspaceID, tool, HashArgs(args), string(outcome),
-		nullableStr(decidedBy), nullableStr(requestID))
-	if err != nil {
-		return fmt.Errorf("harbormaster: record outcome: %w", err)
-	}
-	return nil
+	return RecordOutcomeAt(ctx, db, workspaceID, tool, args, outcome, decidedBy, requestID, time.Now().UTC())
 }
 
 // HashArgs is the stable hashing function used to group "same-shape"

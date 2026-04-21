@@ -225,38 +225,50 @@ func assembleSections(startMarker, endMarker string, sections []memorySection, b
 
 	// Deduct the full wrapper (start + header + end + trailing newlines)
 	// from the per-section budget so the overall block stays within the
-	// caller's cap. Subtracting only the header lets a tight budget still
-	// emit startMarker + endMarker + blank lines with no content, which
-	// wastes budget on pure framing and crowds out other prompt sections.
+	// caller's cap. Subtracting only the header lets a tight budget
+	// overshoot by start/end marker length. If after deduction there's no
+	// room for any content we return "" so we never emit a frame with
+	// zero meaningful content.
+	const truncSuffix = "\n...(truncated)"
 	wrapperLen := len(startMarker) + 1 + len(untrustedHeader) + len(endMarker) + 2
 	if budget <= wrapperLen {
 		return ""
 	}
-	budget -= wrapperLen
+	contentBudget := budget - wrapperLen
+
+	// Build content first so we can skip the wrapper entirely when no
+	// section fit — that's the "empty framed block" case CodeRabbit
+	// flagged.
+	var content strings.Builder
+	totalChars := 0
+	for _, s := range sections {
+		if s.content == "" || totalChars >= contentBudget {
+			continue
+		}
+		section := fmt.Sprintf("--- %s ---\n%s\n", s.label, s.content)
+		remaining := contentBudget - totalChars
+		if len(section) > remaining {
+			if remaining <= len(truncSuffix) {
+				continue
+			}
+			// Reserve room for the truncation suffix inside remaining
+			// so slice+suffix fits the cap exactly. Without this,
+			// slicing to `remaining` and then appending the suffix
+			// overshoots by len(truncSuffix).
+			cut := remaining - len(truncSuffix)
+			section = section[:cut] + truncSuffix
+		}
+		content.WriteString(section)
+		totalChars += len(section)
+	}
+	if totalChars == 0 {
+		return ""
+	}
 
 	var b strings.Builder
 	b.WriteString(startMarker + "\n")
 	b.WriteString(untrustedHeader)
-	totalChars := 0
-
-	for _, s := range sections {
-		if s.content == "" || totalChars >= budget {
-			continue
-		}
-
-		section := fmt.Sprintf("--- %s ---\n%s\n", s.label, s.content)
-		remaining := budget - totalChars
-		if len(section) > remaining {
-			if remaining > minTruncationChars {
-				section = section[:remaining] + "\n...(truncated)"
-			} else {
-				continue // skip — not enough room for meaningful content
-			}
-		}
-		b.WriteString(section)
-		totalChars += len(section)
-	}
-
+	b.WriteString(content.String())
 	b.WriteString(endMarker + "\n\n")
 	return b.String()
 }

@@ -212,11 +212,13 @@ func (x *Indexer) index(ctx context.Context, e journal.Entry) error {
 	// calculation in one place so ops can reason about why a given hit
 	// ranks where it does.
 	importance := BaseImportance(e.Type, e.Severity, e.Priority)
-	// UPSERT preserves reinforcement signal on reindex: reference_count and
-	// last_referenced_at survive so the recall-weighting signal isn't wiped
-	// every time the embedder model rolls or a manual reindex runs. Only
-	// the vector, model, dim, importance, and indexed_at are recomputed —
-	// everything earned at recall time is kept.
+	// UPSERT preserves both reinforcement signal AND the adjusted importance
+	// on reindex. DecayAndReinforce writes back importance_score =
+	// BASE × RecencyFactor × (1 + ReferenceBoost/8); if reindex overwrote
+	// that with raw BaseImportance, a model roll or manual reindex would
+	// silently undo every decay + reinforcement pass until the next
+	// nightly job. Preserve the existing score — reindex doesn't change
+	// what the entry is about, only which embedder produced the vector.
 	_, err = x.db.ExecContext(ctx, `INSERT INTO journal_embeddings
 		(entry_id, workspace_id, crew_id, agent_id, model, dim, vector, indexed_at,
 		 importance_score, reference_count, last_referenced_at)
@@ -228,8 +230,7 @@ func (x *Indexer) index(ctx context.Context, e journal.Entry) error {
 			model = excluded.model,
 			dim = excluded.dim,
 			vector = excluded.vector,
-			indexed_at = excluded.indexed_at,
-			importance_score = excluded.importance_score`,
+			indexed_at = excluded.indexed_at`,
 		e.ID, e.WorkspaceID, nullable(e.CrewID), nullable(e.AgentID),
 		x.embedder.Model(), x.embedder.Dim(), EncodeVector(vec), importance)
 	return err
