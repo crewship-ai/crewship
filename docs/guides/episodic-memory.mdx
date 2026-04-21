@@ -50,11 +50,14 @@ To force an embedding on an otherwise-filtered entry, tag it with `refs.episodic
 
 ```sql
 CREATE TABLE journal_embeddings (
-  entry_id  TEXT PRIMARY KEY REFERENCES journal_entries(id) ON DELETE CASCADE,
-  vector    BLOB NOT NULL,     -- raw float32 bytes
-  dim       INTEGER NOT NULL,
-  model     TEXT NOT NULL,     -- "nomic-embed-text", etc.
-  indexed_at TEXT NOT NULL
+  entry_id           TEXT PRIMARY KEY REFERENCES journal_entries(id) ON DELETE CASCADE,
+  vector             BLOB NOT NULL,     -- raw float32 bytes
+  dim                INTEGER NOT NULL,
+  model              TEXT NOT NULL,     -- "nomic-embed-text", etc.
+  indexed_at         TEXT NOT NULL,
+  importance_score   REAL DEFAULT 0.5,  -- fed into recall sort (see "Importance scoring")
+  reference_count    INTEGER DEFAULT 0, -- bumped when a hit lands in a prompt
+  last_referenced_at TEXT               -- stamped at the same time
 );
 ```
 

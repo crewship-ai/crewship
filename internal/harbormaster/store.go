@@ -230,6 +230,13 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 			slog.Default().Warn("harbormaster: reward history insert failed",
 				"err", err, "tool", tool, "outcome", outcome, "approval_id", row.ID)
 		}
+	} else {
+		// No tool on the stored payload → no reward signal for auto-tuning.
+		// Usually means an upstream enqueue path changed shape or a legacy
+		// row predates the tool-field convention. Logged so drift is visible
+		// in the audit log instead of silently degrading gate learning.
+		slog.Default().Warn("harbormaster: reward history skipped — missing tool",
+			"approval_id", row.ID, "workspace_id", row.WorkspaceID)
 	}
 	return nil
 }

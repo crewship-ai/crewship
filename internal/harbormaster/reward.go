@@ -261,6 +261,9 @@ func nullableStr(s string) any {
 // RecordOutcome which stamps with now().
 func RecordOutcomeAt(ctx context.Context, db *sql.DB, workspaceID, tool string,
 	args map[string]any, outcome Outcome, decidedBy, requestID string, at time.Time) error {
+	if workspaceID == "" || tool == "" {
+		return fmt.Errorf("harbormaster: workspace_id and tool required")
+	}
 	id := "grh_" + randomToken(8)
 	_, err := db.ExecContext(ctx, `INSERT INTO gate_reward_history
 		(id, workspace_id, tool_name, args_hash, outcome, decided_by, decided_at, request_id)

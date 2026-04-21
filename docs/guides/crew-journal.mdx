@@ -66,7 +66,7 @@ remember it and how prominently should it surface at recall time?"*.
 | `normal` (default) | No special treatment. |
 | `high` | Recall importance floors at 0.85; subject to normal compaction. |
 | `pin` | Snapshot to `/crew/shared/.memory/pins.md` at next consolidate run; recall importance floors at 0.80. |
-| `permanent` | Never compacted. Extracted to `learned-*.md` immediately (skips the 10-entry threshold and 6h wait). Recall importance floors at 0.95. |
+| `permanent` | Never compacted. Extracted to `learned-*.md` on the next consolidator run, skipping the 10-entry threshold (extraction happens on the cadence, not the instant the marker is set). Recall importance floors at 0.95. |
 
 Markers are set via the HTTP endpoint or CLI — agents cannot mark their
 own outputs (keeps automation from unilaterally promoting its own
