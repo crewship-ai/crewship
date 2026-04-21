@@ -219,6 +219,87 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 	return q, nil
 }
 
+// SetPriority serves POST /api/v1/journal/{id}/priority. Body:
+//
+//	{"priority": "permanent|high|pin|normal", "reason": "..."}
+//
+// Requires OWNER or ADMIN role. The priority marker feeds the
+// consolidator (permanent → immediate rule extraction, pin → snapshot
+// to pins.md) and the compactor (permanent → never deleted). Agents
+// themselves cannot call this endpoint — it's strictly operator
+// curation, so the role gate is load-bearing, not cosmetic.
+func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	role := RoleFromContext(r.Context())
+	if role != "OWNER" && role != "ADMIN" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "priority edit requires OWNER or ADMIN"})
+		return
+	}
+	entryID := r.PathValue("id")
+	if entryID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "entry id required"})
+		return
+	}
+
+	var body struct {
+		Priority string `json:"priority"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	prio := journal.Priority(body.Priority)
+	if !journal.ValidPriority(prio) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "priority must be one of: normal, high, pin, permanent",
+		})
+		return
+	}
+
+	// Entry must exist in the caller's workspace. Using journal.Get
+	// here matches how every other read handler does the cross-tenant
+	// check — same 404 shape as "no such entry".
+	existing, err := journal.Get(r.Context(), h.db, workspaceID, entryID)
+	if err != nil {
+		h.logger.Error("journal priority: get", "err", err, "entry_id", entryID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		return
+	}
+	if existing == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		return
+	}
+
+	// Scoped UPDATE — workspace_id in the WHERE clause is the tenant
+	// isolation boundary for writes. Dropping it would let a caller
+	// flip a foreign workspace's priority via a stolen ID.
+	res, err := h.db.ExecContext(r.Context(),
+		`UPDATE journal_entries SET priority = ? WHERE id = ? AND workspace_id = ?`,
+		string(prio), entryID, workspaceID)
+	if err != nil {
+		h.logger.Error("journal priority: update", "err", err, "entry_id", entryID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update failed"})
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":       entryID,
+		"priority": string(prio),
+		"reason":   body.Reason,
+		"previous": string(existing.Priority),
+	})
+}
+
 // serializeEntries turns the journal.Entry slice into a JSON-friendly
 // shape. The TS field becomes an RFC3339Nano string so the UI can
 // parse with the built-in Date constructor.
@@ -231,6 +312,7 @@ func serializeEntries(entries []journal.Entry) []map[string]any {
 			"ts":           e.TS.UTC().Format(time.RFC3339Nano),
 			"entry_type":   string(e.Type),
 			"severity":     string(e.Severity),
+			"priority":     string(e.Priority),
 			"actor_type":   string(e.ActorType),
 			"summary":      e.Summary,
 		}

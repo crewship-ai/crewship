@@ -265,9 +265,9 @@ func (w *Writer) persistOne(ctx context.Context, e Entry) error {
 }
 
 const insertSQL = `INSERT INTO journal_entries
-	(id, workspace_id, crew_id, agent_id, mission_id, ts, entry_type, severity,
+	(id, workspace_id, crew_id, agent_id, mission_id, ts, entry_type, severity, priority,
 	 actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 	tx, err := w.db.BeginTx(ctx, nil)
@@ -305,6 +305,7 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 			e.TS.UTC().Format("2006-01-02T15:04:05.000Z"),
 			string(e.Type),
 			string(e.Severity),
+			priorityOrNormal(e.Priority),
 			string(e.ActorType),
 			nullable(e.ActorID),
 			e.Summary,
@@ -345,6 +346,17 @@ func estimateBatchBytes(batch []Entry) int {
 // nullable turns an empty string into sql.NullString{Valid:false} so the
 // row stores NULL instead of the empty string, keeping the indexed
 // "agent_id IS NULL" queries cheap.
+// priorityOrNormal returns the string form of p, falling back to
+// "normal" when the zero value slips through. Keeping the coercion
+// centralised means the DB CHECK constraint never sees an empty
+// string even if a caller builds an Entry without setting Priority.
+func priorityOrNormal(p Priority) string {
+	if p == "" {
+		return string(PriorityNormal)
+	}
+	return string(p)
+}
+
 func nullable(s string) any {
 	if s == "" {
 		return nil

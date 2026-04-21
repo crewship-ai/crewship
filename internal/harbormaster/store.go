@@ -210,7 +210,35 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 			Refs: map[string]any{"approval_id": row.ID},
 		})
 	}
+
+	// Feed the outcome into the reward-history table so AdjustMode
+	// can converge gate behaviour from repeated operator decisions.
+	// The tool + args live in the original request payload — we pull
+	// them from the reloaded row so this works regardless of caller.
+	// Failures here are non-fatal: auto-tuning is best-effort and
+	// shouldn't cause a human decision to return an error.
+	tool, args := extractToolArgs(row.Payload)
+	if tool != "" {
+		outcome := OutcomeDenied
+		if status == StatusApproved {
+			outcome = OutcomeApproved
+		}
+		_ = RecordOutcome(ctx, db, row.WorkspaceID, tool, args, outcome, decidedBy, row.ID)
+	}
 	return nil
+}
+
+// extractToolArgs pulls the tool name + args back out of the stored
+// request payload. Gate() writes them as top-level map keys; if
+// something else is inserting rows the lookup fails gracefully and
+// AdjustMode just never tunes the affected calls.
+func extractToolArgs(payload map[string]any) (string, map[string]any) {
+	if payload == nil {
+		return "", nil
+	}
+	tool, _ := payload["tool"].(string)
+	args, _ := payload["args"].(map[string]any)
+	return tool, args
 }
 
 // Cancel withdraws a still-pending request. Used when the agent that

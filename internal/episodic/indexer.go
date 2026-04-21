@@ -129,7 +129,7 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 	}
 	args = append(args, batch)
 	rows, err := x.db.QueryContext(ctx, `
-		SELECT e.id, e.workspace_id, e.crew_id, e.agent_id, e.entry_type, e.severity,
+		SELECT e.id, e.workspace_id, e.crew_id, e.agent_id, e.entry_type, e.severity, e.priority,
 		       e.summary, e.payload, e.refs, e.ts
 		  FROM journal_entries e
 		  LEFT JOIN journal_embeddings em ON em.entry_id = e.id
@@ -149,9 +149,9 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 	var pending []journal.Entry
 	for rows.Next() {
 		var e journal.Entry
-		var payloadStr, refsStr, tsStr, kind, sev string
+		var payloadStr, refsStr, tsStr, kind, sev, prio string
 		var crewID, agentID sql.NullString
-		if err := rows.Scan(&e.ID, &e.WorkspaceID, &crewID, &agentID, &kind, &sev,
+		if err := rows.Scan(&e.ID, &e.WorkspaceID, &crewID, &agentID, &kind, &sev, &prio,
 			&e.Summary, &payloadStr, &refsStr, &tsStr); err != nil {
 			x.logger.Warn("episodic: scan row failed", "err", err)
 			continue
@@ -160,6 +160,7 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 		e.AgentID = agentID.String
 		e.Type = journal.EntryType(kind)
 		e.Severity = journal.Severity(sev)
+		e.Priority = journal.Priority(prio)
 		// Parse payload + refs lazily — only the conversation path uses them.
 		e.Payload = decodeJSONMap(payloadStr)
 		e.Refs = decodeJSONMap(refsStr)
@@ -205,11 +206,18 @@ func (x *Indexer) index(ctx context.Context, e journal.Entry) error {
 	if err != nil {
 		return fmt.Errorf("embed: %w", err)
 	}
+	// Compute the baseline importance at embed time. It feeds into recall
+	// as a cosine multiplier (see rankHits) and is later decayed + boosted
+	// by the nightly DecayAndReinforce job. Using BaseImportance keeps the
+	// calculation in one place so ops can reason about why a given hit
+	// ranks where it does.
+	importance := BaseImportance(e.Type, e.Severity, e.Priority)
 	_, err = x.db.ExecContext(ctx, `INSERT OR REPLACE INTO journal_embeddings
-		(entry_id, workspace_id, crew_id, agent_id, model, dim, vector, indexed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		(entry_id, workspace_id, crew_id, agent_id, model, dim, vector, indexed_at,
+		 importance_score, reference_count, last_referenced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 0, NULL)`,
 		e.ID, e.WorkspaceID, nullable(e.CrewID), nullable(e.AgentID),
-		x.embedder.Model(), x.embedder.Dim(), EncodeVector(vec))
+		x.embedder.Model(), x.embedder.Dim(), EncodeVector(vec), importance)
 	return err
 }
 

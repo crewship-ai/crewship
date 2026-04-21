@@ -684,6 +684,7 @@ func (r *Router) registerRoutes() {
 	jh := NewJournalHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
+	r.mux.Handle("POST /api/v1/journal/{id}/priority", authed(wsCtx(http.HandlerFunc(jh.SetPriority))))
 
 	// Cartographer: mission checkpoint / restore / fork API. The package
 	// owns the row writes + journal emits; this handler is the HTTP
@@ -712,6 +713,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/approvals", authed(wsCtx(http.HandlerFunc(ah.List))))
 	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
 	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
+	r.mux.Handle("POST /api/v1/approvals/reset-auto-tuning", authed(wsCtx(http.HandlerFunc(ah.ResetAutoTuning))))
 
 	// Hooks registry: lifecycle intercepts. List is available to every
 	// workspace member for auditability; enable/disable is OWNER/ADMIN

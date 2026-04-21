@@ -95,7 +95,25 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	// something it shouldn't have, which is exactly the kind of lesson
 	// worth generalising. Allowed decisions are routine operations.
 	filtered := filterKeeperDenied(entries)
-	if len(filtered) < cfg.MinEntries {
+
+	// Priority=permanent entries bypass the below-threshold skip. An
+	// operator has explicitly said "remember this forever", so we
+	// extract rules from the filtered set regardless of count — waiting
+	// 6 hours for 10 entries before recording an explicit permanent
+	// marker defeats the markers' purpose. Also extract pins into
+	// pins.md so they surface prominently outside the rule stream.
+	hasPermanent := false
+	for _, e := range filtered {
+		if e.Priority == journal.PriorityPermanent {
+			hasPermanent = true
+			break
+		}
+	}
+	if err := snapshotPins(cfg, filtered); err != nil && logger != nil {
+		logger.Warn("consolidate: pins snapshot failed", "err", err)
+	}
+
+	if len(filtered) < cfg.MinEntries && !hasPermanent {
 		logger.Debug("consolidate: skipping, below threshold",
 			"crew_id", cfg.CrewID, "have", len(filtered), "want", cfg.MinEntries)
 		return ConsolidationResult{Skipped: true, EntriesScanned: len(filtered)}, nil
@@ -341,6 +359,78 @@ func collectEvidence(rules []LearnedRule) []string {
 		}
 	}
 	return out
+}
+
+// snapshotPins walks the filtered entries for priority=pin and appends
+// them to {outputDir}/pins.md — one entry per file, human-curated by
+// the operator, surfaced prominently next to the auto-generated rule
+// stream. Unlike learned-*.md the pins file accumulates forever: the
+// point of a pin is "I want every future session to remember this".
+// Duplicate IDs are skipped so rerunning consolidation on the same
+// entries doesn't grow the file unboundedly.
+func snapshotPins(cfg Config, entries []journal.Entry) error {
+	if cfg.OutputDir == "" {
+		return nil
+	}
+	var pins []journal.Entry
+	for _, e := range entries {
+		if e.Priority == journal.PriorityPin {
+			pins = append(pins, e)
+		}
+	}
+	if len(pins) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
+		return fmt.Errorf("pins mkdir: %w", err)
+	}
+	path := filepath.Join(cfg.OutputDir, "pins.md")
+
+	// Pre-read existing pins to skip IDs already captured. pins.md is
+	// an append-only human-curated reference — rewriting or deduping
+	// the entire file would surprise operators who annotated entries
+	// by hand.
+	existing := map[string]bool{}
+	if data, err := os.ReadFile(path); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if i := strings.Index(line, "pin-id:"); i >= 0 {
+				id := strings.TrimSpace(line[i+len("pin-id:"):])
+				if id != "" {
+					existing[id] = true
+				}
+			}
+		}
+	}
+
+	var block strings.Builder
+	if _, err := os.Stat(path); err != nil {
+		block.WriteString("# Pinned entries\n\n")
+		block.WriteString("Entries explicitly pinned by operators (`priority=pin`). The consolidator\n")
+		block.WriteString("appends them here so they stay visible outside the rule stream.\n\n")
+	}
+	appended := 0
+	for _, e := range pins {
+		if existing[e.ID] {
+			continue
+		}
+		fmt.Fprintf(&block, "- **%s** (%s, %s) — %s\n", e.ID, e.Type,
+			e.TS.UTC().Format("2006-01-02"), e.Summary)
+		fmt.Fprintf(&block, "  <!-- pin-id:%s -->\n", e.ID)
+		appended++
+	}
+	if appended == 0 {
+		return nil
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("pins open: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(block.String()); err != nil {
+		return fmt.Errorf("pins write: %w", err)
+	}
+	return nil
 }
 
 // appendRules writes the rendered rules to
