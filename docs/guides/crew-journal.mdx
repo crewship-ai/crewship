@@ -121,7 +121,7 @@ Pagination is keyset (compound `ts, id`), not offset, so deep paging stays O(log
 
 Workspace isolation is enforced at the store level (`journal.List`/`Get`/`Count` take a workspace filter and refuse to run without one). The handler additionally pulls `workspace_id` from the session context -- there is no way for a caller to pass a foreign workspace id through a query parameter.
 
-Cross-tenant existence is never leaked: unknown IDs return 404 with the same shape as "not in your workspace". See [`paymaster_handler.go`](/api-reference/paymaster) for the shared `crewBelongsToWorkspace` / `missionBelongsToWorkspace` helpers used across every read handler.
+Cross-tenant existence is never leaked: unknown IDs return 404 with the same shape as "not in your workspace". The shared `crewBelongsToWorkspace` / `missionBelongsToWorkspace` helpers (defined in `internal/api/paymaster_handler.go` and reused across every read handler) enforce the same contract — see the [Paymaster API reference](/api-reference/paymaster) for the endpoints that exercise them.
 
 ## Retention
 

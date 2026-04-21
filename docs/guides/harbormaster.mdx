@@ -107,7 +107,7 @@ See [`crewship approvals`](/cli/approvals). `cancel` is not yet implemented -- t
 
 ## Hook integration
 
-The [hooks](/guides/hooks) system fires `on_approval_requested` when a new request is enqueued (wired via `harbormaster.Enqueue` calling into the hooks dispatcher). Use it to page oncall, post to Slack, or auto-escalate:
+The [hooks](/guides/hooks) system fires `on_approval_requested` when Harbor Master determines approval is required — specifically, when `Gate` returns `Required=true` (applies to Approved, Denied, and Pending branches). The orchestrator's `HookDispatcher` dispatches the event after the gate decision lands; the harbormaster package itself stays hook-agnostic. Use this hook to page oncall, post to Slack, or auto-escalate:
 
 ```yaml
 # hooks_config row (illustrative -- registration is config-time)

@@ -101,12 +101,14 @@ The stored finding carries `kind` and a redacted `detail` like `"openai API key 
 `lookout.ValidateArgs(schemaJSON, args)` runs draft-07 JSON Schema over a tool call's arguments. Use it before dispatching:
 
 ```go
-if result, _ := lookout.ValidateArgs(mySchema, toolArgs); result.Verdict == lookout.VerdictBlock {
-    // Block the tool call; args didn't satisfy the schema.
+if err := lookout.ValidateArgs(mySchema, toolArgs); err != nil {
+    // Block the tool call; err describes which field didn't satisfy the schema.
 }
 ```
 
-Unknown-key and type mismatches produce findings. Empty schema = pass.
+`ValidateArgs` returns `error` (nil on pass). Unknown-key and type mismatches
+produce a non-nil error with a message pointing at the offending path. Empty
+schema = pass.
 
 ## Adding a detector
 

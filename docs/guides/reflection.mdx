@@ -50,7 +50,12 @@ type Synthesis struct {
 }
 ```
 
-When the upstream ensemble reports high disagreement (stddev > 0.25) the `Confidence` is damped further so callers can treat low-confidence outputs as requiring human review (e.g. route to Harbor Master).
+`Confidence` is the mean of each persona's self-reported confidence,
+computed by `quartermaster.EnsembleJudge` (see `internal/quartermaster/judge.go`).
+The judge also annotates a `HumanEscalate` flag when the personas disagree
+(stddev > 0.25), so callers route to Harbor Master on either a low average
+OR an explicit escalate signal — not on any implicit "dampening" of the
+average itself. See the `Usage` block below for the recommended check.
 
 ## Usage
 
@@ -87,7 +92,12 @@ final, err := reflection.OptimizeLoop(ctx, deps, reflection.LoopInput{
 
 - Terminates on first pass or `MaxIters`.
 - Failed iterations' feedback is folded into the next Generate prompt.
-- On `MaxIters` without pass, `final.Escalated = true` -- route to Harbor Master.
+- On `MaxIters` without pass, `OptimizeLoop` returns
+  `reflection.ErrEvaluatorLoopExhausted` (wrapping the last verifier
+  error). Callers MUST check `err` before inspecting `final` and
+  treat that error as an escalation signal — route to Harbor Master
+  or request human input. Inspecting `final.Escalated` without first
+  handling the error path would miss the exhaustion case entirely.
 
 Every iteration emits a `summary.generated` entry with the candidate + verifier feedback so the audit trail captures the convergence (or non-convergence) path.
 
