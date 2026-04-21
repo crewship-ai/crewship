@@ -87,9 +87,9 @@ Defined in `secrets.go`:
 | `secret_openai` | `sk-[A-Za-z0-9]{32,}` / project-scoped `sk-proj-...` |
 | `secret_anthropic` | `sk-ant-api03-...` |
 | `secret_aws` | AKIA / ASIA IDs + 40-char secret pairs |
-| `secret_github_pat` | `ghp_`, `github_pat_`, classic 40-char hex |
-| `secret_github_oauth` | `gho_` |
-| `secret_github_app` | `ghs_` |
+| `secret_github_pat` | GitHub PAT — `ghp_`, `github_pat_`, or a legacy 40-char hex token |
+| `secret_github_oauth` | GitHub OAuth token — `gho_` |
+| `secret_github_app` | GitHub App installation token — `ghs_` |
 | `secret_bearer_token` | `Bearer <long-b64>` |
 | `secret_password` | `password=...`, `PASSWORD: ...` in env-var-shaped strings |
 | `secret_api_key` | Generic `api_key=...`, `X-API-Key: ...` |
