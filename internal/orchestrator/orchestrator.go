@@ -577,6 +577,31 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if gateErr != nil {
 		return fmt.Errorf("approval gate: %w", gateErr)
 	}
+	// If the gate enqueued an approval (Required && !Approved → Pending,
+	// or Denied with an existing request row), fire the
+	// on_approval_requested hook so integrations can notify a human
+	// (Slack, PagerDuty, etc.) without waiting for the journal poller.
+	// Fire on any gated decision — denied and pending both mean "a
+	// human needs to know about this", approved means the rule matched
+	// and a prior approval auto-satisfied it.
+	if gateDecision.Required {
+		_ = o.getHooks().Dispatch(ctx, "on_approval_requested", HookEventContext{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
+			ToolName:    "agent_run",
+			Severity:    "notice",
+			Payload: map[string]any{
+				"request_id": gateDecision.RequestID,
+				"reason":     gateDecision.Reason,
+				"approved":   gateDecision.Approved,
+				"denied":     gateDecision.Denied,
+				"pending":    gateDecision.Pending,
+				"agent_slug": req.AgentSlug,
+			},
+		})
+	}
 	// Only proceed when the gate explicitly says so. Denied, Pending,
 	// and "Required but not Approved" must all halt the run — a
 	// pending approval still means a human hasn't said yes yet, and
