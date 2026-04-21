@@ -23,36 +23,48 @@ export default async function globalSetup(config: FullConfig) {
 
   const baseURL = (config.projects[0]?.use?.baseURL as string) || "http://localhost:3001"
   const browser = await chromium.launch()
-  const ctx = await browser.newContext({ baseURL })
-  const page = await ctx.newPage()
+  try {
+    const ctx = await browser.newContext({ baseURL })
+    const page = await ctx.newPage()
 
-  await page.goto("/login")
-  await page.waitForLoadState("networkidle")
+    await page.goto("/login")
+    await page.waitForLoadState("networkidle")
 
-  const csrfToken = await page.evaluate(async () => {
-    const res = await fetch("/api/auth/csrf")
-    return (await res.json()).csrfToken as string
-  })
+    const csrfToken = await page.evaluate(async () => {
+      const res = await fetch("/api/auth/csrf")
+      return (await res.json()).csrfToken as string
+    })
 
-  const result = await page.evaluate(
-    async ({ email, password, csrf }) => {
-      const res = await fetch("/api/auth/callback/credentials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, csrfToken: csrf, redirect: "false" }),
-      })
-      return res.json()
-    },
-    { email, password, csrf: csrfToken }
-  )
-  if (result?.error) {
-    throw new Error(`global-setup login failed: ${result.error}`)
+    const result = await page.evaluate(
+      async ({ email, password, csrf }) => {
+        const res = await fetch("/api/auth/callback/credentials", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, csrfToken: csrf, redirect: "false" }),
+        })
+        return res.json()
+      },
+      { email, password, csrf: csrfToken }
+    )
+    if (result?.error) {
+      throw new Error(`global-setup login failed: ${result.error}`)
+    }
+
+    await ctx.storageState({ path: storageFilePath() })
+  } finally {
+    // finally so a thrown fetch/CSRF failure doesn't leak the
+    // chromium process — the next CI retry would otherwise pile
+    // up orphaned headless shells until the runner OOMs.
+    await browser.close()
   }
+}
 
-  const storageFile = path.join(os.tmpdir(), "crewship-e2e-auth.json")
-  await ctx.storageState({ path: storageFile })
-  await browser.close()
-
-  // Expose the path to tests via an env var so the config can pick it up.
-  process.env.STORAGE_STATE = storageFile
+// storageFilePath namespaces the cookie jar per instance so concurrent
+// `crewship_N` dirs or different ports don't overwrite each other's
+// auth. CREWSHIP_INSTANCE_ID comes from the multi-instance convention
+// in CLAUDE.md; falls back to the port so local single-instance runs
+// keep a stable filename.
+export function storageFilePath(): string {
+  const instance = process.env.CREWSHIP_INSTANCE_ID || process.env.NEXT_PORT || "default"
+  return path.join(os.tmpdir(), `crewship-e2e-auth-${instance}.json`)
 }

@@ -51,8 +51,21 @@ pnpm test:e2e --project=chromium
 
 Place it under `e2e/*.spec.ts`. Use the auth fixture (`./fixtures/auth`)
 rather than `@playwright/test` directly so the test lands on an
-authenticated page; the fixture handles CSRF + NextAuth credentials
-login once per worker.
+authenticated page.
+
+Auth flow:
+
+1. `e2e/global-setup.ts` runs once at the start of the whole test
+   run. It logs in via NextAuth credentials (CSRF + POST to
+   `/api/auth/callback/credentials`) and writes the resulting session
+   cookies to `$TMPDIR/crewship-e2e-auth-<instance>.json`.
+   `<instance>` comes from `CREWSHIP_INSTANCE_ID` or `NEXT_PORT` so
+   concurrent instances on one host don't clobber each other's auth.
+2. `playwright.config.ts` points `use.storageState` at the same file,
+   so every spec inherits the cookies for free.
+3. `e2e/fixtures/auth.ts` just lands the page on `/` — no per-test
+   login, which previously tripped the `/api/auth/callback/credentials`
+   rate limit (429 after ~5 logins in a minute).
 
 Keep smoke specs shallow — one layout landmark per route. Deep
 interaction specs belong in a per-feature file (e.g. `approvals.spec.ts`

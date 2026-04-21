@@ -1,6 +1,5 @@
 import { defineConfig, devices } from "@playwright/test"
-import * as os from "os"
-import * as path from "path"
+import { storageFilePath } from "./e2e/global-setup"
 
 const nextPort = process.env.NEXT_PORT || "3001"
 
@@ -17,7 +16,10 @@ export default defineConfig({
     baseURL: `http://localhost:${nextPort}`,
     // Every test inherits the cookies written by global-setup, so
     // specs never re-login and never hit the NextAuth rate limit.
-    storageState: path.join(os.tmpdir(), "crewship-e2e-auth.json"),
+    // storageFilePath() namespaces per CREWSHIP_INSTANCE_ID so
+    // concurrent instances on the same host don't clobber each
+    // other's auth file.
+    storageState: storageFilePath(),
     screenshot: "only-on-failure",
     trace: "on-first-retry",
   },

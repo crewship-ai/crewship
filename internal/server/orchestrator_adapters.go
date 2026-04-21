@@ -134,6 +134,7 @@ func (a *presenceAdapter) Track(ctx context.Context, in orchestrator.PresenceInp
 		AgentID:     in.AgentID,
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.CrewID,
+		MissionID:   in.MissionID,
 		Status:      presence.Status(in.Status),
 		Details:     in.Details,
 	})

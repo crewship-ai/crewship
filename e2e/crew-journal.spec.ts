@@ -12,18 +12,24 @@ import { test, expect } from "./fixtures/auth"
 // flows (HITL decide, checkpoint create, paymaster time-range switch)
 // belong in dedicated specs where setup cost pays off.
 
-const routes = [
-  { path: "/journal", name: "journal" },
-  { path: "/paymaster", name: "paymaster" },
-  { path: "/approvals", name: "approvals" },
+// Each route carries a `landmark` regex that MUST be visible once the
+// page has rendered. Without this, a blank-shell error page would
+// still pass the "no uncaught JS errors" check. The regex is tolerant
+// of navigation labels (e.g. "Journal") or page-specific content
+// ("Approvals queue") — any one visible match proves we rendered the
+// right surface.
+const routes: { path: string; name: string; landmark: RegExp }[] = [
+  { path: "/journal", name: "journal", landmark: /journal|timeline/i },
+  { path: "/paymaster", name: "paymaster", landmark: /paymaster|spend|cost/i },
+  { path: "/approvals", name: "approvals", landmark: /approvals?|pending|decide/i },
   // /crows-nest and /eval redirect to /login for the seeded demo
   // user even though CLI lists them as OWNER. Not a regression in
   // this PR — dedicated auth guard test pending. Track as follow-up.
-  // { path: "/crows-nest", name: "crows-nest" },
-  // { path: "/eval", name: "eval" },
+  // { path: "/crows-nest", name: "crows-nest", landmark: /crow|terminal/i },
+  // { path: "/eval", name: "eval", landmark: /eval|replay|regression/i },
 ]
 
-for (const { path, name } of routes) {
+for (const { path, name, landmark } of routes) {
   test.describe(`Crew Journal — ${path}`, () => {
     test(`${name} mounts without uncaught JS errors`, async ({ page }) => {
       // Track uncaught page exceptions — these are real regressions
@@ -44,6 +50,17 @@ for (const { path, name } of routes) {
 
       // URL landed on the expected path (not a /login redirect).
       expect(page.url()).toContain(path)
+
+      // One rendered landmark match per route — proves we actually
+      // rendered the right surface, not a blank shell or a
+      // server-rendered error page that would also pass pageerror.
+      // .locator(':visible') filter is load-bearing: the same text
+      // often exists in a collapsed sidebar nav item, which
+      // getByText(...).first() would pick up even though it's hidden
+      // from the rendered viewport.
+      await expect(
+        page.locator(":visible").filter({ hasText: landmark }).first()
+      ).toBeVisible({ timeout: 5_000 })
 
       expect(
         pageErrors.map((e) => e.message),

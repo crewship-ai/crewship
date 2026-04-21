@@ -276,10 +276,16 @@ type PresenceTracker interface {
 // uses the same string values as presence.Status (online/busy/blocked/
 // offline) — keeping the string form here avoids pulling the presence
 // package into orchestrator's import set.
+//
+// MissionID is forwarded to the journal.Entry emitted by
+// presence.Upsert on a real transition, keeping the mission-scoped
+// timeline correct (mirrors the AgentRunRequest → JournalEntry
+// MissionID threading fixed in PR #205).
 type PresenceInput struct {
 	WorkspaceID string
 	CrewID      string
 	AgentID     string
+	MissionID   string
 	Status      string
 	Details     map[string]any
 }
@@ -1123,6 +1129,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		Status:      "busy",
 		Details:     map[string]any{"current_chat_id": req.ChatID},
 	})
@@ -1193,6 +1200,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			WorkspaceID: req.WorkspaceID,
 			CrewID:      req.CrewID,
 			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
 			Status:      "online",
 			Details:     map[string]any{"reason": "cancelled"},
 		})
@@ -1237,6 +1245,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
+		MissionID:   req.MissionID,
 		Status:      "online",
 	})
 
