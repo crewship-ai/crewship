@@ -134,7 +134,7 @@ func RewardHistory(ctx context.Context, db *sql.DB, workspaceID, tool, argsHash 
 	for rows.Next() {
 		var o string
 		if err := rows.Scan(&o); err != nil {
-			return OutcomeCounts{}, err
+			return OutcomeCounts{}, fmt.Errorf("harbormaster: reward history scan: %w", err)
 		}
 		switch Outcome(o) {
 		case OutcomeApproved:
@@ -149,7 +149,7 @@ func RewardHistory(ctx context.Context, db *sql.DB, workspaceID, tool, argsHash 
 		c.Total++
 	}
 	if err := rows.Err(); err != nil {
-		return OutcomeCounts{}, err
+		return OutcomeCounts{}, fmt.Errorf("harbormaster: reward history rows: %w", err)
 	}
 	return c, nil
 }
@@ -237,10 +237,16 @@ func EmitAutoTuned(ctx context.Context, j journal.Emitter, workspaceID, crewID, 
 	})
 }
 
-func randomToken(n int) string {
+// randomToken returns a hex string of n random bytes. rand.Read errors
+// are propagated so callers don't silently insert a zeroed-token row,
+// which would both collide with other zero tokens and hide the entropy
+// failure from operators.
+func randomToken(n int) (string, error) {
 	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("harbormaster: random token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func nullableStr(s string) any {
@@ -259,8 +265,12 @@ func RecordOutcomeAt(ctx context.Context, db *sql.DB, workspaceID, tool string,
 	if workspaceID == "" || tool == "" {
 		return fmt.Errorf("harbormaster: workspace_id and tool required")
 	}
-	id := "grh_" + randomToken(8)
-	_, err := db.ExecContext(ctx, `INSERT INTO gate_reward_history
+	token, err := randomToken(8)
+	if err != nil {
+		return fmt.Errorf("harbormaster: record outcome at: %w", err)
+	}
+	id := "grh_" + token
+	_, err = db.ExecContext(ctx, `INSERT INTO gate_reward_history
 		(id, workspace_id, tool_name, args_hash, outcome, decided_by, decided_at, request_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, workspaceID, tool, HashArgs(args), string(outcome),
