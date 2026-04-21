@@ -73,13 +73,24 @@ for (const { path, name, landmark } of routes) {
 test.describe("Crew Journal — /missions/[id]/timeline", () => {
   test("timeline mounts for a seeded mission", async ({ page, request }) => {
     const res = await request.get("/api/v1/missions?limit=1")
-    if (!res.ok()) {
-      test.skip(true, `missions list not available: ${res.status()}`)
+
+    // Only skip for the one expected "feature not applicable" case:
+    // the missions endpoint returns 404 when the API is running but
+    // the route isn't wired on this build. Every other non-OK status
+    // (500 backend failure, 401 auth lost, 403 role drop) is a real
+    // regression we want this smoke to catch — silently skipping
+    // them would mask an incident as a green run.
+    if (res.status() === 404) {
+      test.skip(true, "missions endpoint not wired on this build")
       return
     }
+    expect(res.ok(), `missions list returned ${res.status()}`).toBe(true)
+
     const body = await res.json()
     const missions = body.rows ?? body.missions ?? body
     if (!Array.isArray(missions) || missions.length === 0) {
+      // Genuinely "no data yet" — skipping is correct because a
+      // freshly-nuked DB legitimately has no missions.
       test.skip(true, "no seeded missions")
       return
     }

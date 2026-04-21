@@ -1,4 +1,5 @@
 import { chromium, FullConfig } from "@playwright/test"
+import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
 
@@ -50,7 +51,21 @@ export default async function globalSetup(config: FullConfig) {
       throw new Error(`global-setup login failed: ${result.error}`)
     }
 
-    await ctx.storageState({ path: storageFilePath() })
+    const file = storageFilePath()
+    await ctx.storageState({ path: file })
+    // Lock the cookie jar to owner-read/write only. storageState is
+    // an authenticated NextAuth session token — on a shared CI
+    // runner or multi-user dev VM the default 0644 world-readable
+    // permission would let any local account hijack the session
+    // without needing the user's password. chmod is a no-op on
+    // Windows but Playwright runners in practice are Linux/macOS.
+    try {
+      fs.chmodSync(file, 0o600)
+    } catch {
+      // Non-fatal — the file still exists with defaults. Best-effort
+      // hardening; on the rare FS where chmod fails (e.g. some
+      // network mounts) the test run should still complete.
+    }
   } finally {
     // finally so a thrown fetch/CSRF failure doesn't leak the
     // chromium process — the next CI retry would otherwise pile
