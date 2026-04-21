@@ -212,10 +212,24 @@ func (x *Indexer) index(ctx context.Context, e journal.Entry) error {
 	// calculation in one place so ops can reason about why a given hit
 	// ranks where it does.
 	importance := BaseImportance(e.Type, e.Severity, e.Priority)
-	_, err = x.db.ExecContext(ctx, `INSERT OR REPLACE INTO journal_embeddings
+	// UPSERT preserves reinforcement signal on reindex: reference_count and
+	// last_referenced_at survive so the recall-weighting signal isn't wiped
+	// every time the embedder model rolls or a manual reindex runs. Only
+	// the vector, model, dim, importance, and indexed_at are recomputed —
+	// everything earned at recall time is kept.
+	_, err = x.db.ExecContext(ctx, `INSERT INTO journal_embeddings
 		(entry_id, workspace_id, crew_id, agent_id, model, dim, vector, indexed_at,
 		 importance_score, reference_count, last_referenced_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 0, NULL)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 0, NULL)
+		ON CONFLICT(entry_id) DO UPDATE SET
+			workspace_id = excluded.workspace_id,
+			crew_id = excluded.crew_id,
+			agent_id = excluded.agent_id,
+			model = excluded.model,
+			dim = excluded.dim,
+			vector = excluded.vector,
+			indexed_at = excluded.indexed_at,
+			importance_score = excluded.importance_score`,
 		e.ID, e.WorkspaceID, nullable(e.CrewID), nullable(e.AgentID),
 		x.embedder.Model(), x.embedder.Dim(), EncodeVector(vec), importance)
 	return err

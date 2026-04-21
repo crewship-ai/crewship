@@ -18,14 +18,20 @@ import (
 // exclusively internal via journal.Writer — nothing here accepts POST;
 // entries come from backend code emitting scoped events.
 type JournalHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
 }
 
-// NewJournalHandler wires a handler around the database. The emitter
-// isn't needed here — reads hit the table directly.
-func NewJournalHandler(db *sql.DB, logger *slog.Logger) *JournalHandler {
-	return &JournalHandler{db: db, logger: logger}
+// NewJournalHandler wires a handler around the database. The emitter is
+// only used by priority-change audit writes; reads hit the table
+// directly. Passing nil is allowed (noop) so existing call sites don't
+// break.
+func NewJournalHandler(db *sql.DB, logger *slog.Logger, j journal.Emitter) *JournalHandler {
+	if j == nil {
+		j = noopEmitter{}
+	}
+	return &JournalHandler{db: db, logger: logger, journal: j}
 }
 
 // List serves GET /api/v1/journal. Filters come from query params:
@@ -290,6 +296,41 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 	if n == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
 		return
+	}
+
+	// Durable audit trail. Priority is a load-bearing marker (permanent
+	// entries are never compacted; pins land in curated pins.md) so a
+	// silent UPDATE would hide who upgraded or downgraded what, and why.
+	// The reason body field is captured here — otherwise it was purely
+	// echoed back in the response and evaporated.
+	actorID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		actorID = u.ID
+	}
+	if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      existing.CrewID,
+		AgentID:     existing.AgentID,
+		MissionID:   existing.MissionID,
+		Type:        "memory.priority_changed",
+		ActorType:   journal.ActorUser,
+		ActorID:     actorID,
+		Severity:    journal.SeverityNotice,
+		Summary: fmt.Sprintf("priority: %s → %s on %s",
+			existing.Priority, prio, entryID),
+		Payload: map[string]any{
+			"target_entry_id":   entryID,
+			"target_entry_type": string(existing.Type),
+			"previous_priority": string(existing.Priority),
+			"new_priority":      string(prio),
+			"reason":            body.Reason,
+		},
+		Refs: map[string]any{
+			"parent_entry_id": entryID,
+		},
+	}); emitErr != nil {
+		// The UPDATE already happened; audit-emit failure is best-effort.
+		h.logger.Warn("journal priority: audit emit failed", "err", emitErr, "entry_id", entryID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

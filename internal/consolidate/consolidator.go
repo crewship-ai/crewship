@@ -96,6 +96,24 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	// worth generalising. Allowed decisions are routine operations.
 	filtered := filterKeeperDenied(entries)
 
+	// Separate query for priority-marked entries across ALL types (not
+	// just candidateTypes). An operator who pins an exec.command or
+	// mission.comment still wants that pin snapshotted to pins.md and,
+	// if priority=permanent, wants the threshold bypassed — but the
+	// candidateTypes filter would drop those entries silently.
+	pq := journal.Query{
+		WorkspaceID: cfg.WorkspaceID,
+		CrewID:      cfg.CrewID,
+		Priorities:  []journal.Priority{journal.PriorityPin, journal.PriorityPermanent},
+		Since:       now.Add(-cfg.Since),
+		Limit:       500,
+	}
+	prioEntries, _, err := journal.List(ctx, c.DB, pq)
+	if err != nil {
+		logger.Warn("consolidate: priority scan failed", "err", err)
+		prioEntries = nil
+	}
+
 	// Priority=permanent entries bypass the below-threshold skip. An
 	// operator has explicitly said "remember this forever", so we
 	// extract rules from the filtered set regardless of count — waiting
@@ -103,13 +121,13 @@ func (c *Consolidator) Run(ctx context.Context, cfg Config) (ConsolidationResult
 	// marker defeats the markers' purpose. Also extract pins into
 	// pins.md so they surface prominently outside the rule stream.
 	hasPermanent := false
-	for _, e := range filtered {
+	for _, e := range prioEntries {
 		if e.Priority == journal.PriorityPermanent {
 			hasPermanent = true
 			break
 		}
 	}
-	if err := snapshotPins(cfg, filtered); err != nil && logger != nil {
+	if err := snapshotPins(cfg, prioEntries); err != nil && logger != nil {
 		logger.Warn("consolidate: pins snapshot failed", "err", err)
 	}
 
@@ -394,7 +412,15 @@ func snapshotPins(cfg Config, entries []journal.Entry) error {
 	if data, err := os.ReadFile(path); err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
 			if i := strings.Index(line, "pin-id:"); i >= 0 {
-				id := strings.TrimSpace(line[i+len("pin-id:"):])
+				// Strip the HTML-comment close marker that we wrote when
+				// the pin was appended (`<!-- pin-id:j_123 -->`). Without
+				// this, the recorded ID ends up as "j_123 -->" and every
+				// rerun re-appends the same pin because the lookup misses.
+				rest := line[i+len("pin-id:"):]
+				if j := strings.Index(rest, "-->"); j >= 0 {
+					rest = rest[:j]
+				}
+				id := strings.TrimSpace(rest)
 				if id != "" {
 					existing[id] = true
 				}

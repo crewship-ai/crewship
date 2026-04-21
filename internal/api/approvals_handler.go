@@ -183,6 +183,32 @@ func (h *ApprovalsHandler) ResetAutoTuning(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reset failed"})
 		return
 	}
+
+	// Durable audit trail: who reset the rolling reward window, for which
+	// tool, and how many rows got wiped. Without this, an operator can
+	// silently neutralise auto-tuning and nobody can tell it happened —
+	// so the gating history becomes un-auditable for compliance.
+	actorID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		actorID = u.ID
+	}
+	if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: workspaceID,
+		Type:        "approval.auto_tuning_reset",
+		ActorType:   journal.ActorUser,
+		ActorID:     actorID,
+		Severity:    journal.SeverityNotice,
+		Summary:     "reset auto-tuning for tool=" + body.Tool,
+		Payload: map[string]any{
+			"tool":         body.Tool,
+			"rows_deleted": n,
+		},
+	}); emitErr != nil {
+		// Log only — the reset already happened; a journal write failure
+		// shouldn't bubble 500 back to the operator.
+		h.logger.Warn("approvals reset auto-tuning: audit emit failed", "err", emitErr)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"tool":          body.Tool,
 		"rows_deleted":  n,

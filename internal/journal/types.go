@@ -13,6 +13,7 @@ package journal
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -243,6 +244,12 @@ func (e *Entry) Validate() error {
 	}
 	if e.Severity == "" {
 		e.Severity = SeverityInfo
+	}
+	if e.Priority == "" {
+		e.Priority = PriorityNormal
+	}
+	if !ValidPriority(e.Priority) {
+		return fmt.Errorf("journal: invalid priority %q (allowed: normal|high|pin|permanent)", e.Priority)
 	}
 	return nil
 }

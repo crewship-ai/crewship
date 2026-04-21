@@ -681,7 +681,7 @@ func (r *Router) registerRoutes() {
 
 	// Crew Journal: workspace-wide event stream. Reads only — writes are
 	// internal via journal.Writer emits from handlers across the codebase.
-	jh := NewJournalHandler(r.db, r.logger)
+	jh := NewJournalHandler(r.db, r.logger, r.Journal())
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
 	r.mux.Handle("POST /api/v1/journal/{id}/priority", authed(wsCtx(http.HandlerFunc(jh.SetPriority))))
