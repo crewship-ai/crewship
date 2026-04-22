@@ -84,25 +84,30 @@ export function EngineStatusBanner() {
 
   return (
     <div className="border-b border-border bg-card">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-muted/40 transition-colors text-left"
-        aria-expanded={expanded}
-      >
-        {expanded
-          ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-        <Server className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-label font-medium">Engine</span>
-        <StatusBadge
-          status={engineOk ? "COMPLETED" : "FAILED"}
-          label={engineOk ? "online" : "unreachable"}
-        />
-        <span className="text-micro text-muted-foreground ml-2">
-          runtime {runtimeStatus}
-        </span>
-        <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full flex items-center gap-2 px-4 py-2 hover:bg-muted/40 transition-colors">
+        {/* Left side: toggle button spans just the label cluster, not the
+            whole row — this is why there are no nested <button>s even though
+            the action group on the right contains <Button>s. */}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-2 text-left flex-1 min-w-0"
+          aria-expanded={expanded}
+        >
+          {expanded
+            ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+          <Server className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-label font-medium">Engine</span>
+          <StatusBadge
+            status={engineOk ? "COMPLETED" : "FAILED"}
+            label={engineOk ? "online" : "unreachable"}
+          />
+          <span className="text-micro text-muted-foreground ml-2">
+            runtime {runtimeStatus}
+          </span>
+        </button>
+        <div className="flex items-center gap-2 shrink-0">
           <Button
             variant={autoRefresh ? "default" : "outline"}
             size="sm"
@@ -121,7 +126,7 @@ export function EngineStatusBanner() {
             {refreshing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
           </Button>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="px-4 pb-4">
