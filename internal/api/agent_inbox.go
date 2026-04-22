@@ -8,7 +8,7 @@ import (
 )
 
 // AgentInboxHandler serves GET /api/v1/agents/{agentId}/inbox — a
-// consolidated "what's waiting on this agent" payload used by the Fleet
+// consolidated "what's waiting on this agent" payload used by the Cruise
 // preview panel (Phase 10). One round-trip instead of four parallel
 // fetches from the client.
 type AgentInboxHandler struct {

@@ -635,7 +635,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("DELETE /api/v1/mission-proposals/{proposalId}", authed(wsCtx(http.HandlerFunc(proposals.Delete))))
 
 	// Agents (require workspace context)
-	r.mux.Handle("GET /api/v1/agents/fleet-status", authed(wsCtx(http.HandlerFunc(agents.FleetStatus))))
+	r.mux.Handle("GET /api/v1/agents/cruise-status", authed(wsCtx(http.HandlerFunc(agents.CruiseStatus))))
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
@@ -722,7 +722,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/memory/health", authed(wsCtx(http.HandlerFunc(mhh.Get))))
 
 	// Agent inbox: consolidated "waiting on this agent" payload for the
-	// Fleet right-panel inbox view. One round-trip replaces four parallel
+	// Cruise right-panel inbox view. One round-trip replaces four parallel
 	// fetches (approvals + assignments + escalations + peer messages).
 	aih := NewAgentInboxHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/inbox", authed(wsCtx(http.HandlerFunc(aih.Handle))))

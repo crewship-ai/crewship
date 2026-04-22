@@ -103,7 +103,7 @@ export function SessionsPageClient() {
         </div>
         <div className="ml-auto">
           <Button size="sm" className="gap-1.5" asChild>
-            <Link href={`/fleet/agents/${agentId}/chat`}>
+            <Link href={`/cruise/agents/${agentId}/chat`}>
               <Plus className="h-3.5 w-3.5" /> New Session
             </Link>
           </Button>
@@ -133,7 +133,7 @@ export function SessionsPageClient() {
               {sessions.map((s) => (
                 <tr key={s.id} className="hover:bg-muted/50">
                   <td className="px-4 sm:px-6 py-3">
-                    <Link href={`/fleet/agents/${agentId}/chat?session=${s.id}&workspace_id=${workspaceId ?? ""}`} className="hover:underline flex items-center gap-1.5">
+                    <Link href={`/cruise/agents/${agentId}/chat?session=${s.id}&workspace_id=${workspaceId ?? ""}`} className="hover:underline flex items-center gap-1.5">
                       <MessageSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span className="truncate max-w-[200px] sm:max-w-none">{s.title ?? "Untitled session"}</span>
                     </Link>

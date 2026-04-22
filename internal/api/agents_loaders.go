@@ -9,7 +9,7 @@ import (
 
 // Agent-specific batch loaders. Extracted from agents.go so the
 // handler file can focus on HTTP surface (Create / Get / Update /
-// Delete / List / FleetStatus / Load). Keep pagination helpers in
+// Delete / List / CruiseStatus / Load). Keep pagination helpers in
 // the main handler file for now — moving those would ripple through
 // crews.go and credentials.go and belongs in its own refactor pass.
 

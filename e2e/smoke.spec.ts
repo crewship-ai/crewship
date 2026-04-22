@@ -11,15 +11,15 @@ test.describe("Dashboard", () => {
 
 test.describe("Agent Overview", () => {
   test("shows CLI adapter icon and label", async ({ page }) => {
-    await page.locator("a[href*='/fleet/agents/']").first().click()
-    await page.waitForURL("**/fleet/agents/**")
+    await page.locator("a[href*='/cruise/agents/']").first().click()
+    await page.waitForURL("**/cruise/agents/**")
     await expect(page.getByText("CLI Adapter")).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText("Claude Code")).toBeVisible()
   })
 
   test("shows provider and model info", async ({ page }) => {
-    await page.locator("a[href*='/fleet/agents/']").first().click()
-    await page.waitForURL("**/fleet/agents/**")
+    await page.locator("a[href*='/cruise/agents/']").first().click()
+    await page.waitForURL("**/cruise/agents/**")
     await expect(page.getByText("Provider")).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText("Model", { exact: true }).first()).toBeVisible()
   })
@@ -30,7 +30,7 @@ test.describe("Agent Settings", () => {
     // Wait for dashboard to fully load with agent cards
     await expect(page.getByText("All Agents")).toBeVisible({ timeout: 15_000 })
     // Wait for an agent card to render (contains status badge like Idle/Running)
-    const agentCard = page.locator("a[href^='/fleet/agents/']").filter({ hasText: /Idle|Running|Stopped|Error/ }).first()
+    const agentCard = page.locator("a[href^='/cruise/agents/']").filter({ hasText: /Idle|Running|Stopped|Error/ }).first()
     await expect(agentCard).toBeVisible({ timeout: 10_000 })
     const href = await agentCard.getAttribute("href")
     await page.goto(`${href}/settings`)
@@ -70,8 +70,8 @@ test.describe("Agent Settings", () => {
 
 test.describe("Agent Credentials", () => {
   test("shows provider icon in credentials table", async ({ page }) => {
-    await page.locator("a[href*='/fleet/agents/']").first().click()
-    await page.waitForURL("**/fleet/agents/**")
+    await page.locator("a[href*='/cruise/agents/']").first().click()
+    await page.waitForURL("**/cruise/agents/**")
     await expect(page.getByText("CLI Adapter")).toBeVisible({ timeout: 10_000 })
     await page.locator("a[href*='/credentials']").first().click()
     await page.waitForURL("**/credentials")
@@ -85,7 +85,7 @@ test.describe("Agent Credentials", () => {
 
 test.describe("New Agent", () => {
   test("has adapter cards and model select", async ({ page }) => {
-    await page.goto("/fleet/agents/new")
+    await page.goto("/cruise/agents/new")
     await expect(page.locator("button:has-text('Claude Code')")).toBeVisible({ timeout: 10_000 })
     await expect(page.locator("button:has-text('OpenCode')")).toBeVisible()
     await expect(page.locator("button:has-text('Codex CLI')")).toBeVisible()

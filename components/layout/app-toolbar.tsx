@@ -24,7 +24,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useEngineStatus } from "@/hooks/use-engine-status"
-import { useFleetStatus } from "@/hooks/use-fleet-status"
+import { useCruiseStatus } from "@/hooks/use-cruise-status"
 import { usePendingEscalations } from "@/hooks/use-pending-escalations"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -39,8 +39,8 @@ const mobileNavSections = [
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Crews", href: "/fleet/crews", icon: Network },
-      { title: "Agents", href: "/fleet/agents", icon: Bot },
+      { title: "Crews", href: "/cruise/crews", icon: Network },
+      { title: "Agents", href: "/cruise/agents", icon: Bot },
     ],
   },
   {
@@ -69,9 +69,9 @@ const mobileNavSections = [
 
 const pageConfig: Record<string, { title: string }> = {
   "/": { title: "Dashboard" },
-  "/fleet/agents": { title: "Agents" },
-  "/fleet/crews": { title: "Crews" },
-  "/fleet": { title: "Crews & Agents" },
+  "/cruise/agents": { title: "Agents" },
+  "/cruise/crews": { title: "Crews" },
+  "/cruise": { title: "Crews & Agents" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
   "/audit": { title: "Audit Log" },
@@ -153,7 +153,7 @@ export function AppToolbar() {
   const config = pageConfig[pathname] ?? null
   const { workspaceId } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
-  const fleetStatus = useFleetStatus(workspaceId)
+  const cruiseStatus = useCruiseStatus(workspaceId)
   const pendingEscalations = usePendingEscalations(workspaceId)
   const { session, signOut } = useAuth()
   const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
@@ -194,30 +194,30 @@ export function AppToolbar() {
   const userInitials = getInitials(userName)
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
-  const isFleetPage = pathname === "/fleet"
+  const isCruisePage = pathname === "/cruise"
 
-  // Crew count for fleet breadcrumb
+  // Crew count for cruise breadcrumb
   const [crewCount, setCrewCount] = useState(0)
   useEffect(() => {
-    if (!isFleetPage || !workspaceId) return
+    if (!isCruisePage || !workspaceId) return
     fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data: unknown[]) => setCrewCount(data.length))
       .catch(() => {})
-  }, [isFleetPage, workspaceId])
+  }, [isCruisePage, workspaceId])
 
   function renderBreadcrumbs() {
     if (isAgentPage && agentBreadcrumb) {
       return (
         <>
-          <Link href="/fleet/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/cruise/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Agents
           </Link>
           {agentBreadcrumb.crewName && agentBreadcrumb.crewId && (
             <>
               <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
               <Link
-                href={`/fleet/crews/${agentBreadcrumb.crewId}`}
+                href={`/cruise/crews/${agentBreadcrumb.crewId}`}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
               >
                 <span
@@ -237,7 +237,7 @@ export function AppToolbar() {
     if (isAgentPage) {
       return (
         <>
-          <Link href="/fleet/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/cruise/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Agents
           </Link>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
@@ -246,14 +246,14 @@ export function AppToolbar() {
       )
     }
 
-    // Fleet breadcrumb: title + stats pills
-    if (isFleetPage) {
-      const agentTotal = fleetStatus?.total ?? 0
-      const running = fleetStatus?.running ?? 0
-      const errors = fleetStatus?.error ?? 0
+    // Cruise breadcrumb: title + stats pills
+    if (isCruisePage) {
+      const agentTotal = cruiseStatus?.total ?? 0
+      const running = cruiseStatus?.running ?? 0
+      const errors = cruiseStatus?.error ?? 0
       return (
         <>
-          <span className="text-sm text-muted-foreground">Fleet</span>
+          <span className="text-sm text-muted-foreground">Cruise</span>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
           <span className="text-sm font-semibold">Crews & Agents</span>
           <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-3">
@@ -323,31 +323,31 @@ export function AppToolbar() {
 
       {/* Right: Status indicators + search + notifications */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* Status indicators: System + Fleet + Escalations */}
+        {/* Status indicators: System + Cruise + Escalations */}
         {(() => {
           const systemOnline = engineStatus === "connected" && wsStatus === "connected"
           const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
 
-          let fleetLabel = ""
-          let fleetColor: "emerald" | "amber" | "red" | "muted" = "muted"
-          if (!fleetStatus) {
-            fleetLabel = "Loading..."
-            fleetColor = "muted"
-          } else if (fleetStatus.total === 0) {
-            fleetLabel = "No agents"
-            fleetColor = "muted"
-          } else if (fleetStatus.error > 0 && fleetStatus.running > 0) {
-            fleetLabel = `${fleetStatus.running > 99 ? "99+" : fleetStatus.running} active \u00b7 ${fleetStatus.error} error${fleetStatus.error > 1 ? "s" : ""}`
-            fleetColor = "amber"
-          } else if (fleetStatus.error > 0) {
-            fleetLabel = `${fleetStatus.error} error${fleetStatus.error > 1 ? "s" : ""}`
-            fleetColor = "red"
-          } else if (fleetStatus.running > 0) {
-            fleetLabel = `${fleetStatus.running > 99 ? "99+" : fleetStatus.running} active`
-            fleetColor = "emerald"
+          let cruiseLabel = ""
+          let cruiseColor: "emerald" | "amber" | "red" | "muted" = "muted"
+          if (!cruiseStatus) {
+            cruiseLabel = "Loading..."
+            cruiseColor = "muted"
+          } else if (cruiseStatus.total === 0) {
+            cruiseLabel = "No agents"
+            cruiseColor = "muted"
+          } else if (cruiseStatus.error > 0 && cruiseStatus.running > 0) {
+            cruiseLabel = `${cruiseStatus.running > 99 ? "99+" : cruiseStatus.running} active \u00b7 ${cruiseStatus.error} error${cruiseStatus.error > 1 ? "s" : ""}`
+            cruiseColor = "amber"
+          } else if (cruiseStatus.error > 0) {
+            cruiseLabel = `${cruiseStatus.error} error${cruiseStatus.error > 1 ? "s" : ""}`
+            cruiseColor = "red"
+          } else if (cruiseStatus.running > 0) {
+            cruiseLabel = `${cruiseStatus.running > 99 ? "99+" : cruiseStatus.running} active`
+            cruiseColor = "emerald"
           } else {
-            fleetLabel = "Fleet idle"
-            fleetColor = "muted"
+            cruiseLabel = "Cruise idle"
+            cruiseColor = "muted"
           }
 
           const colorMap = {
@@ -358,7 +358,7 @@ export function AppToolbar() {
           }
 
           const sysColors = systemOnline ? colorMap.emerald : systemChecking ? colorMap.amber : colorMap.red
-          const fleetColors = colorMap[fleetColor]
+          const cruiseColors = colorMap[cruiseColor]
 
           return (
             <div className="hidden lg:flex items-center gap-1.5 mr-1">
@@ -378,20 +378,20 @@ export function AppToolbar() {
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div tabIndex={0} role="status" aria-label={`Fleet: ${fleetLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${fleetColors.bg}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${fleetColors.dot} ${fleetStatus?.running ? "animate-pulse" : ""}`} />
-                    <span className={`text-micro font-medium ${fleetColors.text}`}>{fleetLabel}</span>
+                  <div tabIndex={0} role="status" aria-label={`Cruise: ${cruiseLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${cruiseColors.bg}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${cruiseColors.dot} ${cruiseStatus?.running ? "animate-pulse" : ""}`} />
+                    <span className={`text-micro font-medium ${cruiseColors.text}`}>{cruiseLabel}</span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {fleetStatus ? `${fleetStatus.total} agents: ${fleetStatus.running} running, ${fleetStatus.idle} idle, ${fleetStatus.error} errors` : "Loading fleet status..."}
+                  {cruiseStatus ? `${cruiseStatus.total} agents: ${cruiseStatus.running} running, ${cruiseStatus.idle} idle, ${cruiseStatus.error} errors` : "Loading cruise status..."}
                 </TooltipContent>
               </Tooltip>
 
               {pendingEscalations > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Link href="/fleet/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
+                    <Link href="/cruise/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
                       <span className={`text-micro font-medium ${colorMap.amber.text}`}>
                         {pendingEscalations > 99 ? "99+" : pendingEscalations} escalation{pendingEscalations !== 1 ? "s" : ""}

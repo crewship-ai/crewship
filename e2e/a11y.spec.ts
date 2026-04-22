@@ -9,7 +9,7 @@ const EXCLUDED_RULES = ["select-name", "color-contrast", "label", "button-name"]
 
 const PAGES = [
   { name: "Dashboard", path: "/" },
-  { name: "New Agent", path: "/fleet/agents/new" },
+  { name: "New Agent", path: "/cruise/agents/new" },
   { name: "Admin", path: "/admin" },
   { name: "Settings", path: "/settings" },
 ]

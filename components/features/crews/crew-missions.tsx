@@ -112,7 +112,7 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
             return (
               <Link
                 key={mission.id}
-                href={`/fleet/crews/${crewId}/missions/${mission.id}`}
+                href={`/cruise/crews/${crewId}/missions/${mission.id}`}
               >
                 <Card className="hover:border-primary/50 transition-colors cursor-pointer">
                   <CardContent className="p-3 sm:p-4">

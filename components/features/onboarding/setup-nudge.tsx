@@ -17,14 +17,14 @@ export function SetupNudge({ crewCount, agentCount, credentialCount }: SetupNudg
       icon: Network,
       label: "Create a crew",
       description: "Group your agents by department or function",
-      href: "/fleet/crews/new",
+      href: "/cruise/crews/new",
     },
     {
       done: agentCount > 0,
       icon: Bot,
       label: "Add an agent",
       description: "Create your first AI virtual employee",
-      href: "/fleet/agents/new",
+      href: "/cruise/agents/new",
     },
     {
       done: credentialCount > 0,

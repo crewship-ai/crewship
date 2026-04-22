@@ -2,15 +2,12 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { fleetUnifiedUI } from "@/lib/feature-flags"
 import {
   LayoutDashboard,
-  Bot,
   Key,
   Plug,
   Zap,
   Settings,
-  Network,
   Workflow,
   Activity,
   Shield,
@@ -55,19 +52,11 @@ import {
 const navSections = [
   {
     label: "Work",
-    items: fleetUnifiedUI()
-      ? [
-          { title: "Dashboard", href: "/", icon: LayoutDashboard },
-          { title: "Orchestration", href: "/orchestration", icon: Workflow },
-          { title: "Fleet", href: "/fleet", icon: Ship },
-        ]
-      : [
-          { title: "Dashboard", href: "/", icon: LayoutDashboard },
-          { title: "Orchestration", href: "/orchestration", icon: Workflow },
-          { title: "Fleet", href: "/fleet", icon: Ship },
-          { title: "Crews", href: "/crews", icon: Network },
-          { title: "Agents", href: "/agents", icon: Bot },
-        ],
+    items: [
+      { title: "Dashboard", href: "/", icon: LayoutDashboard },
+      { title: "Orchestration", href: "/orchestration", icon: Workflow },
+      { title: "Cruise", href: "/cruise", icon: Ship },
+    ],
   },
   {
     label: "Configure",

@@ -48,7 +48,7 @@ function CrewHealthIndicator({ summary }: { summary: AgentStatusSummary }) {
 export const CrewCard = memo(function CrewCard({ crew }: { crew: CrewData }) {
   return (
     <Link
-      href={`/fleet/crews/${crew.id}`}
+      href={`/cruise/crews/${crew.id}`}
       className="rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
     >
       <Card className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md">
