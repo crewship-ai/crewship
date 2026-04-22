@@ -67,7 +67,7 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
 
   return (
     <Link
-      href={`/agents/${agent.id}`}
+      href={`/fleet/agents/${agent.id}`}
       className="rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
     >
       <Card className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md">

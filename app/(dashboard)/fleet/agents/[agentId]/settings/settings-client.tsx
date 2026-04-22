@@ -225,7 +225,7 @@ export function SettingsPageClient() {
         return
       }
 
-      router.push("/agents")
+      router.push("/fleet/agents")
     } catch {
       setError("Network error. Please try again.")
     } finally {

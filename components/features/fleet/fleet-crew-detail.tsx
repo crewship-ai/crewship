@@ -104,13 +104,13 @@ export function FleetCrewDetail({ crew, agents, missions, onAgentClick }: FleetC
       {/* Action buttons */}
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/crews/${crew.id}`}>
+          <Link href={`/fleet/crews/${crew.id}`}>
             <Settings2 className="mr-1.5 h-3.5 w-3.5" />
             Edit
           </Link>
         </Button>
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/crews/${crew.id}/files`}>
+          <Link href={`/fleet/crews/${crew.id}/files`}>
             <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
             Files
           </Link>
@@ -142,7 +142,7 @@ export function FleetCrewDetail({ crew, agents, missions, onAgentClick }: FleetC
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-[13px] font-semibold">Agents</h3>
           <Button variant="outline" size="sm" className="h-7 text-[11px]" asChild>
-            <Link href={`/agents/new?crew_id=${crew.id}`}>+ Add</Link>
+            <Link href={`/fleet/agents/new?crew_id=${crew.id}`}>+ Add</Link>
           </Button>
         </div>
 

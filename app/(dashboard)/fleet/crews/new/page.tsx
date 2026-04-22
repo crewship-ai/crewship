@@ -141,7 +141,7 @@ export default function NewCrewPage() {
         const prefill = encodeURIComponent(
           "I need you to create a new crew for me. Please describe what kind of crew you want and I will design the agents, roles, and system prompts, then create everything for you.\n\nWhat should the crew do?"
         )
-        router.push(`/agents/${coordinator.id}/chat?prefill=${prefill}&workspace_id=${workspaceId}`)
+        router.push(`/fleet/agents/${coordinator.id}/chat?prefill=${prefill}&workspace_id=${workspaceId}`)
         return
       }
       setMode("no-coordinator")
@@ -250,7 +250,7 @@ export default function NewCrewPage() {
       }
 
       toast.success(`Crew "${name}" created with ${aiSuggestion.agents.length} agents`)
-      router.push(`/crews/${crew.id}`)
+      router.push(`/fleet/crews/${crew.id}`)
     } catch {
       toast.error("Network error. Please try again.")
       setSubmitting(false)
@@ -283,7 +283,7 @@ export default function NewCrewPage() {
         return
       }
       toast.success(`Crew "${name}" created with ${data.agent_count} agents`)
-      router.push(`/crews/${data.crew_id}`)
+      router.push(`/fleet/crews/${data.crew_id}`)
     } catch {
       toast.error("Network error. Please try again.")
       setSubmitting(false)
@@ -319,7 +319,7 @@ export default function NewCrewPage() {
           return
         }
         toast.success("Crew created successfully")
-        router.push("/crews")
+        router.push("/fleet/crews")
       } catch {
         toast.error("Network error. Please try again.")
         setSubmitting(false)
@@ -347,7 +347,7 @@ export default function NewCrewPage() {
         description="Create a new crew to organize your agents"
         actions={
           <Button variant="outline" size="sm" asChild>
-            <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back</Link>
+            <Link href="/fleet/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back</Link>
           </Button>
         }
         className="max-w-3xl"

@@ -39,8 +39,8 @@ const mobileNavSections = [
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Crews", href: "/crews", icon: Network },
-      { title: "Agents", href: "/agents", icon: Bot },
+      { title: "Crews", href: "/fleet/crews", icon: Network },
+      { title: "Agents", href: "/fleet/agents", icon: Bot },
     ],
   },
   {
@@ -69,8 +69,8 @@ const mobileNavSections = [
 
 const pageConfig: Record<string, { title: string }> = {
   "/": { title: "Dashboard" },
-  "/agents": { title: "Agents" },
-  "/crews": { title: "Crews" },
+  "/fleet/agents": { title: "Agents" },
+  "/fleet/crews": { title: "Crews" },
   "/fleet": { title: "Crews & Agents" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
@@ -210,14 +210,14 @@ export function AppToolbar() {
     if (isAgentPage && agentBreadcrumb) {
       return (
         <>
-          <Link href="/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/fleet/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Agents
           </Link>
           {agentBreadcrumb.crewName && agentBreadcrumb.crewId && (
             <>
               <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
               <Link
-                href={`/crews/${agentBreadcrumb.crewId}`}
+                href={`/fleet/crews/${agentBreadcrumb.crewId}`}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
               >
                 <span
@@ -237,7 +237,7 @@ export function AppToolbar() {
     if (isAgentPage) {
       return (
         <>
-          <Link href="/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/fleet/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Agents
           </Link>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
@@ -391,7 +391,7 @@ export function AppToolbar() {
               {pendingEscalations > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Link href="/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
+                    <Link href="/fleet/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
                       <span className={`text-micro font-medium ${colorMap.amber.text}`}>
                         {pendingEscalations > 99 ? "99+" : pendingEscalations} escalation{pendingEscalations !== 1 ? "s" : ""}

@@ -34,7 +34,7 @@ export function CrewAgents({ agents, crewId, canCreate }: CrewAgentsProps) {
         <h2 className="text-default font-semibold">Agents</h2>
         {canCreate && agents.length > 0 && (
           <Button size="sm" asChild>
-            <Link href={`/agents/new?crew_id=${crewId}`}>New Agent</Link>
+            <Link href={`/fleet/agents/new?crew_id=${crewId}`}>New Agent</Link>
           </Button>
         )}
       </div>
@@ -46,7 +46,7 @@ export function CrewAgents({ agents, crewId, canCreate }: CrewAgentsProps) {
         >
           {canCreate && (
             <Button className="mt-4" size="sm" asChild>
-              <Link href={`/agents/new?crew_id=${crewId}`}>
+              <Link href={`/fleet/agents/new?crew_id=${crewId}`}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add Agent
               </Link>

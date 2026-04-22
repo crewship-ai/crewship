@@ -88,8 +88,8 @@ const PROVIDER_LABELS: Record<string, string> = {
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Orchestration", href: "/orchestration", icon: CircleDot },
-  { title: "Crews", href: "/crews", icon: Network },
-  { title: "Agents", href: "/agents", icon: Bot },
+  { title: "Crews", href: "/fleet/crews", icon: Network },
+  { title: "Agents", href: "/fleet/agents", icon: Bot },
   { title: "Skills", href: "/skills", icon: Zap },
   { title: "Credentials", href: "/credentials", icon: Key },
   { title: "Runs", href: "/runs", icon: Activity },
@@ -100,8 +100,8 @@ const NAV_ITEMS = [
 ]
 
 const QUICK_ACTIONS = [
-  { title: "Create new agent", href: "/agents/new", icon: Plus, keywords: ["add", "new", "agent"] },
-  { title: "Create new crew", href: "/crews/new", icon: Plus, keywords: ["add", "new", "crew", "team"] },
+  { title: "Create new agent", href: "/fleet/agents/new", icon: Plus, keywords: ["add", "new", "agent"] },
+  { title: "Create new crew", href: "/fleet/crews/new", icon: Plus, keywords: ["add", "new", "crew", "team"] },
 ]
 
 interface CommandPaletteProps {
@@ -241,7 +241,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   key={agent.id}
                   value={`agent ${agent.name} ${agent.slug}`}
                   keywords={[agent.role_title ?? "", agent.crew?.name ?? "", agent.status]}
-                  onSelect={() => runCommand(() => router.push(`/agents/${agent.id}`))}
+                  onSelect={() => runCommand(() => router.push(`/fleet/agents/${agent.id}`))}
                 >
                   <img
                     src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
@@ -272,7 +272,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <CommandItem
                   key={crew.id}
                   value={`crew ${crew.name} ${crew.slug}`}
-                  onSelect={() => runCommand(() => router.push(`/crews/${crew.id}`))}
+                  onSelect={() => runCommand(() => router.push(`/fleet/crews/${crew.id}`))}
                 >
                   <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" className="h-5 w-5 rounded-md [&>svg]:h-3 [&>svg]:w-3" />
                   <span className="flex-1 truncate">{crew.name}</span>

@@ -141,7 +141,7 @@ export default function CrewsPage() {
       actions={
         abilities.can("create", "Crew") && (
           <Button asChild>
-            <Link href="/crews/new">
+            <Link href="/fleet/crews/new">
               <Plus className="mr-2 h-4 w-4" />
               New Crew
             </Link>
@@ -204,7 +204,7 @@ export default function CrewsPage() {
         >
           {abilities.can("create", "Crew") && (
             <Button className="mt-4" asChild>
-              <Link href="/crews/new">
+              <Link href="/fleet/crews/new">
                 <Plus className="mr-2 h-4 w-4" />
                 Create Crew
               </Link>

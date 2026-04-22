@@ -144,7 +144,7 @@ export default function NewAgentPage() {
           return
         }
 
-        router.push("/agents")
+        router.push("/fleet/agents")
       } catch {
         setError("Network error. Please try again.")
         setSubmitting(false)
@@ -181,7 +181,7 @@ export default function NewAgentPage() {
       description="Create a new AI virtual employee"
       actions={
         <Button variant="outline" size="sm" asChild>
-          <Link href="/agents">
+          <Link href="/fleet/agents">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Link>
@@ -391,7 +391,7 @@ export default function NewAgentPage() {
             Create Agent
           </Button>
           <Button type="button" variant="outline" asChild>
-            <Link href="/agents">Cancel</Link>
+            <Link href="/fleet/agents">Cancel</Link>
           </Button>
         </div>
       </form>

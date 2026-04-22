@@ -194,7 +194,7 @@ export function ChatPageClient() {
             </SheetHeader>
             <div className="flex-1 overflow-y-auto py-1">
               {agentTabsList.map((tab) => {
-                const basePath = `/agents/${agentId}`
+                const basePath = `/fleet/agents/${agentId}`
                 const tabPath = tab.href ? `${basePath}${tab.href}` : basePath
                 const isActive = tab.href === ""
                   ? pathname === basePath

@@ -326,7 +326,7 @@ export default function RunsPage() {
                     #{run.id.slice(0, 8)}
                   </span>
                   <Link
-                    href={`/agents/${run.agent_id}`}
+                    href={`/fleet/agents/${run.agent_id}`}
                     className="text-xs font-medium truncate hover:underline"
                   >
                     {run.agent_name ?? <span className="text-muted-foreground/60">Unknown</span>}
@@ -362,7 +362,7 @@ export default function RunsPage() {
                     {formatRelativeShort(run.started_at ?? run.created_at)}
                   </span>
                   <Link
-                    href={`/agents/${run.agent_id}`}
+                    href={`/fleet/agents/${run.agent_id}`}
                     className="text-muted-foreground/60 hover:text-foreground transition-colors justify-self-end"
                     aria-label="Open agent"
                   >

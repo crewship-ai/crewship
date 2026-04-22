@@ -155,35 +155,35 @@ export function AgentOverviewPageClient() {
       {/* Stats Row — 5 columns */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         <StatMiniCard
-          href={`/agents/${agentId}/runs`}
+          href={`/fleet/agents/${agentId}/runs`}
           icon={Zap}
           label="Runs"
           value={totalRuns}
           subtitle={`${totalCompletedRunCount} completed`}
         />
         <StatMiniCard
-          href={`/agents/${agentId}/chat`}
+          href={`/fleet/agents/${agentId}/chat`}
           icon={MessagesSquare}
           label="Sessions"
           value={agent._count?.chats ?? 0}
           subtitle={activeChats > 0 ? `${activeChats} active` : "none active"}
         />
         <StatMiniCard
-          href={`/agents/${agentId}/skills`}
+          href={`/fleet/agents/${agentId}/skills`}
           icon={Puzzle}
           label="Skills"
           value={agent._count?.skills ?? 0}
           subtitle={(agent._count?.skills ?? 0) > 0 ? "assigned" : "none assigned"}
         />
         <StatMiniCard
-          href={`/agents/${agentId}/credentials`}
+          href={`/fleet/agents/${agentId}/credentials`}
           icon={KeyRound}
           label="Credentials"
           value={agent._count?.credentials ?? 0}
           subtitle={(agent._count?.credentials ?? 0) > 0 ? `${agent._count.credentials} active` : "none"}
         />
         <StatMiniCard
-          href={`/agents/${agentId}/files`}
+          href={`/fleet/agents/${agentId}/files`}
           icon={FileText}
           label="Files"
           value="\u2014"
@@ -252,7 +252,7 @@ export function AgentOverviewPageClient() {
                 {agent.crew && (
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Crew</span>
-                    <Link href={`/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline" aria-label={`Go to ${agent.crew.name} crew`}>
+                    <Link href={`/fleet/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline" aria-label={`Go to ${agent.crew.name} crew`}>
                       <span className={`h-2 w-2 rounded-full ${getCrewBgClass(agent.crew.color)}`} />
                       {agent.crew.name}
                     </Link>
@@ -306,7 +306,7 @@ export function AgentOverviewPageClient() {
                   <MessagesSquare className="h-4 w-4 text-muted-foreground" />
                   <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Recent Sessions</span>
                 </div>
-                <Link href={`/agents/${agentId}/chat`} className="text-micro text-primary font-medium hover:underline">
+                <Link href={`/fleet/agents/${agentId}/chat`} className="text-micro text-primary font-medium hover:underline">
                   View all
                 </Link>
               </div>
@@ -319,7 +319,7 @@ export function AgentOverviewPageClient() {
                   {recentChats.map((chat) => (
                     <Link
                       key={chat.id}
-                      href={`/agents/${agentId}/chat?session=${chat.id}`}
+                      href={`/fleet/agents/${agentId}/chat?session=${chat.id}`}
                       className="flex items-center justify-between px-4 py-2.5 hover:bg-muted/50 transition-colors"
                     >
                       <div className="min-w-0">
@@ -350,7 +350,7 @@ export function AgentOverviewPageClient() {
                   <Zap className="h-4 w-4 text-muted-foreground" />
                   <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Recent Runs</span>
                 </div>
-                <Link href={`/agents/${agentId}/runs`} className="text-micro text-primary font-medium hover:underline">
+                <Link href={`/fleet/agents/${agentId}/runs`} className="text-micro text-primary font-medium hover:underline">
                   View all
                 </Link>
               </div>

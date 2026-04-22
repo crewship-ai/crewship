@@ -111,7 +111,7 @@ export default function AgentsPage() {
       actions={
         abilities.can("create", "Agent") && (
           <Button asChild>
-            <Link href="/agents/new">
+            <Link href="/fleet/agents/new">
               <Plus className="mr-2 h-4 w-4" />
               New Agent
             </Link>
@@ -150,7 +150,7 @@ export default function AgentsPage() {
         >
           {agents.length === 0 ? (
             <Button className="mt-4" asChild>
-              <Link href="/agents/new">
+              <Link href="/fleet/agents/new">
                 <Plus className="mr-2 h-4 w-4" />
                 Create Agent
               </Link>

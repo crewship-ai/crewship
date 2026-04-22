@@ -165,19 +165,19 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
         {/* Quick actions */}
         <div className="flex items-center gap-2">
           <Button size="sm" className="h-7 text-[11px]" asChild>
-            <Link href={`/agents/${agent.id}/chat`}>
+            <Link href={`/fleet/agents/${agent.id}/chat`}>
               <MessageSquare className="mr-1.5 h-3 w-3" />
               Chat
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="h-7 text-[11px]" asChild>
-            <Link href={`/agents/${agent.id}/logs`}>
+            <Link href={`/fleet/agents/${agent.id}/logs`}>
               <ScrollText className="mr-1.5 h-3 w-3" />
               Logs
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="h-7 text-[11px]" asChild>
-            <Link href={`/agents/${agent.id}/settings`}>
+            <Link href={`/fleet/agents/${agent.id}/settings`}>
               <Settings className="mr-1.5 h-3 w-3" />
               Settings
             </Link>
@@ -201,7 +201,7 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
               {runs.map((run) => (
                 <Link
                   key={run.id}
-                  href={`/agents/${agent.id}/runs`}
+                  href={`/fleet/agents/${agent.id}/runs`}
                   className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.04] transition-colors"
                 >
                   <span className={cn("text-[10px] font-mono", RUN_STATUS_COLOR[run.status] || "text-muted-foreground")}>
@@ -225,7 +225,7 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
         {/* Open full page link */}
         <div className="pt-2">
           <Button variant="ghost" size="sm" className="h-7 text-[11px] text-muted-foreground w-full justify-center gap-1.5" asChild>
-            <Link href={`/agents/${agent.id}`}>
+            <Link href={`/fleet/agents/${agent.id}`}>
               Open full agent page
               <ExternalLink className="h-3 w-3" />
             </Link>

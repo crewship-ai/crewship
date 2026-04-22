@@ -504,7 +504,7 @@ export function FilesPageClient() {
               crewId ? "text-muted-foreground hover:bg-accent cursor-pointer" : "text-muted-foreground/40 cursor-not-allowed",
             )}
             title={crewId ? "Browse all crew files" : "No crew assigned"}
-            onClick={() => crewId && router.push(`/crews/${crewId}/files`)}
+            onClick={() => crewId && router.push(`/fleet/crews/${crewId}/files`)}
           >Crew</button>
           <button
             className={cn("px-2.5 py-1 text-micro rounded-md flex items-center gap-1", activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}

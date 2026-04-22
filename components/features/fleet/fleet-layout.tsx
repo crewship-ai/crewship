@@ -158,13 +158,13 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
         {/* Right: actions */}
         <div className="flex items-center gap-1.5 ml-auto shrink-0">
           <Button size="sm" className="h-[22px] px-2 text-label font-medium gap-1" asChild>
-            <Link href="/crews/new">
+            <Link href="/fleet/crews/new">
               <Plus className="h-3 w-3" />
               Crew
             </Link>
           </Button>
           <Button variant="outline" size="sm" className="h-[22px] px-2 text-label font-medium gap-1 bg-muted border-border" asChild>
-            <Link href="/agents/new">
+            <Link href="/fleet/agents/new">
               <Plus className="h-3 w-3" />
               Agent
             </Link>
