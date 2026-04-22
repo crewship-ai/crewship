@@ -4,9 +4,9 @@ import { useCallback, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Zap, Key, Plug } from "lucide-react"
 import { ToolbarStrip, type ToolbarTab } from "@/components/layout/toolbar-strip"
-import { SkillsPageClient } from "@/app/(dashboard)/fleet/agents/[agentId]/skills/skills-client"
-import { CredentialsPageClient } from "@/app/(dashboard)/fleet/agents/[agentId]/credentials/credentials-client"
-import { MCPPageClient } from "@/app/(dashboard)/fleet/agents/[agentId]/mcp/mcp-client"
+import { SkillsPageClient } from "@/components/features/agents/tools/skills-pane"
+import { CredentialsPageClient } from "@/components/features/agents/tools/credentials-pane"
+import { MCPPageClient } from "@/components/features/agents/tools/mcp-pane"
 
 type Section = "skills" | "credentials" | "mcp"
 

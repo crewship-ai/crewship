@@ -162,28 +162,28 @@ export function AgentOverviewPageClient() {
           subtitle={`${totalCompletedRunCount} completed`}
         />
         <StatMiniCard
-          href={`/fleet/agents/${agentId}/chat`}
+          href={`/fleet/agents/${agentId}/sessions`}
           icon={MessagesSquare}
           label="Sessions"
           value={agent._count?.chats ?? 0}
           subtitle={activeChats > 0 ? `${activeChats} active` : "none active"}
         />
         <StatMiniCard
-          href={`/fleet/agents/${agentId}/skills`}
+          href={`/fleet/agents/${agentId}/tools?section=skills`}
           icon={Puzzle}
           label="Skills"
           value={agent._count?.skills ?? 0}
           subtitle={(agent._count?.skills ?? 0) > 0 ? "assigned" : "none assigned"}
         />
         <StatMiniCard
-          href={`/fleet/agents/${agentId}/credentials`}
+          href={`/fleet/agents/${agentId}/tools?section=credentials`}
           icon={KeyRound}
           label="Credentials"
           value={agent._count?.credentials ?? 0}
           subtitle={(agent._count?.credentials ?? 0) > 0 ? `${agent._count.credentials} active` : "none"}
         />
         <StatMiniCard
-          href={`/fleet/agents/${agentId}/files`}
+          href={`/fleet/agents/${agentId}/workspace?pane=files`}
           icon={FileText}
           label="Files"
           value="\u2014"

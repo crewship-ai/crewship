@@ -23,7 +23,7 @@ type LogLevel = "ALL" | "INFO" | "WARN" | "ERROR"
 const LEVELS: LogLevel[] = ["ALL", "INFO", "WARN", "ERROR"]
 
 /** Agent logs viewer with dark terminal style, filtering, and auto-refresh. */
-export function LogsPageClient() {
+export function LogsViewer() {
   const { agentId } = useParams<{ agentId: string }>()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [logs, setLogs] = useState<LogEntry[]>([])

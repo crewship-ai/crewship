@@ -1,4 +1,4 @@
-import { LogsPageClient } from "./logs-client"
+import { LogsPageClient } from "@/components/features/agents/logs/logs-page-client"
 
 export function generateStaticParams() {
   return [{ agentId: "_" }]

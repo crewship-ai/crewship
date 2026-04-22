@@ -4,8 +4,8 @@ import { useCallback, useMemo } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { FolderOpen, TerminalSquare } from "lucide-react"
 import { ToolbarStrip, type ToolbarTab } from "@/components/layout/toolbar-strip"
-import { FilesPageClient } from "@/app/(dashboard)/fleet/agents/[agentId]/files/files-client"
-import { TerminalPageClient } from "@/app/(dashboard)/fleet/agents/[agentId]/terminal/terminal-client"
+import { FilesPageClient } from "@/components/features/agents/workspace/files-pane"
+import { TerminalPageClient } from "@/components/features/agents/workspace/terminal-pane"
 
 type Pane = "files" | "terminal"
 
