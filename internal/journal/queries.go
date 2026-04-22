@@ -20,6 +20,7 @@ type Query struct {
 	MissionID   string
 	Types       []EntryType
 	Severities  []Severity
+	Priorities  []Priority // empty → any priority; use to surface only 'permanent'+'high'+'pin' etc.
 	Since       time.Time
 	Until       time.Time
 	Cursor      string // opaque — set from a prior page's last entry ID+TS
@@ -73,6 +74,14 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 			args = append(args, string(s))
 		}
 	}
+	if len(q.Priorities) > 0 {
+		placeholders := strings.Repeat("?,", len(q.Priorities))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "priority IN ("+placeholders+")")
+		for _, p := range q.Priorities {
+			args = append(args, string(p))
+		}
+	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "ts >= ?")
 		args = append(args, q.Since.UTC().Format(time.RFC3339Nano))
@@ -93,7 +102,7 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	}
 
 	query := `SELECT id, workspace_id, crew_id, agent_id, mission_id, ts, entry_type,
-		severity, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
+		severity, priority, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
 		FROM journal_entries
 		WHERE ` + strings.Join(conds, " AND ") + `
 		ORDER BY ts DESC, id DESC
@@ -109,10 +118,10 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	out := make([]Entry, 0, q.Limit)
 	for rows.Next() {
 		var (
-			e                                            Entry
-			crewID, agentID, missionID, actorID          sql.NullString
-			traceID, spanID, expires                     sql.NullString
-			payloadStr, refsStr, tsStr, sev, actor, kind string
+			e                                                   Entry
+			crewID, agentID, missionID, actorID                 sql.NullString
+			traceID, spanID, expires                            sql.NullString
+			payloadStr, refsStr, tsStr, sev, prio, actor, kind  string
 		)
 		if err := rows.Scan(
 			&e.ID,
@@ -123,6 +132,7 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 			&tsStr,
 			&kind,
 			&sev,
+			&prio,
 			&actor,
 			&actorID,
 			&e.Summary,
@@ -142,6 +152,7 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 		e.SpanID = spanID.String
 		e.Type = EntryType(kind)
 		e.Severity = Severity(sev)
+		e.Priority = Priority(prio)
 		e.ActorType = ActorType(actor)
 		if ts, err := parseJournalTS(tsStr); err == nil {
 			e.TS = ts
@@ -181,17 +192,17 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error
 	// the requested one — which means the fallback below always ran,
 	// the List call was pure waste, and CodeRabbit flagged it.
 	row := db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, agent_id, mission_id, ts,
-		entry_type, severity, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
+		entry_type, severity, priority, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
 		FROM journal_entries WHERE workspace_id = ? AND id = ?`, workspaceID, id)
 	var (
-		e                                            Entry
-		crewID, agentID, missionID, actorID          sql.NullString
-		traceID, spanID, expires                     sql.NullString
-		payloadStr, refsStr, tsStr, sev, actor, kind string
+		e                                                   Entry
+		crewID, agentID, missionID, actorID                 sql.NullString
+		traceID, spanID, expires                            sql.NullString
+		payloadStr, refsStr, tsStr, sev, prio, actor, kind  string
 	)
 	if err := row.Scan(
 		&e.ID, &e.WorkspaceID, &crewID, &agentID, &missionID, &tsStr,
-		&kind, &sev, &actor, &actorID, &e.Summary, &payloadStr, &refsStr,
+		&kind, &sev, &prio, &actor, &actorID, &e.Summary, &payloadStr, &refsStr,
 		&traceID, &spanID, &expires,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -207,6 +218,7 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error
 	e.SpanID = spanID.String
 	e.Type = EntryType(kind)
 	e.Severity = Severity(sev)
+	e.Priority = Priority(prio)
 	e.ActorType = ActorType(actor)
 	if ts, err := parseJournalTS(tsStr); err == nil {
 		e.TS = ts
@@ -265,6 +277,14 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 		conds = append(conds, "severity IN ("+placeholders+")")
 		for _, s := range q.Severities {
 			args = append(args, string(s))
+		}
+	}
+	if len(q.Priorities) > 0 {
+		placeholders := strings.Repeat("?,", len(q.Priorities))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "priority IN ("+placeholders+")")
+		for _, p := range q.Priorities {
+			args = append(args, string(p))
 		}
 	}
 	if !q.Since.IsZero() {

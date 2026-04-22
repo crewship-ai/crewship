@@ -161,6 +161,67 @@ func truncateString(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
+// journalPriorityCmd marks a journal entry with one of the four
+// priority values. Inspired by OpenClaw Auto-Dream's ⚠️ PERMANENT /
+// 🔥 HIGH / 📌 PIN markers — operators annotate entries they want
+// surfaced prominently in recall or never compacted. Requires OWNER
+// or ADMIN on the caller's workspace.
+var journalPriorityCmd = &cobra.Command{
+	Use:   "priority <entry-id>",
+	Short: "Mark a journal entry with a priority (permanent/high/pin/normal)",
+	Long: `Annotate a journal entry with an importance marker.
+
+  permanent — never compacted, extracted to learned rules immediately,
+              recall importance floored at 0.95. Use sparingly.
+  high      — recall importance boosted to 0.85, normal compaction.
+  pin       — snapshot to /crew/shared/.memory/pins.md at next
+              consolidate run, recall importance 0.80+.
+  normal    — clear any existing marker back to default.
+
+Examples:
+  crewship journal priority j_abc --mark permanent --reason "FX compliance rule"
+  crewship journal priority j_abc --mark pin --reason "team playbook entry"
+  crewship journal priority j_abc --mark normal`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		mark, _ := cmd.Flags().GetString("mark")
+		reason, _ := cmd.Flags().GetString("reason")
+		if mark == "" {
+			return fmt.Errorf("--mark is required")
+		}
+
+		client := newAPIClient()
+		path := fmt.Sprintf("/api/v1/journal/%s/priority", url.PathEscape(args[0]))
+		resp, err := client.Post(path, map[string]string{
+			"priority": mark,
+			"reason":   reason,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var out struct {
+			ID       string `json:"id"`
+			Priority string `json:"priority"`
+			Previous string `json:"previous"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		fmt.Printf("Entry %s: priority %s → %s\n", out.ID, out.Previous, out.Priority)
+		return nil
+	},
+}
+
 func init() {
 	journalCmd.Flags().Int("lines", 50, "Max entries to fetch")
 	journalCmd.Flags().String("crew", "", "Filter by crew slug or ID")
@@ -170,4 +231,8 @@ func init() {
 	journalCmd.Flags().String("severity", "", "Comma-separated severities (info,notice,warn,error)")
 	journalCmd.Flags().String("since", "", "Time window (1h, 24h, 7d, or RFC3339)")
 	journalCmd.Flags().Bool("follow", false, "Live tail via SSE (not yet implemented in CLI — use web UI)")
+
+	journalPriorityCmd.Flags().String("mark", "", "Priority marker: permanent | high | pin | normal (required)")
+	journalPriorityCmd.Flags().String("reason", "", "Short reason recorded alongside the change (shows up in logs)")
+	journalCmd.AddCommand(journalPriorityCmd)
 }
