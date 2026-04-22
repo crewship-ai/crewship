@@ -73,10 +73,10 @@ test("/fleet renders top tabs + no console errors", async ({ page }) => {
   const issues = attachCollectors(page)
   await page.goto("/fleet")
   await page.waitForLoadState("networkidle")
-  await expect(page.getByRole("button", { name: "Overview" })).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByRole("button", { name: "Activity" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Health" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Connections" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Overview", exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole("button", { name: "Activity", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Health", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Connections", exact: true })).toHaveCount(0)
   console.log("/fleet issues:", JSON.stringify(issues, null, 2))
   expect(issues.jsErrors).toHaveLength(0)
 })
@@ -98,12 +98,11 @@ test("legacy /crews redirects to /fleet/crews", async ({ page }) => {
 test("agent full page: all 7 tabs reachable without JS errors", async ({ page }) => {
   await login(page)
   const issues = attachCollectors(page)
-  await page.goto("/fleet")
+  await page.goto("/fleet/agents")
   await page.waitForLoadState("networkidle")
 
   const agentLink = page
-    .locator("a[href^='/fleet/agents/']")
-    .filter({ hasNot: page.locator("text=/new/i") })
+    .locator("a[href^='/fleet/agents/']:not([href$='/new']):not([href*='/agents/new'])")
     .first()
 
   if ((await agentLink.count()) === 0) {
@@ -135,8 +134,7 @@ test("crew full page: all 6 tabs reachable", async ({ page }) => {
   await page.waitForLoadState("networkidle")
 
   const crewLink = page
-    .locator("a[href^='/fleet/crews/']")
-    .filter({ hasNot: page.locator("text=/new/i") })
+    .locator("a[href^='/fleet/crews/']:not([href$='/new']):not([href*='/crews/new'])")
     .first()
 
   if ((await crewLink.count()) === 0) {
@@ -160,12 +158,11 @@ test("crew full page: all 6 tabs reachable", async ({ page }) => {
 
 test("agent workspace sub-strip: pane=terminal switch", async ({ page }) => {
   await login(page)
-  await page.goto("/fleet")
+  await page.goto("/fleet/agents")
   await page.waitForLoadState("networkidle")
 
   const agentLink = page
-    .locator("a[href^='/fleet/agents/']")
-    .filter({ hasNot: page.locator("text=/new/i") })
+    .locator("a[href^='/fleet/agents/']:not([href$='/new']):not([href*='/agents/new'])")
     .first()
   if ((await agentLink.count()) === 0) {
     test.skip(true, "no agents")
@@ -181,9 +178,9 @@ test("agent workspace sub-strip: pane=terminal switch", async ({ page }) => {
 
 test("agent tools sub-strip: skills/credentials/mcp", async ({ page }) => {
   await login(page)
-  await page.goto("/fleet")
+  await page.goto("/fleet/agents")
   await page.waitForLoadState("networkidle")
-  const agentLink = page.locator("a[href^='/fleet/agents/']").filter({ hasNot: page.locator("text=/new/i") }).first()
+  const agentLink = page.locator("a[href^='/fleet/agents/']:not([href$='/new']):not([href*='/agents/new'])").first()
   if ((await agentLink.count()) === 0) {
     test.skip(true, "no agents")
     return
@@ -201,9 +198,9 @@ test("agent tools sub-strip: skills/credentials/mcp", async ({ page }) => {
 
 test("agent settings: Schedule sub-section loads, avatar style picker is locked", async ({ page }) => {
   await login(page)
-  await page.goto("/fleet")
+  await page.goto("/fleet/agents")
   await page.waitForLoadState("networkidle")
-  const agentLink = page.locator("a[href^='/fleet/agents/']").filter({ hasNot: page.locator("text=/new/i") }).first()
+  const agentLink = page.locator("a[href^='/fleet/agents/']:not([href$='/new']):not([href*='/agents/new'])").first()
   if ((await agentLink.count()) === 0) {
     test.skip(true, "no agents")
     return
@@ -224,7 +221,7 @@ test("crew overview shows avatar picker + apply button", async ({ page }) => {
   await login(page)
   await page.goto("/fleet/crews")
   await page.waitForLoadState("networkidle")
-  const crewLink = page.locator("a[href^='/fleet/crews/']").filter({ hasNot: page.locator("text=/new/i") }).first()
+  const crewLink = page.locator("a[href^='/fleet/crews/']:not([href$='/new']):not([href*='/crews/new'])").first()
   if ((await crewLink.count()) === 0) {
     test.skip(true, "no crews")
     return
