@@ -173,11 +173,17 @@ func (c *Compactor) selectAged(ctx context.Context, workspaceID string, cutoff t
 		placeholders[i] = "?"
 		args = append(args, string(t))
 	}
+	// priority != 'permanent' is load-bearing: operators use
+	// PriorityPermanent to say "never forget this", and the compactor
+	// must honor that regardless of age, type, or severity. Without
+	// the filter the 30-day rollup would silently delete deliberately
+	// pinned knowledge.
 	q := `SELECT id, crew_id, ts, entry_type,
 	              (length(payload) + length(summary)) AS size_bytes
 	      FROM journal_entries
 	      WHERE workspace_id = ?
 	        AND ts < ?
+	        AND priority != 'permanent'
 	        AND entry_type IN (` + strings.Join(placeholders, ",") + `)
 	      ORDER BY ts ASC`
 	rows, err := c.DB.QueryContext(ctx, q, args...)

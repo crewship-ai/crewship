@@ -57,6 +57,21 @@ func Gate(ctx context.Context, db *sql.DB, j journal.Emitter, eval *Evaluator, i
 		return Decision{NotGated: true, Approved: true}, nil
 	}
 
+	// Auto-tune the mode from reward history. If the operator has
+	// approved this same-shape call many times in a row, Sync→Async
+	// stops blocking the agent on something humans rubber-stamp. If
+	// they've denied it repeatedly, Async→Sync starts actually
+	// blocking instead of logging and running anyway. AdjustMode
+	// needs a quorum (half the window) so a single denial doesn't
+	// flip behaviour. Errors degrade gracefully — on DB failure we
+	// fall back to the requested mode.
+	originalMode := in.Mode
+	if adjusted, reason, err := AdjustMode(ctx, db, in.WorkspaceID, in.Tool, in.Args, in.Mode); err == nil && adjusted != originalMode {
+		in.Mode = adjusted
+		EmitAutoTuned(ctx, j, in.WorkspaceID, in.CrewID, in.AgentID, in.MissionID,
+			in.Tool, originalMode, adjusted, reason)
+	}
+
 	req := Request{
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.CrewID,

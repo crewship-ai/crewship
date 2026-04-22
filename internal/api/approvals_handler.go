@@ -146,3 +146,72 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": string(status), "decided_by": user.ID})
 }
+
+// ResetAutoTuning serves POST /api/v1/approvals/reset-auto-tuning.
+// Body: {"tool": "shell.exec"}. Requires OWNER or ADMIN.
+//
+// Wipes the rolling reward window for (workspace, tool) so the next
+// Gate() call falls back to the operator-requested mode instead of
+// the auto-tuned one. Use this when a gate was mis-trained (e.g.
+// automation approved on behalf of humans for a while, then humans
+// took over — the history still biases approve, and you want it gone).
+func (h *ApprovalsHandler) ResetAutoTuning(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	role := RoleFromContext(r.Context())
+	if role != "OWNER" && role != "ADMIN" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "reset requires OWNER or ADMIN"})
+		return
+	}
+	var body struct {
+		Tool string `json:"tool"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if body.Tool == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool required"})
+		return
+	}
+	n, err := harbormaster.ResetAutoTuning(r.Context(), h.db, workspaceID, body.Tool)
+	if err != nil {
+		h.logger.Error("approvals reset auto-tuning", "err", err, "tool", body.Tool)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reset failed"})
+		return
+	}
+
+	// Durable audit trail: who reset the rolling reward window, for which
+	// tool, and how many rows got wiped. Without this, an operator can
+	// silently neutralise auto-tuning and nobody can tell it happened —
+	// so the gating history becomes un-auditable for compliance.
+	actorID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		actorID = u.ID
+	}
+	if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: workspaceID,
+		Type:        "approval.auto_tuning_reset",
+		ActorType:   journal.ActorUser,
+		ActorID:     actorID,
+		Severity:    journal.SeverityNotice,
+		Summary:     "reset auto-tuning for tool=" + body.Tool,
+		Payload: map[string]any{
+			"tool":         body.Tool,
+			"rows_deleted": n,
+		},
+	}); emitErr != nil {
+		// Log only — the reset already happened; a journal write failure
+		// shouldn't bubble 500 back to the operator.
+		h.logger.Warn("approvals reset auto-tuning: audit emit failed", "err", emitErr)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tool":          body.Tool,
+		"rows_deleted":  n,
+		"workspace_id":  workspaceID,
+	})
+}

@@ -120,6 +120,51 @@ matcher:
   severities: ["high", "critical"]
 ```
 
+## Reward-adjusted gating
+
+Every `Decide` call also feeds `gate_reward_history` — one row per
+outcome, keyed by `(workspace_id, tool_name, args_hash)`. On the next
+`Gate()` call for the same shape, `harbormaster.AdjustMode` walks the
+last 20 outcomes and:
+
+- downgrades `sync → async` when **approval rate > 90%** (humans are
+  rubber-stamping — stop blocking the agent)
+- upgrades `async → sync` when **denial rate > 70%** (humans are
+  rejecting — start blocking instead of logging and running anyway)
+
+Both require a quorum of at least `RewardHistorySize/2 = 10` decisions
+before tuning — a single denial won't flip the mode. Timeouts and
+cancellations are tracked but excluded from the rate calculation so
+inaction doesn't dilute operator intent.
+
+Every mode change emits a `keeper.rule_auto_tuned` journal entry so
+the audit trail shows *why* a later call took a different path than
+the rule says.
+
+**Reset** — operators can wipe the rolling window for a tool via CLI:
+
+```bash
+crewship approvals reset-auto-tuning shell.exec
+# → Reset auto-tuning for "shell.exec" — cleared 17 rows from gate_reward_history
+```
+
+or HTTP:
+
+```bash
+curl -X POST /api/v1/approvals/reset-auto-tuning -d '{"tool":"shell.exec"}'
+```
+
+Use when automation approved on behalf of humans for a while and
+biased the window (the next decisions will retrain naturally).
+
+`args_hash` is a sha256 over JSON-sorted keys — the raw args are
+never stored in `gate_reward_history`, only in the original
+`approvals_queue` row. Semantically-equal calls hash the same, so
+one cohort per operation shape.
+
+Inspired by Self-Evolve's Q-value update loop, simplified: operator
+decision *is* the signal (no LLM judge needed).
+
 ## Gotchas
 
 - **Only OWNER and ADMIN can decide.** The `Decide` handler inline-checks `RoleFromContext` and returns 403 for anyone else. This used to be documented as "middleware-enforced" but there was no middleware -- the check is now explicit in the handler.

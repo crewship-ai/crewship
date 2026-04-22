@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -210,7 +211,47 @@ func Decide(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id 
 			Refs: map[string]any{"approval_id": row.ID},
 		})
 	}
+
+	// Feed the outcome into the reward-history table so AdjustMode
+	// can converge gate behaviour from repeated operator decisions.
+	// The tool + args live in the original request payload — we pull
+	// them from the reloaded row so this works regardless of caller.
+	// Failures here are non-fatal: auto-tuning is best-effort and
+	// shouldn't cause a human decision to return an error. But we DO
+	// log so an oncall engineer can see why auto-tuning stops working
+	// if the reward table is having issues.
+	tool, args := extractToolArgs(row.Payload)
+	if tool != "" {
+		outcome := OutcomeDenied
+		if status == StatusApproved {
+			outcome = OutcomeApproved
+		}
+		if err := RecordOutcome(ctx, db, row.WorkspaceID, tool, args, outcome, decidedBy, row.ID); err != nil {
+			slog.Default().Warn("harbormaster: reward history insert failed",
+				"err", err, "tool", tool, "outcome", outcome, "approval_id", row.ID)
+		}
+	} else {
+		// No tool on the stored payload → no reward signal for auto-tuning.
+		// Usually means an upstream enqueue path changed shape or a legacy
+		// row predates the tool-field convention. Logged so drift is visible
+		// in the audit log instead of silently degrading gate learning.
+		slog.Default().Warn("harbormaster: reward history skipped — missing tool",
+			"approval_id", row.ID, "workspace_id", row.WorkspaceID)
+	}
 	return nil
+}
+
+// extractToolArgs pulls the tool name + args back out of the stored
+// request payload. Gate() writes them as top-level map keys; if
+// something else is inserting rows the lookup fails gracefully and
+// AdjustMode just never tunes the affected calls.
+func extractToolArgs(payload map[string]any) (string, map[string]any) {
+	if payload == nil {
+		return "", nil
+	}
+	tool, _ := payload["tool"].(string)
+	args, _ := payload["args"].(map[string]any)
+	return tool, args
 }
 
 // Cancel withdraws a still-pending request. Used when the agent that

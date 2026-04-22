@@ -316,6 +316,47 @@ CREATE INDEX IF NOT EXISTS idx_eval_runs_ws_created ON eval_runs(workspace_id, c
 CREATE INDEX IF NOT EXISTS idx_eval_runs_kind ON eval_runs(kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_eval_runs_mission ON eval_runs(mission_id, created_at DESC) WHERE mission_id IS NOT NULL;
 `},
+	// Memory uplift inspired by OpenClaw Auto-Dream (importance scoring,
+	// forgetting via access patterns) and Self-Evolve (reward signal from
+	// HITL outcomes feeding gate auto-tuning). Three shape changes and
+	// one new table, all narrow additions with backwards-compatible
+	// defaults so rolling back to migration 53 leaves the new columns
+	// as orphans the old code simply ignores.
+	//
+	// - journal_entries.priority: user-facing importance marker. 'normal'
+	//   is the default; 'permanent' is never compacted, 'high' boosts
+	//   episodic recall weight, 'pin' snapshots into pins.md.
+	// - journal_embeddings.importance_score: (0..1) multiplier on cosine
+	//   similarity at recall time. Baseline comes from entry_type +
+	//   severity; reference_count and last_referenced_at let a nightly
+	//   job decay cold entries and boost frequently-recalled ones.
+	// - gate_reward_history: records every HITL outcome so
+	//   harbormaster.Evaluator can auto-tune gate modes
+	//   (approve-rate > 90% → downgrade sync→async; deny-rate > 70% →
+	//   upgrade). args_hash is a stable hash of the tool arg shape so
+	//   repeated decisions on the same operation cluster together
+	//   without storing the raw args (PII + secret hygiene).
+	{version: 54, name: "add_memory_importance_and_gate_rewards", sql: `
+ALTER TABLE journal_entries ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
+CREATE INDEX IF NOT EXISTS idx_journal_entries_priority ON journal_entries(workspace_id, priority) WHERE priority != 'normal';
+
+ALTER TABLE journal_embeddings ADD COLUMN importance_score REAL NOT NULL DEFAULT 0.5;
+ALTER TABLE journal_embeddings ADD COLUMN reference_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE journal_embeddings ADD COLUMN last_referenced_at TEXT;
+
+CREATE TABLE IF NOT EXISTS gate_reward_history (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    args_hash TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK(outcome IN ('approved','denied','timeout','cancelled')),
+    decided_by TEXT,
+    decided_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    request_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_gate_reward_ws_tool ON gate_reward_history(workspace_id, tool_name, decided_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gate_reward_ws_args ON gate_reward_history(workspace_id, tool_name, args_hash, decided_at DESC);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

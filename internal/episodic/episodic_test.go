@@ -28,6 +28,7 @@ CREATE TABLE journal_entries (
     ts TEXT NOT NULL,
     entry_type TEXT NOT NULL,
     severity TEXT NOT NULL DEFAULT 'info',
+    priority TEXT NOT NULL DEFAULT 'normal',
     actor_type TEXT NOT NULL,
     actor_id TEXT,
     summary TEXT NOT NULL,
@@ -46,7 +47,10 @@ CREATE TABLE journal_embeddings (
     model TEXT NOT NULL,
     dim INTEGER NOT NULL,
     vector BLOB NOT NULL,
-    indexed_at TEXT NOT NULL
+    indexed_at TEXT NOT NULL,
+    importance_score REAL NOT NULL DEFAULT 0.5,
+    reference_count INTEGER NOT NULL DEFAULT 0,
+    last_referenced_at TEXT
 );
 `
 

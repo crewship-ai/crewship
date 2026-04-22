@@ -129,7 +129,7 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 	}
 	args = append(args, batch)
 	rows, err := x.db.QueryContext(ctx, `
-		SELECT e.id, e.workspace_id, e.crew_id, e.agent_id, e.entry_type, e.severity,
+		SELECT e.id, e.workspace_id, e.crew_id, e.agent_id, e.entry_type, e.severity, e.priority,
 		       e.summary, e.payload, e.refs, e.ts
 		  FROM journal_entries e
 		  LEFT JOIN journal_embeddings em ON em.entry_id = e.id
@@ -149,9 +149,9 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 	var pending []journal.Entry
 	for rows.Next() {
 		var e journal.Entry
-		var payloadStr, refsStr, tsStr, kind, sev string
+		var payloadStr, refsStr, tsStr, kind, sev, prio string
 		var crewID, agentID sql.NullString
-		if err := rows.Scan(&e.ID, &e.WorkspaceID, &crewID, &agentID, &kind, &sev,
+		if err := rows.Scan(&e.ID, &e.WorkspaceID, &crewID, &agentID, &kind, &sev, &prio,
 			&e.Summary, &payloadStr, &refsStr, &tsStr); err != nil {
 			x.logger.Warn("episodic: scan row failed", "err", err)
 			continue
@@ -160,6 +160,7 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 		e.AgentID = agentID.String
 		e.Type = journal.EntryType(kind)
 		e.Severity = journal.Severity(sev)
+		e.Priority = journal.Priority(prio)
 		// Parse payload + refs lazily — only the conversation path uses them.
 		e.Payload = decodeJSONMap(payloadStr)
 		e.Refs = decodeJSONMap(refsStr)
@@ -205,11 +206,33 @@ func (x *Indexer) index(ctx context.Context, e journal.Entry) error {
 	if err != nil {
 		return fmt.Errorf("embed: %w", err)
 	}
-	_, err = x.db.ExecContext(ctx, `INSERT OR REPLACE INTO journal_embeddings
-		(entry_id, workspace_id, crew_id, agent_id, model, dim, vector, indexed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+	// Compute the baseline importance at embed time. It feeds into recall
+	// as a cosine multiplier (see rankHits) and is later decayed + boosted
+	// by the nightly DecayAndReinforce job. Using BaseImportance keeps the
+	// calculation in one place so ops can reason about why a given hit
+	// ranks where it does.
+	importance := BaseImportance(e.Type, e.Severity, e.Priority)
+	// UPSERT preserves both reinforcement signal AND the adjusted importance
+	// on reindex. DecayAndReinforce writes back importance_score =
+	// BASE × RecencyFactor × (1 + ReferenceBoost/8); if reindex overwrote
+	// that with raw BaseImportance, a model roll or manual reindex would
+	// silently undo every decay + reinforcement pass until the next
+	// nightly job. Preserve the existing score — reindex doesn't change
+	// what the entry is about, only which embedder produced the vector.
+	_, err = x.db.ExecContext(ctx, `INSERT INTO journal_embeddings
+		(entry_id, workspace_id, crew_id, agent_id, model, dim, vector, indexed_at,
+		 importance_score, reference_count, last_referenced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, 0, NULL)
+		ON CONFLICT(entry_id) DO UPDATE SET
+			workspace_id = excluded.workspace_id,
+			crew_id = excluded.crew_id,
+			agent_id = excluded.agent_id,
+			model = excluded.model,
+			dim = excluded.dim,
+			vector = excluded.vector,
+			indexed_at = excluded.indexed_at`,
 		e.ID, e.WorkspaceID, nullable(e.CrewID), nullable(e.AgentID),
-		x.embedder.Model(), x.embedder.Dim(), EncodeVector(vec))
+		x.embedder.Model(), x.embedder.Dim(), EncodeVector(vec), importance)
 	return err
 }
 

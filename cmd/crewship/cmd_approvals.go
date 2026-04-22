@@ -186,4 +186,55 @@ func init() {
 	approvalsCmd.AddCommand(approvalsListCmd)
 	approvalsCmd.AddCommand(approvalsApproveCmd)
 	approvalsCmd.AddCommand(approvalsDenyCmd)
+	approvalsCmd.AddCommand(approvalsResetAutoTuningCmd)
+}
+
+// approvalsResetAutoTuningCmd wipes the rolling reward history for a
+// tool so the next Gate() call falls back to the operator-requested
+// mode. Use when a gate was auto-tuned toward approve (e.g. a period
+// of rubber-stamping) and you want to re-sensitise humans to the
+// same decision type without editing the gate rule itself.
+var approvalsResetAutoTuningCmd = &cobra.Command{
+	Use:   "reset-auto-tuning <tool>",
+	Short: "Wipe the rolling reward history for a tool (re-train Harbor Master gating)",
+	Long: `Wipe the reward history used by Harbor Master gate auto-tuning for the given tool.
+
+Auto-tuning downgrades sync→async after 90%+ approvals and upgrades async→sync
+after 70%+ denials, over the last 20 decisions per tool+args shape. When this
+goes wrong (e.g. automation approved on behalf of humans for a while, skewing
+the window) operators can reset to make the gate respect the configured mode
+again for the next decisions, until humans re-train it naturally.
+
+Requires OWNER or ADMIN on the caller's workspace.
+
+Examples:
+  crewship approvals reset-auto-tuning shell.exec
+  crewship approvals reset-auto-tuning "terraform apply"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/approvals/reset-auto-tuning", map[string]string{"tool": args[0]})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Tool        string `json:"tool"`
+			RowsDeleted int    `json:"rows_deleted"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		fmt.Printf("Reset auto-tuning for %q — cleared %d rows from gate_reward_history\n",
+			out.Tool, out.RowsDeleted)
+		return nil
+	},
 }

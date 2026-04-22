@@ -35,6 +35,7 @@ CREATE TABLE journal_entries (
     ts TEXT NOT NULL,
     entry_type TEXT NOT NULL,
     severity TEXT NOT NULL DEFAULT 'info',
+    priority TEXT NOT NULL DEFAULT 'normal',
     actor_type TEXT NOT NULL,
     actor_id TEXT,
     summary TEXT NOT NULL,

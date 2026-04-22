@@ -50,11 +50,14 @@ To force an embedding on an otherwise-filtered entry, tag it with `refs.episodic
 
 ```sql
 CREATE TABLE journal_embeddings (
-  entry_id  TEXT PRIMARY KEY REFERENCES journal_entries(id) ON DELETE CASCADE,
-  vector    BLOB NOT NULL,     -- raw float32 bytes
-  dim       INTEGER NOT NULL,
-  model     TEXT NOT NULL,     -- "nomic-embed-text", etc.
-  indexed_at TEXT NOT NULL
+  entry_id           TEXT PRIMARY KEY REFERENCES journal_entries(id) ON DELETE CASCADE,
+  vector             BLOB NOT NULL,     -- raw float32 bytes
+  dim                INTEGER NOT NULL,
+  model              TEXT NOT NULL,     -- "nomic-embed-text", etc.
+  indexed_at         TEXT NOT NULL,
+  importance_score   REAL DEFAULT 0.5,  -- fed into recall sort (see "Importance scoring")
+  reference_count    INTEGER DEFAULT 0, -- bumped when a hit lands in a prompt
+  last_referenced_at TEXT               -- stamped at the same time
 );
 ```
 
@@ -112,6 +115,64 @@ type Hit struct {
 ```
 
 Consumers typically weight fresher hits higher when injecting into prompts. `episodic.RenderInjection(hits, maxChars)` does this and returns a prompt-ready string, truncated to fit a char budget -- used by the orchestrator's `episodicRecallAdapter` before every agent run.
+
+## Importance scoring
+
+Each `journal_embeddings` row carries three additional fields that feed
+recall ranking and a nightly decay job:
+
+| Column | Purpose |
+|---|---|
+| `importance_score REAL` | Multiplied into cosine at `Recall` sort time (range [0,1]) |
+| `reference_count INTEGER` | Incremented whenever a hit lands in a prompt |
+| `last_referenced_at TEXT` | Stamped at the same time |
+
+**Baseline** comes from `BaseImportance(entry_type, severity, priority)`
+(see `internal/episodic/importance.go`): peer escalations and eval
+regressions seed high; info-level routine events seed 0.5; the
+operator-applied priority marker floors the value at 0.80 (pin) /
+0.85 (high) / 0.95 (permanent).
+
+**Nightly decay** — `episodic.DecayAndReinforce` recomputes every
+row as:
+
+```
+importance = BASE × RecencyFactor × (1 + ReferenceBoost/8)
+```
+
+- `RecencyFactor(indexed_at, now) = max(0.1, 1 - days/180)` — a 0.1
+  floor keeps old-but-critical memories from going to literal zero
+- `ReferenceBoost(refs) = log₂(refs + 1)` — frequently-recalled
+  entries lift, but the `/8` divisor prevents runaway loops from
+  dominating over rare-but-critical ones
+
+**Recall-time use** — `Recall` sorts candidates by
+`cosine × importance` (not cosine alone), then top-K is returned.
+Every returned hit gets `MarkReferenced` which increments the
+reference counter so the next DecayAndReinforce lifts frequently-
+hit memories.
+
+This is a direct port of OpenClaw Auto-Dream's importance formula,
+adapted to Crewship's entry-type catalog and multi-tenant model.
+Effect: a six-month-old peer.escalation keeps ranking well after
+one recall per week, while a stale low-value info entry falls off.
+
+## Untrusted-hints wrapper
+
+`RenderInjection` wraps its output in a `<recalled-memory>…</recalled-memory>`
+block with an explicit "UNTRUSTED HINTS" preamble. The wrapper is
+load-bearing: recalled entries may contain text authored by peers,
+tools, or agent output — a past `peer.escalation` could carry an
+`"IGNORE PREVIOUS INSTRUCTIONS"` payload without anyone realising.
+The wrapper instructs the model to treat everything inside as hints
+the current task can override, not as authoritative instructions.
+
+Same treatment applies to the orchestrator's `buildMemoryContext`
+blocks (AGENT.md / CREW.md) — both surfaces are agent-authored and
+therefore both should be read by the model as hints.
+
+Patterns borrowed from Hermes Agent's `sanitize_context()` and
+Self-Evolve's `<self-evolve-memories>…(untrusted metadata)…`.
 
 ## Embedder
 

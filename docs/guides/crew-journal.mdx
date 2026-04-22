@@ -55,6 +55,44 @@ Defined in `internal/journal/types.go`. Every type is a stable string -- renames
 
 Severity is one of `info`, `notice`, `warn`, `error`. Actor types: `agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`.
 
+## Priority markers
+
+Priority is an operator-facing importance marker orthogonal to Severity.
+Severity answers *"how alarming?"*; Priority answers *"how long do we
+remember it and how prominently should it surface at recall time?"*.
+
+| Marker | Effect |
+|---|---|
+| `normal` (default) | No special treatment. |
+| `high` | Recall importance floors at 0.85; subject to normal compaction. |
+| `pin` | Snapshot to `/crew/shared/.memory/pins.md` at next consolidate run; recall importance floors at 0.80. |
+| `permanent` | Never compacted. Extracted to `learned-*.md` on the next consolidator run, skipping the 10-entry threshold (extraction happens on the cadence, not the instant the marker is set). Recall importance floors at 0.95. |
+
+Markers are set via the HTTP endpoint or CLI — agents cannot mark their
+own outputs (keeps automation from unilaterally promoting its own
+memory). OWNER and ADMIN roles only.
+
+```bash
+# HTTP
+curl -X POST https://host/api/v1/journal/j_abc/priority \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"priority":"permanent","reason":"FX compliance constraint"}'
+
+# CLI
+crewship journal priority j_abc --mark permanent --reason "FX compliance constraint"
+```
+
+The consolidator (`internal/consolidate`) honours `permanent` as a
+fast-path signal — a single permanent entry triggers rule extraction
+on the next run regardless of volume. The compactor (`internal/
+consolidate/compact.go`) excludes `permanent` from the 30-day rollup
+via a `WHERE priority != 'permanent'` clause, so deliberately-pinned
+knowledge survives the life of the DB.
+
+Inspired by OpenClaw Auto-Dream's `⚠️ PERMANENT / 🔥 HIGH / 📌 PIN`
+markers — the semantics are deliberately close so a reader who knows
+one system can reason about the other.
+
 ## Writing
 
 The write surface is `journal.Emitter`:

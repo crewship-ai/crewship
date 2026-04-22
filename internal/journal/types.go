@@ -13,6 +13,7 @@ package journal
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -109,6 +110,54 @@ const (
 	SeverityError  Severity = "error"
 )
 
+// Priority is a user-facing importance marker orthogonal to Severity.
+// Severity answers "how alarming is this?" — Priority answers "how long
+// should we remember it and how prominently should it surface at recall
+// time?". Inspired by OpenClaw Auto-Dream's ⚠️ PERMANENT / 🔥 HIGH /
+// 📌 PIN markers: operators and lead agents annotate entries so the
+// consolidator and compactor can make smarter keep/drop decisions.
+//
+// The enum is deliberately small. 'normal' is the implicit default for
+// every emit (DB column defaults to 'normal' too) so the vast majority
+// of entries flow through with no extra annotation.
+type Priority string
+
+const (
+	// PriorityNormal is every entry's default; no special treatment
+	// at recall or compaction.
+	PriorityNormal Priority = "normal"
+
+	// PriorityHigh boosts importance score at episodic recall, but
+	// is still subject to normal compaction rules — use this for
+	// "this matters for the next few weeks, not forever".
+	PriorityHigh Priority = "high"
+
+	// PriorityPin snapshots the entry into /crew/shared/.memory/pins.md
+	// at the next consolidation run so operators can see it
+	// alongside curated memory without a journal query. Pin is for
+	// "I want future agents to see this every session", e.g. a crew
+	// convention or a mission-critical caveat.
+	PriorityPin Priority = "pin"
+
+	// PriorityPermanent guarantees the entry is never compacted AND
+	// is extracted to learned-*.md without waiting for the normal
+	// 10-entry threshold or 6h cadence. Use sparingly — every
+	// permanent entry survives the life of the database.
+	PriorityPermanent Priority = "permanent"
+)
+
+// ValidPriority returns true when p is one of the four allowed values.
+// Callers that build entries from untrusted input (HTTP handlers, CLI
+// flags) should validate before emitting so a bad string doesn't wedge
+// the DB CHECK constraint.
+func ValidPriority(p Priority) bool {
+	switch p {
+	case PriorityNormal, PriorityHigh, PriorityPin, PriorityPermanent:
+		return true
+	}
+	return false
+}
+
 // ActorType identifies who/what produced an entry. Used for filtering
 // ("show me only what agents did") and for policy decisions (shell hooks
 // can only be registered by users, not by agents).
@@ -150,6 +199,7 @@ type Entry struct {
 	TS          time.Time
 	Type        EntryType
 	Severity    Severity
+	Priority    Priority // zero-value → DB default 'normal'; see Priority doc
 	ActorType   ActorType
 	ActorID     string
 	Summary     string
@@ -194,6 +244,12 @@ func (e *Entry) Validate() error {
 	}
 	if e.Severity == "" {
 		e.Severity = SeverityInfo
+	}
+	if e.Priority == "" {
+		e.Priority = PriorityNormal
+	}
+	if !ValidPriority(e.Priority) {
+		return fmt.Errorf("journal: invalid priority %q (allowed: normal|high|pin|permanent)", e.Priority)
 	}
 	return nil
 }
