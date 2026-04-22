@@ -7,28 +7,40 @@ import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   LayoutGrid, LayoutDashboard, MessageSquare, FolderOpen,
-  Activity, ScrollText, Zap, Key, Plug, Clock, Settings, Bug, History, X, TerminalSquare,
+  Activity, ScrollText, Wrench, Settings, X,
 } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { StatusDot } from "@/components/ui/status-badge"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
-const tabs = [
-  { label: "Overview", href: "", icon: LayoutDashboard },
-  { label: "Sessions", href: "/chat", icon: MessageSquare },
-  { label: "Files", href: "/files", icon: FolderOpen },
+interface TabDef {
+  label: string
+  href: string
+  icon: typeof LayoutDashboard
+  /** Extra pathname prefixes that should still light up this tab (legacy routes during migration). */
+  aliases?: string[]
+}
+
+const tabs: TabDef[] = [
+  { label: "Overview", href: "", icon: LayoutDashboard, aliases: ["/history"] },
+  { label: "Sessions", href: "/sessions", icon: MessageSquare, aliases: ["/chats", "/chat"] },
   { label: "Runs", href: "/runs", icon: Activity },
-  { label: "Logs", href: "/logs", icon: ScrollText },
-  { label: "Skills", href: "/skills", icon: Zap },
-  { label: "Credentials", href: "/credentials", icon: Key },
-  { label: "MCP", href: "/mcp", icon: Plug },
-  { label: "Schedule", href: "/schedule", icon: Clock },
-  { label: "Terminal", href: "/terminal", icon: TerminalSquare },
-  { label: "Settings", href: "/settings", icon: Settings },
-  { label: "Debug", href: "/debug", icon: Bug },
-  { label: "History", href: "/history", icon: History },
+  { label: "Workspace", href: "/workspace", icon: FolderOpen, aliases: ["/files", "/terminal"] },
+  { label: "Tools", href: "/tools", icon: Wrench, aliases: ["/skills", "/credentials", "/mcp"] },
+  { label: "Logs", href: "/logs", icon: ScrollText, aliases: ["/debug"] },
+  { label: "Settings", href: "/settings", icon: Settings, aliases: ["/schedule"] },
 ]
+
+function isTabActive(pathname: string, basePath: string, tab: TabDef): boolean {
+  if (tab.href === "") {
+    if (pathname === basePath) return true
+    return (tab.aliases ?? []).some((alias) => pathname.startsWith(`${basePath}${alias}`))
+  }
+  const tabPath = `${basePath}${tab.href}`
+  if (pathname.startsWith(tabPath)) return true
+  return (tab.aliases ?? []).some((alias) => pathname.startsWith(`${basePath}${alias}`))
+}
 
 // Map agent status string → canonical status identifier for StatusDot.
 function mapAgentStatus(status: string | undefined): string {
@@ -100,9 +112,7 @@ export function AgentDesktopRail({ agentId }: { agentId: string }) {
       <div className="flex-1 overflow-y-auto py-1">
         {tabs.map((tab) => {
           const tabPath = tab.href ? `${basePath}${tab.href}` : basePath
-          const isActive = tab.href === ""
-            ? pathname === basePath
-            : pathname.startsWith(tabPath)
+          const isActive = isTabActive(pathname, basePath, tab)
 
           return (
             <Link
@@ -177,9 +187,7 @@ export function AgentMobileTabsBar({ agentId }: { agentId: string }) {
           <div className="flex-1 overflow-y-auto py-1">
             {tabs.map((tab) => {
               const tabPath = tab.href ? `${basePath}${tab.href}` : basePath
-              const isActive = tab.href === ""
-                ? pathname === basePath
-                : pathname.startsWith(tabPath)
+              const isActive = isTabActive(pathname, basePath, tab)
               return (
                 <Link
                   key={tab.href}
