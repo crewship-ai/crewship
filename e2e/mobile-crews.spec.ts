@@ -93,16 +93,17 @@ test("mobile agent detail: hero and actions fit, no horizontal scroll", async ({
 
 test("mobile crew page renders all 6 tabs in horizontal scroll strip", async ({ page }) => {
   await login(page)
-  await page.goto("/crews/crews")
-  await page.waitForLoadState("networkidle")
-  const crewLink = page.locator("a[href^='/crews/crews/']:not([href$='/new']):not([href*='/crews/new'])").first()
-  if ((await crewLink.count()) === 0) {
+  const wsId = await page.evaluate(async () => {
+    const r = await fetch("/api/v1/workspaces")
+    const d = await r.json()
+    return Array.isArray(d) ? d[0]?.id : d.id
+  })
+  const crews = await page.request.get(`/api/v1/crews?workspace_id=${wsId}`).then((r) => r.json())
+  if (!Array.isArray(crews) || crews.length === 0) {
     test.skip(true, "no crews")
     return
   }
-  await crewLink.click()
-  await page.waitForURL(/\/crews\/crews\/[^/]+/)
-  // Crew tabs should be present (ToolbarStrip is scroll-aware)
+  await page.goto(`/crews/${crews[0].id}`)
   for (const tab of ["Overview", "Members", "Network", "Runtime", "Journal", "Settings"]) {
     await expect(page.getByRole("tab", { name: tab })).toBeVisible({ timeout: 5_000 })
   }

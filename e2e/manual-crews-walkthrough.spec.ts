@@ -88,11 +88,11 @@ test("legacy /agents redirects to /crews/agents in browser", async ({ page }) =>
   expect(page.url()).toContain("/crews/agents")
 })
 
-test("legacy /crews redirects to /crews/crews", async ({ page }) => {
+test("legacy /fleet redirects to /crews", async ({ page }) => {
   await login(page)
-  await page.goto("/crews")
-  await page.waitForURL(/\/crews\/crews/, { timeout: 10_000 })
-  expect(page.url()).toContain("/crews/crews")
+  await page.goto("/fleet")
+  await page.waitForURL(/\/crews(\?|$)/, { timeout: 10_000 })
+  expect(page.url()).toMatch(/\/crews(\?|$)/)
 })
 
 test("agent full page: all 7 tabs reachable without JS errors", async ({ page }) => {
@@ -130,24 +130,22 @@ test("agent full page: all 7 tabs reachable without JS errors", async ({ page })
 test("crew full page: all 6 tabs reachable", async ({ page }) => {
   await login(page)
   const issues = attachCollectors(page)
-  await page.goto("/crews/crews")
-  await page.waitForLoadState("networkidle")
-
-  const crewLink = page
-    .locator("a[href^='/crews/crews/']:not([href$='/new']):not([href*='/crews/new'])")
-    .first()
-
-  if ((await crewLink.count()) === 0) {
+  // /crews shell renders crews as <button>s, not <a href>. Resolve direct.
+  const wsId = await page.evaluate(async () => {
+    const r = await fetch("/api/v1/workspaces")
+    const d = await r.json()
+    return Array.isArray(d) ? d[0]?.id : d.id
+  })
+  const crews = await page.request.get(`/api/v1/crews?workspace_id=${wsId}`).then((r) => r.json())
+  if (!Array.isArray(crews) || crews.length === 0) {
     test.skip(true, "no crews seeded")
     return
   }
-
-  const href = await crewLink.getAttribute("href")
-  expect(href).toBeTruthy()
+  const basePath = `/crews/${crews[0].id}`
 
   const tabs = ["", "?tab=members", "?tab=network", "?tab=runtime", "?tab=journal", "?tab=settings"]
   for (const t of tabs) {
-    const url = `${href}${t}`
+    const url = `${basePath}${t}`
     const resp = await page.goto(url)
     await page.waitForLoadState("domcontentloaded")
     expect(resp?.status(), `${url} HTTP`).toBeLessThan(400)
@@ -219,15 +217,17 @@ test("agent settings: Schedule sub-section loads, avatar style picker is locked"
 
 test("crew overview shows avatar picker + apply button", async ({ page }) => {
   await login(page)
-  await page.goto("/crews/crews")
-  await page.waitForLoadState("networkidle")
-  const crewLink = page.locator("a[href^='/crews/crews/']:not([href$='/new']):not([href*='/crews/new'])").first()
-  if ((await crewLink.count()) === 0) {
+  const wsId = await page.evaluate(async () => {
+    const r = await fetch("/api/v1/workspaces")
+    const d = await r.json()
+    return Array.isArray(d) ? d[0]?.id : d.id
+  })
+  const crews = await page.request.get(`/api/v1/crews?workspace_id=${wsId}`).then((r) => r.json())
+  if (!Array.isArray(crews) || crews.length === 0) {
     test.skip(true, "no crews")
     return
   }
-  await crewLink.click()
-  await page.waitForURL(/\/crews\/crews\/[^/]+/)
+  await page.goto(`/crews/${crews[0].id}`)
   await expect(page.getByText("Agent avatar style")).toBeVisible({ timeout: 10_000 })
 })
 
@@ -309,37 +309,44 @@ test("chat session: create via UI and verify in agent Sessions tab", async ({ pa
 
 test("crew Journal tab renders escalations + journal components without crashing", async ({ page }) => {
   await login(page)
-  await page.goto("/crews/crews")
-  await page.waitForLoadState("networkidle")
-  const crewLink = page.locator("a[href^='/crews/crews/']:not([href$='/new']):not([href*='/crews/new'])").first()
-  await crewLink.click()
-  await page.waitForURL(/\/crews\/crews\/[^/]+/, { timeout: 10_000 })
+  // /crews is the shell; crew detail lives at /crews/[id]. Resolve directly
+  // via API so this test doesn't depend on crew cards being link elements
+  // (AllCrewsOverview renders them as <button>, not <a>).
+  const wsId = await page.evaluate(async () => {
+    const r = await fetch("/api/v1/workspaces")
+    const d = await r.json()
+    return Array.isArray(d) ? d[0]?.id : d.id
+  })
+  const crews = await page.request.get(`/api/v1/crews?workspace_id=${wsId}`).then((r) => r.json())
+  if (!Array.isArray(crews) || crews.length === 0) {
+    test.skip(true, "no crews seeded")
+    return
+  }
+  await page.goto(`/crews/${crews[0].id}`)
   const issues = attachCollectors(page)
   await page.getByRole("tab", { name: "Journal" }).click()
   await page.waitForURL(/tab=journal/, { timeout: 5_000 })
-  // Just verify no JS crash; content can be empty on demo data.
   await page.waitForTimeout(500)
   expect(issues.jsErrors).toHaveLength(0)
 })
 
 test("avatar apply-to-all → agents inherit crew style", async ({ page }) => {
   await login(page)
-  await page.goto("/crews/crews")
-  await page.waitForLoadState("networkidle")
-  const crewLink = page.locator("a[href^='/crews/crews/']:not([href$='/new']):not([href*='/crews/new'])").first()
-  const crewHref = await crewLink.getAttribute("href")
-  const crewId = crewHref?.split("/").pop()
-  expect(crewId).toBeTruthy()
-
-  await crewLink.click()
-  await page.waitForURL(/\/crews\/crews\/[^/]+/, { timeout: 10_000 })
-
-  // Apply avatar style "pixel-art" via API (UI button is present per prior test)
   const wsId = await page.evaluate(async () => {
     const r = await fetch("/api/v1/workspaces")
     const d = await r.json()
     return Array.isArray(d) ? d[0]?.id : d.id
   })
+  const crews = await page.request.get(`/api/v1/crews?workspace_id=${wsId}`).then((r) => r.json())
+  if (!Array.isArray(crews) || crews.length === 0) {
+    test.skip(true, "no crews seeded")
+    return
+  }
+  const crewId = crews[0].id
+  await page.goto(`/crews/${crewId}`)
+  expect(crewId).toBeTruthy()
+
+  // Apply avatar style "pixel-art" via API (UI button is present per prior test)
   const applyRes = await page.request.post(
     `/api/v1/crews/${crewId}/apply-avatar-style?workspace_id=${wsId}`,
     { data: { avatar_style: "pixel-art" } },

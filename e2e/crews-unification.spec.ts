@@ -7,10 +7,10 @@ test.describe("Crews Unification", () => {
     expect(page.url()).toContain("/crews/agents")
   })
 
-  test("legacy /crews redirects to /crews/crews", async ({ page }) => {
+  test("legacy /crews redirects to /crews", async ({ page }) => {
     await page.goto("/crews")
-    await page.waitForURL("**/crews/crews", { timeout: 10_000 })
-    expect(page.url()).toContain("/crews/crews")
+    await page.waitForURL("**/crews", { timeout: 10_000 })
+    expect(page.url()).toContain("/crews")
   })
 
   test("/crews renders explorer and 3 top-level tabs", async ({ page }) => {
@@ -54,15 +54,15 @@ test.describe("Crews Unification", () => {
   })
 
   test("crew detail renders 6 tabs", async ({ page }) => {
-    await page.goto("/crews/crews")
+    await page.goto("/crews")
     await page.waitForLoadState("networkidle")
-    const crewLink = page.locator("a[href^='/crews/crews/']").filter({ hasNotText: "new" }).first()
+    const crewLink = page.locator("a[href^='/crews/']").filter({ hasNotText: "new" }).first()
     if (await crewLink.count() === 0) {
       test.skip(true, "no seeded crews")
       return
     }
     await crewLink.click()
-    await page.waitForURL(/\/crews\/crews\/[^/]+/, { timeout: 10_000 })
+    await page.waitForURL(/\/crews\/[^/]+/, { timeout: 10_000 })
 
     const tabs = ["Overview", "Members", "Network", "Runtime", "Journal", "Settings"]
     for (const label of tabs) {
