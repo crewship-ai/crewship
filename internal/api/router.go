@@ -721,6 +721,12 @@ func (r *Router) registerRoutes() {
 	mhh := NewMemoryHealthHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/memory/health", authed(wsCtx(http.HandlerFunc(mhh.Get))))
 
+	// Agent inbox: consolidated "waiting on this agent" payload for the
+	// Fleet right-panel inbox view. One round-trip replaces four parallel
+	// fetches (approvals + assignments + escalations + peer messages).
+	aih := NewAgentInboxHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/inbox", authed(wsCtx(http.HandlerFunc(aih.Handle))))
+
 	// Hooks registry: lifecycle intercepts. List is available to every
 	// workspace member for auditability; enable/disable is OWNER/ADMIN
 	// only because flipping a hook can invoke shell commands.

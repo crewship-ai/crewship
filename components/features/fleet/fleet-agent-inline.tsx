@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import {
   MessageSquare, ScrollText, Settings, ExternalLink,
   Zap, Puzzle, KeyRound, Clock, Cpu, Crown, Bot,
+  DollarSign, CalendarClock, FileText, Users, ChevronDown, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,6 +14,7 @@ import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { timeAgo, formatDuration } from "@/lib/time"
 import { cn } from "@/lib/utils"
+import { useAgentInbox } from "@/hooks/use-agent-inbox"
 
 interface AgentData {
   id: string
@@ -31,6 +33,24 @@ interface AgentData {
   crew?: { name: string; slug: string; color: string | null; avatar_style?: string | null } | null
   _count?: { skills: number; credentials: number; chats: number }
   last_active_at?: string | null
+}
+
+interface AgentDetailExtra {
+  system_prompt: string | null
+  schedule_cron: string | null
+  schedule_enabled: boolean | null
+  schedule_next_run: string | null
+  schedule_prompt: string | null
+  memory_enabled?: boolean
+  timeout_seconds?: number
+}
+
+interface PeerAgent {
+  id: string
+  name: string
+  slug: string
+  avatar_seed?: string | null
+  avatar_style?: string | null
 }
 
 interface SessionRow {
@@ -86,6 +106,10 @@ export interface FleetAgentInlineProps {
 export function FleetAgentInline({ agent, workspaceId }: FleetAgentInlineProps) {
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [runs, setRuns] = useState<RunRow[]>([])
+  const [detail, setDetail] = useState<AgentDetailExtra | null>(null)
+  const [peers, setPeers] = useState<PeerAgent[]>([])
+  const [promptExpanded, setPromptExpanded] = useState(false)
+  const { inbox } = useAgentInbox(agent.id)
 
   useEffect(() => {
     if (!workspaceId) return
@@ -97,12 +121,50 @@ export function FleetAgentInline({ agent, workspaceId }: FleetAgentInlineProps) 
       fetch(`/api/v1/agents/${agent.id}/runs?workspace_id=${workspaceId}&limit=3`, { signal: controller.signal })
         .then((r) => r.ok ? r.json() : [])
         .catch(() => []),
-    ]).then(([s, r]: [SessionRow[], RunRow[]]) => {
+      fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { signal: controller.signal })
+        .then((r) => r.ok ? r.json() : null)
+        .catch(() => null),
+    ]).then(([s, r, d]: [SessionRow[], RunRow[], AgentDetailExtra | null]) => {
       setSessions(Array.isArray(s) ? s : [])
       setRuns(Array.isArray(r) ? r : [])
+      setDetail(d)
     })
     return () => controller.abort()
   }, [agent.id, workspaceId])
+
+  // Peer list for crew context row
+  useEffect(() => {
+    if (!workspaceId || !agent.crew_id) {
+      setPeers([])
+      return
+    }
+    const controller = new AbortController()
+    fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${agent.crew_id}`, {
+      signal: controller.signal,
+    })
+      .then((r) => r.ok ? r.json() : [])
+      .then((agents: PeerAgent[]) => {
+        setPeers(
+          Array.isArray(agents)
+            ? agents.filter((a) => a.id !== agent.id).slice(0, 8)
+            : [],
+        )
+      })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [agent.id, agent.crew_id, workspaceId])
+
+  const scheduleCountdown = useMemo(() => {
+    if (!detail?.schedule_enabled || !detail?.schedule_next_run) return null
+    const ms = new Date(detail.schedule_next_run).getTime() - Date.now()
+    if (ms <= 0) return "imminent"
+    const mins = Math.floor(ms / 60_000)
+    if (mins < 60) return `${mins}m`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h ${mins % 60}m`
+    const days = Math.floor(hrs / 24)
+    return `${days}d ${hrs % 24}h`
+  }, [detail?.schedule_enabled, detail?.schedule_next_run])
 
   const agentPath = `/fleet/agents/${agent.id}`
   const canonicalStatus = mapAgentStatus(agent.status)
@@ -179,10 +241,16 @@ export function FleetAgentInline({ agent, workspaceId }: FleetAgentInlineProps) 
           </div>
         </div>
 
-        {/* Stats strip — 2 cols on mobile, 5 on desktop */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3">
+        {/* Stats strip — 2 cols on mobile, 6 on desktop */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
           <StatMiniCard href={`${agentPath}/sessions`} icon={MessageSquare} label="Sessions" value={sessionCount} />
           <StatMiniCard href={`${agentPath}/runs`} icon={Zap} label="Runs" value={runs.length > 0 ? runs.length : "—"} />
+          <StatMiniCard
+            href="/paymaster"
+            icon={DollarSign}
+            label="Cost (month)"
+            value={inbox && inbox.cost_usd_this_month > 0 ? `$${inbox.cost_usd_this_month.toFixed(2)}` : "—"}
+          />
           <StatMiniCard href={`${agentPath}/tools?section=skills`} icon={Puzzle} label="Skills" value={skillCount} />
           <StatMiniCard href={`${agentPath}/tools?section=credentials`} icon={KeyRound} label="Credentials" value={credCount} />
           <StatMiniCard href={`${agentPath}/logs`} icon={Clock} label="Last active" value={agent.last_active_at ? timeAgo(agent.last_active_at) : "—"} />
@@ -312,6 +380,156 @@ export function FleetAgentInline({ agent, workspaceId }: FleetAgentInlineProps) 
             </Card>
           </div>
         </div>
+
+        {/* Schedule card — only when agent has an enabled cron schedule */}
+        {detail?.schedule_enabled && detail?.schedule_cron && (
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-label font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <CalendarClock className="h-3.5 w-3.5" />
+                  Schedule
+                </h3>
+                <Link
+                  href={`${agentPath}/settings?section=schedule`}
+                  className="text-micro text-primary hover:underline"
+                >
+                  Edit
+                </Link>
+              </div>
+              <dl className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-label">
+                <Row label="Cron">
+                  <span className="font-mono text-micro">{detail.schedule_cron}</span>
+                </Row>
+                <Row label="Next run">
+                  <span className="tabular-nums">{scheduleCountdown ?? "—"}</span>
+                </Row>
+                <Row label="Last run">
+                  <span className="text-micro">
+                    {detail.schedule_next_run ? timeAgo(detail.schedule_next_run) : "never"}
+                  </span>
+                </Row>
+              </dl>
+              {detail.schedule_prompt && (
+                <p className="text-micro text-muted-foreground/80 line-clamp-2">
+                  {detail.schedule_prompt}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* System prompt peek — collapsible */}
+        {detail?.system_prompt && (
+          <Card>
+            <CardContent className="p-4 space-y-2">
+              <button
+                type="button"
+                onClick={() => setPromptExpanded((v) => !v)}
+                className="w-full flex items-center justify-between text-left group"
+                aria-expanded={promptExpanded}
+              >
+                <h3 className="text-label font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <FileText className="h-3.5 w-3.5" />
+                  System prompt
+                </h3>
+                <span className="flex items-center gap-1 text-micro text-muted-foreground group-hover:text-foreground">
+                  {promptExpanded ? "Hide" : "Show"}
+                  {promptExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </span>
+              </button>
+              <pre className={cn(
+                "text-micro text-muted-foreground whitespace-pre-wrap font-mono bg-muted/30 p-3 rounded",
+                !promptExpanded && "line-clamp-3",
+              )}>
+                {detail.system_prompt}
+              </pre>
+              {!promptExpanded && detail.system_prompt.length > 200 && (
+                <p className="text-micro text-muted-foreground/70">
+                  {detail.system_prompt.length.toLocaleString()} characters — click to expand
+                </p>
+              )}
+              <Link
+                href={`${agentPath}/settings`}
+                className="inline-flex items-center gap-1 text-micro text-primary hover:underline"
+              >
+                Edit in Settings <ExternalLink className="h-3 w-3" />
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Peer context — crew peers row + outside the crew when no peers */}
+        {agent.crew_id && peers.length > 0 && (
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-label font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <Users className="h-3.5 w-3.5" />
+                  Crew peers
+                </h3>
+                {agent.crew && (
+                  <Link
+                    href={`/fleet/crews/${agent.crew_id}`}
+                    className="text-micro text-primary hover:underline truncate"
+                  >
+                    {agent.crew.name} →
+                  </Link>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {peers.slice(0, 8).map((peer) => (
+                  <Link
+                    key={peer.id}
+                    href={`/fleet?agent=${peer.slug}&crew=${agent.crew?.slug ?? ""}`}
+                    className="group flex items-center gap-2 rounded-lg border border-border bg-card/50 px-2 py-1.5 hover:bg-accent/40 transition-colors"
+                    title={peer.name}
+                  >
+                    <img
+                      src={getAgentAvatarUrl(
+                        peer.avatar_seed || peer.name,
+                        peer.avatar_style || agent.crew?.avatar_style,
+                      )}
+                      alt=""
+                      loading="lazy"
+                      className="h-6 w-6 rounded"
+                    />
+                    <span className="text-micro font-medium group-hover:text-foreground">
+                      {peer.name}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+              {inbox && inbox.peer_messages.length > 0 && (
+                <div className="pt-2 border-t border-border space-y-1.5">
+                  <p className="text-micro text-muted-foreground/70 uppercase tracking-wider">
+                    Recent peer messages
+                  </p>
+                  {inbox.peer_messages.slice(0, 3).map((pm) => (
+                    <div
+                      key={pm.id}
+                      className="flex items-center gap-2 text-label py-0.5"
+                    >
+                      <span className={cn(
+                        "inline-flex items-center gap-1 text-micro font-medium",
+                        pm.direction === "incoming" ? "text-amber-400" : "text-muted-foreground/70",
+                      )}>
+                        {pm.direction === "incoming" ? "← " : "→ "}
+                        {pm.from_agent_name}
+                      </span>
+                      <span className="text-body text-foreground/80 truncate flex-1">
+                        {pm.question}
+                      </span>
+                      <span className="text-micro text-muted-foreground tabular-nums shrink-0">
+                        {timeAgo(pm.created_at)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )

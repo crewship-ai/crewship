@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { FleetExplorer } from "@/components/features/fleet/fleet-explorer"
 import { FleetCrewDetail } from "@/components/features/fleet/fleet-crew-detail"
-import { FleetAgentDetail } from "@/components/features/fleet/fleet-agent-detail"
+import { FleetAgentInbox } from "@/components/features/fleet/fleet-agent-inbox"
 import { FleetAgentInline } from "@/components/features/fleet/fleet-agent-inline"
 import { AllCrewsOverview } from "@/components/features/fleet/fleet-all-crews-overview"
 import { HealthOverview } from "@/components/features/fleet/fleet-health-overview"
@@ -380,7 +380,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
           )}>
             <AnimatePresence mode="wait">
               {showRightPanel && selectedAgent && (
-                <FleetAgentDetail agent={selectedAgent} workspaceId={workspaceId} onClose={handleAgentClose} />
+                <FleetAgentInbox agent={selectedAgent} workspaceId={workspaceId} onClose={handleAgentClose} />
               )}
             </AnimatePresence>
           </div>
