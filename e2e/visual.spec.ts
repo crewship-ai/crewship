@@ -47,7 +47,7 @@ test.describe("Visual Regression", () => {
   })
 
   test("new agent page", async ({ page }) => {
-    await page.goto("/agents/new")
+    await page.goto("/fleet/agents/new")
     await expect(page.getByRole("button", { name: /Claude Code/ })).toBeVisible({ timeout: 10_000 })
     await expect(page).toHaveScreenshot("new-agent.png", {
       ...SCREENSHOT_OPTS,

@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test"
 import { storageFilePath } from "./e2e/global-setup"
 
 const nextPort = process.env.NEXT_PORT || "3001"
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${nextPort}`
+const skipWebServer = process.env.PLAYWRIGHT_BASE_URL != null
 
 export default defineConfig({
   testDir: "./e2e",
@@ -13,7 +15,7 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "html",
 
   use: {
-    baseURL: `http://localhost:${nextPort}`,
+    baseURL,
     // Every test inherits the cookies written by global-setup, so
     // specs never re-login and never hit the NextAuth rate limit.
     // storageFilePath() namespaces per CREWSHIP_INSTANCE_ID so
@@ -38,12 +40,14 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    command: `pnpm dev --port ${nextPort}`,
-    url: `http://localhost:${nextPort}`,
-    reuseExistingServer: true,
-    timeout: 60_000,
-    stdout: "ignore",
-    stderr: "pipe",
-  },
+  ...(skipWebServer ? {} : {
+    webServer: {
+      command: `pnpm dev --port ${nextPort}`,
+      url: `http://localhost:${nextPort}`,
+      reuseExistingServer: true,
+      timeout: 60_000,
+      stdout: "ignore" as const,
+      stderr: "pipe" as const,
+    },
+  }),
 })
