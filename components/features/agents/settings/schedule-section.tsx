@@ -58,7 +58,7 @@ function formatDuration(ms: number): string {
   return `${m}m ${s % 60}s`
 }
 
-export function SchedulePageClient() {
+export function ScheduleSection() {
   const params = useParams<{ agentId: string }>()
   const agentId = params.agentId
   const { workspaceId, loading: wsLoading } = useWorkspace()

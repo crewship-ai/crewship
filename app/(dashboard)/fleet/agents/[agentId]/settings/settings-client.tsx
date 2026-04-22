@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { useRouter, useParams, useSearchParams } from "next/navigation"
 import {
   Save, Trash2, Loader2, AlertCircle, CheckCircle2,
   User, Hash, Users, FileText, Briefcase, Shield, Cpu,
-  Wrench, Timer, MessageSquare, Image as ImageIcon,
+  Wrench, Timer, MessageSquare, Image as ImageIcon, Settings as SettingsIcon, Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SectionCard } from "@/components/ui/section-card"
 import { PropertyRow } from "@/components/layout/property-row"
+import { ToolbarStrip, type ToolbarTab } from "@/components/layout/toolbar-strip"
 import {
   Select,
   SelectContent,
@@ -24,6 +25,8 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 import { AvatarPicker } from "@/components/avatar-picker"
+import { AvatarOverrideBadge } from "@/components/features/agents/settings/avatar-override-badge"
+import { ScheduleSection } from "@/components/features/agents/settings/schedule-section"
 import { cn } from "@/lib/utils"
 
 interface AgentDetail {
@@ -54,10 +57,34 @@ interface TeamOption {
   slug: string
 }
 
+type Section = "general" | "schedule"
+
+const SECTION_TABS: ToolbarTab<Section>[] = [
+  { id: "general", label: "General", icon: SettingsIcon },
+  { id: "schedule", label: "Schedule", icon: Clock },
+]
+
 export function SettingsPageClient() {
   const { agentId } = useParams<{ agentId: string }>()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { workspaceId, loading: wsLoading } = useWorkspace()
+
+  const activeSection = useMemo<Section>(
+    () => (searchParams.get("section") === "schedule" ? "schedule" : "general"),
+    [searchParams],
+  )
+
+  const handleSectionChange = useCallback(
+    (section: Section) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (section === "general") params.delete("section")
+      else params.set("section", section)
+      const qs = params.toString()
+      router.replace(qs ? `?${qs}` : "?", { scroll: false })
+    },
+    [router, searchParams],
+  )
 
   const [agent, setAgent] = useState<AgentDetail | null>(null)
   const [crews, setTeams] = useState<TeamOption[]>([])
@@ -248,7 +275,30 @@ export function SettingsPageClient() {
     )
   }
 
+  if (activeSection === "schedule") {
+    return (
+      <div className="flex flex-col h-full min-h-0">
+        <ToolbarStrip
+          tabs={SECTION_TABS}
+          activeTab={activeSection}
+          onTabChange={handleSectionChange}
+          ariaLabel="Settings section"
+        />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <ScheduleSection />
+        </div>
+      </div>
+    )
+  }
+
   return (
+    <div className="flex flex-col h-full min-h-0">
+      <ToolbarStrip
+        tabs={SECTION_TABS}
+        activeTab={activeSection}
+        onTabChange={handleSectionChange}
+        ariaLabel="Settings section"
+      />
     <div className="p-6 space-y-6 max-w-3xl">
       <div>
         <h2 className="text-title font-semibold">Settings</h2>
@@ -353,13 +403,21 @@ export function SettingsPageClient() {
             </span>
           }
         >
-          <AvatarPicker
-            seed={avatarSeed || agent?.name || ""}
-            style={avatarStyle}
-            onSeedChange={setAvatarSeed}
-            onStyleChange={setAvatarStyle}
-            lockedStyle={!avatarStyle ? agent?.crew?.avatar_style : undefined}
-          />
+          <div className="space-y-3">
+            <AvatarOverrideBadge
+              agentId={agentId}
+              workspaceId={workspaceId ?? ""}
+              hasOverride={!!avatarStyle}
+              onReset={() => setAvatarStyle("")}
+            />
+            <AvatarPicker
+              seed={avatarSeed || agent?.name || ""}
+              style={avatarStyle}
+              onSeedChange={setAvatarSeed}
+              onStyleChange={() => { /* style is crew-controlled */ }}
+              lockedStyle={avatarStyle || agent?.crew?.avatar_style || "bottts-neutral"}
+            />
+          </div>
         </SectionCard>
 
         {/* Runtime */}
@@ -517,6 +575,7 @@ export function SettingsPageClient() {
           </Button>
         </div>
       </form>
+    </div>
     </div>
   )
 }

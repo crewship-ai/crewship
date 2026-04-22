@@ -44,8 +44,8 @@ function formatEventTitle(event: AuditEvent): string {
   return event.action.replace(/_/g, " ")
 }
 
-/** Agent configuration change history timeline. */
-export function HistoryPageClient() {
+/** Agent configuration change history timeline. Rendered inline in Overview. */
+export function HistorySection() {
   const { agentId } = useParams<{ agentId: string }>()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [events, setEvents] = useState<AuditEvent[]>([])

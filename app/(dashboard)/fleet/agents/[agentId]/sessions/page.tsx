@@ -1,4 +1,4 @@
-import { SessionsPageClient } from "../chats/chats-client"
+import { SessionsPageClient } from "@/components/features/agents/sessions/sessions-page-client"
 
 export function generateStaticParams() {
   return [{ agentId: "_" }]

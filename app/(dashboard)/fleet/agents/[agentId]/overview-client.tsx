@@ -19,6 +19,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { getCrewBgClass } from "@/lib/colors"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
+import { HistorySection } from "@/components/features/agents/overview/history-section"
 import { timeAgo, formatDuration, formatTimeout } from "@/lib/time"
 
 
@@ -408,6 +409,15 @@ export function AgentOverviewPageClient() {
         </div>
       </div>
 
+      <details className="mt-4 group">
+        <summary className="cursor-pointer select-none text-label font-medium text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5">
+          <span className="transition-transform group-open:rotate-90">▸</span>
+          Recent changes
+        </summary>
+        <div className="mt-3">
+          <HistorySection />
+        </div>
+      </details>
 
     </div>
   )
