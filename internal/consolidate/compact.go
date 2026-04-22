@@ -106,6 +106,19 @@ func (c *Compactor) Run(ctx context.Context, workspaceID string, olderThan time.
 			logger.Warn("compact: flush after emit failed", "err", err)
 			continue
 		}
+		// Archive before delete — move each bucket row into
+		// journal_entries_archived with a compressed summary so the
+		// audit trail is still queryable via archive-search. Failures
+		// here are logged; the delete still runs because freeing
+		// space is the compactor's primary contract.
+		archived, archErr := c.archiveBucket(ctx, workspaceID, b.IDs)
+		if archErr != nil {
+			logger.Warn("compact: archive bucket failed, falling back to delete only",
+				"err", archErr, "crew_id", b.CrewID, "date", b.Date, "type", b.Type)
+		} else {
+			result.EntriesArchived += archived
+		}
+
 		deleted, freed, err := c.deleteBucket(ctx, workspaceID, b.IDs)
 		if err != nil {
 			logger.Warn("compact: delete bucket failed", "err", err,
@@ -368,6 +381,69 @@ func (c *Compactor) deleteBucket(ctx context.Context, workspaceID string, ids []
 		return 0, 0, fmt.Errorf("commit: %w", err)
 	}
 	return totalDeleted, bytesFreed, nil
+}
+
+// archiveBucket copies rows from journal_entries into
+// journal_entries_archived BEFORE deleteBucket removes them. The copied
+// row carries a compressed_payload that's 1 line max (truncation at 400
+// chars) so the archive stays small — for exec.output_chunk entries
+// that typically hold 50 KB of stdout, the compression ratio is ~100×.
+//
+// Chunked in groups of 500 to respect SQLite's 999-parameter limit
+// (matches deleteBucket's chunking). Transaction per call means a
+// failure rolls back cleanly — the live rows stay in place so
+// deleteBucket can pick up the pieces next run.
+func (c *Compactor) archiveBucket(ctx context.Context, workspaceID string, ids []string) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	const chunk = 500
+	tx, err := c.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("archive begin: %w", err)
+	}
+	var total int64
+	for start := 0; start < len(ids); start += chunk {
+		end := start + chunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		placeholders := strings.Repeat("?,", len(batch))
+		placeholders = placeholders[:len(placeholders)-1]
+		args := make([]any, 0, len(batch)+1)
+		args = append(args, workspaceID)
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		// INSERT...SELECT copies each row into the archive table with a
+		// truncated summary/payload. substr(...) caps compressed_payload
+		// at 400 chars so a single runaway exec.output_chunk doesn't
+		// bloat the archive beyond what it replaces.
+		q := `INSERT OR IGNORE INTO journal_entries_archived
+			(id, workspace_id, crew_id, agent_id, mission_id, ts,
+			 entry_type, severity, priority, actor_type, actor_id,
+			 summary, compressed_payload, original_size_bytes)
+			SELECT id, workspace_id, crew_id, agent_id, mission_id, ts,
+			       entry_type, severity, priority, actor_type, actor_id,
+			       substr(summary, 1, 200),
+			       substr(payload, 1, 400),
+			       length(payload) + length(summary)
+			  FROM journal_entries
+			 WHERE workspace_id = ?
+			   AND id IN (` + placeholders + `)`
+		res, err := tx.ExecContext(ctx, q, args...)
+		if err != nil {
+			_ = tx.Rollback()
+			return 0, fmt.Errorf("archive chunk: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("archive commit: %w", err)
+	}
+	return total, nil
 }
 
 // parseTS accepts the same formats journal.parseJournalTS does, but

@@ -148,12 +148,60 @@ func (a *presenceAdapter) Track(ctx context.Context, in orchestrator.PresenceInp
 	return nil
 }
 
+// memoryMetricsAdapter wraps the DB directly for the two cheap
+// aggregate queries used by the nudge + cost-awareness blocks. Kept
+// separate from the journal package because both queries span two
+// tables and are read-only — nothing in internal/journal wants to
+// grow a "count aggregate" API just for this consumer.
+type memoryMetricsAdapter struct {
+	db *sql.DB
+}
+
+func newMemoryMetricsAdapter(db *sql.DB) *memoryMetricsAdapter {
+	return &memoryMetricsAdapter{db: db}
+}
+
+func (a *memoryMetricsAdapter) EntriesSinceLastMemoryUpdate(ctx context.Context, workspaceID, agentID string) (int64, error) {
+	var n int64
+	err := a.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		  FROM journal_entries
+		 WHERE workspace_id = ? AND agent_id = ?
+		   AND ts > COALESCE(
+		     (SELECT MAX(ts) FROM journal_entries
+		        WHERE workspace_id = ? AND agent_id = ? AND entry_type = 'memory.updated'),
+		     datetime('now','-30 days'))`,
+		workspaceID, agentID, workspaceID, agentID).Scan(&n)
+	return n, err
+}
+
+func (a *memoryMetricsAdapter) AgentSpendLast24h(ctx context.Context, workspaceID, agentID string) (float64, int64, int64, error) {
+	var (
+		usd    float64
+		tokens int64
+		calls  int64
+	)
+	err := a.db.QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(cost_usd), 0),
+		       COALESCE(SUM(input_tokens + output_tokens), 0),
+		       COUNT(*)
+		  FROM cost_ledger
+		 WHERE workspace_id = ? AND agent_id = ?
+		   AND ts >= datetime('now','-24 hours')`,
+		workspaceID, agentID).Scan(&usd, &tokens, &calls)
+	return usd, tokens, calls, err
+}
+
 func (a *episodicRecallAdapter) Recall(ctx context.Context, in orchestrator.EpisodicRecallInput) (string, error) {
 	if a.embedder == nil {
 		return "", nil
 	}
 	scope := episodic.ScopeForRole(in.Role)
-	hits, err := episodic.Recall(ctx, a.db, a.embedder, episodic.Query{
+	// HybridRecall fuses BM25 (FTS5) + cosine via Reciprocal Rank
+	// Fusion so paraphrased queries AND keyword-exact queries both
+	// land the right memories. Degrades gracefully to dense-only if
+	// the FTS5 index is missing (pre-migration-55 DBs).
+	hits, err := episodic.HybridRecall(ctx, a.db, a.embedder, episodic.Query{
 		WorkspaceID: in.WorkspaceID,
 		CrewID:      in.CrewID,
 		AgentID:     in.AgentID,

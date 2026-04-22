@@ -357,6 +357,109 @@ CREATE TABLE IF NOT EXISTS gate_reward_history (
 CREATE INDEX IF NOT EXISTS idx_gate_reward_ws_tool ON gate_reward_history(workspace_id, tool_name, decided_at DESC);
 CREATE INDEX IF NOT EXISTS idx_gate_reward_ws_args ON gate_reward_history(workspace_id, tool_name, args_hash, decided_at DESC);
 `},
+	// Memory quality uplift — five subsystems in one migration because
+	// they share plumbing (hybrid retrieval reads the FTS index built
+	// for archive-search; health metrics read relations; relations are
+	// populated on every embed). Splitting into five migrations would
+	// mean five rollbacks-not-done between merges, which makes the
+	// half-shipped state the default and the deployed state the rare
+	// one.
+	//
+	// FTS5 virtual table — indexes summary + payload over journal_entries
+	// so hybrid recall can run BM25 in parallel with dense cosine. Keep
+	// the `tokenize='porter ascii'` so stemming reduces "deploys /
+	// deployed / deploying" to one bucket, and ascii so we don't pay the
+	// overhead of unicode case folding for an operator-facing tool.
+	// `content='journal_entries'` makes the FTS table a shadow of the
+	// base table (no duplicate storage); triggers keep them in sync on
+	// INSERT / DELETE / UPDATE.
+	//
+	// journal_entries_archived — compactor moves aged low-value rows here
+	// instead of deleting. Same schema as the live table so recall can
+	// UNION ALL across both with a simple flag. archived_at records when
+	// the compactor moved the row; the original ts stays so timeline
+	// queries still work.
+	//
+	// memory_relations — A-Mem-style graph between entries. relation_kind
+	// is a small enum ('similar', 'supports', 'refutes', 'duplicates').
+	// `score` is the cosine at insert time for similar; 1.0 for the
+	// curated kinds. Union-find over this table computes the Reachability
+	// metric in the health snapshot.
+	//
+	// memory_health_snapshots — daily score per (workspace, crew) so the
+	// UI has a monotonic time-series to plot without recomputing five
+	// metrics on every request.
+	{version: 55, name: "add_memory_quality_uplift", sql: `
+CREATE VIRTUAL TABLE IF NOT EXISTS journal_entries_fts USING fts5(
+    summary, payload,
+    content='journal_entries',
+    content_rowid='rowid',
+    tokenize='porter ascii'
+);
+CREATE TRIGGER IF NOT EXISTS journal_entries_ai AFTER INSERT ON journal_entries BEGIN
+    INSERT INTO journal_entries_fts(rowid, summary, payload) VALUES (new.rowid, new.summary, new.payload);
+END;
+-- For external-content FTS5 tables, DELETE/UPDATE triggers use the
+-- INSERT(fts, 'delete'/'insert', ...) contentless form. An earlier
+-- revision used plain DELETE/INSERT which mutated FTS5's shadow tables
+-- directly and corrupted the index (SQLite error 267 "database disk
+-- image is malformed"). Keep this form exactly as-is — changes here
+-- require a full FTS rebuild.
+CREATE TRIGGER IF NOT EXISTS journal_entries_ad AFTER DELETE ON journal_entries BEGIN
+    INSERT INTO journal_entries_fts(journal_entries_fts, rowid, summary, payload) VALUES('delete', old.rowid, old.summary, old.payload);
+END;
+CREATE TRIGGER IF NOT EXISTS journal_entries_au AFTER UPDATE ON journal_entries BEGIN
+    INSERT INTO journal_entries_fts(journal_entries_fts, rowid, summary, payload) VALUES('delete', old.rowid, old.summary, old.payload);
+    INSERT INTO journal_entries_fts(rowid, summary, payload) VALUES (new.rowid, new.summary, new.payload);
+END;
+
+CREATE TABLE IF NOT EXISTS journal_entries_archived (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    crew_id TEXT,
+    agent_id TEXT,
+    mission_id TEXT,
+    ts TEXT NOT NULL,
+    archived_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    entry_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    priority TEXT NOT NULL DEFAULT 'normal',
+    actor_type TEXT NOT NULL,
+    actor_id TEXT,
+    summary TEXT NOT NULL,
+    compressed_payload TEXT NOT NULL DEFAULT '{}',
+    original_size_bytes INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_archived_ws_ts ON journal_entries_archived(workspace_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_archived_ws_type ON journal_entries_archived(workspace_id, entry_type, ts DESC);
+
+CREATE TABLE IF NOT EXISTS memory_relations (
+    entry_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+    related_entry_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+    relation_kind TEXT NOT NULL CHECK(relation_kind IN ('similar','supports','refutes','duplicates')),
+    score REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY(entry_id, related_entry_id, relation_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(entry_id, relation_kind);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(related_entry_id, relation_kind);
+
+CREATE TABLE IF NOT EXISTS memory_health_snapshots (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    crew_id TEXT REFERENCES crews(id) ON DELETE CASCADE,
+    computed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    freshness REAL NOT NULL DEFAULT 0,
+    coverage REAL NOT NULL DEFAULT 0,
+    coherence REAL NOT NULL DEFAULT 0,
+    efficiency REAL NOT NULL DEFAULT 0,
+    reachability REAL NOT NULL DEFAULT 0,
+    overall REAL NOT NULL DEFAULT 0,
+    details TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_health_snapshots_ws_time ON memory_health_snapshots(workspace_id, computed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_health_snapshots_ws_crew ON memory_health_snapshots(workspace_id, crew_id, computed_at DESC);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

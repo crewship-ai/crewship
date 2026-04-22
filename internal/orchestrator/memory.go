@@ -92,8 +92,76 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 		b.WriteString(wsBlock)
 	}
 	b.WriteString(buildMemoryInstructions(today))
+	// Agent-curated nudge + cost awareness — two small blocks that
+	// only fire when there's something to say. Both draw from the
+	// journal / paymaster rollups and are bounded in size so they
+	// can't eat the budget.
+	if nudge := o.buildNudgeBlock(ctx, req); nudge != "" {
+		b.WriteString(nudge)
+	}
+	if cost := o.buildCostAwarenessBlock(ctx, req); cost != "" {
+		b.WriteString(cost)
+	}
 
 	return b.String()
+}
+
+// nudgeThreshold is how many new journal entries for the agent since
+// the last memory.updated emit will trigger the "consider updating
+// AGENT.md" prompt. 30 is pragmatic: below 30 the agent usually
+// hasn't seen enough to have a pattern worth writing down; above 30
+// they probably do. Adjust in production based on how often agents
+// actually follow through.
+const nudgeThreshold = 30
+
+// buildNudgeBlock counts journal entries attributed to this agent
+// since the last memory.updated emit and, above a threshold,
+// injects a one-line nudge. The agent is NOT forced to write
+// anything — the nudge is a passive suggestion, not a tool call.
+// Inspired by Hermes Agent's "agent-curated memory with periodic
+// nudges" but scoped to our read-only side (we don't have an
+// in-session trigger point, so the nudge lands at the next run's
+// system prompt assembly).
+func (o *Orchestrator) buildNudgeBlock(ctx context.Context, req AgentRunRequest) string {
+	if req.AgentID == "" || req.WorkspaceID == "" {
+		return ""
+	}
+	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
+	defer cancel()
+	newEntries, err := o.getMemoryMetrics().EntriesSinceLastMemoryUpdate(readCtx, req.WorkspaceID, req.AgentID)
+	if err != nil || newEntries < nudgeThreshold {
+		return ""
+	}
+	return fmt.Sprintf(
+		"\n[MEMORY NUDGE]\nYou have %d new journal entries since your last memory update. Consider appending any recurring pattern you've noticed to ~/.memory/AGENT.md before the session ends — the consolidator won't replace your personal observations.\n[END MEMORY NUDGE]\n\n",
+		newEntries,
+	)
+}
+
+// buildCostAwarenessBlock injects a short line from the paymaster
+// rollup so the agent knows its own spend before it decides whether
+// to burn another $3 on the next tool call. The line lists spend
+// for the last 24h for this agent only — crew-level rollups are
+// visible via `crewship paymaster` CLI and don't need to be in every
+// system prompt.
+//
+// Rolls up cost_ledger directly for this agent_id; workspace_id in
+// the WHERE is load-bearing for tenant isolation. Empty block when
+// no spend is recorded.
+func (o *Orchestrator) buildCostAwarenessBlock(ctx context.Context, req AgentRunRequest) string {
+	if req.AgentID == "" || req.WorkspaceID == "" {
+		return ""
+	}
+	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
+	defer cancel()
+	totalUSD, totalTokens, callCount, err := o.getMemoryMetrics().AgentSpendLast24h(readCtx, req.WorkspaceID, req.AgentID)
+	if err != nil || callCount == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"\n[COST AWARENESS]\nYour last 24h: %d LLM calls, %d tokens, $%.2f spent. Reuse prior outputs where possible and short-circuit long reasoning chains when a cheaper path works.\n[END COST AWARENESS]\n\n",
+		callCount, totalTokens, totalUSD,
+	)
 }
 
 // buildAgentMemoryBlock reads per-agent memory files and returns a formatted
