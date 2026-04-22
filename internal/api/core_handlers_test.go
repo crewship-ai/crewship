@@ -715,6 +715,32 @@ func TestApplyAvatarStyle(t *testing.T) {
 	if resp["updated"].(float64) != 2 {
 		t.Errorf("updated = %v, want 2", resp["updated"])
 	}
+
+	// reset_overrides clears avatar_style on all agents in the crew
+	req7 := httptest.NewRequest("POST", "/api/v1/crews/crew-style/avatar-style",
+		bytes.NewBufferString(`{"reset_overrides":true}`))
+	req7.SetPathValue("crewId", "crew-style")
+	req7 = withWorkspaceUser(req7, userID, wsID, "OWNER")
+	rr7 := httptest.NewRecorder()
+	h.ApplyAvatarStyle(rr7, req7)
+	if rr7.Code != http.StatusOK {
+		t.Fatalf("reset_overrides status = %d, body: %s", rr7.Code, rr7.Body.String())
+	}
+	var resp2 map[string]interface{}
+	json.Unmarshal(rr7.Body.Bytes(), &resp2)
+	if resp2["updated"].(float64) != 2 {
+		t.Errorf("reset updated = %v, want 2", resp2["updated"])
+	}
+	if resp2["reset"] != true {
+		t.Errorf("reset flag = %v, want true", resp2["reset"])
+	}
+	var nullCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM agents WHERE crew_id = 'crew-style' AND avatar_style IS NULL`).Scan(&nullCount); err != nil {
+		t.Fatalf("verify null: %v", err)
+	}
+	if nullCount != 2 {
+		t.Errorf("agents with null avatar_style = %d, want 2", nullCount)
+	}
 }
 
 // ---------------------------------------------------------------------------
