@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils"
 import { FleetExplorer } from "@/components/features/fleet/fleet-explorer"
 import { FleetCrewDetail } from "@/components/features/fleet/fleet-crew-detail"
 import { FleetAgentDetail } from "@/components/features/fleet/fleet-agent-detail"
+import { FleetAgentInline } from "@/components/features/fleet/fleet-agent-inline"
 import { AllCrewsOverview } from "@/components/features/fleet/fleet-all-crews-overview"
 import { HealthOverview } from "@/components/features/fleet/fleet-health-overview"
 import { FleetBottomDrawer } from "@/components/features/fleet/fleet-bottom-drawer"
@@ -283,14 +284,19 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
           <AnimatePresence mode="wait">
             {activeTab === "overview" && (
               <motion.div
-                key={`overview-${selectedCrewId || "none"}`}
+                key={`overview-${selectedAgentId || selectedCrewId || "none"}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="h-full"
               >
-                {selectedCrew ? (
+                {selectedAgent ? (
+                  <FleetAgentInline
+                    agent={selectedAgent}
+                    workspaceId={workspaceId}
+                  />
+                ) : selectedCrew ? (
                   <FleetCrewDetail
                     crew={selectedCrew}
                     agents={crewAgents}

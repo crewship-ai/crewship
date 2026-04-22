@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import {
-  X, MessageSquare, ScrollText, Settings, Crown, Bot, Cpu, Key, Clock,
+  X, MessageSquare, ScrollText, Settings, Cpu, Key, Clock,
   ExternalLink,
 } from "lucide-react"
 import { motion } from "motion/react"
@@ -10,12 +10,6 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-
-const CREW_DOT_CLASS: Record<string, string> = {
-  blue: "bg-blue-500", emerald: "bg-emerald-500", violet: "bg-violet-500",
-  amber: "bg-amber-500", rose: "bg-rose-500", cyan: "bg-cyan-500",
-  lime: "bg-lime-500", fuchsia: "bg-fuchsia-500",
-}
 import { timeAgo, formatDuration } from "@/lib/time"
 import Link from "next/link"
 
@@ -134,51 +128,26 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
         </Button>
       </div>
 
-      {/* Content */}
+      {/* Content — essentials only. Detailed view lives in the center pane
+          (FleetAgentInline) when an agent is selected. */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Description */}
-        {agent.description && (
-          <p className="text-[12px] text-muted-foreground/80">{agent.description}</p>
-        )}
-
-        {/* Info rows */}
-        <div className="space-y-2">
-          <InfoRow icon={agent.agent_role === "LEAD" ? Crown : Bot} label="Role" value={agent.agent_role} />
-          {agent.crew && (
-            <InfoRow
-              icon={Bot}
-              label="Crew"
-              value={
-                <span className="flex items-center gap-1.5">
-                  <span
-                    className={cn("h-2 w-2 rounded-full shrink-0", CREW_DOT_CLASS[agent.crew.color || ""] || CREW_DOT_CLASS.blue)}
-                  />
-                  {agent.crew.name}
-                </span>
-              }
-            />
-          )}
-          <InfoRow icon={Cpu} label="LLM" value={`${agent.llm_provider} / ${agent.llm_model}`} />
-          <InfoRow icon={Settings} label="Adapter" value={agent.cli_adapter} />
-        </div>
-
         {/* Quick actions */}
-        <div className="flex items-center gap-2">
-          <Button size="sm" className="h-7 text-[11px]" asChild>
+        <div className="grid grid-cols-3 gap-2">
+          <Button size="sm" className="h-8 text-[11px] gap-1" asChild>
             <Link href={`/fleet/agents/${agent.id}/chat`}>
-              <MessageSquare className="mr-1.5 h-3 w-3" />
+              <MessageSquare className="h-3 w-3" />
               Chat
             </Link>
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-[11px]" asChild>
+          <Button variant="outline" size="sm" className="h-8 text-[11px] gap-1" asChild>
             <Link href={`/fleet/agents/${agent.id}/logs`}>
-              <ScrollText className="mr-1.5 h-3 w-3" />
+              <ScrollText className="h-3 w-3" />
               Logs
             </Link>
           </Button>
-          <Button variant="outline" size="sm" className="h-7 text-[11px]" asChild>
+          <Button variant="outline" size="sm" className="h-8 text-[11px] gap-1" asChild>
             <Link href={`/fleet/agents/${agent.id}/settings`}>
-              <Settings className="mr-1.5 h-3 w-3" />
+              <Settings className="h-3 w-3" />
               Settings
             </Link>
           </Button>
@@ -233,16 +202,6 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
         </div>
       </div>
     </motion.div>
-  )
-}
-
-function InfoRow({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 text-[12px]">
-      <Icon className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-      <span className="text-muted-foreground w-14 shrink-0">{label}</span>
-      <span className="text-foreground/80 truncate">{value}</span>
-    </div>
   )
 }
 
