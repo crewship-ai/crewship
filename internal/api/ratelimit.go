@@ -3,11 +3,18 @@ package api
 import (
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
+
+// rateLimitDisabled is true when CREWSHIP_DISABLE_RATELIMIT is set (typically
+// in dev shells running E2E suites against a real backend). When true the
+// middleware is a pass-through. Default is off — production and CI keep the
+// per-IP limits engaged.
+var rateLimitDisabled = os.Getenv("CREWSHIP_DISABLE_RATELIMIT") != ""
 
 // ipLimiter tracks a per-IP rate limiter and when it was last seen.
 type ipLimiter struct {
@@ -73,7 +80,11 @@ func (rl *RateLimiter) cleanup() {
 
 // Middleware returns an http.Handler that rate-limits requests by client IP.
 // When the limit is exceeded, it responds with 429 Too Many Requests.
+// When CREWSHIP_DISABLE_RATELIMIT is set the middleware is a no-op.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+	if rateLimitDisabled {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := extractIP(r)
 		limiter := rl.getLimiter(ip)
