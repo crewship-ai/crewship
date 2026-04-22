@@ -17,6 +17,7 @@ import { HealthOverview } from "@/components/features/fleet/fleet-health-overvie
 import { FleetBottomDrawer } from "@/components/features/fleet/fleet-bottom-drawer"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useFleetSelection } from "@/hooks/use-fleet-selection"
 import Link from "next/link"
 
 interface CrewData {
@@ -81,52 +82,53 @@ const FLEET_TABS = [
 
 export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _onRefresh }: FleetLayoutProps) {
   const isMobile = useIsMobile()
+  const { selectedAgentSlug, selectedCrewSlug, update, selectAgent } = useFleetSelection()
 
-  // Panel state
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>("overview")
 
-  // Selection state
-  const [selectedCrewId, setSelectedCrewId] = useState<string | null>(null)
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-
-  // Auto-collapse on mobile
   useEffect(() => {
     if (isMobile) setLeftCollapsed(true)
   }, [isMobile])
 
-  // Derived data
   const selectedCrew = useMemo(
-    () => (selectedCrewId ? crews.find((c) => c.id === selectedCrewId) || null : null),
-    [crews, selectedCrewId],
+    () => (selectedCrewSlug ? crews.find((c) => c.slug === selectedCrewSlug) || null : null),
+    [crews, selectedCrewSlug],
   )
 
   const selectedAgent = useMemo(
-    () => (selectedAgentId ? agents.find((a) => a.id === selectedAgentId) || null : null),
-    [agents, selectedAgentId],
+    () => (selectedAgentSlug ? agents.find((a) => a.slug === selectedAgentSlug) || null : null),
+    [agents, selectedAgentSlug],
   )
+
+  const selectedCrewId = selectedCrew?.id ?? null
+  const selectedAgentId = selectedAgent?.id ?? null
 
   const crewAgents = useMemo(
     () => (selectedCrewId ? agents.filter((a) => a.crew_id === selectedCrewId) : []),
     [agents, selectedCrewId],
   )
 
-  // Handlers
   const handleCrewSelect = useCallback((crewId: string) => {
-    setSelectedCrewId(crewId)
-    setSelectedAgentId(null)
-  }, [])
+    const crew = crews.find((c) => c.id === crewId)
+    if (!crew) return
+    update({ crew: crew.slug, agent: null })
+  }, [crews, update])
 
   const handleAgentSelect = useCallback((agentId: string) => {
-    setSelectedAgentId((prev) => prev === agentId ? null : agentId)
-    // Also select the agent's crew
     const agent = agents.find((a) => a.id === agentId)
-    if (agent?.crew_id) setSelectedCrewId(agent.crew_id)
-  }, [agents])
+    if (!agent) return
+    if (selectedAgentSlug === agent.slug) {
+      selectAgent(null)
+      return
+    }
+    const parentCrew = agent.crew_id ? crews.find((c) => c.id === agent.crew_id) : null
+    update({ agent: agent.slug, crew: parentCrew?.slug ?? null })
+  }, [agents, crews, selectedAgentSlug, selectAgent, update])
 
   const handleAgentClose = useCallback(() => {
-    setSelectedAgentId(null)
-  }, [])
+    selectAgent(null)
+  }, [selectAgent])
 
   const showRightPanel = selectedAgent !== null
 
