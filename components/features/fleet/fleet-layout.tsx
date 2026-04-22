@@ -19,6 +19,7 @@ import { FleetBottomDrawer } from "@/components/features/fleet/fleet-bottom-draw
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useFleetSelection } from "@/hooks/use-fleet-selection"
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import Link from "next/link"
 
 interface CrewData {
@@ -151,6 +152,24 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
   }, [selectAgent])
 
   const showRightPanel = selectedAgent !== null
+
+  const cycleAgent = useCallback((delta: 1 | -1) => {
+    if (agents.length === 0) return
+    const currentIdx = selectedAgent ? agents.findIndex((a) => a.slug === selectedAgent.slug) : -1
+    const nextIdx = currentIdx < 0
+      ? (delta === 1 ? 0 : agents.length - 1)
+      : (currentIdx + delta + agents.length) % agents.length
+    const next = agents[nextIdx]
+    if (!next) return
+    const parentCrew = next.crew_id ? crews.find((c) => c.id === next.crew_id) : null
+    update({ agent: next.slug, crew: parentCrew?.slug ?? null })
+  }, [agents, crews, selectedAgent, update])
+
+  useKeyboardShortcuts([
+    { keys: "Escape", handler: handleAgentClose, enabled: showRightPanel },
+    { keys: "j", handler: () => cycleAgent(1) },
+    { keys: "k", handler: () => cycleAgent(-1) },
+  ])
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">

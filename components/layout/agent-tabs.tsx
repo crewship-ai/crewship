@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import {
   LayoutGrid, LayoutDashboard, MessageSquare, FolderOpen,
   Activity, ScrollText, Wrench, Settings, X,
@@ -64,10 +65,25 @@ export function AgentTabs(_props: AgentTabsProps) {
 
 export function AgentDesktopRail({ agentId }: { agentId: string }) {
   const pathname = usePathname()
+  const router = useRouter()
   const basePath = `/fleet/agents/${agentId}`
   const isMobile = useIsMobile()
   const [expanded, setExpanded] = useState(false)
   const { agent } = useAgentDetail()
+
+  const go = useCallback((href: string) => {
+    router.push(`${basePath}${href}`)
+  }, [router, basePath])
+
+  useKeyboardShortcuts([
+    { keys: ["g", "o"], handler: () => go("") },
+    { keys: ["g", "s"], handler: () => go("/sessions") },
+    { keys: ["g", "r"], handler: () => go("/runs") },
+    { keys: ["g", "w"], handler: () => go("/workspace") },
+    { keys: ["g", "t"], handler: () => go("/tools") },
+    { keys: ["g", "l"], handler: () => go("/logs") },
+    { keys: ["g", ","], handler: () => go("/settings") },
+  ])
 
   if (isMobile) return null
 
