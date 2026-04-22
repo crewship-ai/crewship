@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
+import { toast } from "sonner"
 import {
   Plus, LayoutGrid, Activity,
   Share2, HeartPulse,
@@ -90,6 +91,25 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
   useEffect(() => {
     if (isMobile) setLeftCollapsed(true)
   }, [isMobile])
+
+  const staleSlugNotified = useRef<string | null>(null)
+  useEffect(() => {
+    if (selectedAgentSlug && !agents.find((a) => a.slug === selectedAgentSlug)) {
+      if (staleSlugNotified.current !== selectedAgentSlug) {
+        staleSlugNotified.current = selectedAgentSlug
+        toast.warning(`Agent "${selectedAgentSlug}" not found`)
+        update({ agent: null })
+      }
+    } else if (selectedCrewSlug && !crews.find((c) => c.slug === selectedCrewSlug)) {
+      if (staleSlugNotified.current !== selectedCrewSlug) {
+        staleSlugNotified.current = selectedCrewSlug
+        toast.warning(`Crew "${selectedCrewSlug}" not found`)
+        update({ crew: null })
+      }
+    } else {
+      staleSlugNotified.current = null
+    }
+  }, [selectedAgentSlug, selectedCrewSlug, agents, crews, update])
 
   const selectedCrew = useMemo(
     () => (selectedCrewSlug ? crews.find((c) => c.slug === selectedCrewSlug) || null : null),

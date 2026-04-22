@@ -20,6 +20,7 @@ import { getCrewBgClass } from "@/lib/colors"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
 import { HistorySection } from "@/components/features/agents/overview/history-section"
+import { EmptyState } from "@/components/layout/empty-state"
 import { timeAgo, formatDuration, formatTimeout } from "@/lib/time"
 
 
@@ -137,11 +138,22 @@ export function AgentOverviewPageClient() {
 
   if (error || !agent) {
     return (
-      <div className="p-4 sm:p-6">
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <p className="text-body">{error ?? "Agent not found"}</p>
-        </div>
+      <div className="p-6">
+        <EmptyState
+          icon={AlertCircle}
+          title={error ? "Failed to load agent" : "Agent not found"}
+          description={
+            error
+              ? "Refresh the page or check that the workspace is running."
+              : "This agent may have been renamed or deleted."
+          }
+        >
+          <div className="mt-4">
+            <Link href="/fleet" className="text-micro font-medium text-primary hover:underline">
+              Back to Fleet
+            </Link>
+          </div>
+        </EmptyState>
       </div>
     )
   }
