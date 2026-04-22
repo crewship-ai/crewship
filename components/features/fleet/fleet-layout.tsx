@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
 import {
   Plus, LayoutGrid, Activity,
-  Share2, HeartPulse,
+  HeartPulse,
   ChevronLeft, PanelLeftOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -61,7 +61,7 @@ interface MissionData {
   created_at: string
 }
 
-type TabId = "overview" | "activity" | "connections" | "health"
+type TabId = "overview" | "activity" | "health"
 
 export interface FleetLayoutProps {
   crews: CrewData[]
@@ -74,7 +74,6 @@ export interface FleetLayoutProps {
 const FLEET_TABS = [
   { id: "overview" as const, label: "Overview", icon: LayoutGrid },
   { id: "activity" as const, label: "Activity", icon: Activity },
-  { id: "connections" as const, label: "Connections", icon: Share2 },
   { id: "health" as const, label: "Health", icon: HeartPulse },
 ]
 
@@ -319,26 +318,6 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
                 className="p-4 h-full overflow-auto"
               >
                 <CrewActivityFeed workspaceId={workspaceId} />
-              </motion.div>
-            )}
-
-            {activeTab === "connections" && (
-              <motion.div
-                key="connections"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="flex items-center justify-center h-full text-muted-foreground/50"
-              >
-                <div className="text-center">
-                  <Share2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-body font-medium">Crew Connections</p>
-                  <p className="text-micro text-muted-foreground/40 mt-1">
-                    Configure inter-crew communication in{" "}
-                    <Link href="/orchestration" className="text-primary hover:underline">Orchestration</Link>
-                  </p>
-                </div>
               </motion.div>
             )}
 
