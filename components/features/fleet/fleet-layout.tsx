@@ -95,13 +95,17 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
 
   const staleSlugNotified = useRef<string | null>(null)
   useEffect(() => {
-    if (selectedAgentSlug && !agents.find((a) => a.slug === selectedAgentSlug)) {
+    // Don't clear URL params until entity lists have actually loaded,
+    // otherwise deep-links like /fleet?agent=filip get wiped on first paint
+    // before agents[] has arrived from the parent fetch.
+    if (agents.length === 0 && crews.length === 0) return
+    if (selectedAgentSlug && agents.length > 0 && !agents.find((a) => a.slug === selectedAgentSlug)) {
       if (staleSlugNotified.current !== selectedAgentSlug) {
         staleSlugNotified.current = selectedAgentSlug
         toast.warning(`Agent "${selectedAgentSlug}" not found`)
         update({ agent: null })
       }
-    } else if (selectedCrewSlug && !crews.find((c) => c.slug === selectedCrewSlug)) {
+    } else if (selectedCrewSlug && crews.length > 0 && !crews.find((c) => c.slug === selectedCrewSlug)) {
       if (staleSlugNotified.current !== selectedCrewSlug) {
         staleSlugNotified.current = selectedCrewSlug
         toast.warning(`Crew "${selectedCrewSlug}" not found`)
@@ -347,23 +351,24 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh: _
           <AnimatePresence>
             {showRightPanel && selectedAgent && (
               <motion.div
-                className="fixed inset-0 z-40 bg-card flex flex-col"
+                className="fixed inset-0 z-40 bg-background flex flex-col"
                 initial={{ x: "100%" }}
                 animate={{ x: 0 }}
                 exit={{ x: "100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}
               >
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 bg-card">
                   <button
                     onClick={handleAgentClose}
                     className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                    aria-label="Back"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <span className="text-label font-semibold text-muted-foreground uppercase tracking-wider">Agent Detail</span>
+                  <span className="text-label font-semibold truncate">{selectedAgent.name}</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <FleetAgentDetail agent={selectedAgent} workspaceId={workspaceId} onClose={handleAgentClose} />
+                  <FleetAgentInline agent={selectedAgent} workspaceId={workspaceId} />
                 </div>
               </motion.div>
             )}

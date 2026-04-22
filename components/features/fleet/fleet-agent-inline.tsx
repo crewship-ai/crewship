@@ -117,67 +117,70 @@ export function FleetAgentInline({ agent, workspaceId }: FleetAgentInlineProps) 
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="p-6 max-w-5xl space-y-5">
-        {/* Hero */}
-        <div className="flex items-start gap-4">
-          <img
-            src={avatarUrl}
-            alt=""
-            className="h-16 w-16 rounded-2xl shrink-0 border border-border"
-          />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-title font-semibold truncate">{agent.name}</h1>
-              <StatusBadge status={canonicalStatus} label={agent.status.toLowerCase()} />
-              {agent.agent_role === "LEAD" && (
-                <Badge variant="outline" className="gap-1 text-micro">
-                  <Crown className="h-3 w-3" /> Lead
-                </Badge>
+      <div className="p-4 sm:p-6 max-w-5xl space-y-4 sm:space-y-5">
+        {/* Hero — responsive: actions stack below on mobile */}
+        <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+          <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+            <img
+              src={avatarUrl}
+              alt=""
+              className="h-12 w-12 sm:h-16 sm:w-16 rounded-xl sm:rounded-2xl shrink-0 border border-border"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                <h1 className="text-body sm:text-title font-semibold truncate">{agent.name}</h1>
+                <StatusBadge status={canonicalStatus} label={agent.status.toLowerCase()} />
+                {agent.agent_role === "LEAD" && (
+                  <Badge variant="outline" className="gap-1 text-micro">
+                    <Crown className="h-3 w-3" /> Lead
+                  </Badge>
+                )}
+                {isLive && (
+                  <span className="inline-flex items-center gap-1 text-micro text-emerald-400">
+                    <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
+                    live
+                  </span>
+                )}
+              </div>
+              {agent.role_title && (
+                <p className="text-label sm:text-body text-muted-foreground mt-0.5 truncate">{agent.role_title}</p>
               )}
-              {isLive && (
-                <span className="inline-flex items-center gap-1 text-micro text-emerald-400">
-                  <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
-                  live
-                </span>
+              {agent.description && (
+                <p className="text-micro sm:text-label text-muted-foreground/80 mt-1 line-clamp-2">{agent.description}</p>
               )}
             </div>
-            {agent.role_title && (
-              <p className="text-body text-muted-foreground mt-0.5">{agent.role_title}</p>
-            )}
-            {agent.description && (
-              <p className="text-label text-muted-foreground/80 mt-1 line-clamp-2">{agent.description}</p>
-            )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild>
-              <Link href={`${agentPath}/chat`}>
+
+          <div className="grid grid-cols-4 sm:flex sm:items-center gap-2 shrink-0 w-full sm:w-auto">
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
+              <Link href={`${agentPath}/chat`} aria-label="Chat">
                 <MessageSquare className="h-3.5 w-3.5" />
-                Chat
+                <span className="hidden sm:inline">Chat</span>
               </Link>
             </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild>
-              <Link href={`${agentPath}/logs`}>
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
+              <Link href={`${agentPath}/logs`} aria-label="Logs">
                 <ScrollText className="h-3.5 w-3.5" />
-                Logs
+                <span className="hidden sm:inline">Logs</span>
               </Link>
             </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild>
-              <Link href={`${agentPath}/settings`}>
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
+              <Link href={`${agentPath}/settings`} aria-label="Settings">
                 <Settings className="h-3.5 w-3.5" />
-                Settings
+                <span className="hidden sm:inline">Settings</span>
               </Link>
             </Button>
-            <Button size="sm" className="h-8 gap-1.5" asChild>
-              <Link href={agentPath}>
-                Open full
+            <Button size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
+              <Link href={agentPath} aria-label="Open full agent page">
+                <span className="hidden sm:inline">Open full</span>
                 <ExternalLink className="h-3.5 w-3.5" />
               </Link>
             </Button>
           </div>
         </div>
 
-        {/* Stats strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        {/* Stats strip — 2 cols on mobile, 5 on desktop */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3">
           <StatMiniCard href={`${agentPath}/sessions`} icon={MessageSquare} label="Sessions" value={sessionCount} />
           <StatMiniCard href={`${agentPath}/runs`} icon={Zap} label="Runs" value={runs.length > 0 ? runs.length : "—"} />
           <StatMiniCard href={`${agentPath}/tools?section=skills`} icon={Puzzle} label="Skills" value={skillCount} />
