@@ -94,12 +94,12 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalD
               <section className="flex flex-wrap gap-2">
                 {row.crew_id && (
                   <Badge asChild variant="outline" className="text-[10px] font-mono border-border/60">
-                    <Link href={`/cruise/crews/${encodeURIComponent(row.crew_id)}`}>crew · {row.crew_id.slice(0, 8)}</Link>
+                    <Link href={`/crews/crews/${encodeURIComponent(row.crew_id)}`}>crew · {row.crew_id.slice(0, 8)}</Link>
                   </Badge>
                 )}
                 {row.agent_id && (
                   <Badge asChild variant="outline" className="text-[10px] font-mono border-border/60">
-                    <Link href={`/cruise/agents/${encodeURIComponent(row.agent_id)}`}>agent · {row.agent_id.slice(0, 8)}</Link>
+                    <Link href={`/crews/agents/${encodeURIComponent(row.agent_id)}`}>agent · {row.agent_id.slice(0, 8)}</Link>
                   </Badge>
                 )}
                 {row.mission_id && (

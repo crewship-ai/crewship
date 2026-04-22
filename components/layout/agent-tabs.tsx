@@ -66,7 +66,7 @@ export function AgentTabs(_props: AgentTabsProps) {
 export function AgentDesktopRail({ agentId }: { agentId: string }) {
   const pathname = usePathname()
   const router = useRouter()
-  const basePath = `/cruise/agents/${agentId}`
+  const basePath = `/crews/agents/${agentId}`
   const isMobile = useIsMobile()
   const [expanded, setExpanded] = useState(false)
   const { agent } = useAgentDetail()
@@ -158,7 +158,7 @@ export const agentTabsList = tabs
 
 export function AgentMobileTabsBar({ agentId }: { agentId: string }) {
   const pathname = usePathname()
-  const basePath = `/cruise/agents/${agentId}`
+  const basePath = `/crews/agents/${agentId}`
   const isMobile = useIsMobile()
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const { agent } = useAgentDetail()

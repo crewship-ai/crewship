@@ -55,7 +55,7 @@ const navSections = [
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
       { title: "Orchestration", href: "/orchestration", icon: Workflow },
-      { title: "Cruise", href: "/cruise", icon: Ship },
+      { title: "Crews", href: "/crews", icon: Ship },
     ],
   },
   {

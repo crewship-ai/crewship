@@ -46,8 +46,8 @@ func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
 // SetScheduler attaches a ScheduleUpdater for live-updating agent cron schedules.
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
 
-// CruiseStatus returns lightweight agent counts by status for the toolbar.
-func (h *AgentHandler) CruiseStatus(w http.ResponseWriter, r *http.Request) {
+// CrewsStatus returns lightweight agent counts by status for the toolbar.
+func (h *AgentHandler) CrewsStatus(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT status, COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL GROUP BY status`,

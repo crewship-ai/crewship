@@ -6,13 +6,13 @@ import { useRouter } from "next/navigation"
 export default function LegacyAgentsRedirect() {
   const router = useRouter()
   useEffect(() => {
-    router.replace("/cruise/agents")
+    router.replace("/crews/agents")
   }, [router])
   return (
     <>
-      <meta httpEquiv="refresh" content="0;url=/cruise/agents" />
+      <meta httpEquiv="refresh" content="0;url=/crews/agents" />
       <noscript>
-        <p>Redirecting to <a href="/cruise/agents">/cruise/agents</a>…</p>
+        <p>Redirecting to <a href="/crews/agents">/crews/agents</a>…</p>
       </noscript>
     </>
   )

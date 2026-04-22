@@ -5,6 +5,6 @@
  * Default is always OFF — call sites must opt in explicitly.
  */
 
-export function cruiseUnifiedUI(): boolean {
-  return process.env.NEXT_PUBLIC_CRUISE_UNIFIED_UI === "true"
+export function crewsUnifiedUI(): boolean {
+  return process.env.NEXT_PUBLIC_CREWS_UNIFIED_UI === "true"
 }
