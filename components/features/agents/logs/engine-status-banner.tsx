@@ -11,7 +11,7 @@ import { SectionCard } from "@/components/ui/section-card"
 import { PropertyRow } from "@/components/layout/property-row"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { DebugData } from "@/lib/types/agent"
 
 function StatusIcon({ ok }: { ok: boolean }) {
@@ -65,10 +65,19 @@ export function EngineStatusBanner() {
     return () => clearInterval(interval)
   }, [autoRefresh, workspaceId, fetchDebug])
 
-  useRealtimeEvent("agent.status", useCallback(() => { fetchDebug() }, [fetchDebug]))
-  useRealtimeEvent("run.started", useCallback(() => { fetchDebug() }, [fetchDebug]))
-  useRealtimeEvent("run.completed", useCallback(() => { fetchDebug() }, [fetchDebug]))
-  useRealtimeEvent("run.failed", useCallback(() => { fetchDebug() }, [fetchDebug]))
+  // Filter realtime refreshes to events actually belonging to this agent —
+  // workspace-wide broadcasts would otherwise re-fetch /debug on every run
+  // started by any agent in the workspace.
+  const maybeRefresh = useCallback(
+    (event: RealtimeEvent) => {
+      if (event.payload?.agent_id === agentId) fetchDebug()
+    },
+    [agentId, fetchDebug],
+  )
+  useRealtimeEvent("agent.status", maybeRefresh)
+  useRealtimeEvent("run.started", maybeRefresh)
+  useRealtimeEvent("run.completed", maybeRefresh)
+  useRealtimeEvent("run.failed", maybeRefresh)
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true)
@@ -122,8 +131,12 @@ export function EngineStatusBanner() {
             className="h-6 text-micro gap-1"
             onClick={handleRefresh}
             disabled={refreshing}
+            aria-label="Refresh engine status"
+            title="Refresh engine status"
           >
-            {refreshing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            {refreshing
+              ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+              : <RefreshCw className="h-3 w-3" aria-hidden="true" />}
           </Button>
         </div>
       </div>

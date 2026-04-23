@@ -103,7 +103,7 @@ interface AgentBreadcrumb {
   crewColor: string | null
 }
 
-const AGENT_PATH_RE = /^\/agents\/([^/]+)/
+const AGENT_PATH_RE = /^\/crews\/agents\/([^/]+)/
 
 function useAgentBreadcrumb(pathname: string, workspaceId: string | null): AgentBreadcrumb | null {
   const [data, setData] = useState<AgentBreadcrumb | null>(null)
@@ -111,7 +111,7 @@ function useAgentBreadcrumb(pathname: string, workspaceId: string | null): Agent
   const agentId = match?.[1]
 
   useEffect(() => {
-    if (!agentId || agentId === "_" || !workspaceId) {
+    if (!agentId || agentId === "_" || agentId === "new" || !workspaceId) {
       setData(null)
       return
     }

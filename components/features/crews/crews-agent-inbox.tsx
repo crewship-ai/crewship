@@ -228,29 +228,42 @@ function InboxRow({
   href: string
 }) {
   const active = count > 0
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-md transition-colors",
-        active
-          ? "hover:bg-white/[0.06] text-foreground"
-          : "text-muted-foreground/60 pointer-events-none opacity-70",
-      )}
-    >
+  const content = (
+    <>
       <span className={cn(
         "flex items-center justify-center h-6 w-6 rounded-full",
         active ? "bg-amber-500/15 text-amber-400" : "bg-muted/40 text-muted-foreground/60",
       )}>
-        <Icon className="h-3 w-3" />
+        <Icon className="h-3 w-3" aria-hidden="true" />
       </span>
-      <span className="text-label tabular-nums font-semibold">
-        {count}
-      </span>
+      <span className="text-label tabular-nums font-semibold">{count}</span>
       <span className="text-label truncate">{label}</span>
       {active && (
-        <ExternalLink className="h-3 w-3 text-muted-foreground/50 ml-auto shrink-0" />
+        <ExternalLink className="h-3 w-3 text-muted-foreground/50 ml-auto shrink-0" aria-hidden="true" />
       )}
+    </>
+  )
+
+  // Inactive rows (count === 0) render as a non-interactive div so keyboard
+  // users can't tab into a "disabled" row and screen readers announce the
+  // aria-disabled state rather than a misleading link.
+  if (!active) {
+    return (
+      <div
+        aria-disabled="true"
+        className="flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-md text-muted-foreground/60 opacity-70"
+      >
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-md transition-colors hover:bg-white/[0.06] text-foreground"
+    >
+      {content}
     </Link>
   )
 }

@@ -14,8 +14,8 @@ import { test, expect, request as plwRequest } from "@playwright/test"
  *   8. Missing right-panel action visibility
  */
 
-const E2E_EMAIL = process.env.E2E_EMAIL || "demo@crewship.ai"
-const E2E_PASSWORD = process.env.E2E_PASSWORD || "password123"
+const E2E_EMAIL = process.env.E2E_EMAIL
+const E2E_PASSWORD = process.env.E2E_PASSWORD
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3001"
 
 test.describe.configure({ mode: "serial" })
@@ -24,10 +24,14 @@ test.use({ storageState: { cookies: [], origins: [] } })
 let cachedCookies: Awaited<ReturnType<Awaited<ReturnType<typeof plwRequest.newContext>>["storageState"]>>["cookies"] = []
 
 test.beforeAll(async () => {
+  test.skip(
+    !E2E_EMAIL || !E2E_PASSWORD,
+    "edge-cases: set E2E_EMAIL and E2E_PASSWORD to run this suite",
+  )
   const ctx = await plwRequest.newContext({ baseURL: BASE_URL })
   const { csrfToken } = (await (await ctx.get("/api/auth/csrf")).json()) as { csrfToken: string }
   const res = await ctx.post("/api/auth/callback/credentials", {
-    form: { csrfToken, email: E2E_EMAIL, password: E2E_PASSWORD, callbackUrl: "/", json: "true" },
+    form: { csrfToken, email: E2E_EMAIL!, password: E2E_PASSWORD!, callbackUrl: "/", json: "true" },
   })
   if (!res.ok()) throw new Error(`login ${res.status()}`)
   cachedCookies = (await ctx.storageState()).cookies
@@ -38,6 +42,19 @@ async function login(page: import("@playwright/test").Page) {
   await page.context().addCookies(cachedCookies)
   await page.goto("/")
   await page.waitForLoadState("domcontentloaded")
+}
+
+// `/api/v1/workspaces` has historically returned either an array or a single
+// object (depending on seed/version). Normalize to a list at every call site
+// so one test never throws on the singleton shape before the real assertion
+// runs.
+async function getWorkspaceId(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(async () => {
+    const r = await fetch("/api/v1/workspaces")
+    const json = await r.json()
+    const list = Array.isArray(json) ? json : [json]
+    return list[0].id as string
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -68,10 +85,7 @@ test("stale crew slug clears ?crew=", async ({ page }) => {
 
 test("Esc closes the agent preview panel and clears ?agent=", async ({ page }) => {
   await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    return (await r.json())[0].id
-  })
+  const wsId = await getWorkspaceId(page)
   const agents = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
   if (agents.length === 0) {
     test.skip(true, "no agents seeded")
@@ -90,10 +104,7 @@ test("Esc closes the agent preview panel and clears ?agent=", async ({ page }) =
 
 test("j key cycles to next agent in the explorer", async ({ page }) => {
   await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    return (await r.json())[0].id
-  })
+  const wsId = await getWorkspaceId(page)
   const agents = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
   if (agents.length < 2) {
     test.skip(true, "need at least 2 agents")
@@ -115,10 +126,7 @@ test("j key cycles to next agent in the explorer", async ({ page }) => {
 
 test("rapid agent switching settles on the last agent", async ({ page }) => {
   await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    return (await r.json())[0].id
-  })
+  const wsId = await getWorkspaceId(page)
   const agents = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
   if (agents.length < 3) {
     test.skip(true, "need 3+ agents")
@@ -153,7 +161,9 @@ test("deep-link to ?agent=<slug> works after full page load", async ({ browser }
   void wsId
   // Fetch via request API to avoid needing page context
   const req = await plwRequest.newContext({ baseURL: BASE_URL, storageState: { cookies: cachedCookies, origins: [] } })
-  const agents = await (await req.get(`/api/v1/agents?workspace_id=${(await (await req.get("/api/v1/workspaces")).json())[0].id}`)).json()
+  const wsJson = await (await req.get("/api/v1/workspaces")).json()
+  const wsList = Array.isArray(wsJson) ? wsJson : [wsJson]
+  const agents = await (await req.get(`/api/v1/agents?workspace_id=${wsList[0].id}`)).json()
   await req.dispose()
   if (agents.length === 0) {
     test.skip(true, "no agents")
@@ -221,10 +231,7 @@ test("logout redirects to /login and re-login works", async ({ page }) => {
 
 test("agent inbox panel shows all 3 inbox rows + status chips even when all counts are 0", async ({ page }) => {
   await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    return (await r.json())[0].id
-  })
+  const wsId = await getWorkspaceId(page)
   const agents = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
   if (agents.length === 0) {
     test.skip(true, "no agents")
@@ -234,7 +241,10 @@ test("agent inbox panel shows all 3 inbox rows + status chips even when all coun
   await page.waitForLoadState("networkidle")
   await page.waitForTimeout(1500)
   // All 3 inbox labels present regardless of count
-  for (const label of ["approvals pending", "assignments open", "escalation"]) {
+  // CrewsAgentInbox renders "escalations" (plural) for any count other
+  // than 1, so assert that — the singular "escalation" would miss the
+  // zero-count case this test is covering.
+  for (const label of ["approvals pending", "assignments open", "escalations"]) {
     await expect(page.getByText(label).first()).toBeVisible({ timeout: 5_000 })
   }
   // Memory chip always present (on/off)
@@ -247,10 +257,7 @@ test("agent inbox panel shows all 3 inbox rows + status chips even when all coun
 
 test("agent inline center renders runtime card + 6 stat cards", async ({ page }) => {
   await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    return (await r.json())[0].id
-  })
+  const wsId = await getWorkspaceId(page)
   const agents = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
   if (agents.length === 0) {
     test.skip(true, "no agents")
@@ -275,10 +282,7 @@ test("agent inline center renders runtime card + 6 stat cards", async ({ page })
 
 test("inbox fetches abort on rapid agent switch (no orphaned responses)", async ({ page }) => {
   await login(page)
-  const wsId = await page.evaluate(async () => {
-    const r = await fetch("/api/v1/workspaces")
-    return (await r.json())[0].id
-  })
+  const wsId = await getWorkspaceId(page)
   const agents = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
   if (agents.length < 2) {
     test.skip(true, "need 2+ agents")

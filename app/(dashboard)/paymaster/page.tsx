@@ -27,11 +27,12 @@ export default function PaymasterPage() {
   const [selectedCrewId, setSelectedCrewId] = useState<string | null>(
     searchParams.get("crew") ?? null,
   )
-  // Honour ?crew=<id> deep-link from the Crews Cost stat card.
+  // Honour ?crew=<id> deep-link from the Crews Cost stat card. Mirror the
+  // query param directly so removing ?crew= clears the selection and a
+  // manual Clear inside the UI isn't clobbered by a stale dependency.
   useEffect(() => {
-    const q = searchParams.get("crew")
-    if (q && q !== selectedCrewId) setSelectedCrewId(q)
-  }, [searchParams, selectedCrewId])
+    setSelectedCrewId(searchParams.get("crew") ?? null)
+  }, [searchParams])
   // reloadKey bumps on Retry to force the hooks to refetch without
   // flipping range to a different value and back. setRange(range) is a
   // no-op because React bails on identical string state.

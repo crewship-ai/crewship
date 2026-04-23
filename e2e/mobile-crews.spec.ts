@@ -1,8 +1,9 @@
 import { test, expect, request as plwRequest } from "@playwright/test"
 
-const E2E_EMAIL = process.env.E2E_EMAIL || "demo@crewship.ai"
-const E2E_PASSWORD = process.env.E2E_PASSWORD || "password123"
+const E2E_EMAIL = process.env.E2E_EMAIL
+const E2E_PASSWORD = process.env.E2E_PASSWORD
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3001"
+
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -15,10 +16,16 @@ test.use({
 let cachedCookies: Awaited<ReturnType<Awaited<ReturnType<typeof plwRequest.newContext>>["storageState"]>>["cookies"] = []
 
 test.beforeAll(async () => {
+  // Refuse to embed demo credentials in source — skip the whole suite
+  // unless E2E_EMAIL and E2E_PASSWORD are supplied through the environment.
+  test.skip(
+    !E2E_EMAIL || !E2E_PASSWORD,
+    "mobile-crews: set E2E_EMAIL and E2E_PASSWORD to run this suite",
+  )
   const ctx = await plwRequest.newContext({ baseURL: BASE_URL })
   const { csrfToken } = (await (await ctx.get("/api/auth/csrf")).json()) as { csrfToken: string }
   const loginRes = await ctx.post("/api/auth/callback/credentials", {
-    form: { csrfToken, email: E2E_EMAIL, password: E2E_PASSWORD, callbackUrl: "/", json: "true" },
+    form: { csrfToken, email: E2E_EMAIL!, password: E2E_PASSWORD!, callbackUrl: "/", json: "true" },
   })
   if (!loginRes.ok()) throw new Error(`login ${loginRes.status()}`)
   const storage = await ctx.storageState()

@@ -42,33 +42,60 @@ export default function AgentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState("All")
 
+  // Track in-flight request so a late response from workspace A can never
+  // overwrite state after the user has switched to workspace B.
+  const abortRef = useRef<AbortController | null>(null)
+
   const fetchAgents = useCallback(async (silent = false) => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setAgents([])
+      setLoading(false)
+      return
+    }
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     if (!silent) {
       setLoading(true)
       setError(null)
     }
     try {
-      const res = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+      const res = await fetch(
+        `/api/v1/agents?workspace_id=${workspaceId}`,
+        { signal: controller.signal },
+      )
+      if (controller.signal.aborted) return
       if (!res.ok) {
-        if (!silent) setError("Failed to load agents")
+        if (!silent) {
+          setAgents([])
+          setError("Failed to load agents")
+        }
         return
       }
       const data = (await res.json()) as Agent[]
+      if (controller.signal.aborted) return
       setAgents(data)
-    } catch {
-      if (!silent) setError("Failed to load agents")
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return
+      if (!silent) {
+        setAgents([])
+        setError("Failed to load agents")
+      }
     } finally {
-      if (!silent) setLoading(false)
+      if (!silent && !controller.signal.aborted) setLoading(false)
     }
   }, [workspaceId])
 
   useEffect(() => {
     if (!workspaceId) {
+      setAgents([])
       if (!wsLoading) setLoading(false)
       return
     }
     fetchAgents()
+    return () => {
+      abortRef.current?.abort()
+    }
   }, [workspaceId, wsLoading, fetchAgents])
 
   // Real-time: debounced refetch on agent events (prevents burst of 4 concurrent fetches)

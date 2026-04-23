@@ -92,8 +92,8 @@ test.describe("Crews Unification", () => {
       return
     }
     const href = await agentLink.getAttribute("href")
-    if (!href) return
-    await page.goto(`${href}/workspace`)
+    expect(href, "agent card link is missing href — selector regressed").toBeTruthy()
+    await page.goto(`${href!}/workspace`)
     await expect(page.getByRole("tab", { name: "Files" })).toBeVisible({ timeout: 5_000 })
     await expect(page.getByRole("tab", { name: "Terminal" })).toBeVisible()
     await page.getByRole("tab", { name: "Terminal" }).click()
@@ -111,8 +111,8 @@ test.describe("Crews Unification", () => {
       return
     }
     const href = await agentLink.getAttribute("href")
-    if (!href) return
-    await page.goto(`${href}/tools`)
+    expect(href, "agent card link is missing href — selector regressed").toBeTruthy()
+    await page.goto(`${href!}/tools`)
     await expect(page.getByRole("tab", { name: "Skills" })).toBeVisible({ timeout: 5_000 })
     await expect(page.getByRole("tab", { name: "Credentials" })).toBeVisible()
     await expect(page.getByRole("tab", { name: "MCP" })).toBeVisible()

@@ -9,11 +9,9 @@ export default function LegacyFleetRedirect() {
     router.replace("/crews")
   }, [router])
   return (
-    <>
+    <noscript>
       <meta httpEquiv="refresh" content="0;url=/crews" />
-      <noscript>
-        <p>Redirecting to <a href="/crews">/crews</a>…</p>
-      </noscript>
-    </>
+      <p>Redirecting to <a href="/crews">/crews</a>…</p>
+    </noscript>
   )
 }

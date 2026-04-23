@@ -52,29 +52,49 @@ export default function CrewsPage() {
   const [missions, setMissions] = useState<MissionData[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Cancel in-flight fetch when workspace changes so a late response from
+  // workspace A can't repopulate crews/agents/missions after the user has
+  // switched to workspace B.
+  const abortRef = useRef<AbortController | null>(null)
+
   const fetchData = useCallback(async (silent = false) => {
     if (!workspaceId) {
+      setCrews([])
+      setAgents([])
+      setMissions([])
       if (!silent) setLoading(false)
       return
     }
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     if (!silent) setLoading(true)
     try {
       const [crewsRes, agentsRes, missionsRes] = await Promise.all([
-        fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
-        fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
-        fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=20&include_tasks=true`),
+        fetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal }),
+        fetch(`/api/v1/agents?workspace_id=${workspaceId}`, { signal: controller.signal }),
+        fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=20&include_tasks=true`, { signal: controller.signal }),
       ])
+      if (controller.signal.aborted) return
       if (crewsRes.ok) setCrews(await crewsRes.json())
+      if (controller.signal.aborted) return
       if (agentsRes.ok) setAgents(await agentsRes.json())
+      if (controller.signal.aborted) return
       if (missionsRes.ok) setMissions(await missionsRes.json())
-    } catch {
-      // ignore
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return
+      // other errors: leave state as-is (previous data survives a transient network blip)
     } finally {
-      if (!silent) setLoading(false)
+      if (!silent && !controller.signal.aborted) setLoading(false)
     }
   }, [workspaceId])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    fetchData()
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [fetchData])
 
   // Real-time: debounced refetch (prevents burst of 8×3 concurrent fetches)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -107,10 +127,21 @@ export default function CrewsPage() {
   useRealtimeEvent("crew.deleted", debouncedRefetch)
   useRealtimeEvent("mission.updated", debouncedRefetch)
 
-  if (loading || wsLoading || !workspaceId) {
+  if (loading || wsLoading) {
     return (
       <div className="h-full flex items-center justify-center">
         <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
+      </div>
+    )
+  }
+
+  if (!workspaceId) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
+        <p className="text-sm font-medium text-foreground/80">No workspace selected</p>
+        <p className="text-[12px] text-muted-foreground max-w-sm">
+          Pick a workspace from the toolbar to see its crews, agents and missions.
+        </p>
       </div>
     )
   }

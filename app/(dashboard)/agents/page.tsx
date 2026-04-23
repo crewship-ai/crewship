@@ -9,11 +9,9 @@ export default function LegacyAgentsRedirect() {
     router.replace("/crews/agents")
   }, [router])
   return (
-    <>
+    <noscript>
       <meta httpEquiv="refresh" content="0;url=/crews/agents" />
-      <noscript>
-        <p>Redirecting to <a href="/crews/agents">/crews/agents</a>…</p>
-      </noscript>
-    </>
+      <p>Redirecting to <a href="/crews/agents">/crews/agents</a>…</p>
+    </noscript>
   )
 }

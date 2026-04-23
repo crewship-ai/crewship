@@ -13,8 +13,8 @@ import { test, expect, request as plwRequest } from "@playwright/test"
  *   F) Avatar crew-level flow (apply + reset)
  */
 
-const E2E_EMAIL = process.env.E2E_EMAIL || "demo@crewship.ai"
-const E2E_PASSWORD = process.env.E2E_PASSWORD || "password123"
+const E2E_EMAIL = process.env.E2E_EMAIL
+const E2E_PASSWORD = process.env.E2E_PASSWORD
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3001"
 
 test.describe.configure({ mode: "serial" })
@@ -23,10 +23,14 @@ test.use({ storageState: { cookies: [], origins: [] } })
 let cachedCookies: Awaited<ReturnType<Awaited<ReturnType<typeof plwRequest.newContext>>["storageState"]>>["cookies"] = []
 
 test.beforeAll(async () => {
+  test.skip(
+    !E2E_EMAIL || !E2E_PASSWORD,
+    "full-integration: set E2E_EMAIL and E2E_PASSWORD to run this suite",
+  )
   const ctx = await plwRequest.newContext({ baseURL: BASE_URL })
   const { csrfToken } = (await (await ctx.get("/api/auth/csrf")).json()) as { csrfToken: string }
   const loginRes = await ctx.post("/api/auth/callback/credentials", {
-    form: { csrfToken, email: E2E_EMAIL, password: E2E_PASSWORD, callbackUrl: "/", json: "true" },
+    form: { csrfToken, email: E2E_EMAIL!, password: E2E_PASSWORD!, callbackUrl: "/", json: "true" },
   })
   if (!loginRes.ok()) throw new Error(`login ${loginRes.status()}`)
   cachedCookies = (await ctx.storageState()).cookies
@@ -37,6 +41,19 @@ async function login(page: import("@playwright/test").Page) {
   await page.context().addCookies(cachedCookies)
   await page.goto("/")
   await page.waitForLoadState("domcontentloaded")
+}
+
+// `/api/v1/workspaces` has historically returned either an array or a single
+// object. Normalize at every call site so one test never throws on the
+// singleton shape before the real assertion runs. Callers must have already
+// logged in (this helper does not navigate, so it's safe mid-flow).
+async function withWorkspace(page: import("@playwright/test").Page): Promise<string> {
+  const wsId = await page.evaluate(async () => {
+    const r = await fetch("/api/v1/workspaces")
+    const d = await r.json()
+    return Array.isArray(d) ? d[0]?.id : d.id
+  })
+  return wsId as string
 }
 
 // ---------------------------------------------------------------------------
@@ -98,15 +115,9 @@ test.describe("B. Legacy redirects", () => {
 // ---------------------------------------------------------------------------
 
 test.describe("C. Backend API contract", () => {
-  async function withWorkspace(page: import("@playwright/test").Page) {
+  test.beforeEach(async ({ page }) => {
     await login(page)
-    const wsId = await page.evaluate(async () => {
-      const r = await fetch("/api/v1/workspaces")
-      const d = await r.json()
-      return Array.isArray(d) ? d[0]?.id : d.id
-    })
-    return wsId as string
-  }
+  })
 
   test("agents list has entries with name/slug/crew", async ({ page }) => {
     const ws = await withWorkspace(page)
@@ -210,20 +221,14 @@ test.describe("D. CRUD flow", () => {
     const href = await newAgent.getAttribute("href")
     const id = href?.split("/").pop()
 
-    const ws = await page.evaluate(async () => {
-      const r = await fetch("/api/v1/workspaces")
-      return (await r.json())[0].id
-    })
+    const ws = await withWorkspace(page)
     const del = await page.request.delete(`/api/v1/agents/${id}?workspace_id=${ws}`)
     expect(del.status()).toBe(200)
   })
 
   test("create chat session → appears in Sessions tab", async ({ page }) => {
     await login(page)
-    const ws = await page.evaluate(async () => {
-      const r = await fetch("/api/v1/workspaces")
-      return (await r.json())[0].id
-    })
+    const ws = await withWorkspace(page)
     const agents = await page.request.get(`/api/v1/agents?workspace_id=${ws}`).then((r) => r.json())
     const agent = agents[0]
     const create = await page.request.post(`/api/v1/agents/${agent.id}/chats?workspace_id=${ws}`, { data: {} })
@@ -241,10 +246,7 @@ test.describe("D. CRUD flow", () => {
 test.describe("E. Tab + sub-strip navigation", () => {
   test("agent: all 7 tabs + 6 sub-strip query variants render < 400", async ({ page }) => {
     await login(page)
-    const ws = await page.evaluate(async () => {
-      const r = await fetch("/api/v1/workspaces")
-      return (await r.json())[0].id
-    })
+    const ws = await withWorkspace(page)
     const agents = await page.request.get(`/api/v1/agents?workspace_id=${ws}`).then((r) => r.json())
     const base = `/crews/agents/${agents[0].id}`
     const paths = [
@@ -262,10 +264,7 @@ test.describe("E. Tab + sub-strip navigation", () => {
 
   test("crew: all 6 tab query variants render < 400", async ({ page }) => {
     await login(page)
-    const ws = await page.evaluate(async () => {
-      const r = await fetch("/api/v1/workspaces")
-      return (await r.json())[0].id
-    })
+    const ws = await withWorkspace(page)
     const crews = await page.request.get(`/api/v1/crews?workspace_id=${ws}`).then((r) => r.json())
     const base = `/crews/${crews[0].id}`
     const tabs = ["", "?tab=members", "?tab=network", "?tab=runtime", "?tab=journal", "?tab=settings"]
@@ -283,10 +282,7 @@ test.describe("E. Tab + sub-strip navigation", () => {
 test.describe("F. Avatar flow", () => {
   test("apply-to-all then reset_overrides both return 200 + updated count", async ({ page }) => {
     await login(page)
-    const ws = await page.evaluate(async () => {
-      const r = await fetch("/api/v1/workspaces")
-      return (await r.json())[0].id
-    })
+    const ws = await withWorkspace(page)
     const crews = await page.request.get(`/api/v1/crews?workspace_id=${ws}`).then((r) => r.json())
     const c = crews[0].id
 

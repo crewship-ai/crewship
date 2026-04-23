@@ -114,21 +114,34 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
   useEffect(() => {
     if (!workspaceId) return
     const controller = new AbortController()
+    // Swallow fetch-network failures but re-throw AbortError so the outer
+    // Promise.all rejects on agent switch — otherwise stale empty arrays
+    // would overwrite the panel for the next agent.
+    const swallowNonAbort = <T,>(fallback: T) => (err: unknown): T => {
+      if ((err as { name?: string })?.name === "AbortError") throw err
+      return fallback
+    }
     Promise.all([
       fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=3`, { signal: controller.signal })
         .then((r) => r.ok ? r.json() : [])
-        .catch(() => []),
+        .catch(swallowNonAbort<SessionRow[]>([])),
       fetch(`/api/v1/agents/${agent.id}/runs?workspace_id=${workspaceId}&limit=3`, { signal: controller.signal })
         .then((r) => r.ok ? r.json() : [])
-        .catch(() => []),
+        .catch(swallowNonAbort<RunRow[]>([])),
       fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { signal: controller.signal })
         .then((r) => r.ok ? r.json() : null)
-        .catch(() => null),
-    ]).then(([s, r, d]: [SessionRow[], RunRow[], AgentDetailExtra | null]) => {
-      setSessions(Array.isArray(s) ? s : [])
-      setRuns(Array.isArray(r) ? r : [])
-      setDetail(d)
-    })
+        .catch(swallowNonAbort<AgentDetailExtra | null>(null)),
+    ])
+      .then(([s, r, d]: [SessionRow[], RunRow[], AgentDetailExtra | null]) => {
+        if (controller.signal.aborted) return
+        setSessions(Array.isArray(s) ? s : [])
+        setRuns(Array.isArray(r) ? r : [])
+        setDetail(d)
+      })
+      .catch((err) => {
+        if ((err as { name?: string })?.name === "AbortError") return
+        // genuine failure — leave previous state untouched
+      })
     return () => controller.abort()
   }, [agent.id, workspaceId])
 

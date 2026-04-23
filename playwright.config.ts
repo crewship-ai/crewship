@@ -2,8 +2,12 @@ import { defineConfig, devices } from "@playwright/test"
 import { storageFilePath } from "./e2e/global-setup"
 
 const nextPort = process.env.NEXT_PORT || "3001"
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${nextPort}`
-const skipWebServer = process.env.PLAYWRIGHT_BASE_URL != null
+const externalBaseURL = (process.env.PLAYWRIGHT_BASE_URL ?? "").trim()
+const baseURL = externalBaseURL || `http://localhost:${nextPort}`
+// Only skip the local web server when an *actual* external URL is provided.
+// An empty string used to set skipWebServer=true while baseURL fell back to
+// localhost, leaving tests pointed at a port with nothing listening.
+const skipWebServer = externalBaseURL.length > 0
 
 export default defineConfig({
   testDir: "./e2e",
