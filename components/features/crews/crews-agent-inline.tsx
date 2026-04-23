@@ -154,9 +154,19 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
     return () => controller.abort()
   }, [agent.id, agent.crew_id, workspaceId])
 
+  // Countdown ticks every 30s so the 'next run' chip moves while the user
+  // stays on the page. Round to minutes — sub-minute precision isn't worth
+  // the 1s render storm.
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    if (!detail?.schedule_enabled || !detail?.schedule_next_run) return
+    const interval = setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => clearInterval(interval)
+  }, [detail?.schedule_enabled, detail?.schedule_next_run])
+
   const scheduleCountdown = useMemo(() => {
     if (!detail?.schedule_enabled || !detail?.schedule_next_run) return null
-    const ms = new Date(detail.schedule_next_run).getTime() - Date.now()
+    const ms = new Date(detail.schedule_next_run).getTime() - nowTick
     if (ms <= 0) return "imminent"
     const mins = Math.floor(ms / 60_000)
     if (mins < 60) return `${mins}m`
@@ -164,7 +174,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
     if (hrs < 24) return `${hrs}h ${mins % 60}m`
     const days = Math.floor(hrs / 24)
     return `${days}d ${hrs % 24}h`
-  }, [detail?.schedule_enabled, detail?.schedule_next_run])
+  }, [detail?.schedule_enabled, detail?.schedule_next_run, nowTick])
 
   const agentPath = `/crews/agents/${agent.id}`
   const canonicalStatus = mapAgentStatus(agent.status)
@@ -499,6 +509,16 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                     </span>
                   </Link>
                 ))}
+                {peers.length > 8 && (
+                  <Link
+                    href={`/crews/${agent.crew_id}`}
+                    className="flex items-center justify-center h-9 px-2.5 rounded-lg border border-dashed border-border bg-card/30 text-micro text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors"
+                    title={`+${peers.length - 8} more peers`}
+                    aria-label={`Show ${peers.length - 8} more peers in crew`}
+                  >
+                    +{peers.length - 8}
+                  </Link>
+                )}
               </div>
               {inbox && inbox.peer_messages.length > 0 && (
                 <div className="pt-2 border-t border-border space-y-1.5">

@@ -376,6 +376,12 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <CrewsAgentInline agent={selectedAgent} workspaceId={workspaceId} />
+                  {/* Inbox rendered as a stacked section on mobile — on desktop
+                      it's the right-panel. Without this, mobile users never see
+                      pending approvals / assignments / escalations at all. */}
+                  <div className="border-t border-border">
+                    <CrewsAgentInbox agent={selectedAgent} workspaceId={workspaceId} onClose={handleAgentClose} />
+                  </div>
                 </div>
               </motion.div>
             )}
