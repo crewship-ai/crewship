@@ -56,26 +56,12 @@ test("mobile agent detail: hero and actions fit, no horizontal scroll", async ({
     return
   }
 
-  await page.goto("/crews")
+  // Agent cards now live on /crews/agents list. A crew click on mobile
+  // navigates to the full /crews/<id> page rather than setting a preview
+  // param, so the 'click crew → click agent inside crew preview' flow
+  // from the pre-10 layout no longer applies on mobile either.
+  await page.goto(`/crews?agent=${agentList[0].slug}`)
   await page.waitForLoadState("networkidle")
-  await page.waitForTimeout(800)
-
-  const crewCard = page.locator("button").filter({ hasText: /Research|DevOps|Quality|Engineering/ }).first()
-  if ((await crewCard.count()) === 0) {
-    test.skip(true, "no seeded crews")
-    return
-  }
-  await crewCard.click()
-  await page.waitForURL(/\?crew=/, { timeout: 5_000 })
-  await page.waitForTimeout(800)
-
-  const firstName = agentList[0].name
-  const agentCard = page.locator('[role="button"]').filter({ hasText: firstName }).first()
-  if ((await agentCard.count()) === 0) {
-    test.skip(true, `no '${firstName}' card visible in crew overview`)
-    return
-  }
-  await agentCard.click()
   await page.waitForTimeout(1500)
 
   // Agent detail (CrewsAgentInline) should be visible — hero has Chat link,

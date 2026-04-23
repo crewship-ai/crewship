@@ -22,18 +22,21 @@ test.describe("Crews Unification", () => {
     await expect(page.getByRole("button", { name: "Connections", exact: true })).toHaveCount(0)
   })
 
-  test("clicking a crew card in AllCrewsOverview sets ?crew= URL param", async ({ page }) => {
+  test("clicking a crew card navigates to the full crew page", async ({ page }) => {
     await page.goto("/crews")
     await page.waitForLoadState("networkidle")
-    // AllCrewsOverview renders crew cards as <button>s, not <a> links
+    // AllCrewsOverview renders crew cards as <button>s; click now drills
+    // into /crews/<id> rather than setting a preview query param, because
+    // crew config (network, runtime, containers, MCP, avatar) warrants the
+    // full tabbed page.
     const crewItem = page.locator("button").filter({ hasText: /Research|DevOps|Quality|Engineering/ }).first()
     if (await crewItem.count() === 0) {
       test.skip(true, "no seeded crews in dev workspace")
       return
     }
     await crewItem.click()
-    await page.waitForURL(/\?crew=[a-z0-9-]+/, { timeout: 5_000 })
-    expect(page.url()).toMatch(/\?crew=/)
+    await page.waitForURL(/\/crews\/[a-zA-Z0-9]+(\?|$)/, { timeout: 5_000 })
+    expect(page.url()).toMatch(/\/crews\/[a-zA-Z0-9]+/)
   })
 
   test("agent full page has 7-tab rail", async ({ page }) => {
