@@ -88,7 +88,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Orchestration", href: "/orchestration", icon: CircleDot },
-  { title: "Crews", href: "/crews/crews", icon: Network },
+  { title: "Crews", href: "/crews", icon: Network },
   { title: "Agents", href: "/crews/agents", icon: Bot },
   { title: "Skills", href: "/skills", icon: Zap },
   { title: "Credentials", href: "/credentials", icon: Key },
@@ -101,7 +101,7 @@ const NAV_ITEMS = [
 
 const QUICK_ACTIONS = [
   { title: "Create new agent", href: "/crews/agents/new", icon: Plus, keywords: ["add", "new", "agent"] },
-  { title: "Create new crew", href: "/crews/crews/new", icon: Plus, keywords: ["add", "new", "crew", "team"] },
+  { title: "Create new crew", href: "/crews/new", icon: Plus, keywords: ["add", "new", "crew", "team"] },
 ]
 
 interface CommandPaletteProps {
@@ -272,7 +272,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <CommandItem
                   key={crew.id}
                   value={`crew ${crew.name} ${crew.slug}`}
-                  onSelect={() => runCommand(() => router.push(`/crews/crews/${crew.id}`))}
+                  onSelect={() => runCommand(() => router.push(`/crews/${crew.id}`))}
                 >
                   <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" className="h-5 w-5 rounded-md [&>svg]:h-3 [&>svg]:w-3" />
                   <span className="flex-1 truncate">{crew.name}</span>

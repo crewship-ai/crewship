@@ -39,7 +39,7 @@ const mobileNavSections = [
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Crews", href: "/crews/crews", icon: Network },
+      { title: "Crews", href: "/crews", icon: Network },
       { title: "Agents", href: "/crews/agents", icon: Bot },
     ],
   },
@@ -70,8 +70,7 @@ const mobileNavSections = [
 const pageConfig: Record<string, { title: string }> = {
   "/": { title: "Dashboard" },
   "/crews/agents": { title: "Agents" },
-  "/crews/crews": { title: "Crews" },
-  "/crews": { title: "Crews & Agents" },
+  "/crews": { title: "Crews" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
   "/audit": { title: "Audit Log" },
@@ -217,7 +216,7 @@ export function AppToolbar() {
             <>
               <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
               <Link
-                href={`/crews/crews/${agentBreadcrumb.crewId}`}
+                href={`/crews/${agentBreadcrumb.crewId}`}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
               >
                 <span
@@ -391,7 +390,7 @@ export function AppToolbar() {
               {pendingEscalations > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Link href="/crews/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
+                    <Link href="/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
                       <span className={`text-micro font-medium ${colorMap.amber.text}`}>
                         {pendingEscalations > 99 ? "99+" : pendingEscalations} escalation{pendingEscalations !== 1 ? "s" : ""}

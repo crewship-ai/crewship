@@ -17,7 +17,7 @@ export function SetupNudge({ crewCount, agentCount, credentialCount }: SetupNudg
       icon: Network,
       label: "Create a crew",
       description: "Group your agents by department or function",
-      href: "/crews/crews/new",
+      href: "/crews/new",
     },
     {
       done: agentCount > 0,

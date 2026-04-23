@@ -280,7 +280,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                 </Row>
                 {agent.crew && (
                   <Row label="Crew">
-                    <Link href={`/crews/crews/${agent.crew_id}`} className="hover:underline">
+                    <Link href={`/crews/${agent.crew_id}`} className="hover:underline">
                       {agent.crew.name}
                     </Link>
                   </Row>
@@ -470,7 +470,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                 </h3>
                 {agent.crew && (
                   <Link
-                    href={`/crews/crews/${agent.crew_id}`}
+                    href={`/crews/${agent.crew_id}`}
                     className="text-micro text-primary hover:underline truncate"
                   >
                     {agent.crew.name} →

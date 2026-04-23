@@ -265,7 +265,7 @@ export function AgentOverviewPageClient() {
                 {agent.crew && (
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Crew</span>
-                    <Link href={`/crews/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline" aria-label={`Go to ${agent.crew.name} crew`}>
+                    <Link href={`/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline" aria-label={`Go to ${agent.crew.name} crew`}>
                       <span className={`h-2 w-2 rounded-full ${getCrewBgClass(agent.crew.color)}`} />
                       {agent.crew.name}
                     </Link>

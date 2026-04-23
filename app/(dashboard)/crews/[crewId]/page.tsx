@@ -244,7 +244,7 @@ export default function CrewDetailPage() {
     if (!workspaceId || !crew) return
     try {
       const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-      if (res.ok) { toast.success(`"${crew.name}" deleted`); router.push("/crews/crews") }
+      if (res.ok) { toast.success(`"${crew.name}" deleted`); router.push("/crews") }
       else toast.error("Failed to delete crew")
     } catch { toast.error("Failed to delete crew") }
   }
@@ -253,7 +253,7 @@ export default function CrewDetailPage() {
     return (
       <div className="p-6 space-y-4">
         <Button variant="ghost" size="sm" asChild>
-          <Link href="/crews/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
+          <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
         </Button>
         <p className="text-body text-destructive">{error}</p>
       </div>
@@ -302,7 +302,7 @@ export default function CrewDetailPage() {
         onTabChange={handleTabChange}
         leading={
           <Button variant="ghost" size="sm" asChild className="h-7 px-2 gap-1">
-            <Link href="/crews/crews"><ArrowLeft className="h-3.5 w-3.5" /><span className="text-micro">Back</span></Link>
+            <Link href="/crews"><ArrowLeft className="h-3.5 w-3.5" /><span className="text-micro">Back</span></Link>
           </Button>
         }
         ariaLabel="Crew tabs"
@@ -335,7 +335,7 @@ export default function CrewDetailPage() {
 
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" asChild>
-            <Link href={`/crews/crews/${crew.id}/files`}>
+            <Link href={`/crews/${crew.id}/files`}>
               <FolderOpen className="mr-2 h-4 w-4" />
               Crew Files
             </Link>

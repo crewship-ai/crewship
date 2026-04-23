@@ -250,7 +250,7 @@ export default function NewCrewPage() {
       }
 
       toast.success(`Crew "${name}" created with ${aiSuggestion.agents.length} agents`)
-      router.push(`/crews/crews/${crew.id}`)
+      router.push(`/crews/${crew.id}`)
     } catch {
       toast.error("Network error. Please try again.")
       setSubmitting(false)
@@ -283,7 +283,7 @@ export default function NewCrewPage() {
         return
       }
       toast.success(`Crew "${name}" created with ${data.agent_count} agents`)
-      router.push(`/crews/crews/${data.crew_id}`)
+      router.push(`/crews/${data.crew_id}`)
     } catch {
       toast.error("Network error. Please try again.")
       setSubmitting(false)
@@ -319,7 +319,7 @@ export default function NewCrewPage() {
           return
         }
         toast.success("Crew created successfully")
-        router.push("/crews/crews")
+        router.push("/crews")
       } catch {
         toast.error("Network error. Please try again.")
         setSubmitting(false)
@@ -347,7 +347,7 @@ export default function NewCrewPage() {
         description="Create a new crew to organize your agents"
         actions={
           <Button variant="outline" size="sm" asChild>
-            <Link href="/crews/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back</Link>
+            <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back</Link>
           </Button>
         }
         className="max-w-3xl"

@@ -129,7 +129,7 @@ export function CrewsAgentInbox({
                 label="assignments open"
                 href={
                   agent.crew?.slug
-                    ? `/crews/crews/${agent.crew.slug}?tab=journal`
+                    ? `/crews/${agent.crew.slug}?tab=journal`
                     : `/crews/agents/${agent.id}`
                 }
               />
@@ -139,7 +139,7 @@ export function CrewsAgentInbox({
                 label={`escalation${inbox?.escalations_open === 1 ? "" : "s"}`}
                 href={
                   agent.crew?.slug
-                    ? `/crews/crews/${agent.crew.slug}?tab=journal`
+                    ? `/crews/${agent.crew.slug}?tab=journal`
                     : `/crews/agents/${agent.id}`
                 }
               />
@@ -159,7 +159,7 @@ export function CrewsAgentInbox({
                   key={pm.id}
                   href={
                     agent.crew?.slug
-                      ? `/crews/crews/${agent.crew.slug}?tab=journal`
+                      ? `/crews/${agent.crew.slug}?tab=journal`
                       : `/crews/agents/${agent.id}`
                   }
                   className="block rounded-md hover:bg-white/[0.04] transition-colors p-1.5 -m-1.5"

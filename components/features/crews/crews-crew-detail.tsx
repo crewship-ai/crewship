@@ -104,13 +104,13 @@ export function CrewsCrewDetail({ crew, agents, missions, onAgentClick }: CrewsC
       {/* Action buttons */}
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/crews/crews/${crew.id}`}>
+          <Link href={`/crews/${crew.id}`}>
             <Settings2 className="mr-1.5 h-3.5 w-3.5" />
             Edit
           </Link>
         </Button>
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/crews/crews/${crew.id}/files`}>
+          <Link href={`/crews/${crew.id}/files`}>
             <FolderOpen className="mr-1.5 h-3.5 w-3.5" />
             Files
           </Link>

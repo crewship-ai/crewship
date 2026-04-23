@@ -21,6 +21,7 @@ import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 
 interface CrewData {
@@ -84,6 +85,7 @@ const CREWS_TABS = [
 
 export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _onRefresh }: CrewsLayoutProps) {
   const isMobile = useIsMobile()
+  const router = useRouter()
   const { selectedAgentSlug, selectedCrewSlug, update, selectAgent } = useCrewsSelection()
 
   const [leftCollapsed, setLeftCollapsed] = useState(false)
@@ -134,11 +136,16 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _
     [agents, selectedCrewId],
   )
 
+  // Click on a crew in the explorer navigates to the full crew page.
+  // Crew config (network policy, runtime, containers, MCP, avatar, issue
+  // prefix, terminal, peer conversations, escalations, journal, danger
+  // zone) lives across six tabs on /crews/<id> and doesn't fit into the
+  // center preview. Agents keep the shallow ?agent=slug preview because
+  // their data is lighter and the right-panel inbox adds real value.
   const handleCrewSelect = useCallback((crewId: string) => {
-    const crew = crews.find((c) => c.id === crewId)
-    if (!crew) return
-    update({ crew: crew.slug, agent: null })
-  }, [crews, update])
+    if (!crews.find((c) => c.id === crewId)) return
+    router.push(`/crews/${crewId}`)
+  }, [crews, router])
 
   const handleAgentSelect = useCallback((agentId: string) => {
     const agent = agents.find((a) => a.id === agentId)
@@ -201,7 +208,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _
         {/* Right: actions */}
         <div className="flex items-center gap-1.5 ml-auto shrink-0">
           <Button size="sm" className="h-[22px] px-2 text-label font-medium gap-1" asChild>
-            <Link href="/crews/crews/new">
+            <Link href="/crews/new">
               <Plus className="h-3 w-3" />
               Crew
             </Link>
