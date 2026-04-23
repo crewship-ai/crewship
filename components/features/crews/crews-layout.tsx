@@ -380,7 +380,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _
                       it's the right-panel. Without this, mobile users never see
                       pending approvals / assignments / escalations at all. */}
                   <div className="border-t border-border">
-                    <CrewsAgentInbox agent={selectedAgent} workspaceId={workspaceId} onClose={handleAgentClose} />
+                    <CrewsAgentInbox agent={selectedAgent} onClose={handleAgentClose} />
                   </div>
                 </div>
               </motion.div>
@@ -393,7 +393,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _
           )}>
             <AnimatePresence mode="wait">
               {showRightPanel && selectedAgent && (
-                <CrewsAgentInbox agent={selectedAgent} workspaceId={workspaceId} onClose={handleAgentClose} />
+                <CrewsAgentInbox agent={selectedAgent} onClose={handleAgentClose} />
               )}
             </AnimatePresence>
           </div>

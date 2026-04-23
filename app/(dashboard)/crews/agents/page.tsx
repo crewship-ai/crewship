@@ -28,8 +28,11 @@ interface Agent {
   agent_role: string
   status: string
   cli_adapter: string
-  llm_provider: string
-  llm_model: string
+  // Backend `agentResponse` returns these as nullable pointers, so mirror
+  // that at the boundary — callers must handle null rather than assuming
+  // a provider/model has been picked.
+  llm_provider: string | null
+  llm_model: string | null
   crew: AgentCrew | null
   _count: { skills: number; credentials: number; chats: number }
 }

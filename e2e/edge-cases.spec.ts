@@ -132,17 +132,13 @@ test("rapid agent switching settles on the last agent", async ({ page }) => {
     test.skip(true, "need 3+ agents")
     return
   }
-  await page.goto("/crews")
+  // Three real navigations back-to-back — `router.replace` through
+  // useSearchParams is what the abort logic actually keys on, so
+  // `history.replaceState` inside page.evaluate would no-op the hook.
+  await page.goto(`/crews?agent=${agents[0].slug}`)
+  await page.goto(`/crews?agent=${agents[1].slug}`)
+  await page.goto(`/crews?agent=${agents[2].slug}`)
   await page.waitForLoadState("networkidle")
-  // Fire 3 selections fast
-  await page.evaluate((slugs) => {
-    for (const slug of slugs) {
-      const url = new URL(window.location.href)
-      url.searchParams.set("agent", slug)
-      window.history.replaceState({}, "", url.toString())
-    }
-  }, [agents[0].slug, agents[1].slug, agents[2].slug])
-  await page.waitForTimeout(800)
   expect(page.url()).toContain(`agent=${agents[2].slug}`)
 })
 
@@ -270,7 +266,7 @@ test("agent inline center renders runtime card + 6 stat cards", async ({ page })
   await expect(page.locator("h3").filter({ hasText: /^Runtime$/i }).first()).toBeVisible({ timeout: 5_000 })
   // Stat cards are <Link> elements with these labels. Use role+visible filter
   // so we don't collide with hidden rail/title spans.
-  for (const label of ["Sessions", "Runs", "Skills", "Credentials", "Last active", "Cost"]) {
+  for (const label of ["Sessions", "Recent runs", "Skills", "Credentials", "Last active", "Cost"]) {
     const card = page.locator("a").filter({ hasText: new RegExp(`^${label}`, "i") }).first()
     await expect(card).toBeVisible({ timeout: 5_000 })
   }
@@ -296,8 +292,8 @@ test("inbox fetches abort on rapid agent switch (no orphaned responses)", async 
   await page.waitForTimeout(100)
   await page.goto(`/crews?agent=${agents[1].slug}`)
   await page.waitForTimeout(1000)
-  // Exactly 2 inbox requests — one for each agent. Abort means the first
-  // request either completed fast or was cancelled; either way we see 2 URLs.
-  expect(inboxRequests.length).toBeGreaterThanOrEqual(1)
-  expect(inboxRequests.length).toBeLessThanOrEqual(4)
+  // Two navigations → two inbox URLs observed. Abort means the first
+  // response is thrown away; the request itself still leaves the
+  // browser, so the count is tied to goto() calls, not completions.
+  expect(inboxRequests.length).toBe(2)
 })

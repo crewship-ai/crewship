@@ -40,6 +40,7 @@ interface AgentDetailExtra {
   schedule_cron: string | null
   schedule_enabled: boolean | null
   schedule_next_run: string | null
+  schedule_last_run: string | null
   schedule_prompt: string | null
   memory_enabled?: boolean
   timeout_seconds?: number
@@ -145,25 +146,30 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
     return () => controller.abort()
   }, [agent.id, workspaceId])
 
-  // Peer list for crew context row
+  // Peer list for crew context row. Clear immediately on agent switch so a
+  // failed fetch doesn't leave the previous agent's peers under the new
+  // header, and store the full list — UI-level slicing handles the visible
+  // cap so a `+N more` chip can still render when there are many peers.
   useEffect(() => {
-    if (!workspaceId || !agent.crew_id) {
-      setPeers([])
-      return
-    }
+    setPeers([])
+    if (!workspaceId || !agent.crew_id) return
     const controller = new AbortController()
     fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${agent.crew_id}`, {
       signal: controller.signal,
     })
       .then((r) => r.ok ? r.json() : [])
       .then((agents: PeerAgent[]) => {
+        if (controller.signal.aborted) return
         setPeers(
           Array.isArray(agents)
-            ? agents.filter((a) => a.id !== agent.id).slice(0, 8)
+            ? agents.filter((a) => a.id !== agent.id)
             : [],
         )
       })
-      .catch(() => {})
+      .catch((err) => {
+        if ((err as { name?: string })?.name === "AbortError") return
+        setPeers([])
+      })
     return () => controller.abort()
   }, [agent.id, agent.crew_id, workspaceId])
 
@@ -267,7 +273,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
         {/* Stats strip — 2 cols on mobile, 6 on desktop */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
           <StatMiniCard href={`${agentPath}/sessions`} icon={MessageSquare} label="Sessions" value={sessionCount} />
-          <StatMiniCard href={`${agentPath}/runs`} icon={Zap} label="Runs" value={runs.length > 0 ? runs.length : "—"} />
+          <StatMiniCard href={`${agentPath}/runs`} icon={Zap} label="Recent runs" value={runs.length > 0 ? runs.length : "—"} />
           <StatMiniCard
             href={agent.crew_id ? `/paymaster?crew=${agent.crew_id}` : "/paymaster"}
             icon={DollarSign}
@@ -429,7 +435,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                 </Row>
                 <Row label="Last run">
                   <span className="text-micro">
-                    {detail.schedule_next_run ? timeAgo(detail.schedule_next_run) : "never"}
+                    {detail.schedule_last_run ? timeAgo(detail.schedule_last_run) : "never"}
                   </span>
                 </Row>
               </dl>

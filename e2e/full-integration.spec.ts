@@ -205,25 +205,39 @@ test.describe("D. CRUD flow", () => {
   test("create agent via form → appears in list → delete via API", async ({ page }) => {
     await login(page)
     const slug = `integ-${Date.now()}`
-    await page.goto("/crews/agents/new")
-    await page.waitForLoadState("networkidle")
-    await page.locator('input[id="name"]').fill("Integration")
-    await page.locator('input[id="slug"]').fill(slug)
-    // Crew is required
-    const crewCombobox = page.locator('button[id="crew_id"], [role="combobox"]').first()
-    await crewCombobox.click()
-    await page.locator('[role="option"]').first().click()
-    await page.getByRole("button", { name: /create|save/i }).first().click()
-    await page.waitForURL(/\/crews\/agents\/?(\?|$)/, { timeout: 15_000 })
+    let agentId: string | undefined
+    try {
+      await page.goto("/crews/agents/new")
+      await page.waitForLoadState("networkidle")
+      await page.locator('input[id="name"]').fill("Integration")
+      await page.locator('input[id="slug"]').fill(slug)
+      // Crew is required
+      const crewCombobox = page.locator('button[id="crew_id"], [role="combobox"]').first()
+      await crewCombobox.click()
+      await page.locator('[role="option"]').first().click()
+      await page.getByRole("button", { name: /create|save/i }).first().click()
+      await page.waitForURL(/\/crews\/agents\/?(\?|$)/, { timeout: 15_000 })
 
-    const newAgent = page.locator(`a[href*='/crews/agents/']`).filter({ hasText: "Integration" }).first()
-    await expect(newAgent).toBeVisible({ timeout: 10_000 })
-    const href = await newAgent.getAttribute("href")
-    const id = href?.split("/").pop()
+      const newAgent = page.locator(`a[href*='/crews/agents/']`).filter({ hasText: "Integration" }).first()
+      await expect(newAgent).toBeVisible({ timeout: 10_000 })
+      const href = await newAgent.getAttribute("href")
+      agentId = href?.split("/").pop()
 
-    const ws = await withWorkspace(page)
-    const del = await page.request.delete(`/api/v1/agents/${id}?workspace_id=${ws}`)
-    expect(del.status()).toBe(200)
+      const ws = await withWorkspace(page)
+      const del = await page.request.delete(`/api/v1/agents/${agentId}?workspace_id=${ws}`)
+      expect(del.status()).toBe(200)
+      agentId = undefined
+    } finally {
+      // If we got as far as creating the agent but an earlier assertion
+      // threw, delete it here so the database isn't left with orphan
+      // `integ-<ts>` rows between runs.
+      if (agentId) {
+        const ws = await withWorkspace(page).catch(() => null)
+        if (ws) {
+          await page.request.delete(`/api/v1/agents/${agentId}?workspace_id=${ws}`).catch(() => {})
+        }
+      }
+    }
   })
 
   test("create chat session → appears in Sessions tab", async ({ page }) => {

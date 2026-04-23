@@ -28,7 +28,6 @@ export interface CrewsAgentInboxProps {
   memoryEnabled?: boolean
   /** `lead_mode` from agent detail; shown only when agent_role=LEAD. */
   leadMode?: string | null
-  workspaceId: string
   onClose: () => void
 }
 
@@ -41,7 +40,7 @@ export interface CrewsAgentInboxProps {
  * center CrewsAgentInline pane.
  */
 export function CrewsAgentInbox({
-  agent, workspaceId: _workspaceId,
+  agent,
   scheduleNextRun, memoryEnabled, leadMode,
   onClose,
 }: CrewsAgentInboxProps) {
@@ -284,7 +283,7 @@ function StatusChip({
   return (
     <div className="flex items-center gap-2 text-micro">
       <span className={cn("flex items-center justify-center h-5 w-5 rounded-full shrink-0", toneClass)}>
-        <Icon className="h-3 w-3" />
+        <Icon className="h-3 w-3" aria-hidden="true" />
       </span>
       <span className="text-muted-foreground uppercase tracking-wider w-20 shrink-0">{label}</span>
       <span className="font-medium text-foreground/85 tabular-nums">{value}</span>

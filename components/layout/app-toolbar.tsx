@@ -199,10 +199,17 @@ export function AppToolbar() {
   const [crewCount, setCrewCount] = useState(0)
   useEffect(() => {
     if (!isCrewsPage || !workspaceId) return
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+    const controller = new AbortController()
+    fetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : [])
-      .then((data: unknown[]) => setCrewCount(data.length))
-      .catch(() => {})
+      .then((data: unknown) => {
+        if (controller.signal.aborted) return
+        setCrewCount(Array.isArray(data) ? data.length : 0)
+      })
+      .catch((err) => {
+        if ((err as { name?: string })?.name === "AbortError") return
+      })
+    return () => controller.abort()
   }, [isCrewsPage, workspaceId])
 
   function renderBreadcrumbs() {

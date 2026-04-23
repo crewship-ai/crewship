@@ -31,8 +31,8 @@ interface AgentData {
   agent_role: string
   status: string
   cli_adapter: string
-  llm_provider: string
-  llm_model: string
+  llm_provider: string | null
+  llm_model: string | null
   avatar_seed?: string | null
   avatar_style?: string | null
   crew: AgentCrew | null
@@ -108,9 +108,11 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
                 {agent.crew.name}
               </Badge>
             )}
-            <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
-              {agent.llm_provider} / {agent.llm_model}
-            </Badge>
+            {(agent.llm_provider || agent.llm_model) && (
+              <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
+                {agent.llm_provider ?? "—"} / {agent.llm_model ?? "—"}
+              </Badge>
+            )}
           </div>
 
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground">
