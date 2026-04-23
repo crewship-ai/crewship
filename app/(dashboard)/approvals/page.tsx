@@ -1,7 +1,8 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Gavel, RefreshCw, ShieldCheck } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+import { Gavel, RefreshCw, ShieldCheck, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -23,6 +24,8 @@ const FILTERS: { key: FilterKey; label: string; apiStatus: ApprovalStatus }[] = 
  * approvals; clicking a card opens the right-side detail sheet.
  */
 export default function ApprovalsPage() {
+  const searchParams = useSearchParams()
+  const agentFilter = searchParams.get("agent_id")
   const [filter, setFilter] = useState<FilterKey>("pending")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -33,12 +36,16 @@ export default function ApprovalsPage() {
     pollMs: 15000,
   })
 
-  // "Decided" is pending=no — we filter client-side because the backend
-  // enumerates each decided status separately.
+  // "Decided" is pending=no — filter client-side because the backend
+  // enumerates each decided status separately. Plus honour ?agent_id= from
+  // the Crews inbox deep-link so clicking a row count lands on the right
+  // filter rather than the unfiltered queue.
   const visibleRows = useMemo(() => {
-    if (filter === "decided") return rows.filter((r) => r.status !== "pending")
-    return rows
-  }, [rows, filter])
+    let out = rows
+    if (filter === "decided") out = out.filter((r) => r.status !== "pending")
+    if (agentFilter) out = out.filter((r) => r.agent_id === agentFilter)
+    return out
+  }, [rows, filter, agentFilter])
 
   const selectedRow = useMemo(
     () => visibleRows.find((r) => r.id === selectedId) ?? null,
@@ -111,9 +118,21 @@ export default function ApprovalsPage() {
       </aside>
 
       <div className="flex-1 min-w-0 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-wider">
-            {visibleRows.length} {filter} {visibleRows.length === 1 ? "approval" : "approvals"}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-wider">
+              {visibleRows.length} {filter} {visibleRows.length === 1 ? "approval" : "approvals"}
+            </div>
+            {agentFilter && (
+              <a
+                href="/approvals"
+                className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary text-[10px] font-medium px-2 py-0.5 hover:bg-primary/15 transition-colors"
+                title="Clear agent filter"
+              >
+                agent: {agentFilter.slice(0, 8)}…
+                <X className="h-2.5 w-2.5" />
+              </a>
+            )}
           </div>
           <Button
             variant="outline"

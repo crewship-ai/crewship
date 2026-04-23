@@ -256,7 +256,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
           <StatMiniCard href={`${agentPath}/sessions`} icon={MessageSquare} label="Sessions" value={sessionCount} />
           <StatMiniCard href={`${agentPath}/runs`} icon={Zap} label="Runs" value={runs.length > 0 ? runs.length : "—"} />
           <StatMiniCard
-            href="/paymaster"
+            href={agent.crew_id ? `/paymaster?crew=${agent.crew_id}` : "/paymaster"}
             icon={DollarSign}
             label="Cost (month)"
             value={inbox && inbox.cost_usd_this_month > 0 ? `$${inbox.cost_usd_this_month.toFixed(2)}` : "—"}
