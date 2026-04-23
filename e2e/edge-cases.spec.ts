@@ -259,14 +259,14 @@ test("agent inline center renders runtime card + 6 stat cards", async ({ page })
   await page.goto(`/crews?agent=${agents[0].slug}`)
   await page.waitForLoadState("networkidle")
   await page.waitForTimeout(1000)
-  // Runtime section header
-  await expect(page.getByRole("heading", { name: /runtime/i }).first()).toBeVisible({ timeout: 5_000 })
-  // 6 stat card labels — Sessions / Runs / Cost (month) / Skills / Credentials / Last active
-  for (const label of ["Sessions", "Runs", "Skills", "Credentials", "Last active"]) {
-    await expect(page.getByText(label, { exact: false }).first()).toBeVisible()
+  // Runtime section exists (rendered as uppercase label)
+  await expect(page.locator("h3").filter({ hasText: /^Runtime$/i }).first()).toBeVisible({ timeout: 5_000 })
+  // Stat cards are <Link> elements with these labels. Use role+visible filter
+  // so we don't collide with hidden rail/title spans.
+  for (const label of ["Sessions", "Runs", "Skills", "Credentials", "Last active", "Cost"]) {
+    const card = page.locator("a").filter({ hasText: new RegExp(`^${label}`, "i") }).first()
+    await expect(card).toBeVisible({ timeout: 5_000 })
   }
-  // Cost card specifically (Phase 10)
-  await expect(page.getByText("Cost", { exact: false }).first()).toBeVisible()
 })
 
 // ---------------------------------------------------------------------------
