@@ -89,7 +89,7 @@ export default function NewCrewPage() {
   const [slugManual, setSlugManual] = useState(false)
   const [description, setDescription] = useState("")
   // Crew color is always a palette id — never a raw hex value. Downstream
-  // renderers (CrewIcon, crew-group-node, fleet overviews) all resolve the
+  // renderers (CrewIcon, crew-group-node, crews overviews) all resolve the
   // id to a Tailwind class, so any freeform hex would break them.
   const [color, setColor] = useState<CrewPaletteId>("blue")
   const [icon, setIcon] = useState("")
@@ -141,7 +141,7 @@ export default function NewCrewPage() {
         const prefill = encodeURIComponent(
           "I need you to create a new crew for me. Please describe what kind of crew you want and I will design the agents, roles, and system prompts, then create everything for you.\n\nWhat should the crew do?"
         )
-        router.push(`/agents/${coordinator.id}/chat?prefill=${prefill}&workspace_id=${workspaceId}`)
+        router.push(`/crews/agents/${coordinator.id}/chat?prefill=${prefill}&workspace_id=${workspaceId}`)
         return
       }
       setMode("no-coordinator")

@@ -3,11 +3,32 @@ package api
 import (
 	"net"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
 )
+
+// rateLimitDisabled is true when CREWSHIP_DISABLE_RATELIMIT parses as a truthy
+// boolean (typically in dev shells running E2E suites against a real backend).
+// When true the middleware is a pass-through. Fails closed: empty string or an
+// unparseable value keeps rate-limiting engaged.
+var rateLimitDisabled = parseBoolEnv("CREWSHIP_DISABLE_RATELIMIT")
+
+func parseBoolEnv(name string) bool {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		return false
+	}
+	return b
+}
 
 // ipLimiter tracks a per-IP rate limiter and when it was last seen.
 type ipLimiter struct {
@@ -73,7 +94,11 @@ func (rl *RateLimiter) cleanup() {
 
 // Middleware returns an http.Handler that rate-limits requests by client IP.
 // When the limit is exceeded, it responds with 429 Too Many Requests.
+// When CREWSHIP_DISABLE_RATELIMIT is set the middleware is a no-op.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+	if rateLimitDisabled {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := extractIP(r)
 		limiter := rl.getLimiter(ip)

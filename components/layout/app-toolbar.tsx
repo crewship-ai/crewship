@@ -24,7 +24,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useEngineStatus } from "@/hooks/use-engine-status"
-import { useFleetStatus } from "@/hooks/use-fleet-status"
+import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { usePendingEscalations } from "@/hooks/use-pending-escalations"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -40,7 +40,7 @@ const mobileNavSections = [
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
       { title: "Crews", href: "/crews", icon: Network },
-      { title: "Agents", href: "/agents", icon: Bot },
+      { title: "Agents", href: "/crews/agents", icon: Bot },
     ],
   },
   {
@@ -69,9 +69,8 @@ const mobileNavSections = [
 
 const pageConfig: Record<string, { title: string }> = {
   "/": { title: "Dashboard" },
-  "/agents": { title: "Agents" },
+  "/crews/agents": { title: "Agents" },
   "/crews": { title: "Crews" },
-  "/fleet": { title: "Crews & Agents" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
   "/audit": { title: "Audit Log" },
@@ -104,7 +103,7 @@ interface AgentBreadcrumb {
   crewColor: string | null
 }
 
-const AGENT_PATH_RE = /^\/agents\/([^/]+)/
+const AGENT_PATH_RE = /^\/crews\/agents\/([^/]+)/
 
 function useAgentBreadcrumb(pathname: string, workspaceId: string | null): AgentBreadcrumb | null {
   const [data, setData] = useState<AgentBreadcrumb | null>(null)
@@ -112,7 +111,7 @@ function useAgentBreadcrumb(pathname: string, workspaceId: string | null): Agent
   const agentId = match?.[1]
 
   useEffect(() => {
-    if (!agentId || agentId === "_" || !workspaceId) {
+    if (!agentId || agentId === "_" || agentId === "new" || !workspaceId) {
       setData(null)
       return
     }
@@ -153,7 +152,7 @@ export function AppToolbar() {
   const config = pageConfig[pathname] ?? null
   const { workspaceId } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
-  const fleetStatus = useFleetStatus(workspaceId)
+  const crewsStatus = useCrewsStatus(workspaceId)
   const pendingEscalations = usePendingEscalations(workspaceId)
   const { session, signOut } = useAuth()
   const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
@@ -194,23 +193,30 @@ export function AppToolbar() {
   const userInitials = getInitials(userName)
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
-  const isFleetPage = pathname === "/fleet"
+  const isCrewsPage = pathname === "/crews"
 
-  // Crew count for fleet breadcrumb
+  // Crew count for crews breadcrumb
   const [crewCount, setCrewCount] = useState(0)
   useEffect(() => {
-    if (!isFleetPage || !workspaceId) return
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+    if (!isCrewsPage || !workspaceId) return
+    const controller = new AbortController()
+    fetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : [])
-      .then((data: unknown[]) => setCrewCount(data.length))
-      .catch(() => {})
-  }, [isFleetPage, workspaceId])
+      .then((data: unknown) => {
+        if (controller.signal.aborted) return
+        setCrewCount(Array.isArray(data) ? data.length : 0)
+      })
+      .catch((err) => {
+        if ((err as { name?: string })?.name === "AbortError") return
+      })
+    return () => controller.abort()
+  }, [isCrewsPage, workspaceId])
 
   function renderBreadcrumbs() {
     if (isAgentPage && agentBreadcrumb) {
       return (
         <>
-          <Link href="/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/crews/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Agents
           </Link>
           {agentBreadcrumb.crewName && agentBreadcrumb.crewId && (
@@ -237,7 +243,7 @@ export function AppToolbar() {
     if (isAgentPage) {
       return (
         <>
-          <Link href="/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <Link href="/crews/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             Agents
           </Link>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
@@ -246,14 +252,14 @@ export function AppToolbar() {
       )
     }
 
-    // Fleet breadcrumb: title + stats pills
-    if (isFleetPage) {
-      const agentTotal = fleetStatus?.total ?? 0
-      const running = fleetStatus?.running ?? 0
-      const errors = fleetStatus?.error ?? 0
+    // Crews breadcrumb: title + stats pills
+    if (isCrewsPage) {
+      const agentTotal = crewsStatus?.total ?? 0
+      const running = crewsStatus?.running ?? 0
+      const errors = crewsStatus?.error ?? 0
       return (
         <>
-          <span className="text-sm text-muted-foreground">Fleet</span>
+          <span className="text-sm text-muted-foreground">Crews</span>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
           <span className="text-sm font-semibold">Crews & Agents</span>
           <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-3">
@@ -323,31 +329,31 @@ export function AppToolbar() {
 
       {/* Right: Status indicators + search + notifications */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* Status indicators: System + Fleet + Escalations */}
+        {/* Status indicators: System + Crews + Escalations */}
         {(() => {
           const systemOnline = engineStatus === "connected" && wsStatus === "connected"
           const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
 
-          let fleetLabel = ""
-          let fleetColor: "emerald" | "amber" | "red" | "muted" = "muted"
-          if (!fleetStatus) {
-            fleetLabel = "Loading..."
-            fleetColor = "muted"
-          } else if (fleetStatus.total === 0) {
-            fleetLabel = "No agents"
-            fleetColor = "muted"
-          } else if (fleetStatus.error > 0 && fleetStatus.running > 0) {
-            fleetLabel = `${fleetStatus.running > 99 ? "99+" : fleetStatus.running} active \u00b7 ${fleetStatus.error} error${fleetStatus.error > 1 ? "s" : ""}`
-            fleetColor = "amber"
-          } else if (fleetStatus.error > 0) {
-            fleetLabel = `${fleetStatus.error} error${fleetStatus.error > 1 ? "s" : ""}`
-            fleetColor = "red"
-          } else if (fleetStatus.running > 0) {
-            fleetLabel = `${fleetStatus.running > 99 ? "99+" : fleetStatus.running} active`
-            fleetColor = "emerald"
+          let crewsLabel = ""
+          let crewsColor: "emerald" | "amber" | "red" | "muted" = "muted"
+          if (!crewsStatus) {
+            crewsLabel = "Loading..."
+            crewsColor = "muted"
+          } else if (crewsStatus.total === 0) {
+            crewsLabel = "No agents"
+            crewsColor = "muted"
+          } else if (crewsStatus.error > 0 && crewsStatus.running > 0) {
+            crewsLabel = `${crewsStatus.running > 99 ? "99+" : crewsStatus.running} active \u00b7 ${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`
+            crewsColor = "amber"
+          } else if (crewsStatus.error > 0) {
+            crewsLabel = `${crewsStatus.error} error${crewsStatus.error > 1 ? "s" : ""}`
+            crewsColor = "red"
+          } else if (crewsStatus.running > 0) {
+            crewsLabel = `${crewsStatus.running > 99 ? "99+" : crewsStatus.running} active`
+            crewsColor = "emerald"
           } else {
-            fleetLabel = "Fleet idle"
-            fleetColor = "muted"
+            crewsLabel = "Crews idle"
+            crewsColor = "muted"
           }
 
           const colorMap = {
@@ -358,7 +364,7 @@ export function AppToolbar() {
           }
 
           const sysColors = systemOnline ? colorMap.emerald : systemChecking ? colorMap.amber : colorMap.red
-          const fleetColors = colorMap[fleetColor]
+          const crewsColors = colorMap[crewsColor]
 
           return (
             <div className="hidden lg:flex items-center gap-1.5 mr-1">
@@ -378,13 +384,13 @@ export function AppToolbar() {
 
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div tabIndex={0} role="status" aria-label={`Fleet: ${fleetLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${fleetColors.bg}`}>
-                    <span className={`h-1.5 w-1.5 rounded-full ${fleetColors.dot} ${fleetStatus?.running ? "animate-pulse" : ""}`} />
-                    <span className={`text-micro font-medium ${fleetColors.text}`}>{fleetLabel}</span>
+                  <div tabIndex={0} role="status" aria-label={`Crews: ${crewsLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${crewsColors.bg}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${crewsColors.dot} ${crewsStatus?.running ? "animate-pulse" : ""}`} />
+                    <span className={`text-micro font-medium ${crewsColors.text}`}>{crewsLabel}</span>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {fleetStatus ? `${fleetStatus.total} agents: ${fleetStatus.running} running, ${fleetStatus.idle} idle, ${fleetStatus.error} errors` : "Loading fleet status..."}
+                  {crewsStatus ? `${crewsStatus.total} agents: ${crewsStatus.running} running, ${crewsStatus.idle} idle, ${crewsStatus.error} errors` : "Loading crews status..."}
                 </TooltipContent>
               </Tooltip>
 

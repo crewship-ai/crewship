@@ -1,34 +1,47 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import {
   LayoutGrid, LayoutDashboard, MessageSquare, FolderOpen,
-  Activity, ScrollText, Zap, Key, Plug, Clock, Settings, Bug, History, X, TerminalSquare,
+  Activity, ScrollText, Wrench, Settings, X,
 } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { StatusDot } from "@/components/ui/status-badge"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
-const tabs = [
-  { label: "Overview", href: "", icon: LayoutDashboard },
-  { label: "Sessions", href: "/chat", icon: MessageSquare },
-  { label: "Files", href: "/files", icon: FolderOpen },
+interface TabDef {
+  label: string
+  href: string
+  icon: typeof LayoutDashboard
+  /** Extra pathname prefixes that should still light up this tab (legacy routes during migration). */
+  aliases?: string[]
+}
+
+const tabs: TabDef[] = [
+  { label: "Overview", href: "", icon: LayoutDashboard, aliases: ["/history"] },
+  { label: "Sessions", href: "/sessions", icon: MessageSquare, aliases: ["/chats", "/chat"] },
   { label: "Runs", href: "/runs", icon: Activity },
-  { label: "Logs", href: "/logs", icon: ScrollText },
-  { label: "Skills", href: "/skills", icon: Zap },
-  { label: "Credentials", href: "/credentials", icon: Key },
-  { label: "MCP", href: "/mcp", icon: Plug },
-  { label: "Schedule", href: "/schedule", icon: Clock },
-  { label: "Terminal", href: "/terminal", icon: TerminalSquare },
-  { label: "Settings", href: "/settings", icon: Settings },
-  { label: "Debug", href: "/debug", icon: Bug },
-  { label: "History", href: "/history", icon: History },
+  { label: "Workspace", href: "/workspace", icon: FolderOpen, aliases: ["/files", "/terminal"] },
+  { label: "Tools", href: "/tools", icon: Wrench, aliases: ["/skills", "/credentials", "/mcp"] },
+  { label: "Logs", href: "/logs", icon: ScrollText, aliases: ["/debug"] },
+  { label: "Settings", href: "/settings", icon: Settings, aliases: ["/schedule"] },
 ]
+
+function isTabActive(pathname: string, basePath: string, tab: TabDef): boolean {
+  if (tab.href === "") {
+    if (pathname === basePath) return true
+    return (tab.aliases ?? []).some((alias) => pathname.startsWith(`${basePath}${alias}`))
+  }
+  const tabPath = `${basePath}${tab.href}`
+  if (pathname.startsWith(tabPath)) return true
+  return (tab.aliases ?? []).some((alias) => pathname.startsWith(`${basePath}${alias}`))
+}
 
 // Map agent status string → canonical status identifier for StatusDot.
 function mapAgentStatus(status: string | undefined): string {
@@ -52,10 +65,25 @@ export function AgentTabs(_props: AgentTabsProps) {
 
 export function AgentDesktopRail({ agentId }: { agentId: string }) {
   const pathname = usePathname()
-  const basePath = `/agents/${agentId}`
+  const router = useRouter()
+  const basePath = `/crews/agents/${agentId}`
   const isMobile = useIsMobile()
   const [expanded, setExpanded] = useState(false)
   const { agent } = useAgentDetail()
+
+  const go = useCallback((href: string) => {
+    router.push(`${basePath}${href}`)
+  }, [router, basePath])
+
+  useKeyboardShortcuts([
+    { keys: ["g", "o"], handler: () => go("") },
+    { keys: ["g", "s"], handler: () => go("/sessions") },
+    { keys: ["g", "r"], handler: () => go("/runs") },
+    { keys: ["g", "w"], handler: () => go("/workspace") },
+    { keys: ["g", "t"], handler: () => go("/tools") },
+    { keys: ["g", "l"], handler: () => go("/logs") },
+    { keys: ["g", ","], handler: () => go("/settings") },
+  ])
 
   if (isMobile) return null
 
@@ -100,9 +128,7 @@ export function AgentDesktopRail({ agentId }: { agentId: string }) {
       <div className="flex-1 overflow-y-auto py-1">
         {tabs.map((tab) => {
           const tabPath = tab.href ? `${basePath}${tab.href}` : basePath
-          const isActive = tab.href === ""
-            ? pathname === basePath
-            : pathname.startsWith(tabPath)
+          const isActive = isTabActive(pathname, basePath, tab)
 
           return (
             <Link
@@ -132,7 +158,7 @@ export const agentTabsList = tabs
 
 export function AgentMobileTabsBar({ agentId }: { agentId: string }) {
   const pathname = usePathname()
-  const basePath = `/agents/${agentId}`
+  const basePath = `/crews/agents/${agentId}`
   const isMobile = useIsMobile()
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const { agent } = useAgentDetail()
@@ -177,9 +203,7 @@ export function AgentMobileTabsBar({ agentId }: { agentId: string }) {
           <div className="flex-1 overflow-y-auto py-1">
             {tabs.map((tab) => {
               const tabPath = tab.href ? `${basePath}${tab.href}` : basePath
-              const isActive = tab.href === ""
-                ? pathname === basePath
-                : pathname.startsWith(tabPath)
+              const isActive = isTabActive(pathname, basePath, tab)
               return (
                 <Link
                   key={tab.href}

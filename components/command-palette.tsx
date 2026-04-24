@@ -89,7 +89,7 @@ const NAV_ITEMS = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Orchestration", href: "/orchestration", icon: CircleDot },
   { title: "Crews", href: "/crews", icon: Network },
-  { title: "Agents", href: "/agents", icon: Bot },
+  { title: "Agents", href: "/crews/agents", icon: Bot },
   { title: "Skills", href: "/skills", icon: Zap },
   { title: "Credentials", href: "/credentials", icon: Key },
   { title: "Runs", href: "/runs", icon: Activity },
@@ -100,7 +100,7 @@ const NAV_ITEMS = [
 ]
 
 const QUICK_ACTIONS = [
-  { title: "Create new agent", href: "/agents/new", icon: Plus, keywords: ["add", "new", "agent"] },
+  { title: "Create new agent", href: "/crews/agents/new", icon: Plus, keywords: ["add", "new", "agent"] },
   { title: "Create new crew", href: "/crews/new", icon: Plus, keywords: ["add", "new", "crew", "team"] },
 ]
 
@@ -241,7 +241,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   key={agent.id}
                   value={`agent ${agent.name} ${agent.slug}`}
                   keywords={[agent.role_title ?? "", agent.crew?.name ?? "", agent.status]}
-                  onSelect={() => runCommand(() => router.push(`/agents/${agent.id}`))}
+                  onSelect={() => runCommand(() => router.push(`/crews/agents/${agent.id}`))}
                 >
                   <img
                     src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}

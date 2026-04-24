@@ -31,8 +31,8 @@ interface AgentData {
   agent_role: string
   status: string
   cli_adapter: string
-  llm_provider: string
-  llm_model: string
+  llm_provider: string | null
+  llm_model: string | null
   avatar_seed?: string | null
   avatar_style?: string | null
   crew: AgentCrew | null
@@ -67,7 +67,7 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
 
   return (
     <Link
-      href={`/agents/${agent.id}`}
+      href={`/crews/agents/${agent.id}`}
       className="rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
     >
       <Card className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md">
@@ -108,9 +108,11 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
                 {agent.crew.name}
               </Badge>
             )}
-            <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
-              {agent.llm_provider} / {agent.llm_model}
-            </Badge>
+            {(agent.llm_provider || agent.llm_model) && (
+              <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
+                {agent.llm_provider ?? "—"} / {agent.llm_model ?? "—"}
+              </Badge>
+            )}
           </div>
 
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground">

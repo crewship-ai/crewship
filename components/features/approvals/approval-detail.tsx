@@ -99,7 +99,7 @@ export function ApprovalDetail({ row, open, onOpenChange, onDecided }: ApprovalD
                 )}
                 {row.agent_id && (
                   <Badge asChild variant="outline" className="text-[10px] font-mono border-border/60">
-                    <Link href={`/agents/${encodeURIComponent(row.agent_id)}`}>agent · {row.agent_id.slice(0, 8)}</Link>
+                    <Link href={`/crews/agents/${encodeURIComponent(row.agent_id)}`}>agent · {row.agent_id.slice(0, 8)}</Link>
                   </Badge>
                 )}
                 {row.mission_id && (

@@ -35,23 +35,32 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		AvatarStyle string `json:"avatar_style"`
+		AvatarStyle    string `json:"avatar_style"`
+		ResetOverrides bool   `json:"reset_overrides"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
 		return
 	}
 
-	if body.AvatarStyle == "" {
+	if !body.ResetOverrides && body.AvatarStyle == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "avatar_style is required"})
 		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	res, err := h.db.ExecContext(r.Context(),
-		"UPDATE agents SET avatar_style = ?, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
-		body.AvatarStyle, now, crewID)
+	var res sql.Result
+	var err error
+	if body.ResetOverrides {
+		res, err = h.db.ExecContext(r.Context(),
+			"UPDATE agents SET avatar_style = NULL, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
+			now, crewID)
+	} else {
+		res, err = h.db.ExecContext(r.Context(),
+			"UPDATE agents SET avatar_style = ?, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
+			body.AvatarStyle, now, crewID)
+	}
 	if err != nil {
 		h.logger.Error("apply avatar style to agents", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -59,8 +68,11 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	affected, _ := res.RowsAffected()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"updated": affected,
-		"style":   body.AvatarStyle,
-	})
+	response := map[string]any{"updated": affected}
+	if body.ResetOverrides {
+		response["reset"] = true
+	} else {
+		response["style"] = body.AvatarStyle
+	}
+	writeJSON(w, http.StatusOK, response)
 }

@@ -1,28 +1,12 @@
 "use client"
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react"
-import { Users, Plus, Search, RotateCcw, ArrowUpDown } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { PageShell } from "@/components/layout/page-shell"
-import { EmptyState } from "@/components/layout/empty-state"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CrewCard } from "@/components/features/crews/crew-card"
-import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
-import { Separator } from "@/components/ui/separator"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useAbilities } from "@/hooks/use-abilities"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { toast } from "sonner"
-import Link from "next/link"
+import { CrewsLayout } from "@/components/features/crews/crews-layout"
 
-interface Crew {
+interface CrewData {
   id: string
   name: string
   slug: string
@@ -33,64 +17,112 @@ interface Crew {
   _count: { agents: number; members: number }
 }
 
-type SortOption = "name" | "created_at" | "agents"
+interface AgentData {
+  id: string
+  name: string
+  slug: string
+  status: string
+  description: string | null
+  role_title: string | null
+  agent_role: string
+  llm_provider: string
+  llm_model: string
+  cli_adapter: string
+  crew_id: string | null
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  crew?: { name: string; slug: string; color: string | null; avatar_style?: string | null } | null
+  _count?: { skills: number; credentials: number; chats: number }
+  last_active_at?: string | null
+}
 
-const sortLabels: Record<SortOption, string> = {
-  name: "Name",
-  created_at: "Newest first",
-  agents: "Most agents",
+interface MissionData {
+  id: string
+  title: string
+  status: string
+  crew_id: string
+  tasks?: { id: string; status: string }[]
+  created_at: string
 }
 
 export default function CrewsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
-  const { abilities } = useAbilities()
-  const [crews, setCrews] = useState<Crew[]>([])
+  const [crews, setCrews] = useState<CrewData[]>([])
+  const [agents, setAgents] = useState<AgentData[]>([])
+  const [missions, setMissions] = useState<MissionData[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [search, setSearch] = useState("")
-  const [sortBy, setSortBy] = useState<SortOption>("name")
 
-  const fetchCrews = useCallback(async (silent = false) => {
-    if (!workspaceId) return
+  // Cancel in-flight fetch when workspace changes so a late response from
+  // workspace A can't repopulate crews/agents/missions after the user has
+  // switched to workspace B.
+  const abortRef = useRef<AbortController | null>(null)
 
-    if (!silent) { setLoading(true); setError(null) }
-    try {
-      const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
-      if (!res.ok) {
-        if (!silent) { const msg = "Failed to load crews"; setError(msg); toast.error(msg) }
-        return
-      }
-      const data = (await res.json()) as Crew[]
-      setCrews(data)
-      setError(null)
-    } catch {
-      if (!silent) { const msg = "Failed to load crews"; setError(msg); toast.error(msg) }
-    } finally {
+  const fetchData = useCallback(async (silent = false) => {
+    if (!workspaceId) {
+      setCrews([])
+      setAgents([])
+      setMissions([])
       if (!silent) setLoading(false)
+      return
+    }
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    if (!silent) {
+      // On a user-visible reload (workspace switch / manual refresh) we
+      // must drop the previous workspace's data before firing the new
+      // requests — otherwise a failing fetch would render the old
+      // workspace's crews/agents/missions under the new header.
+      setCrews([])
+      setAgents([])
+      setMissions([])
+      setLoading(true)
+    }
+    try {
+      const [crewsRes, agentsRes, missionsRes] = await Promise.all([
+        fetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal }),
+        fetch(`/api/v1/agents?workspace_id=${workspaceId}`, { signal: controller.signal }),
+        fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=20&include_tasks=true`, { signal: controller.signal }),
+      ])
+      if (controller.signal.aborted) return
+      if (crewsRes.ok) setCrews(await crewsRes.json())
+      if (controller.signal.aborted) return
+      if (agentsRes.ok) setAgents(await agentsRes.json())
+      if (controller.signal.aborted) return
+      if (missionsRes.ok) setMissions(await missionsRes.json())
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return
+      // other errors: leave state as-is (previous data survives a transient network blip)
+    } finally {
+      // Only the currently-owned controller is allowed to flip loading
+      // back off. Without this, a silent refetch that aborted the
+      // original visible request would never clear the skeleton.
+      if (abortRef.current === controller && !controller.signal.aborted) {
+        setLoading(false)
+      }
     }
   }, [workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) {
-      if (!wsLoading) setLoading(false)
-      return
+    fetchData()
+    return () => {
+      abortRef.current?.abort()
     }
+  }, [fetchData])
 
-    fetchCrews()
-  }, [workspaceId, wsLoading, fetchCrews])
-
-  // Real-time: debounced refetch on crew/agent events
+  // Real-time: debounced refetch (prevents burst of 8×3 concurrent fetches)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedRefetch = useCallback(() => {
     if (debounceRef.current !== null) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null
-      void fetchCrews(true)
-    }, 150)
-  }, [fetchCrews])
+      void fetchData(true)
+    }, 200)
+  }, [fetchData])
 
-  // Clear any pending timer on unmount / workspace change so a late
-  // timeout cannot overwrite state with data from a previous workspace.
+  // Clear any pending timer on unmount or when workspace changes,
+  // otherwise a late-firing timeout can overwrite state with data from
+  // the previous workspace.
   useEffect(() => {
     return () => {
       if (debounceRef.current !== null) {
@@ -101,136 +133,46 @@ export default function CrewsPage() {
   }, [workspaceId])
 
   useRealtimeEvent("agent.status", debouncedRefetch)
+  useRealtimeEvent("agent.created", debouncedRefetch)
+  useRealtimeEvent("agent.updated", debouncedRefetch)
+  useRealtimeEvent("agent.deleted", debouncedRefetch)
   useRealtimeEvent("crew.created", debouncedRefetch)
   useRealtimeEvent("crew.updated", debouncedRefetch)
   useRealtimeEvent("crew.deleted", debouncedRefetch)
+  useRealtimeEvent("mission.updated", debouncedRefetch)
 
-  const filteredAndSorted = useMemo(() => {
-    let result = crews
+  if (loading || wsLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
+      </div>
+    )
+  }
 
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      result = result.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          c.slug.toLowerCase().includes(q) ||
-          c.description?.toLowerCase().includes(q)
-      )
-    }
+  if (!workspaceId) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-2 p-6 text-center">
+        <p className="text-sm font-medium text-foreground/80">No workspace selected</p>
+        <p className="text-[12px] text-muted-foreground max-w-sm">
+          Pick a workspace from the toolbar to see its crews, agents and missions.
+        </p>
+      </div>
+    )
+  }
 
-    return [...result].sort((a, b) => {
-      switch (sortBy) {
-        case "name":
-          return a.name.localeCompare(b.name)
-        case "created_at":
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        case "agents":
-          return b._count.agents - a._count.agents
-        default:
-          return 0
-      }
-    })
-  }, [crews, search, sortBy])
-
-  const isLoading = wsLoading || loading
-
+  // CrewsLayout only mounts once the initial fetch has resolved (guarded by
+  // the `loading || wsLoading` skeleton above), so we can promise it the
+  // data is loaded. This is what drives its stale-slug watcher — using the
+  // array lengths as a loaded proxy would mis-treat legitimately empty
+  // workspaces as "still loading" and silently pin invalid ?agent= slugs.
   return (
-    <PageShell
-      title="Crews"
-      description="Organize agents into departments"
-      actions={
-        abilities.can("create", "Crew") && (
-          <Button asChild>
-            <Link href="/crews/new">
-              <Plus className="mr-2 h-4 w-4" />
-              New Crew
-            </Link>
-          </Button>
-        )
-      }
-    >
-      {error && (
-        <div className="flex items-center gap-3">
-          <p className="text-body text-destructive flex-1">{error}</p>
-          <Button variant="outline" size="sm" onClick={() => fetchCrews()} className="gap-2 shrink-0">
-            <RotateCcw className="h-3.5 w-3.5" />
-            Try Again
-          </Button>
-        </div>
-      )}
-
-      {!isLoading && crews.length > 0 && (
-        <div className="flex items-center gap-3">
-          <div className="relative max-w-xs flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search crews..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-9 bg-card"
-            />
-          </div>
-          <div className="ml-auto">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2 h-9 bg-card">
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                  {sortLabels[sortBy]}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {(Object.keys(sortLabels) as SortOption[]).map((key) => (
-                  <DropdownMenuItem key={key} onClick={() => setSortBy(key)}>
-                    {sortLabels[key]}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      )}
-
-      {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-[140px] rounded-xl" />
-          ))}
-        </div>
-      ) : crews.length === 0 ? (
-        <EmptyState
-          icon={Users}
-          title="No crews yet"
-          description="Create a crew to group your agents by department or function."
-        >
-          {abilities.can("create", "Crew") && (
-            <Button className="mt-4" asChild>
-              <Link href="/crews/new">
-                <Plus className="mr-2 h-4 w-4" />
-                Create Crew
-              </Link>
-            </Button>
-          )}
-        </EmptyState>
-      ) : filteredAndSorted.length === 0 ? (
-        <EmptyState
-          icon={Search}
-          title="No matching crews"
-          description="No crews match your search. Try a different query."
-        />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredAndSorted.map((crew) => (
-            <CrewCard key={crew.id} crew={crew} />
-          ))}
-        </div>
-      )}
-
-      {!isLoading && crews.length > 0 && workspaceId && (
-        <>
-          <Separator />
-          <CrewActivityFeed workspaceId={workspaceId} />
-        </>
-      )}
-    </PageShell>
+    <CrewsLayout
+      crews={crews}
+      agents={agents}
+      missions={missions}
+      workspaceId={workspaceId}
+      loaded
+      onRefresh={() => fetchData()}
+    />
   )
 }
