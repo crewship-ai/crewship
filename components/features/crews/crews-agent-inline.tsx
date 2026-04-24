@@ -1,20 +1,29 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
 import {
-  MessageSquare, ScrollText, Settings, ExternalLink,
+  MessageSquare, ExternalLink,
   Zap, Puzzle, KeyRound, Clock, Cpu, Crown, Bot,
   DollarSign, CalendarClock, FileText, Users, ChevronDown, ChevronRight,
+  FolderOpen, Wrench, ShieldCheck, Plug,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { timeAgo, formatDuration } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { useAgentInbox } from "@/hooks/use-agent-inbox"
+import { AgentDetailProvider } from "@/hooks/use-agent-detail"
+import { FilesPageClient } from "@/components/features/agents/workspace/files-pane"
+import { SkillsPageClient } from "@/components/features/agents/tools/skills-pane"
+import { CredentialsPageClient } from "@/components/features/agents/tools/credentials-pane"
+import { MCPPageClient } from "@/components/features/agents/tools/mcp-pane"
 
 interface AgentData {
   id: string
@@ -71,15 +80,6 @@ interface RunRow {
   started_at: string | null
   ended_at: string | null
   duration_ms?: number | null
-}
-
-function mapAgentStatus(status: string | undefined): string {
-  switch (status) {
-    case "RUNNING": return "IN_PROGRESS"
-    case "ERROR": return "FAILED"
-    case "STOPPED": return "CANCELLED"
-    default: return "PENDING"
-  }
 }
 
 /** Preview fetches cap at this many sessions/runs for the center pane. */
@@ -211,12 +211,6 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
   }, [detail?.schedule_enabled, detail?.schedule_next_run, nowTick])
 
   const agentPath = `/crews/agents/${agent.id}`
-  const canonicalStatus = mapAgentStatus(agent.status)
-  const isLive = agent.status === "RUNNING"
-  const avatarUrl = getAgentAvatarUrl(
-    agent.avatar_seed || agent.name,
-    agent.avatar_style || agent.crew?.avatar_style,
-  )
   const skillCount = agent._count?.skills ?? 0
   const credCount = agent._count?.credentials ?? 0
   const sessionCount = agent._count?.chats ?? 0
@@ -224,66 +218,14 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-4 sm:p-6 max-w-5xl space-y-4 sm:space-y-5">
-        {/* Hero — responsive: actions stack below on mobile */}
-        <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-          <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
-            <img
-              src={avatarUrl}
-              alt=""
-              className="h-12 w-12 sm:h-16 sm:w-16 rounded-xl sm:rounded-2xl shrink-0 border border-border"
-            />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                <h1 className="text-body sm:text-title font-semibold truncate">{agent.name}</h1>
-                <StatusBadge status={canonicalStatus} label={agent.status.toLowerCase()} />
-                {agent.agent_role === "LEAD" && (
-                  <Badge variant="outline" className="gap-1 text-micro">
-                    <Crown className="h-3 w-3" /> Lead
-                  </Badge>
-                )}
-                {isLive && (
-                  <span className="inline-flex items-center gap-1 text-micro text-emerald-400">
-                    <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
-                    live
-                  </span>
-                )}
-              </div>
-              {agent.role_title && (
-                <p className="text-label sm:text-body text-muted-foreground mt-0.5 truncate">{agent.role_title}</p>
-              )}
-              {agent.description && (
-                <p className="text-micro sm:text-label text-muted-foreground/80 mt-1 line-clamp-2">{agent.description}</p>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-4 sm:flex sm:items-center gap-2 shrink-0 w-full sm:w-auto">
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
-              <Link href={`${agentPath}/chat`} aria-label="Chat">
-                <MessageSquare className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Chat</span>
-              </Link>
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
-              <Link href={`${agentPath}/logs`} aria-label="Logs">
-                <ScrollText className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Logs</span>
-              </Link>
-            </Button>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
-              <Link href={`${agentPath}/settings`} aria-label="Settings">
-                <Settings className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Settings</span>
-              </Link>
-            </Button>
-            <Button size="sm" className="h-8 gap-1.5 px-2 sm:px-3" asChild>
-              <Link href={agentPath} aria-label="Open full agent page">
-                <span className="hidden sm:inline">Open full</span>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Link>
-            </Button>
-          </div>
-        </div>
+        {/* Description — identity (avatar/name/status/role/actions) now lives
+            on CrewsContextHeader above the tabs, so the body starts with the
+            longer-form description when present. */}
+        {agent.description && (
+          <p className="text-label text-muted-foreground/80 line-clamp-2">
+            {agent.description}
+          </p>
+        )}
 
         {/* Stats strip — 2 cols on mobile, 6 on desktop */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
@@ -610,8 +552,84 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
             </CardContent>
           </Card>
         )}
+
+        {/* Workspace + Tools — Phase 2 inlines what used to be the
+            "Open full" sub-routes (workspace, tools) so users don't leave
+            /crews to browse files or manage skills. Each section lazy-
+            mounts its body so clicking an agent doesn't fire a file-tree
+            fetch until the user actually expands. */}
+        <AgentDetailProvider agentId={agent.id}>
+          <LazyCollapsibleCard icon={FolderOpen} title="Workspace">
+            <div className="h-[500px] min-h-0">
+              <FilesPageClient />
+            </div>
+          </LazyCollapsibleCard>
+          <LazyCollapsibleCard
+            icon={Wrench}
+            title="Skills"
+            meta={skillCount === 1 ? "1 assigned" : `${skillCount} assigned`}
+          >
+            <SkillsPageClient />
+          </LazyCollapsibleCard>
+          <LazyCollapsibleCard
+            icon={ShieldCheck}
+            title="Credentials"
+            meta={credCount === 1 ? "1 assigned" : `${credCount} assigned`}
+          >
+            <CredentialsPageClient />
+          </LazyCollapsibleCard>
+          <LazyCollapsibleCard icon={Plug} title="MCP servers">
+            <MCPPageClient />
+          </LazyCollapsibleCard>
+        </AgentDetailProvider>
       </div>
     </div>
+  )
+}
+
+function LazyCollapsibleCard({
+  icon: Icon,
+  title,
+  meta,
+  children,
+}: {
+  icon: React.ElementType
+  title: string
+  meta?: string
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const [everOpened, setEverOpened] = useState(false)
+  const handleChange = (o: boolean) => {
+    setOpen(o)
+    if (o) setEverOpened(true)
+  }
+  return (
+    <Card>
+      <Collapsible open={open} onOpenChange={handleChange}>
+        <CollapsibleTrigger className="w-full flex items-center gap-2 p-4 text-left group">
+          <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
+          <span className="text-label font-semibold uppercase tracking-wider text-muted-foreground">
+            {title}
+          </span>
+          {meta && (
+            <span className="text-micro text-muted-foreground/70 truncate">{meta}</span>
+          )}
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 ml-auto text-muted-foreground transition-transform",
+              open && "rotate-180",
+            )}
+            aria-hidden="true"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t border-border">
+            {everOpened && children}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   )
 }
 

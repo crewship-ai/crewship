@@ -1,6 +1,6 @@
 "use client"
 
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 
 import { useState, useEffect, useCallback } from "react"
 import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2, RotateCcw } from "lucide-react"
@@ -30,7 +30,7 @@ interface AgentCredential {
 }
 
 export function CredentialsPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [credentials, setCredentials] = useState<AgentCredential[]>([])
   const [loading, setLoading] = useState(true)

@@ -1,6 +1,7 @@
 "use client"
 
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { useState, useEffect, useCallback, useRef } from "react"
 import dynamic from "next/dynamic"
 import {
@@ -212,7 +213,7 @@ function flatCount(nodes: TreeNode[]): { fileCount: number; dirCount: number; to
 }
 
 export function FilesPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const router = useRouter()
   const { agent } = useAgentDetail()

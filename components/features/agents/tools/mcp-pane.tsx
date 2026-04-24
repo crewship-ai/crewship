@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { Plug, Loader2, AlertCircle, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -59,7 +59,7 @@ function parseServers(raw: string | null | undefined): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 export function MCPPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [agent, setAgent] = useState<AgentData | null>(null)

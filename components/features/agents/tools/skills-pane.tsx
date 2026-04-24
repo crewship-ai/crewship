@@ -1,6 +1,6 @@
 "use client"
 
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { useState, useEffect, useCallback } from "react"
 import {
   Puzzle, AlertCircle, Plus, Trash2, Loader2,
@@ -94,7 +94,7 @@ function SkillIcon({ category }: { category: string | null }) {
 }
 
 export function SkillsPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [skills, setSkills] = useState<AgentSkill[]>([])
   const [loading, setLoading] = useState(true)
