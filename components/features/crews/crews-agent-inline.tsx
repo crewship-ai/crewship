@@ -192,7 +192,12 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
 
   const scheduleCountdown = useMemo(() => {
     if (!detail?.schedule_enabled || !detail?.schedule_next_run) return null
-    const ms = new Date(detail.schedule_next_run).getTime() - nowTick
+    // Backend can hand us a malformed timestamp (e.g. a partial write or
+    // a legacy cron never recomputed). `new Date("garbage").getTime()`
+    // returns NaN, which would then render as "NaNm" / "NaNh" strings.
+    const nextRunMs = new Date(detail.schedule_next_run).getTime()
+    if (!Number.isFinite(nextRunMs)) return null
+    const ms = nextRunMs - nowTick
     if (ms <= 0) return "imminent"
     const mins = Math.floor(ms / 60_000)
     if (mins < 60) return `${mins}m`

@@ -68,7 +68,16 @@ export default function CrewsPage() {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
-    if (!silent) setLoading(true)
+    if (!silent) {
+      // On a user-visible reload (workspace switch / manual refresh) we
+      // must drop the previous workspace's data before firing the new
+      // requests — otherwise a failing fetch would render the old
+      // workspace's crews/agents/missions under the new header.
+      setCrews([])
+      setAgents([])
+      setMissions([])
+      setLoading(true)
+    }
     try {
       const [crewsRes, agentsRes, missionsRes] = await Promise.all([
         fetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal }),
@@ -85,7 +94,12 @@ export default function CrewsPage() {
       if ((err as { name?: string })?.name === "AbortError") return
       // other errors: leave state as-is (previous data survives a transient network blip)
     } finally {
-      if (!silent && !controller.signal.aborted) setLoading(false)
+      // Only the currently-owned controller is allowed to flip loading
+      // back off. Without this, a silent refetch that aborted the
+      // original visible request would never clear the skeleton.
+      if (abortRef.current === controller && !controller.signal.aborted) {
+        setLoading(false)
+      }
     }
   }, [workspaceId])
 

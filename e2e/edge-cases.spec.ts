@@ -150,11 +150,6 @@ test("deep-link to ?agent=<slug> works after full page load", async ({ browser }
   const ctx = await browser.newContext()
   await ctx.addCookies(cachedCookies)
   const page = await ctx.newPage()
-  const wsId = await page.evaluate(async () => {
-    await new Promise((r) => setTimeout(r, 0))
-    return null
-  })
-  void wsId
   // Fetch via request API to avoid needing page context
   const req = await plwRequest.newContext({ baseURL: BASE_URL, storageState: { cookies: cachedCookies, origins: [] } })
   const wsJson = await (await req.get("/api/v1/workspaces")).json()

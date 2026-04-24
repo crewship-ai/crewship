@@ -52,6 +52,7 @@ export default function AgentsPage() {
   const fetchAgents = useCallback(async (silent = false) => {
     if (!workspaceId) {
       setAgents([])
+      setError(null)
       setLoading(false)
       return
     }
@@ -78,6 +79,10 @@ export default function AgentsPage() {
       const data = (await res.json()) as Agent[]
       if (controller.signal.aborted) return
       setAgents(data)
+      // Clear any previous failure banner on successful recovery — a
+      // silent refetch driven by realtime events should dismiss a stale
+      // error just as well as a user-initiated retry.
+      setError(null)
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return
       if (!silent) {
