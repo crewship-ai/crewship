@@ -263,6 +263,12 @@ export function FilesPageClient() {
     setFileContent(null)
     setEditMode(false)
     setIsDirty(false)
+    // Clear errors alongside the tree reset. Without this, an error
+    // raised against the previous agent (e.g. "Network error. Is the
+    // engine running?") stays visible while the new agent's fetch is
+    // in flight, making it look like the new agent is failing too.
+    setError(null)
+    setFileError(null)
     // Without a resolved agentId the legacy pathname would be
     // `/api/v1/agents//files`, which 404s. Short-circuit while the
     // AgentDetailProvider is still resolving.
