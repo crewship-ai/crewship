@@ -26,6 +26,9 @@ import { z } from "zod"
 
 interface CrewActivityFeedProps {
   workspaceId: string
+  /** Optional entity scope. Server filters the merged feed when set. */
+  agentId?: string
+  crewId?: string
 }
 
 const TYPE_CONFIG: Record<ActivityItem["type"], {
@@ -50,7 +53,7 @@ const TYPE_CONFIG: Record<ActivityItem["type"], {
   },
 }
 
-export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
+export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityFeedProps) {
   const [items, setItems] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -63,9 +66,13 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
       else setLoading(true)
     }
     try {
-      const res = await fetch(
-        `/api/v1/activity?workspace_id=${workspaceId}&limit=30`
-      )
+      const params = new URLSearchParams({
+        workspace_id: workspaceId,
+        limit: "30",
+      })
+      if (agentId) params.set("agent_id", agentId)
+      if (crewId) params.set("crew_id", crewId)
+      const res = await fetch(`/api/v1/activity?${params.toString()}`)
       if (res.ok) {
         const json = await res.json()
         const parsed = z.array(activityItemSchema).safeParse(json)
@@ -81,7 +88,7 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
         setRefreshing(false)
       }
     }
-  }, [workspaceId])
+  }, [workspaceId, agentId, crewId])
 
   useEffect(() => {
     fetchActivity()

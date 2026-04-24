@@ -377,14 +377,18 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
 
             {activeTab === "activity" && (
               <motion.div
-                key="activity"
+                key={`activity-${selectedAgentId || selectedCrewId || "workspace"}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="p-4 h-full overflow-auto"
               >
-                <CrewActivityFeed workspaceId={workspaceId} />
+                <CrewActivityFeed
+                  workspaceId={workspaceId}
+                  agentId={selectedAgentId ?? undefined}
+                  crewId={!selectedAgentId && selectedCrewId ? selectedCrewId : undefined}
+                />
               </motion.div>
             )}
 
