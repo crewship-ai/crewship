@@ -24,7 +24,6 @@ import { SettingsDrawer } from "@/components/features/crews/drawers/settings-dra
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection, type CrewsTab, type CrewsDrawer } from "@/hooks/use-crews-selection"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 
 interface CrewData {
@@ -91,7 +90,6 @@ const CREWS_TABS: Array<{ id: CrewsTab; label: string; icon: typeof LayoutGrid }
 
 export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = false, onRefresh: _onRefresh }: CrewsLayoutProps) {
   const isMobile = useIsMobile()
-  const router = useRouter()
   const {
     selectedAgentSlug,
     selectedCrewSlug,
@@ -99,6 +97,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
     activeDrawer,
     update,
     selectAgent,
+    selectCrew,
     setTab,
     openDrawer,
     closeDrawer,
@@ -153,16 +152,21 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
     [agents, selectedCrewId],
   )
 
-  // Click on a crew in the explorer navigates to the full crew page.
-  // Crew config (network policy, runtime, containers, MCP, avatar, issue
-  // prefix, terminal, peer conversations, escalations, journal, danger
-  // zone) lives across six tabs on /crews/<id> and doesn't fit into the
-  // center preview. Agents keep the shallow ?agent=slug preview because
-  // their data is lighter and the right-panel inbox adds real value.
+  // Click on a crew in the explorer keeps the user on /crews with
+  // `?crew=<slug>` — Phase 7 stopped routing to the legacy full crew
+  // page. The inline Overview tab renders CrewsCrewDetail; Activity
+  // and Health narrow server-side to the crew. Deep config (network
+  // policy, runtime, MCP, danger zone) still lives at /crews/<id> for
+  // now and is reachable via the Edit button inside the Overview.
   const handleCrewSelect = useCallback((crewId: string) => {
-    if (!crews.find((c) => c.id === crewId)) return
-    router.push(`/crews/${crewId}`)
-  }, [crews, router])
+    const crew = crews.find((c) => c.id === crewId)
+    if (!crew) return
+    if (selectedCrewSlug === crew.slug) {
+      selectCrew(null)
+      return
+    }
+    selectCrew(crew.slug)
+  }, [crews, selectedCrewSlug, selectCrew])
 
   const handleAgentSelect = useCallback((agentId: string) => {
     const agent = agents.find((a) => a.id === agentId)
