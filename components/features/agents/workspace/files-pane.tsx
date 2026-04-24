@@ -252,16 +252,21 @@ export function FilesPageClient() {
   useEffect(() => {
     if (wsLoading) return
     if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
-    // Without a resolved agentId the legacy pathname would be
-    // `/api/v1/agents//files`, which 404s. Short-circuit while the
-    // AgentDetailProvider is still resolving.
-    if (!agentId) { setLoading(false); return }
+    // Flush the previous agent's tree + editor state before we decide
+    // whether to fetch. If we leave state in place while agentId is
+    // unresolved, the panel flashes the last agent's files until the
+    // new fetch resolves — confusing when the two agents have very
+    // different workspaces.
     fileAbortRef.current?.abort()
     setTree([])
     setSelectedPath(null)
     setFileContent(null)
     setEditMode(false)
     setIsDirty(false)
+    // Without a resolved agentId the legacy pathname would be
+    // `/api/v1/agents//files`, which 404s. Short-circuit while the
+    // AgentDetailProvider is still resolving.
+    if (!agentId) { setLoading(false); return }
     let cancelled = false
     let isFirstLoad = true
     async function fetchFiles() {
@@ -474,7 +479,7 @@ export function FilesPageClient() {
             className={cn("px-2.5 py-1 text-micro rounded-md", activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
             onClick={() => {
               setActiveFileTab("container")
-              if (containerFiles.length === 0 && !containerLoading && workspaceId) {
+              if (containerFiles.length === 0 && !containerLoading && workspaceId && agentId) {
                 containerAbortRef.current?.abort()
                 const ac = new AbortController()
                 containerAbortRef.current = ac
@@ -515,7 +520,7 @@ export function FilesPageClient() {
             className={cn("px-2.5 py-1 text-micro rounded-md flex items-center gap-1", activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
             onClick={() => {
               setActiveFileTab("git")
-              if (gitCommits.length === 0 && !gitLoading && workspaceId) {
+              if (gitCommits.length === 0 && !gitLoading && workspaceId && agentId) {
                 gitAbortRef.current?.abort()
                 const ac = new AbortController()
                 gitAbortRef.current = ac

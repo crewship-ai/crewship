@@ -127,6 +127,10 @@ export function SkillsPageClient() {
 
   useEffect(() => {
     if (!workspaceId || !agentId) {
+      // Flush the previous agent's skills so switching agents (or
+      // closing the panel) doesn't leave the old roster visible
+      // while the new fetch resolves.
+      setSkills([])
       setLoading(false)
       return
     }
@@ -175,7 +179,7 @@ export function SkillsPageClient() {
             {skills.length} skill{skills.length !== 1 ? "s" : ""} assigned
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} disabled={!workspaceId}>
+        <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} disabled={!workspaceId || !agentId}>
           <Plus className="h-4 w-4 mr-1" />
           Add Skill
         </Button>
@@ -236,7 +240,7 @@ export function SkillsPageClient() {
         </div>
       )}
 
-      {workspaceId && (
+      {workspaceId && agentId && (
         <AddSkillDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
@@ -282,6 +286,10 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
   const [addError, setAddError] = useState<string | null>(null)
 
   const handleAdd = async (skillId: string) => {
+    // Dialog only mounts when both workspaceId and agentId are present,
+    // but guard again here to keep the contract on the handler itself
+    // so a future caller can't POST to /agents//skills.
+    if (!workspaceId || !agentId) return
     setAdding(skillId)
     setAddError(null)
     try {

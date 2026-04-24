@@ -75,7 +75,6 @@ interface AgentDetailExtra {
 }
 
 interface DebugSnapshot {
-  db_status: string
   crewshipd_reachable: boolean
   runtime?: { status?: string } | null
 }
@@ -86,6 +85,10 @@ function AgentHealth({ agent, workspaceId }: { agent: AgentData; workspaceId: st
   const nowTick = useTick(60_000)
 
   useEffect(() => {
+    // Clear before we branch so switching agents doesn't leave the
+    // previous agent's chips (Lead / Memory / Schedule) on screen
+    // while the new fetch is in flight.
+    setDetail(null)
     if (!workspaceId) return
     const controller = new AbortController()
     fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { signal: controller.signal })
@@ -108,6 +111,7 @@ function AgentHealth({ agent, workspaceId }: { agent: AgentData; workspaceId: st
   }, [agent.id, workspaceId])
 
   useEffect(() => {
+    setDebug(null)
     if (!workspaceId) return
     const controller = new AbortController()
     fetch(`/api/v1/agents/${agent.id}/debug?workspace_id=${workspaceId}`, { signal: controller.signal })
