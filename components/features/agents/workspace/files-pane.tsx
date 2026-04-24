@@ -218,6 +218,11 @@ export function FilesPageClient() {
   const router = useRouter()
   const { agent } = useAgentDetail()
   const crewId = agent?.crew_id ?? null
+  // Both workspaceId and agentId are required to hit any
+  // /api/v1/agents/{id}/... endpoint. Centralising the conjunction
+  // keeps the four existing guard sites (mount effect, save handler,
+  // container tab, git tab) from drifting in future edits.
+  const canQueryAgent = Boolean(workspaceId && agentId)
   const [tree, setTree] = useState<TreeNode[]>([])
   const [basePrefix, setBasePrefix] = useState("")
   const [loading, setLoading] = useState(true)
@@ -336,7 +341,7 @@ export function FilesPageClient() {
   }, [agentId, workspaceId])
 
   const fetchSubdir = useCallback(async (dirPath: string) => {
-    if (!workspaceId || !agentId) return
+    if (!canQueryAgent) return
     setLoadingDirs((prev) => new Set(prev).add(dirPath))
     try {
       const relPath = dirPath.startsWith(basePrefix) ? dirPath.slice(basePrefix.length) : dirPath
@@ -346,7 +351,7 @@ export function FilesPageClient() {
       setTree((prev) => insertChildren(prev, dirPath, data ?? []))
     } catch { /* folder contents unavailable — tree shows empty */ }
     finally { setLoadingDirs((prev) => { const next = new Set(prev); next.delete(dirPath); return next }) }
-  }, [agentId, workspaceId, basePrefix])
+  }, [agentId, workspaceId, canQueryAgent, basePrefix])
 
   const openFile = useCallback((path: string) => {
     const file = findNode(tree, path)
@@ -372,7 +377,7 @@ export function FilesPageClient() {
   }, [agentId, workspaceId, tree])
 
   const handleSave = useCallback(async (content: string) => {
-    if (!selectedPath || !workspaceId || !agentId) return
+    if (!selectedPath || !canQueryAgent) return
     setSaving(true)
     try {
       const res = await fetch(
@@ -392,7 +397,7 @@ export function FilesPageClient() {
     } finally {
       setSaving(false)
     }
-  }, [agentId, workspaceId, selectedPath])
+  }, [agentId, workspaceId, canQueryAgent, selectedPath])
 
   const handleDiscard = useCallback(() => {
     setEditMode(false)
@@ -485,7 +490,7 @@ export function FilesPageClient() {
             className={cn("px-2.5 py-1 text-micro rounded-md", activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
             onClick={() => {
               setActiveFileTab("container")
-              if (containerFiles.length === 0 && !containerLoading && workspaceId && agentId) {
+              if (containerFiles.length === 0 && !containerLoading && canQueryAgent) {
                 containerAbortRef.current?.abort()
                 const ac = new AbortController()
                 containerAbortRef.current = ac
@@ -526,7 +531,7 @@ export function FilesPageClient() {
             className={cn("px-2.5 py-1 text-micro rounded-md flex items-center gap-1", activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
             onClick={() => {
               setActiveFileTab("git")
-              if (gitCommits.length === 0 && !gitLoading && workspaceId && agentId) {
+              if (gitCommits.length === 0 && !gitLoading && canQueryAgent) {
                 gitAbortRef.current?.abort()
                 const ac = new AbortController()
                 gitAbortRef.current = ac
