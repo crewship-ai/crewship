@@ -210,7 +210,6 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
     return `${days}d ${hrs % 24}h`
   }, [detail?.schedule_enabled, detail?.schedule_next_run, nowTick])
 
-  const agentPath = `/crews/agents/${agent.id}`
   const skillCount = agent._count?.skills ?? 0
   const credCount = agent._count?.credentials ?? 0
   const sessionCount = agent._count?.chats ?? 0
@@ -227,11 +226,14 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
           </p>
         )}
 
-        {/* Stats strip — 2 cols on mobile, 6 on desktop */}
+        {/* Stats strip — 2 cols on mobile, 6 on desktop. After Phase 8 the
+            old `/crews/agents/[id]/{sessions,runs,tools,logs}` routes are
+            gone, so stat cards are non-interactive displays. The Activity
+            tab and the drawers are the click paths; users don't need a
+            third one-off. */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
-          <StatMiniCard href={`${agentPath}/sessions`} icon={MessageSquare} label="Sessions" value={sessionCount} />
+          <StatMiniCard icon={MessageSquare} label="Sessions" value={sessionCount} />
           <StatMiniCard
-            href={`${agentPath}/runs`}
             icon={Zap}
             label="Recent runs"
             // Preview fetch caps at limit=3. Hitting the cap means there
@@ -246,14 +248,13 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
             }
           />
           <StatMiniCard
-            href={agent.crew_id ? `/paymaster?crew=${agent.crew_id}` : "/paymaster"}
             icon={DollarSign}
             label="Cost (month)"
             value={inbox && inbox.cost_usd_this_month > 0 ? `$${inbox.cost_usd_this_month.toFixed(2)}` : "—"}
           />
-          <StatMiniCard href={`${agentPath}/tools?section=skills`} icon={Puzzle} label="Skills" value={skillCount} />
-          <StatMiniCard href={`${agentPath}/tools?section=credentials`} icon={KeyRound} label="Credentials" value={credCount} />
-          <StatMiniCard href={`${agentPath}/logs`} icon={Clock} label="Last active" value={agent.last_active_at ? timeAgo(agent.last_active_at) : "—"} />
+          <StatMiniCard icon={Puzzle} label="Skills" value={skillCount} />
+          <StatMiniCard icon={KeyRound} label="Credentials" value={credCount} />
+          <StatMiniCard icon={Clock} label="Last active" value={agent.last_active_at ? timeAgo(agent.last_active_at) : "—"} />
         </div>
 
         {/* Body: runtime + recent activity */}
@@ -298,7 +299,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                     <MessageSquare className="h-3.5 w-3.5" />
                     Recent sessions
                   </h3>
-                  <Link href={`${agentPath}/sessions`} className="text-micro text-primary hover:underline">
+                  <Link href={`/crews?agent=${agent.slug}&tab=activity`} className="text-micro text-primary hover:underline">
                     View all
                   </Link>
                 </div>
@@ -309,7 +310,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                     {sessions.slice(0, 3).map((s) => (
                       <li key={s.id}>
                         <Link
-                          href={`${agentPath}/chat?session=${s.id}`}
+                          href={`/crews?agent=${agent.slug}&tab=activity`}
                           className="flex items-center gap-2 py-1 px-1 -mx-1 rounded hover:bg-accent/50 transition-colors"
                         >
                           <span className="text-body truncate flex-1">{s.title || "Untitled session"}</span>
@@ -332,7 +333,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                     <Zap className="h-3.5 w-3.5" />
                     Recent runs
                   </h3>
-                  <Link href={`${agentPath}/runs`} className="text-micro text-primary hover:underline">
+                  <Link href={`/crews?agent=${agent.slug}&tab=activity`} className="text-micro text-primary hover:underline">
                     View all
                   </Link>
                 </div>
@@ -359,7 +360,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                       return (
                         <li key={r.id}>
                           <Link
-                            href={`${agentPath}/runs`}
+                            href={`/crews?agent=${agent.slug}&tab=activity`}
                             className="flex items-center gap-2 py-1 px-1 -mx-1 rounded hover:bg-accent/50 transition-colors"
                           >
                             <span className={cn(
@@ -403,7 +404,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                   Schedule
                 </h3>
                 <Link
-                  href={`${agentPath}/settings?section=schedule`}
+                  href={`/crews?agent=${agent.slug}&drawer=settings&section=schedule`}
                   className="text-micro text-primary hover:underline"
                 >
                   Edit
@@ -462,7 +463,7 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                 </p>
               )}
               <Link
-                href={`${agentPath}/settings`}
+                href={`/crews?agent=${agent.slug}&drawer=settings`}
                 className="inline-flex items-center gap-1 text-micro text-primary hover:underline"
               >
                 Edit in Settings <ExternalLink className="h-3 w-3" />
@@ -643,25 +644,21 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function StatMiniCard({
-  href, icon: Icon, label, value,
+  icon: Icon, label, value,
 }: {
-  href: string
   icon: React.ElementType
   label: string
   value: string | number
 }) {
   return (
-    <Link
-      href={href}
-      className="rounded-lg border border-border bg-card/50 px-3 py-2.5 hover:bg-accent/40 hover:border-border/80 transition-colors group"
-    >
+    <div className="rounded-lg border border-border bg-card/50 px-3 py-2.5">
       <div className="flex items-center gap-1.5 text-micro text-muted-foreground uppercase tracking-wider">
         <Icon className="h-3 w-3" />
         {label}
       </div>
-      <p className="text-title font-semibold tabular-nums mt-1 group-hover:text-foreground">
+      <p className="text-title font-semibold tabular-nums mt-1">
         {value}
       </p>
-    </Link>
+    </div>
   )
 }

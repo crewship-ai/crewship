@@ -1,14 +1,12 @@
 "use client"
 
-import Link from "next/link"
-import { ExternalLink, ScrollText } from "lucide-react"
+import { ScrollText } from "lucide-react"
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { Button } from "@/components/ui/button"
 import { LogsPageClient } from "@/components/features/agents/logs/logs-page-client"
 import { AgentDetailProvider } from "@/hooks/use-agent-detail"
 
@@ -54,16 +52,6 @@ export function LogsDrawer({ agent, open, onOpenChange }: LogsDrawerProps) {
             </div>
           )}
         </div>
-        {agent && (
-          <div className="border-t border-border px-4 py-2 shrink-0 flex items-center justify-end">
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-micro" asChild>
-              <Link href={`/crews/agents/${agent.id}/logs`}>
-                Open full logs page
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            </Button>
-          </div>
-        )}
       </SheetContent>
     </Sheet>
   )

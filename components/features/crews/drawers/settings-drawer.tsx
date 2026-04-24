@@ -9,7 +9,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
-import { SettingsPageClient } from "@/app/(dashboard)/crews/agents/[agentId]/settings/settings-client"
+import { SettingsPageClient } from "@/components/features/agents/settings/settings-page-client"
 import { AgentDetailProvider } from "@/hooks/use-agent-detail"
 
 interface EntityBrief {
@@ -75,16 +75,6 @@ export function SettingsDrawer({ entity, open, onOpenChange }: SettingsDrawerPro
             </div>
           )}
         </div>
-        {entity?.kind === "agent" && fullPath && (
-          <div className="border-t border-border px-4 py-2 shrink-0 flex items-center justify-end">
-            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-micro" asChild>
-              <Link href={fullPath}>
-                Open full settings page
-                <ExternalLink className="h-3 w-3" />
-              </Link>
-            </Button>
-          </div>
-        )}
       </SheetContent>
     </Sheet>
   )
