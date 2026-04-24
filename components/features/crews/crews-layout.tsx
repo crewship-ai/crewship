@@ -15,7 +15,7 @@ import { CrewsCrewDetail } from "@/components/features/crews/crews-crew-detail"
 import { CrewsAgentInline } from "@/components/features/crews/crews-agent-inline"
 import { CrewsContextHeader } from "@/components/features/crews/crews-context-header"
 import { AllCrewsOverview } from "@/components/features/crews/crews-all-crews-overview"
-import { HealthOverview } from "@/components/features/crews/crews-health-overview"
+import { CrewsHealthTab } from "@/components/features/crews/crews-health-tab"
 import { CrewsBottomDrawer } from "@/components/features/crews/crews-bottom-drawer"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { ChatDrawer } from "@/components/features/crews/drawers/chat-drawer"
@@ -394,14 +394,20 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
 
             {activeTab === "health" && (
               <motion.div
-                key="health"
+                key={`health-${selectedAgentId || selectedCrewId || "workspace"}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="p-4 h-full overflow-auto"
               >
-                <HealthOverview crews={crews} agents={agents} />
+                <CrewsHealthTab
+                  workspaceId={workspaceId}
+                  crews={crews}
+                  agents={agents}
+                  selectedAgent={selectedAgent}
+                  selectedCrew={selectedCrew}
+                />
               </motion.div>
             )}
           </AnimatePresence>
