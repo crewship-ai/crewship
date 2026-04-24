@@ -12,16 +12,18 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
 import { CrewsCrewDetail } from "@/components/features/crews/crews-crew-detail"
-import { CrewsAgentInbox } from "@/components/features/crews/crews-agent-inbox"
 import { CrewsAgentInline } from "@/components/features/crews/crews-agent-inline"
+import { CrewsContextHeader } from "@/components/features/crews/crews-context-header"
 import { AllCrewsOverview } from "@/components/features/crews/crews-all-crews-overview"
-import { HealthOverview } from "@/components/features/crews/crews-health-overview"
+import { CrewsHealthTab } from "@/components/features/crews/crews-health-tab"
 import { CrewsBottomDrawer } from "@/components/features/crews/crews-bottom-drawer"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
+import { ChatDrawer } from "@/components/features/crews/drawers/chat-drawer"
+import { LogsDrawer } from "@/components/features/crews/drawers/logs-drawer"
+import { SettingsDrawer } from "@/components/features/crews/drawers/settings-drawer"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useCrewsSelection } from "@/hooks/use-crews-selection"
+import { useCrewsSelection, type CrewsTab, type CrewsDrawer } from "@/hooks/use-crews-selection"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 
 interface CrewData {
@@ -63,8 +65,6 @@ interface MissionData {
   created_at: string
 }
 
-type TabId = "overview" | "activity" | "health"
-
 export interface CrewsLayoutProps {
   crews: CrewData[]
   agents: AgentData[]
@@ -78,10 +78,10 @@ export interface CrewsLayoutProps {
   onRefresh: () => void
 }
 
-const CREWS_TABS = [
-  { id: "overview" as const, label: "Overview", icon: LayoutGrid },
-  { id: "activity" as const, label: "Activity", icon: Activity },
-  { id: "health" as const, label: "Health", icon: HeartPulse },
+const CREWS_TABS: Array<{ id: CrewsTab; label: string; icon: typeof LayoutGrid }> = [
+  { id: "overview", label: "Overview", icon: LayoutGrid },
+  { id: "activity", label: "Activity", icon: Activity },
+  { id: "health", label: "Health", icon: HeartPulse },
 ]
 
 // CREWS_BOTTOM_TABS lives inside crews-bottom-drawer.tsx now (extracted
@@ -90,11 +90,20 @@ const CREWS_TABS = [
 
 export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = false, onRefresh: _onRefresh }: CrewsLayoutProps) {
   const isMobile = useIsMobile()
-  const router = useRouter()
-  const { selectedAgentSlug, selectedCrewSlug, update, selectAgent } = useCrewsSelection()
+  const {
+    selectedAgentSlug,
+    selectedCrewSlug,
+    activeTab,
+    activeDrawer,
+    update,
+    selectAgent,
+    selectCrew,
+    setTab,
+    openDrawer,
+    closeDrawer,
+  } = useCrewsSelection()
 
   const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabId>("overview")
 
   useEffect(() => {
     if (isMobile) setLeftCollapsed(true)
@@ -143,16 +152,21 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
     [agents, selectedCrewId],
   )
 
-  // Click on a crew in the explorer navigates to the full crew page.
-  // Crew config (network policy, runtime, containers, MCP, avatar, issue
-  // prefix, terminal, peer conversations, escalations, journal, danger
-  // zone) lives across six tabs on /crews/<id> and doesn't fit into the
-  // center preview. Agents keep the shallow ?agent=slug preview because
-  // their data is lighter and the right-panel inbox adds real value.
+  // Click on a crew in the explorer keeps the user on /crews with
+  // `?crew=<slug>` — Phase 7 stopped routing to the legacy full crew
+  // page. The inline Overview tab renders CrewsCrewDetail; Activity
+  // and Health narrow server-side to the crew. Deep config (network
+  // policy, runtime, MCP, danger zone) still lives at /crews/<id> for
+  // now and is reachable via the Edit button inside the Overview.
   const handleCrewSelect = useCallback((crewId: string) => {
-    if (!crews.find((c) => c.id === crewId)) return
-    router.push(`/crews/${crewId}`)
-  }, [crews, router])
+    const crew = crews.find((c) => c.id === crewId)
+    if (!crew) return
+    if (selectedCrewSlug === crew.slug) {
+      selectCrew(null)
+      return
+    }
+    selectCrew(crew.slug)
+  }, [crews, selectedCrewSlug, selectCrew])
 
   const handleAgentSelect = useCallback((agentId: string) => {
     const agent = agents.find((a) => a.id === agentId)
@@ -169,7 +183,10 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
     selectAgent(null)
   }, [selectAgent])
 
-  const showRightPanel = selectedAgent !== null
+  // Mobile still needs a full-screen agent panel because the explorer
+  // and context header share the same narrow viewport. Desktop renders
+  // the agent inline in the center column.
+  const showMobileAgentPanel = isMobile && selectedAgent !== null
 
   const cycleAgent = useCallback((delta: 1 | -1) => {
     if (agents.length === 0) return
@@ -184,10 +201,27 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
   }, [agents, crews, selectedAgent, update])
 
   useKeyboardShortcuts([
-    { keys: "Escape", handler: handleAgentClose, enabled: showRightPanel },
+    { keys: "Escape", handler: handleAgentClose, enabled: selectedAgent !== null && activeDrawer === null },
     { keys: "j", handler: () => cycleAgent(1) },
     { keys: "k", handler: () => cycleAgent(-1) },
   ])
+
+  const handleDrawerOpenChange = useCallback(
+    (drawer: CrewsDrawer) => (open: boolean) => {
+      if (!open && activeDrawer === drawer) closeDrawer()
+    },
+    [activeDrawer, closeDrawer],
+  )
+
+  // Settings drawer operates on the current entity (agent first, then crew).
+  // Kept as a single drawer component because the editor surface is
+  // interchangeable at the Sheet level — the body will branch by entity kind
+  // once Phase 3 inlines the real forms.
+  const settingsEntity = selectedAgent
+    ? { kind: "agent" as const, id: selectedAgent.id, name: selectedAgent.name }
+    : selectedCrew
+      ? { kind: "crew" as const, id: selectedCrew.id, name: selectedCrew.name }
+      : null
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
@@ -198,7 +232,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
           {CREWS_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id)}
+              onClick={() => setTab(id)}
               className={cn(
                 "flex items-center gap-1.5 px-3 text-label font-medium border-b-2 transition-all duration-100 relative top-px",
                 activeTab === id
@@ -229,13 +263,26 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
         </div>
       </div>
 
-      {/* Main 3-column layout */}
+      {/* Context header — compact identity strip for the selected entity.
+          Renders nothing in the workspace (all-crews) view, so no vertical
+          space is eaten when nothing is selected. */}
+      <CrewsContextHeader
+        agent={selectedAgent}
+        crew={!selectedAgent ? selectedCrew : null}
+        onOpenDrawer={openDrawer}
+      />
+
+      {/* Main 2-column layout (explorer + canvas). The right-hand Inbox
+          panel retired in Phase 4 — its approvals/escalations counters
+          moved to context-header alert pills, peer messages relocate to
+          the Activity tab (Phase 5), and Lead/Memory/Schedule chips
+          move to the Health tab (Phase 6). */}
       <div
         className="flex-1 min-h-0 grid transition-all duration-200 relative"
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "280px"} 1fr ${showRightPanel ? "380px" : "0px"}`,
+            : `${leftCollapsed ? "48px" : "280px"} 1fr`,
           gridTemplateRows: "1fr auto",
         }}
       >
@@ -334,36 +381,50 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
 
             {activeTab === "activity" && (
               <motion.div
-                key="activity"
+                key={`activity-${selectedAgentId || selectedCrewId || "workspace"}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="p-4 h-full overflow-auto"
               >
-                <CrewActivityFeed workspaceId={workspaceId} />
+                <CrewActivityFeed
+                  workspaceId={workspaceId}
+                  agentId={selectedAgentId ?? undefined}
+                  crewId={!selectedAgentId && selectedCrewId ? selectedCrewId : undefined}
+                />
               </motion.div>
             )}
 
             {activeTab === "health" && (
               <motion.div
-                key="health"
+                key={`health-${selectedAgentId || selectedCrewId || "workspace"}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="p-4 h-full overflow-auto"
               >
-                <HealthOverview crews={crews} agents={agents} />
+                <CrewsHealthTab
+                  workspaceId={workspaceId}
+                  crews={crews}
+                  agents={agents}
+                  selectedAgent={selectedAgent}
+                  selectedCrew={selectedCrew}
+                />
               </motion.div>
             )}
           </AnimatePresence>
         </div>
 
-        {/* Right panel */}
-        {isMobile ? (
+        {/* Mobile full-screen agent panel. The desktop grid renders the
+            agent inline in the center column, but on a narrow viewport
+            the explorer overlay + header strip eat the entire width, so
+            selecting an agent promotes the center into a dedicated
+            slide-over panel with its own back button. */}
+        {isMobile && (
           <AnimatePresence>
-            {showRightPanel && selectedAgent && (
+            {showMobileAgentPanel && selectedAgent && (
               <motion.div
                 className="fixed inset-0 z-40 bg-background flex flex-col"
                 initial={{ x: "100%" }}
@@ -383,32 +444,35 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <CrewsAgentInline agent={selectedAgent} workspaceId={workspaceId} />
-                  {/* Inbox rendered as a stacked section on mobile — on desktop
-                      it's the right-panel. Without this, mobile users never see
-                      pending approvals / assignments / escalations at all. */}
-                  <div className="border-t border-border">
-                    <CrewsAgentInbox agent={selectedAgent} onClose={handleAgentClose} />
-                  </div>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
-        ) : (
-          <div className={cn(
-            "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
-            showRightPanel ? "w-[380px]" : "w-0",
-          )}>
-            <AnimatePresence mode="wait">
-              {showRightPanel && selectedAgent && (
-                <CrewsAgentInbox agent={selectedAgent} onClose={handleAgentClose} />
-              )}
-            </AnimatePresence>
-          </div>
         )}
 
         {/* Bottom drawer */}
         <CrewsBottomDrawer crews={crews} agents={agents} isMobile={isMobile} />
       </div>
+
+      {/* Slide-over drawers — Sheets controlled by the URL ?drawer= param so
+          reload/back preserves the open panel. Phase 3 will replace the stub
+          bodies with inline Chat / Logs / Settings content, making the
+          existing full-page routes redundant. */}
+      <ChatDrawer
+        agent={selectedAgent}
+        open={activeDrawer === "chat" && selectedAgent !== null}
+        onOpenChange={handleDrawerOpenChange("chat")}
+      />
+      <LogsDrawer
+        agent={selectedAgent}
+        open={activeDrawer === "logs" && selectedAgent !== null}
+        onOpenChange={handleDrawerOpenChange("logs")}
+      />
+      <SettingsDrawer
+        entity={settingsEntity}
+        open={activeDrawer === "settings" && settingsEntity !== null}
+        onOpenChange={handleDrawerOpenChange("settings")}
+      />
     </div>
   )
 }

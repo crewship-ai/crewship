@@ -202,4 +202,134 @@ describe("useCrewsSelection", () => {
       )
     })
   })
+
+  describe("tab URL state", () => {
+    it("defaults to overview when ?tab is absent", () => {
+      setSearchParams("")
+      const { result } = renderHook(() => useCrewsSelection())
+      expect(result.current.activeTab).toBe("overview")
+    })
+
+    it("defaults to overview when ?tab is invalid", () => {
+      setSearchParams("tab=sessions")
+      const { result } = renderHook(() => useCrewsSelection())
+      expect(result.current.activeTab).toBe("overview")
+    })
+
+    it("reads activity from ?tab=activity", () => {
+      setSearchParams("tab=activity")
+      const { result } = renderHook(() => useCrewsSelection())
+      expect(result.current.activeTab).toBe("activity")
+    })
+
+    it("reads health from ?tab=health", () => {
+      setSearchParams("tab=health")
+      const { result } = renderHook(() => useCrewsSelection())
+      expect(result.current.activeTab).toBe("health")
+    })
+
+    it("setTab writes ?tab=activity", () => {
+      const { result } = renderHook(() => useCrewsSelection())
+      act(() => {
+        result.current.setTab("activity")
+      })
+      expect(mocks.replace).toHaveBeenCalledWith("/crews?tab=activity", { scroll: false })
+    })
+
+    // Drops the param when the value equals the default so URLs stay clean.
+    it("setTab(overview) removes ?tab param", () => {
+      setSearchParams("tab=activity&agent=mia")
+      const { result } = renderHook(() => useCrewsSelection())
+      act(() => {
+        result.current.setTab("overview")
+      })
+      const call = mocks.replace.mock.calls[0][0] as string
+      expect(call).not.toContain("tab=")
+      expect(call).toContain("agent=mia")
+    })
+
+    it("preserves agent/crew when switching tabs", () => {
+      setSearchParams("agent=mia&crew=research")
+      const { result } = renderHook(() => useCrewsSelection())
+      act(() => {
+        result.current.setTab("health")
+      })
+      const call = mocks.replace.mock.calls[0][0] as string
+      expect(call).toContain("agent=mia")
+      expect(call).toContain("crew=research")
+      expect(call).toContain("tab=health")
+    })
+  })
+
+  describe("drawer URL state", () => {
+    it("activeDrawer is null when ?drawer is absent", () => {
+      setSearchParams("")
+      const { result } = renderHook(() => useCrewsSelection())
+      expect(result.current.activeDrawer).toBeNull()
+    })
+
+    it("activeDrawer is null when ?drawer is invalid", () => {
+      setSearchParams("drawer=xyz")
+      const { result } = renderHook(() => useCrewsSelection())
+      expect(result.current.activeDrawer).toBeNull()
+    })
+
+    it("reads chat from ?drawer=chat", () => {
+      setSearchParams("drawer=chat")
+      const { result } = renderHook(() => useCrewsSelection())
+      expect(result.current.activeDrawer).toBe("chat")
+    })
+
+    it("openDrawer writes ?drawer=logs", () => {
+      setSearchParams("agent=mia")
+      const { result } = renderHook(() => useCrewsSelection())
+      act(() => {
+        result.current.openDrawer("logs")
+      })
+      const call = mocks.replace.mock.calls[0][0] as string
+      expect(call).toContain("agent=mia")
+      expect(call).toContain("drawer=logs")
+    })
+
+    it("closeDrawer removes ?drawer param", () => {
+      setSearchParams("agent=mia&drawer=settings")
+      const { result } = renderHook(() => useCrewsSelection())
+      act(() => {
+        result.current.closeDrawer()
+      })
+      const call = mocks.replace.mock.calls[0][0] as string
+      expect(call).not.toContain("drawer=")
+      expect(call).toContain("agent=mia")
+    })
+  })
+
+  describe("update (atomic) — tab + drawer", () => {
+    it("sets agent, tab, and drawer in a single call", () => {
+      const { result } = renderHook(() => useCrewsSelection())
+      act(() => {
+        result.current.update({ agent: "mia", tab: "activity", drawer: "chat" })
+      })
+      const call = mocks.replace.mock.calls[0][0] as string
+      expect(call).toContain("agent=mia")
+      expect(call).toContain("tab=activity")
+      expect(call).toContain("drawer=chat")
+    })
+
+    it("distinguishes drawer:null (close) from drawer absent (no-op)", () => {
+      setSearchParams("agent=mia&drawer=chat")
+      const { result } = renderHook(() => useCrewsSelection())
+      act(() => {
+        result.current.update({ agent: "mia" })
+      })
+      const call = mocks.replace.mock.calls[0][0] as string
+      expect(call).toContain("drawer=chat")
+
+      mocks.replace.mockClear()
+      act(() => {
+        result.current.update({ drawer: null })
+      })
+      const call2 = mocks.replace.mock.calls[0][0] as string
+      expect(call2).not.toContain("drawer=")
+    })
+  })
 })

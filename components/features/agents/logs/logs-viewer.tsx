@@ -1,6 +1,6 @@
 "use client"
 
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Download, AlertCircle, ScrollText, Search, Pause, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,7 @@ const LEVELS: LogLevel[] = ["ALL", "INFO", "WARN", "ERROR"]
 
 /** Agent logs viewer with dark terminal style, filtering, and auto-refresh. */
 export function LogsViewer() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -36,7 +36,7 @@ export function LogsViewer() {
   const logContainerRef = useRef<HTMLDivElement>(null)
 
   const fetchLogs = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/logs?workspace_id=${workspaceId}&limit=1000`)
       if (!res.ok) {
@@ -67,19 +67,19 @@ export function LogsViewer() {
 
   useEffect(() => {
     if (wsLoading) return
-    if (!workspaceId) {
+    if (!workspaceId || !agentId) {
       setLoading(false)
       setError("No workspace selected")
       return
     }
     fetchLogs()
-  }, [workspaceId, wsLoading, fetchLogs])
+  }, [workspaceId, agentId, wsLoading, fetchLogs])
 
   useEffect(() => {
-    if (!autoRefresh || !workspaceId) return
+    if (!autoRefresh || !workspaceId || !agentId) return
     const interval = setInterval(fetchLogs, 5000) // Fallback polling, slower
     return () => clearInterval(interval)
-  }, [autoRefresh, workspaceId, fetchLogs])
+  }, [autoRefresh, workspaceId, agentId, fetchLogs])
 
   // Real-time: stream individual log entries when autoRefresh is on
   useRealtimeEvent("agent.log", useCallback((event: RealtimeEvent) => {

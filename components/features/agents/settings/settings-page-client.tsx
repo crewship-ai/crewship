@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { useRouter, useParams, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import {
   Save, Trash2, Loader2, AlertCircle, CheckCircle2,
   User, Hash, Users, FileText, Briefcase, Shield, Cpu,
@@ -65,7 +66,7 @@ const SECTION_TABS: ToolbarTab<Section>[] = [
 ]
 
 export function SettingsPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const router = useRouter()
   const searchParams = useSearchParams()
   const { workspaceId, loading: wsLoading } = useWorkspace()
@@ -132,7 +133,7 @@ export function SettingsPageClient() {
   }
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
 
     let cancelled = false
 
@@ -188,7 +189,7 @@ export function SettingsPageClient() {
 
   const handleSave = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
 
     setSubmitting(true)
     setError(null)
@@ -234,7 +235,7 @@ export function SettingsPageClient() {
   }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, timeoutSeconds, toolProfile, crewId, avatarSeed, avatarStyle])
 
   const handleDelete = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     if (!confirm("Are you sure you want to delete this agent? This action cannot be undone.")) return
 
     setDeleting(true)
