@@ -14,12 +14,16 @@ import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
 import { CrewsCrewDetail } from "@/components/features/crews/crews-crew-detail"
 import { CrewsAgentInbox } from "@/components/features/crews/crews-agent-inbox"
 import { CrewsAgentInline } from "@/components/features/crews/crews-agent-inline"
+import { CrewsContextHeader } from "@/components/features/crews/crews-context-header"
 import { AllCrewsOverview } from "@/components/features/crews/crews-all-crews-overview"
 import { HealthOverview } from "@/components/features/crews/crews-health-overview"
 import { CrewsBottomDrawer } from "@/components/features/crews/crews-bottom-drawer"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
+import { ChatDrawer } from "@/components/features/crews/drawers/chat-drawer"
+import { LogsDrawer } from "@/components/features/crews/drawers/logs-drawer"
+import { SettingsDrawer } from "@/components/features/crews/drawers/settings-drawer"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useCrewsSelection } from "@/hooks/use-crews-selection"
+import { useCrewsSelection, type CrewsTab, type CrewsDrawer } from "@/hooks/use-crews-selection"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
@@ -63,8 +67,6 @@ interface MissionData {
   created_at: string
 }
 
-type TabId = "overview" | "activity" | "health"
-
 export interface CrewsLayoutProps {
   crews: CrewData[]
   agents: AgentData[]
@@ -78,10 +80,10 @@ export interface CrewsLayoutProps {
   onRefresh: () => void
 }
 
-const CREWS_TABS = [
-  { id: "overview" as const, label: "Overview", icon: LayoutGrid },
-  { id: "activity" as const, label: "Activity", icon: Activity },
-  { id: "health" as const, label: "Health", icon: HeartPulse },
+const CREWS_TABS: Array<{ id: CrewsTab; label: string; icon: typeof LayoutGrid }> = [
+  { id: "overview", label: "Overview", icon: LayoutGrid },
+  { id: "activity", label: "Activity", icon: Activity },
+  { id: "health", label: "Health", icon: HeartPulse },
 ]
 
 // CREWS_BOTTOM_TABS lives inside crews-bottom-drawer.tsx now (extracted
@@ -91,10 +93,19 @@ const CREWS_TABS = [
 export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = false, onRefresh: _onRefresh }: CrewsLayoutProps) {
   const isMobile = useIsMobile()
   const router = useRouter()
-  const { selectedAgentSlug, selectedCrewSlug, update, selectAgent } = useCrewsSelection()
+  const {
+    selectedAgentSlug,
+    selectedCrewSlug,
+    activeTab,
+    activeDrawer,
+    update,
+    selectAgent,
+    setTab,
+    openDrawer,
+    closeDrawer,
+  } = useCrewsSelection()
 
   const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [activeTab, setActiveTab] = useState<TabId>("overview")
 
   useEffect(() => {
     if (isMobile) setLeftCollapsed(true)
@@ -184,10 +195,27 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
   }, [agents, crews, selectedAgent, update])
 
   useKeyboardShortcuts([
-    { keys: "Escape", handler: handleAgentClose, enabled: showRightPanel },
+    { keys: "Escape", handler: handleAgentClose, enabled: showRightPanel && activeDrawer === null },
     { keys: "j", handler: () => cycleAgent(1) },
     { keys: "k", handler: () => cycleAgent(-1) },
   ])
+
+  const handleDrawerOpenChange = useCallback(
+    (drawer: CrewsDrawer) => (open: boolean) => {
+      if (!open && activeDrawer === drawer) closeDrawer()
+    },
+    [activeDrawer, closeDrawer],
+  )
+
+  // Settings drawer operates on the current entity (agent first, then crew).
+  // Kept as a single drawer component because the editor surface is
+  // interchangeable at the Sheet level — the body will branch by entity kind
+  // once Phase 3 inlines the real forms.
+  const settingsEntity = selectedAgent
+    ? { kind: "agent" as const, id: selectedAgent.id, name: selectedAgent.name }
+    : selectedCrew
+      ? { kind: "crew" as const, id: selectedCrew.id, name: selectedCrew.name }
+      : null
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
@@ -198,7 +226,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
           {CREWS_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id)}
+              onClick={() => setTab(id)}
               className={cn(
                 "flex items-center gap-1.5 px-3 text-label font-medium border-b-2 transition-all duration-100 relative top-px",
                 activeTab === id
@@ -228,6 +256,15 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
           </Button>
         </div>
       </div>
+
+      {/* Context header — compact identity strip for the selected entity.
+          Renders nothing in the workspace (all-crews) view, so no vertical
+          space is eaten when nothing is selected. */}
+      <CrewsContextHeader
+        agent={selectedAgent}
+        crew={!selectedAgent ? selectedCrew : null}
+        onOpenDrawer={openDrawer}
+      />
 
       {/* Main 3-column layout */}
       <div
@@ -409,6 +446,26 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
         {/* Bottom drawer */}
         <CrewsBottomDrawer crews={crews} agents={agents} isMobile={isMobile} />
       </div>
+
+      {/* Slide-over drawers — Sheets controlled by the URL ?drawer= param so
+          reload/back preserves the open panel. Phase 3 will replace the stub
+          bodies with inline Chat / Logs / Settings content, making the
+          existing full-page routes redundant. */}
+      <ChatDrawer
+        agent={selectedAgent}
+        open={activeDrawer === "chat" && selectedAgent !== null}
+        onOpenChange={handleDrawerOpenChange("chat")}
+      />
+      <LogsDrawer
+        agent={selectedAgent}
+        open={activeDrawer === "logs" && selectedAgent !== null}
+        onOpenChange={handleDrawerOpenChange("logs")}
+      />
+      <SettingsDrawer
+        entity={settingsEntity}
+        open={activeDrawer === "settings" && settingsEntity !== null}
+        onOpenChange={handleDrawerOpenChange("settings")}
+      />
     </div>
   )
 }
