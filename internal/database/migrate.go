@@ -460,6 +460,16 @@ CREATE TABLE IF NOT EXISTS memory_health_snapshots (
 CREATE INDEX IF NOT EXISTS idx_health_snapshots_ws_time ON memory_health_snapshots(workspace_id, computed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_health_snapshots_ws_crew ON memory_health_snapshots(workspace_id, crew_id, computed_at DESC);
 `},
+	// Composite index sized for the /crews Activity-tab SSE stream, which
+	// polls journal_entries every 1s with both workspace_id and crew_id
+	// bound. Individually we already have (workspace_id, ts DESC) and
+	// (crew_id, ts DESC); either alone forces SQLite to filter the other
+	// column after the index scan. The composite lets the planner walk
+	// a single B-tree ordered by ts for a (workspace_id, crew_id) pair
+	// straight out — ~10x fewer row reads per poll on large crews.
+	{version: 56, name: "add_journal_ws_crew_ts_index", sql: `
+CREATE INDEX IF NOT EXISTS idx_journal_ws_crew_ts ON journal_entries(workspace_id, crew_id, ts DESC);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

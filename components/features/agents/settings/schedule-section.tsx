@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { Loader2, Clock, Save, Calendar, MessageSquare, Power, Activity } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -59,8 +59,7 @@ function formatDuration(ms: number): string {
 }
 
 export function ScheduleSection() {
-  const params = useParams<{ agentId: string }>()
-  const agentId = params.agentId
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [loading, setLoading] = useState(true)
@@ -74,7 +73,7 @@ export function ScheduleSection() {
   const [runsLoading, setRunsLoading] = useState(true)
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !agentId) {
       setLoading(false)
       return
     }
@@ -94,7 +93,7 @@ export function ScheduleSection() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !agentId) {
       setRunsLoading(false)
       return
     }
@@ -124,7 +123,7 @@ export function ScheduleSection() {
   }, [cronExpr])
 
   const handleSave = async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     if (cronExpr && !cronValid) {
       toast.error("Invalid cron expression")
       return

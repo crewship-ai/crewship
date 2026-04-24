@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import {
   ChevronDown, ChevronRight, RefreshCw, Loader2, CheckCircle2, XCircle,
   Server, Cpu, Settings2, Wifi,
@@ -33,7 +33,7 @@ function formatTime(ts: string): string {
  * the top of the Logs tab, absorbing the old standalone Debug page.
  */
 export function EngineStatusBanner() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId } = useWorkspace()
   const [data, setData] = useState<DebugData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -42,7 +42,7 @@ export function EngineStatusBanner() {
   const [expanded, setExpanded] = useState(false)
 
   const fetchDebug = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/debug?workspace_id=${workspaceId}`)
       if (!res.ok) return
@@ -55,15 +55,15 @@ export function EngineStatusBanner() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     fetchDebug()
-  }, [workspaceId, fetchDebug])
+  }, [workspaceId, agentId, fetchDebug])
 
   useEffect(() => {
-    if (!autoRefresh || !workspaceId) return
+    if (!autoRefresh || !workspaceId || !agentId) return
     const interval = setInterval(fetchDebug, 3000)
     return () => clearInterval(interval)
-  }, [autoRefresh, workspaceId, fetchDebug])
+  }, [autoRefresh, workspaceId, agentId, fetchDebug])
 
   // Filter realtime refreshes to events actually belonging to this agent —
   // workspace-wide broadcasts would otherwise re-fetch /debug on every run

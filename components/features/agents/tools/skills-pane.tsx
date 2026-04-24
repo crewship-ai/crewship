@@ -1,6 +1,6 @@
 "use client"
 
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { useState, useEffect, useCallback } from "react"
 import {
   Puzzle, AlertCircle, Plus, Trash2, Loader2,
@@ -94,7 +94,7 @@ function SkillIcon({ category }: { category: string | null }) {
 }
 
 export function SkillsPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [skills, setSkills] = useState<AgentSkill[]>([])
   const [loading, setLoading] = useState(true)
@@ -103,7 +103,7 @@ export function SkillsPageClient() {
   const [removingId, setRemovingId] = useState<string | null>(null)
 
   const fetchSkills = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/skills?workspace_id=${workspaceId}`)
       if (!res.ok) {
@@ -126,15 +126,19 @@ export function SkillsPageClient() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !agentId) {
+      // Flush the previous agent's skills so switching agents (or
+      // closing the panel) doesn't leave the old roster visible
+      // while the new fetch resolves.
+      setSkills([])
       setLoading(false)
       return
     }
     fetchSkills()
-  }, [workspaceId, fetchSkills])
+  }, [workspaceId, agentId, fetchSkills])
 
   const handleRemove = async (skillId: string) => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     setRemovingId(skillId)
     try {
       const res = await fetch(
@@ -175,7 +179,7 @@ export function SkillsPageClient() {
             {skills.length} skill{skills.length !== 1 ? "s" : ""} assigned
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} disabled={!workspaceId}>
+        <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} disabled={!workspaceId || !agentId}>
           <Plus className="h-4 w-4 mr-1" />
           Add Skill
         </Button>
@@ -236,7 +240,7 @@ export function SkillsPageClient() {
         </div>
       )}
 
-      {workspaceId && (
+      {workspaceId && agentId && (
         <AddSkillDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
@@ -282,6 +286,10 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
   const [addError, setAddError] = useState<string | null>(null)
 
   const handleAdd = async (skillId: string) => {
+    // Dialog only mounts when both workspaceId and agentId are present,
+    // but guard again here to keep the contract on the handler itself
+    // so a future caller can't POST to /agents//skills.
+    if (!workspaceId || !agentId) return
     setAdding(skillId)
     setAddError(null)
     try {

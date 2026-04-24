@@ -224,10 +224,10 @@ test("logout redirects to /login and re-login works", async ({ page }) => {
 })
 
 // ---------------------------------------------------------------------------
-// 8. Agent inbox right panel renders actions even with zero counts
+// 8. Agent context header renders action buttons after Phase 4 right-panel removal
 // ---------------------------------------------------------------------------
 
-test("agent inbox panel shows all 3 inbox rows + status chips even when all counts are 0", async ({ page }) => {
+test("agent context header exposes Chat / Logs / Settings buttons", async ({ page }) => {
   await login(page)
   const wsId = await getWorkspaceId(page)
   const agents = await page.request.get(`/api/v1/agents?workspace_id=${wsId}`).then((r) => r.json())
@@ -237,16 +237,13 @@ test("agent inbox panel shows all 3 inbox rows + status chips even when all coun
   }
   await page.goto(`/crews?agent=${agents[0].slug}`)
   await page.waitForLoadState("networkidle")
-  await page.waitForTimeout(1500)
-  // All 3 inbox labels present regardless of count
-  // CrewsAgentInbox renders "escalations" (plural) for any count other
-  // than 1, so assert that — the singular "escalation" would miss the
-  // zero-count case this test is covering.
-  for (const label of ["approvals pending", "assignments open", "escalations"]) {
-    await expect(page.getByText(label).first()).toBeVisible({ timeout: 5_000 })
+  await page.waitForTimeout(1000)
+  // Header action buttons replace the old right-panel quick actions.
+  // Alert pills (approvals / escalations / cost) are conditional on
+  // counts > 0 and no longer appear as zero-state labels.
+  for (const label of ["Open chat drawer", "Open logs drawer", "Open settings drawer"]) {
+    await expect(page.getByLabel(label).first()).toBeVisible({ timeout: 5_000 })
   }
-  // Memory chip always present (on/off)
-  await expect(page.getByText("Memory", { exact: false }).first()).toBeVisible()
 })
 
 // ---------------------------------------------------------------------------
