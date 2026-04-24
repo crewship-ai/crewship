@@ -4,12 +4,10 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
-  Bot,
   Key,
   Plug,
   Zap,
   Settings,
-  Network,
   Workflow,
   Activity,
   Shield,
@@ -57,9 +55,7 @@ const navSections = [
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
       { title: "Orchestration", href: "/orchestration", icon: Workflow },
-      { title: "Fleet", href: "/fleet", icon: Ship },
-      { title: "Crews", href: "/crews", icon: Network },
-      { title: "Agents", href: "/agents", icon: Bot },
+      { title: "Crews", href: "/crews", icon: Ship },
     ],
   },
   {

@@ -108,7 +108,7 @@ detail). Example: journal timeline, spend dashboards.
 
 ## 3. Top strip + grid cards
 
-**Used by**: `/eval`, `/fleet` (dashboard variant), single-page admin views.
+**Used by**: `/eval`, `/crews` (dashboard variant), single-page admin views.
 
 ```
 +---------------------------------------------------+

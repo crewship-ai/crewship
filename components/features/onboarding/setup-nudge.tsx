@@ -24,7 +24,7 @@ export function SetupNudge({ crewCount, agentCount, credentialCount }: SetupNudg
       icon: Bot,
       label: "Add an agent",
       description: "Create your first AI virtual employee",
-      href: "/agents/new",
+      href: "/crews/agents/new",
     },
     {
       done: credentialCount > 0,

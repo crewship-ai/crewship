@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { DollarSign, Filter, RefreshCw } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -21,8 +22,17 @@ import { cn } from "@/lib/utils"
  * `docs/design/patterns.md` #2.
  */
 export default function PaymasterPage() {
+  const searchParams = useSearchParams()
   const [range, setRange] = useState<PaymasterRange>("7d")
-  const [selectedCrewId, setSelectedCrewId] = useState<string | null>(null)
+  const [selectedCrewId, setSelectedCrewId] = useState<string | null>(
+    searchParams.get("crew") ?? null,
+  )
+  // Honour ?crew=<id> deep-link from the Crews Cost stat card. Mirror the
+  // query param directly so removing ?crew= clears the selection and a
+  // manual Clear inside the UI isn't clobbered by a stale dependency.
+  useEffect(() => {
+    setSelectedCrewId(searchParams.get("crew") ?? null)
+  }, [searchParams])
   // reloadKey bumps on Retry to force the hooks to refetch without
   // flipping range to a different value and back. setRange(range) is a
   // no-op because React bails on identical string state.
