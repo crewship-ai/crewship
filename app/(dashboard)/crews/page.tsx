@@ -146,12 +146,18 @@ export default function CrewsPage() {
     )
   }
 
+  // CrewsLayout only mounts once the initial fetch has resolved (guarded by
+  // the `loading || wsLoading` skeleton above), so we can promise it the
+  // data is loaded. This is what drives its stale-slug watcher — using the
+  // array lengths as a loaded proxy would mis-treat legitimately empty
+  // workspaces as "still loading" and silently pin invalid ?agent= slugs.
   return (
     <CrewsLayout
       crews={crews}
       agents={agents}
       missions={missions}
       workspaceId={workspaceId}
+      loaded
       onRefresh={() => fetchData()}
     />
   )

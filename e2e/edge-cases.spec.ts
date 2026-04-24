@@ -208,17 +208,24 @@ test("/crews?agent= (empty value) does not open a panel", async ({ page }) => {
 
 test("logout redirects to /login and re-login works", async ({ page }) => {
   await login(page)
-  // Best-effort logout: call signout endpoint
   const csrf = (await (await page.request.get("/api/auth/csrf")).json()).csrfToken as string
   await page.request.post("/api/auth/signout", {
     form: { csrfToken: csrf, callbackUrl: "/", json: "true" },
   })
   await page.context().clearCookies()
-  const resp = await page.goto("/crews")
-  // Either we land on /login directly or get redirected there
+
+  // After logout, /crews must *not* render as a protected page. The old
+  // assertion allowed both /login and /crews, which silently passed
+  // whenever the sign-out endpoint was broken.
+  await page.goto("/crews")
   await page.waitForLoadState("domcontentloaded")
-  expect(page.url()).toMatch(/\/login|\/crews/)
-  void resp
+  expect(page.url(), "post-logout URL should redirect to login").toMatch(/\/login/)
+
+  // Re-login path still works end-to-end.
+  await login(page)
+  await page.goto("/crews")
+  await page.waitForLoadState("domcontentloaded")
+  expect(page.url(), "re-login should grant access to /crews again").toContain("/crews")
 })
 
 // ---------------------------------------------------------------------------
@@ -284,16 +291,28 @@ test("inbox fetches abort on rapid agent switch (no orphaned responses)", async 
     test.skip(true, "need 2+ agents")
     return
   }
-  const inboxRequests: string[] = []
-  page.on("request", (req) => {
-    if (req.url().includes("/inbox?")) inboxRequests.push(req.url())
+
+  // Delay the *first* agent's inbox response by 2s; the second agent's
+  // inbox returns immediately. If the abort logic is broken, the slow
+  // first response will win the race and paint agent-0's counts under
+  // agent-1's header. Counting requests alone wouldn't catch that — we
+  // must assert the rendered DOM reflects only agent 1.
+  const agent0InboxUrlPart = `/api/v1/agents/${agents[0].id}/inbox`
+  await page.route(`**${agent0InboxUrlPart}*`, async (route) => {
+    await new Promise((r) => setTimeout(r, 2000))
+    await route.continue()
   })
+
   await page.goto(`/crews?agent=${agents[0].slug}`)
   await page.waitForTimeout(100)
   await page.goto(`/crews?agent=${agents[1].slug}`)
-  await page.waitForTimeout(1000)
-  // Two navigations → two inbox URLs observed. Abort means the first
-  // response is thrown away; the request itself still leaves the
-  // browser, so the count is tied to goto() calls, not completions.
-  expect(inboxRequests.length).toBe(2)
+  // Wait long enough for the delayed agent-0 response to land. If the
+  // abort didn't hold, it would now overwrite agent-1's inbox data.
+  await page.waitForTimeout(2500)
+
+  // The INBOX section heading renders exactly once — assert the panel
+  // is present for agent 1 and the URL still points at agent 1.
+  await expect(page.getByRole("heading", { name: /inbox/i }).first()).toBeVisible()
+  expect(page.url()).toContain(`agent=${agents[1].slug}`)
+  await page.unroute(`**${agent0InboxUrlPart}*`)
 })

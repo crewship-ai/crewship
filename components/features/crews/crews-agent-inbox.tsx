@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { motion } from "motion/react"
 import {
@@ -11,6 +12,13 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/time"
 import { useAgentInbox } from "@/hooks/use-agent-inbox"
+import { useWorkspace } from "@/hooks/use-workspace"
+
+interface AgentScheduleInfo {
+  schedule_next_run: string | null
+  memory_enabled: boolean
+  lead_mode: string | null
+}
 
 interface AgentBrief {
   id: string
@@ -22,11 +30,12 @@ interface AgentBrief {
 
 export interface CrewsAgentInboxProps {
   agent: AgentBrief
-  /** `schedule_next_run` ISO timestamp — echoed here as a countdown chip. */
+  /** Optional — parent can pass pre-fetched detail to avoid an extra
+   *  request. When omitted the component fetches `/api/v1/agents/{id}`
+   *  itself so Schedule / Memory / Lead chips render correctly rather
+   *  than showing stale defaults. */
   scheduleNextRun?: string | null
-  /** `memory_enabled` flag from agent detail — defaults false for display. */
   memoryEnabled?: boolean
-  /** `lead_mode` from agent detail; shown only when agent_role=LEAD. */
   leadMode?: string | null
   onClose: () => void
 }
@@ -41,10 +50,48 @@ export interface CrewsAgentInboxProps {
  */
 export function CrewsAgentInbox({
   agent,
-  scheduleNextRun, memoryEnabled, leadMode,
+  scheduleNextRun: scheduleNextRunProp,
+  memoryEnabled: memoryEnabledProp,
+  leadMode: leadModeProp,
   onClose,
 }: CrewsAgentInboxProps) {
   const { inbox, loading } = useAgentInbox(agent.id)
+  const { workspaceId } = useWorkspace()
+  const [fetchedDetail, setFetchedDetail] = useState<AgentScheduleInfo | null>(null)
+
+  // Self-fetch detail unless the parent has supplied all three fields.
+  // Without this the chips silently default to "passive lead / memory off /
+  // no schedule" for every agent — which is wrong for most of them.
+  const needsFetch =
+    scheduleNextRunProp === undefined ||
+    memoryEnabledProp === undefined ||
+    leadModeProp === undefined
+  useEffect(() => {
+    if (!needsFetch || !workspaceId) return
+    setFetchedDetail(null)
+    const controller = new AbortController()
+    fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, {
+      signal: controller.signal,
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: AgentScheduleInfo | null) => {
+        if (controller.signal.aborted || !d) return
+        setFetchedDetail({
+          schedule_next_run: d.schedule_next_run ?? null,
+          memory_enabled: Boolean(d.memory_enabled),
+          lead_mode: d.lead_mode ?? null,
+        })
+      })
+      .catch((err) => {
+        if ((err as { name?: string })?.name === "AbortError") return
+      })
+    return () => controller.abort()
+  }, [agent.id, workspaceId, needsFetch])
+
+  const scheduleNextRun = scheduleNextRunProp ?? fetchedDetail?.schedule_next_run ?? null
+  const memoryEnabled = memoryEnabledProp ?? fetchedDetail?.memory_enabled ?? false
+  const leadMode = leadModeProp ?? fetchedDetail?.lead_mode ?? null
+
   const agentPath = `/crews/agents/${agent.id}`
   const scheduleCountdown = scheduleNextRun
     ? formatCountdown(new Date(scheduleNextRun).getTime() - Date.now())

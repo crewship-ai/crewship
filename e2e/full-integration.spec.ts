@@ -15,6 +15,11 @@ import { test, expect, request as plwRequest } from "@playwright/test"
 
 const E2E_EMAIL = process.env.E2E_EMAIL
 const E2E_PASSWORD = process.env.E2E_PASSWORD
+// The multi-instance convention is `3010+N` for instance N, but the
+// default Crewship dev shell (`./dev.sh start`) and the documented dev
+// VM (see CLAUDE.md → "Frontend: http://192.168.1.201:3001") both run
+// on 3001. Stay aligned with what actually listens by default; override
+// via PLAYWRIGHT_BASE_URL when running against a non-default instance.
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3001"
 
 test.describe.configure({ mode: "serial" })
@@ -33,7 +38,22 @@ test.beforeAll(async () => {
     form: { csrfToken, email: E2E_EMAIL!, password: E2E_PASSWORD!, callbackUrl: "/", json: "true" },
   })
   if (!loginRes.ok()) throw new Error(`login ${loginRes.status()}`)
-  cachedCookies = (await ctx.storageState()).cookies
+  // NextAuth's credentials callback returns HTTP 200 even on invalid
+  // credentials — the real signal is either (a) an `error` key in the
+  // JSON body or (b) the absence of a session cookie. Check both so a
+  // bad password doesn't silently produce an "authenticated" suite.
+  const body = await loginRes.json().catch(() => ({}))
+  if (body && typeof body.error === "string") {
+    throw new Error(`login failed: ${body.error}`)
+  }
+  const storage = await ctx.storageState()
+  const hasSession = storage.cookies.some((c) =>
+    c.name.includes("authjs.session-token") || c.name.includes("next-auth.session-token"),
+  )
+  if (!hasSession) {
+    throw new Error("login failed: no session cookie was set")
+  }
+  cachedCookies = storage.cookies
   await ctx.dispose()
 })
 
@@ -53,7 +73,13 @@ async function withWorkspace(page: import("@playwright/test").Page): Promise<str
     const d = await r.json()
     return Array.isArray(d) ? d[0]?.id : d.id
   })
-  return wsId as string
+  if (!wsId || typeof wsId !== "string") {
+    throw new Error(
+      "withWorkspace: no workspace_id returned from /api/v1/workspaces — " +
+      "dev seed missing or session cookie rejected by the backend",
+    )
+  }
+  return wsId
 }
 
 // ---------------------------------------------------------------------------
@@ -333,14 +359,20 @@ test.describe("G. No console errors on critical pages", () => {
   ]
 
   for (const path of criticalPages) {
-    test(`${path} has no pageerrors`, async ({ page }) => {
+    test(`${path} has no pageerrors or console errors`, async ({ page }) => {
       await login(page)
       const errors: string[] = []
-      page.on("pageerror", (e) => errors.push(e.message))
+      // pageerror catches uncaught exceptions; console(type=error) catches
+      // explicit console.error() calls — the suite title promises "no
+      // console errors", so both channels must stay clean.
+      page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`))
+      page.on("console", (msg) => {
+        if (msg.type() === "error") errors.push(`console.error: ${msg.text()}`)
+      })
       await page.goto(path)
       await page.waitForLoadState("networkidle")
       await page.waitForTimeout(500)
-      expect(errors, `${path} pageerrors`).toHaveLength(0)
+      expect(errors, `${path} errors`).toHaveLength(0)
     })
   }
 })

@@ -104,12 +104,16 @@ export default function AgentsPage() {
   // Real-time: debounced refetch on agent events (prevents burst of 4 concurrent fetches)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedRefetch = useCallback(() => {
+    // Skip while the initial load is still running: otherwise a silent
+    // refetch here would abort the visible request and never clear the
+    // `loading` flag, leaving the page stuck in skeleton mode.
+    if (loading) return
     if (debounceRef.current !== null) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       debounceRef.current = null
       void fetchAgents(true)
     }, 150)
-  }, [fetchAgents])
+  }, [fetchAgents, loading])
 
   // Clear any pending timer on unmount / workspace change so a late
   // timeout cannot overwrite state with data from a previous workspace.
@@ -179,12 +183,14 @@ export default function AgentsPage() {
           }
         >
           {agents.length === 0 ? (
-            <Button className="mt-4" asChild>
-              <Link href="/crews/agents/new">
-                <Plus className="mr-2 h-4 w-4" />
-                Create Agent
-              </Link>
-            </Button>
+            abilities.can("create", "Agent") ? (
+              <Button className="mt-4" asChild>
+                <Link href="/crews/agents/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create Agent
+                </Link>
+              </Button>
+            ) : null
           ) : (
             <Button className="mt-4" variant="outline" onClick={() => setActiveFilter("All")}>
               Clear filter

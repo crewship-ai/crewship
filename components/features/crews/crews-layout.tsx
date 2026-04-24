@@ -70,6 +70,11 @@ export interface CrewsLayoutProps {
   agents: AgentData[]
   missions: MissionData[]
   workspaceId: string
+  /** Explicit load signal from the parent fetch. The stale-slug watcher
+   *  needs this because `agents.length > 0` is not a reliable "loaded"
+   *  flag — a legitimately empty workspace would otherwise never get
+   *  its stale `?agent=` / `?crew=` param cleared. */
+  loaded?: boolean
   onRefresh: () => void
 }
 
@@ -83,7 +88,7 @@ const CREWS_TABS = [
 // during the drawer component split). The top-level layout only renders
 // <CrewsBottomDrawer> and does not need the tab list here.
 
-export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _onRefresh }: CrewsLayoutProps) {
+export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = false, onRefresh: _onRefresh }: CrewsLayoutProps) {
   const isMobile = useIsMobile()
   const router = useRouter()
   const { selectedAgentSlug, selectedCrewSlug, update, selectAgent } = useCrewsSelection()
@@ -97,17 +102,19 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _
 
   const staleSlugNotified = useRef<string | null>(null)
   useEffect(() => {
-    // Don't clear URL params until entity lists have actually loaded,
-    // otherwise deep-links like /crews?agent=filip get wiped on first paint
-    // before agents[] has arrived from the parent fetch.
-    if (agents.length === 0 && crews.length === 0) return
-    if (selectedAgentSlug && agents.length > 0 && !agents.find((a) => a.slug === selectedAgentSlug)) {
+    // Wait for the parent fetch to actually finish before judging a slug
+    // as stale. `agents.length > 0` / `crews.length > 0` would otherwise
+    // treat a legitimately empty workspace as "still loading" forever,
+    // and would also flip deep-links like `/crews?agent=filip` to null
+    // on first paint before the fetch had a chance to populate.
+    if (!loaded) return
+    if (selectedAgentSlug && !agents.find((a) => a.slug === selectedAgentSlug)) {
       if (staleSlugNotified.current !== selectedAgentSlug) {
         staleSlugNotified.current = selectedAgentSlug
         toast.warning(`Agent "${selectedAgentSlug}" not found`)
         update({ agent: null })
       }
-    } else if (selectedCrewSlug && crews.length > 0 && !crews.find((c) => c.slug === selectedCrewSlug)) {
+    } else if (selectedCrewSlug && !crews.find((c) => c.slug === selectedCrewSlug)) {
       if (staleSlugNotified.current !== selectedCrewSlug) {
         staleSlugNotified.current = selectedCrewSlug
         toast.warning(`Crew "${selectedCrewSlug}" not found`)
@@ -116,7 +123,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, onRefresh: _
     } else {
       staleSlugNotified.current = null
     }
-  }, [selectedAgentSlug, selectedCrewSlug, agents, crews, update])
+  }, [loaded, selectedAgentSlug, selectedCrewSlug, agents, crews, update])
 
   const selectedCrew = useMemo(
     () => (selectedCrewSlug ? crews.find((c) => c.slug === selectedCrewSlug) || null : null),

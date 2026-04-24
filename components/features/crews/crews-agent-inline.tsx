@@ -114,6 +114,13 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
 
   useEffect(() => {
     if (!workspaceId) return
+    // Reset pane state immediately on agent switch — the new header
+    // already rendered with the fresh agent prop, so leaving sessions /
+    // runs / detail from the previous agent visible while fetches are
+    // in flight is a confusing half-second of stale data.
+    setSessions([])
+    setRuns([])
+    setDetail(null)
     const controller = new AbortController()
     // Swallow fetch-network failures but re-throw AbortError so the outer
     // Promise.all rejects on agent switch — otherwise stale empty arrays
