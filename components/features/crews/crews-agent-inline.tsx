@@ -82,6 +82,9 @@ function mapAgentStatus(status: string | undefined): string {
   }
 }
 
+/** Preview fetches cap at this many sessions/runs for the center pane. */
+const RUNS_PREVIEW_LIMIT = 3
+
 const RUN_STATUS_COLOR: Record<string, string> = {
   COMPLETED: "text-emerald-400",
   completed: "text-emerald-400",
@@ -130,10 +133,10 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
       return fallback
     }
     Promise.all([
-      fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=3`, { signal: controller.signal })
+      fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=${RUNS_PREVIEW_LIMIT}`, { signal: controller.signal })
         .then((r) => r.ok ? r.json() : [])
         .catch(swallowNonAbort<SessionRow[]>([])),
-      fetch(`/api/v1/agents/${agent.id}/runs?workspace_id=${workspaceId}&limit=3`, { signal: controller.signal })
+      fetch(`/api/v1/agents/${agent.id}/runs?workspace_id=${workspaceId}&limit=${RUNS_PREVIEW_LIMIT}`, { signal: controller.signal })
         .then((r) => r.ok ? r.json() : [])
         .catch(swallowNonAbort<RunRow[]>([])),
       fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, { signal: controller.signal })
@@ -285,7 +288,21 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
         {/* Stats strip — 2 cols on mobile, 6 on desktop */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
           <StatMiniCard href={`${agentPath}/sessions`} icon={MessageSquare} label="Sessions" value={sessionCount} />
-          <StatMiniCard href={`${agentPath}/runs`} icon={Zap} label="Recent runs" value={runs.length > 0 ? runs.length : "—"} />
+          <StatMiniCard
+            href={`${agentPath}/runs`}
+            icon={Zap}
+            label="Recent runs"
+            // Preview fetch caps at limit=3. Hitting the cap means there
+            // are at least 3 — surface that as `3+` so a user with 100
+            // runs doesn't see a misleading flat 3.
+            value={
+              runs.length === 0
+                ? "—"
+                : runs.length >= RUNS_PREVIEW_LIMIT
+                  ? `${RUNS_PREVIEW_LIMIT}+`
+                  : runs.length
+            }
+          />
           <StatMiniCard
             href={agent.crew_id ? `/paymaster?crew=${agent.crew_id}` : "/paymaster"}
             icon={DollarSign}
@@ -382,9 +399,21 @@ export function CrewsAgentInline({ agent, workspaceId }: CrewsAgentInlineProps) 
                 ) : (
                   <ul className="space-y-1.5">
                     {runs.slice(0, 3).map((r) => {
-                      const dur = r.duration_ms ?? (r.started_at && r.ended_at
-                        ? new Date(r.ended_at).getTime() - new Date(r.started_at).getTime()
-                        : null)
+                      // Guard duration math against malformed timestamps —
+                      // partial writes or legacy rows can yield NaN, which
+                      // would render as "NaNms". Prefer a finite
+                      // duration_ms, fall back to derived delta only when
+                      // both bounds parse cleanly.
+                      let dur: number | null = null
+                      if (typeof r.duration_ms === "number" && Number.isFinite(r.duration_ms)) {
+                        dur = r.duration_ms
+                      } else if (r.started_at && r.ended_at) {
+                        const startTs = new Date(r.started_at).getTime()
+                        const endTs = new Date(r.ended_at).getTime()
+                        if (Number.isFinite(startTs) && Number.isFinite(endTs)) {
+                          dur = endTs - startTs
+                        }
+                      }
                       return (
                         <li key={r.id}>
                           <Link

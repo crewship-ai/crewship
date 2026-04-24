@@ -97,6 +97,11 @@ export default function AgentsPage() {
   useEffect(() => {
     if (!workspaceId) {
       setAgents([])
+      // Clear any stale banner for consistency with the fetchAgents
+      // reset path — signing out or switching to an empty workspace
+      // shouldn't leave a "Failed to load agents" notice from the
+      // previous workspace.
+      setError(null)
       if (!wsLoading) setLoading(false)
       return
     }
