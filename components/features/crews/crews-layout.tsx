@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
 import { CrewsCrewDetail } from "@/components/features/crews/crews-crew-detail"
-import { CrewsAgentInbox } from "@/components/features/crews/crews-agent-inbox"
 import { CrewsAgentInline } from "@/components/features/crews/crews-agent-inline"
 import { CrewsContextHeader } from "@/components/features/crews/crews-context-header"
 import { AllCrewsOverview } from "@/components/features/crews/crews-all-crews-overview"
@@ -180,7 +179,10 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
     selectAgent(null)
   }, [selectAgent])
 
-  const showRightPanel = selectedAgent !== null
+  // Mobile still needs a full-screen agent panel because the explorer
+  // and context header share the same narrow viewport. Desktop renders
+  // the agent inline in the center column.
+  const showMobileAgentPanel = isMobile && selectedAgent !== null
 
   const cycleAgent = useCallback((delta: 1 | -1) => {
     if (agents.length === 0) return
@@ -195,7 +197,7 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
   }, [agents, crews, selectedAgent, update])
 
   useKeyboardShortcuts([
-    { keys: "Escape", handler: handleAgentClose, enabled: showRightPanel && activeDrawer === null },
+    { keys: "Escape", handler: handleAgentClose, enabled: selectedAgent !== null && activeDrawer === null },
     { keys: "j", handler: () => cycleAgent(1) },
     { keys: "k", handler: () => cycleAgent(-1) },
   ])
@@ -266,13 +268,17 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
         onOpenDrawer={openDrawer}
       />
 
-      {/* Main 3-column layout */}
+      {/* Main 2-column layout (explorer + canvas). The right-hand Inbox
+          panel retired in Phase 4 — its approvals/escalations counters
+          moved to context-header alert pills, peer messages relocate to
+          the Activity tab (Phase 5), and Lead/Memory/Schedule chips
+          move to the Health tab (Phase 6). */}
       <div
         className="flex-1 min-h-0 grid transition-all duration-200 relative"
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "280px"} 1fr ${showRightPanel ? "380px" : "0px"}`,
+            : `${leftCollapsed ? "48px" : "280px"} 1fr`,
           gridTemplateRows: "1fr auto",
         }}
       >
@@ -397,10 +403,14 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
           </AnimatePresence>
         </div>
 
-        {/* Right panel */}
-        {isMobile ? (
+        {/* Mobile full-screen agent panel. The desktop grid renders the
+            agent inline in the center column, but on a narrow viewport
+            the explorer overlay + header strip eat the entire width, so
+            selecting an agent promotes the center into a dedicated
+            slide-over panel with its own back button. */}
+        {isMobile && (
           <AnimatePresence>
-            {showRightPanel && selectedAgent && (
+            {showMobileAgentPanel && selectedAgent && (
               <motion.div
                 className="fixed inset-0 z-40 bg-background flex flex-col"
                 initial={{ x: "100%" }}
@@ -420,27 +430,10 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <CrewsAgentInline agent={selectedAgent} workspaceId={workspaceId} />
-                  {/* Inbox rendered as a stacked section on mobile — on desktop
-                      it's the right-panel. Without this, mobile users never see
-                      pending approvals / assignments / escalations at all. */}
-                  <div className="border-t border-border">
-                    <CrewsAgentInbox agent={selectedAgent} onClose={handleAgentClose} />
-                  </div>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
-        ) : (
-          <div className={cn(
-            "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
-            showRightPanel ? "w-[380px]" : "w-0",
-          )}>
-            <AnimatePresence mode="wait">
-              {showRightPanel && selectedAgent && (
-                <CrewsAgentInbox agent={selectedAgent} onClose={handleAgentClose} />
-              )}
-            </AnimatePresence>
-          </div>
         )}
 
         {/* Bottom drawer */}
