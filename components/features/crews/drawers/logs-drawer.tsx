@@ -5,11 +5,12 @@ import { ExternalLink, ScrollText } from "lucide-react"
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { LogsPageClient } from "@/components/features/agents/logs/logs-page-client"
+import { AgentDetailProvider } from "@/hooks/use-agent-detail"
 
 interface AgentBrief {
   id: string
@@ -22,32 +23,47 @@ export interface LogsDrawerProps {
   onOpenChange: (open: boolean) => void
 }
 
+/**
+ * LogsPageClient reads agentId via useAgentId(), which falls back to
+ * the AgentDetailProvider in scope. The wrapper provides that scope so
+ * LogsViewer doesn't need the /crews/agents/[agentId]/logs route tree
+ * to function.
+ */
 export function LogsDrawer({ agent, open, onOpenChange }: LogsDrawerProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md flex flex-col">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-3xl p-0 flex flex-col"
+        showCloseButton={false}
+      >
+        <SheetHeader className="px-4 py-3 border-b border-border shrink-0">
+          <SheetTitle className="flex items-center gap-2 text-label">
             <ScrollText className="h-4 w-4" />
             Logs {agent ? `— ${agent.name}` : ""}
           </SheetTitle>
-          <SheetDescription>
-            Live log tail — streaming journal entries inline lands in Phase 3.
-          </SheetDescription>
         </SheetHeader>
-        <div className="flex-1 flex items-center justify-center p-6 text-center text-micro text-muted-foreground">
-          <div className="space-y-3">
-            <p>Inline log tail is landing in Phase 3.</p>
-            {agent && (
-              <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                <Link href={`/crews/agents/${agent.id}/logs`}>
-                  Open full logs page
-                  <ExternalLink className="h-3 w-3" />
-                </Link>
-              </Button>
-            )}
-          </div>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {agent ? (
+            <AgentDetailProvider agentId={agent.id}>
+              <LogsPageClient />
+            </AgentDetailProvider>
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-6 text-micro text-muted-foreground">
+              Select an agent to view logs.
+            </div>
+          )}
         </div>
+        {agent && (
+          <div className="border-t border-border px-4 py-2 shrink-0 flex items-center justify-end">
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-micro" asChild>
+              <Link href={`/crews/agents/${agent.id}/logs`}>
+                Open full logs page
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            </Button>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   )

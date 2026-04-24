@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import {
   ChevronDown, ChevronRight, RefreshCw, Loader2, CheckCircle2, XCircle,
   Server, Cpu, Settings2, Wifi,
@@ -33,7 +33,7 @@ function formatTime(ts: string): string {
  * the top of the Logs tab, absorbing the old standalone Debug page.
  */
 export function EngineStatusBanner() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId } = useWorkspace()
   const [data, setData] = useState<DebugData | null>(null)
   const [loading, setLoading] = useState(true)

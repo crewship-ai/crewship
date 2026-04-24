@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { Loader2, Clock, Save, Calendar, MessageSquare, Power, Activity } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -59,8 +59,7 @@ function formatDuration(ms: number): string {
 }
 
 export function ScheduleSection() {
-  const params = useParams<{ agentId: string }>()
-  const agentId = params.agentId
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [loading, setLoading] = useState(true)

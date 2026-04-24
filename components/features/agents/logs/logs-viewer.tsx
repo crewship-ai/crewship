@@ -1,6 +1,6 @@
 "use client"
 
-import { useParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Download, AlertCircle, ScrollText, Search, Pause, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -24,7 +24,7 @@ const LEVELS: LogLevel[] = ["ALL", "INFO", "WARN", "ERROR"]
 
 /** Agent logs viewer with dark terminal style, filtering, and auto-refresh. */
 export function LogsViewer() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)

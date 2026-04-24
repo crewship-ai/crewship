@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { useRouter, useParams, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useAgentId } from "@/hooks/use-agent-id"
 import {
   Save, Trash2, Loader2, AlertCircle, CheckCircle2,
   User, Hash, Users, FileText, Briefcase, Shield, Cpu,
@@ -65,7 +66,7 @@ const SECTION_TABS: ToolbarTab<Section>[] = [
 ]
 
 export function SettingsPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+  const agentId = useAgentId()
   const router = useRouter()
   const searchParams = useSearchParams()
   const { workspaceId, loading: wsLoading } = useWorkspace()

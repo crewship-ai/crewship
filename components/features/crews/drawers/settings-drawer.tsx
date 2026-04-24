@@ -5,11 +5,12 @@ import { ExternalLink, Settings as SettingsIcon } from "lucide-react"
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { SettingsPageClient } from "@/app/(dashboard)/crews/agents/[agentId]/settings/settings-client"
+import { AgentDetailProvider } from "@/hooks/use-agent-detail"
 
 interface EntityBrief {
   kind: "agent" | "crew"
@@ -24,10 +25,10 @@ export interface SettingsDrawerProps {
 }
 
 /**
- * Drawer for editing either an agent or a crew. The body is a stub in
- * Phase 1; Phase 3 will inline the existing settings forms (agent
- * settings-client, crew config tabs) directly into the Sheet so the "Open
- * full" page becomes redundant.
+ * Agent settings inline. The crew variant currently links to the full
+ * crew page — embedding the 600-line config form here would crowd the
+ * Sheet and the crew config is edited rarely enough that a link is
+ * the right ratio. Refactor later if product data says otherwise.
  */
 export function SettingsDrawer({ entity, open, onOpenChange }: SettingsDrawerProps) {
   const fullPath = entity
@@ -38,29 +39,52 @@ export function SettingsDrawer({ entity, open, onOpenChange }: SettingsDrawerPro
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-md flex flex-col">
-        <SheetHeader>
-          <SheetTitle className="flex items-center gap-2">
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-2xl p-0 flex flex-col"
+        showCloseButton={false}
+      >
+        <SheetHeader className="px-4 py-3 border-b border-border shrink-0">
+          <SheetTitle className="flex items-center gap-2 text-label">
             <SettingsIcon className="h-4 w-4" />
             Settings {entity ? `— ${entity.name}` : ""}
           </SheetTitle>
-          <SheetDescription>
-            Inline settings form lands in Phase 3.
-          </SheetDescription>
         </SheetHeader>
-        <div className="flex-1 flex items-center justify-center p-6 text-center text-micro text-muted-foreground">
-          <div className="space-y-3">
-            <p>Inline settings editing is landing in Phase 3.</p>
-            {fullPath && (
-              <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                <Link href={fullPath}>
-                  Open full settings page
-                  <ExternalLink className="h-3 w-3" />
-                </Link>
-              </Button>
-            )}
-          </div>
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {entity?.kind === "agent" ? (
+            <AgentDetailProvider agentId={entity.id}>
+              <SettingsPageClient />
+            </AgentDetailProvider>
+          ) : entity?.kind === "crew" ? (
+            <div className="flex items-center justify-center h-full p-6 text-center text-micro text-muted-foreground">
+              <div className="space-y-3">
+                <p>Crew configuration lives on the full crew page for now.</p>
+                {fullPath && (
+                  <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                    <Link href={fullPath}>
+                      Open crew page
+                      <ExternalLink className="h-3 w-3" />
+                    </Link>
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full p-6 text-micro text-muted-foreground">
+              Select an entity to edit.
+            </div>
+          )}
         </div>
+        {entity?.kind === "agent" && fullPath && (
+          <div className="border-t border-border px-4 py-2 shrink-0 flex items-center justify-end">
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-micro" asChild>
+              <Link href={fullPath}>
+                Open full settings page
+                <ExternalLink className="h-3 w-3" />
+              </Link>
+            </Button>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   )
