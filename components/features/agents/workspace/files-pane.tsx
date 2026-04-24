@@ -252,6 +252,10 @@ export function FilesPageClient() {
   useEffect(() => {
     if (wsLoading) return
     if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
+    // Without a resolved agentId the legacy pathname would be
+    // `/api/v1/agents//files`, which 404s. Short-circuit while the
+    // AgentDetailProvider is still resolving.
+    if (!agentId) { setLoading(false); return }
     fileAbortRef.current?.abort()
     setTree([])
     setSelectedPath(null)
@@ -321,7 +325,7 @@ export function FilesPageClient() {
   }, [agentId, workspaceId])
 
   const fetchSubdir = useCallback(async (dirPath: string) => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     setLoadingDirs((prev) => new Set(prev).add(dirPath))
     try {
       const relPath = dirPath.startsWith(basePrefix) ? dirPath.slice(basePrefix.length) : dirPath
@@ -357,7 +361,7 @@ export function FilesPageClient() {
   }, [agentId, workspaceId, tree])
 
   const handleSave = useCallback(async (content: string) => {
-    if (!selectedPath || !workspaceId) return
+    if (!selectedPath || !workspaceId || !agentId) return
     setSaving(true)
     try {
       const res = await fetch(

@@ -327,9 +327,11 @@ function MemoryHealthCard({ crewId, workspaceId }: { crewId: string; workspaceId
             <span
               className={cn(
                 "text-micro font-semibold tabular-nums px-2 py-0.5 rounded-full",
-                health.overall >= 0.75 && "bg-emerald-500/15 text-emerald-400",
-                health.overall >= 0.5 && health.overall < 0.75 && "bg-amber-500/15 text-amber-400",
-                health.overall < 0.5 && "bg-red-500/15 text-red-400",
+                health.overall >= 0.75
+                  ? "bg-emerald-500/15 text-emerald-400"
+                  : health.overall >= 0.5
+                    ? "bg-amber-500/15 text-amber-400"
+                    : "bg-red-500/15 text-red-400",
               )}
             >
               {Math.round(health.overall * 100)}%
@@ -377,9 +379,11 @@ function MemoryBar({ label, value }: { label: string; value: number }) {
         <div
           className={cn(
             "h-full rounded-full transition-all",
-            pct >= 0.75 && "bg-emerald-400",
-            pct >= 0.5 && pct < 0.75 && "bg-amber-400",
-            pct < 0.5 && "bg-red-400",
+            pct >= 0.75
+              ? "bg-emerald-400"
+              : pct >= 0.5
+                ? "bg-amber-400"
+                : "bg-red-400",
           )}
           // Dynamic width — Tailwind can't express runtime percentages.
           style={{ width: `${Math.round(pct * 100)}%` }}

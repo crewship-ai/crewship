@@ -73,7 +73,7 @@ export function ScheduleSection() {
   const [runsLoading, setRunsLoading] = useState(true)
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !agentId) {
       setLoading(false)
       return
     }
@@ -93,7 +93,7 @@ export function ScheduleSection() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !agentId) {
       setRunsLoading(false)
       return
     }
@@ -123,7 +123,7 @@ export function ScheduleSection() {
   }, [cronExpr])
 
   const handleSave = async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     if (cronExpr && !cronValid) {
       toast.error("Invalid cron expression")
       return

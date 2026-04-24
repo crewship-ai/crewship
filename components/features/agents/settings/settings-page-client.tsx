@@ -133,7 +133,7 @@ export function SettingsPageClient() {
   }
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
 
     let cancelled = false
 
@@ -189,7 +189,7 @@ export function SettingsPageClient() {
 
   const handleSave = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
 
     setSubmitting(true)
     setError(null)
@@ -235,7 +235,7 @@ export function SettingsPageClient() {
   }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, timeoutSeconds, toolProfile, crewId, avatarSeed, avatarStyle])
 
   const handleDelete = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     if (!confirm("Are you sure you want to delete this agent? This action cannot be undone.")) return
 
     setDeleting(true)

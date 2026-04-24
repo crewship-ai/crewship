@@ -74,7 +74,7 @@ export function MCPPageClient() {
   // -- Fetch agent (and crew if applicable) ---------------------------------
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     let cancelled = false
 
     async function fetchData() {
@@ -125,7 +125,7 @@ export function MCPPageClient() {
   // -- Save handler ---------------------------------------------------------
 
   const handleSave = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     setSaving(true)
 
     try {

@@ -39,7 +39,7 @@ export function CredentialsPageClient() {
   const [removingId, setRemovingId] = useState<string | null>(null)
 
   const fetchCredentials = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
       if (!res.ok) {
@@ -56,15 +56,15 @@ export function CredentialsPageClient() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     fetchCredentials()
-  }, [workspaceId, fetchCredentials])
+  }, [workspaceId, agentId, fetchCredentials])
 
   // Real-time: refresh when agent status changes (auto-assign may add credentials)
   useRealtimeEvent("agent.status", useCallback(() => { fetchCredentials() }, [fetchCredentials]))
 
   const handleRemove = useCallback(async (assignmentId: string) => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     setRemovingId(assignmentId)
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?workspace_id=${workspaceId}`, {

@@ -31,12 +31,6 @@ export interface SettingsDrawerProps {
  * the right ratio. Refactor later if product data says otherwise.
  */
 export function SettingsDrawer({ entity, open, onOpenChange }: SettingsDrawerProps) {
-  const fullPath = entity
-    ? entity.kind === "agent"
-      ? `/crews/agents/${entity.id}/settings`
-      : `/crews/${entity.id}`
-    : null
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -59,14 +53,12 @@ export function SettingsDrawer({ entity, open, onOpenChange }: SettingsDrawerPro
             <div className="flex items-center justify-center h-full p-6 text-center text-micro text-muted-foreground">
               <div className="space-y-3">
                 <p>Crew configuration lives on the full crew page for now.</p>
-                {fullPath && (
-                  <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                    <Link href={fullPath}>
-                      Open crew page
-                      <ExternalLink className="h-3 w-3" />
-                    </Link>
-                  </Button>
-                )}
+                <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                  <Link href={`/crews/${entity.id}`}>
+                    Open crew page
+                    <ExternalLink className="h-3 w-3" />
+                  </Link>
+                </Button>
               </div>
             </div>
           ) : (

@@ -103,7 +103,7 @@ export function SkillsPageClient() {
   const [removingId, setRemovingId] = useState<string | null>(null)
 
   const fetchSkills = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/skills?workspace_id=${workspaceId}`)
       if (!res.ok) {
@@ -126,15 +126,15 @@ export function SkillsPageClient() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) {
+    if (!workspaceId || !agentId) {
       setLoading(false)
       return
     }
     fetchSkills()
-  }, [workspaceId, fetchSkills])
+  }, [workspaceId, agentId, fetchSkills])
 
   const handleRemove = async (skillId: string) => {
-    if (!workspaceId) return
+    if (!workspaceId || !agentId) return
     setRemovingId(skillId)
     try {
       const res = await fetch(
