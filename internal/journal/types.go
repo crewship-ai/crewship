@@ -42,11 +42,11 @@ const (
 	EntryTaskDelegated    EntryType = "task.delegated"
 
 	// Security
-	EntryKeeperRequest    EntryType = "keeper.request"
-	EntryKeeperDecision   EntryType = "keeper.decision"
-	EntryGuardrailInput   EntryType = "guardrail.input_blocked"
-	EntryGuardrailOutput  EntryType = "guardrail.output_blocked"
-	EntryApprovalRequest  EntryType = "approval.requested"
+	EntryKeeperRequest     EntryType = "keeper.request"
+	EntryKeeperDecision    EntryType = "keeper.decision"
+	EntryGuardrailInput    EntryType = "guardrail.input_blocked"
+	EntryGuardrailOutput   EntryType = "guardrail.output_blocked"
+	EntryApprovalRequest   EntryType = "approval.requested"
 	EntryApprovalGranted   EntryType = "approval.granted"
 	EntryApprovalDenied    EntryType = "approval.denied"
 	EntryApprovalTimeout   EntryType = "approval.timeout"

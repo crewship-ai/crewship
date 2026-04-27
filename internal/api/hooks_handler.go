@@ -117,10 +117,10 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	out := make([]hookRow, 0, 16)
 	for rows.Next() {
 		var (
-			hk                                                hookRow
-			crewNS, createdBy                                 sql.NullString
-			matcherStr, handlerCfgStr, createdAt, updatedAt   string
-			blockingInt, enabledInt                           int
+			hk                                              hookRow
+			crewNS, createdBy                               sql.NullString
+			matcherStr, handlerCfgStr, createdAt, updatedAt string
+			blockingInt, enabledInt                         int
 		)
 		if err := rows.Scan(
 			&hk.ID,

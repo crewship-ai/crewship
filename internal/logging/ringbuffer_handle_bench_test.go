@@ -46,4 +46,3 @@ func BenchmarkRingHandler_Handle_ThreeAttrs(b *testing.B) {
 		_ = h.Handle(ctx, r)
 	}
 }
-

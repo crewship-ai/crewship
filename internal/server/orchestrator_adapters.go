@@ -25,8 +25,8 @@ import (
 // the boundary so the orchestrator doesn't need to know about
 // hooks.EventContext.
 type hooksAdapter struct {
-	db     *sql.DB
-	journ  journal.Emitter
+	db    *sql.DB
+	journ journal.Emitter
 }
 
 func newHooksAdapter(db *sql.DB, j journal.Emitter) *hooksAdapter {

@@ -226,11 +226,11 @@ type rowScanner interface {
 
 func scanHook(r rowScanner) (Hook, error) {
 	var (
-		h                                                Hook
-		crewID, createdBy                                sql.NullString
-		matcherStr, handlerCfgStr, kind, createdAt, upd  string
-		blockingInt, enabledInt                          int
-		eventStr                                         string
+		h                                               Hook
+		crewID, createdBy                               sql.NullString
+		matcherStr, handlerCfgStr, kind, createdAt, upd string
+		blockingInt, enabledInt                         int
+		eventStr                                        string
 	)
 	if err := r.Scan(
 		&h.ID,

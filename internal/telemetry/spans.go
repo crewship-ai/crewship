@@ -36,11 +36,11 @@ const (
 	// cached_input_tokens is specifically Anthropic prompt-cache hits; on
 	// other providers we leave it zero so dashboards can still compute
 	// cache-hit ratios without branching per provider.
-	AttrGenAIUsageInputTokens        = "gen_ai.usage.input_tokens"
-	AttrGenAIUsageOutputTokens       = "gen_ai.usage.output_tokens"
-	AttrGenAIUsageCachedInputTokens  = "gen_ai.usage.cached_input_tokens"
-	AttrGenAIUsageCacheCreationToks  = "gen_ai.usage.cache_creation_tokens"
-	AttrGenAICostTotalUSD            = "gen_ai.cost.total_usd"
+	AttrGenAIUsageInputTokens       = "gen_ai.usage.input_tokens"
+	AttrGenAIUsageOutputTokens      = "gen_ai.usage.output_tokens"
+	AttrGenAIUsageCachedInputTokens = "gen_ai.usage.cached_input_tokens"
+	AttrGenAIUsageCacheCreationToks = "gen_ai.usage.cache_creation_tokens"
+	AttrGenAICostTotalUSD           = "gen_ai.cost.total_usd"
 
 	// Crewship correlation — allow the trace explorer to group by agent /
 	// crew / mission without cross-referencing the journal table.

@@ -93,17 +93,17 @@ type Request struct {
 // Approved/Denied/TimedOut reflect a sync resolution. RequestID is always
 // set so async callers can correlate later.
 type Decision struct {
-	Pending    bool
-	Approved   bool
-	Denied     bool
-	TimedOut   bool
-	RequestID  string
-	Status     Status
-	DecidedBy  string
-	Comment    string
-	Reason     string
-	Kind       Kind
-	NotGated   bool // true when no rule matched and Gate fell through
+	Pending   bool
+	Approved  bool
+	Denied    bool
+	TimedOut  bool
+	RequestID string
+	Status    Status
+	DecidedBy string
+	Comment   string
+	Reason    string
+	Kind      Kind
+	NotGated  bool // true when no rule matched and Gate fell through
 }
 
 // RuleMatcher describes one matching rule. A rule fires when ANY of its

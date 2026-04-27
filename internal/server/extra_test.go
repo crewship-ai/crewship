@@ -77,7 +77,7 @@ func TestRegisterRoutes_AllPathsMounted(t *testing.T) {
 		{"GET", "/healthz", http.StatusOK},
 		{"GET", "/readyz", http.StatusOK},
 		{"GET", "/metrics", http.StatusOK},
-		{"GET", "/ws", http.StatusUnauthorized},          // missing token
+		{"GET", "/ws", http.StatusUnauthorized},                // missing token
 		{"GET", "/ws/terminal", http.StatusServiceUnavailable}, // no terminal handler
 	}
 	for _, tc := range cases {
@@ -188,11 +188,11 @@ func TestSanitizeMetadata_AllowedKeys(t *testing.T) {
 	in := map[string]interface{}{
 		"summary":      "ok",
 		"tool_name":    "Bash",
-		"tool_input":   "rm -rf /",          // BLOCKED
-		"raw_response": "secrets",           // BLOCKED
+		"tool_input":   "rm -rf /", // BLOCKED
+		"raw_response": "secrets",  // BLOCKED
 		"model":        "claude",
 		"usage":        map[string]int{"in": 1},
-		"private_key":  "sk-XXXX",           // BLOCKED
+		"private_key":  "sk-XXXX", // BLOCKED
 	}
 	got := sanitizeMetadata(in)
 	if got["summary"] != "ok" {

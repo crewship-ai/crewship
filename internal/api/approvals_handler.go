@@ -210,8 +210,8 @@ func (h *ApprovalsHandler) ResetAutoTuning(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"tool":          body.Tool,
-		"rows_deleted":  n,
-		"workspace_id":  workspaceID,
+		"tool":         body.Tool,
+		"rows_deleted": n,
+		"workspace_id": workspaceID,
 	})
 }

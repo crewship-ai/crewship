@@ -312,7 +312,7 @@ func Cancel(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, id,
 				ActorID:   row.RequestedBy,
 				Summary:   fmt.Sprintf("approval cancelled: %s", reason),
 				Payload:   map[string]any{"approval_id": row.ID, "cancelled": true, "reason": reason},
-				Refs:        map[string]any{"approval_id": row.ID},
+				Refs:      map[string]any{"approval_id": row.ID},
 			})
 		}
 	}
@@ -346,8 +346,8 @@ func SweepTimeouts(ctx context.Context, db *sql.DB, j journal.Emitter) (int, err
 	var pending []stale
 	for rows.Next() {
 		var (
-			s                              stale
-			crew, agent, mission, kindStr  sql.NullString
+			s                             stale
+			crew, agent, mission, kindStr sql.NullString
 		)
 		if err := rows.Scan(&s.id, &s.ws, &crew, &agent, &mission, &s.requestedBy, &kindStr, &s.reason); err != nil {
 			rows.Close()
@@ -512,9 +512,9 @@ type rowScanner interface {
 
 func scanRequest(r rowScanner) (Request, error) {
 	var (
-		req                                                               Request
-		crew, agent, mission, decidedBy, decidedAt, comment, timeoutAt    sql.NullString
-		payloadStr, kindStr, statusStr, createdAt                         string
+		req                                                            Request
+		crew, agent, mission, decidedBy, decidedAt, comment, timeoutAt sql.NullString
+		payloadStr, kindStr, statusStr, createdAt                      string
 	)
 	if err := r.Scan(
 		&req.ID,

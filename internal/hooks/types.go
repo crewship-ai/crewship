@@ -180,9 +180,9 @@ var (
 // the triggering operation (e.g. cancel the tool call, deny the memory
 // write). The wrapped Result carries the handler's message.
 type BlockedError struct {
-	HookID  string
-	Event   Event
-	Result  Result
+	HookID string
+	Event  Event
+	Result Result
 }
 
 func (e *BlockedError) Error() string {

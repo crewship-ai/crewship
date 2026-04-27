@@ -56,12 +56,6 @@ func newRemapCUID() string {
 	return string(out)
 }
 
-// base36 remains a thin wrapper around strconv.FormatInt so any external
-// users (or tests) that depend on the public shape keep working.
-func base36(n int64) string {
-	return strconv.FormatInt(n, 36)
-}
-
 // foreignKeyEdge captures one FK column's destination.
 type foreignKeyEdge struct {
 	column    string // column on the source table

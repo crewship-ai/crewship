@@ -200,7 +200,7 @@ func TestRequestExpose_AgentBoundaryMismatch(t *testing.T) {
 	h := newRequestExposeHandler(t, db, DefaultPortExposeConfig(), &fakeDockerInspector{ip: "10.0.0.2"})
 
 	rec := postJSON(t, h.RequestExpose, map[string]any{
-		"workspace_id": "ws2",  // wrong — agent is in ws1
+		"workspace_id": "ws2", // wrong — agent is in ws1
 		"crew_id":      "crew2",
 		"agent_id":     "a1",
 		"container_id": "c1",

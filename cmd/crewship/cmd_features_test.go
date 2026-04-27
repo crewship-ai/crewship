@@ -114,10 +114,10 @@ func TestFeaturesListRunE_NoAuth(t *testing.T) {
 // featuresMock serves /api/v1/features/catalog with a configurable payload
 // and captures the last URL called so tests can assert --search propagation.
 type featuresMock struct {
-	t           *testing.T
-	lastURL     string
-	status      int
-	payload     []byte
+	t       *testing.T
+	lastURL string
+	status  int
+	payload []byte
 }
 
 func (m *featuresMock) handler() http.Handler {

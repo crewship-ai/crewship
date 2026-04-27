@@ -16,14 +16,12 @@ import (
 const (
 	benchBase = "You are an agent with persistent memory, responsible for..."
 	benchLead = "[CREW CONTEXT]\nYour fellow crew members: ..."
-	benchPeer = "[PEER COMMUNICATION]\nYour crew members: ..."
 	benchMem  = "[AGENT MEMORY]\n--- AGENT.md (long-term memory) ---\n..."
 	benchLang = "cs"
 )
 
 func benchBasePrompt() string  { return strings.Repeat(benchBase, 80) } // ~4.8 kB
 func benchLeadBlock() string   { return strings.Repeat(benchLead, 60) } // ~2.7 kB
-func benchPeerBlock() string   { return strings.Repeat(benchPeer, 40) } // ~2.0 kB
 func benchMemoryBlock() string { return strings.Repeat(benchMem, 80) }  // ~4.0 kB
 
 // BenchmarkSystemPromptAssembly_Concat replicates the old RunAgent pattern:
