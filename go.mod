@@ -14,7 +14,7 @@ require (
 	github.com/google/go-containerregistry v0.21.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.5
-	github.com/mattn/go-isatty v0.0.21
+	github.com/mattn/go-isatty v0.0.22
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/afero v1.15.0
