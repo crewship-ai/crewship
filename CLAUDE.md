@@ -30,9 +30,10 @@ All development and dogfood production happen on remote Proxmox VMs via SSH. Nev
 ### `crewship-dev` — VMID 300 (development)
 
 - **Connect:** `ssh crewship-dev` (alias for `ubuntu@192.168.1.201`)
+- **DNS:** `crewship-dev.unifylab.cz` → 192.168.1.201
 - **Repo path:** `/opt/crewship`
-- **Backend:** `http://192.168.1.201:8080`
-- **Frontend:** `http://192.168.1.201:3001`
+- **Backend:** `http://crewship-dev.unifylab.cz:8080` (or http://192.168.1.201:8080)
+- **Frontend:** `http://crewship-dev.unifylab.cz:3001` (or http://192.168.1.201:3001)
 - **Resources:** 12 vCPU, **48 GB RAM** (balloon 24 GB, reduced from 64 GB on 2026-04-27 — peak usage was ~29 GB), 200 GB NVMe
 - **Tracks:** `main` branch (always-bleeding-edge); started via `./dev.sh start` in tmux
 - **VS Code / Cursor:** `code --remote ssh-remote+crewship-dev /opt/crewship`
@@ -42,8 +43,9 @@ All development and dogfood production happen on remote Proxmox VMs via SSH. Nev
 ### `crewship-prod` — VMID 301 (dogfood production)
 
 - **Connect:** `ssh crewship-prod` (alias for `ubuntu@192.168.1.202`)
+- **DNS:** `crewship-prod.unifylab.cz` → 192.168.1.202
 - **Repo path:** `/opt/crewship-prod`
-- **Backend / Frontend (embedded):** `http://192.168.1.202:8080`
+- **Backend / Frontend (embedded):** `http://crewship-prod.unifylab.cz:8080` (or http://192.168.1.202:8080)
 - **Resources:** 4 vCPU, 16 GB RAM (balloon 8 GB), 60 GB local-lvm disk
 - **OS:** Ubuntu 24.04.4 LTS cloud-init image, Docker 29.4.1 native (overlayfs, cgroup v2)
 - **Tracks:** `release` branch (created from main on 2026-04-27). Push there to deploy: `git push origin main:release`. systemd timer polls every 5 min and rebuilds if SHA changed. Rollback: `git push -f origin <good-sha>:release`.
@@ -57,8 +59,8 @@ All development and dogfood production happen on remote Proxmox VMs via SSH. Nev
 ### Other Proxmox VMs (non-Crewship)
 
 - VMID 103 `truenas` (storage NAS)
-- VMID 200 `coolify` (self-hosted PaaS — note: DNS `crewship-dev.unifylab.cz` and `crewship.unifylab.cz` currently resolve to this VM, not to `crewship-dev` directly. Likely stale or proxied through Coolify; reconcile when DNS gets actively used.)
-- Proxmox host: `ssh proxmox` (alias for `root@192.168.1.251`)
+- VMID 200 `coolify` (self-hosted PaaS, also catches `*.unifylab.cz` wildcard for undefined subdomains)
+- Proxmox host: `ssh proxmox` (alias for `root@192.168.1.251`, DNS `proxmox.unifylab.cz`)
 
 ## Crew Journal architecture (added 2026-04, shipped on feat/crew-journal)
 
