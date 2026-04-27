@@ -2308,13 +2308,13 @@ func TestStaticFileHandler_Basic(t *testing.T) {
 	h := StaticFileHandlerFromDir(dir)
 
 	cases := []struct {
-		path    string
+		path     string
 		wantBody string
 	}{
 		{"/", "INDEX"},
 		{"/index.html", "INDEX"},
-		{"/login", "LOGIN"},      // .html resolution
-		{"/missing", "INDEX"},    // SPA fallback
+		{"/login", "LOGIN"},   // .html resolution
+		{"/missing", "INDEX"}, // SPA fallback
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {

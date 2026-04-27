@@ -118,10 +118,10 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	out := make([]Entry, 0, q.Limit)
 	for rows.Next() {
 		var (
-			e                                                   Entry
-			crewID, agentID, missionID, actorID                 sql.NullString
-			traceID, spanID, expires                            sql.NullString
-			payloadStr, refsStr, tsStr, sev, prio, actor, kind  string
+			e                                                  Entry
+			crewID, agentID, missionID, actorID                sql.NullString
+			traceID, spanID, expires                           sql.NullString
+			payloadStr, refsStr, tsStr, sev, prio, actor, kind string
 		)
 		if err := rows.Scan(
 			&e.ID,
@@ -195,10 +195,10 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error
 		entry_type, severity, priority, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
 		FROM journal_entries WHERE workspace_id = ? AND id = ?`, workspaceID, id)
 	var (
-		e                                                   Entry
-		crewID, agentID, missionID, actorID                 sql.NullString
-		traceID, spanID, expires                            sql.NullString
-		payloadStr, refsStr, tsStr, sev, prio, actor, kind  string
+		e                                                  Entry
+		crewID, agentID, missionID, actorID                sql.NullString
+		traceID, spanID, expires                           sql.NullString
+		payloadStr, refsStr, tsStr, sev, prio, actor, kind string
 	)
 	if err := row.Scan(
 		&e.ID, &e.WorkspaceID, &crewID, &agentID, &missionID, &tsStr,

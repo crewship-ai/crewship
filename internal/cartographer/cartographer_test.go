@@ -168,8 +168,8 @@ func TestCreateRoundtrip(t *testing.T) {
 	ctx := context.Background()
 	state := StateSnapshot{
 		AgentMemory: map[string]string{
-			"agent_lead":   "sha256:abc",
-			"agent_scout":  "sha256:def",
+			"agent_lead":  "sha256:abc",
+			"agent_scout": "sha256:def",
 		},
 		PendingTasks:    []string{"mt_1", "mt_2"},
 		OpenAssignments: []string{"as_1"},

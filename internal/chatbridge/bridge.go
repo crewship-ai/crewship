@@ -50,8 +50,8 @@ type ChatInfo struct {
 	WorkspaceID        string
 	MemoryEnabled      bool
 	CrewMembers        []orchestrator.CrewMember
-	AllCrews           []orchestrator.CrewInfo       // Deprecated: COORDINATOR-only; see orchestrator.BuildCoordinatorContext.
-	ActiveMissions     []orchestrator.MissionSummary // Deprecated: COORDINATOR-only; see orchestrator.BuildCoordinatorContext.
+	AllCrews           []orchestrator.CrewInfo       //nolint:staticcheck // SA1019: COORDINATOR backward compat — keep until COORDINATOR role is fully retired.
+	ActiveMissions     []orchestrator.MissionSummary //nolint:staticcheck // SA1019: COORDINATOR backward compat — keep until COORDINATOR role is fully retired.
 	NetworkMode        string
 	AllowedDomains     []string
 	MemoryMB           int

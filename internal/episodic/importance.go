@@ -156,9 +156,9 @@ func DecayAndReinforce(ctx context.Context, db *sql.DB, now time.Time) (int, err
 	var pending []row
 	for rows.Next() {
 		var (
-			r                          row
+			r                           row
 			indexedStr, sev, prio, kind string
-			refs                       sql.NullInt64
+			refs                        sql.NullInt64
 		)
 		if err := rows.Scan(&r.id, &indexedStr, &refs, &kind, &sev, &prio); err != nil {
 			return 0, fmt.Errorf("episodic: decay scan: %w", err)

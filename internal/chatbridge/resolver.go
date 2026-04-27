@@ -399,9 +399,9 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	// Convert all_crews for COORDINATOR agents.
 	// Deprecated: COORDINATOR role is deprecated (see orchestrator.BuildCoordinatorContext).
 	// Branch retained for backward compat with existing COORDINATOR agents.
-	var allCrews []orchestrator.CrewInfo
+	var allCrews []orchestrator.CrewInfo //nolint:staticcheck // SA1019: COORDINATOR backward compat
 	for _, c := range data.AllCrews {
-		ci := orchestrator.CrewInfo{
+		ci := orchestrator.CrewInfo{ //nolint:staticcheck // SA1019: COORDINATOR backward compat
 			ID:   c.ID,
 			Name: c.Name,
 			Slug: c.Slug,
@@ -428,9 +428,9 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		allCrews = append(allCrews, ci)
 	}
 
-	var activeMissions []orchestrator.MissionSummary
+	var activeMissions []orchestrator.MissionSummary //nolint:staticcheck // SA1019: COORDINATOR backward compat
 	for _, m := range data.ActiveMissions {
-		activeMissions = append(activeMissions, orchestrator.MissionSummary{
+		activeMissions = append(activeMissions, orchestrator.MissionSummary{ //nolint:staticcheck // SA1019: COORDINATOR backward compat
 			ID:       m.ID,
 			CrewSlug: m.CrewSlug,
 			Title:    m.Title,

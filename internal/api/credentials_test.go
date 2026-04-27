@@ -235,7 +235,7 @@ func TestCredList_WithEntries(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","github-token", "ghp_secret_value")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "github-token", "ghp_secret_value")
 
 	req := httptest.NewRequest("GET", "/api/v1/credentials", nil)
 	ctx := withWorkspace(req.Context(), wsID, "OWNER")
@@ -280,7 +280,7 @@ func TestCredGet_Success(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","my-cred", "secret-val")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "my-cred", "secret-val")
 
 	req := httptest.NewRequest("GET", "/api/v1/credentials/c1", nil)
 	req.SetPathValue("credentialId", "c1")
@@ -301,7 +301,7 @@ func TestCredGet_OtherWorkspaceDenied(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","my-cred", "secret-val")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "my-cred", "secret-val")
 
 	// Try to access from different workspace
 	req := httptest.NewRequest("GET", "/api/v1/credentials/c1", nil)
@@ -322,7 +322,7 @@ func TestCredUpdate_Forbidden(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","x", "v")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "x", "v")
 
 	body := bytes.NewBufferString(`{"name":"new"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
@@ -359,7 +359,7 @@ func TestCredUpdate_RotateValue(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","name", "old-secret")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "name", "old-secret")
 
 	body := bytes.NewBufferString(`{"value":"new-secret"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
@@ -385,7 +385,7 @@ func TestCredUpdate_NoFields(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","n", "v")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "n", "v")
 
 	body := bytes.NewBufferString(`{}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/credentials/c1", body)
@@ -406,7 +406,7 @@ func TestCredDelete_Forbidden(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","n", "v")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "n", "v")
 
 	req := httptest.NewRequest("DELETE", "/api/v1/credentials/c1", nil)
 	req.SetPathValue("credentialId", "c1")
@@ -441,7 +441,7 @@ func TestCredDelete_Success(t *testing.T) {
 	h, db := newCredHandler(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	seedCredentialEnc(t, db, wsID, userID, "c1","n", "v")
+	seedCredentialEnc(t, db, wsID, userID, "c1", "n", "v")
 
 	req := httptest.NewRequest("DELETE", "/api/v1/credentials/c1", nil)
 	req.SetPathValue("credentialId", "c1")

@@ -233,12 +233,12 @@ func TestContainerStats_FakeAPI(t *testing.T) {
 
 	statsPayload := map[string]any{
 		"cpu_stats": map[string]any{
-			"cpu_usage":    map[string]any{"total_usage": 2_000_000_000},
+			"cpu_usage":        map[string]any{"total_usage": 2_000_000_000},
 			"system_cpu_usage": 10_000_000_000,
-			"online_cpus":  2,
+			"online_cpus":      2,
 		},
 		"precpu_stats": map[string]any{
-			"cpu_usage":    map[string]any{"total_usage": 1_000_000_000},
+			"cpu_usage":        map[string]any{"total_usage": 1_000_000_000},
 			"system_cpu_usage": 5_000_000_000,
 		},
 		"memory_stats": map[string]any{
@@ -301,12 +301,12 @@ func TestContainerStats_HandlesCPUWraparound(t *testing.T) {
 	// pre > current => guard kicks in, cpuPct stays 0.
 	statsPayload := map[string]any{
 		"cpu_stats": map[string]any{
-			"cpu_usage":    map[string]any{"total_usage": 1_000_000_000},
+			"cpu_usage":        map[string]any{"total_usage": 1_000_000_000},
 			"system_cpu_usage": 5_000_000_000,
-			"online_cpus":  1,
+			"online_cpus":      1,
 		},
 		"precpu_stats": map[string]any{
-			"cpu_usage":    map[string]any{"total_usage": 2_000_000_000},
+			"cpu_usage":        map[string]any{"total_usage": 2_000_000_000},
 			"system_cpu_usage": 10_000_000_000,
 		},
 		"memory_stats": map[string]any{"usage": 100, "limit": 0, "stats": map[string]any{"cache": 0}},
@@ -610,4 +610,3 @@ func TestProvider_ContextDeadlineRespected(t *testing.T) {
 		t.Fatal("expected context deadline error")
 	}
 }
-

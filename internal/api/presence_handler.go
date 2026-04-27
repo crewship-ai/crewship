@@ -26,11 +26,11 @@ func NewPresenceHandler(db *sql.DB, logger *slog.Logger) *PresenceHandler {
 // into the external contract so future internal changes (adding fields,
 // renaming them) don't leak into the API.
 type rosterRow struct {
-	AgentID   string         `json:"agent_id"`
-	CrewID    string         `json:"crew_id,omitempty"`
-	Status    string         `json:"status"`
-	Since     time.Time      `json:"since"`
-	Details   map[string]any `json:"details,omitempty"`
+	AgentID string         `json:"agent_id"`
+	CrewID  string         `json:"crew_id,omitempty"`
+	Status  string         `json:"status"`
+	Since   time.Time      `json:"since"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // Roster serves GET /api/v1/presence/roster[?crew_id=...].

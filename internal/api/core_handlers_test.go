@@ -2969,7 +2969,7 @@ func TestCrewUpdate_AllFields(t *testing.T) {
 
 	// Switch to free; allowed_domains explicitly cleared
 	body2 := map[string]interface{}{
-		"network_mode":    "free",
+		"network_mode":        "free",
 		"container_ttl_hours": 0, // sets NULL
 	}
 	req2 := httptest.NewRequest("PATCH", "/api/v1/crews/crew-all", jsonBody(body2))
@@ -3288,4 +3288,3 @@ func TestAgentChats_ListPopulatedFields(t *testing.T) {
 		t.Errorf("title = %v, want Sample", chats[0]["title"])
 	}
 }
-

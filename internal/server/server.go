@@ -16,24 +16,24 @@ import (
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
-	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/episodic"
 	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
-	"github.com/crewship-ai/crewship/internal/presence"
-	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/presence"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/terminal"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -41,30 +41,30 @@ import (
 // Server is the main crewship process, wiring together the HTTP server, IPC
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 type Server struct {
-	httpServer      *http.Server
-	ipcServer       *http.Server
-	mux             *http.ServeMux
-	ipcMux          *http.ServeMux
-	spaHandler      http.Handler
-	cfg             *config.Config
-	logger          *slog.Logger
-	wsHub           *ws.Hub
-	orchestrator    *orchestrator.Orchestrator
-	missionEngine   *orchestrator.MissionEngine
-	container       provider.ContainerProvider
-	storage         provider.StorageProvider
-	state           provider.StateProvider
-	logWriter       *logcollector.Writer
-	logReader       *logcollector.Reader
-	convStore       *conversation.Store
-	tokenPool       *llmproxy.TokenPool
-	tokenSyncer     *llmproxy.TokenSyncer
-	credMonitor     *llmproxy.CredentialMonitor
-	debugLogs       *logging.RingBuffer
-	db              *sql.DB
-	apiRouter       *goapi.Router
-	fileWatcher     *fileserver.Watcher
-	watchedCrews    sync.Map
+	httpServer        *http.Server
+	ipcServer         *http.Server
+	mux               *http.ServeMux
+	ipcMux            *http.ServeMux
+	spaHandler        http.Handler
+	cfg               *config.Config
+	logger            *slog.Logger
+	wsHub             *ws.Hub
+	orchestrator      *orchestrator.Orchestrator
+	missionEngine     *orchestrator.MissionEngine
+	container         provider.ContainerProvider
+	storage           provider.StorageProvider
+	state             provider.StateProvider
+	logWriter         *logcollector.Writer
+	logReader         *logcollector.Reader
+	convStore         *conversation.Store
+	tokenPool         *llmproxy.TokenPool
+	tokenSyncer       *llmproxy.TokenSyncer
+	credMonitor       *llmproxy.CredentialMonitor
+	debugLogs         *logging.RingBuffer
+	db                *sql.DB
+	apiRouter         *goapi.Router
+	fileWatcher       *fileserver.Watcher
+	watchedCrews      sync.Map
 	statsCollector    *StatsCollector
 	terminalHandler   *terminal.Handler
 	journalWriter     *journal.Writer

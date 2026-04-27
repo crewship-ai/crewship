@@ -12,8 +12,8 @@ import (
 // string-building allocation shape.
 
 const (
-	benchLeadTitle    = "Bootstrap the new onboarding flow"
-	benchLeadDesc     = "Implement the missing pieces of the user onboarding wizard so a fresh user can land on /onboarding, authenticate, pick a plan, and complete in under three minutes."
+	benchLeadTitle     = "Bootstrap the new onboarding flow"
+	benchLeadDesc      = "Implement the missing pieces of the user onboarding wizard so a fresh user can land on /onboarding, authenticate, pick a plan, and complete in under three minutes."
 	benchLeadMissionID = "m_abcdef1234567890abcdef"
 )
 

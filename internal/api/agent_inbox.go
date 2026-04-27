@@ -21,13 +21,13 @@ func NewAgentInboxHandler(db *sql.DB, logger *slog.Logger) *AgentInboxHandler {
 }
 
 type agentInboxResponse struct {
-	ApprovalsPending   int              `json:"approvals_pending"`
-	AssignmentsOpen    int              `json:"assignments_open"`
-	EscalationsOpen    int              `json:"escalations_open"`
-	PeerMessages       []peerMessageRow `json:"peer_messages"`
-	CostUSDThisMonth   float64          `json:"cost_usd_this_month"`
-	LLMCallsThisMonth  int              `json:"llm_calls_this_month"`
-	TokensUsedThisMonth int64           `json:"tokens_used_this_month"`
+	ApprovalsPending    int              `json:"approvals_pending"`
+	AssignmentsOpen     int              `json:"assignments_open"`
+	EscalationsOpen     int              `json:"escalations_open"`
+	PeerMessages        []peerMessageRow `json:"peer_messages"`
+	CostUSDThisMonth    float64          `json:"cost_usd_this_month"`
+	LLMCallsThisMonth   int              `json:"llm_calls_this_month"`
+	TokensUsedThisMonth int64            `json:"tokens_used_this_month"`
 }
 
 type peerMessageRow struct {

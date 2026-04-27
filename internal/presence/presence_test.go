@@ -114,10 +114,10 @@ func TestUpsertEmitsOnTransitionOnly(t *testing.T) {
 
 func TestValidateStatus(t *testing.T) {
 	tests := map[Status]bool{
-		StatusOnline:  true,
-		StatusBusy:    true,
-		StatusBlocked: true,
-		StatusOffline: true,
+		StatusOnline:   true,
+		StatusBusy:     true,
+		StatusBlocked:  true,
+		StatusOffline:  true,
 		Status("typo"): false,
 		Status(""):     false,
 	}

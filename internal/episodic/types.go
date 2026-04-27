@@ -25,8 +25,8 @@ import "time"
 type Scope string
 
 const (
-	ScopeOwn         Scope = "own"
-	ScopeCrewShared  Scope = "crew_shared"
+	ScopeOwn        Scope = "own"
+	ScopeCrewShared Scope = "crew_shared"
 )
 
 // Role maps an agent role string to the Scope it unlocks. Invariant:

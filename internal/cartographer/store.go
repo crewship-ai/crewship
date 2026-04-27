@@ -196,9 +196,9 @@ type scanner interface {
 
 func scanCheckpoint(s scanner) (*Checkpoint, error) {
 	var (
-		cp                                Checkpoint
-		crewID, label, forkOf, createdBy  sql.NullString
-		stateJSON, createdAtStr           string
+		cp                               Checkpoint
+		crewID, label, forkOf, createdBy sql.NullString
+		stateJSON, createdAtStr          string
 	)
 	if err := s.Scan(
 		&cp.ID,

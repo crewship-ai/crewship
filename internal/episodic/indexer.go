@@ -143,9 +143,6 @@ func (x *Indexer) sweepOnce(ctx context.Context, batch int) {
 	}
 	defer rows.Close()
 
-	type row struct {
-		entry journal.Entry
-	}
 	var pending []journal.Entry
 	for rows.Next() {
 		var e journal.Entry

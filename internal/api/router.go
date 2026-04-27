@@ -45,44 +45,44 @@ func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map
 
 // Router is the top-level HTTP multiplexer that registers all API, internal, and static routes.
 type Router struct {
-	mux                  *http.ServeMux
-	db                   *sql.DB
-	logger               *slog.Logger
-	authMw               *AuthMiddleware
-	socketPath           string
-	internalToken        string
-	internalBaseURL      string
-	hub                  *ws.Hub
-	orch                 *orchestrator.Orchestrator
-	keeperGK             gatekeeper.Evaluator
-	keeperSecrets        SecretGetter
-	keeperContainer      provider.ContainerProvider
-	keeperConfig         *config.KeeperConfig
-	keeperConvReader     ConversationReader
-	missionCallback      MissionCallback
-	scheduleUpdater      ScheduleUpdater
-	logWriter            *logcollector.Writer
+	mux              *http.ServeMux
+	db               *sql.DB
+	logger           *slog.Logger
+	authMw           *AuthMiddleware
+	socketPath       string
+	internalToken    string
+	internalBaseURL  string
+	hub              *ws.Hub
+	orch             *orchestrator.Orchestrator
+	keeperGK         gatekeeper.Evaluator
+	keeperSecrets    SecretGetter
+	keeperContainer  provider.ContainerProvider
+	keeperConfig     *config.KeeperConfig
+	keeperConvReader ConversationReader
+	missionCallback  MissionCallback
+	scheduleUpdater  ScheduleUpdater
+	logWriter        *logcollector.Writer
 	// Deprecated: Captain feature is deprecated (see captain.go).
 	// Fields retained so the router continues to wire Captain for backward compat.
-	captainLLM           llm.Provider
-	captainMissionEngine MissionStarter
-	allowSignup          bool
-	googleClientID       string
-	googleSecret         string
-	authBaseURL          string
-	license              *license.License
-	agentHandler         *AgentHandler
-	storagePath          string // base path for crew file storage
-	catalogFetcher       *devcontainer.CatalogFetcher
-	runtimeFetcher       *devcontainer.RuntimeFetcher
-	dockerClient         *dockerclient.Client
-	featureCacheDir      string
-	portExposeRegistry   *PortExposeRegistry // closed via Shutdown() on server stop
-	portExposePublicURL  string              // e.g. http://10.0.0.1:8080, used to build capability URLs
-	authRateLimitedMux   http.Handler        // mux wrapped with auth rate limiter
-	apiRateLimitedMux    http.Handler        // mux wrapped with general API rate limiter
-	journal              journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
-	consolidator         *consolidate.Consolidator
+	captainLLM            llm.Provider
+	captainMissionEngine  MissionStarter
+	allowSignup           bool
+	googleClientID        string
+	googleSecret          string
+	authBaseURL           string
+	license               *license.License
+	agentHandler          *AgentHandler
+	storagePath           string // base path for crew file storage
+	catalogFetcher        *devcontainer.CatalogFetcher
+	runtimeFetcher        *devcontainer.RuntimeFetcher
+	dockerClient          *dockerclient.Client
+	featureCacheDir       string
+	portExposeRegistry    *PortExposeRegistry // closed via Shutdown() on server stop
+	portExposePublicURL   string              // e.g. http://10.0.0.1:8080, used to build capability URLs
+	authRateLimitedMux    http.Handler        // mux wrapped with auth rate limiter
+	apiRateLimitedMux     http.Handler        // mux wrapped with general API rate limiter
+	journal               journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
+	consolidator          *consolidate.Consolidator
 	consolidateMemoryRoot string
 }
 

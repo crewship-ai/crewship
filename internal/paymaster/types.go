@@ -105,8 +105,8 @@ type Call struct {
 // timestamp the row was written with. Lets callers correlate a ledger row to
 // the journal entry that was emitted alongside it.
 type CostRecord struct {
-	ID  string
-	TS  time.Time
+	ID   string
+	TS   time.Time
 	Cost float64
 }
 

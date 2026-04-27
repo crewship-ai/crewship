@@ -11,21 +11,21 @@ import (
 // endpoint. One row per replay/regression invocation; a thin index over
 // the much richer eval.run_started / eval.metric journal entries.
 type RunRecord struct {
-	ID                 string    `json:"id"`
-	WorkspaceID        string    `json:"workspace_id"`
-	Kind               string    `json:"kind"` // "replay" or "regression"
-	MissionID          string    `json:"mission_id,omitempty"`
-	BaselineMissionID  string    `json:"baseline_mission_id,omitempty"`
-	CandidateMissionID string    `json:"candidate_mission_id,omitempty"`
-	Status             string    `json:"status"` // queued|running|completed|failed
-	Result             string    `json:"result,omitempty"`
-	Seed               int64     `json:"seed"`
-	Signature          string    `json:"signature,omitempty"`
-	TotalTokens        int64     `json:"total_tokens"`
-	TotalCostUSD       float64   `json:"total_cost_usd"`
-	Regressed          bool      `json:"regressed"`
-	CreatedBy          string    `json:"created_by,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                 string     `json:"id"`
+	WorkspaceID        string     `json:"workspace_id"`
+	Kind               string     `json:"kind"` // "replay" or "regression"
+	MissionID          string     `json:"mission_id,omitempty"`
+	BaselineMissionID  string     `json:"baseline_mission_id,omitempty"`
+	CandidateMissionID string     `json:"candidate_mission_id,omitempty"`
+	Status             string     `json:"status"` // queued|running|completed|failed
+	Result             string     `json:"result,omitempty"`
+	Seed               int64      `json:"seed"`
+	Signature          string     `json:"signature,omitempty"`
+	TotalTokens        int64      `json:"total_tokens"`
+	TotalCostUSD       float64    `json:"total_cost_usd"`
+	Regressed          bool       `json:"regressed"`
+	CreatedBy          string     `json:"created_by,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 

@@ -63,10 +63,10 @@ func Replay(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, mis
 			"signature": run.SeedSignature,
 		},
 		Refs: map[string]any{
-			"eval_run_id":   run.ID,
-			"mission_id":    missionID,
-			"seed":          seed,
-			"signature":     run.SeedSignature,
+			"eval_run_id": run.ID,
+			"mission_id":  missionID,
+			"seed":        seed,
+			"signature":   run.SeedSignature,
 		},
 	}); err != nil {
 		run.Status = "failed"

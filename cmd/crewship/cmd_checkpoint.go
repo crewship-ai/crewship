@@ -162,9 +162,9 @@ anchored at this point.`,
 			return err
 		}
 		var body struct {
-			Checkpoint      checkpointRow `json:"checkpoint"`
-			JournalCursor   string        `json:"journal_cursor"`
-			WarnDivergence  []string      `json:"warn_divergence"`
+			Checkpoint     checkpointRow `json:"checkpoint"`
+			JournalCursor  string        `json:"journal_cursor"`
+			WarnDivergence []string      `json:"warn_divergence"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
