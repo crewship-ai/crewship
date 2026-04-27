@@ -20,19 +20,48 @@ pnpm lint && pnpm build                  # Frontend — must pass for UI changes
 - **No `require()` / CommonJS** in frontend — ES modules only.
 - **Never amend commits after pre-commit hook failure** — create a new commit.
 - **Never `git checkout .` or `git clean` on WIP** — always stash first.
+- **`NEXTAUTH_SECRET` MUST be set on the Crewship server** — otherwise the entire API router AND static UI handler are silently skipped. In `internal/server/server.go`, the guard `if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != ""` gates both API-router creation (`mux.Handle("/api/", apiRouter)`) and SPA handler setup (`s.spaHandler = goapi.StaticFileHandler(deps.WebFS)`). When missing, the only user-visible signal is `WARN NEXTAUTH_SECRET not set, WebSocket auth disabled`. Symptom: every route returns 404, no ERROR log. Healthy startup logs both `Go API routes mounted` and `serving embedded static UI` — confirm via `journalctl -u crewship-prod | grep -E "API routes mounted|serving embedded"`.
+- **`make build` end-to-end, not piecemeal.** Sequence is `pnpm build` → `rm -rf web/out && cp -r out web/out` → `go build`. Skipping the `cp -r` (e.g. running `pnpm build` followed directly by `go build`) leaves `web/out/` stale; the Go embed FS then drifts ~100+ files out of sync with Next.js output and routes 404 unpredictably.
 
-## Remote development server
+## Remote environments (dev + prod)
 
-All development happens on a **remote Proxmox VM** via SSH. Never build or run services locally on the Mac Mini.
+All development and dogfood production happen on remote Proxmox VMs via SSH. Never build or run services locally on the Mac Mini.
+
+### `crewship-dev` — VMID 300 (development)
 
 - **Connect:** `ssh crewship-dev` (alias for `ubuntu@192.168.1.201`)
+- **DNS:** `crewship-dev.unifylab.cz` → 192.168.1.201
 - **Repo path:** `/opt/crewship`
-- **Backend:** `http://192.168.1.201:8080`
-- **Frontend:** `http://192.168.1.201:3001`
-- **Resources:** 12 vCPU, 64 GB RAM, 200 GB NVMe, Docker container provider
-- **Start services:** `cd /opt/crewship && ./dev.sh start` (inside tmux to survive SSH disconnect)
+- **Backend:** `http://crewship-dev.unifylab.cz:8080` (or http://192.168.1.201:8080)
+- **Frontend:** `http://crewship-dev.unifylab.cz:3001` (or http://192.168.1.201:3001)
+- **Resources:** 12 vCPU, **48 GB RAM** (balloon 24 GB, reduced from 64 GB on 2026-04-27 — peak usage was ~29 GB), 200 GB NVMe
+- **Tracks:** `main` branch (always-bleeding-edge); started via `./dev.sh start` in tmux
 - **VS Code / Cursor:** `code --remote ssh-remote+crewship-dev /opt/crewship`
 - Go PATH on the server requires: `export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin` (already in `.bashrc`)
+- Tags: `crewship`, `dev`, `environment-development`
+
+### `crewship-prod` — VMID 301 (dogfood production)
+
+- **Connect:** `ssh crewship-prod` (alias for `ubuntu@192.168.1.202`)
+- **DNS:** `crewship-prod.unifylab.cz` → 192.168.1.202
+- **Repo path:** `/opt/crewship-prod`
+- **Backend / Frontend (embedded):** `http://crewship-prod.unifylab.cz:8080` (or http://192.168.1.202:8080)
+- **Resources:** 4 vCPU, 16 GB RAM (balloon 8 GB), 60 GB local-lvm disk
+- **OS:** Ubuntu 24.04.4 LTS cloud-init image, Docker 29.4.1 native (overlayfs, cgroup v2)
+- **Tracks:** `release` branch (created from main on 2026-04-27). Push there to deploy: `git push origin main:release`. systemd timer polls every 5 min and rebuilds if SHA changed. Rollback: `git push -f origin <good-sha>:release`.
+- **systemd units:** `crewship-prod.service` (server), `crewship-deploy.timer` (5-min poll → `/opt/crewship-prod/deploy.sh`)
+- **Env file:** `/etc/crewship/crewship-prod.env` (mode 0600, root-owned). Contains `NEXTAUTH_SECRET`, `ENCRYPTION_KEY` (env-unique, NOT shared with dev), `CREWSHIP_ENV=production`, etc.
+- **Storage:** DB at `/opt/crewship-prod/data/crewship.db`, localfs provider at `/var/lib/crewship`
+- **Deploy SSH key:** GitHub Deploy Key on `crewship-ai/crewship` (read-only) so the timer can `git pull` without agent forwarding
+- **Why VM, not LXC:** unprivileged LXC + Docker fails at first `docker run` (`runc create failed: open sysctl ip_unprivileged_port_start: permission denied`). Privileged LXC would fix it but doesn't match what real customers run (~70 % self-host on cloud VMs with native Docker). Native VM matches Tier 1 customer reality. ~1.5 GB RAM overhead is the price.
+- **Network isolation:** Proxmox firewall on net0 (`/etc/pve/firewall/301.fw`). Default ACCEPT in/out, but explicit `OUT DROP` rules block crossover to `.101` (truenas/minio), `.200` (coolify), `.201` (crewship-dev), `.221` (MBA runner), `.230` (truenas alt-IP), `.251` (proxmox host). Internet (GitHub, LLM APIs) and gateway/DNS (`.1`) remain reachable. SSH from LAN unaffected. Tested: `ping .201` from prod VM = blocked, `curl https://github.com` = OK.
+- Tags: `crewship`, `prod`, `environment-production`
+
+### Other Proxmox VMs (non-Crewship)
+
+- VMID 103 `truenas` (storage NAS)
+- VMID 200 `coolify` (self-hosted PaaS, also catches `*.unifylab.cz` wildcard for undefined subdomains)
+- Proxmox host: `ssh proxmox` (alias for `root@192.168.1.251`, DNS `proxmox.unifylab.cz`)
 
 ## Crew Journal architecture (added 2026-04, shipped on feat/crew-journal)
 
