@@ -54,6 +54,7 @@ All development and dogfood production happen on remote Proxmox VMs via SSH. Nev
 - **Storage:** DB at `/opt/crewship-prod/data/crewship.db`, localfs provider at `/var/lib/crewship`
 - **Deploy SSH key:** GitHub Deploy Key on `crewship-ai/crewship` (read-only) so the timer can `git pull` without agent forwarding
 - **Why VM, not LXC:** unprivileged LXC + Docker fails at first `docker run` (`runc create failed: open sysctl ip_unprivileged_port_start: permission denied`). Privileged LXC would fix it but doesn't match what real customers run (~70 % self-host on cloud VMs with native Docker). Native VM matches Tier 1 customer reality. ~1.5 GB RAM overhead is the price.
+- **Network isolation:** Proxmox firewall on net0 (`/etc/pve/firewall/301.fw`). Default ACCEPT in/out, but explicit `OUT DROP` rules block crossover to `.101` (truenas/minio), `.200` (coolify), `.201` (crewship-dev), `.221` (MBA runner), `.230` (truenas alt-IP), `.251` (proxmox host). Internet (GitHub, LLM APIs) and gateway/DNS (`.1`) remain reachable. SSH from LAN unaffected. Tested: `ping .201` from prod VM = blocked, `curl https://github.com` = OK.
 - Tags: `crewship`, `prod`, `environment-production`
 
 ### Other Proxmox VMs (non-Crewship)
