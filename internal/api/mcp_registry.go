@@ -167,13 +167,13 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 			return fmt.Errorf("parse registry response: %w", err)
 		}
 
-		for _, env := range listPage.Servers {
+		for _, envelope := range listPage.Servers {
 			totalEntries++
-			entry := env.Server
+			entry := envelope.Server
 			if entry.Name == "" {
 				continue
 			}
-			if !env.Meta.Official.IsLatest {
+			if !envelope.Meta.Official.IsLatest {
 				continue
 			}
 
@@ -225,7 +225,7 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 			}
 
 			verified := 0
-			if env.Meta.Official.Status == "active" {
+			if envelope.Meta.Official.Status == "active" {
 				verified = 1
 			}
 

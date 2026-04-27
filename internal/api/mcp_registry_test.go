@@ -184,3 +184,129 @@ func TestSyncMCPRegistry_NewSchemaAndPagination(t *testing.T) {
 		t.Errorf("deprecated should have is_verified=0, got %d", depVerified)
 	}
 }
+
+// realUpstreamSample is a verbatim capture of two entries from
+// https://registry.modelcontextprotocol.io/v0/servers (April 2026). The
+// other fixture round-trips JSON through our own struct tags, so a typo
+// like `json:"website_url"` instead of `json:"websiteUrl"` would be
+// invisible to it. This test pins the wire format independently — if
+// upstream changes a field name, this fails first.
+const realUpstreamSample = `{
+  "servers": [
+    {
+      "server": {
+        "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+        "name": "ai.agenttrust/mcp-server",
+        "description": "Identity, trust, and A2A orchestration for autonomous AI agents.",
+        "title": "AgentTrust",
+        "repository": {"url": "https://github.com/agenttrust/mcp-server", "source": "github"},
+        "version": "1.1.1",
+        "websiteUrl": "https://agenttrust.ai",
+        "icons": [{"src": "https://agenttrust.ai/icon.png", "sizes": ["96x96"]}],
+        "packages": [{
+          "registryType": "npm",
+          "identifier": "@agenttrust/mcp-server",
+          "version": "1.1.1",
+          "transport": {"type": "stdio"},
+          "environmentVariables": [
+            {"description": "Your AgentTrust API key", "isRequired": true, "isSecret": true, "name": "AGENTTRUST_API_KEY"}
+          ]
+        }]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {"status": "active", "isLatest": true}
+      }
+    },
+    {
+      "server": {
+        "name": "ac.tandem/docs-mcp",
+        "description": "Remote MCP server for Tandem docs.",
+        "repository": {"url": "https://github.com/frumu-ai/tandem", "source": "github"},
+        "version": "0.3.0",
+        "remotes": [{"type": "streamable-http", "url": "https://tandem.ac/mcp"}]
+      },
+      "_meta": {
+        "io.modelcontextprotocol.registry/official": {"status": "active", "isLatest": true}
+      }
+    }
+  ],
+  "metadata": {"nextCursor": "", "count": 2}
+}`
+
+func TestSyncMCPRegistry_RealUpstreamSchema(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(realUpstreamSample))
+	}))
+	t.Cleanup(srv.Close)
+
+	prev := mcpRegistryURL
+	mcpRegistryURL = srv.URL
+	t.Cleanup(func() { mcpRegistryURL = prev })
+
+	if err := SyncMCPRegistry(context.Background(), db, logger); err != nil {
+		t.Fatalf("SyncMCPRegistry: %v", err)
+	}
+
+	// Field mapping for the packages-based entry.
+	var displayName, icon, homepage, sourceURL, transport, pkgName, pkgReg, command, envJSON string
+	err := db.QueryRow(`SELECT display_name, icon, homepage_url, source_url, transport,
+			package_name, package_registry, command, env_vars_json
+		FROM mcp_registry_servers WHERE id = ?`, "ai.agenttrust/mcp-server").Scan(
+		&displayName, &icon, &homepage, &sourceURL, &transport,
+		&pkgName, &pkgReg, &command, &envJSON)
+	if err != nil {
+		t.Fatalf("scan agenttrust: %v", err)
+	}
+	checks := []struct{ field, got, want string }{
+		{"display_name (← title)", displayName, "AgentTrust"},
+		{"icon (← icons[0].src)", icon, "https://agenttrust.ai/icon.png"},
+		{"homepage_url (← websiteUrl)", homepage, "https://agenttrust.ai"},
+		{"source_url (← repository.url)", sourceURL, "https://github.com/agenttrust/mcp-server"},
+		{"transport (← packages[0].transport.type)", transport, "stdio"},
+		{"package_name (← packages[0].identifier)", pkgName, "@agenttrust/mcp-server"},
+		{"package_registry (← packages[0].registryType)", pkgReg, "npm"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)
+		}
+	}
+	// envVars JSON must contain the upstream camelCase tags — the parser
+	// re-emits them via the same struct, so a tag typo on read would also
+	// drop the field on write.
+	for _, want := range []string{"AGENTTRUST_API_KEY", `"isRequired":true`, `"isSecret":true`} {
+		if !strings.Contains(envJSON, want) {
+			t.Errorf("env_vars_json missing %q: %s", want, envJSON)
+		}
+	}
+
+	// Field mapping for the remote-only entry (also asserts that a missing
+	// `title` falls back to `name`, that an empty `websiteUrl` lands as ""
+	// rather than the zero default of some other field, and that
+	// `repository.url` still maps when title/website are absent).
+	var rTitle, rHomepage, rSource, rTransport, rEndpoint string
+	if err := db.QueryRow(`SELECT display_name, homepage_url, source_url, transport, endpoint
+		FROM mcp_registry_servers WHERE id = ?`, "ac.tandem/docs-mcp").Scan(
+		&rTitle, &rHomepage, &rSource, &rTransport, &rEndpoint); err != nil {
+		t.Fatalf("scan tandem: %v", err)
+	}
+	if rTitle != "ac.tandem/docs-mcp" {
+		t.Errorf("missing title should fall back to name: got %q", rTitle)
+	}
+	if rHomepage != "" {
+		t.Errorf("missing websiteUrl should be empty: got %q", rHomepage)
+	}
+	if rSource != "https://github.com/frumu-ai/tandem" {
+		t.Errorf("repository.url not mapped: got %q", rSource)
+	}
+	if rTransport != "streamable-http" {
+		t.Errorf("remote.type not mapped to transport: got %q", rTransport)
+	}
+	if rEndpoint != "https://tandem.ac/mcp" {
+		t.Errorf("remote.url not mapped to endpoint: got %q", rEndpoint)
+	}
+}
