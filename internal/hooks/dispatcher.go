@@ -11,14 +11,14 @@ import (
 
 // Dispatch is the single entry point call sites use. Flow:
 //
-//   1. Load every enabled hook for (workspaceID, event) whose crew scope is
-//      compatible with ec.CrewID.
-//   2. Filter the list by Matcher.Matches(m, ec).
-//   3. Execute blocking hooks synchronously in registration order. The
-//      first OutcomeBlock short-circuits with a *BlockedError — the
-//      caller uses errors.As to recover and abort the operation.
-//   4. Execute non-blocking hooks in goroutines so the hot path is not
-//      gated on webhook latency.
+//  1. Load every enabled hook for (workspaceID, event) whose crew scope is
+//     compatible with ec.CrewID.
+//  2. Filter the list by Matcher.Matches(m, ec).
+//  3. Execute blocking hooks synchronously in registration order. The
+//     first OutcomeBlock short-circuits with a *BlockedError — the
+//     caller uses errors.As to recover and abort the operation.
+//  4. Execute non-blocking hooks in goroutines so the hot path is not
+//     gated on webhook latency.
 //
 // Non-fatal errors (individual handler failures, journal emit failures)
 // are aggregated into the returned error via errors.Join so the caller

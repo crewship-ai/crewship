@@ -170,7 +170,6 @@ func BackupSelfTest(ctx context.Context, ops DockerOps, opts SelfTestOpts) (*Sel
 	}
 	bundleBytes := bundleBuf.Len()
 
-
 	// 3. Overwrite the canary with a sentinel so a no-op restore (e.g.
 	//    one that silently skipped the workspace section) cannot coast
 	//    through verify. An `rm` would be cleaner but bind-mount

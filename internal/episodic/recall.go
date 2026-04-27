@@ -75,13 +75,13 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 	var cands []candidate
 	for rows.Next() {
 		var (
-			c              candidate
-			dim            int
-			blob           []byte
-			agentID        sql.NullString
-			payloadStr     string
-			tsStr          string
-			importance     sql.NullFloat64
+			c          candidate
+			dim        int
+			blob       []byte
+			agentID    sql.NullString
+			payloadStr string
+			tsStr      string
+			importance sql.NullFloat64
 		)
 		if err := rows.Scan(&c.EntryID, &dim, &blob, &importance,
 			&c.EntryType, &c.Summary, &agentID, &payloadStr, &tsStr); err != nil {

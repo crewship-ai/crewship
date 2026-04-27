@@ -55,7 +55,7 @@ var ErrEvaluatorLoopExhausted = errors.New("reflection: evaluator loop exhausted
 //     than running Generate first. This lets a caller who already has
 //     a draft skip straight to verification.
 //  2. On fail, prepends a feedback block of the form
-//       "Previous attempt failed with: <issues>. Suggested: <fix>"
+//     "Previous attempt failed with: <issues>. Suggested: <fix>"
 //     to the generator's context slice, and calls Generate again.
 //  3. Emits an EntryEvalMetric to the journal for every iteration,
 //     carrying iteration number, status, issues count, and the number
@@ -150,11 +150,11 @@ func emitLoopMetric(ctx context.Context, j journal.Emitter, scope Scope, iter in
 		return
 	}
 	payload := map[string]any{
-		"metric":           "evaluator_loop",
-		"iteration":        iter,
-		"status":           status,
-		"issues_count":     len(issues),
-		"context_entries":  ctxSize,
+		"metric":          "evaluator_loop",
+		"iteration":       iter,
+		"status":          status,
+		"issues_count":    len(issues),
+		"context_entries": ctxSize,
 	}
 	entry := journal.Entry{
 		WorkspaceID: scope.WorkspaceID,

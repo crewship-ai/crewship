@@ -102,9 +102,9 @@ func TestApprovalsListRunE_NoWorkspace(t *testing.T) {
 
 // approvalsMock stubs the two endpoints this file needs.
 type approvalsMock struct {
-	t      *testing.T
-	mu     sync.Mutex
-	listQS string // query string captured from GET /api/v1/approvals
+	t          *testing.T
+	mu         sync.Mutex
+	listQS     string // query string captured from GET /api/v1/approvals
 	decidePath string
 	decideBody []byte
 }

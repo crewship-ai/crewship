@@ -137,9 +137,9 @@ func SpendByMission(ctx context.Context, db *sql.DB, missionID string) (MissionS
 	                  COALESCE(MIN(ts), ''), COALESCE(MAX(ts), '')
 	           FROM cost_ledger WHERE mission_id = ?`
 	var (
-		s          MissionSpend
-		firstStr   string
-		lastStr    string
+		s        MissionSpend
+		firstStr string
+		lastStr  string
 	)
 	s.MissionID = missionID
 	if err := db.QueryRowContext(ctx, q, missionID).Scan(

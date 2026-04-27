@@ -108,60 +108,60 @@ func (f *fakeEmitter) byType(t journal.EntryType) []journal.Entry {
 // way that hides the intent).
 func TestEstimate(t *testing.T) {
 	tests := []struct {
-		name                                 string
-		provider, model                      string
-		in, out, cachedIn, cacheCreate       int64
-		want                                 float64
+		name                           string
+		provider, model                string
+		in, out, cachedIn, cacheCreate int64
+		want                           float64
 	}{
 		{
-			name: "opus 1k in / 1k out",
+			name:     "opus 1k in / 1k out",
 			provider: "anthropic", model: "claude-opus-4-7",
 			in: 1000, out: 1000,
 			// 1000 * 15/1e6 + 1000 * 75/1e6 = 0.015 + 0.075
 			want: 0.015 + 0.075,
 		},
 		{
-			name: "sonnet with cached input",
+			name:     "sonnet with cached input",
 			provider: "anthropic", model: "claude-sonnet-4-6",
 			in: 1000, out: 500, cachedIn: 10000,
 			// 1000 * 3/1e6 + 500 * 15/1e6 + 10000 * 0.30/1e6
 			want: 0.003 + 0.0075 + 0.003,
 		},
 		{
-			name: "haiku tiny call",
+			name:     "haiku tiny call",
 			provider: "anthropic", model: "claude-haiku-4-5",
 			in: 100, out: 50,
 			// 100 * 0.80/1e6 + 50 * 4/1e6
 			want: 0.00008 + 0.0002,
 		},
 		{
-			name: "ollama free",
+			name:     "ollama free",
 			provider: "ollama", model: "llama3:70b",
 			in: 1_000_000, out: 1_000_000,
 			want: 0,
 		},
 		{
-			name: "openai gpt-5",
+			name:     "openai gpt-5",
 			provider: "openai", model: "gpt-5",
 			in: 1000, out: 500,
 			// 1000 * 10/1e6 + 500 * 30/1e6
 			want: 0.01 + 0.015,
 		},
 		{
-			name: "unknown provider returns zero",
+			name:     "unknown provider returns zero",
 			provider: "wholly-unknown-vendor", model: "x",
 			in: 1000, out: 1000,
 			want: 0,
 		},
 		{
-			name: "anthropic fallback for unknown model",
+			name:     "anthropic fallback for unknown model",
 			provider: "anthropic", model: "claude-future-99",
 			in: 1000, out: 500,
 			// falls back to sonnet rate (3/15)
 			want: 0.003 + 0.0075,
 		},
 		{
-			name: "negative tokens treated as zero",
+			name:     "negative tokens treated as zero",
 			provider: "anthropic", model: "claude-opus-4-7",
 			in: -50, out: 100,
 			// only output tokens count
@@ -212,8 +212,8 @@ func TestRecordRoundtrip(t *testing.T) {
 
 	// SQL roundtrip.
 	var (
-		gotProvider, gotModel string
-		gotIn, gotOut         int64
+		gotProvider, gotModel  string
+		gotIn, gotOut          int64
 		gotCachedIn, gotCacheC int64
 		gotCost                float64
 		gotTags                string

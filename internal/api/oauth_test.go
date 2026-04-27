@@ -36,9 +36,8 @@ func seedOAuthCredential(t *testing.T, db *sql.DB, wsID, credID, clientID, secre
 		t.Fatalf("encrypt: %v", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('uowner', 'o@o.com', 'O')`); err != nil {
-		// ignore unique violation if user already exists
-	}
+	// Idempotent seed — ignore unique-violation if user already exists.
+	_, _ = db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('uowner', 'o@o.com', 'O')`)
 	if _, err := db.Exec(`
 		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope,
 			oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,

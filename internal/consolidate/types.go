@@ -66,11 +66,11 @@ type LearnedRule struct {
 // when the MinEntries threshold was not met; in that case RulesAppended
 // and OutputPath are zero values and no file is written.
 type ConsolidationResult struct {
-	Skipped         bool
-	EntriesScanned  int
-	RulesAppended   int
-	OutputPath      string
-	JournalEntryID  string // id of the memory.consolidated entry that was emitted
+	Skipped        bool
+	EntriesScanned int
+	RulesAppended  int
+	OutputPath     string
+	JournalEntryID string // id of the memory.consolidated entry that was emitted
 }
 
 // CompactResult reports what a single compaction pass deleted and rolled

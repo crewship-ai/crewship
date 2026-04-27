@@ -166,8 +166,8 @@ func TestIndexerSelectiveFilter(t *testing.T) {
 
 	emb := &stubEmbedder{model: "test-embed", dim: 4,
 		vectors: map[string][]float32{
-			"deploy":   {1, 0, 0, 0},
-			"daily":    {0, 1, 0, 0},
+			"deploy": {1, 0, 0, 0},
+			"daily":  {0, 1, 0, 0},
 		}}
 	idx := NewIndexer(db, emb, quietLogger(), 0)
 	idx.sweepOnce(context.Background(), 10)

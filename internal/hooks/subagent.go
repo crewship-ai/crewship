@@ -14,10 +14,10 @@ import (
 //
 // The orchestrator's implementation typically:
 //
-//   1. Picks a short-lived agent defined by handler_config.agent_id or
-//      spawns an ephemeral one from a template.
-//   2. Passes the event context as the agent's task prompt.
-//   3. Parses the agent's structured response into Result.Outcome.
+//  1. Picks a short-lived agent defined by handler_config.agent_id or
+//     spawns an ephemeral one from a template.
+//  2. Passes the event context as the agent's task prompt.
+//  3. Parses the agent's structured response into Result.Outcome.
 //
 // Full integration lands in a follow-up commit; this file just pins the
 // contract so dispatcher.go can compile today.

@@ -119,12 +119,12 @@ func bm25Lane(ctx context.Context, db *sql.DB, q Query, limit int) ([]Hit, error
 	var out []Hit
 	for rows.Next() {
 		var (
-			h             Hit
-			agentID       sql.NullString
-			payloadStr    string
-			tsStr         string
-			bm25Score     float64
-			entryTypeStr  string
+			h            Hit
+			agentID      sql.NullString
+			payloadStr   string
+			tsStr        string
+			bm25Score    float64
+			entryTypeStr string
 		)
 		if err := rows.Scan(&h.EntryID, &entryTypeStr, &h.Summary, &agentID, &payloadStr, &tsStr, &bm25Score); err != nil {
 			continue

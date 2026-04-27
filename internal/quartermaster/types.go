@@ -21,14 +21,14 @@ import "time"
 // journal itself as an EntryEvalRunStarted + per-metric EntryEvalMetric
 // events. No new DB table is introduced for MVP.
 type EvalRun struct {
-	ID             string
-	MissionID      string
-	SeedSignature  string // sha256 over step type|tool_name sequence
-	StartedAt      time.Time
-	CompletedAt    time.Time
-	Status         string // "completed", "failed", "partial"
-	Metrics        EvalMetrics
-	Result         string // free-form summary ("ok", "regression", "inconclusive", etc.)
+	ID            string
+	MissionID     string
+	SeedSignature string // sha256 over step type|tool_name sequence
+	StartedAt     time.Time
+	CompletedAt   time.Time
+	Status        string // "completed", "failed", "partial"
+	Metrics       EvalMetrics
+	Result        string // free-form summary ("ok", "regression", "inconclusive", etc.)
 }
 
 // EvalMetrics is the numeric snapshot computed from a trajectory. These

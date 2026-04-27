@@ -9,8 +9,8 @@ package reflection
 // can parse them uniformly. The instruction block at the end of every
 // prompt is identical; only the role framing changes.
 var personaPrompts = map[Persona]string{
-	PersonaLogician: logicianPrompt,
-	PersonaSkeptic:  skepticPrompt,
+	PersonaLogician:     logicianPrompt,
+	PersonaSkeptic:      skepticPrompt,
 	PersonaDomainExpert: domainExpertPrompt,
 }
 

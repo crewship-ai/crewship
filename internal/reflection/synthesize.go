@@ -141,8 +141,8 @@ func buildSynthesisPrompt(subject string, critiques []Critique) string {
 func parseSynthesis(raw string) Synthesis {
 	trimmed := strings.TrimSpace(raw)
 	var decoded struct {
-		Keep       string `json:"keep"`
-		Revise     []struct {
+		Keep   string `json:"keep"`
+		Revise []struct {
 			What string `json:"what"`
 			Why  string `json:"why"`
 		} `json:"revise"`

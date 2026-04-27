@@ -124,12 +124,12 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		ActorID:     fromAgentID,
 		Summary:     fmt.Sprintf("escalation from %s: %s", body.FromSlug, truncate(body.Reason, 140)),
 		Payload: map[string]any{
-			"reason":           body.Reason,
-			"context":          body.Context,
-			"escalation_type":  escalationType,
-			"metadata":         body.Metadata,
-			"from_slug":        body.FromSlug,
-			"state":            "pending",
+			"reason":          body.Reason,
+			"context":         body.Context,
+			"escalation_type": escalationType,
+			"metadata":        body.Metadata,
+			"from_slug":       body.FromSlug,
+			"state":           "pending",
 		},
 		Refs: map[string]any{"escalation_id": escalationID, "chat_id": body.ChatID},
 	})

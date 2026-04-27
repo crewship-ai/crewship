@@ -168,11 +168,11 @@ func (c *Compactor) now() time.Time {
 // not the full journal.Entry — the payload text is used only to measure
 // bytes freed, never parsed.
 type agedRow struct {
-	ID         string
-	CrewID     sql.NullString
-	TS         time.Time
-	Type       journal.EntryType
-	SizeBytes  int64
+	ID        string
+	CrewID    sql.NullString
+	TS        time.Time
+	Type      journal.EntryType
+	SizeBytes int64
 }
 
 // selectAged issues the SELECT that pulls candidate rows. entry_type is
@@ -242,14 +242,14 @@ type bucketKey struct {
 }
 
 type bucket struct {
-	CrewID    string
-	Date      string
-	Type      journal.EntryType
-	IDs       []string
-	Count     int
-	BytesSum  int64
-	FirstTS   time.Time
-	LastTS    time.Time
+	CrewID   string
+	Date     string
+	Type     journal.EntryType
+	IDs      []string
+	Count    int
+	BytesSum int64
+	FirstTS  time.Time
+	LastTS   time.Time
 }
 
 // groupIntoBuckets partitions rows by (crew_id, date, type). The ordering
@@ -313,12 +313,12 @@ func (c *Compactor) emitBucketSummary(ctx context.Context, workspaceID string, b
 		Summary: fmt.Sprintf("rolled up %d %s entries from %s",
 			b.Count, b.Type, b.Date),
 		Payload: map[string]any{
-			"bucket_date":        b.Date,
-			"entry_type":         string(b.Type),
-			"count":              b.Count,
-			"bytes_sum":          b.BytesSum,
-			"first_ts":           b.FirstTS.Format(time.RFC3339),
-			"last_ts":            b.LastTS.Format(time.RFC3339),
+			"bucket_date": b.Date,
+			"entry_type":  string(b.Type),
+			"count":       b.Count,
+			"bytes_sum":   b.BytesSum,
+			"first_ts":    b.FirstTS.Format(time.RFC3339),
+			"last_ts":     b.LastTS.Format(time.RFC3339),
 		},
 		Refs: map[string]any{
 			"compacted_entries": b.IDs,

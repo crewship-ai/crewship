@@ -249,7 +249,7 @@ func TestHandleExposePort_SuccessForwardsAndInjectsContext(t *testing.T) {
 		{"container_id", "container-abc"},
 		{"chat_id", "chat-7"},
 		{"description", "grafana probe"},
-		{"port", float64(8080)},       // JSON numbers decode to float64.
+		{"port", float64(8080)},        // JSON numbers decode to float64.
 		{"ttl_seconds", float64(3600)}, // included only because caller set non-zero.
 	} {
 		got := capturedBody[want.key]

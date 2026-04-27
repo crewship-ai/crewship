@@ -50,12 +50,12 @@ func (r *recordingEmitter) byType(t journal.EntryType) []journal.Entry {
 // stubCritiquer returns a pre-scripted critique per persona and records
 // the goroutine-visible start time so tests can check parallelism.
 type stubCritiquer struct {
-	mu          sync.Mutex
-	starts      map[Persona]time.Time
-	delay       time.Duration
-	scripted    map[Persona]Critique
-	errOnce     *Persona
-	callCount   int32
+	mu        sync.Mutex
+	starts    map[Persona]time.Time
+	delay     time.Duration
+	scripted  map[Persona]Critique
+	errOnce   *Persona
+	callCount int32
 }
 
 func newStubCritiquer(scripted map[Persona]Critique, delay time.Duration) *stubCritiquer {

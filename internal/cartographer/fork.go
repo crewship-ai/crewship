@@ -165,11 +165,11 @@ func Fork(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, fromC
 			ActorID:     userID,
 			Summary:     fmt.Sprintf("fork %s from checkpoint %s", newMissionID, src.ID),
 			Refs: map[string]any{
-				"parent_mission":     src.MissionID,
-				"new_mission":        newMissionID,
-				"fork_of":            src.ID,
-				"new_checkpoint_id":  newCPID,
-				"journal_cursor":     src.JournalCursor,
+				"parent_mission":    src.MissionID,
+				"new_mission":       newMissionID,
+				"fork_of":           src.ID,
+				"new_checkpoint_id": newCPID,
+				"journal_cursor":    src.JournalCursor,
 			},
 		})
 	}

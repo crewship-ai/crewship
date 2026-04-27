@@ -290,7 +290,7 @@ func TestMiddleware_NoScopeFailsClosed(t *testing.T) {
 	stub := &stubProvider{name: "anthropic", resp: &Response{}}
 	mw := Middleware(stub, &fakeLLMEmitter{}, openLLMTestDB(t))
 	_, err := mw.Complete(context.Background(), Request{
-		Model: "claude-haiku-4-5",
+		Model:    "claude-haiku-4-5",
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err == nil {
