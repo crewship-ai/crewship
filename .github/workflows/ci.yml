@@ -23,7 +23,7 @@ jobs:
   # ── Frontend: lint, typecheck, build ──
   frontend:
     name: Frontend
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos-arm64]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -55,7 +55,7 @@ jobs:
   # ── Frontend tests (Vitest) ──
   frontend-test:
     name: Frontend Test
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos-arm64]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -71,7 +71,7 @@ jobs:
   # ── Go: vet, build, test ──
   go:
     name: Go
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos-arm64]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -92,7 +92,7 @@ jobs:
   # ── Go lint: golangci-lint ──
   go-lint:
     name: Go Lint
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos-arm64]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -119,7 +119,7 @@ jobs:
   # detection is acceptable for the budget.
   binary:
     name: Binary Build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macos-arm64]
     timeout-minutes: 10
     needs: [frontend, go]
     if: github.event_name == 'push'
