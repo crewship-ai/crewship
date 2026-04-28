@@ -14,15 +14,28 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 )
 
+// provisionLogTailCap bounds the in-memory ring buffer of progress messages
+// that ProvisionStatus returns to clients connecting mid-build (e.g. after a
+// page reload). 50 is plenty for the longest realistic build (1 pull + ~30
+// features + mise + commit) without growing the JSON response unboundedly.
+const provisionLogTailCap = 50
+
 // ProvisionJob tracks the state of an in-progress provisioning operation.
 // In-memory state is fine for single-instance deployment (MVP). If crewshipd
 // is ever scaled horizontally this must be moved to a shared store.
+//
+// Step/Total/Message/StepStart/LogTail are populated by the progress callback
+// passed into Provisioner.Provision. They feed both the WS broadcast (live
+// progress) and the ProvisionStatus GET endpoint (replay-on-reconnect for a
+// client that joins mid-build). All progress fields are guarded by the
+// ProvisioningHandler's mutex; callers must Lock before reading or writing.
 type ProvisionJob struct {
 	CrewID      string
 	Status      string // "pending", "running", "completed", "failed"
@@ -31,6 +44,12 @@ type ProvisionJob struct {
 	Error       string
 	CachedImage string
 	ConfigHash  string
+
+	Step      int       // 1-based current milestone
+	Total     int       // total milestones; 0 until the first progress event
+	Message   string    // human-readable description of current step
+	StepStart time.Time // wall clock at last step transition (for ETA hints)
+	LogTail   []string  // ring buffer of past progress messages, cap = provisionLogTailCap
 }
 
 // orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
@@ -64,6 +83,12 @@ type ProvisioningHandler struct {
 	// rateLimiter caps concurrent and recent provisions per workspace. Guards
 	// against runaway triggers (e.g. a buggy loop) exhausting Docker resources.
 	rateLimiter *provisionRateLimiter
+
+	// wsHub is the WebSocket broadcaster used to push live `provision.progress`,
+	// `provision.completed` and `provision.failed` events on the
+	// `workspace:{id}` channel. May be nil — broadcasts are no-ops in that
+	// case, which is the path tests take.
+	wsHub *ws.Hub
 
 	// imgListMu guards imgListCache. CacheList + sweepOrphanCacheImages both
 	// page through all local images; memoizing that O(n) Docker call trims
@@ -160,6 +185,8 @@ func (r *provisionRateLimiter) release(workspaceID string) {
 // NewProvisioningHandler creates a ProvisioningHandler with the given database and logger.
 // Fetchers may be nil; in that case the handler falls back to the embedded catalogs.
 // If docker is nil, the provisioner is disabled and ProvisionTrigger returns 503.
+// wsHub may be nil — provisioning still works, but live progress events won't reach
+// connected browsers (clients fall back to polling ProvisionStatus).
 func NewProvisioningHandler(
 	db *sql.DB,
 	logger *slog.Logger,
@@ -167,6 +194,7 @@ func NewProvisioningHandler(
 	runtimeFetcher *devcontainer.RuntimeFetcher,
 	docker *client.Client,
 	featureCacheDir string,
+	wsHub *ws.Hub,
 ) *ProvisioningHandler {
 	var provisioner *devcontainer.Provisioner
 	if docker != nil {
@@ -183,6 +211,7 @@ func NewProvisioningHandler(
 		provisioner:    provisioner,
 		jobs:           make(map[string]*ProvisionJob),
 		rateLimiter:    newProvisionRateLimiter(),
+		wsHub:          wsHub,
 	}
 	if docker != nil {
 		h.gcClient = docker // *client.Client implements orphanGCClient
@@ -466,12 +495,12 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var devcontainerConfig, cachedImage, cfgHash sql.NullString
+	var devcontainerConfig, cachedImage, cfgHash, slug sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT devcontainer_config, cached_image, config_hash
+		`SELECT devcontainer_config, cached_image, config_hash, slug
 		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		crewID, workspaceID,
-	).Scan(&devcontainerConfig, &cachedImage, &cfgHash)
+	).Scan(&devcontainerConfig, &cachedImage, &cfgHash, &slug)
 
 	if err == sql.ErrNoRows {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
@@ -494,15 +523,45 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 		"config_hash":         nullStringPtr(cfgHash),
 	}
 
+	// agents_pending_restart: agents in this crew running on a stale image.
+	// One container per crew, so this is "is the live container's image
+	// different from cached_image?" — if yes, every active agent in the
+	// crew is pinned to the old image and needs the container recreated.
+	if cachedImage.Valid && cachedImage.String != "" && slug.Valid && slug.String != "" {
+		pending := h.agentsPendingRestartCount(r.Context(), crewID, slug.String, cachedImage.String)
+		resp["agents_pending_restart"] = pending
+	} else {
+		resp["agents_pending_restart"] = 0
+	}
+
 	status := "idle"
 	if hasJob {
+		// Snapshot progress fields under the lock so the response is internally
+		// consistent (step / total / message all reflect the same moment).
+		h.mu.RLock()
 		status = job.Status
 		if job.Error != "" {
 			resp["error"] = job.Error
 		}
-		resp["started_at"] = job.StartedAt.Format(time.RFC3339)
+		if job.Total > 0 {
+			resp["step"] = job.Step
+			resp["total"] = job.Total
+			resp["message"] = job.Message
+		}
+		if len(job.LogTail) > 0 {
+			tail := make([]string, len(job.LogTail))
+			copy(tail, job.LogTail)
+			resp["log_tail"] = tail
+		}
+		startedAt := job.StartedAt.Format(time.RFC3339)
+		var completedAt string
 		if job.CompletedAt != nil {
-			resp["completed_at"] = job.CompletedAt.Format(time.RFC3339)
+			completedAt = job.CompletedAt.Format(time.RFC3339)
+		}
+		h.mu.RUnlock()
+		resp["started_at"] = startedAt
+		if completedAt != "" {
+			resp["completed_at"] = completedAt
 		}
 	} else if cachedImage.Valid && cachedImage.String != "" {
 		status = "completed"
@@ -618,10 +677,11 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	// job state is updated, then the slot is freed.
 	defer func() {
 		if r := recover(); r != nil {
+			panicErr := fmt.Sprintf("internal error: %v", r)
 			h.mu.Lock()
 			if j, ok := h.jobs[crewID]; ok {
 				j.Status = "failed"
-				j.Error = fmt.Sprintf("internal error: %v", r)
+				j.Error = panicErr
 				now := time.Now()
 				j.CompletedAt = &now
 			}
@@ -632,6 +692,10 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 				"panic", r,
 				"stack", string(debug.Stack()),
 			)
+			h.wsHub.BroadcastWorkspace(workspaceID, "provision.failed", map[string]any{
+				"crew_id": crewID,
+				"error":   panicErr,
+			})
 		}
 	}()
 
@@ -641,7 +705,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 
 	cfg, err := devcontainer.ParseBytes([]byte(cfgJSON))
 	if err != nil {
-		h.markJobFailed(job, fmt.Errorf("parse devcontainer_config: %w", err))
+		h.markJobFailed(job, workspaceID, fmt.Errorf("parse devcontainer_config: %w", err))
 		return
 	}
 
@@ -651,7 +715,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		baseImage = runtimeImg
 	}
 	if baseImage == "" {
-		h.markJobFailed(job, fmt.Errorf("no base image in devcontainer config or runtime_image"))
+		h.markJobFailed(job, workspaceID, fmt.Errorf("no base image in devcontainer config or runtime_image"))
 		return
 	}
 	// Ensure the config hash reflects the resolved base image.
@@ -663,9 +727,35 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		"features", len(cfg.Features),
 	)
 
-	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON)
+	progress := func(step, total int, message string) {
+		now := time.Now()
+		h.mu.Lock()
+		job.Step = step
+		job.Total = total
+		job.Message = message
+		job.StepStart = now
+		job.LogTail = append(job.LogTail, message)
+		if len(job.LogTail) > provisionLogTailCap {
+			// Drop oldest entries when the ring buffer is full. Allocates a
+			// fresh slice to release the head storage; otherwise long builds
+			// would hold on to old strings via the underlying array.
+			tail := make([]string, provisionLogTailCap)
+			copy(tail, job.LogTail[len(job.LogTail)-provisionLogTailCap:])
+			job.LogTail = tail
+		}
+		h.mu.Unlock()
+
+		h.wsHub.BroadcastWorkspace(workspaceID, "provision.progress", map[string]any{
+			"crew_id": crewID,
+			"step":    step,
+			"total":   total,
+			"message": message,
+		})
+	}
+
+	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON, devcontainer.WithProgress(progress))
 	if err != nil {
-		h.markJobFailed(job, fmt.Errorf("provision: %w", err))
+		h.markJobFailed(job, workspaceID, fmt.Errorf("provision: %w", err))
 		return
 	}
 
@@ -691,7 +781,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		result.CachedImage, result.ConfigHash, reqJSON, crewID, workspaceID,
 	)
 	if err != nil {
-		h.markJobFailed(job, fmt.Errorf("update db: %w", err))
+		h.markJobFailed(job, workspaceID, fmt.Errorf("update db: %w", err))
 		return
 	}
 
@@ -708,10 +798,18 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		"cached_image", result.CachedImage,
 		"config_hash", result.ConfigHash,
 	)
+	h.wsHub.BroadcastWorkspace(workspaceID, "provision.completed", map[string]any{
+		"crew_id":      crewID,
+		"cached_image": result.CachedImage,
+		"config_hash":  result.ConfigHash,
+	})
 }
 
-// markJobFailed records a failure on the job and logs it.
-func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, err error) {
+// markJobFailed records a failure on the job, logs it, and broadcasts a
+// `provision.failed` event so any open browser updates without polling.
+// workspaceID is required for the broadcast — callers always know it because
+// runProvisioning is the only call site.
+func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, workspaceID string, err error) {
 	h.logger.Error("provisioning failed", "crew_id", job.CrewID, "error", err)
 	now := time.Now()
 	h.mu.Lock()
@@ -719,6 +817,11 @@ func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, err error) {
 	job.CompletedAt = &now
 	job.Error = err.Error()
 	h.mu.Unlock()
+
+	h.wsHub.BroadcastWorkspace(workspaceID, "provision.failed", map[string]any{
+		"crew_id": job.CrewID,
+		"error":   err.Error(),
+	})
 }
 
 // ProvisionRebuild invalidates the cached image and triggers re-provisioning.
@@ -952,4 +1055,135 @@ func isEmptyRequirements(r devcontainer.AggregatedRequirements) bool {
 		len(r.CapAdd) == 0 &&
 		len(r.SecurityOpt) == 0 &&
 		len(r.PostStartCommands) == 0
+}
+
+// crewContainerName mirrors docker.Provider.CrewContainerName for the cases
+// where we don't hold a provider reference. Hardcoded to the default Docker
+// prefix because the provider is the only consumer that customizes it, and
+// the restart endpoint always targets that exact runtime. If we ever support
+// multiple container providers per workspace, this needs to round-trip
+// through the orchestrator.
+const crewContainerPrefix = "crewship-team-"
+
+// findCrewContainer returns the live Docker container ID for the given crew
+// slug, or "" if no container is running. Returns an error only on a real
+// Docker failure — "no container found" is the empty-string success path.
+func (h *ProvisioningHandler) findCrewContainer(ctx context.Context, slug string) (string, error) {
+	if h.docker == nil {
+		return "", nil
+	}
+	name := crewContainerPrefix + slug
+	containers, err := h.docker.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return "", err
+	}
+	for _, c := range containers {
+		for _, n := range c.Names {
+			if n == "/"+name {
+				return c.ID, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// agentsPendingRestartCount returns how many agents in a crew are running on a
+// stale image — i.e. the live container exists but its Image differs from the
+// freshly-built `cached_image`. Returns 0 when no container exists, when the
+// image already matches, or on any Docker error (the count is informational;
+// surfacing a 500 here would block the whole status response).
+func (h *ProvisioningHandler) agentsPendingRestartCount(ctx context.Context, crewID, slug, cachedImage string) int {
+	containerID, err := h.findCrewContainer(ctx, slug)
+	if err != nil || containerID == "" {
+		return 0
+	}
+	inspect, err := h.docker.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return 0
+	}
+	if inspect.Config != nil && inspect.Config.Image == cachedImage {
+		return 0
+	}
+	// Stale container — count active agents in this crew. We deliberately
+	// count only non-deleted rows; the actual runtime impact is "all of
+	// them" because they share one container, but the UI shows a number
+	// that matches what the user sees in the roster.
+	var count int
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agents WHERE crew_id = ? AND deleted_at IS NULL`,
+		crewID,
+	).Scan(&count); err != nil {
+		return 0
+	}
+	return count
+}
+
+// RestartCrewAgents destroys the crew's runtime container so the next agent
+// exec recreates it from the latest `cached_image`. Returns 200 with the
+// affected agent count even if no container was running (idempotent).
+//
+// Auth: requires "update" on the crew. Workspace scoping is enforced via the
+// SELECT against crews.workspace_id.
+func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "update") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+	if h.docker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "container restart not available (Docker client not configured)",
+		})
+		return
+	}
+	crewID := r.PathValue("crewId")
+	if crewID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew ID is required"})
+		return
+	}
+
+	var slug string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT slug FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		crewID, workspaceID,
+	).Scan(&slug)
+	if err == sql.ErrNoRows {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("query crew for restart", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	containerID, err := h.findCrewContainer(r.Context(), slug)
+	if err != nil {
+		h.logger.Error("list containers for restart", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if containerID == "" {
+		// Nothing to restart — agents will pick up the new image on next start.
+		writeJSON(w, http.StatusOK, map[string]any{"restarted": 0})
+		return
+	}
+
+	// Force-remove drops the container. The next agent exec will trigger
+	// EnsureCrewRuntime which re-creates from the current cached_image.
+	if err := h.docker.ContainerRemove(r.Context(), containerID, container.RemoveOptions{Force: true}); err != nil {
+		h.logger.Error("remove crew container", "container_id", containerID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	var restarted int
+	_ = h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM agents WHERE crew_id = ? AND deleted_at IS NULL`,
+		crewID,
+	).Scan(&restarted)
+
+	h.logger.Info("crew runtime restarted", "crew_id", crewID, "slug", slug, "agents", restarted)
+	writeJSON(w, http.StatusOK, map[string]any{"restarted": restarted})
 }

@@ -1,14 +1,15 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
   Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
   LayoutDashboard, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
-  Loader2, Package, AlertTriangle,
+  Loader2, Package, AlertTriangle, Play, RotateCcw,
 } from "lucide-react"
+import { toast } from "sonner"
 
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
 import { useRealtime } from "@/hooks/use-realtime"
@@ -367,7 +368,7 @@ export function AppToolbar() {
                   fixed pills shift left as a group (right-aligned),
                   preserving their relative order. The fixed pills never
                   reflow within themselves. */}
-              <ProvisioningBadge provisioning={provisioning} />
+              <ProvisioningBadge provisioning={provisioning} workspaceId={workspaceId} />
 
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -564,16 +565,27 @@ export function AppToolbar() {
 }
 
 /**
- * Toolbar provisioning badge with click-to-open detail popover.
+ * Toolbar provisioning badge — single source of UI truth for "an image
+ * somewhere needs work".
  *
- * Lives at the LEFT edge of the right-side status group so the fixed
- * Online / Crews-idle pills don't reflow when this badge appears or
- * disappears. Click opens a popover listing each unhealthy crew —
- * status (needs rebuild / building / failed) plus the features it
- * declares, each with its brand icon when we have one. Each row
- * deep-links to the crew canvas where the user can act.
+ * Sits at the LEFT edge of the status group so the fixed Online / Crews
+ * pills don't reflow when it appears. Click opens a popover whose rows
+ * are state-aware:
+ *   - needs_provision → Build now button
+ *   - running         → live step/total progress bar + last message
+ *   - failed          → error + Retry button
+ *
+ * Crew name is a Link to the canvas (where the user can edit config or
+ * see the full provisioning banner); action buttons live on the row
+ * itself so the user never has to navigate away to act.
  */
-function ProvisioningBadge({ provisioning }: { provisioning: ReturnType<typeof useProvisioningStatus> }) {
+function ProvisioningBadge({
+  provisioning,
+  workspaceId,
+}: {
+  provisioning: ReturnType<typeof useProvisioningStatus>
+  workspaceId: string | null
+}) {
   const [open, setOpen] = useState(false)
   if (provisioning.total === 0) return null
 
@@ -586,10 +598,19 @@ function ProvisioningBadge({ provisioning }: { provisioning: ReturnType<typeof u
     if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`
     if (provisioning.building > 0) return `Building ${provisioning.building}…`
     if (provisioning.needsProvision > 0) return `${provisioning.needsProvision} need${provisioning.needsProvision > 1 ? "" : "s"} rebuild`
+    if (provisioning.pendingRestart > 0) return `${provisioning.pendingRestart} need${provisioning.pendingRestart > 1 ? "" : "s"} restart`
     return ""
   }
   const Icon = provisioning.building > 0 ? Loader2 : provisioning.failed > 0 ? AlertTriangle : Package
-  const unhealthy = provisioning.detail.filter((d) => d.status !== "completed" && d.status !== "idle")
+  // Show every crew that needs the user's attention: build pending, building,
+  // failed, or build complete but agents still on the old image (waiting for
+  // explicit Restart). Idle / clean-completed crews are filtered out so the
+  // popover always reflects the badge count.
+  const unhealthy = provisioning.detail.filter((d) => {
+    if (d.status === "needs_provision" || d.status === "running" || d.status === "failed") return true
+    if (d.status === "completed" && (d.agentsPendingRestart ?? 0) > 0) return true
+    return false
+  })
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -603,47 +624,189 @@ function ProvisioningBadge({ provisioning }: { provisioning: ReturnType<typeof u
           <span className={`text-micro font-medium ${colors.text}`}>{verbalize()}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="w-[360px] p-0 overflow-hidden">
+      <PopoverContent align="start" sideOffset={8} className="w-[400px] p-0 overflow-hidden">
         <div className="px-3 py-2 border-b text-xs font-semibold flex items-center gap-2">
           <Package className="h-3.5 w-3.5 text-muted-foreground" />
           Container builds
         </div>
-        <ul className="divide-y max-h-[320px] overflow-y-auto">
+        <ul className="divide-y max-h-[420px] overflow-y-auto">
           {unhealthy.map((d) => (
-            <li key={d.id}>
-              <Link
-                href={`/crews?crew=${encodeURIComponent(d.slug)}`}
-                onClick={() => setOpen(false)}
-                className="block px-3 py-2.5 hover:bg-accent/40 transition-colors"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <ProvisioningStatusDot status={d.status} />
-                  <span className="text-sm font-medium truncate flex-1">{d.name}</span>
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {d.status === "needs_provision" ? "needs rebuild" : d.status}
-                  </span>
-                </div>
-                {d.error && (
-                  <pre className="text-[10px] text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap break-words ml-4 max-h-[40px] overflow-hidden">
-                    {d.error.slice(0, 200)}
-                  </pre>
-                )}
-                {d.featureIds.length > 0 && (
-                  <div className="flex items-center gap-1 ml-4 mt-1.5 flex-wrap">
-                    {d.featureIds.map((fid) => (
-                      <FeatureChip key={fid} featureRef={fid} />
-                    ))}
-                  </div>
-                )}
-              </Link>
-            </li>
+            <ProvisioningRow
+              key={d.id}
+              crew={d}
+              workspaceId={workspaceId}
+              onNavigate={() => setOpen(false)}
+            />
           ))}
         </ul>
         <div className="px-3 py-2 border-t bg-muted/30 text-[10px] text-muted-foreground">
-          Click a crew to open its canvas and act on it.
+          Build button kicks off provisioning here — no need to open the crew.
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+/**
+ * One row in the provisioning popover. Renders state-specific content
+ * (Build / progress / Retry) inline so the user can act without navigating.
+ *
+ * The crew name remains a Link to the canvas because the canvas still
+ * shows the full ProvisioningBanner with raw error logs and the
+ * Settings tab — the popover is the *primary* surface for the action,
+ * not the only place to see context.
+ */
+function ProvisioningRow({
+  crew,
+  workspaceId,
+  onNavigate,
+}: {
+  crew: ReturnType<typeof useProvisioningStatus>["detail"][number]
+  workspaceId: string | null
+  onNavigate: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const pendingRestart = crew.agentsPendingRestart ?? 0
+  const isPendingRestart = crew.status === "completed" && pendingRestart > 0
+
+  const trigger = useCallback(async () => {
+    if (!workspaceId) return
+    setBusy(true)
+    try {
+      const r = await fetch(
+        `/api/v1/crews/${crew.id}/provision?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "POST" },
+      )
+      if (!r.ok) {
+        const text = await r.text()
+        toast.error(`Build failed to start: ${text.slice(0, 200)}`)
+      } else {
+        toast.success(`Building ${crew.name}…`)
+      }
+    } catch (err) {
+      toast.error(`Build failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [crew.id, crew.name, workspaceId])
+
+  const restart = useCallback(async () => {
+    if (!workspaceId) return
+    setBusy(true)
+    try {
+      const r = await fetch(
+        `/api/v1/crews/${crew.id}/restart-agents?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "POST" },
+      )
+      if (!r.ok) {
+        const text = await r.text()
+        toast.error(`Restart failed: ${text.slice(0, 200)}`)
+      } else {
+        const data = (await r.json().catch(() => ({}))) as { restarted?: number }
+        toast.success(`${data.restarted ?? 0} agent${data.restarted === 1 ? "" : "s"} restarted in ${crew.name}`)
+      }
+    } catch (err) {
+      toast.error(`Restart failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [crew.id, crew.name, workspaceId])
+
+  const statusLabel = isPendingRestart
+    ? "ready · restart agents"
+    : crew.status === "needs_provision"
+      ? "needs rebuild"
+      : crew.status
+
+  return (
+    <li className="px-3 py-2.5">
+      <div className="flex items-center gap-2 mb-1.5">
+        <ProvisioningStatusDot status={crew.status} />
+        <Link
+          href={`/crews?crew=${encodeURIComponent(crew.slug)}`}
+          onClick={onNavigate}
+          className="text-sm font-medium truncate flex-1 hover:text-foreground transition-colors"
+        >
+          {crew.name}
+        </Link>
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
+          {statusLabel}
+        </span>
+      </div>
+
+      {crew.status === "running" && crew.total ? (
+        <div className="ml-4 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-blue-500 transition-all"
+                style={{ width: `${Math.min(100, ((crew.step ?? 0) / Math.max(1, crew.total)) * 100)}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+              {crew.step ?? 0}/{crew.total}
+            </span>
+          </div>
+          {crew.message && (
+            <div className="text-[11px] text-muted-foreground truncate">{crew.message}</div>
+          )}
+        </div>
+      ) : null}
+
+      {crew.status === "failed" && crew.error && (
+        <pre className="text-[10px] text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap break-words ml-4 max-h-[60px] overflow-hidden">
+          {crew.error.slice(0, 240)}
+        </pre>
+      )}
+
+      {crew.featureIds.length > 0 && crew.status !== "running" && (
+        <div className="flex items-center gap-1 ml-4 mt-1.5 flex-wrap">
+          {crew.featureIds.map((fid) => (
+            <FeatureChip key={fid} featureRef={fid} />
+          ))}
+        </div>
+      )}
+
+      {isPendingRestart && (
+        <div className="ml-4 mt-1 text-[11px] text-muted-foreground">
+          {pendingRestart} agent{pendingRestart === 1 ? "" : "s"} on old image
+        </div>
+      )}
+
+      {(crew.status === "needs_provision" || crew.status === "failed" || isPendingRestart) && (
+        <div className="flex justify-end mt-2">
+          <button
+            type="button"
+            onClick={isPendingRestart ? restart : trigger}
+            disabled={busy || !workspaceId}
+            className={`text-xs px-2.5 py-1 rounded border flex items-center gap-1.5 transition-colors ${
+              crew.status === "failed"
+                ? "bg-red-500/15 hover:bg-red-500/25 text-red-300 border-red-500/40"
+                : isPendingRestart
+                  ? "bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/40"
+                  : "bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border-amber-500/40"
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            {busy ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : crew.status === "failed" ? (
+              <RotateCcw className="h-3 w-3" />
+            ) : isPendingRestart ? (
+              <RotateCcw className="h-3 w-3" />
+            ) : (
+              <Play className="h-3 w-3" />
+            )}
+            {busy
+              ? "Starting…"
+              : crew.status === "failed"
+                ? "Retry"
+                : isPendingRestart
+                  ? "Restart agents"
+                  : "Build now"}
+          </button>
+        </div>
+      )}
+    </li>
   )
 }
 

@@ -35,6 +35,27 @@ type CommitClient interface {
 	ImageInspect(ctx context.Context, imageID string, inspectOpts ...dockerclient.ImageInspectOption) (image.InspectResponse, error)
 }
 
+// ProgressCallback receives provisioning progress updates. Called synchronously
+// from Provision(); implementations must be cheap and non-blocking. Step counts
+// from 1 to total inclusive; total is fixed for the duration of one Provision
+// call. Message is human-readable, suitable for direct display in a UI.
+type ProgressCallback func(step int, total int, message string)
+
+// ProvisionOption configures a single Provision call. Use the With* helpers
+// rather than constructing the underlying type directly.
+type ProvisionOption func(*provisionOpts)
+
+type provisionOpts struct {
+	onProgress ProgressCallback
+}
+
+// WithProgress attaches a progress callback to a Provision call. The callback
+// fires on coarse-grained milestones (pull, each feature install, mise install,
+// commit) — not on raw BuildKit log lines, which would overwhelm a UI.
+func WithProgress(cb ProgressCallback) ProvisionOption {
+	return func(o *provisionOpts) { o.onProgress = cb }
+}
+
 // Provisioner orchestrates the full devcontainer provisioning flow: create a
 // temporary container from the base image, install features, run post-create
 // commands, and commit the result as a cached image.
@@ -254,7 +275,12 @@ func (p *Provisioner) invalidateImageListCache() {
 // Provision builds a cached image by installing devcontainer features and
 // running post-create commands in a temporary container. If a cached image
 // already exists, it returns immediately.
-func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Config, miseConfig string) (*ProvisionResult, error) {
+func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Config, miseConfig string, opts ...ProvisionOption) (*ProvisionResult, error) {
+	o := &provisionOpts{}
+	for _, fn := range opts {
+		fn(o)
+	}
+
 	hash := configHash(baseImage, cfg, miseConfig)
 	tag := cacheImageTag(hash)
 
@@ -265,16 +291,42 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 	if exists {
 		p.logger.Info("using cached image", "tag", tag)
+		if o.onProgress != nil {
+			o.onProgress(1, 1, "Using cached image")
+		}
 		return &ProvisionResult{CachedImage: tag, ConfigHash: hash}, nil
 	}
 
 	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
 	if len(cfg.Features) == 0 && cfg.PostCreateCommand == nil && len(cfg.ContainerEnv) == 0 && miseConfig == "" {
 		p.logger.Debug("skipping provisioning - config has no customizations")
+		if o.onProgress != nil {
+			o.onProgress(1, 1, "No customizations needed")
+		}
 		return &ProvisionResult{CachedImage: "", ConfigHash: hash}, nil
 	}
 
 	p.logger.Info("provisioning devcontainer image", "base", baseImage, "tag", tag)
+
+	// Compute total milestones up front so the UI can render a stable
+	// progress bar. Granularity matches what we actually emit below: pull +
+	// one per feature + (mise as a single bucket) + commit. We don't drill
+	// into per-mise-tool granularity because we don't know the tool list
+	// without parsing miseConfig — and that parse already happens inside
+	// installMise.
+	total := 1 + len(cfg.Features) + 1 // pull + features + commit
+	if miseConfig != "" {
+		total++
+	}
+	step := 0
+	emit := func(message string) {
+		step++
+		if o.onProgress != nil {
+			o.onProgress(step, total, message)
+		}
+	}
+
+	emit("Pulling base image " + baseImage)
 
 	// 2. Create temporary container.
 	containerID, err := p.createTempContainer(ctx, baseImage)
@@ -298,13 +350,16 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// feature with username/userUid options) and the Claude Code CLI (via
 	// devcontainers-extra/claude-code feature) come from the devcontainer
 	// configuration — no custom Go installers needed.
-	resolvedFeatures, err := p.installFeatures(ctx, containerID, cfg)
+	resolvedFeatures, err := p.installFeatures(ctx, containerID, cfg, func(featureID string) {
+		emit("Installing feature " + featureID)
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	// 5. Handle mise configuration.
 	if miseConfig != "" {
+		emit("Installing language runtimes")
 		if err := p.installMise(ctx, containerID, miseConfig); err != nil {
 			return nil, fmt.Errorf("mise provisioning: %w", err)
 		}
@@ -339,6 +394,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	// 9. Commit the container as a cached image.
+	emit("Committing image")
 	_, commitErr := p.docker.ContainerCommit(ctx, containerID, container.CommitOptions{
 		Reference: tag,
 	})
@@ -465,7 +521,12 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 // Returns the sorted slice of resolved features so callers can inspect
 // metadata (containerEnv, mounts, lifecycle hooks, privileged, etc.) after
 // installation.
-func (p *Provisioner) installFeatures(ctx context.Context, containerID string, cfg *Config) ([]*ResolvedFeature, error) {
+//
+// beforeInstall, if non-nil, fires once per feature immediately before its
+// install.sh is executed — used by Provision() to drive the progress
+// callback. Receives the resolved feature ID (e.g. "common-utils"), not the
+// full ref. May be called from the same goroutine as the install itself.
+func (p *Provisioner) installFeatures(ctx context.Context, containerID string, cfg *Config, beforeInstall func(featureID string)) ([]*ResolvedFeature, error) {
 	if len(cfg.Features) == 0 {
 		return nil, nil
 	}
@@ -540,6 +601,9 @@ func (p *Provisioner) installFeatures(ctx context.Context, containerID string, c
 
 	// Install each feature.
 	for _, feature := range sorted {
+		if beforeInstall != nil {
+			beforeInstall(feature.Metadata.ID)
+		}
 		opts := optionsByRef[feature.Ref]
 		if err := p.installer.InstallFeature(ctx, containerID, feature, opts); err != nil {
 			return nil, fmt.Errorf("installing feature %s: %w", feature.Metadata.ID, err)

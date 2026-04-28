@@ -1125,9 +1125,9 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 flex items-center gap-3">
       <AlertTriangle className="h-4 w-4 text-amber-300 shrink-0" />
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-amber-200">Container image is out of date</div>
+        <div className="text-sm text-amber-200">Container image needs rebuild</div>
         <div className="text-xs text-muted-foreground">
-          You changed the runtime config — agents in this crew can&apos;t start until the image is rebuilt. The image isn&apos;t auto-rebuilt on save (it&apos;s expensive); trigger it explicitly when you&apos;re ready.
+          Runtime config changed — agents in this crew can&apos;t start until the image is rebuilt. Use the toolbar Build button or rebuild here.
         </div>
       </div>
       <button
@@ -1136,7 +1136,7 @@ function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string;
         disabled={triggering}
         className="text-xs px-2.5 py-1.5 rounded bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 border border-amber-500/40 shrink-0"
       >
-        {triggering ? "Starting…" : "Provision now"}
+        {triggering ? "Starting…" : "Build now"}
       </button>
     </div>
   )
