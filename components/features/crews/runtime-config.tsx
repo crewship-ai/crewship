@@ -382,6 +382,11 @@ const BASE_IMAGES: Array<{
   label: string
   description: string
   icon: IconType
+  /** BRAND_COLORS key — used to tint the card icon with the official
+   *  brand color. Stored explicitly because img.value is a full
+   *  registry path (mcr.microsoft.com/devcontainers/…) and parsing
+   *  it for a brand key is brittle. */
+  colorKey?: string
   recommended?: boolean
 }> = [
   {
@@ -389,6 +394,7 @@ const BASE_IMAGES: Array<{
     label: "Node 22 (Debian) — recommended",
     description: "Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.",
     icon: SiNodedotjs,
+    colorKey: "node",
     recommended: true,
   },
   {
@@ -396,48 +402,57 @@ const BASE_IMAGES: Array<{
     label: "Debian 12 (bookworm)",
     description: "Minimal Debian with common utilities. Add features/runtimes as needed.",
     icon: SiDebian,
+    colorKey: "debian",
   },
   {
     value: "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
     label: "Ubuntu 24.04",
     description: "Ubuntu LTS with common utilities.",
     icon: SiUbuntu,
+    colorKey: "ubuntu",
   },
   {
     value: "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
     label: "Python 3.12 (Debian)",
     description: "Python 3.12 + pip + venv pre-installed on Debian.",
     icon: SiPython,
+    colorKey: "python",
   },
   {
     value: "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
     label: "Go 1.23 (Debian)",
     description: "Go 1.23 toolchain on Debian.",
     icon: SiGo,
+    colorKey: "go",
   },
   {
     value: "mcr.microsoft.com/devcontainers/rust:bookworm",
     label: "Rust (Debian)",
     description: "Rust stable + cargo on Debian.",
     icon: SiRust,
+    colorKey: "rust",
   },
   {
     value: "mcr.microsoft.com/devcontainers/java:21-bookworm",
     label: "Java 21 (OpenJDK)",
     description: "OpenJDK 21 + Maven/Gradle on Debian.",
     icon: SiOpenjdk,
+    colorKey: "java",
   },
   {
     value: "mcr.microsoft.com/devcontainers/universal:2",
     label: "Universal (kitchen sink)",
     description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
     icon: Boxes,
+    // No colorKey — Boxes is a generic lucide icon, not a brand mark.
+    // Falls through to muted-foreground.
   },
   {
     value: "mcr.microsoft.com/devcontainers/base:alpine-3.20",
     label: "Alpine 3.20 (experimental)",
     description: "Tiny (~7MB). WARNING: musl incompatible with Claude Code.",
     icon: SiAlpinelinux,
+    colorKey: "alpine",
   },
 ]
 
@@ -833,11 +848,11 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                   {BASE_IMAGES.map((img) => {
                     const Icon = img.icon
                     const isSelected = baseImage === img.value
-                    // Map BASE_IMAGES.value (e.g. "node-22-debian") to a
-                    // BRAND_COLORS key so each card gets the canonical
-                    // brand tint instead of a uniform muted gray.
-                    const colorKey = img.value.split("-")[0]
-                    const brandColor = getBrandColor(colorKey)
+                    // colorKey is set explicitly on each entry above
+                    // (e.g. "node", "debian", "ubuntu") because img.value
+                    // is a full registry path. Falls back to muted
+                    // foreground when no key is set (Universal/Boxes).
+                    const brandColor = img.colorKey ? getBrandColor(img.colorKey) : null
                     return (
                       <button
                         key={img.value}
