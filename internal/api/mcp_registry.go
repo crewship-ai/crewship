@@ -8,80 +8,109 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// --- Registry API response types (defensive parsing) ---
+// --- Registry API response types (2025-12-11 schema) ---
+//
+// The official MCP registry switched to a versioned schema in late 2025: the
+// list endpoint now wraps each entry in {server, _meta}, paginates via
+// metadata.nextCursor, and renames many fields (display_name → title,
+// homepage → websiteUrl, source_url → repository.url, icon → icons[].src,
+// transport_type → type, registry_name → registryType, environment_variables
+// → environmentVariables, runtime → runtimeHint). Older parsers blow up with
+// "cannot unmarshal object into Go value of type []…".
 
 type registryEnvVar struct {
-	Name       string `json:"name"`
-	IsRequired bool   `json:"is_required"`
-	IsSecret   bool   `json:"is_secret"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsRequired  bool   `json:"isRequired"`
+	IsSecret    bool   `json:"isSecret"`
+}
+
+type registryTransport struct {
+	Type string `json:"type"`
 }
 
 type registryPackage struct {
-	RegistryName string           `json:"registry_name"`
-	Name         string           `json:"name"`
-	Version      string           `json:"version"`
-	Runtime      string           `json:"runtime"`
-	EnvVars      []registryEnvVar `json:"environment_variables"`
+	RegistryType         string            `json:"registryType"`
+	Identifier           string            `json:"identifier"`
+	Version              string            `json:"version"`
+	RuntimeHint          string            `json:"runtimeHint"`
+	Transport            registryTransport `json:"transport"`
+	EnvironmentVariables []registryEnvVar  `json:"environmentVariables"`
 }
 
 type registryRemote struct {
-	TransportType string           `json:"transport_type"`
-	URL           string           `json:"url"`
-	Headers       []registryEnvVar `json:"headers"`
+	Type    string           `json:"type"`
+	URL     string           `json:"url"`
+	Headers []registryEnvVar `json:"headers"`
+}
+
+type registryRepository struct {
+	URL    string `json:"url"`
+	Source string `json:"source"`
+}
+
+type registryIcon struct {
+	Src string `json:"src"`
 }
 
 type registryServerEntry struct {
-	Name        string            `json:"name"`
-	DisplayName string            `json:"display_name"`
-	Description string            `json:"description"`
-	Homepage    string            `json:"homepage"`
-	SourceURL   string            `json:"source_url"`
-	Icon        string            `json:"icon"`
-	Category    string            `json:"category"`
-	IsVerified  bool              `json:"is_verified"`
-	Packages    []registryPackage `json:"packages"`
-	Remotes     []registryRemote  `json:"remotes"`
+	Name        string             `json:"name"`
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	Version     string             `json:"version"`
+	WebsiteURL  string             `json:"websiteUrl"`
+	Repository  registryRepository `json:"repository"`
+	Icons       []registryIcon     `json:"icons"`
+	Packages    []registryPackage  `json:"packages"`
+	Remotes     []registryRemote   `json:"remotes"`
+}
+
+type registryOfficialMeta struct {
+	Status   string `json:"status"`
+	IsLatest bool   `json:"isLatest"`
+}
+
+type registryEntryMeta struct {
+	Official registryOfficialMeta `json:"io.modelcontextprotocol.registry/official"`
+}
+
+type registryEntryEnvelope struct {
+	Server registryServerEntry `json:"server"`
+	Meta   registryEntryMeta   `json:"_meta"`
+}
+
+type registryListResponse struct {
+	Servers  []registryEntryEnvelope `json:"servers"`
+	Metadata struct {
+		NextCursor string `json:"nextCursor"`
+		Count      int    `json:"count"`
+	} `json:"metadata"`
 }
 
 // --- Sync function ---
 
-const mcpRegistryURL = "https://registry.modelcontextprotocol.io/v0/servers"
+const (
+	mcpRegistryPageSize = 200
+	mcpRegistryMaxPages = 200 // hard ceiling to avoid runaway loops on broken cursors
+)
+
+// mcpRegistryURL is a var (not const) so tests can point it at a httptest
+// server.
+var mcpRegistryURL = "https://registry.modelcontextprotocol.io/v0/servers"
 
 // SyncMCPRegistry fetches the official MCP registry and upserts all servers
-// into the local mcp_registry_servers table.
+// into the local mcp_registry_servers table. Only entries flagged as
+// _meta.…/official.isLatest are persisted (the registry now returns every
+// version of every server, and we want one row per server).
 func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mcpRegistryURL, nil)
-	if err != nil {
-		return fmt.Errorf("create registry request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("fetch registry: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("registry returned HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20)) // 50MB limit
-	if err != nil {
-		return fmt.Errorf("read registry response: %w", err)
-	}
-
-	var entries []registryServerEntry
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return fmt.Errorf("parse registry response: %w", err)
-	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := db.BeginTx(ctx, nil)
@@ -102,79 +131,128 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 	}
 	defer stmt.Close()
 
+	cursor := ""
+	totalEntries := 0
 	count := 0
-	for _, entry := range entries {
-		if entry.Name == "" {
-			continue
+	for pageNum := 0; pageNum < mcpRegistryMaxPages; pageNum++ {
+		pageURL := fmt.Sprintf("%s?limit=%d", mcpRegistryURL, mcpRegistryPageSize)
+		if cursor != "" {
+			pageURL += "&cursor=" + url.QueryEscape(cursor)
 		}
 
-		displayName := entry.DisplayName
-		if displayName == "" {
-			displayName = entry.Name
-		}
-
-		transport := "stdio"
-		packageName := ""
-		packageRegistry := ""
-		command := ""
-		endpoint := ""
-		authType := ""
-		var envVars []registryEnvVar
-
-		// Prefer packages (stdio) if available, otherwise use remotes
-		if len(entry.Packages) > 0 {
-			pkg := entry.Packages[0]
-			transport = "stdio"
-			packageName = pkg.Name
-			packageRegistry = pkg.RegistryName
-			if pkg.Runtime != "" {
-				command = pkg.Runtime
-			}
-			envVars = pkg.EnvVars
-		} else if len(entry.Remotes) > 0 {
-			remote := entry.Remotes[0]
-			transport = remote.TransportType
-			if transport == "" {
-				transport = "streamable-http"
-			}
-			endpoint = remote.URL
-			envVars = remote.Headers
-			if len(remote.Headers) > 0 {
-				authType = "header"
-			}
-		}
-
-		envVarsJSON, err := json.Marshal(envVars)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 		if err != nil {
-			envVarsJSON = []byte("[]")
+			return fmt.Errorf("create registry request: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("fetch registry: %w", err)
 		}
 
-		// Use name as the stable ID
-		id := entry.Name
-
-		verified := 0
-		if entry.IsVerified {
-			verified = 1
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return fmt.Errorf("registry returned HTTP %d", resp.StatusCode)
 		}
 
-		if _, err := stmt.ExecContext(ctx,
-			id, entry.Name, displayName, entry.Description,
-			entry.Icon, transport, entry.Homepage, entry.SourceURL,
-			packageName, packageRegistry, command, endpoint,
-			authType, string(envVarsJSON), entry.Category,
-			verified, now,
-		); err != nil {
-			logger.Warn("skip registry entry", "name", entry.Name, "error", err)
-			continue
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
+		resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("read registry response: %w", err)
 		}
-		count++
+
+		var listPage registryListResponse
+		if err := json.Unmarshal(body, &listPage); err != nil {
+			return fmt.Errorf("parse registry response: %w", err)
+		}
+
+		for _, envelope := range listPage.Servers {
+			totalEntries++
+			entry := envelope.Server
+			if entry.Name == "" {
+				continue
+			}
+			if !envelope.Meta.Official.IsLatest {
+				continue
+			}
+
+			displayName := entry.Title
+			if displayName == "" {
+				displayName = entry.Name
+			}
+
+			icon := ""
+			if len(entry.Icons) > 0 {
+				icon = entry.Icons[0].Src
+			}
+
+			transport := "stdio"
+			packageName := ""
+			packageRegistry := ""
+			command := ""
+			endpoint := ""
+			authType := ""
+			var envVars []registryEnvVar
+
+			if len(entry.Packages) > 0 {
+				pkg := entry.Packages[0]
+				if pkg.Transport.Type != "" {
+					transport = pkg.Transport.Type
+				}
+				packageName = pkg.Identifier
+				packageRegistry = pkg.RegistryType
+				if pkg.RuntimeHint != "" {
+					command = pkg.RuntimeHint
+				}
+				envVars = pkg.EnvironmentVariables
+			} else if len(entry.Remotes) > 0 {
+				remote := entry.Remotes[0]
+				transport = remote.Type
+				if transport == "" {
+					transport = "streamable-http"
+				}
+				endpoint = remote.URL
+				envVars = remote.Headers
+				if len(remote.Headers) > 0 {
+					authType = "header"
+				}
+			}
+
+			envVarsJSON, err := json.Marshal(envVars)
+			if err != nil {
+				envVarsJSON = []byte("[]")
+			}
+
+			verified := 0
+			if envelope.Meta.Official.Status == "active" {
+				verified = 1
+			}
+
+			if _, err := stmt.ExecContext(ctx,
+				entry.Name, entry.Name, displayName, entry.Description,
+				icon, transport, entry.WebsiteURL, entry.Repository.URL,
+				packageName, packageRegistry, command, endpoint,
+				authType, string(envVarsJSON), "",
+				verified, now,
+			); err != nil {
+				logger.Warn("skip registry entry", "name", entry.Name, "error", err)
+				continue
+			}
+			count++
+		}
+
+		if listPage.Metadata.NextCursor == "" || listPage.Metadata.NextCursor == cursor {
+			break
+		}
+		cursor = listPage.Metadata.NextCursor
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit sync transaction: %w", err)
 	}
 
-	logger.Info("MCP registry sync complete", "servers_synced", count, "total_entries", len(entries))
+	logger.Info("MCP registry sync complete", "servers_synced", count, "total_entries", totalEntries)
 	return nil
 }
 
