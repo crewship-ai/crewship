@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { AlertTriangle, ChevronDown, Files, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { Files, Plus, RotateCcw, Trash2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
@@ -17,6 +17,10 @@ import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { cn } from "@/lib/utils"
+
+import { HealthCard, QuickAction } from "./crew-canvas-cards"
+import { Collapsible, ProvisioningBanner } from "./crew-canvas-banner"
+
 
 interface AgentSummary {
   id: string
@@ -104,10 +108,12 @@ interface CrewMemberRow {
   user?: MemberUser | null
 }
 
+
 const STYLE_OPTIONS = (Object.entries(AVATAR_STYLES) as Array<[
   string,
   { label: string; style: unknown },
 ]>).map(([value, meta]) => ({ value, label: meta.label }))
+
 
 type CrewTab = "overview" | "roster" | "missions" | "files" | "settings"
 
@@ -118,6 +124,7 @@ const TABS: Array<{ id: CrewTab; label: string }> = [
   { id: "files", label: "Files" },
   { id: "settings", label: "Settings" },
 ]
+
 
 export interface CrewCanvasProps {
   workspaceId: string
@@ -138,6 +145,7 @@ export interface CrewCanvasProps {
  * the two primary CTAs (Files, Add agent). Tabs below let users focus
  * on one concern at a time without scrolling 700+ lines.
  */
+
 export function CrewCanvas({
   workspaceId,
   crewSlug,
@@ -958,208 +966,6 @@ export function CrewCanvas({
 // Layout helpers
 // =============================================================================
 
-function HealthCard({ label, value, hint, tone, href }: {
-  label: string
-  value: string
-  hint: string
-  tone: "active" | "neutral" | "danger"
-  href?: string
-}) {
-  const inner = (
-    <div
-      className={cn(
-        "rounded-xl border bg-card p-4 transition-colors",
-        tone === "danger" ? "border-red-500/30 ring-1 ring-red-500/20" :
-        tone === "active" ? "border-white/10" : "border-white/8",
-        href && "hover:border-white/20",
-      )}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
-        {tone === "danger" && <span className="text-[10px] text-red-300">action needed</span>}
-      </div>
-      <div className={cn(
-        "text-2xl font-semibold mb-1 tabular-nums",
-        tone === "danger" ? "text-red-200" : "text-foreground",
-      )}>
-        {value}
-      </div>
-      <div className="text-[11px] text-muted-foreground">{hint}</div>
-    </div>
-  )
-  return href ? <Link href={href}>{inner}</Link> : inner
-}
-
-function QuickAction({ icon, label, onClick, disabled }: {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="rounded-lg border border-white/8 bg-card px-3 py-2.5 flex items-center gap-2.5 text-left hover:border-white/15 hover:bg-white/[0.02] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-    >
-      <span className="text-foreground/70">{icon}</span>
-      <span className="text-xs text-foreground/85">{label}</span>
-    </button>
-  )
-}
-
-/**
- * Surfaces three states the user otherwise can't see until they hit
- * "send message" and get a backend error:
- *   - "needs_provision": user edited devcontainer/runtime config and saved.
- *     The PATCH cleared cached_image; a chat now would 500 with
- *     "Crew has devcontainer configuration but no provisioned image".
- *     Show an amber banner with a Provision button.
- *   - "running": polled job is mid-build. Show progress + ETA-ish hint.
- *   - "failed": the last build crashed. Show the error inline so the user
- *     sees WHY (e.g. a feature with a missing required parameter), not
- *     a generic toast.
- *
- * Polls every 3s while busy, every 30s when idle. Bails as soon as a
- * stable terminal state is reached.
- */
-function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string; crewSlug: string; workspaceId: string }) {
-  const [state, setState] = useState<{ status: string; error?: string; cached?: string | null; hasConfig: boolean } | null>(null)
-  const [triggering, setTriggering] = useState(false)
-
-  const refresh = useCallback(async () => {
-    try {
-      // wsCtx middleware mandates workspace_id; without it the endpoint
-      // 400s and the polling loop re-renders forever.
-      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (!r.ok) return
-      const data = await r.json()
-      setState({
-        status: data.status ?? "idle",
-        error: data.error,
-        cached: data.cached_image,
-        hasConfig: Boolean(data.devcontainer_config),
-      })
-    } catch { /* tolerate */ }
-  }, [crewId, workspaceId])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  // Poll fast while a build is in flight, slowly when idle/healthy.
-  useEffect(() => {
-    const isBusy = state?.status === "running"
-    const interval = isBusy ? 3000 : 30000
-    const id = setInterval(() => { void refresh() }, interval)
-    return () => clearInterval(id)
-  }, [state?.status, refresh])
-
-  const trigger = useCallback(async () => {
-    setTriggering(true)
-    try {
-      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
-      if (!r.ok) {
-        const text = await r.text()
-        toast.error(`Provision failed to start: ${text}`)
-      } else {
-        toast.success(`Provisioning started for ${crewSlug}`)
-        void refresh()
-      }
-    } catch (err) {
-      toast.error(`Provision failed: ${err instanceof Error ? err.message : err}`)
-    } finally {
-      setTriggering(false)
-    }
-  }, [crewId, crewSlug, workspaceId, refresh])
-
-  if (!state) return null
-
-  const needsProvision = state.hasConfig && !state.cached && state.status === "idle"
-  if (state.status === "completed" || (!needsProvision && state.status !== "running" && state.status !== "failed")) {
-    return null
-  }
-
-  if (state.status === "running") {
-    return (
-      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 flex items-center gap-3">
-        <Loader2 className="h-4 w-4 text-blue-300 animate-spin shrink-0" />
-        <div className="flex-1">
-          <div className="text-sm text-blue-200">Building container image…</div>
-          <div className="text-xs text-muted-foreground">
-            Devcontainer features are installing. Agents in this crew will become runnable as soon as the image is ready (usually 30-90 s).
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  if (state.status === "failed") {
-    return (
-      <div className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 flex items-start gap-3">
-        <AlertTriangle className="h-4 w-4 text-red-300 shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm text-red-200">Last provision failed</div>
-          {state.error && (
-            <pre className="text-[11px] text-muted-foreground mt-1 whitespace-pre-wrap font-mono break-words max-h-24 overflow-y-auto">
-              {state.error}
-            </pre>
-          )}
-          <div className="text-xs text-muted-foreground mt-1.5">
-            Fix the runtime config (Settings → Container image &amp; features) and try again.
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={trigger}
-          disabled={triggering}
-          className="text-xs px-2.5 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 shrink-0"
-        >
-          {triggering ? "Starting…" : "Retry"}
-        </button>
-      </div>
-    )
-  }
-
-  // needs_provision (idle, hasConfig, no cached_image)
-  return (
-    <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 flex items-center gap-3">
-      <AlertTriangle className="h-4 w-4 text-amber-300 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm text-amber-200">Container image needs rebuild</div>
-        <div className="text-xs text-muted-foreground">
-          Runtime config changed — agents in this crew can&apos;t start until the image is rebuilt. Use the toolbar Build button or rebuild here.
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={trigger}
-        disabled={triggering}
-        className="text-xs px-2.5 py-1.5 rounded bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 border border-amber-500/40 shrink-0"
-      >
-        {triggering ? "Starting…" : "Build now"}
-      </button>
-    </div>
-  )
-}
-
-function Collapsible({ title, summary, children }: {
-  title: string
-  summary: string
-  children: React.ReactNode
-}) {
-  return (
-    <details className="rounded-xl border border-white/8 bg-card overflow-hidden group">
-      <summary className="px-4 py-3 flex items-center gap-2 text-sm cursor-pointer hover:bg-white/[0.02] list-none">
-        <ChevronDown className="h-3 w-3 text-muted-foreground transition-transform group-open:rotate-0 -rotate-90" />
-        <span className="text-foreground font-medium">{title}</span>
-        <span className="text-xs text-muted-foreground truncate">{summary}</span>
-      </summary>
-      <div className="px-4 py-3 border-t border-white/5">
-        {children}
-      </div>
-    </details>
-  )
-}
 
 function formatMemory(mb: number): string {
   if (!Number.isFinite(mb) || mb <= 0) return "—"
@@ -1167,6 +973,7 @@ function formatMemory(mb: number): string {
   const gb = mb / 1024
   return gb >= 10 ? `${gb.toFixed(0)} GB` : `${gb.toFixed(1)} GB`
 }
+
 
 function issueStatusColor(status: string | undefined): string {
   const s = (status ?? "").toLowerCase()
@@ -1177,6 +984,7 @@ function issueStatusColor(status: string | undefined): string {
   if (s.includes("todo")) return "bg-zinc-400"
   return "bg-zinc-600"
 }
+
 
 function Row({
   label,
