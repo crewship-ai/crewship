@@ -5,15 +5,18 @@ import { RefreshCw } from "lucide-react"
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { AVATAR_STYLES, getAgentAvatarUrl, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
 
-const STYLE_OPTIONS = [
-  { value: "robots", label: "Robots" },
-  { value: "humans", label: "Humans" },
-  { value: "abstract", label: "Abstract" },
-  { value: "pixel", label: "Pixel" },
-] as const
+// Style options derived from the real DiceBear catalog in lib/agent-avatar.
+// Values MUST be the actual style slug ("bottts-neutral", "adventurer", …)
+// — earlier hand-typed labels ("robots", "humans") fell through to the
+// default and silently kept the avatar Robots no matter what the user
+// picked.
+const STYLE_OPTIONS = (Object.entries(AVATAR_STYLES) as Array<[
+  string,
+  { label: string; style: unknown },
+]>).map(([value, meta]) => ({ value, label: meta.label }))
 
 export interface AvatarPickerDialogProps {
   open: boolean
@@ -63,7 +66,7 @@ export function AvatarPickerDialog({
     )
   }, [open, seed, style, agentName])
 
-  const effectiveStyle = draftStyle ?? crewStyle ?? "robots"
+  const effectiveStyle = draftStyle ?? crewStyle ?? DEFAULT_AVATAR_STYLE
   const previewUrl = getAgentAvatarUrl(draftSeed, effectiveStyle)
 
   const submit = async () => {
@@ -95,22 +98,27 @@ export function AvatarPickerDialog({
           />
         </div>
 
-        {/* Style switcher */}
+        {/* Style switcher — small previews so the user can compare faces. */}
         <div>
           <div className="text-xs text-muted-foreground mb-1.5">Style</div>
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"
               onClick={() => setDraftStyle(null)}
               className={cn(
-                "px-2 py-1 rounded border text-xs transition-colors",
+                "rounded border text-xs transition-colors p-1.5 flex items-center gap-2",
                 draftStyle === null
                   ? "border-blue-400 bg-blue-500/10 text-blue-300"
                   : "border-white/10 hover:bg-white/5",
               )}
               title={crewStyle ? `Inherit from crew: ${crewStyle}` : "Inherit from crew"}
             >
-              Inherit
+              <img
+                src={getAgentAvatarUrl(draftSeed, crewStyle ?? DEFAULT_AVATAR_STYLE)}
+                alt=""
+                className="w-7 h-7 rounded"
+              />
+              <span className="text-left flex-1 truncate">Inherit</span>
             </button>
             {STYLE_OPTIONS.map((s) => (
               <button
@@ -118,13 +126,18 @@ export function AvatarPickerDialog({
                 type="button"
                 onClick={() => setDraftStyle(s.value)}
                 className={cn(
-                  "px-2 py-1 rounded border text-xs transition-colors",
+                  "rounded border text-xs transition-colors p-1.5 flex items-center gap-2",
                   draftStyle === s.value
                     ? "border-blue-400 bg-blue-500/10 text-blue-300"
                     : "border-white/10 hover:bg-white/5",
                 )}
               >
-                {s.label}
+                <img
+                  src={getAgentAvatarUrl(draftSeed, s.value)}
+                  alt=""
+                  className="w-7 h-7 rounded"
+                />
+                <span className="text-left flex-1 truncate">{s.label}</span>
               </button>
             ))}
           </div>

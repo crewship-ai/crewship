@@ -8,7 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
+import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
 
 interface AgentSummary {
@@ -70,12 +71,13 @@ interface CrewIntegration {
   status: string
 }
 
-const AVATAR_STYLES = [
-  { value: "robots", label: "Robots" },
-  { value: "humans", label: "Humans" },
-  { value: "abstract", label: "Abstract" },
-  { value: "pixel", label: "Pixel" },
-] as const
+// Real DiceBear style slugs from lib/agent-avatar; the previous
+// hand-typed labels ("robots", "humans") didn't match anything in the
+// catalog so saving an avatar style silently fell back to the default.
+const STYLE_OPTIONS = (Object.entries(AVATAR_STYLES) as Array<[
+  string,
+  { label: string; style: unknown },
+]>).map(([value, meta]) => ({ value, label: meta.label }))
 
 export interface CrewCanvasProps {
   workspaceId: string
@@ -108,6 +110,7 @@ export function CrewCanvas({
   const [showContainer, setShowContainer] = useState(false)
   const [issues, setIssues] = useState<IssuesSnapshot | null>(null)
   const [integrations, setIntegrations] = useState<CrewIntegration[] | null>(null)
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
 
   const fetchCrew = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -240,9 +243,28 @@ export function CrewCanvas({
     <div className="px-6 md:px-8 lg:px-12 py-6 space-y-7 max-w-[1180px] mx-auto w-full">
       {/* Header */}
       <header className="flex items-start gap-5 pb-5 border-b border-white/8">
-        <div className="w-20 h-20 rounded-2xl bg-blue-500/15 border border-blue-500/30 grid place-items-center shrink-0">
-          <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="xl" />
-        </div>
+        <button
+          type="button"
+          onClick={() => setIconPickerOpen(true)}
+          title="Customize icon and color"
+          className="shrink-0 group rounded-2xl transition-transform hover:scale-[1.03]"
+        >
+          <div className="relative">
+            <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="xl" />
+            <span className="absolute inset-0 rounded-2xl ring-2 ring-blue-400/0 group-hover:ring-blue-400/40 transition-all pointer-events-none" />
+          </div>
+        </button>
+        <CrewIconPickerDialog
+          open={iconPickerOpen}
+          onOpenChange={setIconPickerOpen}
+          crewName={crew.name}
+          icon={crew.icon}
+          color={crew.color}
+          onSave={async ({ icon, color }) => {
+            await patch({ icon, color })
+            toast.success("Icon updated")
+          }}
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h1 className="text-2xl font-semibold">
@@ -318,10 +340,10 @@ export function CrewCanvas({
           <Row label="Avatar style">
             <div className="flex items-center gap-2">
               <EditableField
-                value={crew.avatar_style ?? "robots"}
+                value={crew.avatar_style ?? "bottts-neutral"}
                 onSave={(v) => patch({ avatar_style: v })}
-                options={[...AVATAR_STYLES]}
-                format={(v) => AVATAR_STYLES.find((o) => o.value === v)?.label ?? v}
+                options={STYLE_OPTIONS}
+                format={(v) => STYLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
               />
               {agentsForCrew.length > 0 && (
                 <button

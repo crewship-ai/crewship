@@ -59,12 +59,22 @@ export function ChatPageClient() {
 
   // Resolve agent by slug (workspace-scoped).
   useEffect(() => {
+    // Wait for workspace to load. Don't flip loadingAgent off — that
+    // would render a misleading "agent not found" while ws is still
+    // resolving.
     if (!workspaceId) return
+
+    // Static export placeholder. The browser URL is /chat/<real-slug>
+    // and useParams should return that on hydration; if we still see
+    // "_" or "" here, something upstream is wrong (Suspense, bad
+    // hydration). Stop the spinner and surface a real error so the
+    // page is never silently blank.
     if (!slug || slug === "_") {
-      // Static export placeholder; the redirect from server hasn't hydrated
-      // yet — wait one frame then re-read.
+      setLoadingAgent(false)
+      setError("Could not read agent slug from URL")
       return
     }
+
     let cancelled = false
     setLoadingAgent(true)
     fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
@@ -73,7 +83,7 @@ export function ChatPageClient() {
         if (cancelled) return
         const found = list.find((a) => a.slug === slug)
         if (!found) {
-          setError(`Agent "${slug}" not found`)
+          setError(`Agent "${slug}" not found in workspace`)
         } else {
           setAgent(found)
           setError(null)
@@ -151,14 +161,14 @@ export function ChatPageClient() {
 
   if (wsLoading || loadingAgent) {
     return (
-      <div className="h-[calc(100vh-48px)] p-6">
+      <div className="h-full p-6">
         <Skeleton className="w-full h-full rounded-xl" />
       </div>
     )
   }
   if (error || !agent) {
     return (
-      <div className="h-[calc(100vh-48px)] flex flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="text-sm text-red-300">Could not open chat</p>
         <p className="text-xs text-muted-foreground max-w-sm">{error}</p>
         <Link
@@ -172,7 +182,7 @@ export function ChatPageClient() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-full bg-background">
       {/* Identity strip */}
       <header className="h-12 shrink-0 border-b border-white/8 flex items-center gap-3 px-4 bg-card">
         <Link
