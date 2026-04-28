@@ -323,13 +323,15 @@ export function CrewCanvas({
                 options={[...AVATAR_STYLES]}
                 format={(v) => AVATAR_STYLES.find((o) => o.value === v)?.label ?? v}
               />
-              <button
-                type="button"
-                onClick={applyAvatarStyle}
-                className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
-              >
-                Apply to all {agentsForCrew.length} agent{agentsForCrew.length === 1 ? "" : "s"}
-              </button>
+              {agentsForCrew.length > 0 && (
+                <button
+                  type="button"
+                  onClick={applyAvatarStyle}
+                  className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
+                >
+                  Apply to all {agentsForCrew.length} agent{agentsForCrew.length === 1 ? "" : "s"}
+                </button>
+              )}
             </div>
           </Row>
         </div>
@@ -404,7 +406,7 @@ export function CrewCanvas({
               <span className="text-muted-foreground text-sm font-normal ml-2">{crew.issue_prefix}</span>
             )}
           </h2>
-          <Link href={`/orchestration?crew=${encodeURIComponent(crew.slug)}`} className="text-xs text-blue-300 hover:underline">
+          <Link href="/orchestration" className="text-xs text-blue-300 hover:underline">
             Open in /orchestration →
           </Link>
         </div>
@@ -424,7 +426,7 @@ export function CrewCanvas({
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Recent missions</h2>
-          <Link href={`/orchestration?crew=${encodeURIComponent(crew.slug)}`} className="text-xs text-blue-300 hover:underline">
+          <Link href="/orchestration" className="text-xs text-blue-300 hover:underline">
             Open in /orchestration →
           </Link>
         </div>
@@ -553,12 +555,12 @@ export function CrewCanvas({
               )}
               <Row label="MCP servers" align="center">
                 <span className="text-sm text-muted-foreground">
-                  Manage via CLI: <code className="text-foreground/80">crewship mcp edit {crew.slug}</code>
+                  CLI: <code className="text-foreground/80">crewship mcp {crew.slug}</code>
                 </span>
               </Row>
-              <Row label="Devcontainer" align="center">
+              <Row label="Devcontainer / mise" align="center">
                 <span className="text-sm text-muted-foreground">
-                  Manage via CLI: <code className="text-foreground/80">crewship crew config {crew.slug}</code>
+                  CLI: <code className="text-foreground/80">crewship crew config {crew.slug}</code>
                 </span>
               </Row>
             </div>

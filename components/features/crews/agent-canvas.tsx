@@ -116,32 +116,18 @@ export function AgentCanvas({
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
 
   const fetchAgent = useCallback(async (signal?: AbortSignal) => {
+    // Backend has no /agents/by-slug endpoint, so list + filter + detail.
     try {
-      const res = await fetch(
-        `/api/v1/agents/by-slug/${encodeURIComponent(agentSlug)}?workspace_id=${workspaceId}`,
-        { signal },
-      )
-      if (!res.ok) {
-        // Fall back to listing + filter: the by-slug endpoint may not exist
-        // on older backends. Pull all agents and find this slug.
-        const listRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, { signal })
-        if (!listRes.ok) throw new Error(`agent fetch failed (${res.status})`)
-        const list: AgentRecord[] = await listRes.json()
-        const match = list.find((a) => a.slug === agentSlug)
-        if (!match) throw new Error("agent not found")
-        // Re-fetch by id to get the full record
-        const detailRes = await fetch(`/api/v1/agents/${match.id}?workspace_id=${workspaceId}`, { signal })
-        if (!detailRes.ok) throw new Error(`agent detail fetch failed (${detailRes.status})`)
-        const detail: AgentRecord = await detailRes.json()
-        if (!signal?.aborted) {
-          setAgent(detail)
-          setError(null)
-        }
-        return
-      }
-      const data: AgentRecord = await res.json()
+      const listRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, { signal })
+      if (!listRes.ok) throw new Error(`agent list failed (${listRes.status})`)
+      const list: AgentRecord[] = await listRes.json()
+      const match = list.find((a) => a.slug === agentSlug)
+      if (!match) throw new Error(`agent "${agentSlug}" not found in workspace`)
+      const detailRes = await fetch(`/api/v1/agents/${match.id}?workspace_id=${workspaceId}`, { signal })
+      if (!detailRes.ok) throw new Error(`agent detail failed (${detailRes.status})`)
+      const detail: AgentRecord = await detailRes.json()
       if (!signal?.aborted) {
-        setAgent(data)
+        setAgent(detail)
         setError(null)
       }
     } catch (err) {
@@ -368,7 +354,7 @@ export function AgentCanvas({
         onSave={handleAvatarSave}
       />
 
-      <InboxBanner agentSlug={agent.slug} count={inbox.count} summary={inbox.summary} />
+      <InboxBanner agentId={agent.id} count={inbox.count} summary={inbox.summary} />
 
       {/* Profile */}
       <section className="space-y-3">
@@ -407,10 +393,10 @@ export function AgentCanvas({
               format={(v) => ROLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
             />
           </Row>
-          {/* Lead mode placeholder — only relevant for LEAD agents.
-              Frontend marker only, no backend behavior wired yet. */}
-          <Row label="Lead mode" align="center">
-            {isLead ? (
+          {/* Lead mode — only for LEAD agents. Frontend marker; backend
+              orchestration logic is a separate PR. */}
+          {isLead && (
+            <Row label="Lead mode" align="center">
               <EditableField
                 value={agent.lead_mode || "active"}
                 onSave={(v) => patch({ lead_mode: v })}
@@ -420,12 +406,8 @@ export function AgentCanvas({
                 ]}
                 format={(v) => (v === "active" ? "Active" : "Passive")}
               />
-            ) : (
-              <span className="text-sm text-muted-foreground italic">
-                n/a — {agent.name} is not a lead
-              </span>
-            )}
-          </Row>
+            </Row>
+          )}
         </div>
       </section>
 
@@ -541,40 +523,66 @@ export function AgentCanvas({
                 </span>
               </Row>
               <Row label="Webhook trigger" align="start">
-                <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                  <code className="text-xs text-foreground/85 truncate">
-                    POST /api/v1/webhook/agent/{agent.slug}
-                  </code>
-                  <code className="text-[10px] text-muted-foreground px-1 py-0.5 rounded bg-zinc-950 border border-white/10">
-                    {revealedSecret ? (agent.webhook_secret || "(none)") : "••••••••"}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => setRevealedSecret((v) => !v)}
-                    className="text-[10px] text-blue-300 hover:underline"
-                  >
-                    {revealedSecret ? "Hide" : "Show"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        const newSecret = Math.random().toString(36).slice(2, 18) + Math.random().toString(36).slice(2, 18)
-                        await patch({ webhook_secret: newSecret })
-                        toast.success("Webhook secret rotated")
-                      } catch (err) {
-                        toast.error(`Rotate failed: ${err instanceof Error ? err.message : err}`)
-                      }
-                    }}
-                    className="text-[10px] text-muted-foreground hover:text-foreground"
-                  >
-                    Rotate
-                  </button>
-                </div>
+                {agent.webhook_secret ? (
+                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                    <code className="text-xs text-foreground/85 break-all">
+                      POST /api/v1/webhooks/{agent.crew_id ?? "<crewId>"}/{agent.id}/trigger
+                    </code>
+                    <code className="text-[10px] text-muted-foreground px-1 py-0.5 rounded bg-zinc-950 border border-white/10">
+                      {revealedSecret ? agent.webhook_secret : "••••••••"}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => setRevealedSecret((v) => !v)}
+                      className="text-[10px] text-blue-300 hover:underline"
+                    >
+                      {revealedSecret ? "Hide" : "Show"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const newSecret = Math.random().toString(36).slice(2, 18) + Math.random().toString(36).slice(2, 18)
+                          await patch({ webhook_secret: newSecret })
+                          toast.success("Webhook secret rotated")
+                        } catch (err) {
+                          toast.error(`Rotate failed: ${err instanceof Error ? err.message : err}`)
+                        }
+                      }}
+                      className="text-[10px] text-muted-foreground hover:text-foreground"
+                    >
+                      Rotate
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground italic">disabled</span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const newSecret = Math.random().toString(36).slice(2, 18) + Math.random().toString(36).slice(2, 18)
+                          await patch({ webhook_secret: newSecret })
+                          toast.success("Webhook enabled — secret generated")
+                        } catch (err) {
+                          toast.error(`Enable failed: ${err instanceof Error ? err.message : err}`)
+                        }
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded border border-white/10 hover:bg-white/5"
+                    >
+                      Enable
+                    </button>
+                  </div>
+                )}
               </Row>
               <Row label="Hooks" align="center">
                 <span className="text-sm text-muted-foreground">
-                  Manage via CLI: <code className="text-foreground/80">crewship hooks edit {agent.slug}</code>
+                  Manage via CLI:{" "}
+                  <code className="text-foreground/80">crewship hooks list</code>
+                  {" / "}
+                  <code className="text-foreground/80">enable</code>
+                  {" / "}
+                  <code className="text-foreground/80">disable</code>
                 </span>
               </Row>
             </motion.div>
@@ -597,15 +605,23 @@ export function AgentCanvas({
 
       {/* Skills + Credentials side-by-side */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <CountCard label="Skills" count={agent._count?.skills ?? 0} hint="Add skill via CLI: crewship agent skill add" />
-        <CountCard label="Credentials" count={agent._count?.credentials ?? 0} hint="Assign via CLI: crewship credential assign" />
+        <CountCard
+          label="Skills"
+          count={agent._count?.skills ?? 0}
+          hint={<>CLI: <code className="text-foreground/80">crewship skill assign &lt;skill&gt; {agent.slug}</code></>}
+        />
+        <CountCard
+          label="Credentials"
+          count={agent._count?.credentials ?? 0}
+          hint={<>CLI: <code className="text-foreground/80">crewship credential assign &lt;name&gt; {agent.slug}</code></>}
+        />
       </section>
 
       {/* Activity */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Activity</h2>
-          <Link href={`/journal?agent=${encodeURIComponent(agent.slug)}`} className="text-xs text-blue-300 hover:underline">
+          <Link href={`/journal?agent_id=${encodeURIComponent(agent.id)}`} className="text-xs text-blue-300 hover:underline">
             View all →
           </Link>
         </div>
@@ -664,7 +680,7 @@ function Row({
   )
 }
 
-function CountCard({ label, count, hint }: { label: string; count: number; hint: string }) {
+function CountCard({ label, count, hint }: { label: string; count: number; hint: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-white/8 bg-card p-4">
       <div className="flex items-baseline justify-between">
