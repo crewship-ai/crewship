@@ -10,6 +10,9 @@ build/
 dist/
 next-env.d.ts
 
+# dev.sh frontend-rebuild marker (mtime-only, no content)
+.web-build-marker
+
 # TypeScript build cache
 *.tsbuildinfo
 
