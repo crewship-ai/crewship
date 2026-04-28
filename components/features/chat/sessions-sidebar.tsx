@@ -50,6 +50,8 @@ export function SessionsSidebar({ sessions, activeSessionId, agentSlug }: Sessio
         <div className="flex-1 flex items-center gap-2 px-2 py-1.5 rounded bg-zinc-900 border border-white/10">
           <Search className="h-3 w-3 text-muted-foreground" />
           <input
+            type="search"
+            aria-label="Search chat sessions"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search sessions…"
@@ -71,7 +73,7 @@ export function SessionsSidebar({ sessions, activeSessionId, agentSlug }: Sessio
                 key={s.id}
                 type="button"
                 onClick={() =>
-                  router.replace(`/chat/${encodeURIComponent(agentSlug)}?session=${s.id}`)
+                  router.replace(`/chat/${encodeURIComponent(agentSlug)}?session=${encodeURIComponent(s.id)}`)
                 }
                 className={cn(
                   "w-full text-left px-3 py-2 hover:bg-white/[0.04] border-l-2 transition-colors",

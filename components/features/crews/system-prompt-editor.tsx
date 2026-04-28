@@ -28,8 +28,7 @@ export function SystemPromptEditor({
   updatedHint,
   readOnly = false,
 }: SystemPromptEditorProps) {
-  const initial = value ?? ""
-  const [draft, setDraft] = useState(initial)
+  const [draft, setDraft] = useState(value ?? "")
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -48,7 +47,10 @@ export function SystemPromptEditor({
     }
   }, [editing])
 
-  const dirty = draft !== initial
+  // Derive dirty from the live prop, not a render-once `initial`. Keeps
+  // the indicator honest after parent re-fetches push a new value while
+  // the user happens to have an open draft equal to the persisted state.
+  const dirty = draft !== (value ?? "")
 
   const handleSave = async () => {
     if (!dirty) {
@@ -68,7 +70,7 @@ export function SystemPromptEditor({
   }
 
   const handleCancel = () => {
-    setDraft(initial)
+    setDraft(value ?? "")
     setError(null)
     setEditing(false)
   }

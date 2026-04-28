@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
+import { motion } from "motion/react"
 import { ChevronLeft, MessageSquarePlus } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -142,7 +143,16 @@ export function ChatPageClient() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const created: { id: string } = await res.json()
-      router.replace(`/chat/${encodeURIComponent(slug)}?session=${created.id}`)
+      // Pre-seed the sidebar so the just-created session shows up before
+      // the next refetch — avoids a one-tick gap where the active session
+      // appears nowhere in the rail.
+      const nowIso = new Date().toISOString()
+      setSessions((prev) =>
+        prev.some((s) => s.id === created.id)
+          ? prev
+          : [{ id: created.id, title: null, status: "ACTIVE", message_count: 0, started_at: nowIso, ended_at: null }, ...prev],
+      )
+      router.replace(`/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(created.id)}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -172,7 +182,7 @@ export function ChatPageClient() {
         const list: SessionRecord[] = await listRes.json()
         if (Array.isArray(list)) setSessions(list)
       }
-      router.replace(`/chat/${encodeURIComponent(slug)}?session=${created.id}`)
+      router.replace(`/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(created.id)}`)
     } catch {
       // toast handled at the chat panel level
     } finally {
@@ -209,7 +219,13 @@ export function ChatPageClient() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-background">
+    <motion.div
+      initial={{ x: "100%", opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: "100%", opacity: 0 }}
+      transition={{ type: "spring", stiffness: 320, damping: 32, mass: 0.8 }}
+      className="flex flex-col h-full bg-background"
+    >
       {/* Identity strip */}
       <header className="h-12 shrink-0 border-b border-white/8 flex items-center gap-3 px-4 bg-card">
         <Link
@@ -248,7 +264,13 @@ export function ChatPageClient() {
         </button>
       </header>
 
-      <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "240px 1fr" }}>
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: [0.32, 0.72, 0, 1], delay: 0.08 }}
+        className="flex-1 min-h-0 grid"
+        style={{ gridTemplateColumns: "240px 1fr" }}
+      >
         <SessionsSidebar
           sessions={sessions}
           activeSessionId={sessionId}
@@ -269,7 +291,7 @@ export function ChatPageClient() {
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }

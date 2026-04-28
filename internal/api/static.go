@@ -73,13 +73,14 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 		// index.html lives there). Rewrite a request like /chat/filip
 		// → chat/_.html so the right page bundle hydrates with the
 		// runtime slug (read via useParams in the client component).
-		// Walk parents deepest-first so nested dynamic routes like
-		// /orchestration/issues/<id> resolve correctly. Try both
-		// `<parent>/_.html` (Next.js >= 14 default) and
-		// `<parent>/_/index.html` (older or directory-style outputs).
+		//
+		// Only resolve EXACTLY one level above the leaf (parent of the
+		// last segment) — walking deeper used to misroute /chat/a/b
+		// onto chat/_.html, hydrating the wrong page shell. If the
+		// leaf-1 lookup fails, fall through to the SPA index.
 		parts := strings.Split(strings.Trim(path, "/"), "/")
-		for i := len(parts) - 1; i >= 1; i-- {
-			parent := strings.Join(parts[:i], "/")
+		if len(parts) >= 2 {
+			parent := strings.Join(parts[:len(parts)-1], "/")
 			for _, candidate := range []string{parent + "/_.html", parent + "/_/index.html"} {
 				if _, err := fs.Stat(webFS, candidate); err == nil {
 					slog.Debug("dynamic placeholder", "path", r.URL.Path, "served", candidate)

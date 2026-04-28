@@ -405,20 +405,23 @@ function DockerTab() {
 }
 
 /**
- * Files — for an agent, lists files in its container home dir via
- * /api/v1/agents/{agentId}/files. For a crew, no per-crew file API
- * exists yet, so we surface an explanation rather than an empty list.
+ * Files — uses /api/v1/agents/{agentId}/files for an agent and
+ * /api/v1/crews/{crewId}/files for a crew. The crew variant lists the
+ * shared crew tree (/crew/shared) via the sidecar proxy.
  */
 function FilesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelProps["context"] }) {
   const [files, setFiles] = useState<FileEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!context || context.kind !== "agent") return
+    if (!context) return
     let cancelled = false
     setFiles(null)
     setError(null)
-    fetch(`/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&path=/`)
+    const url = context.kind === "agent"
+      ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&path=/`
+      : `/api/v1/crews/${context.crewId}/files?workspace_id=${workspaceId}`
+    fetch(url)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return
@@ -429,23 +432,25 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
   }, [context, workspaceId])
 
   if (!context) return <EmptyState>Select an agent or crew to browse files.</EmptyState>
-  if (context.kind === "crew") {
+  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
+  if (files === null) return <EmptyState>Loading…</EmptyState>
+  if (files.length === 0) {
     return (
       <EmptyState>
-        Crew-level shared files are not exposed via API yet. Pick an
-        individual agent in the explorer to browse its files.
+        {context.kind === "agent"
+          ? `No files in ${context.agentName}'s home dir.`
+          : "No shared files in this crew yet."}
       </EmptyState>
     )
   }
-  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
-  if (files === null) return <EmptyState>Loading…</EmptyState>
-  if (files.length === 0) return <EmptyState>No files in this agent&apos;s home dir.</EmptyState>
+
+  const rootPath = context.kind === "agent"
+    ? `/crew/agents/${context.agentSlug}/`
+    : `/crew/shared/`
 
   return (
     <div className="h-full overflow-y-auto p-3 text-xs">
-      <div className="text-muted-foreground mb-2 font-mono">
-        /crew/agents/{context.agentSlug}/
-      </div>
+      <div className="text-muted-foreground mb-2 font-mono">{rootPath}</div>
       <ul className="font-mono space-y-0.5">
         {files.map((f) => (
           <li key={f.name} className="flex items-center gap-2 text-foreground/85 hover:bg-white/[0.03] px-2 -mx-2 py-0.5 rounded">

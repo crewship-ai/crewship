@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Calendar } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -33,6 +33,16 @@ export function ScheduleEditor({
   const [draftPrompt, setDraftPrompt] = useState(prompt ?? "")
   const [draftEnabled, setDraftEnabled] = useState(enabled)
   const [saving, setSaving] = useState(false)
+
+  // Sync drafts back from props once we're not actively editing — keeps
+  // the editor honest after parent re-fetches (e.g. another tab toggled
+  // the schedule, or onSave returned a normalized cron expression).
+  useEffect(() => {
+    if (editing) return
+    setDraftCron(cron ?? "")
+    setDraftPrompt(prompt ?? "")
+    setDraftEnabled(enabled)
+  }, [editing, cron, prompt, enabled])
 
   const handleToggle = async (next: boolean) => {
     if (readOnly) return

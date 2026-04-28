@@ -96,13 +96,9 @@ export function CrewsLayout({
   const {
     selectedAgentSlug,
     selectedCrewSlug,
-    statusFilter,
-    roleFilter,
     update,
     selectAgent,
     selectCrew,
-    setStatus,
-    setRole,
   } = useCrewsSelection()
 
   const [explorerCollapsed, setExplorerCollapsed] = useState(false)
@@ -143,15 +139,6 @@ export function CrewsLayout({
     () => (selectedAgentSlug ? agents.find((a) => a.slug === selectedAgentSlug) || null : null),
     [agents, selectedAgentSlug],
   )
-
-  // Filter agents by status + role for explorer + roster.
-  const filteredAgents = useMemo(() => {
-    return agents.filter((a) => {
-      if (statusFilter !== "all" && a.status !== statusFilter) return false
-      if (roleFilter !== "all" && a.agent_role !== roleFilter) return false
-      return true
-    })
-  }, [agents, statusFilter, roleFilter])
 
   const crewAgents = useMemo(
     () => (selectedCrew ? agents.filter((a) => a.crew_id === selectedCrew.id) : []),
@@ -208,10 +195,6 @@ export function CrewsLayout({
         agentSlug={selectedAgentSlug}
         crewName={selectedCrew?.name ?? null}
         agentName={selectedAgent?.name ?? null}
-        statusFilter={statusFilter}
-        roleFilter={roleFilter}
-        onStatusChange={setStatus}
-        onRoleChange={setRole}
         onCrewCreated={onRefresh}
         onAgentCreated={(slug) => {
           onRefresh()
@@ -251,7 +234,7 @@ export function CrewsLayout({
                 >
                   <CrewsExplorer
                     crews={crews}
-                    agents={filteredAgents}
+                    agents={agents}
                     selectedCrewId={selectedCrew?.id ?? null}
                     selectedAgentId={selectedAgent?.id ?? null}
                     collapsed={false}
@@ -267,7 +250,7 @@ export function CrewsLayout({
           <div className="min-h-0 overflow-hidden">
             <CrewsExplorer
               crews={crews}
-              agents={filteredAgents}
+              agents={agents}
               selectedCrewId={selectedCrew?.id ?? null}
               selectedAgentId={selectedAgent?.id ?? null}
               collapsed={explorerCollapsed}
@@ -295,6 +278,7 @@ export function CrewsLayout({
                   crews={crews}
                   onAgentChanged={onRefresh}
                   onSelectCrew={(slug) => selectCrew(slug)}
+                  onOpenFiles={handleOpenFiles}
                 />
               ) : selectedCrew ? (
                 <CrewCanvas
@@ -315,7 +299,7 @@ export function CrewsLayout({
                 />
               ) : (
                 <EmptyRoster
-                  agents={filteredAgents}
+                  agents={agents}
                   crews={crews}
                   onAgentSelect={handleAgentSelectBySlug}
                 />

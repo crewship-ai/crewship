@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
   Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
-  LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
+  LayoutDashboard, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
 } from "lucide-react"
 
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
@@ -39,8 +39,7 @@ const mobileNavSections = [
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Crews", href: "/crews", icon: Network },
-      { title: "Agents", href: "/crews/agents", icon: Bot },
+      { title: "Crews & Agents", href: "/crews", icon: Network },
     ],
   },
   {
@@ -194,23 +193,9 @@ export function AppToolbar() {
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
   const isCrewsPage = pathname === "/crews"
-
-  // Crew count for crews breadcrumb
-  const [crewCount, setCrewCount] = useState(0)
-  useEffect(() => {
-    if (!isCrewsPage || !workspaceId) return
-    const controller = new AbortController()
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`, { signal: controller.signal })
-      .then((r) => r.ok ? r.json() : [])
-      .then((data: unknown) => {
-        if (controller.signal.aborted) return
-        setCrewCount(Array.isArray(data) ? data.length : 0)
-      })
-      .catch((err) => {
-        if ((err as { name?: string })?.name === "AbortError") return
-      })
-    return () => controller.abort()
-  }, [isCrewsPage, workspaceId])
+  const chatMatch = pathname.match(/^\/chat\/([^/]+)/)
+  const isChatPage = Boolean(chatMatch)
+  const chatAgentSlug = chatMatch?.[1] ? decodeURIComponent(chatMatch[1]) : null
 
   function renderBreadcrumbs() {
     if (isAgentPage && agentBreadcrumb) {
@@ -252,30 +237,35 @@ export function AppToolbar() {
       )
     }
 
-    // Crews breadcrumb: title + stats pills
+    // Crews page: just the section title (subbar already shows
+    // breadcrumb + stats — no point duplicating "Crews / Crews & Agents").
     if (isCrewsPage) {
-      const agentTotal = crewsStatus?.total ?? 0
-      const running = crewsStatus?.running ?? 0
-      const errors = crewsStatus?.error ?? 0
+      return (
+        <span className="text-sm font-semibold">Crews &amp; Agents</span>
+      )
+    }
+
+    // Chat page: link back to /crews?agent=<slug> so the toolbar back-action
+    // restores agent selection in the canvas (instead of dumping the user
+    // on an empty roster).
+    if (isChatPage && chatAgentSlug) {
       return (
         <>
-          <span className="text-sm text-muted-foreground">Crews</span>
+          <Link
+            href={`/crews?agent=${encodeURIComponent(chatAgentSlug)}`}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Crews
+          </Link>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
-          <span className="text-sm font-semibold">Crews & Agents</span>
-          <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-3">
-            {[
-              { label: "crews", value: crewCount, color: "bg-violet-500", tc: "text-violet-400" },
-              { label: "agents", value: agentTotal, color: "bg-blue-500", tc: "text-blue-400" },
-              { label: "running", value: running, color: "bg-emerald-500", tc: running > 0 ? "text-emerald-400" : "" },
-              { label: "error", value: errors, color: "bg-red-500", tc: errors > 0 ? "text-red-400" : "" },
-            ].map(({ label, value, color, tc }) => (
-              <div key={label} className="flex items-center gap-1">
-                <div className={`w-1.5 h-1.5 rounded-full ${color} ${value === 0 ? "opacity-30" : ""}`} />
-                <span className={`tabular-nums ${tc}`}>{value}</span>
-                <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
-              </div>
-            ))}
-          </div>
+          <Link
+            href={`/crews?agent=${encodeURIComponent(chatAgentSlug)}`}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors truncate"
+          >
+            {chatAgentSlug}
+          </Link>
+          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-sm font-semibold">Chat</span>
         </>
       )
     }
