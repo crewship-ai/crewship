@@ -748,6 +748,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		job.Steps = dup
 		h.mu.Unlock()
 
+		h.logger.Info("provision plan emitted", "crew_id", crewID, "steps", len(steps), "ws_hub", h.wsHub != nil)
 		h.wsHub.BroadcastWorkspace(workspaceID, "provision.started", map[string]any{
 			"crew_id": crewID,
 			"steps":   steps,
@@ -772,6 +773,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		}
 		h.mu.Unlock()
 
+		h.logger.Debug("provision progress", "crew_id", crewID, "step", step, "total", total, "message", message)
 		h.wsHub.BroadcastWorkspace(workspaceID, "provision.progress", map[string]any{
 			"crew_id": crewID,
 			"step":    step,
