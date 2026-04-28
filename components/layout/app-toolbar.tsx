@@ -7,6 +7,7 @@ import { useAuth } from "@/hooks/use-auth"
 import {
   Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
   LayoutDashboard, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
+  Loader2, Package, AlertTriangle,
 } from "lucide-react"
 
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
@@ -25,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
+import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { usePendingEscalations } from "@/hooks/use-pending-escalations"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -152,6 +154,7 @@ export function AppToolbar() {
   const { workspaceId } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
+  const provisioning = useProvisioningStatus(workspaceId)
   const pendingEscalations = usePendingEscalations(workspaceId)
   const { session, signOut } = useAuth()
   const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
@@ -383,6 +386,47 @@ export function AppToolbar() {
                   {crewsStatus ? `${crewsStatus.total} agents: ${crewsStatus.running} running, ${crewsStatus.idle} idle, ${crewsStatus.error} errors` : "Loading crews status..."}
                 </TooltipContent>
               </Tooltip>
+
+              {provisioning.total > 0 && (() => {
+                const tone = provisioning.failed > 0 ? "red" : provisioning.building > 0 ? "amber" : "amber"
+                const c = colorMap[tone]
+                const verbalize = () => {
+                  if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`
+                  if (provisioning.building > 0) return `Building ${provisioning.building}…`
+                  if (provisioning.needsProvision > 0) return `${provisioning.needsProvision} need${provisioning.needsProvision > 1 ? "" : "s"} rebuild`
+                  return ""
+                }
+                const tip = provisioning.detail
+                  .filter((d) => d.status !== "completed" && d.status !== "idle")
+                  .map((d) => `${d.name}: ${d.status}${d.error ? ` (${d.error.slice(0, 60)})` : ""}`)
+                  .join(" · ")
+                const Icon = provisioning.building > 0 ? Loader2 : provisioning.failed > 0 ? AlertTriangle : Package
+                // Link to the first crew that needs attention so the badge is clickable.
+                const firstActionable = provisioning.detail.find((d) =>
+                  d.status === "needs_provision" || d.status === "failed" || d.status === "running",
+                )
+                const href = firstActionable ? `/crews?crew=${encodeURIComponent(firstActionable.slug)}` : "/crews"
+                return (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link
+                        href={href}
+                        role="status"
+                        aria-label={`Crew images: ${verbalize()}`}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${c.bg}`}
+                      >
+                        <Icon
+                          className={`h-3 w-3 ${c.icon} ${provisioning.building > 0 ? "animate-spin" : ""}`}
+                        />
+                        <span className={`text-micro font-medium ${c.text}`}>{verbalize()}</span>
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {tip || "Crew image status"}
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })()}
 
               {pendingEscalations > 0 && (
                 <Tooltip>

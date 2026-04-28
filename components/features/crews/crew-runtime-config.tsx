@@ -40,6 +40,7 @@ export function CrewRuntimeConfig({
   const [saving, setSaving] = useState(false)
   const [provisioning, setProvisioning] = useState(false)
   const [rebuilding, setRebuilding] = useState(false)
+  const [provisionPromptOpen, setProvisionPromptOpen] = useState(false)
 
   // Resync from props when they change (e.g. after save)
   useEffect(() => {
@@ -61,19 +62,35 @@ export function CrewRuntimeConfig({
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
+      // Snapshot the configs that affect the image BEFORE save — used
+      // below to decide whether to prompt for reprovision.
+      const willInvalidate =
+        value.runtimeImage !== (runtimeImage || "") ||
+        value.devcontainerConfig !== (devcontainerConfig || "") ||
+        value.miseConfig !== (miseConfig || "")
+      const hadImage = Boolean(cachedImage)
+
       await onSave({
         runtime_image: value.runtimeImage || null,
         devcontainer_config: value.devcontainerConfig || null,
         mise_config: value.miseConfig || null,
       })
       toast.success("Runtime configuration updated")
+
+      // Only nag the user when there's actual work to do: the config
+      // touched the image AND there was a built image to invalidate.
+      // First-time setup (hadImage = false) gets the standard "Not
+      // provisioned" badge + Provision button instead.
+      if (willInvalidate && hadImage) {
+        setProvisionPromptOpen(true)
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save"
       toast.error(message)
     } finally {
       setSaving(false)
     }
-  }, [value, onSave])
+  }, [value, runtimeImage, devcontainerConfig, miseConfig, cachedImage, onSave])
 
   const handleProvision = useCallback(async () => {
     setProvisioning(true)
@@ -202,6 +219,53 @@ export function CrewRuntimeConfig({
           {!devcontainerConfig && !miseConfig && (
             <p className="text-xs text-muted-foreground">No runtime configuration set.</p>
           )}
+        </div>
+      )}
+
+      {provisionPromptOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 grid place-items-center"
+          onClick={() => setProvisionPromptOpen(false)}
+          onKeyDown={(e) => { if (e.key === "Escape") setProvisionPromptOpen(false) }}
+          role="presentation"
+        >
+          <div
+            className="w-[440px] max-w-[90vw] rounded-xl border border-white/10 bg-card shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="provision-prompt-title"
+          >
+            <div className="px-5 py-4 border-b border-white/8">
+              <h3 id="provision-prompt-title" className="text-base font-semibold flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-amber-300" />
+                Rebuild container image now?
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Your changes are saved, but the container image still reflects the old config.
+                Agents in this crew can&apos;t start until the image is rebuilt — usually 30-90 seconds
+                depending on which features changed.
+              </p>
+            </div>
+            <div className="px-5 py-4 flex items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setProvisionPromptOpen(false)}
+                disabled={provisioning}
+              >
+                Later
+              </Button>
+              <Button
+                onClick={async () => {
+                  setProvisionPromptOpen(false)
+                  await handleProvision()
+                }}
+                disabled={provisioning}
+              >
+                {provisioning ? "Starting…" : "Provision now"}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
