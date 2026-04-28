@@ -25,6 +25,9 @@ export interface ProvisioningCrewState {
   name: string
   status: "idle" | "needs_provision" | "running" | "failed" | "completed"
   error?: string
+  /** Feature IDs active on this crew, derived from devcontainer_config.
+   *  Used by the popover to render feature icons next to each crew. */
+  featureIds: string[]
 }
 
 interface CrewListEntry {
@@ -64,7 +67,8 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
       const results = await Promise.allSettled(
         crews.map(async (c): Promise<ProvisioningCrewState> => {
           const r = await fetch(`/api/v1/crews/${c.id}/provision?workspace_id=${workspaceId}`)
-          if (!r.ok) return { id: c.id, slug: c.slug, name: c.name, status: "idle" }
+          const featureIds = extractFeatureIds(c.devcontainer_config)
+          if (!r.ok) return { id: c.id, slug: c.slug, name: c.name, status: "idle", featureIds }
           const data: ProvisionStatusResponse = await r.json()
           const hasConfig = Boolean(data.devcontainer_config)
           const hasImage = Boolean(data.cached_image)
@@ -73,7 +77,7 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
           else if (data.status === "failed") status = "failed"
           else if (hasConfig && !hasImage) status = "needs_provision"
           else if (hasImage) status = "completed"
-          return { id: c.id, slug: c.slug, name: c.name, status, error: data.error }
+          return { id: c.id, slug: c.slug, name: c.name, status, error: data.error, featureIds }
         }),
       )
 
@@ -103,4 +107,18 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
   }, [summary.building, refresh])
 
   return summary
+}
+
+/**
+ * Pull feature refs out of a stringified devcontainer.json. Tolerant of
+ * NULL / malformed JSON — the badge should never crash the toolbar.
+ */
+function extractFeatureIds(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as { features?: Record<string, unknown> }
+    return Object.keys(parsed.features ?? {})
+  } catch {
+    return []
+  }
 }

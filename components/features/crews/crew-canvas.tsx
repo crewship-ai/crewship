@@ -201,7 +201,9 @@ export function CrewCanvas({
   useEffect(() => {
     if (!crew) return
     let cancelled = false
-    fetch(`/api/v1/crews/${crew.id}/issues?workspace_id=${workspaceId}`)
+    // The crew-scoped path only has POST registered; GET lives at the
+    // workspace-scoped /issues endpoint with crew_id as filter.
+    fetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crew.id)}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data: IssueRow[]) => {
         if (cancelled || !Array.isArray(data)) return
@@ -404,7 +406,7 @@ export function CrewCanvas({
         </div>
       </header>
 
-      <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} />
+      <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} workspaceId={workspaceId} />
 
       {/* Tabs */}
       <div className="flex items-center gap-5 border-b border-white/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
@@ -1022,13 +1024,15 @@ function QuickAction({ icon, label, onClick, disabled }: {
  * Polls every 3s while busy, every 30s when idle. Bails as soon as a
  * stable terminal state is reached.
  */
-function ProvisioningBanner({ crewId, crewSlug }: { crewId: string; crewSlug: string }) {
+function ProvisioningBanner({ crewId, crewSlug, workspaceId }: { crewId: string; crewSlug: string; workspaceId: string }) {
   const [state, setState] = useState<{ status: string; error?: string; cached?: string | null; hasConfig: boolean } | null>(null)
   const [triggering, setTriggering] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch(`/api/v1/crews/${crewId}/provision`)
+      // wsCtx middleware mandates workspace_id; without it the endpoint
+      // 400s and the polling loop re-renders forever.
+      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (!r.ok) return
       const data = await r.json()
       setState({
@@ -1038,7 +1042,7 @@ function ProvisioningBanner({ crewId, crewSlug }: { crewId: string; crewSlug: st
         hasConfig: Boolean(data.devcontainer_config),
       })
     } catch { /* tolerate */ }
-  }, [crewId])
+  }, [crewId, workspaceId])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -1053,7 +1057,7 @@ function ProvisioningBanner({ crewId, crewSlug }: { crewId: string; crewSlug: st
   const trigger = useCallback(async () => {
     setTriggering(true)
     try {
-      const r = await fetch(`/api/v1/crews/${crewId}/provision`, { method: "POST" })
+      const r = await fetch(`/api/v1/crews/${crewId}/provision?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST" })
       if (!r.ok) {
         const text = await r.text()
         toast.error(`Provision failed to start: ${text}`)
@@ -1066,7 +1070,7 @@ function ProvisioningBanner({ crewId, crewSlug }: { crewId: string; crewSlug: st
     } finally {
       setTriggering(false)
     }
-  }, [crewId, crewSlug, refresh])
+  }, [crewId, crewSlug, workspaceId, refresh])
 
   if (!state) return null
 

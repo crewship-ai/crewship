@@ -24,6 +24,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
@@ -361,6 +362,13 @@ export function AppToolbar() {
 
           return (
             <div className="hidden lg:flex items-center gap-1.5 mr-1">
+              {/* Provisioning badge — rendered FIRST so it appears LEFT of
+                  the fixed System / Crews pills. When it shows up, the
+                  fixed pills shift left as a group (right-aligned),
+                  preserving their relative order. The fixed pills never
+                  reflow within themselves. */}
+              <ProvisioningBadge provisioning={provisioning} />
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
@@ -386,47 +394,6 @@ export function AppToolbar() {
                   {crewsStatus ? `${crewsStatus.total} agents: ${crewsStatus.running} running, ${crewsStatus.idle} idle, ${crewsStatus.error} errors` : "Loading crews status..."}
                 </TooltipContent>
               </Tooltip>
-
-              {provisioning.total > 0 && (() => {
-                const tone = provisioning.failed > 0 ? "red" : provisioning.building > 0 ? "amber" : "amber"
-                const c = colorMap[tone]
-                const verbalize = () => {
-                  if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`
-                  if (provisioning.building > 0) return `Building ${provisioning.building}…`
-                  if (provisioning.needsProvision > 0) return `${provisioning.needsProvision} need${provisioning.needsProvision > 1 ? "" : "s"} rebuild`
-                  return ""
-                }
-                const tip = provisioning.detail
-                  .filter((d) => d.status !== "completed" && d.status !== "idle")
-                  .map((d) => `${d.name}: ${d.status}${d.error ? ` (${d.error.slice(0, 60)})` : ""}`)
-                  .join(" · ")
-                const Icon = provisioning.building > 0 ? Loader2 : provisioning.failed > 0 ? AlertTriangle : Package
-                // Link to the first crew that needs attention so the badge is clickable.
-                const firstActionable = provisioning.detail.find((d) =>
-                  d.status === "needs_provision" || d.status === "failed" || d.status === "running",
-                )
-                const href = firstActionable ? `/crews?crew=${encodeURIComponent(firstActionable.slug)}` : "/crews"
-                return (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Link
-                        href={href}
-                        role="status"
-                        aria-label={`Crew images: ${verbalize()}`}
-                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${c.bg}`}
-                      >
-                        <Icon
-                          className={`h-3 w-3 ${c.icon} ${provisioning.building > 0 ? "animate-spin" : ""}`}
-                        />
-                        <span className={`text-micro font-medium ${c.text}`}>{verbalize()}</span>
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      {tip || "Crew image status"}
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              })()}
 
               {pendingEscalations > 0 && (
                 <Tooltip>
@@ -593,5 +560,113 @@ export function AppToolbar() {
 
       <CommandPalette open={cmdkOpen} onOpenChange={setCmdkOpen} />
     </header>
+  )
+}
+
+/**
+ * Toolbar provisioning badge with click-to-open detail popover.
+ *
+ * Lives at the LEFT edge of the right-side status group so the fixed
+ * Online / Crews-idle pills don't reflow when this badge appears or
+ * disappears. Click opens a popover listing each unhealthy crew —
+ * status (needs rebuild / building / failed) plus the features it
+ * declares, each with its brand icon when we have one. Each row
+ * deep-links to the crew canvas where the user can act.
+ */
+function ProvisioningBadge({ provisioning }: { provisioning: ReturnType<typeof useProvisioningStatus> }) {
+  const [open, setOpen] = useState(false)
+  if (provisioning.total === 0) return null
+
+  const tone = provisioning.failed > 0 ? "red" : "amber"
+  const colors = tone === "red"
+    ? { bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800", text: "text-red-700 dark:text-red-400", icon: "text-red-600" }
+    : { bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800", text: "text-amber-700 dark:text-amber-400", icon: "text-amber-600" }
+
+  const verbalize = () => {
+    if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`
+    if (provisioning.building > 0) return `Building ${provisioning.building}…`
+    if (provisioning.needsProvision > 0) return `${provisioning.needsProvision} need${provisioning.needsProvision > 1 ? "" : "s"} rebuild`
+    return ""
+  }
+  const Icon = provisioning.building > 0 ? Loader2 : provisioning.failed > 0 ? AlertTriangle : Package
+  const unhealthy = provisioning.detail.filter((d) => d.status !== "completed" && d.status !== "idle")
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Crew images: ${verbalize()}`}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all hover:brightness-95 ${colors.bg}`}
+        >
+          <Icon className={`h-3 w-3 ${colors.icon} ${provisioning.building > 0 ? "animate-spin" : ""}`} />
+          <span className={`text-micro font-medium ${colors.text}`}>{verbalize()}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" sideOffset={8} className="w-[360px] p-0 overflow-hidden">
+        <div className="px-3 py-2 border-b text-xs font-semibold flex items-center gap-2">
+          <Package className="h-3.5 w-3.5 text-muted-foreground" />
+          Container builds
+        </div>
+        <ul className="divide-y max-h-[320px] overflow-y-auto">
+          {unhealthy.map((d) => (
+            <li key={d.id}>
+              <Link
+                href={`/crews?crew=${encodeURIComponent(d.slug)}`}
+                onClick={() => setOpen(false)}
+                className="block px-3 py-2.5 hover:bg-accent/40 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <ProvisioningStatusDot status={d.status} />
+                  <span className="text-sm font-medium truncate flex-1">{d.name}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {d.status === "needs_provision" ? "needs rebuild" : d.status}
+                  </span>
+                </div>
+                {d.error && (
+                  <pre className="text-[10px] text-red-500 dark:text-red-400 font-mono whitespace-pre-wrap break-words ml-4 max-h-[40px] overflow-hidden">
+                    {d.error.slice(0, 200)}
+                  </pre>
+                )}
+                {d.featureIds.length > 0 && (
+                  <div className="flex items-center gap-1 ml-4 mt-1.5 flex-wrap">
+                    {d.featureIds.map((fid) => (
+                      <FeatureChip key={fid} featureRef={fid} />
+                    ))}
+                  </div>
+                )}
+              </Link>
+            </li>
+          ))}
+        </ul>
+        <div className="px-3 py-2 border-t bg-muted/30 text-[10px] text-muted-foreground">
+          Click a crew to open its canvas and act on it.
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function ProvisioningStatusDot({ status }: { status: string }) {
+  if (status === "running") return <Loader2 className="h-3 w-3 text-blue-500 animate-spin shrink-0" />
+  if (status === "failed") return <AlertTriangle className="h-3 w-3 text-red-500 shrink-0" />
+  // needs_provision
+  return <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+}
+
+/**
+ * Pill that renders a feature reference like
+ * "ghcr.io/devcontainers/features/python:1" as just "python" with a
+ * brand icon when we recognise the slug. Falls back to the bare slug
+ * when we don't have a brand icon for it.
+ */
+function FeatureChip({ featureRef }: { featureRef: string }) {
+  // Extract the leaf name: ghcr.io/.../features/<name>:<v> → <name>
+  const m = featureRef.match(/\/features\/([^:]+)/)
+  const slug = (m?.[1] ?? featureRef).toLowerCase()
+  return (
+    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground border border-border/50">
+      {slug}
+    </span>
   )
 }
