@@ -67,19 +67,25 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 		}
 
 		// Dynamic-route placeholder lookup: Next.js static export with
-		// generateStaticParams returning [{ id: "_" }] builds the page at
-		// `<segment>/_/index.html`. We rewrite a request like /chat/filip
-		// → chat/_/index.html so the right page bundle hydrates with the
-		// runtime slug (read via useParams in the client component). We
-		// walk parents deepest-first so nested dynamic routes like
-		// /orchestration/issues/<id> resolve correctly.
+		// generateStaticParams returning [{ id: "_" }] builds the page
+		// HTML at `<segment>/_.html` (the directory `<segment>/_/` is
+		// only used for Next's internal manifest .txt files, no
+		// index.html lives there). Rewrite a request like /chat/filip
+		// → chat/_.html so the right page bundle hydrates with the
+		// runtime slug (read via useParams in the client component).
+		// Walk parents deepest-first so nested dynamic routes like
+		// /orchestration/issues/<id> resolve correctly. Try both
+		// `<parent>/_.html` (Next.js >= 14 default) and
+		// `<parent>/_/index.html` (older or directory-style outputs).
 		parts := strings.Split(strings.Trim(path, "/"), "/")
 		for i := len(parts) - 1; i >= 1; i-- {
-			candidate := strings.Join(append(append([]string{}, parts[:i]...), "_", "index.html"), "/")
-			if _, err := fs.Stat(webFS, candidate); err == nil {
-				slog.Debug("dynamic placeholder", "path", r.URL.Path, "served", candidate)
-				serveFile(w, candidate)
-				return
+			parent := strings.Join(parts[:i], "/")
+			for _, candidate := range []string{parent + "/_.html", parent + "/_/index.html"} {
+				if _, err := fs.Stat(webFS, candidate); err == nil {
+					slog.Debug("dynamic placeholder", "path", r.URL.Path, "served", candidate)
+					serveFile(w, candidate)
+					return
+				}
 			}
 		}
 
