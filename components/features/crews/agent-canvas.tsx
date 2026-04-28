@@ -462,15 +462,20 @@ export function AgentCanvas({
           <button
             type="button"
             onClick={() => setShowAdvanced((v) => !v)}
-            className="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground hover:bg-white/[0.03] hover:text-foreground border-t border-white/5"
+            className="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground hover:bg-white/[0.03] hover:text-foreground border-t border-white/5 transition-colors"
           >
             <ChevronDown
-              className={cn("h-3 w-3 transition-transform", !showAdvanced && "-rotate-90")}
+              className={cn("h-3 w-3 transition-transform duration-200", !showAdvanced && "-rotate-90")}
             />
             Advanced (LLM tuning, tools, memory, webhook, hooks)
           </button>
           {showAdvanced && (
-            <div className="divide-y divide-white/5 border-t border-white/5">
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="divide-y divide-white/5 border-t border-white/5 overflow-hidden">
               <Row label="Temperature">
                 <EditableField
                   value={String(agent.temperature ?? 0.7)}
@@ -572,7 +577,7 @@ export function AgentCanvas({
                   Manage via CLI: <code className="text-foreground/80">crewship hooks edit {agent.slug}</code>
                 </span>
               </Row>
-            </div>
+            </motion.div>
           )}
         </div>
       </section>
