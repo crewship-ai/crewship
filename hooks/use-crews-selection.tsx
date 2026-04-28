@@ -3,57 +3,55 @@
 import { useCallback } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
-export type CrewsTab = "overview" | "activity" | "health"
-export type CrewsDrawer = "chat" | "logs" | "settings"
+export type CrewsStatusFilter = "all" | "RUNNING" | "IDLE" | "ERROR" | "STOPPED"
+export type CrewsRoleFilter = "all" | "AGENT" | "LEAD" | "COORDINATOR"
 
-const VALID_TABS: readonly CrewsTab[] = ["overview", "activity", "health"] as const
-const VALID_DRAWERS: readonly CrewsDrawer[] = ["chat", "logs", "settings"] as const
+const VALID_STATUS: readonly CrewsStatusFilter[] = ["all", "RUNNING", "IDLE", "ERROR", "STOPPED"] as const
+const VALID_ROLE: readonly CrewsRoleFilter[] = ["all", "AGENT", "LEAD", "COORDINATOR"] as const
 
 export interface CrewsSelectionUpdate {
   agent?: string | null
   crew?: string | null
-  tab?: CrewsTab
-  drawer?: CrewsDrawer | null
+  status?: CrewsStatusFilter
+  role?: CrewsRoleFilter
 }
 
 export interface CrewsSelection {
   selectedAgentSlug: string | null
   selectedCrewSlug: string | null
-  activeTab: CrewsTab
-  activeDrawer: CrewsDrawer | null
+  statusFilter: CrewsStatusFilter
+  roleFilter: CrewsRoleFilter
   update: (updates: CrewsSelectionUpdate) => void
   selectAgent: (slug: string | null) => void
   selectCrew: (slug: string | null) => void
-  setTab: (tab: CrewsTab) => void
-  openDrawer: (drawer: CrewsDrawer) => void
-  closeDrawer: () => void
+  setStatus: (status: CrewsStatusFilter) => void
+  setRole: (role: CrewsRoleFilter) => void
   clearSelection: () => void
 }
 
-function parseTab(raw: string | null): CrewsTab {
-  return raw !== null && (VALID_TABS as readonly string[]).includes(raw)
-    ? (raw as CrewsTab)
-    : "overview"
+function parseStatus(raw: string | null): CrewsStatusFilter {
+  return raw !== null && (VALID_STATUS as readonly string[]).includes(raw)
+    ? (raw as CrewsStatusFilter)
+    : "all"
 }
 
-function parseDrawer(raw: string | null): CrewsDrawer | null {
-  return raw !== null && (VALID_DRAWERS as readonly string[]).includes(raw)
-    ? (raw as CrewsDrawer)
-    : null
+function parseRole(raw: string | null): CrewsRoleFilter {
+  return raw !== null && (VALID_ROLE as readonly string[]).includes(raw)
+    ? (raw as CrewsRoleFilter)
+    : "all"
 }
 
 /**
- * URL-driven selection + view state for the Crews page. Reads/writes
- * `?agent=<slug>`, `?crew=<slug>`, `?tab=<overview|activity|health>`, and
- * `?drawer=<chat|logs|settings>` via shallow routing so deep-links, refresh,
- * and back-button behave naturally.
+ * URL-driven selection + filter state for /crews. Reads/writes
+ * `?agent=<slug>`, `?crew=<slug>`, `?status=<filter>`, `?role=<filter>`
+ * via shallow routing so deep-links, refresh, and back-button behave
+ * naturally.
  *
  * `selectCrew` clears the agent (focus is on the crew). Use
- * `update({ agent, crew, tab, drawer })` for atomic multi-field changes.
+ * `update({ agent, crew, status, role })` for atomic multi-field changes.
  *
- * `tab` defaults to "overview" when absent or invalid. `drawer` is `null`
- * (closed) when absent or invalid — so a stale `?drawer=xyz` silently
- * renders as closed rather than blowing up.
+ * Default filter values ("all") are omitted from the URL so canonical
+ * `/crews` and `/crews?status=all` mean the same thing.
  */
 export function useCrewsSelection(): CrewsSelection {
   const searchParams = useSearchParams()
@@ -62,8 +60,8 @@ export function useCrewsSelection(): CrewsSelection {
 
   const selectedAgentSlug = searchParams.get("agent")
   const selectedCrewSlug = searchParams.get("crew")
-  const activeTab = parseTab(searchParams.get("tab"))
-  const activeDrawer = parseDrawer(searchParams.get("drawer"))
+  const statusFilter = parseStatus(searchParams.get("status"))
+  const roleFilter = parseRole(searchParams.get("role"))
 
   const update = useCallback(
     (updates: CrewsSelectionUpdate) => {
@@ -76,15 +74,13 @@ export function useCrewsSelection(): CrewsSelection {
         if (updates.crew) params.set("crew", updates.crew)
         else params.delete("crew")
       }
-      if ("tab" in updates && updates.tab !== undefined) {
-        // Omit the param entirely when the value equals the default, keeping
-        // URLs short and letting `?tab=overview` and no param mean the same.
-        if (updates.tab === "overview") params.delete("tab")
-        else params.set("tab", updates.tab)
+      if ("status" in updates && updates.status !== undefined) {
+        if (updates.status === "all") params.delete("status")
+        else params.set("status", updates.status)
       }
-      if ("drawer" in updates) {
-        if (updates.drawer) params.set("drawer", updates.drawer)
-        else params.delete("drawer")
+      if ("role" in updates && updates.role !== undefined) {
+        if (updates.role === "all") params.delete("role")
+        else params.set("role", updates.role)
       }
       const query = params.toString()
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
@@ -106,23 +102,15 @@ export function useCrewsSelection(): CrewsSelection {
     [update],
   )
 
-  const setTab = useCallback(
-    (tab: CrewsTab) => {
-      update({ tab })
-    },
+  const setStatus = useCallback(
+    (status: CrewsStatusFilter) => update({ status }),
     [update],
   )
 
-  const openDrawer = useCallback(
-    (drawer: CrewsDrawer) => {
-      update({ drawer })
-    },
+  const setRole = useCallback(
+    (role: CrewsRoleFilter) => update({ role }),
     [update],
   )
-
-  const closeDrawer = useCallback(() => {
-    update({ drawer: null })
-  }, [update])
 
   const clearSelection = useCallback(() => {
     update({ agent: null, crew: null })
@@ -131,14 +119,13 @@ export function useCrewsSelection(): CrewsSelection {
   return {
     selectedAgentSlug,
     selectedCrewSlug,
-    activeTab,
-    activeDrawer,
+    statusFilter,
+    roleFilter,
     update,
     selectAgent,
     selectCrew,
-    setTab,
-    openDrawer,
-    closeDrawer,
+    setStatus,
+    setRole,
     clearSelection,
   }
 }
