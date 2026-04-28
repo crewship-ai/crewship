@@ -23,6 +23,11 @@ export function RealtimeToasts() {
   useRealtimeEvent(
     "run.failed",
     useCallback((event) => {
+      // Backend uses the same `run.failed` event for both FAILED and
+      // CANCELLED runs. CANCELLED happens when the user navigates away
+      // mid-stream (the WS drops, the orchestrator stops the agent) —
+      // that's an expected user action, not a failure to surface.
+      if (asString(event.payload.status) === "CANCELLED") return
       const agent = asString(event.payload.agent_slug) ?? asString(event.payload.agent_id) ?? "Agent"
       toast.error(`Run failed: @${agent}`, {
         description: asString(event.payload.error) ?? "The agent run encountered an error.",

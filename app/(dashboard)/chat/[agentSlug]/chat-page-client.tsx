@@ -115,27 +115,41 @@ export function ChatPageClient() {
     return () => { cancelled = true }
   }, [slug, workspaceId])
 
-  // Pull recent sessions for the sidebar.
+  // Pull recent sessions for the sidebar. `sessionsLoaded` gates the
+  // ensure-session effect below so it can decide whether to reuse the
+  // freshest existing session or create a new one — without it,
+  // ensureSession used to fire before the GET resolved and unconditionally
+  // POST'd a new chat, piling up empty "Untitled session" rows on every
+  // visit (the sidebar would show 17+ stale entries within an hour).
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
   useEffect(() => {
     if (!agent || !workspaceId) return
     let cancelled = false
+    setSessionsLoaded(false)
     fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
       .then((r) => (r.ok ? r.json() : []))
       .then((list: SessionRecord[]) => {
-        if (!cancelled && Array.isArray(list)) setSessions(list)
+        if (!cancelled && Array.isArray(list)) {
+          setSessions(list)
+          setSessionsLoaded(true)
+        }
       })
-      .catch(() => { /* silent */ })
+      .catch(() => { if (!cancelled) setSessionsLoaded(true) })
     return () => { cancelled = true }
   }, [agent, workspaceId])
 
-  // If no ?session= specified, allocate one from the freshest existing
-  // session OR create a new one.
+  // If no ?session= specified: route to the freshest existing session
+  // (pre-existing chats with the agent shouldn't be replaced by a new
+  // empty one). Only POST a new session when there are genuinely none.
   const ensureSession = useCallback(async () => {
-    if (!agent || !workspaceId || !slug || sessionId || creatingSession) return
+    if (!agent || !workspaceId || !slug || sessionId || creatingSession || !sessionsLoaded) return
+    if (sessions.length > 0) {
+      // /chats?limit=20 returns sorted desc by created_at, so [0] is freshest.
+      router.replace(`/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(sessions[0].id)}`)
+      return
+    }
     setCreatingSession(true)
     try {
-      // POST /chats accepts { session_id?: string } and returns { id }.
-      // We let the server generate the id (omit session_id).
       const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -143,9 +157,6 @@ export function ChatPageClient() {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const created: { id: string } = await res.json()
-      // Pre-seed the sidebar so the just-created session shows up before
-      // the next refetch — avoids a one-tick gap where the active session
-      // appears nowhere in the rail.
       const nowIso = new Date().toISOString()
       setSessions((prev) =>
         prev.some((s) => s.id === created.id)
@@ -158,11 +169,11 @@ export function ChatPageClient() {
     } finally {
       setCreatingSession(false)
     }
-  }, [agent, workspaceId, sessionId, creatingSession, slug, router])
+  }, [agent, workspaceId, sessionId, creatingSession, sessionsLoaded, sessions, slug, router])
 
   useEffect(() => {
-    if (agent && !sessionId && !creatingSession) void ensureSession()
-  }, [agent, sessionId, creatingSession, ensureSession])
+    if (agent && !sessionId && !creatingSession && sessionsLoaded) void ensureSession()
+  }, [agent, sessionId, creatingSession, sessionsLoaded, ensureSession])
 
   const handleNewSession = useCallback(async () => {
     if (!agent || !workspaceId || !slug) return

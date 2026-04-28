@@ -111,16 +111,23 @@ export function CrewsLayout({
   }, [isMobile])
 
   // Stale-slug watcher: clear ?agent= / ?crew= if they don't exist.
+  // Only fires when the lists are non-empty — a transient empty state
+  // during route transitions (e.g. back-nav from /chat/<slug>) used to
+  // toast "Agent not found" before the fetch caught up, then drop the
+  // ?agent= param and dump the user on the empty roster. Treat empty
+  // lists as still-loading; the user-perception cost of NOT clearing a
+  // stale slug for a beat is much lower than the cost of clearing a
+  // valid one.
   const staleSlugNotified = useRef<string | null>(null)
   useEffect(() => {
     if (!loaded) return
-    if (selectedAgentSlug && !agents.find((a) => a.slug === selectedAgentSlug)) {
+    if (selectedAgentSlug && agents.length > 0 && !agents.find((a) => a.slug === selectedAgentSlug)) {
       if (staleSlugNotified.current !== selectedAgentSlug) {
         staleSlugNotified.current = selectedAgentSlug
         toast.warning(`Agent "${selectedAgentSlug}" not found`)
         update({ agent: null })
       }
-    } else if (selectedCrewSlug && !crews.find((c) => c.slug === selectedCrewSlug)) {
+    } else if (selectedCrewSlug && crews.length > 0 && !crews.find((c) => c.slug === selectedCrewSlug)) {
       if (staleSlugNotified.current !== selectedCrewSlug) {
         staleSlugNotified.current = selectedCrewSlug
         toast.warning(`Crew "${selectedCrewSlug}" not found`)
