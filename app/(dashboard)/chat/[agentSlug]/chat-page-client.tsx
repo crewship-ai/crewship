@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { ChevronLeft, MessageSquarePlus } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -9,6 +9,28 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { SessionsSidebar } from "@/components/features/chat/sessions-sidebar"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+
+/**
+ * Read the agent slug from the live URL after client hydration.
+ *
+ * useParams() is unreliable in Next.js static export: the page is
+ * prerendered with [{ agentSlug: "_" }] and useParams returns "_"
+ * persistently for the prerendered file, even after the user navigates
+ * to /chat/<real-slug>. Pulling from window.location.pathname instead
+ * bypasses that bug and guarantees we see the actual URL.
+ *
+ * Returns null until client mount completes — page renders a loading
+ * state during that brief window.
+ */
+function useAgentSlugFromUrl(): string | null {
+  const [slug, setSlug] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const m = window.location.pathname.match(/^\/chat\/([^/]+)\/?$/)
+    if (m) setSlug(decodeURIComponent(m[1]))
+  }, [])
+  return slug
+}
 
 interface AgentRecord {
   id: string
@@ -43,11 +65,10 @@ interface SessionRecord {
  * RightPanel files/team/context) without modification.
  */
 export function ChatPageClient() {
-  const params = useParams<{ agentSlug: string }>()
   const router = useRouter()
   const searchParams = useSearchParams()
   const { workspaceId, loading: wsLoading } = useWorkspace()
-  const slug = decodeURIComponent(String(params?.agentSlug ?? ""))
+  const slug = useAgentSlugFromUrl()
 
   const [agent, setAgent] = useState<AgentRecord | null>(null)
   const [sessions, setSessions] = useState<SessionRecord[]>([])
@@ -59,17 +80,14 @@ export function ChatPageClient() {
 
   // Resolve agent by slug (workspace-scoped).
   useEffect(() => {
-    // Wait for workspace to load. Don't flip loadingAgent off — that
-    // would render a misleading "agent not found" while ws is still
-    // resolving.
-    if (!workspaceId) return
+    // Wait for both workspace and the post-hydration slug. Don't flip
+    // loadingAgent off while we're still waiting — that would render
+    // a misleading "agent not found" early.
+    if (!workspaceId || slug === null) return
 
-    // Static export placeholder. The browser URL is /chat/<real-slug>
-    // and useParams should return that on hydration; if we still see
-    // "_" or "" here, something upstream is wrong (Suspense, bad
-    // hydration). Stop the spinner and surface a real error so the
-    // page is never silently blank.
-    if (!slug || slug === "_") {
+    if (slug === "" || slug === "_") {
+      // Static-export placeholder hit the client somehow (URL rewrite
+      // failed). Surface a real error rather than rendering blank.
       setLoadingAgent(false)
       setError("Could not read agent slug from URL")
       return
@@ -112,7 +130,7 @@ export function ChatPageClient() {
   // If no ?session= specified, allocate one from the freshest existing
   // session OR create a new one.
   const ensureSession = useCallback(async () => {
-    if (!agent || !workspaceId || sessionId || creatingSession) return
+    if (!agent || !workspaceId || !slug || sessionId || creatingSession) return
     setCreatingSession(true)
     try {
       const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
@@ -135,7 +153,7 @@ export function ChatPageClient() {
   }, [agent, sessionId, creatingSession, ensureSession])
 
   const handleNewSession = useCallback(async () => {
-    if (!agent || !workspaceId) return
+    if (!agent || !workspaceId || !slug) return
     setCreatingSession(true)
     try {
       const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
@@ -159,7 +177,8 @@ export function ChatPageClient() {
     return getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)
   }, [agent])
 
-  if (wsLoading || loadingAgent) {
+  // Wait for client mount + workspace + agent fetch before rendering chat.
+  if (slug === null || wsLoading || loadingAgent) {
     return (
       <div className="h-full p-6">
         <Skeleton className="w-full h-full rounded-xl" />
