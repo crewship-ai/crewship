@@ -3,13 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ChevronDown, Files, Plus } from "lucide-react"
+import { Files, Plus } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
-import { ConfigTextareaEditor } from "@/components/features/crews/config-textarea-editor"
+import { CrewRuntimeConfig } from "@/components/features/crews/crew-runtime-config"
+import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
+import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
+import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
+import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
 
@@ -112,7 +116,6 @@ export function CrewCanvas({
   const [crew, setCrew] = useState<CrewRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showContainer, setShowContainer] = useState(false)
   const [issues, setIssues] = useState<IssuesSnapshot | null>(null)
   const [integrations, setIntegrations] = useState<CrewIntegration[] | null>(null)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
@@ -141,7 +144,6 @@ export function CrewCanvas({
 
   useEffect(() => {
     setLoading(true)
-    setShowContainer(false)
     const controller = new AbortController()
     void fetchCrew(controller.signal)
     return () => controller.abort()
@@ -519,132 +521,76 @@ export function CrewCanvas({
         )}
       </section>
 
-      {/* Container & runtime */}
+      {/* Container resources — memory, CPU, TTL. Restored verbatim
+          from the pre-redesign main branch (CrewContainerConfig, with
+          its own Save button + 256MB-32GB validation). */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Container &amp; runtime</h2>
-        <div className="rounded-xl border border-white/8 bg-card">
-          <button
-            type="button"
-            onClick={() => setShowContainer((v) => !v)}
-            className="w-full px-4 py-2.5 flex items-center gap-2 text-sm hover:bg-white/[0.03]"
-          >
-            <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", !showContainer && "-rotate-90")} />
-            <span className="text-foreground/80 truncate">{containerSummary}</span>
-            <span className="ml-auto text-[10px] text-muted-foreground">click to edit</span>
-          </button>
-          {showContainer && (
-            <div className="divide-y divide-white/5 border-t border-white/5">
-              <Row label="Image">
-                <EditableField
-                  value={crew.runtime_image ?? "debian:trixie-slim"}
-                  onSave={(v) => patch({ runtime_image: v })}
-                  mono
-                />
-              </Row>
-              <Row label="Memory (MB)">
-                <EditableField
-                  value={String(crew.container_memory_mb)}
-                  onSave={(v) => patch({ container_memory_mb: Number(v) })}
-                />
-              </Row>
-              <Row label="CPU">
-                <EditableField
-                  value={String(crew.container_cpus)}
-                  onSave={(v) => patch({ container_cpus: Number(v) })}
-                />
-              </Row>
-              <Row label="TTL (hours)">
-                <EditableField
-                  value={crew.container_ttl_hours != null ? String(crew.container_ttl_hours) : ""}
-                  onSave={(v) => patch({ container_ttl_hours: v === "" ? null : Number(v) })}
-                  placeholder="never"
-                />
-              </Row>
-              <Row label="Network">
-                <EditableField
-                  value={crew.network_mode}
-                  onSave={(v) => patch({ network_mode: v })}
-                  options={[
-                    { value: "free", label: "Free (full internet)" },
-                    { value: "restricted", label: "Restricted (allowlist only)" },
-                  ]}
-                  format={(v) => (v === "free" ? "Free (full internet)" : "Restricted (allowlist only)")}
-                />
-              </Row>
-              {crew.network_mode === "restricted" && (
-                <Row label="Allowed domains" align="start">
-                  <EditableField
-                    value={Array.isArray(crew.allowed_domains)
-                      ? crew.allowed_domains.join(", ")
-                      : (crew.allowed_domains ?? "")}
-                    onSave={(v) => {
-                      const list = v.split(",").map((s) => s.trim()).filter(Boolean)
-                      return patch({ allowed_domains: list.length > 0 ? list : null })
-                    }}
-                    placeholder="api.openai.com, api.anthropic.com, …"
-                  />
-                </Row>
-              )}
-              <Row label="MCP servers" align="center">
-                <span className="text-sm text-muted-foreground">
-                  CLI: <code className="text-foreground/80">crewship mcp {crew.slug}</code>
-                </span>
-              </Row>
-            </div>
-          )}
-        </div>
+        <h2 className="text-lg font-semibold">Container resources</h2>
+        <CrewContainerConfig
+          memoryMb={crew.container_memory_mb}
+          cpus={crew.container_cpus}
+          ttlHours={crew.container_ttl_hours}
+          canEdit
+          onSave={async (config) => {
+            await patch(config)
+          }}
+        />
       </section>
 
-      {/* Devcontainer + mise — restored from the deleted CrewRuntimeConfig.
-          Both fields PATCHable per crews.go::updateCrewRequest. The
-          old curated runtime catalog (Ubuntu/debian/mcr.microsoft.com
-          presets, language pickers) was 1067 lines and is deferred to
-          a follow-up; here we expose the raw devcontainer.json + mise.toml
-          editors which is what power users wanted anyway. */}
+      {/* Network policy — free vs restricted + allowed_domains list,
+          with the proper add/remove UI. Restored from main. */}
       <section className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-lg font-semibold">Devcontainer &amp; mise</h2>
-          {crew.cached_image && (
-            <span className="text-[10px] text-muted-foreground">
-              built: <code className="text-foreground/70">{crew.cached_image}</code>
-            </span>
-          )}
-        </div>
-        <ConfigTextareaEditor
-          format="json"
-          filename="devcontainer.json"
-          value={crew.devcontainer_config}
-          placeholder='{\n  "image": "mcr.microsoft.com/devcontainers/python:1-3.12",\n  "features": { … }\n}'
-          hint={<>Standard <code className="text-foreground/70">devcontainer.json</code>. The crew container will be rebuilt from this on the next provision.</>}
-          onSave={(v) => patch({ devcontainer_config: v })}
+        <h2 className="text-lg font-semibold">Network policy</h2>
+        <CrewNetworkPolicy
+          networkMode={crew.network_mode === "restricted" ? "restricted" : "free"}
+          allowedDomains={Array.isArray(crew.allowed_domains)
+            ? crew.allowed_domains
+            : (crew.allowed_domains ? String(crew.allowed_domains).split(",").map((s) => s.trim()).filter(Boolean) : [])}
+          canEdit
+          onSave={async (mode, domains) => {
+            await patch({ network_mode: mode, allowed_domains: domains.length > 0 ? domains : null })
+          }}
         />
-        <ConfigTextareaEditor
-          format="toml"
-          filename="mise.toml"
-          value={crew.mise_config}
-          placeholder='[tools]\nnode = "20"\npython = "3.12"\n'
-          hint={<>Optional <code className="text-foreground/70">mise.toml</code> for language/runtime versions inside the container.</>}
-          onSave={(v) => patch({ mise_config: v })}
-        />
-        <div className="text-[11px] text-muted-foreground">
-          To rebuild the container after a config change:{" "}
-          <code className="text-foreground/80">crewship crew provision {crew.slug}</code>
-        </div>
       </section>
 
-      {/* Escalation routing — JSON config for who handles what when an
-          agent escalates. Backend supports it via PATCH; was missing
-          from canvas. */}
+      {/* MCP servers — full add/edit/remove panel restored from main.
+          Same component the dropped settings drawer used. */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Escalation routing</h2>
-        <ConfigTextareaEditor
-          format="json"
-          filename="escalation.json"
-          value={crew.escalation_config}
-          placeholder='{\n  "max_attempts": 3,\n  "default_handler": "lead",\n  "rules": [\n    { "type": "auth_error", "handler": "human" }\n  ]\n}'
-          hint={<>JSON describing the escalation chain. Empty = inherit workspace defaults.</>}
-          onSave={(v) => patch({ escalation_config: v })}
+        <h2 className="text-lg font-semibold">MCP servers</h2>
+        <CrewMCPConfig crewId={crew.id} workspaceId={workspaceId} />
+      </section>
+
+      {/* Container & runtime image — the full curated catalog with brand
+          icons (Ubuntu, Debian, mcr.microsoft.com devcontainers, Alpine,
+          …), language/tool feature picker (Node, Python, Go, Docker,
+          kubectl, AWS CLI, Postgres, …), raw devcontainer.json +
+          mise.toml escape hatches, plus Provision / Rebuild buttons
+          that hit POST /api/v1/crews/{id}/provision.
+
+          Restored verbatim (~1067 lines + 209-line wrapper) from the
+          pre-redesign main branch, so users have the same UI they had
+          before the canvas refactor. */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Container image &amp; features</h2>
+        <CrewRuntimeConfig
+          crewId={crew.id}
+          workspaceId={workspaceId}
+          runtimeImage={crew.runtime_image}
+          devcontainerConfig={crew.devcontainer_config}
+          miseConfig={crew.mise_config}
+          cachedImage={crew.cached_image}
+          canEdit
+          onSave={async (config) => {
+            await patch(config)
+          }}
         />
+      </section>
+
+      {/* Escalations — list of open escalations + escalation config
+          editor. Restored from main. */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Escalations</h2>
+        <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
       </section>
 
       {/* Activity */}

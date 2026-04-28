@@ -1,4 +1,5 @@
-import { test, expect, type Page } from "./fixtures/auth"
+import { test, expect } from "./fixtures/auth"
+import type { Page } from "@playwright/test"
 
 // Real user-workflow tests for the redesigned /crews surface.
 //
