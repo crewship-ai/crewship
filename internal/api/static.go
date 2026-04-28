@@ -63,8 +63,14 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 			path = "index.html"
 		}
 
-		// Serve _next/ static assets directly via FileServer (no redirect issues)
+		// Serve _next/ static assets directly via FileServer (no redirect
+		// issues). Hashed chunk filenames already encode content, so a
+		// long-lived cache is safe and avoids re-downloading the same
+		// JS/CSS on every navigation.
 		if strings.HasPrefix(path, "_next/") {
+			if strings.HasPrefix(path, "_next/static/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
