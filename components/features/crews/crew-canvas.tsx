@@ -9,6 +9,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
+import { ConfigTextareaEditor } from "@/components/features/crews/config-textarea-editor"
 import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
 
@@ -37,11 +38,15 @@ interface CrewRecord {
   avatar_style: string | null
   issue_prefix: string | null
   network_mode: string
-  allowed_domains: string | null
+  allowed_domains: string[] | string | null
   container_memory_mb: number
   container_cpus: number
   container_ttl_hours: number | null
   runtime_image: string | null
+  devcontainer_config: string | null
+  mise_config: string | null
+  escalation_config: string | null
+  cached_image: string | null
   created_at: string
   updated_at: string
   _count?: { agents: number; members: number }
@@ -569,9 +574,14 @@ export function CrewCanvas({
               {crew.network_mode === "restricted" && (
                 <Row label="Allowed domains" align="start">
                   <EditableField
-                    value={crew.allowed_domains ?? ""}
-                    onSave={(v) => patch({ allowed_domains: v || null })}
-                    placeholder="api.openai.com,api.anthropic.com,…"
+                    value={Array.isArray(crew.allowed_domains)
+                      ? crew.allowed_domains.join(", ")
+                      : (crew.allowed_domains ?? "")}
+                    onSave={(v) => {
+                      const list = v.split(",").map((s) => s.trim()).filter(Boolean)
+                      return patch({ allowed_domains: list.length > 0 ? list : null })
+                    }}
+                    placeholder="api.openai.com, api.anthropic.com, …"
                   />
                 </Row>
               )}
@@ -580,14 +590,61 @@ export function CrewCanvas({
                   CLI: <code className="text-foreground/80">crewship mcp {crew.slug}</code>
                 </span>
               </Row>
-              <Row label="Devcontainer / mise" align="center">
-                <span className="text-sm text-muted-foreground">
-                  CLI: <code className="text-foreground/80">crewship crew config {crew.slug}</code>
-                </span>
-              </Row>
             </div>
           )}
         </div>
+      </section>
+
+      {/* Devcontainer + mise — restored from the deleted CrewRuntimeConfig.
+          Both fields PATCHable per crews.go::updateCrewRequest. The
+          old curated runtime catalog (Ubuntu/debian/mcr.microsoft.com
+          presets, language pickers) was 1067 lines and is deferred to
+          a follow-up; here we expose the raw devcontainer.json + mise.toml
+          editors which is what power users wanted anyway. */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-lg font-semibold">Devcontainer &amp; mise</h2>
+          {crew.cached_image && (
+            <span className="text-[10px] text-muted-foreground">
+              built: <code className="text-foreground/70">{crew.cached_image}</code>
+            </span>
+          )}
+        </div>
+        <ConfigTextareaEditor
+          format="json"
+          filename="devcontainer.json"
+          value={crew.devcontainer_config}
+          placeholder='{\n  "image": "mcr.microsoft.com/devcontainers/python:1-3.12",\n  "features": { … }\n}'
+          hint={<>Standard <code className="text-foreground/70">devcontainer.json</code>. The crew container will be rebuilt from this on the next provision.</>}
+          onSave={(v) => patch({ devcontainer_config: v })}
+        />
+        <ConfigTextareaEditor
+          format="toml"
+          filename="mise.toml"
+          value={crew.mise_config}
+          placeholder='[tools]\nnode = "20"\npython = "3.12"\n'
+          hint={<>Optional <code className="text-foreground/70">mise.toml</code> for language/runtime versions inside the container.</>}
+          onSave={(v) => patch({ mise_config: v })}
+        />
+        <div className="text-[11px] text-muted-foreground">
+          To rebuild the container after a config change:{" "}
+          <code className="text-foreground/80">crewship crew provision {crew.slug}</code>
+        </div>
+      </section>
+
+      {/* Escalation routing — JSON config for who handles what when an
+          agent escalates. Backend supports it via PATCH; was missing
+          from canvas. */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Escalation routing</h2>
+        <ConfigTextareaEditor
+          format="json"
+          filename="escalation.json"
+          value={crew.escalation_config}
+          placeholder='{\n  "max_attempts": 3,\n  "default_handler": "lead",\n  "rules": [\n    { "type": "auth_error", "handler": "human" }\n  ]\n}'
+          hint={<>JSON describing the escalation chain. Empty = inherit workspace defaults.</>}
+          onSave={(v) => patch({ escalation_config: v })}
+        />
       </section>
 
       {/* Activity */}
