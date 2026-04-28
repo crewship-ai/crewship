@@ -18,6 +18,14 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 
 	// serveFile reads a file from webFS and writes it to the response.
 	// This avoids http.FileServer redirects (e.g. /index.html → ./).
+	//
+	// Cache headers are critical: HTML must NOT be cached (it references
+	// hashed chunk names that change every deploy — caching the HTML
+	// pins users to a stale chunk graph), while _next/static/* chunks
+	// CAN be cached forever (their filenames already include a content
+	// hash, so a code change always picks a new URL). Without these
+	// headers, browser default heuristics keep stale HTML for hours and
+	// users see "fix not deployed" symptoms after every release.
 	serveFile := func(w http.ResponseWriter, name string) {
 		f, err := webFS.Open(name)
 		if err != nil {
@@ -31,6 +39,21 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 			ct = "application/octet-stream"
 		}
 		w.Header().Set("Content-Type", ct)
+
+		switch {
+		case strings.HasPrefix(name, "_next/static/"):
+			// Hashed bundle assets — safe to cache for a year.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case strings.HasSuffix(name, ".html"):
+			// HTML and dynamic-route placeholders — always revalidate so
+			// users pick up new chunk references the moment we redeploy.
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		default:
+			// Everything else (favicon, robots.txt, public assets) —
+			// cache for 5 minutes by default.
+			w.Header().Set("Cache-Control", "public, max-age=300")
+		}
+
 		io.Copy(w, f)
 	}
 
