@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  ChevronDown, MessageSquare, MoreHorizontal, RefreshCw, Square,
+  ChevronDown, MessageSquare, MoreHorizontal, Square,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EditableField } from "@/components/shared/editable-field"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
 import { ScheduleEditor } from "@/components/features/crews/schedule-editor"
 import { InboxBanner } from "@/components/features/crews/inbox-banner"
+import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
@@ -111,6 +113,7 @@ export function AgentCanvas({
   const [error, setError] = useState<string | null>(null)
   const [revealedSecret, setRevealedSecret] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
 
   const fetchAgent = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -215,14 +218,13 @@ export function AgentCanvas({
     }
   }, [agent, fetchAgent])
 
-  const handleRegenAvatar = useCallback(async () => {
+  const handleAvatarSave = useCallback(async (next: { avatar_seed: string; avatar_style: string | null }) => {
     if (!agent) return
-    const newSeed = Math.random().toString(36).slice(2, 12)
     try {
-      await patch({ avatar_seed: newSeed })
-      toast.success("Avatar refreshed")
+      await patch(next)
+      toast.success("Avatar updated")
     } catch (err) {
-      toast.error(`Could not regen: ${err instanceof Error ? err.message : err}`)
+      toast.error(`Could not save avatar: ${err instanceof Error ? err.message : err}`)
     }
   }, [agent, patch])
 
@@ -271,25 +273,29 @@ export function AgentCanvas({
   return (
     <div className="px-6 md:px-8 lg:px-12 py-6 space-y-7 max-w-[1180px] mx-auto w-full">
       {/* Header */}
-      <header className="flex items-start gap-5 pb-5 border-b border-white/8">
-        <div className="relative shrink-0">
+      <motion.header
+        layout
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.16, ease: "easeOut" }}
+        className="flex items-start gap-5 pb-5 border-b border-white/8"
+      >
+        <button
+          type="button"
+          onClick={() => setAvatarPickerOpen(true)}
+          className="relative shrink-0 group"
+          title="Customize avatar"
+        >
           <img
             src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
             alt=""
             className={cn(
-              "w-20 h-20 rounded-2xl",
+              "w-20 h-20 rounded-2xl transition-transform group-hover:scale-[1.03]",
               isRunning && "ring-2 ring-emerald-500/40",
             )}
           />
-          <button
-            type="button"
-            onClick={handleRegenAvatar}
-            className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-zinc-800 border border-white/10 grid place-items-center hover:bg-zinc-700"
-            title="Regenerate avatar"
-          >
-            <RefreshCw className="h-3 w-3 text-muted-foreground" />
-          </button>
-        </div>
+          <span className="absolute inset-0 rounded-2xl ring-2 ring-blue-400/0 group-hover:ring-blue-400/40 transition-all pointer-events-none" />
+        </button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h1 className="text-2xl font-semibold">
@@ -350,7 +356,17 @@ export function AgentCanvas({
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
         </div>
-      </header>
+      </motion.header>
+
+      <AvatarPickerDialog
+        open={avatarPickerOpen}
+        onOpenChange={setAvatarPickerOpen}
+        agentName={agent.name}
+        seed={agent.avatar_seed}
+        style={agent.avatar_style}
+        crewStyle={agent.crew?.avatar_style ?? null}
+        onSave={handleAvatarSave}
+      />
 
       <InboxBanner agentSlug={agent.slug} count={inbox.count} summary={inbox.summary} />
 

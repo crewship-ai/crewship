@@ -66,6 +66,23 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 			return
 		}
 
+		// Dynamic-route placeholder lookup: Next.js static export with
+		// generateStaticParams returning [{ id: "_" }] builds the page at
+		// `<segment>/_/index.html`. We rewrite a request like /chat/filip
+		// → chat/_/index.html so the right page bundle hydrates with the
+		// runtime slug (read via useParams in the client component). We
+		// walk parents deepest-first so nested dynamic routes like
+		// /orchestration/issues/<id> resolve correctly.
+		parts := strings.Split(strings.Trim(path, "/"), "/")
+		for i := len(parts) - 1; i >= 1; i-- {
+			candidate := strings.Join(append(append([]string{}, parts[:i]...), "_", "index.html"), "/")
+			if _, err := fs.Stat(webFS, candidate); err == nil {
+				slog.Debug("dynamic placeholder", "path", r.URL.Path, "served", candidate)
+				serveFile(w, candidate)
+				return
+			}
+		}
+
 		// SPA fallback: serve root index.html for client-side routing
 		slog.Debug("SPA fallback", "path", r.URL.Path)
 		serveFile(w, "index.html")

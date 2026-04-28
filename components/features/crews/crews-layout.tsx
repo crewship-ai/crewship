@@ -153,11 +153,6 @@ export function CrewsLayout({
     })
   }, [agents, statusFilter, roleFilter])
 
-  const runningCount = useMemo(
-    () => agents.filter((a) => a.status === "RUNNING").length,
-    [agents],
-  )
-
   const crewAgents = useMemo(
     () => (selectedCrew ? agents.filter((a) => a.crew_id === selectedCrew.id) : []),
     [agents, selectedCrew],
@@ -217,9 +212,6 @@ export function CrewsLayout({
         roleFilter={roleFilter}
         onStatusChange={setStatus}
         onRoleChange={setRole}
-        runningCount={runningCount}
-        agentsCount={agents.length}
-        crewsCount={crews.length}
         onCrewCreated={onRefresh}
         onAgentCreated={(slug) => {
           onRefresh()
@@ -286,42 +278,50 @@ export function CrewsLayout({
           </div>
         )}
 
-        {/* Canvas */}
+        {/* Canvas — animated cross-fade on selection change */}
         <div className="overflow-y-auto min-h-0 min-w-0">
-          {selectedAgent ? (
-            <AgentCanvas
-              key={selectedAgent.slug}
-              workspaceId={workspaceId}
-              agentSlug={selectedAgent.slug}
-              crews={crews}
-              onAgentChanged={onRefresh}
-              onSelectCrew={(slug) => selectCrew(slug)}
-            />
-          ) : selectedCrew ? (
-            <CrewCanvas
-              key={selectedCrew.slug}
-              workspaceId={workspaceId}
-              crewSlug={selectedCrew.slug}
-              agentsForCrew={crewAgents}
-              missions={missions}
-              onCrewChanged={onRefresh}
-              onSelectAgent={handleAgentSelectBySlug}
-              onOpenFiles={handleOpenFiles}
-              onAddAgent={(_slug) => {
-                // CrewsSubbar holds the dialog state; clicking Add agent in
-                // the crew header dispatches a synthetic "+New Agent in this
-                // crew" by... currently we just route to subbar +Agent flow.
-                // Sub-bar dropdown picks the current crew automatically.
-                document.dispatchEvent(new CustomEvent("crews:add-agent"))
-              }}
-            />
-          ) : (
-            <EmptyRoster
-              agents={filteredAgents}
-              crews={crews}
-              onAgentSelect={handleAgentSelectBySlug}
-            />
-          )}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={selectedAgent?.slug ?? selectedCrew?.slug ?? "empty"}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16, ease: [0.32, 0.72, 0, 1] }}
+            >
+              {selectedAgent ? (
+                <AgentCanvas
+                  workspaceId={workspaceId}
+                  agentSlug={selectedAgent.slug}
+                  crews={crews}
+                  onAgentChanged={onRefresh}
+                  onSelectCrew={(slug) => selectCrew(slug)}
+                />
+              ) : selectedCrew ? (
+                <CrewCanvas
+                  workspaceId={workspaceId}
+                  crewSlug={selectedCrew.slug}
+                  agentsForCrew={crewAgents}
+                  missions={missions}
+                  onCrewChanged={onRefresh}
+                  onSelectAgent={handleAgentSelectBySlug}
+                  onOpenFiles={handleOpenFiles}
+                  onAddAgent={() => {
+                    // Sub-bar holds the create dialog state; defer to it
+                    // via the data-attribute click flow on the +Agent button.
+                    document.querySelector<HTMLButtonElement>(
+                      'button[data-crews-add-agent]',
+                    )?.click()
+                  }}
+                />
+              ) : (
+                <EmptyRoster
+                  agents={filteredAgents}
+                  crews={crews}
+                  onAgentSelect={handleAgentSelectBySlug}
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
 

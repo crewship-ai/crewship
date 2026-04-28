@@ -70,13 +70,12 @@ export function CreateAgentDialog({
     try {
       const targetCrew = requiresCrew ? crews.find((c) => c.slug === crewSlug) : null
       const body: Record<string, unknown> = {
-        workspace_id: workspaceId,
         name: name.trim(),
         slug: slug.trim(),
         agent_role: role,
         crew_id: targetCrew?.id ?? null,
       }
-      const res = await fetch("/api/v1/agents", {
+      const res = await fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

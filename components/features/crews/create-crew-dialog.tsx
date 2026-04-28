@@ -71,14 +71,13 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     setBusy(true)
     try {
       const body: Record<string, unknown> = {
-        workspace_id: workspaceId,
         name: name.trim(),
         slug: slug.trim(),
       }
       if (mode === "template" && pickedTemplate) {
         body.template_slug = pickedTemplate
       }
-      const res = await fetch("/api/v1/crews", {
+      const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

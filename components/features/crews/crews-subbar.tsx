@@ -36,10 +36,6 @@ export interface CrewsSubbarProps {
   roleFilter: CrewsRoleFilter
   onStatusChange: (s: CrewsStatusFilter) => void
   onRoleChange: (r: CrewsRoleFilter) => void
-  /** Counters for the live status strip. */
-  runningCount: number
-  agentsCount: number
-  crewsCount: number
   onCrewCreated: () => void
   onAgentCreated: (slug: string) => void
   /** Optional: shown only on mobile to open the explorer drawer. */
@@ -64,9 +60,6 @@ export function CrewsSubbar({
   roleFilter,
   onStatusChange,
   onRoleChange,
-  runningCount,
-  agentsCount,
-  crewsCount,
   onCrewCreated,
   onAgentCreated,
   onOpenExplorer,
@@ -172,29 +165,6 @@ export function CrewsSubbar({
           </DropdownMenu>
         </div>
 
-        {/* Live counters */}
-        <div className="flex items-center gap-3 ml-3 text-xs shrink-0">
-          <span className="flex items-center gap-1.5">
-            <span className="relative flex h-1.5 w-1.5">
-              {runningCount > 0 && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              )}
-              <span
-                className={cn(
-                  "relative inline-flex rounded-full h-1.5 w-1.5",
-                  runningCount > 0 ? "bg-emerald-500" : "bg-zinc-600",
-                )}
-              />
-            </span>
-            <span className="text-foreground/80">{runningCount}</span>
-            <span className="text-muted-foreground">running</span>
-          </span>
-          <span className="text-foreground/80">{agentsCount}</span>
-          <span className="text-muted-foreground -ml-2">agents</span>
-          <span className="text-foreground/80">{crewsCount}</span>
-          <span className="text-muted-foreground -ml-2">crews</span>
-        </div>
-
         {/* Create CTAs */}
         <div className="ml-auto flex items-center gap-1.5 shrink-0">
           <button
@@ -205,38 +175,19 @@ export function CrewsSubbar({
             <Plus className="h-3 w-3" />
             Crew
           </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="text-xs px-2.5 py-1 rounded bg-blue-500 hover:bg-blue-400 text-white flex items-center gap-1.5">
-                <Plus className="h-3 w-3" />
-                Agent
-                <ChevronDown className="h-2.5 w-2.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[180px]">
-              <DropdownMenuItem
-                onClick={() => {
-                  setCreateAgentDefaultCrew(crewSlug)
-                  setCreateAgentOpen(true)
-                }}
-                className="text-xs"
-              >
-                Blank agent
-                {crewSlug && <span className="text-muted-foreground ml-1">in {crewName ?? crewSlug}</span>}
-              </DropdownMenuItem>
-              {crewSlug && crewSlug !== "" && (
-                <DropdownMenuItem
-                  onClick={() => {
-                    setCreateAgentDefaultCrew(null)
-                    setCreateAgentOpen(true)
-                  }}
-                  className="text-xs"
-                >
-                  Blank agent (pick crew…)
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <button
+            type="button"
+            data-crews-add-agent
+            onClick={() => {
+              setCreateAgentDefaultCrew(crewSlug)
+              setCreateAgentOpen(true)
+            }}
+            className="text-xs px-2.5 py-1 rounded bg-blue-500 hover:bg-blue-400 text-white flex items-center gap-1.5 transition-colors"
+            title={crewSlug ? `New agent in ${crewName ?? crewSlug}` : "New agent (pick crew in dialog)"}
+          >
+            <Plus className="h-3 w-3" />
+            Agent
+          </button>
         </div>
       </div>
 
