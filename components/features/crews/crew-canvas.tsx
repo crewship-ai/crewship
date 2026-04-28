@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ChevronDown, Files, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { AlertTriangle, ChevronDown, Files, Loader2, Plus, RotateCcw, Trash2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
@@ -403,6 +403,8 @@ export function CrewCanvas({
           </button>
         </div>
       </header>
+
+      <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} />
 
       {/* Tabs */}
       <div className="flex items-center gap-5 border-b border-white/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
@@ -1002,6 +1004,137 @@ function QuickAction({ icon, label, onClick, disabled }: {
       <span className="text-foreground/70">{icon}</span>
       <span className="text-xs text-foreground/85">{label}</span>
     </button>
+  )
+}
+
+/**
+ * Surfaces three states the user otherwise can't see until they hit
+ * "send message" and get a backend error:
+ *   - "needs_provision": user edited devcontainer/runtime config and saved.
+ *     The PATCH cleared cached_image; a chat now would 500 with
+ *     "Crew has devcontainer configuration but no provisioned image".
+ *     Show an amber banner with a Provision button.
+ *   - "running": polled job is mid-build. Show progress + ETA-ish hint.
+ *   - "failed": the last build crashed. Show the error inline so the user
+ *     sees WHY (e.g. a feature with a missing required parameter), not
+ *     a generic toast.
+ *
+ * Polls every 3s while busy, every 30s when idle. Bails as soon as a
+ * stable terminal state is reached.
+ */
+function ProvisioningBanner({ crewId, crewSlug }: { crewId: string; crewSlug: string }) {
+  const [state, setState] = useState<{ status: string; error?: string; cached?: string | null; hasConfig: boolean } | null>(null)
+  const [triggering, setTriggering] = useState(false)
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/v1/crews/${crewId}/provision`)
+      if (!r.ok) return
+      const data = await r.json()
+      setState({
+        status: data.status ?? "idle",
+        error: data.error,
+        cached: data.cached_image,
+        hasConfig: Boolean(data.devcontainer_config),
+      })
+    } catch { /* tolerate */ }
+  }, [crewId])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  // Poll fast while a build is in flight, slowly when idle/healthy.
+  useEffect(() => {
+    const isBusy = state?.status === "running"
+    const interval = isBusy ? 3000 : 30000
+    const id = setInterval(() => { void refresh() }, interval)
+    return () => clearInterval(id)
+  }, [state?.status, refresh])
+
+  const trigger = useCallback(async () => {
+    setTriggering(true)
+    try {
+      const r = await fetch(`/api/v1/crews/${crewId}/provision`, { method: "POST" })
+      if (!r.ok) {
+        const text = await r.text()
+        toast.error(`Provision failed to start: ${text}`)
+      } else {
+        toast.success(`Provisioning started for ${crewSlug}`)
+        void refresh()
+      }
+    } catch (err) {
+      toast.error(`Provision failed: ${err instanceof Error ? err.message : err}`)
+    } finally {
+      setTriggering(false)
+    }
+  }, [crewId, crewSlug, refresh])
+
+  if (!state) return null
+
+  const needsProvision = state.hasConfig && !state.cached && state.status === "idle"
+  if (state.status === "completed" || (!needsProvision && state.status !== "running" && state.status !== "failed")) {
+    return null
+  }
+
+  if (state.status === "running") {
+    return (
+      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 px-4 py-3 flex items-center gap-3">
+        <Loader2 className="h-4 w-4 text-blue-300 animate-spin shrink-0" />
+        <div className="flex-1">
+          <div className="text-sm text-blue-200">Building container image…</div>
+          <div className="text-xs text-muted-foreground">
+            Devcontainer features are installing. Agents in this crew will become runnable as soon as the image is ready (usually 30-90 s).
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (state.status === "failed") {
+    return (
+      <div className="rounded-xl border border-red-500/40 bg-red-500/5 px-4 py-3 flex items-start gap-3">
+        <AlertTriangle className="h-4 w-4 text-red-300 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm text-red-200">Last provision failed</div>
+          {state.error && (
+            <pre className="text-[11px] text-muted-foreground mt-1 whitespace-pre-wrap font-mono break-words max-h-24 overflow-y-auto">
+              {state.error}
+            </pre>
+          )}
+          <div className="text-xs text-muted-foreground mt-1.5">
+            Fix the runtime config (Settings → Container image &amp; features) and try again.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={trigger}
+          disabled={triggering}
+          className="text-xs px-2.5 py-1.5 rounded bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 shrink-0"
+        >
+          {triggering ? "Starting…" : "Retry"}
+        </button>
+      </div>
+    )
+  }
+
+  // needs_provision (idle, hasConfig, no cached_image)
+  return (
+    <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 flex items-center gap-3">
+      <AlertTriangle className="h-4 w-4 text-amber-300 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-amber-200">Container image is out of date</div>
+        <div className="text-xs text-muted-foreground">
+          You changed the runtime config — agents in this crew can&apos;t start until the image is rebuilt. The image isn&apos;t auto-rebuilt on save (it&apos;s expensive); trigger it explicitly when you&apos;re ready.
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={trigger}
+        disabled={triggering}
+        className="text-xs px-2.5 py-1.5 rounded bg-amber-500/25 hover:bg-amber-500/35 text-amber-200 border border-amber-500/40 shrink-0"
+      >
+        {triggering ? "Starting…" : "Provision now"}
+      </button>
+    </div>
   )
 }
 
