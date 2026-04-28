@@ -72,6 +72,14 @@ interface IssuesSnapshot {
   Done: number
 }
 
+interface IssueRow {
+  id: string
+  identifier: string | null
+  title: string
+  status: string
+  created_at?: string
+}
+
 interface CrewIntegration {
   id: string
   integration_id: string
@@ -117,6 +125,7 @@ export function CrewCanvas({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [issues, setIssues] = useState<IssuesSnapshot | null>(null)
+  const [recentIssues, setRecentIssues] = useState<IssueRow[]>([])
   const [integrations, setIntegrations] = useState<CrewIntegration[] | null>(null)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
 
@@ -149,13 +158,14 @@ export function CrewCanvas({
     return () => controller.abort()
   }, [crewSlug, fetchCrew])
 
-  // Issues snapshot
+  // Issues — both the bucket counts (for the snapshot grid) and the
+  // freshest 10 rows (for the list with clickable identifier links).
   useEffect(() => {
     if (!crew) return
     let cancelled = false
     fetch(`/api/v1/crews/${crew.id}/issues?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: { status?: string }[]) => {
+      .then((data: IssueRow[]) => {
         if (cancelled || !Array.isArray(data)) return
         const buckets: IssuesSnapshot = { Backlog: 0, Todo: 0, InProgress: 0, InReview: 0, Done: 0 }
         for (const i of data) {
@@ -167,8 +177,16 @@ export function CrewCanvas({
           else if (s.includes("done") || s.includes("closed")) buckets.Done++
         }
         setIssues(buckets)
+        // Sort by created_at desc and keep the 10 most recent.
+        const sorted = [...data].sort((a, b) =>
+          (b.created_at ?? "").localeCompare(a.created_at ?? "")
+        )
+        setRecentIssues(sorted.slice(0, 10))
       })
-      .catch(() => setIssues({ Backlog: 0, Todo: 0, InProgress: 0, InReview: 0, Done: 0 }))
+      .catch(() => {
+        setIssues({ Backlog: 0, Todo: 0, InProgress: 0, InReview: 0, Done: 0 })
+        setRecentIssues([])
+      })
     return () => { cancelled = true }
   }, [crew, workspaceId])
 
@@ -229,7 +247,10 @@ export function CrewCanvas({
 
   const recentMissions = useMemo(() => {
     if (!crew) return []
-    return missions.filter((m) => m.crew_id === crew.id).slice(0, 5)
+    return [...missions]
+      .filter((m) => m.crew_id === crew.id)
+      .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))
+      .slice(0, 10)
   }, [missions, crew])
 
   if (loading) {
@@ -426,7 +447,9 @@ export function CrewCanvas({
         )}
       </section>
 
-      {/* Issues snapshot */}
+      {/* Issues — bucket counts AND list of recent issues with their
+          identifiers (ENG-1, RES-2, …) clickable straight into
+          /orchestration/issues/<identifier>. */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">
@@ -449,12 +472,46 @@ export function CrewCanvas({
             </div>
           ))}
         </div>
+        {recentIssues.length > 0 && (
+          <ul className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
+            {recentIssues.map((i) => (
+              <li key={i.id}>
+                <Link
+                  href={i.identifier ? `/orchestration/issues/${encodeURIComponent(i.identifier)}` : "/orchestration"}
+                  className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
+                >
+                  <span className={cn(
+                    "w-1.5 h-1.5 rounded-full shrink-0",
+                    issueStatusColor(i.status),
+                  )} />
+                  {i.identifier && (
+                    <code className="text-[11px] text-muted-foreground shrink-0 font-mono">
+                      {i.identifier}
+                    </code>
+                  )}
+                  <span className="truncate flex-1 text-foreground/85">{i.title}</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0 uppercase">
+                    {i.status?.replace(/_/g, " ").toLowerCase()}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
-      {/* Recent missions */}
+      {/* Recent missions — top 10 by created_at, each row clickable into
+          its own timeline view at /missions/[id]/timeline. */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-lg font-semibold">Recent missions</h2>
+          <h2 className="text-lg font-semibold">
+            Recent missions
+            {recentMissions.length > 0 && (
+              <span className="text-muted-foreground text-sm font-normal ml-2">
+                {recentMissions.length}
+              </span>
+            )}
+          </h2>
           <Link href="/orchestration" className="text-xs text-blue-300 hover:underline">
             Open in /orchestration →
           </Link>
@@ -466,17 +523,23 @@ export function CrewCanvas({
         ) : (
           <ul className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
             {recentMissions.map((m) => (
-              <li key={m.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 truncate">
+              <li key={m.id}>
+                <Link
+                  href={`/missions/${encodeURIComponent(m.id)}/timeline`}
+                  className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
+                >
                   <span className={cn(
                     "w-1.5 h-1.5 rounded-full shrink-0",
                     m.status === "RUNNING" ? "bg-emerald-400" : m.status === "FAILED" ? "bg-red-500" : "bg-zinc-500",
                   )} />
-                  <span className="truncate">{m.title}</span>
-                </span>
-                <span className="text-[11px] text-muted-foreground shrink-0">
-                  {new Date(m.created_at).toLocaleDateString()}
-                </span>
+                  <span className="truncate flex-1 text-foreground/85">{m.title}</span>
+                  <span className="text-[10px] text-muted-foreground shrink-0 uppercase">
+                    {m.status?.replace(/_/g, " ").toLowerCase()}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground shrink-0">
+                    {new Date(m.created_at).toLocaleDateString()}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>
@@ -625,6 +688,16 @@ export function CrewCanvas({
       </section>
     </div>
   )
+}
+
+function issueStatusColor(status: string | undefined): string {
+  const s = (status ?? "").toLowerCase()
+  if (s.includes("progress")) return "bg-blue-400"
+  if (s.includes("review")) return "bg-amber-400"
+  if (s.includes("done") || s.includes("closed") || s.includes("complete")) return "bg-emerald-400"
+  if (s.includes("blocked") || s.includes("error") || s.includes("cancel")) return "bg-red-500"
+  if (s.includes("todo")) return "bg-zinc-400"
+  return "bg-zinc-600" // backlog / default
 }
 
 function Row({
