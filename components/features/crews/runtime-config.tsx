@@ -218,6 +218,147 @@ function getBrandIcon(tool: string): IconType | null {
   return BRAND_ICONS[stripped] || null
 }
 
+// ---- Brand color map -----------------------------------------------------
+//
+// Official brand colors taken from each project's style guide / brand
+// page (cross-referenced with Simple Icons, which mirrors the same
+// official hex values). Pure-black logos (GitHub, HashiCorp, Vercel,
+// Ollama, Railway, Crystal) are rendered as #FFFFFF on this dark
+// theme — that's the brand-recommended dark-mode treatment.
+const BRAND_COLORS: Record<string, string> = {
+  python: "#3776AB",
+  node: "#339933",
+  nodejs: "#339933",
+  "node.js": "#339933",
+  go: "#00ADD8",
+  golang: "#00ADD8",
+  rust: "#DEA584",
+  ruby: "#CC342D",
+  php: "#777BB4",
+  java: "#ED8B00",
+  openjdk: "#ED8B00",
+  jdk: "#ED8B00",
+  elixir: "#4B275F",
+  erlang: "#A90533",
+  deno: "#70FFAF",
+  bun: "#FBF0DF",
+  dotnet: "#512BD4",
+  "dotnet-core": "#512BD4",
+  kotlin: "#7F52FF",
+  scala: "#DC322F",
+  swift: "#F05138",
+  zig: "#F7A41D",
+  crystal: "#FFFFFF",
+  docker: "#2496ED",
+  "docker-in-docker": "#2496ED",
+  "docker-outside-of-docker": "#2496ED",
+  "docker-from-docker": "#2496ED",
+  kubectl: "#326CE5",
+  "kubectl-helm-minikube": "#326CE5",
+  kubernetes: "#326CE5",
+  k8s: "#326CE5",
+  minikube: "#326CE5",
+  helm: "#0F1689",
+  terraform: "#7B42BC",
+  ansible: "#EE0000",
+  gcloud: "#4285F4",
+  "google-cloud": "#4285F4",
+  "google-cloud-cli": "#4285F4",
+  digitalocean: "#0080FF",
+  doctl: "#0080FF",
+  github: "#FFFFFF",
+  "github-cli": "#FFFFFF",
+  gh: "#FFFFFF",
+  gitlab: "#FC6D26",
+  "glab-cli": "#FC6D26",
+  git: "#F05032",
+  "git-lfs": "#F05032",
+  postgres: "#4169E1",
+  postgresql: "#4169E1",
+  psql: "#4169E1",
+  mysql: "#4479A1",
+  mariadb: "#003545",
+  redis: "#DC382D",
+  "redis-cli": "#DC382D",
+  mongo: "#47A248",
+  mongodb: "#47A248",
+  mongosh: "#47A248",
+  sqlite: "#003B57",
+  sqlite3: "#003B57",
+  hashicorp: "#FFFFFF",
+  vault: "#FFEC6E",
+  pulumi: "#8A3391",
+  pnpm: "#F69220",
+  yarn: "#2C8EBB",
+  npm: "#CB3837",
+  vim: "#019733",
+  neovim: "#019733",
+  nvim: "#019733",
+  zsh: "#FFFFFF",
+  bash: "#4EAA25",
+  sh: "#4EAA25",
+  firebase: "#FFCA28",
+  supabase: "#3ECF8E",
+  nginx: "#009639",
+  apache: "#D22128",
+  httpd: "#D22128",
+  flutter: "#02569B",
+  dart: "#0175C2",
+  elm: "#1293D8",
+  hugo: "#FF4088",
+  vite: "#646CFF",
+  webpack: "#8DD6F9",
+  julia: "#9558B2",
+  lua: "#2C2D72",
+  perl: "#39457E",
+  r: "#276DC3",
+  haskell: "#5D4F85",
+  ghc: "#5D4F85",
+  graphql: "#E10098",
+  openai: "#412991",
+  anthropic: "#D97757",
+  claude: "#D97757",
+  aws: "#FF9900",
+  "aws-cli": "#FF9900",
+  awscli: "#FF9900",
+  azure: "#0078D4",
+  "azure-cli": "#0078D4",
+  az: "#0078D4",
+  heroku: "#430098",
+  "heroku-cli": "#430098",
+  vercel: "#FFFFFF",
+  "vercel-cli": "#FFFFFF",
+  cloudflare: "#F38020",
+  "cloudflare-cli": "#F38020",
+  wrangler: "#F38020",
+  flarectl: "#F38020",
+  fly: "#7B3FE4",
+  "fly-cli": "#7B3FE4",
+  flyctl: "#7B3FE4",
+  ollama: "#FFFFFF",
+  sentry: "#362D59",
+  "sentry-cli": "#362D59",
+  datadog: "#632CA6",
+  "datadog-ci": "#632CA6",
+  railway: "#FFFFFF",
+  netlify: "#00C7B7",
+  // Base image distros
+  debian: "#A81D33",
+  ubuntu: "#E95420",
+  alpinelinux: "#0D597F",
+  alpine: "#0D597F",
+  // Anaconda: official green
+  anaconda: "#44A833",
+}
+
+function getBrandColor(tool: string): string | null {
+  if (!tool) return null
+  const key = tool.toLowerCase()
+  if (BRAND_COLORS[key]) return BRAND_COLORS[key]
+  const stripped = key.replace(/-cli$|^cli-/, "").replace(/\d+$/, "")
+  return BRAND_COLORS[stripped] || null
+}
+
 function featureRefToTool(ref: string): string {
   // ghcr.io/devcontainers/features/python:1 -> "python"
   const withoutTag = ref.split(":")[0]
@@ -692,6 +833,11 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                   {BASE_IMAGES.map((img) => {
                     const Icon = img.icon
                     const isSelected = baseImage === img.value
+                    // Map BASE_IMAGES.value (e.g. "node-22-debian") to a
+                    // BRAND_COLORS key so each card gets the canonical
+                    // brand tint instead of a uniform muted gray.
+                    const colorKey = img.value.split("-")[0]
+                    const brandColor = getBrandColor(colorKey)
                     return (
                       <button
                         key={img.value}
@@ -706,7 +852,10 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                             : "border-border/40 hover:bg-accent/30"
                         )}
                       >
-                        <Icon className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+                        <Icon
+                          className="w-4 h-4 mt-0.5 shrink-0"
+                          style={brandColor ? { color: brandColor } : undefined}
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="font-medium flex items-center gap-1.5">
                             {img.label}
@@ -794,6 +943,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                   const isSelected = feature.ref in selectedFeatures
                   const toolName = featureRefToTool(feature.ref)
                   const BrandIcon = getBrandIcon(toolName) || getBrandIcon(feature.icon || "")
+                  const brandColor = getBrandColor(toolName) || getBrandColor(feature.icon || "")
                   const isCloud = feature.category === "cloud"
                   return (
                     <div
@@ -805,7 +955,10 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                     >
                       <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
                         {BrandIcon ? (
-                          <BrandIcon className="w-4 h-4" />
+                          <BrandIcon
+                            className="w-4 h-4"
+                            style={brandColor ? { color: brandColor } : undefined}
+                          />
                         ) : isCloud ? (
                           <Cloud className="w-4 h-4" />
                         ) : (
@@ -935,6 +1088,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                     entry.default_version ||
                     (entry.versions?.[0] ?? "latest")
                   const BrandIcon = getBrandIcon(entry.tool) || getBrandIcon(entry.icon || "")
+                  const brandColor = getBrandColor(entry.tool) || getBrandColor(entry.icon || "")
                   const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0
                   const defaultVersion = entry.default_version || (hasVersions ? entry.versions![0] : "latest")
                   const isCloud = entry.category === "cloud"
@@ -948,7 +1102,10 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                     >
                       <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
                         {BrandIcon ? (
-                          <BrandIcon className="w-4 h-4" />
+                          <BrandIcon
+                            className="w-4 h-4"
+                            style={brandColor ? { color: brandColor } : undefined}
+                          />
                         ) : isCloud ? (
                           <Cloud className="w-4 h-4" />
                         ) : (
