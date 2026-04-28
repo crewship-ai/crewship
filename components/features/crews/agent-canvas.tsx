@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Plus, Square, Trash2,
+  ChevronDown, MessageSquare, MoreHorizontal, Square,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EditableField } from "@/components/shared/editable-field"
@@ -18,6 +18,17 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
+
+import {
+  PeersCard,
+  RecentRunsCard,
+  RecentSessionsCard,
+  WorkspaceTab,
+} from "./agent-canvas-cards"
+import {
+  CredentialsManager,
+  SkillsManager,
+} from "./agent-canvas-managers"
 
 const ROLE_OPTIONS = [
   { value: "AGENT", label: "Agent" },
@@ -85,7 +96,7 @@ interface AgentRecord {
 
 interface InboxSummary { count: number; summary?: string; cost?: number }
 
-interface ChatRow {
+export interface ChatRow {
   id: string
   title: string | null
   message_count: number
@@ -95,7 +106,7 @@ interface ChatRow {
   created_at: string
 }
 
-interface RunRow {
+export interface RunRow {
   id: string
   status: string
   trigger_type: string
@@ -105,14 +116,14 @@ interface RunRow {
   created_at: string
 }
 
-interface AgentSkillRow {
+export interface AgentSkillRow {
   id: string
   skill_id: string
   enabled: boolean
   skill: { id: string; name: string; slug: string; display_name?: string | null; description?: string | null; category?: string | null; icon?: string | null; version?: string | null }
 }
 
-interface AgentCredRow {
+export interface AgentCredRow {
   id: string
   credential_id: string
   credential_name: string
@@ -124,7 +135,7 @@ interface AgentCredRow {
   created_at: string
 }
 
-interface PeerMessageRow {
+export interface PeerMessageRow {
   id?: string
   from_agent_id?: string
   from_agent_name?: string
@@ -740,6 +751,7 @@ export function AgentCanvas({
 // Layout helpers
 // =============================================================================
 
+
 function Row({
   label,
   align = "center",
@@ -773,530 +785,8 @@ function StatTile({ label, value }: { label: string; value: number | string }) {
 // Recent sessions + runs cards (overview tab)
 // =============================================================================
 
-function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: ChatRow[] | null }) {
-  const recent = chats === null ? null : chats.slice(0, 5)
-  return (
-    <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Recent sessions</h3>
-        <Link href={`/chat/${encodeURIComponent(agentSlug)}`} className="text-[11px] text-blue-300 hover:underline">
-          Open chat →
-        </Link>
-      </div>
-      <div className="divide-y divide-white/5">
-        {recent === null ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-        ) : recent.length === 0 ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground italic">No sessions yet.</div>
-        ) : (
-          recent.map((c) => (
-            <Link
-              key={c.id}
-              href={`/chat/${encodeURIComponent(agentSlug)}?session=${encodeURIComponent(c.id)}`}
-              className="px-4 py-2.5 flex items-center gap-3 hover:bg-white/[0.025]"
-            >
-              <span className={cn(
-                "w-1.5 h-1.5 rounded-full shrink-0",
-                c.status === "ACTIVE" ? "bg-emerald-400" : "bg-muted-foreground/50",
-              )} />
-              <div className="flex-1 min-w-0">
-                <div className="text-xs text-foreground truncate">{c.title || "Untitled session"}</div>
-                <div className="text-[10px] text-muted-foreground">
-                  {formatRelative(c.created_at)} · {c.message_count} message{c.message_count === 1 ? "" : "s"}
-                </div>
-              </div>
-              <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-            </Link>
-          ))
-        )}
-      </div>
-    </div>
-  )
-}
 
-function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | null }) {
-  const recent = runs === null ? null : runs.slice(0, 5)
-  return (
-    <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Recent runs</h3>
-        <Link href={`/runs?agent_id=${encodeURIComponent(agentId)}`} className="text-[11px] text-blue-300 hover:underline">
-          View all →
-        </Link>
-      </div>
-      <div className="divide-y divide-white/5">
-        {recent === null ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-        ) : recent.length === 0 ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground italic">No runs yet.</div>
-        ) : (
-          recent.map((r) => (
-            <div key={r.id} className="px-4 py-2.5 flex items-center gap-3">
-              <span className={cn(
-                "w-1.5 h-1.5 rounded-full shrink-0",
-                r.status === "SUCCESS" ? "bg-emerald-400" :
-                r.status === "FAILED" ? "bg-red-400" :
-                r.status === "RUNNING" ? "bg-blue-400 animate-pulse" :
-                "bg-muted-foreground/50",
-              )} />
-              <div className="flex-1 min-w-0">
-                <div className="text-xs text-foreground truncate">
-                  {r.trigger_type.toLowerCase()}{r.error_message ? ` — ${r.error_message}` : ""}
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  {formatRelative(r.created_at)}{r.finished_at && r.started_at ? ` · ${formatDuration(r.started_at, r.finished_at)}` : ""} · {r.status.toLowerCase()}
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  )
-}
-
-function PeersCard({ messages }: { messages: PeerMessageRow[] }) {
-  return (
-    <section className="rounded-xl border border-white/8 bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/5">
-        <h3 className="text-sm font-semibold">Crew peers</h3>
-      </div>
-      <div className="divide-y divide-white/5">
-        {messages.slice(0, 4).map((m, i) => (
-          <div key={m.id ?? i} className="px-4 py-2.5 flex items-center gap-3">
-            <div className="w-7 h-7 rounded-full bg-zinc-700 grid place-items-center text-[10px] shrink-0">
-              {m.from_agent_name?.[0] ?? "?"}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-foreground truncate">
-                <span className="font-medium">{m.from_agent_name ?? "Unknown"}</span>
-                {m.preview && <span className="text-muted-foreground"> · {m.preview}</span>}
-              </div>
-              <div className="text-[10px] text-muted-foreground">
-                {m.created_at ? formatRelative(m.created_at) : ""}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-// =============================================================================
-// Workspace tab — entry to the bottom-panel files browser
-// =============================================================================
-
-function WorkspaceTab({ agentSlug, onOpenFiles }: { agentId: string; agentSlug: string; onOpenFiles?: () => void }) {
-  return (
-    <div className="space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Workspace</h2>
-        <span className="text-xs text-muted-foreground">files in container <code className="text-foreground/80">/crew/agents/{agentSlug}</code></span>
-      </div>
-      <div className="rounded-xl border border-white/8 bg-card p-6 flex items-center gap-4">
-        <div className="flex-1">
-          <div className="text-sm font-medium">Agent files browser</div>
-          <div className="text-xs text-muted-foreground mt-1">
-            Browse, edit, and upload files in this agent&apos;s home directory.
-            The browser opens in the bottom panel for fast peek-and-edit without losing your place.
-          </div>
-        </div>
-        {onOpenFiles ? (
-          <button
-            type="button"
-            onClick={onOpenFiles}
-            className="text-sm px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white"
-          >
-            Open Files panel
-          </button>
-        ) : (
-          <span className="text-xs text-muted-foreground italic">Files panel not available in this view.</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// =============================================================================
-// Skills + Credentials managers (skills tab)
-// =============================================================================
-
-interface WorkspaceSkill {
-  id: string
-  name: string
-  slug?: string | null
-  display_name?: string | null
-  category?: string | null
-  description?: string | null
-  icon?: string | null
-}
-
-function SkillsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId: string; agentSlug: string; workspaceId: string; onChange: () => void }) {
-  const [assigned, setAssigned] = useState<AgentSkillRow[] | null>(null)
-  const [available, setAvailable] = useState<WorkspaceSkill[] | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-
-  const refresh = useCallback(async () => {
-    try {
-      const r = await fetch(`/api/v1/agents/${agentId}/skills?workspace_id=${workspaceId}`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const data: AgentSkillRow[] = await r.json()
-      setAssigned(Array.isArray(data) ? data : [])
-    } catch (err) {
-      toast.error(`Could not load skills: ${err instanceof Error ? err.message : err}`)
-      setAssigned([])
-    }
-  }, [agentId, workspaceId])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  const openPicker = useCallback(async () => {
-    setPickerOpen(true)
-    if (available !== null) return
-    try {
-      const r = await fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const data: WorkspaceSkill[] = await r.json()
-      setAvailable(Array.isArray(data) ? data : [])
-    } catch (err) {
-      toast.error(`Could not load workspace skills: ${err instanceof Error ? err.message : err}`)
-      setAvailable([])
-    }
-  }, [available, workspaceId])
-
-  const assign = useCallback(async (skillId: string) => {
-    setBusy(true)
-    try {
-      const r = await fetch(`/api/v1/agents/${agentId}/skills`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skill_id: skillId }),
-      })
-      if (!r.ok) throw new Error(await r.text())
-      toast.success("Skill assigned")
-      setPickerOpen(false)
-      await refresh()
-      onChange()
-    } catch (err) {
-      toast.error(`Assign failed: ${err instanceof Error ? err.message : err}`)
-    } finally {
-      setBusy(false)
-    }
-  }, [agentId, refresh, onChange])
-
-  const remove = useCallback(async (assignmentId: string, name: string) => {
-    if (!confirm(`Remove skill "${name}" from ${agentSlug}?`)) return
-    setBusy(true)
-    try {
-      const r = await fetch(`/api/v1/agents/${agentId}/skills/${assignmentId}`, { method: "DELETE" })
-      if (!r.ok) throw new Error(await r.text())
-      toast.success(`Skill "${name}" removed`)
-      await refresh()
-      onChange()
-    } catch (err) {
-      toast.error(`Remove failed: ${err instanceof Error ? err.message : err}`)
-    } finally {
-      setBusy(false)
-    }
-  }, [agentId, agentSlug, refresh, onChange])
-
-  const assignedIds = useMemo(() => new Set((assigned ?? []).map((a) => a.skill_id)), [assigned])
-  const pickable = useMemo(() => (available ?? []).filter((s) => !assignedIds.has(s.id)), [available, assignedIds])
-
-  return (
-    <section className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Skills</h2>
-        <button
-          type="button"
-          onClick={openPicker}
-          className="text-xs px-2.5 py-1 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 flex items-center gap-1.5"
-        >
-          <Plus className="h-3 w-3" />
-          Assign skill
-        </button>
-      </div>
-      <div className="rounded-xl border border-white/8 bg-card overflow-hidden divide-y divide-white/5">
-        {assigned === null ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-        ) : assigned.length === 0 ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground italic">No skills assigned. Click <em>Assign skill</em> to attach one from the workspace library.</div>
-        ) : (
-          assigned.map((row) => (
-            <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-white/[0.025]">
-              <div className="w-8 h-8 rounded-lg bg-zinc-800 grid place-items-center text-foreground/60 shrink-0">
-                <span className="text-xs">{(row.skill.display_name ?? row.skill.name).slice(0, 2).toUpperCase()}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-foreground truncate">{row.skill.display_name ?? row.skill.name}</div>
-                <div className="text-[10px] text-muted-foreground truncate">
-                  {row.skill.category ?? "—"}{row.skill.version ? ` · v${row.skill.version}` : ""}
-                  {row.skill.description ? ` · ${row.skill.description}` : ""}
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => remove(row.id, row.skill.display_name ?? row.skill.name)}
-                className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-red-500/10 hover:text-red-300 flex items-center gap-1"
-                title="Remove skill"
-              >
-                <Trash2 className="h-3 w-3" />
-                Remove
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-
-      {pickerOpen && (
-        <PickerSheet
-          title="Assign skill"
-          subtitle="Pick a workspace skill to attach to this agent."
-          items={pickable}
-          renderItem={(s) => ({
-            primary: s.display_name ?? s.name,
-            secondary: [s.category, s.description].filter(Boolean).join(" · "),
-          })}
-          onPick={(s) => assign(s.id)}
-          onClose={() => setPickerOpen(false)}
-          loading={available === null}
-          busy={busy}
-        />
-      )}
-    </section>
-  )
-}
-
-interface WorkspaceCredential {
-  id: string
-  name: string
-  type: string
-  provider: string
-  status?: string | null
-  default_env_var?: string | null
-}
-
-function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { agentId: string; agentSlug: string; workspaceId: string; onChange: () => void }) {
-  const [assigned, setAssigned] = useState<AgentCredRow[] | null>(null)
-  const [available, setAvailable] = useState<WorkspaceCredential[] | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-
-  const refresh = useCallback(async () => {
-    try {
-      const r = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const data: AgentCredRow[] = await r.json()
-      setAssigned(Array.isArray(data) ? data : [])
-    } catch (err) {
-      toast.error(`Could not load credentials: ${err instanceof Error ? err.message : err}`)
-      setAssigned([])
-    }
-  }, [agentId, workspaceId])
-
-  useEffect(() => { void refresh() }, [refresh])
-
-  const openPicker = useCallback(async () => {
-    setPickerOpen(true)
-    if (available !== null) return
-    try {
-      const r = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const data: WorkspaceCredential[] = await r.json()
-      setAvailable(Array.isArray(data) ? data : [])
-    } catch (err) {
-      toast.error(`Could not load workspace credentials: ${err instanceof Error ? err.message : err}`)
-      setAvailable([])
-    }
-  }, [available, workspaceId])
-
-  const assign = useCallback(async (cred: WorkspaceCredential) => {
-    const envVar = cred.default_env_var || cred.name.toUpperCase().replace(/[^A-Z0-9_]/g, "_")
-    setBusy(true)
-    try {
-      const r = await fetch(`/api/v1/agents/${agentId}/credentials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential_id: cred.id, env_var_name: envVar, priority: 0 }),
-      })
-      if (!r.ok) throw new Error(await r.text())
-      toast.success("Credential assigned")
-      setPickerOpen(false)
-      await refresh()
-      onChange()
-    } catch (err) {
-      toast.error(`Assign failed: ${err instanceof Error ? err.message : err}`)
-    } finally {
-      setBusy(false)
-    }
-  }, [agentId, refresh, onChange])
-
-  const remove = useCallback(async (assignmentId: string, name: string) => {
-    if (!confirm(`Unassign credential "${name}" from ${agentSlug}?`)) return
-    setBusy(true)
-    try {
-      const r = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}`, { method: "DELETE" })
-      if (!r.ok) throw new Error(await r.text())
-      toast.success(`Credential "${name}" unassigned`)
-      await refresh()
-      onChange()
-    } catch (err) {
-      toast.error(`Unassign failed: ${err instanceof Error ? err.message : err}`)
-    } finally {
-      setBusy(false)
-    }
-  }, [agentId, agentSlug, refresh, onChange])
-
-  const assignedIds = useMemo(() => new Set((assigned ?? []).map((a) => a.credential_id)), [assigned])
-  const pickable = useMemo(() => (available ?? []).filter((c) => !assignedIds.has(c.id)), [available, assignedIds])
-
-  return (
-    <section className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Credentials</h2>
-        <button
-          type="button"
-          onClick={openPicker}
-          className="text-xs px-2.5 py-1 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 flex items-center gap-1.5"
-        >
-          <Plus className="h-3 w-3" />
-          Assign credential
-        </button>
-      </div>
-      <div className="rounded-xl border border-white/8 bg-card overflow-hidden divide-y divide-white/5">
-        {assigned === null ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-        ) : assigned.length === 0 ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground italic">No credentials assigned. SECRETs are surfaced through Keeper at runtime — assign them here once and the agent fetches them on demand.</div>
-        ) : (
-          assigned.map((row) => (
-            <div key={row.id} className="px-4 py-3 flex items-center gap-3 hover:bg-white/[0.025]">
-              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-300 grid place-items-center shrink-0">
-                <span className="text-xs">{row.credential_provider.slice(0, 2).toUpperCase()}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-foreground truncate flex items-center gap-2">
-                  {row.credential_name}
-                  {row.credential_type === "SECRET" && (
-                    <span className="text-[9px] px-1.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">SECRET</span>
-                  )}
-                </div>
-                <div className="text-[10px] text-muted-foreground truncate">
-                  {row.credential_provider} · env: <code className="text-foreground/70">{row.env_var_name}</code> · {row.credential_status?.toLowerCase()}
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => remove(row.id, row.credential_name)}
-                className="text-[11px] px-2 py-1 rounded text-muted-foreground hover:bg-red-500/10 hover:text-red-300 flex items-center gap-1"
-                title="Unassign credential"
-              >
-                <Trash2 className="h-3 w-3" />
-                Unassign
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-
-      {pickerOpen && (
-        <PickerSheet
-          title="Assign credential"
-          subtitle="Pick a workspace credential to attach. The agent reads it at runtime via Keeper."
-          items={pickable}
-          renderItem={(c) => ({
-            primary: c.name,
-            secondary: `${c.provider} · ${c.type}${c.default_env_var ? ` · env: ${c.default_env_var}` : ""}`,
-          })}
-          onPick={(c) => assign(c)}
-          onClose={() => setPickerOpen(false)}
-          loading={available === null}
-          busy={busy}
-        />
-      )}
-    </section>
-  )
-}
-
-/**
- * Generic picker sheet for assign-skill / assign-credential dialogs.
- * Centered modal — a real Sheet/Dialog primitive could replace this later.
- */
-function PickerSheet<T>({
-  title, subtitle, items, renderItem, onPick, onClose, loading, busy,
-}: {
-  title: string
-  subtitle: string
-  items: T[]
-  renderItem: (item: T) => { primary: string; secondary?: string }
-  onPick: (item: T) => void
-  onClose: () => void
-  loading: boolean
-  busy: boolean
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/60 grid place-items-center"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === "Escape") onClose() }}
-      role="presentation"
-    >
-      <div
-        className="w-[460px] max-w-[90vw] max-h-[70vh] rounded-xl border border-white/10 bg-card shadow-2xl overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label={title}
-      >
-        <div className="px-4 py-3 border-b border-white/8">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>
-        </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-white/5">
-          {loading ? (
-            <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-          ) : items.length === 0 ? (
-            <div className="px-4 py-6 text-xs text-muted-foreground italic">Nothing else to assign — all available items are already attached.</div>
-          ) : (
-            items.map((item, i) => {
-              const { primary, secondary } = renderItem(item)
-              return (
-                <button
-                  key={i}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onPick(item)}
-                  className="w-full text-left px-4 py-2.5 hover:bg-white/[0.04] disabled:opacity-50"
-                >
-                  <div className="text-sm text-foreground">{primary}</div>
-                  {secondary && <div className="text-[10px] text-muted-foreground">{secondary}</div>}
-                </button>
-              )
-            })
-          )}
-        </div>
-        <div className="px-4 py-2 border-t border-white/8 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-xs px-3 py-1.5 rounded border border-white/10 hover:bg-white/5 text-foreground"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// =============================================================================
-// Date / cost helpers
-// =============================================================================
-
-function formatRelative(iso: string): string {
+export function formatRelative(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime()
   if (ms < 0) return "just now"
   const s = Math.floor(ms / 1000)
@@ -1310,7 +800,7 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
-function formatDuration(startIso: string, endIso: string): string {
+export function formatDuration(startIso: string, endIso: string): string {
   const ms = new Date(endIso).getTime() - new Date(startIso).getTime()
   if (!Number.isFinite(ms) || ms < 0) return ""
   const s = Math.floor(ms / 1000)
@@ -1320,7 +810,7 @@ function formatDuration(startIso: string, endIso: string): string {
   return `${m}m ${rs}s`
 }
 
-function formatCost(usd: number): string {
+export function formatCost(usd: number): string {
   if (!Number.isFinite(usd)) return "–"
   if (usd === 0) return "$0.00"
   if (usd < 0.01) return "<$0.01"
