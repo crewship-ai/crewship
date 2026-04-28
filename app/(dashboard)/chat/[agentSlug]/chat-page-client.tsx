@@ -133,13 +133,15 @@ export function ChatPageClient() {
     if (!agent || !workspaceId || !slug || sessionId || creatingSession) return
     setCreatingSession(true)
     try {
+      // POST /chats accepts { session_id?: string } and returns { id }.
+      // We let the server generate the id (omit session_id).
       const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "CHAT" }),
+        body: JSON.stringify({}),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const created: SessionRecord = await res.json()
+      const created: { id: string } = await res.json()
       router.replace(`/chat/${encodeURIComponent(slug)}?session=${created.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -159,11 +161,17 @@ export function ChatPageClient() {
       const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "CHAT" }),
+        body: JSON.stringify({}),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const created: SessionRecord = await res.json()
-      setSessions((prev) => [created, ...prev])
+      const created: { id: string } = await res.json()
+      // Refetch the sessions list (POST returns only {id}, not the full
+      // record, so we'd otherwise show a partial entry in the sidebar).
+      const listRes = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=20`)
+      if (listRes.ok) {
+        const list: SessionRecord[] = await listRes.json()
+        if (Array.isArray(list)) setSessions(list)
+      }
       router.replace(`/chat/${encodeURIComponent(slug)}?session=${created.id}`)
     } catch {
       // toast handled at the chat panel level

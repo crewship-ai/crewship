@@ -27,19 +27,19 @@ interface ContainerStatus {
   agent_count?: number | null
 }
 
+// Real API shape from internal/api/agent_inbox.go (verified 2026-04-28):
+// peer_messages: { id, from_agent_name, from_agent_slug, to_agent_name?,
+//                  question, status, created_at, direction }
+// escalations are NOT in the response — only escalations_open (count).
 interface PeerMessage {
   id: string
-  from_agent_id: string
-  from_agent_name?: string
-  content: string
-  created_at: string
-}
-
-interface Escalation {
-  id: string
-  reason: string
-  created_at: string
+  from_agent_name: string
+  from_agent_slug: string
+  to_agent_name?: string | null
+  question: string
   status: string
+  created_at: string
+  direction: "incoming" | "outgoing"
 }
 
 interface FileEntry {
@@ -170,26 +170,31 @@ function formatTime(iso: string): string {
 }
 
 /**
- * Messages — pulls peer messages and escalations from the agent inbox.
- * Wired to GET /api/v1/agents/{agentId}/inbox; refreshes on tab open.
+ * Messages — pulls peer messages from the agent inbox. The inbox response
+ * also includes escalation/assignment/approval COUNTS (not arrays); those
+ * surface in the canvas Inbox banner instead of here.
  */
 function MessagesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelProps["context"] }) {
   const [messages, setMessages] = useState<PeerMessage[] | null>(null)
-  const [escalations, setEscalations] = useState<Escalation[] | null>(null)
+  const [counters, setCounters] = useState<{ escalations: number; assignments: number; approvals: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!context || context.kind !== "agent") return
     let cancelled = false
     setMessages(null)
-    setEscalations(null)
+    setCounters(null)
     setError(null)
     fetch(`/api/v1/agents/${context.agentId}/inbox?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return
         setMessages(Array.isArray(data?.peer_messages) ? data.peer_messages : [])
-        setEscalations(Array.isArray(data?.escalations) ? data.escalations : [])
+        setCounters({
+          escalations: Number(data?.escalations_open ?? 0),
+          assignments: Number(data?.assignments_open ?? 0),
+          approvals: Number(data?.approvals_pending ?? 0),
+        })
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
@@ -198,54 +203,70 @@ function MessagesTab({ workspaceId, context }: { workspaceId: string; context: B
   if (!context) return <EmptyState>Select an agent to see its inbox messages.</EmptyState>
   if (context.kind !== "agent") return <EmptyState>Messages are per-agent — select one in the explorer.</EmptyState>
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
-  if (messages === null) return <EmptyState>Loading…</EmptyState>
-  if (messages.length === 0 && (escalations?.length ?? 0) === 0) {
+  if (messages === null || counters === null) return <EmptyState>Loading…</EmptyState>
+
+  const totalCounters = counters.escalations + counters.assignments + counters.approvals
+  if (messages.length === 0 && totalCounters === 0) {
     return <EmptyState>No messages or escalations for {context.agentName}.</EmptyState>
   }
 
   return (
     <div className="h-full overflow-y-auto p-3 space-y-1.5 text-xs">
-      {(escalations ?? []).map((e) => (
-        <div key={e.id} className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2">
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-amber-300 font-medium">Escalation</span>
-            <span className="text-[10px] text-muted-foreground">{formatTime(e.created_at)}</span>
-          </div>
-          <div className="text-foreground/85">{e.reason}</div>
+      {totalCounters > 0 && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/5 px-3 py-2 flex items-center gap-2">
+          <span className="text-amber-300 font-medium">Pending:</span>
+          {counters.escalations > 0 && <span className="text-amber-200">{counters.escalations} escalation{counters.escalations === 1 ? "" : "s"}</span>}
+          {counters.assignments > 0 && <span className="text-amber-200">{counters.assignments} assignment{counters.assignments === 1 ? "" : "s"}</span>}
+          {counters.approvals > 0 && <span className="text-amber-200">{counters.approvals} approval{counters.approvals === 1 ? "" : "s"}</span>}
         </div>
-      ))}
+      )}
       {messages.map((m) => (
         <div key={m.id} className="rounded border border-white/10 bg-zinc-900/40 px-3 py-2">
           <div className="flex items-center justify-between mb-0.5">
-            <span className="text-blue-300 font-medium">{m.from_agent_name ?? m.from_agent_id}</span>
+            <span className="text-blue-300 font-medium">
+              {m.direction === "outgoing" ? "→" : "←"} {m.from_agent_name}
+            </span>
             <span className="text-[10px] text-muted-foreground">{formatTime(m.created_at)}</span>
           </div>
-          <div className="text-foreground/85 whitespace-pre-wrap">{m.content}</div>
+          <div className="text-foreground/85 whitespace-pre-wrap">{m.question}</div>
         </div>
       ))}
     </div>
   )
 }
 
+interface LogEntry {
+  // The actual shape is sidecar-defined; we render whatever string fields
+  // we recognise. Most rows will have at minimum a timestamp + message.
+  ts?: string
+  timestamp?: string
+  level?: string
+  message?: string
+  msg?: string
+  text?: string
+  [k: string]: unknown
+}
+
 /**
- * Exec Log — fetches /api/v1/agents/{agentId}/logs and renders raw lines.
- * No auto-refresh yet (keeps the implementation simple); user expands tab
- * = pulls fresh log.
+ * Exec Log — proxy returns a JSON ARRAY of log entries (verified
+ * 2026-04-28 in internal/api/proxy.go AgentLogs). No `tail=` param;
+ * proxy uses `limit/offset`, default 100. We render whatever recognisable
+ * timestamp + message pair each row has.
  */
 function ExecTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelProps["context"] }) {
-  const [lines, setLines] = useState<string[] | null>(null)
+  const [logs, setLogs] = useState<LogEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!context || context.kind !== "agent") return
     let cancelled = false
-    setLines(null)
+    setLogs(null)
     setError(null)
-    fetch(`/api/v1/agents/${context.agentId}/logs?workspace_id=${workspaceId}&tail=200`)
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((text) => {
+    fetch(`/api/v1/agents/${context.agentId}/logs?workspace_id=${workspaceId}&limit=200`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => {
         if (cancelled) return
-        setLines(text.split(/\r?\n/).filter(Boolean))
+        setLogs(Array.isArray(data) ? data : [])
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
@@ -254,13 +275,29 @@ function ExecTab({ workspaceId, context }: { workspaceId: string; context: Botto
   if (!context) return <EmptyState>Select an agent to see its exec log.</EmptyState>
   if (context.kind !== "agent") return <EmptyState>Exec logs are per-agent — select one in the explorer.</EmptyState>
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
-  if (lines === null) return <EmptyState>Loading…</EmptyState>
-  if (lines.length === 0) return <EmptyState>No log output yet for {context.agentName}.</EmptyState>
+  if (logs === null) return <EmptyState>Loading…</EmptyState>
+  if (logs.length === 0) return <EmptyState>No log output yet for {context.agentName}.</EmptyState>
 
   return (
-    <pre className="h-full overflow-y-auto p-3 text-[11px] leading-relaxed font-mono text-foreground/80 whitespace-pre">
-      {lines.join("\n")}
-    </pre>
+    <div className="h-full overflow-y-auto p-3 text-[11px] leading-relaxed font-mono text-foreground/80">
+      {logs.map((l, i) => {
+        const ts = l.ts ?? l.timestamp ?? ""
+        const msg = l.message ?? l.msg ?? l.text ?? JSON.stringify(l)
+        const level = String(l.level ?? "").toLowerCase()
+        const levelColor =
+          level.includes("error") || level.includes("fatal") ? "text-red-300" :
+          level.includes("warn") ? "text-amber-300" :
+          level.includes("info") ? "text-blue-300" :
+          "text-muted-foreground"
+        return (
+          <div key={i} className="flex gap-2 hover:bg-white/[0.03] px-1 -mx-1 rounded">
+            {ts && <span className="text-muted-foreground shrink-0">{formatTime(String(ts))}</span>}
+            {level && <span className={cn("shrink-0 uppercase", levelColor)}>{level}</span>}
+            <span className="break-all">{String(msg)}</span>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 

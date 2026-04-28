@@ -111,7 +111,6 @@ export function AgentCanvas({
   const [agent, setAgent] = useState<AgentRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [revealedSecret, setRevealedSecret] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
 
@@ -140,7 +139,6 @@ export function AgentCanvas({
 
   useEffect(() => {
     setLoading(true)
-    setRevealedSecret(false)
     setShowAdvanced(false)
     const controller = new AbortController()
     void fetchAgent(controller.signal)
@@ -154,7 +152,12 @@ export function AgentCanvas({
     }
   }, [agent, fetchAgent]))
 
-  // Inbox count surfaced in the yellow banner. Read-only, refetched lazily.
+  // Inbox count surfaced in the yellow banner. Real API shape (verified
+  // 2026-04-28 in internal/api/agent_inbox.go): {
+  //   approvals_pending: int, assignments_open: int, escalations_open: int,
+  //   peer_messages: PeerMessage[], cost_usd_this_month, ...
+  // } — note the *_open keys are COUNTS, not arrays. The first iteration
+  // of this code expected escalations: array and rendered nothing.
   const [inbox, setInbox] = useState<InboxSummary>({ count: 0 })
   useEffect(() => {
     if (!agent) return
@@ -163,14 +166,17 @@ export function AgentCanvas({
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return
-        const total = (data.peer_messages?.length ?? 0) + (data.escalations?.length ?? 0)
-        let summary = ""
-        if (data.escalations?.length) summary += `${data.escalations.length} escalation${data.escalations.length === 1 ? "" : "s"}`
-        if (data.peer_messages?.length) {
-          if (summary) summary += " · "
-          summary += `${data.peer_messages.length} peer message${data.peer_messages.length === 1 ? "" : "s"}`
-        }
-        setInbox({ count: total, summary })
+        const escalations = Number(data.escalations_open ?? 0)
+        const assignments = Number(data.assignments_open ?? 0)
+        const approvals = Number(data.approvals_pending ?? 0)
+        const peerMessages = Array.isArray(data.peer_messages) ? data.peer_messages.length : 0
+        const total = escalations + assignments + approvals + peerMessages
+        const parts: string[] = []
+        if (escalations) parts.push(`${escalations} escalation${escalations === 1 ? "" : "s"}`)
+        if (assignments) parts.push(`${assignments} assignment${assignments === 1 ? "" : "s"}`)
+        if (approvals) parts.push(`${approvals} approval${approvals === 1 ? "" : "s"} pending`)
+        if (peerMessages) parts.push(`${peerMessages} peer message${peerMessages === 1 ? "" : "s"}`)
+        setInbox({ count: total, summary: parts.join(" · ") })
       })
       .catch(() => { /* tolerate */ })
     return () => { cancelled = true }
@@ -458,19 +464,6 @@ export function AgentCanvas({
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
               className="divide-y divide-white/5 border-t border-white/5 overflow-hidden">
-              <Row label="Temperature">
-                <EditableField
-                  value={String(agent.temperature ?? 0.7)}
-                  onSave={(v) => patch({ temperature: Number(v) })}
-                />
-              </Row>
-              <Row label="Max tokens">
-                <EditableField
-                  value={agent.max_tokens != null ? String(agent.max_tokens) : ""}
-                  onSave={(v) => patch({ max_tokens: v === "" ? null : Number(v) })}
-                  placeholder="unset (model default)"
-                />
-              </Row>
               <Row label="Timeout (s)">
                 <EditableField
                   value={String(agent.timeout_seconds)}
@@ -522,59 +515,6 @@ export function AgentCanvas({
                   {agent.memory_enabled ? "enabled" : "disabled"}
                 </span>
               </Row>
-              <Row label="Webhook trigger" align="start">
-                {agent.webhook_secret ? (
-                  <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                    <code className="text-xs text-foreground/85 break-all">
-                      POST /api/v1/webhooks/{agent.crew_id ?? "<crewId>"}/{agent.id}/trigger
-                    </code>
-                    <code className="text-[10px] text-muted-foreground px-1 py-0.5 rounded bg-zinc-950 border border-white/10">
-                      {revealedSecret ? agent.webhook_secret : "••••••••"}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => setRevealedSecret((v) => !v)}
-                      className="text-[10px] text-blue-300 hover:underline"
-                    >
-                      {revealedSecret ? "Hide" : "Show"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          const newSecret = Math.random().toString(36).slice(2, 18) + Math.random().toString(36).slice(2, 18)
-                          await patch({ webhook_secret: newSecret })
-                          toast.success("Webhook secret rotated")
-                        } catch (err) {
-                          toast.error(`Rotate failed: ${err instanceof Error ? err.message : err}`)
-                        }
-                      }}
-                      className="text-[10px] text-muted-foreground hover:text-foreground"
-                    >
-                      Rotate
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground italic">disabled</span>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          const newSecret = Math.random().toString(36).slice(2, 18) + Math.random().toString(36).slice(2, 18)
-                          await patch({ webhook_secret: newSecret })
-                          toast.success("Webhook enabled — secret generated")
-                        } catch (err) {
-                          toast.error(`Enable failed: ${err instanceof Error ? err.message : err}`)
-                        }
-                      }}
-                      className="text-[10px] px-2 py-0.5 rounded border border-white/10 hover:bg-white/5"
-                    >
-                      Enable
-                    </button>
-                  </div>
-                )}
-              </Row>
               <Row label="Hooks" align="center">
                 <span className="text-sm text-muted-foreground">
                   Manage via CLI:{" "}
@@ -583,6 +523,11 @@ export function AgentCanvas({
                   <code className="text-foreground/80">enable</code>
                   {" / "}
                   <code className="text-foreground/80">disable</code>
+                </span>
+              </Row>
+              <Row label="Webhook" align="center">
+                <span className="text-sm text-muted-foreground">
+                  Manage via CLI: <code className="text-foreground/80">crewship agent webhook {agent.slug}</code>
                 </span>
               </Row>
             </motion.div>
