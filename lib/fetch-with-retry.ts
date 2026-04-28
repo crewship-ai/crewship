@@ -1,21 +1,20 @@
 /**
- * fetch wrapper with exponential-backoff retry for transient HTTP errors
- * (429 rate limit, 502/503/504 gateway flaps).
+ * fetch wrapper with exponential-backoff retry for transient *gateway*
+ * hiccups (502/503/504). 429 is intentionally NOT retried — when the
+ * server is rate-limiting, retrying just adds requests to the same
+ * leaky bucket and amplifies the back-pressure (the original symptom:
+ * a tab full of canvases each retrying 4× kept the per-IP limiter
+ * pinned and pushed every other panel into "loading…" forever).
  *
- * The original use case: the /api/v1/crews/{id} detail endpoint
- * occasionally returns 429 when the user navigates fast between crews
- * (each crew triggers a list + detail call back-to-back). Hard-failing
- * the canvas with "Could not load crew (429)" is worse than waiting
- * 250ms and retrying.
- *
- * Retries only on 429/502/503/504. Other HTTP errors (4xx user-fault)
- * are returned immediately — no point retrying a 404 or 401.
+ * Use this only on calls where a transient flap matters (the
+ * crew/agent detail loaders). Plain `fetch` is fine for everything
+ * else.
  */
 export async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit & { retries?: number; baseDelayMs?: number },
 ): Promise<Response> {
-  const retries = init?.retries ?? 3
+  const retries = init?.retries ?? 2
   const baseDelay = init?.baseDelayMs ?? 250
   let lastError: unknown
 
@@ -23,11 +22,12 @@ export async function fetchWithRetry(
     try {
       const res = await fetch(input, init)
       if (res.ok) return res
-      // Retry only on transient server-side hiccups.
-      if (![429, 502, 503, 504].includes(res.status) || attempt === retries) {
+      // Only retry true gateway flaps. 429 means "stop calling me" —
+      // honor that, return immediately, let the caller surface the
+      // error or simply leave the panel empty until next user action.
+      if (![502, 503, 504].includes(res.status) || attempt === retries) {
         return res
       }
-      // Honor Retry-After if the server set it (seconds, integer-ish).
       const retryAfter = res.headers.get("Retry-After")
       const headerDelay = retryAfter ? Number(retryAfter) * 1000 : 0
       const backoff = headerDelay > 0
@@ -41,7 +41,6 @@ export async function fetchWithRetry(
       await sleep(baseDelay * Math.pow(2, attempt) + Math.random() * 100)
     }
   }
-  // Unreachable in practice, but TypeScript needs a return path.
   throw lastError instanceof Error ? lastError : new Error("fetchWithRetry exhausted")
 }
 

@@ -246,19 +246,29 @@ export function AgentCanvas({
     return () => { cancelled = true }
   }, [agent, workspaceId])
 
-  // Runs count for the stats strip — fetched lazily when an agent is loaded.
-  const [runsCount, setRunsCount] = useState<number | null>(null)
+  // Runs + chats are fetched once at canvas-level and shared with the
+  // overview tab's Recent cards (avoids three separate hits to the
+  // same endpoints + the rate-limiter pile-up that used to follow).
+  const [runs, setRuns] = useState<RunRow[] | null>(null)
+  const [chats, setChats] = useState<ChatRow[] | null>(null)
   useEffect(() => {
     if (!agent) return
     let cancelled = false
     fetch(`/api/v1/agents/${agent.id}/runs?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: RunRow[] | null) => {
-        if (!cancelled && Array.isArray(data)) setRunsCount(data.length)
+        if (!cancelled && Array.isArray(data)) setRuns(data)
+      })
+      .catch(() => { /* tolerate */ })
+    fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: ChatRow[] | null) => {
+        if (!cancelled && Array.isArray(data)) setChats(data)
       })
       .catch(() => { /* tolerate */ })
     return () => { cancelled = true }
   }, [agent, workspaceId])
+  const runsCount = runs?.length ?? null
 
   const patch = useCallback(async (body: Record<string, unknown>) => {
     if (!agent) return
@@ -529,8 +539,8 @@ export function AgentCanvas({
 
           {/* Recent sessions + Recent runs */}
           <section className="grid md:grid-cols-2 gap-4">
-            <RecentSessionsCard agentId={agent.id} agentSlug={agent.slug} workspaceId={workspaceId} />
-            <RecentRunsCard agentId={agent.id} workspaceId={workspaceId} />
+            <RecentSessionsCard agentSlug={agent.slug} chats={chats} />
+            <RecentRunsCard agentId={agent.id} runs={runs} />
           </section>
 
           {/* Crew peers (LEAD/COORDINATOR only — uses inbox.peer_messages) */}
@@ -763,17 +773,8 @@ function StatTile({ label, value }: { label: string; value: number | string }) {
 // Recent sessions + runs cards (overview tab)
 // =============================================================================
 
-function RecentSessionsCard({ agentId, agentSlug, workspaceId }: { agentId: string; agentSlug: string; workspaceId: string }) {
-  const [chats, setChats] = useState<ChatRow[] | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: ChatRow[]) => { if (!cancelled) setChats(Array.isArray(data) ? data.slice(0, 5) : []) })
-      .catch(() => { if (!cancelled) setChats([]) })
-    return () => { cancelled = true }
-  }, [agentId, workspaceId])
-
+function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: ChatRow[] | null }) {
+  const recent = chats === null ? null : chats.slice(0, 5)
   return (
     <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
@@ -783,12 +784,12 @@ function RecentSessionsCard({ agentId, agentSlug, workspaceId }: { agentId: stri
         </Link>
       </div>
       <div className="divide-y divide-white/5">
-        {chats === null ? (
+        {recent === null ? (
           <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-        ) : chats.length === 0 ? (
+        ) : recent.length === 0 ? (
           <div className="px-4 py-6 text-xs text-muted-foreground italic">No sessions yet.</div>
         ) : (
-          chats.map((c) => (
+          recent.map((c) => (
             <Link
               key={c.id}
               href={`/chat/${encodeURIComponent(agentSlug)}?session=${encodeURIComponent(c.id)}`}
@@ -813,17 +814,8 @@ function RecentSessionsCard({ agentId, agentSlug, workspaceId }: { agentId: stri
   )
 }
 
-function RecentRunsCard({ agentId, workspaceId }: { agentId: string; workspaceId: string }) {
-  const [runs, setRuns] = useState<RunRow[] | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: RunRow[]) => { if (!cancelled) setRuns(Array.isArray(data) ? data.slice(0, 5) : []) })
-      .catch(() => { if (!cancelled) setRuns([]) })
-    return () => { cancelled = true }
-  }, [agentId, workspaceId])
-
+function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | null }) {
+  const recent = runs === null ? null : runs.slice(0, 5)
   return (
     <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
@@ -833,12 +825,12 @@ function RecentRunsCard({ agentId, workspaceId }: { agentId: string; workspaceId
         </Link>
       </div>
       <div className="divide-y divide-white/5">
-        {runs === null ? (
+        {recent === null ? (
           <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-        ) : runs.length === 0 ? (
+        ) : recent.length === 0 ? (
           <div className="px-4 py-6 text-xs text-muted-foreground italic">No runs yet.</div>
         ) : (
-          runs.map((r) => (
+          recent.map((r) => (
             <div key={r.id} className="px-4 py-2.5 flex items-center gap-3">
               <span className={cn(
                 "w-1.5 h-1.5 rounded-full shrink-0",
