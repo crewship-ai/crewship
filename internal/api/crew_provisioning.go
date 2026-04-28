@@ -50,6 +50,13 @@ type ProvisionJob struct {
 	Message   string    // human-readable description of current step
 	StepStart time.Time // wall clock at last step transition (for ETA hints)
 	LogTail   []string  // ring buffer of past progress messages, cap = provisionLogTailCap
+
+	// Steps is the full ordered checklist emitted up front via Provisioner's
+	// WithPlan callback. Lets a UI render every row at once (done/active/
+	// pending) instead of revealing them one at a time. Empty until the
+	// goroutine seeds it; remains populated through completed/failed for
+	// reload-replay via the GET endpoint.
+	Steps []string
 }
 
 // orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
@@ -548,6 +555,11 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 			resp["total"] = job.Total
 			resp["message"] = job.Message
 		}
+		if len(job.Steps) > 0 {
+			steps := make([]string, len(job.Steps))
+			copy(steps, job.Steps)
+			resp["steps"] = steps
+		}
 		if len(job.LogTail) > 0 {
 			tail := make([]string, len(job.LogTail))
 			copy(tail, job.LogTail)
@@ -727,6 +739,21 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		"features", len(cfg.Features),
 	)
 
+	plan := func(steps []string) {
+		h.mu.Lock()
+		// Defensive copy: caller already cloned, but better safe than
+		// have a slice header race with the GET handler reading concurrently.
+		dup := make([]string, len(steps))
+		copy(dup, steps)
+		job.Steps = dup
+		h.mu.Unlock()
+
+		h.wsHub.BroadcastWorkspace(workspaceID, "provision.started", map[string]any{
+			"crew_id": crewID,
+			"steps":   steps,
+		})
+	}
+
 	progress := func(step, total int, message string) {
 		now := time.Now()
 		h.mu.Lock()
@@ -753,7 +780,10 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		})
 	}
 
-	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON, devcontainer.WithProgress(progress))
+	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON,
+		devcontainer.WithPlan(plan),
+		devcontainer.WithProgress(progress),
+	)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("provision: %w", err))
 		return

@@ -43,6 +43,12 @@ export interface ProvisioningCrewState {
    *  the user should hit Restart agents. Server returns 0 when the live
    *  container's image already matches cached_image. */
   agentsPendingRestart?: number
+  /** Ordered checklist of step labels for the in-flight build. Populated
+   *  via the `provision.started` WS event (or replayed from GET when a
+   *  client joins mid-build). Matches each label verbatim against the
+   *  per-step `message` so the UI can drive a done/active/pending row
+   *  per step by string equality. */
+  steps?: string[]
 }
 
 interface CrewListEntry {
@@ -63,6 +69,7 @@ interface ProvisionStatusResponse {
   message?: string
   log_tail?: string[]
   agents_pending_restart?: number
+  steps?: string[]
 }
 
 const EMPTY: ProvisioningSummary = { needsProvision: 0, building: 0, failed: 0, pendingRestart: 0, total: 0, detail: [] }
@@ -110,6 +117,7 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
             message: data.message,
             logTail: data.log_tail,
             agentsPendingRestart: data.agents_pending_restart,
+            steps: data.steps,
           }
         }),
       )
@@ -142,6 +150,20 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
   // Live updates over WS — patch a single crew row in place. Avoids a full
   // refetch on every tick when only one crew is building.
   useEffect(() => {
+    const unsubStarted = subscribe("provision.started", (ev) => {
+      const p = ev.payload as { crew_id?: string; steps?: string[] }
+      if (!p.crew_id || !Array.isArray(p.steps)) return
+      setSummary((prev) => patchCrew(prev, p.crew_id!, (d) => ({
+        ...d,
+        status: "running",
+        steps: p.steps,
+        // Reset progress markers — a fresh build resets the checklist.
+        step: 0,
+        total: p.steps!.length,
+        message: undefined,
+        logTail: [],
+      })))
+    })
     const unsubProgress = subscribe("provision.progress", (ev) => {
       const p = ev.payload as { crew_id?: string; step?: number; total?: number; message?: string }
       if (!p.crew_id) return
@@ -172,6 +194,7 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
       })))
     })
     return () => {
+      unsubStarted()
       unsubProgress()
       unsubCompleted()
       unsubFailed()

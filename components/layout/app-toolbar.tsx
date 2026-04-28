@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/use-auth"
 import {
   Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
   LayoutDashboard, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
-  Loader2, Package, AlertTriangle, Play, RotateCcw,
+  Loader2, Package, AlertTriangle, Play, RotateCcw, Check, Circle,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -624,12 +624,12 @@ function ProvisioningBadge({
           <span className={`text-micro font-medium ${colors.text}`}>{verbalize()}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="w-[400px] p-0 overflow-hidden">
+      <PopoverContent align="start" sideOffset={8} className="w-[420px] p-0 overflow-hidden">
         <div className="px-3 py-2 border-b text-xs font-semibold flex items-center gap-2">
           <Package className="h-3.5 w-3.5 text-muted-foreground" />
           Container builds
         </div>
-        <ul className="divide-y max-h-[420px] overflow-y-auto">
+        <ul className="divide-y max-h-[480px] overflow-y-auto">
           {unhealthy.map((d) => (
             <ProvisioningRow
               key={d.id}
@@ -734,22 +734,18 @@ function ProvisioningRow({
         </span>
       </div>
 
-      {crew.status === "running" && crew.total ? (
-        <div className="ml-4 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full bg-blue-500 transition-all"
-                style={{ width: `${Math.min(100, ((crew.step ?? 0) / Math.max(1, crew.total)) * 100)}%` }}
-              />
-            </div>
-            <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-              {crew.step ?? 0}/{crew.total}
-            </span>
-          </div>
-          {crew.message && (
-            <div className="text-[11px] text-muted-foreground truncate">{crew.message}</div>
-          )}
+      {crew.status === "running" && crew.steps && crew.steps.length > 0 ? (
+        <ProvisioningChecklist steps={crew.steps} active={crew.step ?? 0} message={crew.message} />
+      ) : crew.status === "running" && crew.total ? (
+        // Fallback for the brief window between provision.started and the
+        // first progress event, or for older backends that don't emit a
+        // plan: a single-line spinner with whatever message we have.
+        <div className="ml-4 text-[11px] text-muted-foreground flex items-center gap-2">
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+          <span className="truncate">{crew.message ?? "Building image…"}</span>
+          <span className="tabular-nums shrink-0 text-muted-foreground/70">
+            {crew.step ?? 0}/{crew.total}
+          </span>
         </div>
       ) : null}
 
@@ -807,6 +803,69 @@ function ProvisioningRow({
         </div>
       )}
     </li>
+  )
+}
+
+/**
+ * Per-build checklist rendered inside a popover row. Three visual states
+ * per step (matching how a user thinks about the build):
+ *   - done    → faint, with checkmark
+ *   - active  → bold, with spinner
+ *   - pending → muted, with empty circle
+ *
+ * `active` is 1-based (the next step to run = current). When active equals
+ * steps.length the build is on its last step. After completion the row
+ * mounts as `completed` (no checklist), so we don't have to handle "all
+ * done" inside the running view.
+ */
+function ProvisioningChecklist({
+  steps,
+  active,
+  message,
+}: {
+  steps: string[]
+  active: number
+  message?: string
+}) {
+  // The emit message exactly matches a plan entry — we use that to find
+  // the active row even if `active` (the index) lags a tick. Falls back
+  // to `active - 1` when message is missing.
+  let activeIdx = active > 0 ? active - 1 : -1
+  if (message) {
+    const messageIdx = steps.indexOf(message)
+    if (messageIdx >= 0) activeIdx = messageIdx
+  }
+
+  return (
+    <ol className="ml-1 mt-1 space-y-1 max-h-[180px] overflow-y-auto">
+      {steps.map((label, i) => {
+        const state: "done" | "active" | "pending" =
+          i < activeIdx ? "done" : i === activeIdx ? "active" : "pending"
+        return (
+          <li
+            key={i}
+            className={`flex items-center gap-2 text-[11px] ${
+              state === "done"
+                ? "text-muted-foreground/70"
+                : state === "active"
+                  ? "text-foreground font-medium"
+                  : "text-muted-foreground/50"
+            }`}
+          >
+            <span className="w-3 h-3 shrink-0 flex items-center justify-center">
+              {state === "done" ? (
+                <Check className="h-3 w-3 text-emerald-400" />
+              ) : state === "active" ? (
+                <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+              ) : (
+                <Circle className="h-2 w-2 text-muted-foreground/40" />
+              )}
+            </span>
+            <span className="truncate">{label}</span>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 

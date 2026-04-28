@@ -33,6 +33,7 @@ export type RealtimeEventType =
   | "agent.log"
   | "file.event"
   | "container.stats"
+  | "provision.started"
   | "provision.progress"
   | "provision.completed"
   | "provision.failed"
@@ -59,7 +60,7 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   "escalation.resolved", "mission.updated", "task.updated",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   "agent.log", "file.event", "container.stats",
-  "provision.progress", "provision.completed", "provision.failed",
+  "provision.started", "provision.progress", "provision.completed", "provision.failed",
 ])
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)

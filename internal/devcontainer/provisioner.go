@@ -38,8 +38,17 @@ type CommitClient interface {
 // ProgressCallback receives provisioning progress updates. Called synchronously
 // from Provision(); implementations must be cheap and non-blocking. Step counts
 // from 1 to total inclusive; total is fixed for the duration of one Provision
-// call. Message is human-readable, suitable for direct display in a UI.
+// call. Message exactly matches the corresponding entry in the step plan
+// emitted via WithPlan, so a UI can drive a checklist by string equality.
 type ProgressCallback func(step int, total int, message string)
+
+// PlanCallback receives the full ordered list of step labels at the very start
+// of a Provision call (before the first ProgressCallback fires). Lets a UI
+// render the complete checklist immediately — done/active/pending — instead
+// of revealing it one row at a time. Only fires for the actual provisioning
+// path; cache hits and skip-path runs don't emit a plan because there's
+// nothing meaningful to checklist.
+type PlanCallback func(steps []string)
 
 // ProvisionOption configures a single Provision call. Use the With* helpers
 // rather than constructing the underlying type directly.
@@ -47,6 +56,7 @@ type ProvisionOption func(*provisionOpts)
 
 type provisionOpts struct {
 	onProgress ProgressCallback
+	onPlan     PlanCallback
 }
 
 // WithProgress attaches a progress callback to a Provision call. The callback
@@ -54,6 +64,15 @@ type provisionOpts struct {
 // commit) — not on raw BuildKit log lines, which would overwhelm a UI.
 func WithProgress(cb ProgressCallback) ProvisionOption {
 	return func(o *provisionOpts) { o.onProgress = cb }
+}
+
+// WithPlan attaches a one-shot plan callback. Fires once at the start of a
+// real provisioning run with the full ordered list of step labels. Each label
+// matches verbatim with the message later passed to WithProgress for that
+// step — so a UI can map "incoming progress message" → "checklist row" by
+// exact string equality.
+func WithPlan(cb PlanCallback) ProvisionOption {
+	return func(o *provisionOpts) { o.onPlan = cb }
 }
 
 // Provisioner orchestrates the full devcontainer provisioning flow: create a
@@ -164,6 +183,41 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 		logger:         logger,
 		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
 	}
+}
+
+// Step label helpers — kept centralized so the plan emitted via WithPlan and
+// the per-step messages emitted via WithProgress always agree on exact text.
+// The UI matches incoming progress messages against plan entries by string
+// equality to drive the checklist; if these ever drift, every row sits stuck
+// on "pending" forever.
+const (
+	miseStepLabel   = "Installing language runtimes"
+	commitStepLabel = "Committing image"
+)
+
+func pullStepLabel(baseImage string) string {
+	return "Pulling base image " + baseImage
+}
+
+func featureStepLabel(featureID string) string {
+	return "Installing " + featureID
+}
+
+// featureLeafID extracts the leaf name from a feature reference.
+//   ghcr.io/devcontainers/features/python:1 → "python"
+//   common-utils:2                          → "common-utils"
+// The leaf is what we display in the checklist and what install.sh-emitting
+// features identify themselves by; matches `feature.Metadata.ID` after
+// download for every feature we've seen in the wild.
+func featureLeafID(ref string) string {
+	// Drop a tag suffix.
+	if idx := strings.LastIndex(ref, ":"); idx >= 0 {
+		ref = ref[:idx]
+	}
+	if idx := strings.LastIndex(ref, "/"); idx >= 0 {
+		return ref[idx+1:]
+	}
+	return ref
 }
 
 // provisionerSchemaVersion invalidates all cached images when this changes.
@@ -308,16 +362,40 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	p.logger.Info("provisioning devcontainer image", "base", baseImage, "tag", tag)
 
-	// Compute total milestones up front so the UI can render a stable
-	// progress bar. Granularity matches what we actually emit below: pull +
-	// one per feature + (mise as a single bucket) + commit. We don't drill
-	// into per-mise-tool granularity because we don't know the tool list
-	// without parsing miseConfig — and that parse already happens inside
-	// installMise.
-	total := 1 + len(cfg.Features) + 1 // pull + features + commit
-	if miseConfig != "" {
-		total++
+	// Compute the step plan up front so the UI can render a stable
+	// checklist (done / active / pending). Granularity matches what we
+	// actually emit below: pull + one per feature + (mise as a single
+	// bucket) + commit. The plan is alphabetical on feature ID — the
+	// real install order from SortFeatures may differ slightly, but the
+	// checklist is matched by exact label string, so the user just sees
+	// rows light up out of order if dependencies force it. That's a
+	// trivial UX cost compared to the alternative (downloading every
+	// feature before showing any progress).
+	featureRefs := make([]string, 0, len(cfg.Features))
+	for ref := range cfg.Features {
+		featureRefs = append(featureRefs, ref)
 	}
+	sort.Strings(featureRefs)
+	plan := make([]string, 0, 2+len(cfg.Features))
+	plan = append(plan, pullStepLabel(baseImage))
+	for _, ref := range featureRefs {
+		plan = append(plan, featureStepLabel(featureLeafID(ref)))
+	}
+	if miseConfig != "" {
+		plan = append(plan, miseStepLabel)
+	}
+	plan = append(plan, commitStepLabel)
+	total := len(plan)
+
+	if o.onPlan != nil {
+		// Defensive copy — the callback may store the slice and we mutate
+		// `plan` no further, but a clone is cheap insurance against future
+		// edits creating an alias.
+		dup := make([]string, len(plan))
+		copy(dup, plan)
+		o.onPlan(dup)
+	}
+
 	step := 0
 	emit := func(message string) {
 		step++
@@ -326,7 +404,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		}
 	}
 
-	emit("Pulling base image " + baseImage)
+	emit(pullStepLabel(baseImage))
 
 	// 2. Create temporary container.
 	containerID, err := p.createTempContainer(ctx, baseImage)
@@ -351,7 +429,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// devcontainers-extra/claude-code feature) come from the devcontainer
 	// configuration — no custom Go installers needed.
 	resolvedFeatures, err := p.installFeatures(ctx, containerID, cfg, func(featureID string) {
-		emit("Installing feature " + featureID)
+		emit(featureStepLabel(featureID))
 	})
 	if err != nil {
 		return nil, err
@@ -359,7 +437,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	// 5. Handle mise configuration.
 	if miseConfig != "" {
-		emit("Installing language runtimes")
+		emit(miseStepLabel)
 		if err := p.installMise(ctx, containerID, miseConfig); err != nil {
 			return nil, fmt.Errorf("mise provisioning: %w", err)
 		}
@@ -394,7 +472,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	// 9. Commit the container as a cached image.
-	emit("Committing image")
+	emit(commitStepLabel)
 	_, commitErr := p.docker.ContainerCommit(ctx, containerID, container.CommitOptions{
 		Reference: tag,
 	})

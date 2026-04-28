@@ -115,6 +115,50 @@ describe("useProvisioningStatus", () => {
     expect(c1?.status).toBe("completed")
   })
 
+  it("provision.started event seeds the checklist steps and resets progress", async () => {
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes("/api/v1/crews?workspace_id=")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => crewListResponse([
+            { id: "c1", slug: "research", name: "Research", cfg: '{"image":"x"}', img: null },
+          ]),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ status: "idle", devcontainer_config: '{"image":"x"}', cached_image: null }),
+      })
+    })
+
+    const { result } = renderHook(() => useProvisioningStatus("ws-started"))
+    await act(async () => { await flushAsync() })
+
+    act(() => {
+      realtimeCallbacks["provision.started"]?.({
+        payload: {
+          crew_id: "c1",
+          steps: [
+            "Pulling base image x",
+            "Installing common-utils",
+            "Installing python",
+            "Committing image",
+          ],
+        },
+      })
+    })
+
+    expect(result.current.detail[0].status).toBe("running")
+    expect(result.current.detail[0].steps).toEqual([
+      "Pulling base image x",
+      "Installing common-utils",
+      "Installing python",
+      "Committing image",
+    ])
+    expect(result.current.detail[0].total).toBe(4)
+    expect(result.current.detail[0].step).toBe(0)
+  })
+
   it("provision.progress event patches a single crew without refetch", async () => {
     mockFetch.mockImplementation((url: string) => {
       if (url.includes("/api/v1/crews?workspace_id=")) {
