@@ -58,6 +58,13 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // AgentFileDownload streams a file from an agent's working directory.
+//
+// The FE may send EITHER a relative path (e.g. "workspace/demo/config/x.toml")
+// or a full storage-rooted path (e.g. "<crewID>/<slug>/workspace/demo/x.toml")
+// — list responses include the full form, so this used to 404 when the FE
+// passed `entry.path` straight back. We accept both: relative paths get the
+// `<crewID>/<slug>/` prefix prepended; full paths are validated to ensure
+// they're scoped to THIS agent (no peeking at sibling agents' files).
 func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -83,7 +90,20 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, url.QueryEscape(cleanPath))
+	// Resolve to a full storage path scoped under this agent.
+	prefix := crewID.String + "/" + slug.String + "/"
+	var fullPath string
+	if strings.HasPrefix(cleanPath, prefix) {
+		fullPath = cleanPath
+	} else if strings.HasPrefix(cleanPath, crewID.String+"/") {
+		// Path is in the crew namespace but not under this agent — reject.
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not scoped to this agent"})
+		return
+	} else {
+		fullPath = prefix + cleanPath
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, url.QueryEscape(fullPath))
 
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -139,7 +159,21 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(cleanPath))
+	// Match the path-resolution rules used by AgentFileDownload: accept
+	// either relative ("workspace/x.toml") or full storage paths
+	// ("<crewID>/<slug>/workspace/x.toml"). Cross-agent writes get a 403.
+	prefix := crewID.String + "/" + slug.String + "/"
+	var fullPath string
+	if strings.HasPrefix(cleanPath, prefix) {
+		fullPath = cleanPath
+	} else if strings.HasPrefix(cleanPath, crewID.String+"/") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not scoped to this agent"})
+		return
+	} else {
+		fullPath = prefix + cleanPath
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(fullPath))
 
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {

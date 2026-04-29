@@ -3,7 +3,6 @@
 import { Fragment, useCallback, useEffect, useState } from "react"
 import { Activity, ClipboardList, MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -98,48 +97,46 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
   useRealtimeEvent("assignment.updated", useCallback(() => { fetchActivity(false, true) }, [fetchActivity]))
   useRealtimeEvent("escalation.created", useCallback(() => { fetchActivity(false, true) }, [fetchActivity]))
 
+  // The parent (agent-canvas / crew-canvas) already renders the section
+  // heading with View-all + Live indicator; this component just renders
+  // the body so the styling matches the Runtime / System Prompt cards.
+
   if (loading) {
     return (
-      <div>
-        <h2 className="text-default font-semibold mb-3">Recent Activity</h2>
-        <div className="text-body text-muted-foreground">Loading activity...</div>
+      <div className="flex items-center justify-center py-12">
+        <div className="text-body text-muted-foreground">Loading activity…</div>
       </div>
     )
   }
 
   if (items.length === 0) {
     return (
-      <div>
-        <h2 className="text-default font-semibold mb-3">Recent Activity</h2>
-        <div className="flex flex-col items-center gap-3 py-8 text-center">
-          <Activity className="h-8 w-8 text-muted-foreground/50" />
-          <div>
-            <p className="text-body text-muted-foreground">No activity yet.</p>
-            <p className="text-label text-muted-foreground/70 mt-1">
-              Activity appears when agents work on assignments, query peers, or raise escalations.
-            </p>
-          </div>
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <Activity className="h-8 w-8 text-muted-foreground/50" />
+        <div>
+          <p className="text-body text-muted-foreground">No activity yet.</p>
+          <p className="text-label text-muted-foreground/70 mt-1">
+            Activity appears when agents work on assignments, query peers, or raise escalations.
+          </p>
         </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-default font-semibold">Recent Activity</h2>
-        <div className="flex items-center gap-1.5 text-label text-muted-foreground">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-          </span>
-          {refreshing ? "Updating..." : "Live"}
-        </div>
+    <div className="relative">
+      {/* Tiny live-update indicator pinned top-right; replaces the
+          old "Recent Activity · Live" heading row. The outer card chrome
+          comes from the parent (agent-canvas / crew-canvas), so this
+          component only renders the table body. */}
+      <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+        </span>
+        {refreshing ? "Updating…" : "Live"}
       </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <TooltipProvider>
+        <TooltipProvider>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -236,9 +233,7 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
                 })}
               </TableBody>
             </Table>
-          </TooltipProvider>
-        </CardContent>
-      </Card>
+        </TooltipProvider>
     </div>
   )
 }

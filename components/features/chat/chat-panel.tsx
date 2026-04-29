@@ -1,17 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useState, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { AnimatePresence } from "motion/react"
 import {
   Bot,
   AlertCircle,
   Wifi,
   WifiOff,
   Loader2,
-  PanelRightOpen,
-  PanelRightClose,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 
 import {
   Conversation,
@@ -29,10 +27,22 @@ import {
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { useChat } from "@/hooks/use-chat"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useDrawerStore } from "@/stores/drawer-store"
 
 import { TurnRenderer } from "./turn-renderer"
 import { RightPanel } from "./right-panel"
+import { RightRail } from "./right-rail"
+import { RightDrawer } from "./right-drawer"
+import { SlashPalette } from "./composer/slash-palette"
+import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
+import { ArtifactPane } from "./artifact/artifact-pane"
+import { FollowUps } from "./suggestions/follow-ups"
+import { ConversationSearch } from "./search/conversation-search"
+import { ExportDialog } from "./export/export-dialog"
+import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
+import { useComposerStore } from "@/stores/composer-store"
+import { getSuggestions } from "@/lib/agent-suggestions"
 
 function getWsUrl(): string {
   if (typeof window === "undefined") return ""
@@ -44,31 +54,51 @@ interface ChatPanelProps {
   agentId: string
   sessionId: string
   agentName?: string
+  /** Canonical agent slug used to build URLs (`/chat/[agentSlug]`).
+   *  Required because SlashPalette commands like /new-session navigate
+   *  back to the agent route — passing the display name there breaks
+   *  for agents whose name has spaces or non-URL-safe characters. No
+   *  fallback to agentName: the display label is the source of the bug
+   *  the previous review flagged. */
+  agentSlug: string
+  /** Agent role / role_title. Used to pick role-aware suggestion packs. */
+  agentRole?: string | null
+  /** How this session was created — UI / CLI / WEBHOOK / CRON / AGENT.
+   *  Rendered as a chip in the connection bar so the user knows where
+   *  they are at a glance. Undefined = unknown (pre-migration). */
+  sessionOrigin?: string | null
   /** Pre-populate the chat input with this text on first render. */
   initialInput?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "files" | "files-only" | "more"
 }
 
-const defaultSuggestions = [
-  "Help me get started",
-  "What can you do?",
-  "Show me your skills",
-  "Run a quick task",
-]
-
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobilePanel }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, mobilePanel }: ChatPanelProps) {
+  const suggestionPack = getSuggestions(agentRole)
+  const defaultSuggestions = suggestionPack.empty
+  const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
   const [authError, setAuthError] = useState(false)
   const [input, setInput] = useState(initialInput ?? "")
   const [sessionReady, setSessionReady] = useState(false)
 
+  // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
+  // animation. Bumped on every session swap so loaded-from-history turns
+  // appear instantly (no slide-up flash) while genuinely-new turns sent
+  // or streamed AFTER the swap still animate.
+  const [animateAfter, setAnimateAfter] = useState(() => Date.now())
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const sessionLoadedFor = useRef<string | null>(null)
+
   useEffect(() => {
     setSessionReady(false)
+    setHistoryLoading(true)
+    setAnimateAfter(Date.now() + 250)
+    sessionLoadedFor.current = sessionId
   }, [sessionId])
 
   // Pre-populate input when a new session is started with a prefill value
@@ -76,10 +106,8 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     if (initialInput) setInput(initialInput)
   }, [initialInput])
 
-  const [showPreview, setShowPreview] = useState(true)
   const [files, setFiles] = useState<FileEntry[]>([])
-  const [splitRatio, setSplitRatio] = useState(60)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const drawer = useDrawerStore()
 
   useEffect(() => {
     fetch("/api/v1/ws-token", { credentials: "include" })
@@ -93,7 +121,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
       .catch(() => {})
   }, [])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, loadHistory, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     token,
     sessionId,
@@ -101,19 +129,45 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
 
   useEffect(() => {
     if (!sessionId) return
+    let cancelled = false
     fetch(`/api/v1/chats/${sessionId}/messages`, { credentials: "include" })
-      .then((r) => r.ok ? r.json() : null)
-      .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
-        if (!data?.messages?.length) return
-        setSessionReady(true)
-        loadHistory(data.messages.map((m) => ({
+      .then(async (r) => {
+        // 404 means the chat row doesn't exist yet — it's a brand-new
+        // session. Don't mark it ready; ensureSession() must still run
+        // on first send to create the chat row.
+        if (r.status === 404) {
+          return { exists: false, messages: [] as { id: string; role: string; content: string; ts: string }[] }
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const data = await r.json()
+        return {
+          exists: true,
+          messages: (data?.messages ?? []) as { id: string; role: string; content: string; ts: string }[],
+        }
+      })
+      .then(({ exists, messages }) => {
+        if (cancelled) return
+        setSessionReady(exists)
+        // Always replace — including with [] for an empty (newly created)
+        // session — so the visible turns swap atomically from old session
+        // → new session with no blank gap in between.
+        loadHistory(messages.map((m) => ({
           id: m.id,
           role: m.role as "user" | "assistant" | "system" | "tool",
           content: m.content,
           timestamp: new Date(m.ts),
         })))
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) {
+          setSessionReady(false)
+          loadHistory([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false)
+      })
+    return () => { cancelled = true }
   }, [sessionId, loadHistory])
 
   const ensureSession = useCallback(async () => {
@@ -121,20 +175,23 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     try {
       const res = await fetch(
         `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, origin: "UI" }) },
       )
       if (res.ok) setSessionReady(true)
     } catch { /* ignore */ }
   }, [agentId, workspaceId, sessionId, sessionReady])
 
-  // Fetch files for the preview panel
+  // Fetch files only when the Files tab might be visible (drawer open + active)
+  const filesVisible = drawer.open && drawer.activeTab === "files"
   useEffect(() => {
-    if (!workspaceId || !showPreview || !sessionId) return
+    if (!workspaceId || !filesVisible || !sessionId) return
     fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data: FileEntry[] | null) => setFiles(data ?? []))
       .catch(() => {})
-  }, [agentId, workspaceId, showPreview, sessionId])
+  }, [agentId, workspaceId, filesVisible, sessionId])
+
+  const composer = useComposerStore()
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const text = message.text?.trim()
@@ -142,7 +199,9 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     await ensureSession()
     sendMessage(text)
     setInput("")
-  }, [isStreaming, sendMessage, ensureSession])
+    composer.clearDraft(sessionId)
+    composer.clearAttachments(sessionId)
+  }, [isStreaming, sendMessage, ensureSession, composer, sessionId])
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
@@ -154,39 +213,10 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])
 
-  // Drag resize handler
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startRatio = splitRatio
-
-    const handleMove = (ev: MouseEvent) => {
-      if (!containerRef.current) return
-      const containerWidth = containerRef.current.offsetWidth
-      const dx = ev.clientX - startX
-      const newRatio = Math.min(80, Math.max(30, startRatio + (dx / containerWidth) * 100))
-      setSplitRatio(newRatio)
-    }
-
-    const handleUp = () => {
-      document.removeEventListener("mousemove", handleMove)
-      document.removeEventListener("mouseup", handleUp)
-    }
-
-    document.addEventListener("mousemove", handleMove)
-    document.addEventListener("mouseup", handleUp)
-  }, [splitRatio])
-
-  const handleResizeKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const step = 2
-    if (e.key === "ArrowLeft") {
-      e.preventDefault()
-      setSplitRatio((r) => Math.max(30, r - step))
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault()
-      setSplitRatio((r) => Math.min(80, r + step))
-    }
-  }, [])
+  const handleSlashCommand = useCallback((id: string) => {
+    if (id === "regenerate") regenerateLastTurn()
+    else if (id === "clear") loadHistory([])
+  }, [regenerateLastTurn, loadHistory])
 
   const chatStatus = isStreaming ? "streaming" as const : "ready" as const
 
@@ -243,31 +273,36 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
             <AuthErrorState />
           ) : (
             <Conversation>
-              <ConversationContent>
-                {turns.length === 0 && (
+              <ConversationContent className="mx-auto w-full max-w-3xl">
+                {turns.length === 0 && !historyLoading && (
                   <ConversationEmptyState
                     icon={<Bot className="h-12 w-12" />}
                     title="Start a conversation"
                     description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
                   />
                 )}
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                  />
-                ))}
+                <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+                  {turns.map((turn, idx) => (
+                    <TurnRenderer
+                      key={turn.id}
+                      turn={turn}
+                      onCopy={handleCopy}
+                      onFileClick={noopFileClick}
+                      isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                      onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                      onEditUserMessage={!isStreaming ? editAndResend : undefined}
+                      animateAfter={animateAfter}
+                      agentId={agentId}
+                    />
+                  ))}
+                </AnimatePresence>
                 <StreamingIndicator isStreaming={isStreaming} turns={turns} />
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>
           )}
         </div>
-        {turns.length === 0 && !authError && (
+        {turns.length === 0 && !authError && !historyLoading && (
           <div className="px-4 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
@@ -297,56 +332,54 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     )
   }
 
-  // Desktop: full split layout
+  // Desktop: chat + icon rail; drawer overlays (or pushes) when open
+  const pushOpen = drawer.open && drawer.mode === "push"
   return (
-    <div ref={containerRef} className="flex h-full">
-      <div className="flex flex-col overflow-hidden" style={{ width: showPreview ? `${splitRatio}%` : "100%" }}>
+    <div className="relative flex h-full">
+      <div className="flex flex-col overflow-hidden flex-1 min-w-0">
         <div className="flex items-center gap-2 px-4 md:px-6 h-[41px] border-b shrink-0">
           <ConnectionBadge status={connectionStatus} />
+          <OriginChip origin={sessionOrigin} />
           <span className="text-micro text-muted-foreground ml-auto font-mono">
             {sessionId.slice(0, 8)}
           </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => setShowPreview(!showPreview)}
-            title={showPreview ? "Hide panel" : "Show panel"}
-          >
-            {showPreview ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
-          </Button>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {authError ? (
             <AuthErrorState />
           ) : (
             <Conversation>
-              <ConversationContent>
-                {turns.length === 0 && (
+              <ConversationContent className="mx-auto w-full max-w-3xl">
+                {turns.length === 0 && !historyLoading && (
                   <ConversationEmptyState
                     icon={<Bot className="h-12 w-12" />}
                     title="Start a conversation"
                     description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
                   />
                 )}
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                  />
-                ))}
+                <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+                  {turns.map((turn, idx) => (
+                    <TurnRenderer
+                      key={turn.id}
+                      turn={turn}
+                      onCopy={handleCopy}
+                      onFileClick={noopFileClick}
+                      isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                      onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                      onEditUserMessage={!isStreaming ? editAndResend : undefined}
+                      animateAfter={animateAfter}
+                      agentId={agentId}
+                    />
+                  ))}
+                </AnimatePresence>
                 <StreamingIndicator isStreaming={isStreaming} turns={turns} />
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>
           )}
         </div>
-        {turns.length === 0 && !authError && (
-          <div className="px-4 md:px-6 pb-2 shrink-0">
+        {turns.length === 0 && !authError && !historyLoading && (
+          <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
                 <Suggestion key={s} suggestion={s} onClick={() => handleSuggestionClick(s)}>{s}</Suggestion>
@@ -354,46 +387,55 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
             </Suggestions>
           </div>
         )}
-        <div className="p-3 md:px-6 shrink-0">
-          <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
-            <PromptInputTextarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}
-              className="min-h-[44px]"
-            />
-            <PromptInputFooter className="justify-end p-2">
-              <PromptInputSubmit
-                disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
-                status={chatStatus}
-                onStop={stopGeneration}
+        <div className="mx-auto w-full max-w-3xl">
+        <FollowUps
+          prompts={followUpPrompts}
+          onPick={handleSuggestionClick}
+          show={!isStreaming && turns.length > 0 && turns[turns.length - 1].role === "assistant"}
+        />
+        </div>
+        <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
+          <AttachmentZone agentId={agentId} sessionId={sessionId}>
+            <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
+              <PromptInputTextarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}
+                className="min-h-[44px]"
               />
-            </PromptInputFooter>
-          </PromptInput>
+              <PromptInputFooter className="justify-between p-2 gap-2">
+                <div className="flex items-center gap-1">
+                  <AttachmentButton agentId={agentId} sessionId={sessionId} />
+                </div>
+                <PromptInputSubmit
+                  disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
+                  status={chatStatus}
+                  onStop={stopGeneration}
+                />
+              </PromptInputFooter>
+            </PromptInput>
+          </AttachmentZone>
         </div>
       </div>
 
-      {showPreview && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize chat pane"
-          tabIndex={0}
-          className="w-1 bg-border hover:bg-primary/40 focus-visible:bg-primary/40 cursor-col-resize shrink-0 transition-colors outline-none"
-          onMouseDown={handleDragStart}
-          onKeyDown={handleResizeKeyDown}
-          title="Drag to resize"
-        />
-      )}
-
-      {showPreview && (
+      <RightDrawer>
         <RightPanel
+          key={drawer.activeTab}
           agentId={agentId}
           workspaceId={workspaceId}
           files={files}
-          style={{ width: `${100 - splitRatio}%` }}
+          initialTab={drawer.activeTab}
+          hideTabs
+          style={{ width: "100%", height: "100%" }}
         />
-      )}
+      </RightDrawer>
+
+      <RightRail className={cn(pushOpen && "border-l-0")} />
+      <SlashPalette agentSlug={agentSlug} onCommand={handleSlashCommand} />
+      <ArtifactPane agentId={agentId} />
+      <ConversationSearch turns={turns} />
+      <ExportDialog turns={turns} agentName={agentName} />
+      <ReconnectBanner status={connectionStatus} />
     </div>
   )
 }
@@ -419,6 +461,28 @@ function ConnectionBadge({ status }: { status: string }) {
       )}
       <span className="capitalize">{status}</span>
     </div>
+  )
+}
+
+/** Origin chip in the chat header strip — tells the user at a glance
+ *  whether they're looking at a session started from the UI, the CLI,
+ *  a webhook, a cron, or an agent-to-agent assignment. Hidden when
+ *  origin is unknown (pre-migration sessions or legacy backends). */
+function OriginChip({ origin }: { origin?: string | null }) {
+  if (!origin) return null
+  const map: Record<string, { label: string; className: string }> = {
+    UI:      { label: "UI",      className: "bg-blue-500/15 text-blue-300" },
+    CLI:     { label: "CLI",     className: "bg-violet-500/15 text-violet-300" },
+    WEBHOOK: { label: "Hook",    className: "bg-amber-500/15 text-amber-300" },
+    CRON:    { label: "Cron",    className: "bg-amber-500/15 text-amber-300" },
+    AGENT:   { label: "Agent",   className: "bg-fuchsia-500/15 text-fuchsia-300" },
+  }
+  const tag = map[origin]
+  if (!tag) return null
+  return (
+    <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", tag.className)}>
+      {tag.label}
+    </span>
   )
 }
 

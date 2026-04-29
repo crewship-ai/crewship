@@ -184,15 +184,27 @@ export function CrewsLayout({
   }, [])
 
   // Bottom panel context: selected agent > selected crew > none.
+  // Agent context carries the parent crew's id+slug because the Terminal
+  // tab needs them to exec into the right `crewship-team-{slug}` container.
   const bottomContext = useMemo(() => {
     if (selectedAgent) {
-      return { kind: "agent" as const, agentId: selectedAgent.id, agentSlug: selectedAgent.slug, agentName: selectedAgent.name }
+      const parentCrew = selectedAgent.crew_id
+        ? crews.find((c) => c.id === selectedAgent.crew_id)
+        : null
+      return {
+        kind: "agent" as const,
+        agentId: selectedAgent.id,
+        agentSlug: selectedAgent.slug,
+        agentName: selectedAgent.name,
+        crewId: selectedAgent.crew_id,
+        crewSlug: parentCrew?.slug ?? null,
+      }
     }
     if (selectedCrew) {
       return { kind: "crew" as const, crewId: selectedCrew.id, crewSlug: selectedCrew.slug }
     }
     return null
-  }, [selectedAgent, selectedCrew])
+  }, [selectedAgent, selectedCrew, crews])
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">

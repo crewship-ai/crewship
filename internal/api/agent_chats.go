@@ -14,7 +14,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, agent_id, workspace_id, title, mode, status,
-			message_count, started_at, ended_at, created_at
+			message_count, started_at, ended_at, created_at, origin
 		FROM chats
 		WHERE agent_id = ? AND workspace_id = ?
 		ORDER BY created_at DESC
@@ -38,6 +38,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		StartedAt    string  `json:"started_at"`
 		EndedAt      *string `json:"ended_at"`
 		CreatedAt    string  `json:"created_at"`
+		Origin       *string `json:"origin"`
 	}
 
 	var result []chatResponse
@@ -45,7 +46,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		var c chatResponse
 		if err := rows.Scan(&c.ID, &c.AgentID, &c.WorkspaceID, &c.Title,
 			&c.Mode, &c.Status, &c.MessageCount,
-			&c.StartedAt, &c.EndedAt, &c.CreatedAt); err != nil {
+			&c.StartedAt, &c.EndedAt, &c.CreatedAt, &c.Origin); err != nil {
 			h.logger.Error("scan chat", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -72,6 +73,12 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		SessionID string `json:"session_id"`
+		// Origin distinguishes how the session was started: "UI" (chat
+		// page in the browser), "CLI" (`crewship run`), "WEBHOOK",
+		// "CRON", "AGENT" (agent-to-agent assignment). The
+		// SessionsSidebar renders a colored chip per origin. Unknown
+		// or empty values are stored as NULL → no chip shown.
+		Origin string `json:"origin"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
@@ -81,6 +88,14 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	chatID := body.SessionID
 	if chatID == "" {
 		chatID = generateCUID()
+	}
+
+	// Whitelist allowed origin values; anything else becomes NULL so a
+	// rogue caller can't shove arbitrary text into a UI-rendered chip.
+	var origin sql.NullString
+	switch body.Origin {
+	case "UI", "CLI", "WEBHOOK", "CRON", "AGENT":
+		origin = sql.NullString{String: body.Origin, Valid: true}
 	}
 
 	// Check agent exists
@@ -97,10 +112,10 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 
 	// Atomic upsert: insert only if agent is still active (prevents TOCTOU with soft-delete)
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT OR IGNORE INTO chats (id, agent_id, workspace_id, created_by, status)
-		 SELECT ?, ?, ?, ?, 'ACTIVE'
+		`INSERT OR IGNORE INTO chats (id, agent_id, workspace_id, created_by, status, origin)
+		 SELECT ?, ?, ?, ?, 'ACTIVE', ?
 		 WHERE EXISTS (SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)`,
-		chatID, agentID, workspaceID, userID, agentID, workspaceID)
+		chatID, agentID, workspaceID, userID, origin, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("create chat", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

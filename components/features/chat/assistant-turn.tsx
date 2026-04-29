@@ -1,6 +1,10 @@
 "use client"
 
-import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle } from "lucide-react"
+import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle, FileCode } from "lucide-react"
+import { useArtifactStore } from "@/stores/artifact-store"
+import { useReactionsStore } from "@/stores/reactions-store"
+import { ReactionPicker } from "./reactions/reaction-picker"
+import { ReactionsRow } from "./reactions/reactions-row"
 import {
   Message,
   MessageContent,
@@ -23,6 +27,11 @@ interface AssistantTurnProps {
   turn: ChatTurn
   onCopy: (content: string) => void
   onFileClick: (fileName: string) => void
+  /** Active agent — required for "Open in Artifact" so tabs are scoped
+   *  to the agent that produced them. When omitted (older callers,
+   *  tests), the affordance is hidden rather than risk cross-agent
+   *  reads/writes against the global artifact store. */
+  agentId?: string
 }
 
 function formatDuration(ms: number): string {
@@ -126,11 +135,11 @@ interface AskQuestion {
   multiSelect?: boolean
 }
 
-function AskUserCard({ part }: { part: TurnPart }) {
+function AskUserCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const input = part.metadata?.input as { questions?: AskQuestion[] } | undefined
   const questions = input?.questions
   if (!questions?.length) {
-    return <DefaultToolCall part={part} />
+    return <DefaultToolCall part={part} agentId={agentId} />
   }
 
   return (
@@ -168,10 +177,10 @@ interface TodoItem {
   activeForm?: string
 }
 
-function TodoWriteCard({ part }: { part: TurnPart }) {
+function TodoWriteCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const input = part.metadata?.input as { todos?: TodoItem[] } | undefined
   const todos = input?.todos
-  if (!todos?.length) return <DefaultToolCall part={part} />
+  if (!todos?.length) return <DefaultToolCall part={part} agentId={agentId} />
 
   const completed = todos.filter((t) => t.status === "completed").length
   const inProgress = todos.filter((t) => t.status === "in_progress").length
@@ -217,9 +226,9 @@ function TodoWriteCard({ part }: { part: TurnPart }) {
   )
 }
 
-function TaskCard({ part }: { part: TurnPart }) {
+function TaskCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const input = part.metadata?.input as { description?: string; prompt?: string; subagent_type?: string } | undefined
-  if (!input?.description) return <DefaultToolCall part={part} />
+  if (!input?.description) return <DefaultToolCall part={part} agentId={agentId} />
 
   const isCompleted = !!part.metadata?.completed
   const promptPreview = input.prompt ? (input.prompt.length > 120 ? input.prompt.slice(0, 120) + "..." : input.prompt) : null
@@ -265,45 +274,87 @@ function redactSensitiveKeys(value: unknown): unknown {
   return value
 }
 
-function DefaultToolCall({ part }: { part: TurnPart }) {
+const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"])
+
+function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
   const isCompleted = !!part.metadata?.completed
   const rawInput = part.metadata?.input as Record<string, unknown> | undefined
   const input = rawInput ? redactSensitiveKeys(rawInput) as Record<string, unknown> : undefined
+  const openArtifact = useArtifactStore((s) => s.openFile)
 
   let subtitle = ""
+  let filePath: string | null = null
   if (input) {
-    if (input.file_path) subtitle = String(input.file_path)
+    if (input.file_path) {
+      subtitle = String(input.file_path)
+      filePath = String(input.file_path)
+    }
     else if (input.command) subtitle = `$ ${String(input.command).slice(0, 60)}${String(input.command).length > 60 ? "..." : ""}`
     else if (input.url) subtitle = String(input.url)
     else if (input.query) subtitle = String(input.query)
     else if (input.pattern) subtitle = String(input.pattern)
   }
 
+  // Reject absolute paths and traversal segments before exposing the
+  // "Open in Artifact" affordance — a crafted tool payload could
+  // otherwise surface arbitrary host paths.
+  const isSafeArtifactPath = (p: string | null): p is string => {
+    if (!p) return false
+    if (p.startsWith("/") || p.startsWith("\\")) return false
+    if (/(^|\/)\.\.(\/|$)/.test(p)) return false
+    return p.length > 0
+  }
+  const safeFilePath = isSafeArtifactPath(filePath) ? filePath : null
+  // agentId is required for safe scoping — without it we can't bind the
+  // tab to the agent that produced it, so don't expose the affordance.
+  const canOpenArtifact = safeFilePath && FILE_TOOLS.has(toolName) && !!agentId
+  const fileName = safeFilePath ? safeFilePath.split("/").pop() ?? safeFilePath : ""
+
   return (
-    <Tool defaultOpen={false}>
-      <ToolHeader
-        title={subtitle ? `${toolName}  ${subtitle}` : toolName}
-        type="tool-invocation"
-        state={isCompleted ? "output-available" : "input-available"}
-      />
-      <ToolContent>
-        {input != null && (
-          <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
-        )}
-      </ToolContent>
-    </Tool>
+    <div className="flex flex-col gap-1.5">
+      <Tool defaultOpen={false}>
+        <ToolHeader
+          title={subtitle ? `${toolName}  ${subtitle}` : toolName}
+          type="tool-invocation"
+          state={isCompleted ? "output-available" : "input-available"}
+        />
+        <ToolContent>
+          {input != null && (
+            <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+          )}
+        </ToolContent>
+      </Tool>
+      {canOpenArtifact && safeFilePath && agentId && (
+        <button
+          type="button"
+          onClick={() =>
+            openArtifact({
+              id: `${agentId}::${safeFilePath}`,
+              agentId,
+              path: safeFilePath,
+              title: fileName,
+            })
+          }
+          className="flex items-center gap-2 px-3 py-1.5 bg-primary/5 border border-primary/20 rounded-lg text-label text-primary hover:bg-primary/10 max-w-md transition-colors w-fit"
+        >
+          <FileCode className="h-3.5 w-3.5" />
+          <span>Open in Artifact</span>
+          <span className="font-mono text-micro text-muted-foreground truncate max-w-[200px]">{fileName}</span>
+        </button>
+      )}
+    </div>
   )
 }
 
-function InlineToolCall({ part }: { part: TurnPart }) {
+function InlineToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
 
   switch (toolName) {
-    case "AskUserQuestion": return <AskUserCard part={part} />
-    case "TodoWrite": return <TodoWriteCard part={part} />
-    case "Task": return <TaskCard part={part} />
-    default: return <DefaultToolCall part={part} />
+    case "AskUserQuestion": return <AskUserCard part={part} agentId={agentId} />
+    case "TodoWrite": return <TodoWriteCard part={part} agentId={agentId} />
+    case "Task": return <TaskCard part={part} agentId={agentId} />
+    default: return <DefaultToolCall part={part} agentId={agentId} />
   }
 }
 
@@ -364,7 +415,7 @@ function DelegationContent({ content }: { content: string }) {
   )
 }
 
-export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps) {
+export function AssistantTurn({ turn, onCopy, onFileClick, agentId }: AssistantTurnProps) {
   // Collect all text content for copy action
   const fullText = turn.parts
     .filter((p) => p.type === "text")
@@ -402,7 +453,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
             )
 
           case "tool_call":
-            return <InlineToolCall key={part.id} part={part} />
+            return <InlineToolCall key={part.id} part={part} agentId={agentId} />
 
           case "tool_result":
             return <InlineToolResult key={part.id} part={part} />
@@ -474,6 +525,9 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
         </button>
       )}
 
+      {/* Reactions row */}
+      <TurnReactions turnId={turn.id} streaming={turn.isStreaming} />
+
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
         <MessageActions>
@@ -486,8 +540,22 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
           <MessageAction tooltip="Bad response">
             <ThumbsDown className="h-3.5 w-3.5" />
           </MessageAction>
+          <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
         </MessageActions>
       )}
     </Message>
+  )
+}
+
+function TurnReactions({ turnId, streaming }: { turnId: string; streaming: boolean }) {
+  const reactions = useReactionsStore((s) => s.byTurn[turnId])
+  const toggle = useReactionsStore((s) => s.toggle)
+  if (streaming || !reactions || Object.keys(reactions).length === 0) return null
+  return (
+    <ReactionsRow
+      reactions={reactions}
+      onToggle={(emoji) => toggle(turnId, emoji)}
+      className="mt-1"
+    />
   )
 }
