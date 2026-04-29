@@ -69,3 +69,80 @@ func TestIsSafeRedirect(t *testing.T) {
 		})
 	}
 }
+
+// TestCanRole locks down the role × action matrix. The original switch only
+// recognised create/manage/read, so two production handlers (CacheDelete with
+// "delete", RestartCrewAgents with "update") fell through to default and
+// always returned 403. This table guarantees both actions are honoured and
+// fails loudly if anyone trims the switch back.
+func TestCanRole(t *testing.T) {
+	cases := []struct {
+		role   string
+		action string
+		want   bool
+	}{
+		// read — any authenticated role; empty role is rejected (fail-closed).
+		{"OWNER", "read", true},
+		{"ADMIN", "read", true},
+		{"MANAGER", "read", true},
+		{"MEMBER", "read", true},
+		{"VIEWER", "read", true},
+		{"", "read", false}, // empty role denied — guards against auth middleware bypass
+
+		// create — OWNER/ADMIN/MANAGER
+		{"OWNER", "create", true},
+		{"ADMIN", "create", true},
+		{"MANAGER", "create", true},
+		{"MEMBER", "create", false},
+		{"VIEWER", "create", false},
+		{"", "create", false},
+
+		// update — same tier as create (reversible mutations)
+		{"OWNER", "update", true},
+		{"ADMIN", "update", true},
+		{"MANAGER", "update", true},
+		{"MEMBER", "update", false},
+		{"VIEWER", "update", false},
+		{"", "update", false},
+
+		// manage — OWNER/ADMIN
+		{"OWNER", "manage", true},
+		{"ADMIN", "manage", true},
+		{"MANAGER", "manage", false},
+		{"MEMBER", "manage", false},
+		{"VIEWER", "manage", false},
+		{"", "manage", false},
+
+		// delete — same tier as manage (destructive)
+		{"OWNER", "delete", true},
+		{"ADMIN", "delete", true},
+		{"MANAGER", "delete", false},
+		{"MEMBER", "delete", false},
+		{"VIEWER", "delete", false},
+		{"", "delete", false},
+
+		// Unknown actions must deny — fail-closed by design.
+		{"OWNER", "wat", false},
+		{"OWNER", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.role+"/"+tc.action, func(t *testing.T) {
+			if got := canRole(tc.role, tc.action); got != tc.want {
+				t.Errorf("canRole(%q, %q) = %v, want %v", tc.role, tc.action, got, tc.want)
+			}
+		})
+	}
+
+	// Multi-action: caller must satisfy ALL of them.
+	t.Run("multi-action AND semantics", func(t *testing.T) {
+		if !canRole("OWNER", "read", "manage", "delete") {
+			t.Error("OWNER should satisfy read+manage+delete")
+		}
+		if canRole("MANAGER", "create", "delete") {
+			t.Error("MANAGER must NOT satisfy delete; multi-action should AND")
+		}
+		if canRole("MEMBER", "read", "create") {
+			t.Error("MEMBER must NOT satisfy create even when read passes")
+		}
+	})
+}
