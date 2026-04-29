@@ -359,6 +359,15 @@ func (r *Router) registerRoutes() {
 	aih := NewAgentInboxHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/inbox", authed(wsCtx(http.HandlerFunc(aih.Handle))))
 
+	// User preferences: generic key-value store for per-user UI settings
+	// (panel sizes, density, last-opened tabs, …). Migration v58 created
+	// the underlying table; values are arbitrary JSON owned by the FE per
+	// key. Only the authenticated user can read/write their own row set.
+	uph := NewUserPreferencesHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/me/preferences", authed(http.HandlerFunc(uph.List)))
+	r.mux.Handle("PUT /api/v1/me/preferences/{key}", authed(http.HandlerFunc(uph.Set)))
+	r.mux.Handle("DELETE /api/v1/me/preferences/{key}", authed(http.HandlerFunc(uph.Delete)))
+
 	// Message reactions: per-(chat, message, emoji, user) emoji react with
 	// idempotent INSERT OR IGNORE. Migration v57 created the underlying
 	// table; endpoints are scoped via chats.workspace_id so cross-tenant

@@ -528,6 +528,22 @@ CREATE TABLE IF NOT EXISTS workspace_files (
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_files_ws ON workspace_files(workspace_id);
 `},
+	// Per-user preferences. JSON-blob value keyed by string, scoped by
+	// user_id. First consumer is bottom-panel height for the Crews
+	// canvas — but the schema is intentionally generic so future UI
+	// settings (theme, density, panel positions, last-opened tabs, …)
+	// land here without another migration.
+	{version: 58, name: "add_user_preferences", sql: `
+CREATE TABLE IF NOT EXISTS user_preferences (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	pref_key TEXT NOT NULL,
+	pref_value TEXT NOT NULL,
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(user_id, pref_key)
+);
+CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

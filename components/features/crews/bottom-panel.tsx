@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { getEditorLanguage } from "@/components/features/chat/chat-tree-row"
+import { useUserPreference } from "@/hooks/use-user-preference"
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
@@ -91,6 +92,14 @@ export interface BottomPanelProps {
  * selected, crew-scoped when a crew is selected, workspace-wide
  * otherwise.
  */
+// Sensible bounds for the resize gesture. The min keeps something
+// useful visible (headers + a few rows); the max stops the panel
+// from eating the whole viewport on a tall monitor. 320 is the same
+// default the panel used before being resizable.
+const PANEL_HEIGHT_MIN = 160
+const PANEL_HEIGHT_MAX = 900
+const PANEL_HEIGHT_DEFAULT = 320
+
 export function BottomPanel({
   workspaceId,
   context,
@@ -100,6 +109,12 @@ export function BottomPanel({
 }: BottomPanelProps) {
   const [tab, setTab] = useState<BottomTab>(initialTab)
   const [open, setOpen] = useState(initialOpen)
+  const [height, setHeight] = useUserPreference<number>(
+    "crews.bottomPanel.height",
+    PANEL_HEIGHT_DEFAULT,
+  )
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     setTab(initialTab)
@@ -107,6 +122,50 @@ export function BottomPanel({
   }, [initialTab, initialOpen])
 
   useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
+
+  // Mouse-driven resize. We track on document so the gesture survives
+  // even if the cursor leaves the handle hitbox (typical desktop drag
+  // behaviour). Touchstart hooks the same flow so tablets get it too.
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (clientY: number) => {
+      if (!dragRef.current) return
+      const delta = dragRef.current.startY - clientY
+      const next = Math.min(
+        PANEL_HEIGHT_MAX,
+        Math.max(PANEL_HEIGHT_MIN, dragRef.current.startH + delta),
+      )
+      setHeight(next)
+    }
+    const onMouseMove = (e: MouseEvent) => onMove(e.clientY)
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) onMove(e.touches[0].clientY)
+    }
+    const onUp = () => {
+      dragRef.current = null
+      setDragging(false)
+      document.body.style.userSelect = ""
+      document.body.style.cursor = ""
+    }
+    document.addEventListener("mousemove", onMouseMove)
+    document.addEventListener("mouseup", onUp)
+    document.addEventListener("touchmove", onTouchMove, { passive: true })
+    document.addEventListener("touchend", onUp)
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove)
+      document.removeEventListener("mouseup", onUp)
+      document.removeEventListener("touchmove", onTouchMove)
+      document.removeEventListener("touchend", onUp)
+    }
+  }, [dragging, setHeight])
+
+  const startDrag = (clientY: number) => {
+    if (!open) return
+    dragRef.current = { startY: clientY, startH: height }
+    setDragging(true)
+    document.body.style.userSelect = "none"
+    document.body.style.cursor = "ns-resize"
+  }
 
   const handleTab = (next: BottomTab, soon?: boolean) => {
     if (soon) return
@@ -117,10 +176,54 @@ export function BottomPanel({
   return (
     <div
       className={cn(
-        "shrink-0 border-t border-white/8 bg-card flex flex-col transition-[height] duration-200",
-        open ? "h-[320px]" : "h-9",
+        "shrink-0 border-t border-white/8 bg-card flex flex-col relative",
+        // Disable height transitions during a drag so the gesture
+        // tracks the cursor 1:1 instead of lerping behind it.
+        !dragging && "transition-[height] duration-200",
       )}
+      style={{ height: open ? `${height}px` : "36px" }}
     >
+      {/* Resize handle — sits at the very top edge, hovers a thin grab
+          target. Pointer-events only when the panel is open (it'd be
+          confusing to drag a collapsed strip). */}
+      {open && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize bottom panel"
+          aria-valuenow={height}
+          aria-valuemin={PANEL_HEIGHT_MIN}
+          aria-valuemax={PANEL_HEIGHT_MAX}
+          tabIndex={0}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            startDrag(e.clientY)
+          }}
+          onTouchStart={(e) => {
+            if (e.touches.length > 0) startDrag(e.touches[0].clientY)
+          }}
+          onKeyDown={(e) => {
+            // Keyboard nudge for accessibility — 16 px steps with
+            // arrow keys, 64 px with PageUp/Down.
+            const step = e.key === "PageUp" || e.key === "PageDown" ? 64 : 16
+            if (e.key === "ArrowUp" || e.key === "PageUp") {
+              e.preventDefault()
+              setHeight(Math.min(PANEL_HEIGHT_MAX, height + step))
+            } else if (e.key === "ArrowDown" || e.key === "PageDown") {
+              e.preventDefault()
+              setHeight(Math.max(PANEL_HEIGHT_MIN, height - step))
+            }
+          }}
+          className={cn(
+            "absolute -top-[3px] left-0 right-0 h-[6px] z-10 cursor-ns-resize",
+            "before:absolute before:inset-x-0 before:top-[2px] before:h-[2px] before:transition-colors",
+            dragging
+              ? "before:bg-blue-400/50"
+              : "before:bg-transparent hover:before:bg-blue-400/30",
+          )}
+        />
+      )}
+
       <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs">
         {TABS.map((t) => {
           const Icon = t.icon
