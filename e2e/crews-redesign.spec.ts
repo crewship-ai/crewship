@@ -145,7 +145,8 @@ test.describe("/chat/[agentSlug] — full-page chat", () => {
     const agentRow = page.locator("aside button").filter({ hasText: /idle|running/i }).first()
     await agentRow.click()
     const url = new URL(page.url())
-    const slug = url.searchParams.get("agent")!
+    const slug = url.searchParams.get("agent")
+    expect(slug).toBeTruthy()
     await page.goto(`/chat/${slug}`)
     // Back arrow has title "Back to agent canvas"
     const back = page.getByTitle("Back to agent canvas")

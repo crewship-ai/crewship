@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { motion } from "motion/react"
 import { ChevronLeft, MessageSquarePlus } from "lucide-react"
+import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
@@ -194,8 +195,8 @@ export function ChatPageClient() {
         if (Array.isArray(list)) setSessions(list)
       }
       router.replace(`/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(created.id)}`)
-    } catch {
-      // toast handled at the chat panel level
+    } catch (err) {
+      toast.error(`Could not create session: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setCreatingSession(false)
     }

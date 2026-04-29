@@ -74,8 +74,6 @@ interface AgentRecord {
   llm_provider: string | null
   llm_model: string | null
   system_prompt: string | null
-  temperature?: number | null
-  max_tokens?: number | null
   timeout_seconds: number
   tool_profile: string
   memory_enabled: boolean
@@ -85,7 +83,6 @@ interface AgentRecord {
   schedule_enabled?: boolean | null
   schedule_last_run?: string | null
   schedule_next_run?: string | null
-  webhook_secret?: string | null
   avatar_seed: string | null
   avatar_style: string | null
   updated_at: string
@@ -233,10 +230,15 @@ export function AgentCanvas({
   // Inbox + cost summary (used by stats strip + InboxBanner).
   const [inbox, setInbox] = useState<InboxSummary>({ count: 0 })
   const [peerMessages, setPeerMessages] = useState<PeerMessageRow[]>([])
+  const agentId = agent?.id
   useEffect(() => {
-    if (!agent) return
+    if (!agentId) return
     let cancelled = false
-    fetch(`/api/v1/agents/${agent.id}/inbox?workspace_id=${workspaceId}`)
+    // Clear previous agent's data immediately so a stale inbox / peer list
+    // never leaks into the next selection while the request is in flight.
+    setInbox({ count: 0 })
+    setPeerMessages([])
+    fetch(`/api/v1/agents/${agentId}/inbox?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return
@@ -255,7 +257,7 @@ export function AgentCanvas({
       })
       .catch(() => { /* tolerate */ })
     return () => { cancelled = true }
-  }, [agent, workspaceId])
+  }, [agentId, workspaceId])
 
   // Runs + chats are fetched once at canvas-level and shared with the
   // overview tab's Recent cards (avoids three separate hits to the
@@ -263,22 +265,26 @@ export function AgentCanvas({
   const [runs, setRuns] = useState<RunRow[] | null>(null)
   const [chats, setChats] = useState<ChatRow[] | null>(null)
   useEffect(() => {
-    if (!agent) return
+    if (!agentId) return
     let cancelled = false
-    fetch(`/api/v1/agents/${agent.id}/runs?workspace_id=${workspaceId}`)
+    // Reset before fetch so the previous agent's runs/chats don't leak into
+    // this canvas while the new request is pending.
+    setRuns(null)
+    setChats(null)
+    fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: RunRow[] | null) => {
         if (!cancelled && Array.isArray(data)) setRuns(data)
       })
       .catch(() => { /* tolerate */ })
-    fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`)
+    fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: ChatRow[] | null) => {
         if (!cancelled && Array.isArray(data)) setChats(data)
       })
       .catch(() => { /* tolerate */ })
     return () => { cancelled = true }
-  }, [agent, workspaceId])
+  }, [agentId, workspaceId])
   const runsCount = runs?.length ?? null
 
   const patch = useCallback(async (body: Record<string, unknown>) => {
@@ -641,7 +647,11 @@ export function AgentCanvas({
                   <Row label="Timeout (s)">
                     <EditableField
                       value={String(agent.timeout_seconds)}
-                      onSave={(v) => patch({ timeout_seconds: Number(v) })}
+                      onSave={(v) => {
+                        const n = parseInt(v, 10)
+                        if (!Number.isInteger(n) || n < 1) return
+                        patch({ timeout_seconds: n })
+                      }}
                     />
                   </Row>
                   <Row label="Tool profile">

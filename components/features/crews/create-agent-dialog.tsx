@@ -69,6 +69,11 @@ export function CreateAgentDialog({
     setBusy(true)
     try {
       const targetCrew = requiresCrew ? crews.find((c) => c.slug === crewSlug) : null
+      if (requiresCrew && !targetCrew) {
+        toast.error(`Crew "${crewSlug}" no longer exists. Please reselect.`)
+        setBusy(false)
+        return
+      }
       const body: Record<string, unknown> = {
         name: name.trim(),
         slug: slug.trim(),

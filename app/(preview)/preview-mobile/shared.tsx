@@ -147,10 +147,10 @@ export function UserFooter() {
   return (
     <div className="border-t p-4">
       <div className="flex items-center gap-3">
-        <div className="h-8 w-8 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center">PS</div>
+        <div className="h-8 w-8 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center">DU</div>
         <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium">Pavel Srba</div>
-          <div className="text-[10px] text-muted-foreground">pavel@unify.tech</div>
+          <div className="text-xs font-medium">Demo User</div>
+          <div className="text-[10px] text-muted-foreground">demo@crewship.local</div>
         </div>
       </div>
     </div>
@@ -170,7 +170,10 @@ export function AgentHeaderBlock({ compact }: { compact?: boolean }) {
           </div>
           <span className="text-[11px] text-muted-foreground">Google Ads Specialist</span>
         </div>
-        <button className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent shrink-0">
+        <button
+          aria-label="Open agent actions"
+          className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent shrink-0"
+        >
           <MoreVertical className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
       </div>

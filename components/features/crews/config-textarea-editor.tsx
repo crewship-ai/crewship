@@ -71,8 +71,11 @@ export function ConfigTextareaEditor({
     setError(null)
     try {
       // Send null for empty strings so the backend can clear the field.
-      const trimmed = draft.trim()
-      await onSave(trimmed === "" ? null : trimmed)
+      // Use trim() only for the emptiness check — persist the original draft
+      // so we don't strip leading/trailing whitespace or a final newline that
+      // may be meaningful in a config file.
+      const next = draft.trim() === "" ? null : draft
+      await onSave(next)
       setEditing(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

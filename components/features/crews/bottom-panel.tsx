@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import {
-  ChevronDown, ChevronUp, Container, FileCode2, Files,
+  ChevronDown, ChevronUp, Container, File, FileCode2, Files, Folder,
   MessageSquare, Terminal,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -96,8 +96,10 @@ export function BottomPanel({
 
   return (
     <div
-      className="shrink-0 border-t border-white/8 bg-card flex flex-col transition-[height] duration-200"
-      style={{ height: open ? 320 : 36 }}
+      className={cn(
+        "shrink-0 border-t border-white/8 bg-card flex flex-col transition-[height] duration-200",
+        open ? "h-[320px]" : "h-9",
+      )}
     >
       <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs">
         {TABS.map((t) => {
@@ -340,19 +342,28 @@ function YamlTab({ workspaceId, context }: { workspaceId: string; context: Botto
 
 function DockerTab() {
   const [containers, setContainers] = useState<ContainerStatus[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     fetch("/api/v1/system/runtime")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then((data) => {
-        if (cancelled || !data) return
+        if (cancelled) return
         const list: ContainerStatus[] = Array.isArray(data?.containers) ? data.containers : []
         setContainers(list)
       })
-      .catch(() => { if (!cancelled) setContainers([]) })
+      .catch((err) => {
+        if (cancelled) return
+        setError(err instanceof Error ? err.message : String(err))
+        setContainers([])
+      })
     return () => { cancelled = true }
   }, [])
 
+  if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
   if (containers === null) return <EmptyState>Loading container status…</EmptyState>
   if (containers.length === 0) return <EmptyState>No containers running.</EmptyState>
 
@@ -454,9 +465,9 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
       <ul className="font-mono space-y-0.5">
         {files.map((f) => (
           <li key={f.name} className="flex items-center gap-2 text-foreground/85 hover:bg-white/[0.03] px-2 -mx-2 py-0.5 rounded">
-            <span className={f.is_dir ? "text-blue-300" : "text-muted-foreground"}>
-              {f.is_dir ? "📁" : "📄"}
-            </span>
+            {f.is_dir
+              ? <Folder className="h-3 w-3 shrink-0 text-blue-300" />
+              : <File className="h-3 w-3 shrink-0 text-muted-foreground" />}
             <span className="flex-1">{f.name}</span>
             {f.size !== undefined && !f.is_dir && (
               <span className="text-[10px] text-muted-foreground">{formatBytes(f.size)}</span>

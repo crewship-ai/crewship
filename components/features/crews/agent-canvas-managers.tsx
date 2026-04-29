@@ -198,7 +198,20 @@ function CredentialsManager({ agentId, agentSlug, workspaceId, onChange }: { age
   }, [available, workspaceId])
 
   const assign = useCallback(async (cred: WorkspaceCredential) => {
-    const envVar = cred.default_env_var || cred.name.toUpperCase().replace(/[^A-Z0-9_]/g, "_")
+    // Server expects /^[A-Z_][A-Z0-9_]*$/ for env var names. The fallback
+    // path computes a name from cred.name, which can produce values like
+    // "1PASSWORD" (leading digit) or "_" (only underscores). Clamp here so
+    // we never POST a name the API will reject — or worse, silently store
+    // and then fail at exec time.
+    const sanitize = (raw: string): string => {
+      let s = raw.toUpperCase().replace(/[^A-Z0-9_]/g, "_").replace(/_+/g, "_")
+      s = s.replace(/^_+|_+$/g, "")
+      if (!s || /^\d/.test(s)) {
+        s = "CRED_" + s
+      }
+      return s.replace(/_+$/g, "")
+    }
+    const envVar = cred.default_env_var || sanitize(cred.name)
     setBusy(true)
     try {
       const r = await fetch(`/api/v1/agents/${agentId}/credentials`, {

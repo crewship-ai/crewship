@@ -68,6 +68,10 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 
   const submit = async () => {
     if (!name.trim() || !slug.trim()) return
+    if (mode === "template" && !pickedTemplate) {
+      toast.error("Pick a template before creating from template")
+      return
+    }
     setBusy(true)
     try {
       const body: Record<string, unknown> = {
@@ -98,7 +102,10 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     }
   }
 
-  const valid = name.trim().length >= 2 && /^[a-z0-9-]{2,}$/.test(slug)
+  const valid =
+    name.trim().length >= 2 &&
+    /^[a-z0-9-]{2,}$/.test(slug) &&
+    (mode !== "template" || !!pickedTemplate)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
