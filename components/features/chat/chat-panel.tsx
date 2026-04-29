@@ -99,7 +99,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
       .catch(() => {})
   }, [])
 
-  const { turns, sendMessage, stopGeneration, regenerateLastTurn, loadHistory, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     token,
     sessionId,
@@ -241,6 +241,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
                     onFileClick={noopFileClick}
                     isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
                     onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
                   />
                 ))}
                 <StreamingIndicator isStreaming={isStreaming} turns={turns} />
@@ -311,6 +312,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
                     onFileClick={noopFileClick}
                     isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
                     onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
                   />
                 ))}
                 <StreamingIndicator isStreaming={isStreaming} turns={turns} />

@@ -15,6 +15,7 @@ import {
 import { arrival } from "@/lib/motion"
 import type { ChatTurn } from "@/hooks/use-chat"
 import { AssistantTurn } from "./assistant-turn"
+import { EditableUserMessage } from "./messages/editable-user-message"
 
 function formatTimestamp(date: Date): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
@@ -26,10 +27,11 @@ interface TurnRendererProps {
   onFileClick: (s: string) => void
   isLastAssistant?: boolean
   onRegenerate?: () => void
+  onEditUserMessage?: (turnId: string, newContent: string) => void
 }
 
 /** Render a single turn (user, assistant, or system). */
-export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate }: TurnRendererProps) {
+export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage }: TurnRendererProps) {
   if (turn.role === "user") {
     const textContent = turn.parts.find((p) => p.type === "text")?.content ?? ""
     return (
@@ -39,17 +41,27 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
         animate={arrival.animate}
         exit={arrival.exit}
         transition={arrival.transition}
+        data-turn-id={turn.id}
+        className="group flex flex-col"
       >
-      <Message from="user">
-        <MessageContent>
-          <div className="flex items-start gap-2">
-            <span>{textContent}</span>
-          </div>
-        </MessageContent>
-        <div className="text-micro text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-          {formatTimestamp(turn.timestamp)}
-        </div>
-      </Message>
+        {onEditUserMessage ? (
+          <EditableUserMessage
+            text={textContent}
+            timestamp={turn.timestamp}
+            onSave={(next) => onEditUserMessage(turn.id, next)}
+          />
+        ) : (
+          <Message from="user">
+            <MessageContent>
+              <div className="flex items-start gap-2">
+                <span>{textContent}</span>
+              </div>
+            </MessageContent>
+            <div className="text-micro text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+              {formatTimestamp(turn.timestamp)}
+            </div>
+          </Message>
+        )}
       </motion.div>
     )
   }
@@ -94,6 +106,7 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
         initial={arrival.initial}
         animate={arrival.animate}
         transition={arrival.transition}
+        data-turn-id={turn.id}
       >
       <Message from="assistant">
         <MessageContent className={isError ? "border-destructive/50 bg-destructive/5 rounded-lg px-4 py-3" : ""}>
@@ -114,6 +127,7 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
       initial={arrival.initial}
       animate={arrival.animate}
       transition={arrival.transition}
+      data-turn-id={turn.id}
     >
       <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} />
       {isLastAssistant && onRegenerate && !turn.isStreaming && (
