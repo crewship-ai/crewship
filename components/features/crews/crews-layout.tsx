@@ -3,28 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
-import {
-  Plus, LayoutGrid, Activity,
-  HeartPulse,
-  ChevronLeft, PanelLeftOpen,
-} from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
-import { CrewsCrewDetail } from "@/components/features/crews/crews-crew-detail"
-import { CrewsAgentInline } from "@/components/features/crews/crews-agent-inline"
-import { CrewsContextHeader } from "@/components/features/crews/crews-context-header"
-import { AllCrewsOverview } from "@/components/features/crews/crews-all-crews-overview"
-import { CrewsHealthTab } from "@/components/features/crews/crews-health-tab"
-import { CrewsBottomDrawer } from "@/components/features/crews/crews-bottom-drawer"
-import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
-import { ChatDrawer } from "@/components/features/crews/drawers/chat-drawer"
-import { LogsDrawer } from "@/components/features/crews/drawers/logs-drawer"
-import { SettingsDrawer } from "@/components/features/crews/drawers/settings-drawer"
+import { CrewsSubbar } from "@/components/features/crews/crews-subbar"
+import { AgentCanvas } from "@/components/features/crews/agent-canvas"
+import { CrewCanvas } from "@/components/features/crews/crew-canvas"
+import { EmptyRoster } from "@/components/features/crews/empty-roster"
+import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useCrewsSelection, type CrewsTab, type CrewsDrawer } from "@/hooks/use-crews-selection"
-import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
-import Link from "next/link"
+import { useCrewsSelection } from "@/hooks/use-crews-selection"
 
 interface CrewData {
   id: string
@@ -78,52 +64,70 @@ export interface CrewsLayoutProps {
   onRefresh: () => void
 }
 
-const CREWS_TABS: Array<{ id: CrewsTab; label: string; icon: typeof LayoutGrid }> = [
-  { id: "overview", label: "Overview", icon: LayoutGrid },
-  { id: "activity", label: "Activity", icon: Activity },
-  { id: "health", label: "Health", icon: HeartPulse },
-]
-
-// CREWS_BOTTOM_TABS lives inside crews-bottom-drawer.tsx now (extracted
-// during the drawer component split). The top-level layout only renders
-// <CrewsBottomDrawer> and does not need the tab list here.
-
-export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = false, onRefresh: _onRefresh }: CrewsLayoutProps) {
+/**
+ * Selection-driven canvas layout.
+ *
+ *   ┌─────────────────────────────────────────────┐
+ *   │  CrewsSubbar (breadcrumb · filters · CTAs)  │
+ *   ├──────────────┬──────────────────────────────┤
+ *   │              │                              │
+ *   │  Explorer    │  AgentCanvas /               │
+ *   │  (filter +   │  CrewCanvas /                │
+ *   │  hierarchy)  │  EmptyRoster                 │
+ *   │              │                              │
+ *   ├──────────────┴──────────────────────────────┤
+ *   │  BottomPanel (Messages/Exec/YAML/Docker/…)  │
+ *   └─────────────────────────────────────────────┘
+ *
+ * Replaces the older drawer-based design (chat/logs/settings as Sheets,
+ * top tabs Overview/Activity/Health, dual headers). All settings now
+ * live inline in the canvas; chat moves to a dedicated /chat/[slug]
+ * full-page route.
+ */
+export function CrewsLayout({
+  crews,
+  agents,
+  missions,
+  workspaceId,
+  loaded = false,
+  onRefresh,
+}: CrewsLayoutProps) {
   const isMobile = useIsMobile()
   const {
     selectedAgentSlug,
     selectedCrewSlug,
-    activeTab,
-    activeDrawer,
     update,
     selectAgent,
     selectCrew,
-    setTab,
-    openDrawer,
-    closeDrawer,
   } = useCrewsSelection()
 
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [explorerCollapsed, setExplorerCollapsed] = useState(false)
+  const [explorerOverlayOpen, setExplorerOverlayOpen] = useState(false)
+  const [bottomTab, setBottomTab] = useState<BottomTab>("messages")
+  const [bottomOpen, setBottomOpen] = useState(false)
 
   useEffect(() => {
-    if (isMobile) setLeftCollapsed(true)
+    if (isMobile) setExplorerCollapsed(true)
   }, [isMobile])
 
+  // Stale-slug watcher: clear ?agent= / ?crew= if they don't exist.
+  // Only fires when the lists are non-empty — a transient empty state
+  // during route transitions (e.g. back-nav from /chat/<slug>) used to
+  // toast "Agent not found" before the fetch caught up, then drop the
+  // ?agent= param and dump the user on the empty roster. Treat empty
+  // lists as still-loading; the user-perception cost of NOT clearing a
+  // stale slug for a beat is much lower than the cost of clearing a
+  // valid one.
   const staleSlugNotified = useRef<string | null>(null)
   useEffect(() => {
-    // Wait for the parent fetch to actually finish before judging a slug
-    // as stale. `agents.length > 0` / `crews.length > 0` would otherwise
-    // treat a legitimately empty workspace as "still loading" forever,
-    // and would also flip deep-links like `/crews?agent=filip` to null
-    // on first paint before the fetch had a chance to populate.
     if (!loaded) return
-    if (selectedAgentSlug && !agents.find((a) => a.slug === selectedAgentSlug)) {
+    if (selectedAgentSlug && agents.length > 0 && !agents.find((a) => a.slug === selectedAgentSlug)) {
       if (staleSlugNotified.current !== selectedAgentSlug) {
         staleSlugNotified.current = selectedAgentSlug
         toast.warning(`Agent "${selectedAgentSlug}" not found`)
         update({ agent: null })
       }
-    } else if (selectedCrewSlug && !crews.find((c) => c.slug === selectedCrewSlug)) {
+    } else if (selectedCrewSlug && crews.length > 0 && !crews.find((c) => c.slug === selectedCrewSlug)) {
       if (staleSlugNotified.current !== selectedCrewSlug) {
         staleSlugNotified.current = selectedCrewSlug
         toast.warning(`Crew "${selectedCrewSlug}" not found`)
@@ -138,35 +142,25 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
     () => (selectedCrewSlug ? crews.find((c) => c.slug === selectedCrewSlug) || null : null),
     [crews, selectedCrewSlug],
   )
-
   const selectedAgent = useMemo(
     () => (selectedAgentSlug ? agents.find((a) => a.slug === selectedAgentSlug) || null : null),
     [agents, selectedAgentSlug],
   )
 
-  const selectedCrewId = selectedCrew?.id ?? null
-  const selectedAgentId = selectedAgent?.id ?? null
-
   const crewAgents = useMemo(
-    () => (selectedCrewId ? agents.filter((a) => a.crew_id === selectedCrewId) : []),
-    [agents, selectedCrewId],
+    () => (selectedCrew ? agents.filter((a) => a.crew_id === selectedCrew.id) : []),
+    [agents, selectedCrew],
   )
 
-  // Click on a crew in the explorer keeps the user on /crews with
-  // `?crew=<slug>` — Phase 7 stopped routing to the legacy full crew
-  // page. The inline Overview tab renders CrewsCrewDetail; Activity
-  // and Health narrow server-side to the crew. Deep config (network
-  // policy, runtime, MCP, danger zone) still lives at /crews/<id> for
-  // now and is reachable via the Edit button inside the Overview.
   const handleCrewSelect = useCallback((crewId: string) => {
     const crew = crews.find((c) => c.id === crewId)
     if (!crew) return
-    if (selectedCrewSlug === crew.slug) {
+    if (selectedCrewSlug === crew.slug && !selectedAgentSlug) {
       selectCrew(null)
       return
     }
     selectCrew(crew.slug)
-  }, [crews, selectedCrewSlug, selectCrew])
+  }, [crews, selectedCrewSlug, selectedAgentSlug, selectCrew])
 
   const handleAgentSelect = useCallback((agentId: string) => {
     const agent = agents.find((a) => a.id === agentId)
@@ -179,299 +173,156 @@ export function CrewsLayout({ crews, agents, missions, workspaceId, loaded = fal
     update({ agent: agent.slug, crew: parentCrew?.slug ?? null })
   }, [agents, crews, selectedAgentSlug, selectAgent, update])
 
-  const handleAgentClose = useCallback(() => {
-    selectAgent(null)
-  }, [selectAgent])
+  const handleAgentSelectBySlug = useCallback((slug: string) => {
+    const agent = agents.find((a) => a.slug === slug)
+    if (agent) handleAgentSelect(agent.id)
+  }, [agents, handleAgentSelect])
 
-  // Mobile still needs a full-screen agent panel because the explorer
-  // and context header share the same narrow viewport. Desktop renders
-  // the agent inline in the center column.
-  const showMobileAgentPanel = isMobile && selectedAgent !== null
+  const handleOpenFiles = useCallback(() => {
+    setBottomTab("files")
+    setBottomOpen(true)
+  }, [])
 
-  const cycleAgent = useCallback((delta: 1 | -1) => {
-    if (agents.length === 0) return
-    const currentIdx = selectedAgent ? agents.findIndex((a) => a.slug === selectedAgent.slug) : -1
-    const nextIdx = currentIdx < 0
-      ? (delta === 1 ? 0 : agents.length - 1)
-      : (currentIdx + delta + agents.length) % agents.length
-    const next = agents[nextIdx]
-    if (!next) return
-    const parentCrew = next.crew_id ? crews.find((c) => c.id === next.crew_id) : null
-    update({ agent: next.slug, crew: parentCrew?.slug ?? null })
-  }, [agents, crews, selectedAgent, update])
-
-  useKeyboardShortcuts([
-    { keys: "Escape", handler: handleAgentClose, enabled: selectedAgent !== null && activeDrawer === null },
-    { keys: "j", handler: () => cycleAgent(1) },
-    { keys: "k", handler: () => cycleAgent(-1) },
-  ])
-
-  const handleDrawerOpenChange = useCallback(
-    (drawer: CrewsDrawer) => (open: boolean) => {
-      if (!open && activeDrawer === drawer) closeDrawer()
-    },
-    [activeDrawer, closeDrawer],
-  )
-
-  // Settings drawer operates on the current entity (agent first, then crew).
-  // Kept as a single drawer component because the editor surface is
-  // interchangeable at the Sheet level — the body will branch by entity kind
-  // once Phase 3 inlines the real forms.
-  const settingsEntity = selectedAgent
-    ? { kind: "agent" as const, id: selectedAgent.id, name: selectedAgent.name }
-    : selectedCrew
-      ? { kind: "crew" as const, id: selectedCrew.id, name: selectedCrew.name }
-      : null
+  // Bottom panel context: selected agent > selected crew > none.
+  const bottomContext = useMemo(() => {
+    if (selectedAgent) {
+      return { kind: "agent" as const, agentId: selectedAgent.id, agentSlug: selectedAgent.slug, agentName: selectedAgent.name }
+    }
+    if (selectedCrew) {
+      return { kind: "crew" as const, crewId: selectedCrew.id, crewSlug: selectedCrew.slug }
+    }
+    return null
+  }, [selectedAgent, selectedCrew])
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* Toolbar: tabs | actions */}
-      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-border px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {/* Left: tabs */}
-        <div className="flex items-stretch">
-          {CREWS_TABS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 text-label font-medium border-b-2 transition-all duration-100 relative top-px",
-                activeTab === id
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80",
-              )}
-            >
-              <Icon className="h-3 w-3 opacity-75" />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Right: actions */}
-        <div className="flex items-center gap-1.5 ml-auto shrink-0">
-          <Button size="sm" className="h-[22px] px-2 text-label font-medium gap-1" asChild>
-            <Link href="/crews/new">
-              <Plus className="h-3 w-3" />
-              Crew
-            </Link>
-          </Button>
-          <Button variant="outline" size="sm" className="h-[22px] px-2 text-label font-medium gap-1 bg-muted border-border" asChild>
-            <Link href="/crews/agents/new">
-              <Plus className="h-3 w-3" />
-              Agent
-            </Link>
-          </Button>
-        </div>
-      </div>
-
-      {/* Context header — compact identity strip for the selected entity.
-          Renders nothing in the workspace (all-crews) view, so no vertical
-          space is eaten when nothing is selected. */}
-      <CrewsContextHeader
-        agent={selectedAgent}
-        crew={!selectedAgent ? selectedCrew : null}
-        onOpenDrawer={openDrawer}
+      <CrewsSubbar
+        workspaceId={workspaceId}
+        crewSlug={selectedCrewSlug}
+        agentSlug={selectedAgentSlug}
+        crewName={selectedCrew?.name ?? null}
+        agentName={selectedAgent?.name ?? null}
+        onCrewCreated={onRefresh}
+        onAgentCreated={(slug) => {
+          onRefresh()
+          handleAgentSelectBySlug(slug)
+        }}
+        onOpenExplorer={() => setExplorerOverlayOpen(true)}
+        crews={crews}
       />
 
-      {/* Main 2-column layout (explorer + canvas). The right-hand Inbox
-          panel retired in Phase 4 — its approvals/escalations counters
-          moved to context-header alert pills, peer messages relocate to
-          the Activity tab (Phase 5), and Lead/Memory/Schedule chips
-          move to the Health tab (Phase 6). */}
+      {/* Main grid: explorer | canvas */}
       <div
-        className="flex-1 min-h-0 grid transition-all duration-200 relative"
+        className="flex-1 min-h-0 grid relative"
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "280px"} 1fr`,
-          gridTemplateRows: "1fr auto",
+            : `${explorerCollapsed ? "48px" : "260px"} 1fr`,
         }}
       >
-        {/* Left panel */}
+        {/* Explorer */}
         {isMobile ? (
-          <>
-            {leftCollapsed && (
-              <button
-                className="absolute top-2 left-2 z-20 h-8 w-8 min-h-[44px] min-w-[44px] rounded-md bg-card border border-border flex items-center justify-center text-muted-foreground hover:text-foreground"
-                onClick={() => setLeftCollapsed(false)}
-              >
-                <PanelLeftOpen className="h-3.5 w-3.5" />
-              </button>
-            )}
-            <AnimatePresence>
-              {!leftCollapsed && (
-                <>
-                  <motion.div
-                    className="fixed inset-0 bg-black/50 z-30"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    onClick={() => setLeftCollapsed(true)}
+          <AnimatePresence>
+            {explorerOverlayOpen && (
+              <>
+                <motion.div
+                  className="fixed inset-0 bg-black/50 z-30"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setExplorerOverlayOpen(false)}
+                />
+                <motion.div
+                  className="fixed left-0 top-0 bottom-0 w-[280px] z-40"
+                  initial={{ x: -280 }}
+                  animate={{ x: 0 }}
+                  exit={{ x: -280 }}
+                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                >
+                  <CrewsExplorer
+                    crews={crews}
+                    agents={agents}
+                    selectedCrewId={selectedCrew?.id ?? null}
+                    selectedAgentId={selectedAgent?.id ?? null}
+                    collapsed={false}
+                    onToggleCollapse={() => setExplorerOverlayOpen(false)}
+                    onCrewSelect={(id) => { handleCrewSelect(id); setExplorerOverlayOpen(false) }}
+                    onAgentSelect={(id) => { handleAgentSelect(id); setExplorerOverlayOpen(false) }}
                   />
-                  <motion.div
-                    className="fixed left-0 top-0 bottom-0 w-[280px] z-40"
-                    initial={{ x: -280 }}
-                    animate={{ x: 0 }}
-                    exit={{ x: -280 }}
-                    transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                  >
-                    <CrewsExplorer
-                      crews={crews}
-                      agents={agents}
-                      selectedCrewId={selectedCrewId}
-                      selectedAgentId={selectedAgentId}
-                      collapsed={false}
-                      onToggleCollapse={() => setLeftCollapsed(true)}
-                      onCrewSelect={(id) => { handleCrewSelect(id); setLeftCollapsed(true) }}
-                      onAgentSelect={(id) => { handleAgentSelect(id); setLeftCollapsed(true) }}
-                    />
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         ) : (
-          <div className="row-span-1 min-h-0 overflow-hidden">
+          <div className="min-h-0 overflow-hidden">
             <CrewsExplorer
               crews={crews}
               agents={agents}
-              selectedCrewId={selectedCrewId}
-              selectedAgentId={selectedAgentId}
-              collapsed={leftCollapsed}
-              onToggleCollapse={() => setLeftCollapsed(!leftCollapsed)}
+              selectedCrewId={selectedCrew?.id ?? null}
+              selectedAgentId={selectedAgent?.id ?? null}
+              collapsed={explorerCollapsed}
+              onToggleCollapse={() => setExplorerCollapsed(!explorerCollapsed)}
               onCrewSelect={handleCrewSelect}
               onAgentSelect={handleAgentSelect}
             />
           </div>
         )}
 
-        {/* Center content */}
-        <div className="row-span-1 relative overflow-hidden min-h-0">
+        {/* Canvas — animated cross-fade on selection change */}
+        <div className="overflow-y-auto min-h-0 min-w-0">
           <AnimatePresence mode="wait">
-            {activeTab === "overview" && (
-              <motion.div
-                key={`overview-${selectedAgentId || selectedCrewId || "none"}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="h-full"
-              >
-                {selectedAgent ? (
-                  <CrewsAgentInline
-                    agent={selectedAgent}
-                    workspaceId={workspaceId}
-                  />
-                ) : selectedCrew ? (
-                  <CrewsCrewDetail
-                    crew={selectedCrew}
-                    agents={crewAgents}
-                    missions={missions}
-                    onAgentClick={handleAgentSelect}
-                  />
-                ) : (
-                  <AllCrewsOverview
-                    crews={crews}
-                    agents={agents}
-                    onCrewSelect={handleCrewSelect}
-                    onAgentSelect={handleAgentSelect}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {activeTab === "activity" && (
-              <motion.div
-                key={`activity-${selectedAgentId || selectedCrewId || "workspace"}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="p-4 h-full overflow-auto"
-              >
-                <CrewActivityFeed
+            <motion.div
+              key={selectedAgent?.slug ?? selectedCrew?.slug ?? "empty"}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16, ease: [0.32, 0.72, 0, 1] }}
+            >
+              {selectedAgent ? (
+                <AgentCanvas
                   workspaceId={workspaceId}
-                  agentId={selectedAgentId ?? undefined}
-                  crewId={!selectedAgentId && selectedCrewId ? selectedCrewId : undefined}
-                />
-              </motion.div>
-            )}
-
-            {activeTab === "health" && (
-              <motion.div
-                key={`health-${selectedAgentId || selectedCrewId || "workspace"}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="p-4 h-full overflow-auto"
-              >
-                <CrewsHealthTab
-                  workspaceId={workspaceId}
+                  agentSlug={selectedAgent.slug}
                   crews={crews}
-                  agents={agents}
-                  selectedAgent={selectedAgent}
-                  selectedCrew={selectedCrew}
+                  onAgentChanged={onRefresh}
+                  onSelectCrew={(slug) => selectCrew(slug)}
+                  onOpenFiles={handleOpenFiles}
                 />
-              </motion.div>
-            )}
+              ) : selectedCrew ? (
+                <CrewCanvas
+                  workspaceId={workspaceId}
+                  crewSlug={selectedCrew.slug}
+                  agentsForCrew={crewAgents}
+                  missions={missions}
+                  onCrewChanged={onRefresh}
+                  onSelectAgent={handleAgentSelectBySlug}
+                  onOpenFiles={handleOpenFiles}
+                  onAddAgent={() => {
+                    // Sub-bar holds the create dialog state; defer to it
+                    // via the data-attribute click flow on the +Agent button.
+                    document.querySelector<HTMLButtonElement>(
+                      'button[data-crews-add-agent]',
+                    )?.click()
+                  }}
+                />
+              ) : (
+                <EmptyRoster
+                  agents={agents}
+                  crews={crews}
+                  onAgentSelect={handleAgentSelectBySlug}
+                />
+              )}
+            </motion.div>
           </AnimatePresence>
         </div>
-
-        {/* Mobile full-screen agent panel. The desktop grid renders the
-            agent inline in the center column, but on a narrow viewport
-            the explorer overlay + header strip eat the entire width, so
-            selecting an agent promotes the center into a dedicated
-            slide-over panel with its own back button. */}
-        {isMobile && (
-          <AnimatePresence>
-            {showMobileAgentPanel && selectedAgent && (
-              <motion.div
-                className="fixed inset-0 z-40 bg-background flex flex-col"
-                initial={{ x: "100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "100%" }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              >
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 bg-card">
-                  <button
-                    onClick={handleAgentClose}
-                    className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
-                    aria-label="Back"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </button>
-                  <span className="text-label font-semibold truncate">{selectedAgent.name}</span>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                  <CrewsAgentInline agent={selectedAgent} workspaceId={workspaceId} />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
-
-        {/* Bottom drawer */}
-        <CrewsBottomDrawer crews={crews} agents={agents} isMobile={isMobile} />
       </div>
 
-      {/* Slide-over drawers — Sheets controlled by the URL ?drawer= param so
-          reload/back preserves the open panel. Phase 3 will replace the stub
-          bodies with inline Chat / Logs / Settings content, making the
-          existing full-page routes redundant. */}
-      <ChatDrawer
-        agent={selectedAgent}
-        open={activeDrawer === "chat" && selectedAgent !== null}
-        onOpenChange={handleDrawerOpenChange("chat")}
-      />
-      <LogsDrawer
-        agent={selectedAgent}
-        open={activeDrawer === "logs" && selectedAgent !== null}
-        onOpenChange={handleDrawerOpenChange("logs")}
-      />
-      <SettingsDrawer
-        entity={settingsEntity}
-        open={activeDrawer === "settings" && settingsEntity !== null}
-        onOpenChange={handleDrawerOpenChange("settings")}
+      {/* Bottom panel — context-aware */}
+      <BottomPanel
+        workspaceId={workspaceId}
+        context={bottomContext}
+        initialTab={bottomTab}
+        initialOpen={bottomOpen}
+        onOpenChange={setBottomOpen}
       />
     </div>
   )

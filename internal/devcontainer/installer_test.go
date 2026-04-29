@@ -396,7 +396,7 @@ func TestInstallFeature_CopyError(t *testing.T) {
 }
 
 func TestBuildFeatureEnv(t *testing.T) {
-	env := buildFeatureEnv("container-abc", "python", map[string]any{
+	env := buildFeatureEnv("container-abc", "python", nil, map[string]any{
 		"version": "3.11",
 		"tools":   "pip",
 	})
@@ -424,9 +424,71 @@ func TestBuildFeatureEnv(t *testing.T) {
 }
 
 func TestBuildFeatureEnv_NilOptions(t *testing.T) {
-	env := buildFeatureEnv("container-xyz", "node", nil)
+	env := buildFeatureEnv("container-xyz", "node", nil, nil)
 	if len(env) != 2 {
 		t.Errorf("expected 2 env vars (_CONTAINER_ID, _REMOTE_USER), got %d", len(env))
+	}
+}
+
+// Regression test: when the user enables a feature with no explicit options
+// (the default UI flow — user just toggles a switch), defaults from the
+// feature's own devcontainer-feature.json must reach install.sh as env vars.
+// Without this, official upstream features like `git` blow up with
+// "[: =: unary operator expected" when their install.sh tries `[ "$VERSION" = "latest" ]`.
+func TestBuildFeatureEnv_AppliesMetadataDefaultsWhenUserOptionsEmpty(t *testing.T) {
+	metadata := map[string]any{
+		"version": map[string]any{"type": "string", "default": "latest"},
+		"ppa":     map[string]any{"type": "boolean", "default": true},
+		// Option without a default — should be omitted, not injected as empty.
+		"profile": map[string]any{"type": "string"},
+	}
+	env := buildFeatureEnv("c1", "git", metadata, map[string]any{})
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+	if envMap["VERSION"] != "latest" {
+		t.Errorf("VERSION default = %q, want latest", envMap["VERSION"])
+	}
+	if envMap["PPA"] != "true" {
+		t.Errorf("PPA default = %q, want true", envMap["PPA"])
+	}
+	if _, ok := envMap["PROFILE"]; ok {
+		t.Errorf("PROFILE should be unset (no default in metadata), got %q", envMap["PROFILE"])
+	}
+}
+
+// User-provided values must override metadata defaults, even when empty —
+// an explicit `"version": ""` in devcontainer.json is a valid (if rare)
+// signal that the user wants the empty form, not the metadata default.
+func TestBuildFeatureEnv_UserOptionsOverrideDefaults(t *testing.T) {
+	metadata := map[string]any{
+		"version": map[string]any{"type": "string", "default": "latest"},
+	}
+	env := buildFeatureEnv("c1", "git", metadata, map[string]any{
+		"version": "system",
+	})
+
+	// Last KEY=VALUE wins per docker exec semantics, so VERSION=system must
+	// appear after any default. We assert both presence and ordering.
+	var defaultIdx, userIdx int = -1, -1
+	for i, e := range env {
+		if e == "VERSION=latest" {
+			defaultIdx = i
+		}
+		if e == "VERSION=system" {
+			userIdx = i
+		}
+	}
+	if userIdx < 0 {
+		t.Fatalf("expected VERSION=system in env, got %v", env)
+	}
+	if defaultIdx >= 0 && defaultIdx > userIdx {
+		t.Errorf("default VERSION=latest at idx %d came after user VERSION=system at idx %d", defaultIdx, userIdx)
 	}
 }
 

@@ -27,122 +27,13 @@ import { ActivityFeed } from "@/components/features/dashboard/activity-feed"
 import { InboxTile, type InboxEntry } from "@/components/features/dashboard/inbox-tile"
 import { RecentMissionsTable } from "@/components/features/dashboard/recent-missions-table"
 
-// ── Types for API responses we consume ────────────────────────────────
-
-interface AgentSummary {
-  id: string
-  name: string
-  slug: string
-  role_title: string | null
-  agent_role: string
-  status: string
-  crew: { name: string; slug: string; color: string | null } | null
-  crew_id?: string | null
-  _count: { skills: number; credentials: number; chats: number }
-}
-
-interface CrewSummary {
-  id: string
-  name: string
-  slug: string
-  color: string | null
-  icon: string | null
-}
-
-interface ProjectSummary {
-  id: string
-  name: string
-  color: string
-  issue_count: number
-  progress: number
-}
-
-interface RunEntry {
-  id: string
-  agent_id: string
-  status: string
-  started_at: string | null
-  finished_at: string | null
-  created_at: string
-}
-
-interface RunsResponse {
-  data: RunEntry[]
-  stats: { running: number; today: number; failed: number }
-}
-
-interface MissionMetricsResponse {
-  active_missions: number
-  total_missions: number
-  completed_24h?: number
-  failed_24h?: number
-  total_cost_24h: number
-}
-
-interface KeeperRequest {
-  id: string
-  agent_name: string
-  credential_name: string
-  decision: string | null
-  created_at: string
-}
-
-interface TimeseriesBucket {
-  ts: string
-  series: Record<string, number>
-}
-interface TimeseriesResponse {
-  metric: string
-  window: string
-  bucket: string
-  group_by: string
-  buckets: TimeseriesBucket[]
-  series_labels: Record<string, string>
-}
-
-// ── Crew color palette → CSS ──────────────────────────────────────────
-
-const CREW_PALETTE: Record<string, string> = {
-  blue: "rgb(96, 165, 250)",
-  emerald: "rgb(52, 211, 153)",
-  violet: "rgb(167, 139, 250)",
-  amber: "rgb(251, 191, 36)",
-  rose: "rgb(251, 113, 133)",
-  cyan: "rgb(34, 211, 238)",
-  lime: "rgb(163, 230, 53)",
-  fuchsia: "rgb(232, 121, 249)",
-}
-function crewColor(paletteId: string | null | undefined): string {
-  return CREW_PALETTE[paletteId ?? ""] ?? "rgb(148, 163, 184)"
-}
-
-// Status donut colors — aligned with orchestration board
-const STATUS_PALETTE = {
-  BACKLOG: "rgb(96, 165, 250)",
-  TODO: "rgb(34, 211, 238)",
-  IN_PROGRESS: "rgb(167, 139, 250)",
-  REVIEW: "rgb(251, 191, 36)",
-  COMPLETED: "rgb(52, 211, 153)",
-  FAILED: "rgb(248, 113, 113)",
-  CANCELLED: "rgb(148, 163, 184)",
-} as const
-
-function formatCost(cost: number): string {
-  if (cost === 0) return "$0.00"
-  if (cost < 0.01) return "<$0.01"
-  return `$${cost.toFixed(2)}`
-}
-
-function formatRelativeShort(iso: string | null | undefined): string {
-  if (!iso) return ""
-  const ts = new Date(iso).getTime()
-  if (isNaN(ts)) return ""
-  const diffSec = Math.floor((Date.now() - ts) / 1000)
-  if (diffSec < 60) return `${diffSec}s`
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`
-  return `${Math.floor(diffSec / 86400)}d`
-}
+import {
+  AgentSummary, CrewSummary, ProjectSummary, RunsResponse,
+  MissionMetricsResponse, KeeperRequest, TimeseriesResponse,
+} from "./dashboard-types"
+import {
+  crewColor, STATUS_PALETTE, formatCost, formatRelativeShort,
+} from "./dashboard-helpers"
 
 export default function DashboardPage() {
   const router = useRouter()

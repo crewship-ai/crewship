@@ -18,6 +18,14 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 
 	// serveFile reads a file from webFS and writes it to the response.
 	// This avoids http.FileServer redirects (e.g. /index.html → ./).
+	//
+	// Cache headers are critical: HTML must NOT be cached (it references
+	// hashed chunk names that change every deploy — caching the HTML
+	// pins users to a stale chunk graph), while _next/static/* chunks
+	// CAN be cached forever (their filenames already include a content
+	// hash, so a code change always picks a new URL). Without these
+	// headers, browser default heuristics keep stale HTML for hours and
+	// users see "fix not deployed" symptoms after every release.
 	serveFile := func(w http.ResponseWriter, name string) {
 		f, err := webFS.Open(name)
 		if err != nil {
@@ -31,6 +39,21 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 			ct = "application/octet-stream"
 		}
 		w.Header().Set("Content-Type", ct)
+
+		switch {
+		case strings.HasPrefix(name, "_next/static/"):
+			// Hashed bundle assets — safe to cache for a year.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case strings.HasSuffix(name, ".html"):
+			// HTML and dynamic-route placeholders — always revalidate so
+			// users pick up new chunk references the moment we redeploy.
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		default:
+			// Everything else (favicon, robots.txt, public assets) —
+			// cache for 5 minutes by default.
+			w.Header().Set("Cache-Control", "public, max-age=300")
+		}
+
 		io.Copy(w, f)
 	}
 
@@ -40,8 +63,14 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 			path = "index.html"
 		}
 
-		// Serve _next/ static assets directly via FileServer (no redirect issues)
+		// Serve _next/ static assets directly via FileServer (no redirect
+		// issues). Hashed chunk filenames already encode content, so a
+		// long-lived cache is safe and avoids re-downloading the same
+		// JS/CSS on every navigation.
 		if strings.HasPrefix(path, "_next/") {
+			if strings.HasPrefix(path, "_next/static/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}
@@ -64,6 +93,30 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 		if _, err := fs.Stat(webFS, path+"/index.html"); err == nil {
 			serveFile(w, path+"/index.html")
 			return
+		}
+
+		// Dynamic-route placeholder lookup: Next.js static export with
+		// generateStaticParams returning [{ id: "_" }] builds the page
+		// HTML at `<segment>/_.html` (the directory `<segment>/_/` is
+		// only used for Next's internal manifest .txt files, no
+		// index.html lives there). Rewrite a request like /chat/filip
+		// → chat/_.html so the right page bundle hydrates with the
+		// runtime slug (read via useParams in the client component).
+		//
+		// Only resolve EXACTLY one level above the leaf (parent of the
+		// last segment) — walking deeper used to misroute /chat/a/b
+		// onto chat/_.html, hydrating the wrong page shell. If the
+		// leaf-1 lookup fails, fall through to the SPA index.
+		parts := strings.Split(strings.Trim(path, "/"), "/")
+		if len(parts) >= 2 {
+			parent := strings.Join(parts[:len(parts)-1], "/")
+			for _, candidate := range []string{parent + "/_.html", parent + "/_/index.html"} {
+				if _, err := fs.Stat(webFS, candidate); err == nil {
+					slog.Debug("dynamic placeholder", "path", r.URL.Path, "served", candidate)
+					serveFile(w, candidate)
+					return
+				}
+			}
 		}
 
 		// SPA fallback: serve root index.html for client-side routing

@@ -410,10 +410,24 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	// Run postStartCommand hooks (feature-level + root-level, pre-merged by
-	// the bridge resolver). Non-fatal — failures log warnings but do not
-	// block the container from coming up.
-	p.runPostStartCommands(ctx, resp.ID, team.PostStartCommands)
+	// Run postStartCommand hooks. We always inject one universal hook FIRST:
+	// `/crew/init.sh` if it exists is executed as the agent user. This is the
+	// "soft promotion" path — agents can persist runtime customizations
+	// (e.g. `pip install --user foo`, env exports, repo clones into /crew)
+	// across container restarts without touching devcontainer.json.
+	//
+	// Why a fixed convention rather than a config flag:
+	//   - /crew is one of the three persisted volumes, so the file survives
+	//     a force-remove + recreate (which is exactly what Restart agents does).
+	//   - The check `[ -x ... ]` keeps it harmless when the file is missing
+	//     and `; true` ensures a failing init.sh doesn't block the rest of
+	//     the post-start chain (feature/root-level hooks).
+	//   - Running as 1001:1001 means no apt — agents have to use --user
+	//     installs, which is the right default (apt installs would still
+	//     not survive recreate anyway, since they touch /usr).
+	hooks := []string{"[ -x /crew/init.sh ] && /crew/init.sh; true"}
+	hooks = append(hooks, team.PostStartCommands...)
+	p.runPostStartCommands(ctx, resp.ID, hooks)
 
 	return resp.ID, nil
 }

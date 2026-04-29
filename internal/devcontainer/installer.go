@@ -90,8 +90,8 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 		return fmt.Errorf("copying feature %s to container: %w", featureID, err)
 	}
 
-	// 3. Build environment variables from options.
-	env := buildFeatureEnv(containerID, featureID, options)
+	// 3. Build environment variables from options + metadata defaults.
+	env := buildFeatureEnv(containerID, featureID, feature.Metadata.Options, options)
 
 	// 4. Execute install.sh as root, with the feature directory as CWD so that
 	// relative paths inside install.sh (e.g., `./scripts/vendor/...`) resolve
@@ -245,16 +245,47 @@ func createTarFromDir(srcDir, prefix string) (*bytes.Buffer, error) {
 // Each option key is uppercased (e.g., "version" -> "VERSION=3.11").
 // Standard devcontainer variables _CONTAINER_ID and _REMOTE_USER are included.
 // containerID is the actual Docker container ID per the devcontainer spec.
-func buildFeatureEnv(containerID, featureID string, options map[string]any) []string {
+//
+// Defaults from the feature's own metadata (devcontainer-feature.json
+// `options.<name>.default`) are applied when the user didn't explicitly set
+// a value. Per https://containers.dev/implementors/features/#options-property,
+// install.sh expects every declared option as an env var — most upstream
+// scripts assume the default is filled in by the runner and break in subtle
+// ways when the variable is empty (the canonical example: the official `git`
+// feature's `[ "$VERSION" = "latest" ]` line erroring with "unary operator
+// expected" when VERSION is unset).
+//
+// User-provided values always win over defaults, including empty strings —
+// "user explicitly set version=''" is a valid (if rare) intent we don't
+// override.
+func buildFeatureEnv(containerID, featureID string, metadataOptions, userOptions map[string]any) []string {
 	env := []string{
 		"_CONTAINER_ID=" + containerID,
 		"_REMOTE_USER=agent",
 	}
 
-	for key, val := range options {
-		envKey := strings.ToUpper(key)
-		envVal := fmt.Sprintf("%v", val)
-		env = append(env, envKey+"="+envVal)
+	// Apply defaults from feature metadata for options the user didn't set.
+	for key, spec := range metadataOptions {
+		if _, hasUserValue := userOptions[key]; hasUserValue {
+			continue
+		}
+		specMap, ok := spec.(map[string]any)
+		if !ok {
+			continue
+		}
+		defVal, hasDefault := specMap["default"]
+		if !hasDefault {
+			continue
+		}
+		env = append(env, strings.ToUpper(key)+"="+fmt.Sprintf("%v", defVal))
+	}
+
+	// User-provided options. Listed second so they override any default
+	// already in the slice (Docker exec uses the LAST value for duplicate
+	// keys), and visible in the same form spec.io/.devcontainer/.json
+	// authors expect: KEY=VALUE.
+	for key, val := range userOptions {
+		env = append(env, strings.ToUpper(key)+"="+fmt.Sprintf("%v", val))
 	}
 
 	return env

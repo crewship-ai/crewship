@@ -13,7 +13,7 @@ func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
 	t.Helper()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewProvisioningHandler(db, logger, nil, nil, nil, "")
+	return NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
 }
 
 func TestCatalogList(t *testing.T) {
@@ -89,7 +89,7 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	// docker client == nil -> provisioner is nil -> trigger returns 503.
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "")
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -128,7 +128,7 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 func TestProvisionStatus_NoCrew(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger, nil, nil, nil, "")
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
