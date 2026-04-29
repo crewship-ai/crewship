@@ -545,10 +545,116 @@ function YamlTab({ workspaceId, context }: { workspaceId: string; context: Botto
   const yaml = toYaml(filterNoise(data))
 
   return (
-    <pre className="h-full overflow-y-auto p-3 text-[11px] leading-relaxed font-mono text-foreground/80 whitespace-pre">
-      {yaml}
-    </pre>
+    <div className="h-full overflow-y-auto p-3 text-[11px] leading-relaxed font-mono text-foreground/80 whitespace-pre">
+      <HighlightedYaml yaml={yaml} />
+    </div>
   )
+}
+
+/**
+ * HighlightedYaml — lightweight tokenizer that paints keys, strings,
+ * numbers and booleans in distinct colors. Handles multi-line quoted
+ * strings (system_prompt et al.) by tracking an "inside string" state
+ * across lines.
+ */
+function HighlightedYaml({ yaml }: { yaml: string }) {
+  const lines = yaml.split("\n")
+  const out: React.ReactNode[] = []
+  let inString = false
+
+  const findUnescapedQuote = (s: string, start: number): number => {
+    for (let i = start; i < s.length; i++) {
+      if (s[i] === "\\") { i++; continue }
+      if (s[i] === '"') return i
+    }
+    return -1
+  }
+
+  lines.forEach((line, idx) => {
+    if (inString) {
+      const closeIdx = findUnescapedQuote(line, 0)
+      if (closeIdx === -1) {
+        out.push(
+          <div key={idx}>
+            <span className="text-amber-200">{line.length === 0 ? " " : line}</span>
+          </div>,
+        )
+      } else {
+        const head = line.slice(0, closeIdx + 1)
+        const tail = line.slice(closeIdx + 1)
+        inString = false
+        out.push(
+          <div key={idx}>
+            <span className="text-amber-200">{head}</span>
+            {tail && <span>{tail}</span>}
+          </div>,
+        )
+      }
+      return
+    }
+
+    const indentMatch = line.match(/^(\s*)/)
+    const indent = indentMatch ? indentMatch[0] : ""
+    let rest = line.slice(indent.length)
+    const tokens: React.ReactNode[] = []
+    if (indent) tokens.push(<span key="indent">{indent}</span>)
+
+    if (rest === "") {
+      out.push(<div key={idx}>{tokens.length ? tokens : " "}</div>)
+      return
+    }
+
+    if (rest.startsWith("- ")) {
+      tokens.push(<span key="bullet" className="text-zinc-500">- </span>)
+      rest = rest.slice(2)
+    } else if (rest === "-") {
+      tokens.push(<span key="bullet" className="text-zinc-500">-</span>)
+      rest = ""
+    }
+
+    const kv = rest.match(/^([A-Za-z_][A-Za-z0-9_-]*):(\s*)(.*)$/)
+    if (kv) {
+      const [, key, sp, value] = kv
+      tokens.push(<span key="key" className="text-sky-300">{key}</span>)
+      tokens.push(<span key="colon" className="text-zinc-500">:</span>)
+      if (sp) tokens.push(<span key="sp">{sp}</span>)
+      if (value.length > 0) {
+        tokens.push(...renderYamlValue(value, () => { inString = true }, findUnescapedQuote))
+      }
+    } else if (rest.length > 0) {
+      tokens.push(<span key="rest">{rest}</span>)
+    }
+
+    out.push(<div key={idx}>{tokens}</div>)
+  })
+
+  return <>{out}</>
+}
+
+function renderYamlValue(
+  value: string,
+  setInString: () => void,
+  findUnescapedQuote: (s: string, start: number) => number,
+): React.ReactNode[] {
+  if (value.startsWith('"')) {
+    const closeIdx = findUnescapedQuote(value, 1)
+    if (closeIdx === -1) {
+      setInString()
+      return [<span key="v" className="text-amber-200">{value}</span>]
+    }
+    const quoted = value.slice(0, closeIdx + 1)
+    const trail = value.slice(closeIdx + 1)
+    const nodes: React.ReactNode[] = [<span key="v" className="text-amber-200">{quoted}</span>]
+    if (trail) nodes.push(<span key="t">{trail}</span>)
+    return nodes
+  }
+  if (/^-?\d+(\.\d+)?$/.test(value)) {
+    return [<span key="v" className="text-emerald-300">{value}</span>]
+  }
+  if (/^(true|false|null|yes|no|~)$/i.test(value)) {
+    return [<span key="v" className="text-violet-300">{value}</span>]
+  }
+  return [<span key="v" className="text-amber-200">{value}</span>]
 }
 
 function DockerTab() {
