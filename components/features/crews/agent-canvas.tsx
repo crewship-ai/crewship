@@ -52,15 +52,26 @@ const ROLE_OPTIONS = [
   { value: "COORDINATOR", label: "Coordinator" },
 ] as const
 
-const MODEL_DESCRIPTIONS: Record<string, { description: string; badge?: string }> = {
-  "claude-opus-4-20250514": { description: "Most capable · best for complex analysis", badge: "Reasoning" },
-  "claude-sonnet-4-20250514": { description: "Balanced speed and capability · default", badge: "Balanced" },
+const MODEL_DESCRIPTIONS: Record<string, { description: string; badge?: string; legacy?: boolean }> = {
+  // Anthropic — current
+  "claude-opus-4-7": { description: "Latest · most capable · 1M context", badge: "Latest" },
+  "claude-sonnet-4-6": { description: "Balanced speed and capability · default", badge: "Default" },
   "claude-haiku-4-5-20251001": { description: "Fast and cheap · quick replies", badge: "Fast" },
+  // Anthropic — legacy (kept for existing agents)
+  "claude-opus-4-20250514": { description: "Older Opus 4 — superseded by 4.7", badge: "Legacy", legacy: true },
+  "claude-sonnet-4-20250514": { description: "Older Sonnet 4 — superseded by 4.6", badge: "Legacy", legacy: true },
+  "claude-3-5-sonnet-20241022": { description: "Pre-4.x flagship", badge: "Legacy", legacy: true },
+  "claude-3-5-haiku-20241022": { description: "Pre-4.x fast tier", badge: "Legacy", legacy: true },
+  // OpenAI
   o3: { description: "Frontier reasoning model", badge: "Reasoning" },
-  "o4-mini": { description: "Smaller, faster reasoning", badge: "Fast" },
+  "o3-mini": { description: "Smaller reasoning model", badge: "Reasoning" },
+  "o4-mini": { description: "Newest small reasoning model", badge: "Fast" },
   "gpt-4o": { description: "Multimodal flagship", badge: "Multimodal" },
+  "gpt-4o-mini": { description: "Smaller multimodal · cheap", badge: "Fast" },
+  // Google
   "gemini-2.5-pro": { description: "Google flagship · 1M-token context", badge: "Long ctx" },
   "gemini-2.5-flash": { description: "Faster, cheaper Gemini", badge: "Fast" },
+  "gemini-2.0-flash": { description: "Older Flash · still supported", badge: "Legacy", legacy: true },
 }
 
 const TOOL_PROFILE_OPTIONS = [
@@ -698,72 +709,17 @@ export function AgentCanvas({
                 </div>
               </div>
 
-              {/* Model dropdown — rich items with badge + description */}
-              <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">Model</div>
-                {(() => {
-                  const adapterCfg = CLI_ADAPTERS[agent.cli_adapter]
-                  const models = adapterCfg?.models ?? []
-                  const inList = models.some((m) => m.value === agent.llm_model)
-                  const meta = agent.llm_model ? MODEL_DESCRIPTIONS[agent.llm_model] : undefined
-                  if (!inList && agent.llm_model) {
-                    // Custom value — fall back to EditableField so the user can keep / edit it
-                    return (
-                      <EditableField
-                        value={agent.llm_model ?? ""}
-                        onSave={(v) => patch({ llm_model: v })}
-                        placeholder="claude-haiku-4-5"
-                      />
-                    )
-                  }
-                  return (
-                    <>
-                      <Select
-                        value={agent.llm_model ?? ""}
-                        onValueChange={(v) => {
-                          if (v === "__custom__") {
-                            patch({ llm_model: "" })
-                          } else {
-                            patch({ llm_model: v })
-                          }
-                        }}
-                      >
-                        <SelectTrigger className="w-full font-mono text-sm h-9">
-                          <SelectValue placeholder="Select a model" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {models.map((m) => {
-                            const meta = MODEL_DESCRIPTIONS[m.value]
-                            return (
-                              <SelectItem key={m.value} value={m.value}>
-                                <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-mono text-sm">{m.label}</span>
-                                    {meta?.badge && (
-                                      <span className="rounded bg-blue-500/15 text-blue-300 px-1.5 py-px text-[10px] font-medium">
-                                        {meta.badge}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {meta?.description && (
-                                    <span className="text-[11px] text-muted-foreground">{meta.description}</span>
-                                  )}
-                                </div>
-                              </SelectItem>
-                            )
-                          })}
-                          <SelectItem value="__custom__" className="text-muted-foreground italic">
-                            Custom model name…
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {meta && (
-                        <p className="text-[11px] text-muted-foreground pl-1">{meta.description}</p>
-                      )}
-                    </>
-                  )
-                })()}
-              </div>
+              {/* Model — primary path is the dropdown of preset model IDs.
+                  Custom write-in stays as a secondary path: pick "Custom…"
+                  to switch to a free-text input. Off-list values (legacy or
+                  truly custom) get a one-off "Current" item pinned at the
+                  top of the dropdown so the user can always see + change
+                  what's set without losing the context. */}
+              <ModelPickerRow
+                cliAdapter={agent.cli_adapter}
+                value={agent.llm_model ?? ""}
+                onSave={(v) => patch({ llm_model: v })}
+              />
             </div>
 
             {/* Advanced — collapsible */}
@@ -876,6 +832,157 @@ export function AgentCanvas({
 // =============================================================================
 // Layout helpers
 // =============================================================================
+
+interface ModelPickerRowProps {
+  cliAdapter: string
+  value: string
+  onSave: (next: string) => void
+}
+
+/**
+ * Model picker. Primary path is the preset dropdown (always rendered).
+ * If the agent's current value isn't one of the preset IDs (legacy or
+ * truly custom), it's pinned at the top of the dropdown as "Current"
+ * so users can see + change it. Secondary "Custom…" item swaps the
+ * trigger to a free-text input that saves on blur or Enter.
+ */
+function ModelPickerRow({ cliAdapter, value, onSave }: ModelPickerRowProps) {
+  const adapterCfg = CLI_ADAPTERS[cliAdapter]
+  const presetModels = adapterCfg?.models ?? []
+  const inList = presetModels.some((m) => m.value === value)
+  const meta = value ? MODEL_DESCRIPTIONS[value] : undefined
+
+  const [customMode, setCustomMode] = useState(false)
+  const [customDraft, setCustomDraft] = useState("")
+
+  if (customMode) {
+    return (
+      <div className="space-y-2">
+        <div className="text-xs text-muted-foreground">Model</div>
+        <div className="flex gap-2">
+          <input
+            autoFocus
+            type="text"
+            value={customDraft}
+            onChange={(e) => setCustomDraft(e.target.value)}
+            placeholder="e.g. claude-haiku-4-5 or claude-3-7-sonnet"
+            className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-blue-400"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && customDraft.trim()) {
+                onSave(customDraft.trim())
+                setCustomMode(false)
+              } else if (e.key === "Escape") {
+                setCustomMode(false)
+                setCustomDraft("")
+              }
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (customDraft.trim()) {
+                onSave(customDraft.trim())
+                setCustomMode(false)
+              }
+            }}
+            disabled={!customDraft.trim()}
+            className="px-3 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 disabled:opacity-40 disabled:hover:bg-blue-500 text-sm text-white"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCustomMode(false)
+              setCustomDraft("")
+            }}
+            className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/5 text-sm text-muted-foreground"
+          >
+            Back
+          </button>
+        </div>
+        <p className="text-[11px] text-muted-foreground pl-1">
+          Type any model identifier supported by the selected adapter. ⏎ to save · Esc to cancel.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="text-xs text-muted-foreground">Model</div>
+      <Select
+        value={value || "__none__"}
+        onValueChange={(v) => {
+          if (v === "__custom__") {
+            setCustomDraft("")
+            setCustomMode(true)
+          } else if (v !== "__none__") {
+            onSave(v)
+          }
+        }}
+      >
+        <SelectTrigger className="w-full font-mono text-sm h-9">
+          <SelectValue placeholder="Select a model" />
+        </SelectTrigger>
+        <SelectContent>
+          {!inList && value && (
+            <SelectItem key={value} value={value}>
+              <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm">{value}</span>
+                  <span className="rounded bg-amber-500/15 text-amber-300 px-1.5 py-px text-[10px] font-medium">
+                    Current
+                  </span>
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  Not in preset list — kept so you can switch back.
+                </span>
+              </div>
+            </SelectItem>
+          )}
+          {presetModels.map((m) => {
+            const itemMeta = MODEL_DESCRIPTIONS[m.value]
+            return (
+              <SelectItem key={m.value} value={m.value}>
+                <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={cn("font-mono text-sm", itemMeta?.legacy && "text-muted-foreground")}>
+                      {m.label}
+                    </span>
+                    {itemMeta?.badge && (
+                      <span
+                        className={cn(
+                          "rounded px-1.5 py-px text-[10px] font-medium",
+                          itemMeta.legacy
+                            ? "bg-zinc-700/40 text-zinc-400"
+                            : "bg-blue-500/15 text-blue-300",
+                        )}
+                      >
+                        {itemMeta.badge}
+                      </span>
+                    )}
+                  </div>
+                  {itemMeta?.description && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {itemMeta.description}
+                    </span>
+                  )}
+                </div>
+              </SelectItem>
+            )
+          })}
+          <SelectItem value="__custom__" className="text-muted-foreground italic">
+            Custom model name…
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {meta && inList && (
+        <p className="text-[11px] text-muted-foreground pl-1">{meta.description}</p>
+      )}
+    </div>
+  )
+}
 
 
 function Row({
