@@ -35,6 +35,7 @@ import { RightDrawer } from "./right-drawer"
 import { SlashPalette } from "./composer/slash-palette"
 import { ModelPicker } from "./composer/model-picker"
 import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
+import { ArtifactPane } from "./artifact/artifact-pane"
 import type { FileEntry } from "./chat-tree-row"
 import { useComposerStore } from "@/stores/composer-store"
 
@@ -363,6 +364,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
 
       <RightRail className={cn(pushOpen && "border-l-0")} />
       <SlashPalette agentSlug={agentName} onCommand={handleSlashCommand} />
+      <ArtifactPane agentId={agentId} />
     </div>
   )
 }

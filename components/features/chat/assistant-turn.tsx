@@ -1,6 +1,7 @@
 "use client"
 
-import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle } from "lucide-react"
+import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle, FileCode } from "lucide-react"
+import { useArtifactStore } from "@/stores/artifact-store"
 import {
   Message,
   MessageContent,
@@ -265,34 +266,63 @@ function redactSensitiveKeys(value: unknown): unknown {
   return value
 }
 
+const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"])
+
 function DefaultToolCall({ part }: { part: TurnPart }) {
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
   const isCompleted = !!part.metadata?.completed
   const rawInput = part.metadata?.input as Record<string, unknown> | undefined
   const input = rawInput ? redactSensitiveKeys(rawInput) as Record<string, unknown> : undefined
+  const openArtifact = useArtifactStore((s) => s.openFile)
 
   let subtitle = ""
+  let filePath: string | null = null
   if (input) {
-    if (input.file_path) subtitle = String(input.file_path)
+    if (input.file_path) {
+      subtitle = String(input.file_path)
+      filePath = String(input.file_path)
+    }
     else if (input.command) subtitle = `$ ${String(input.command).slice(0, 60)}${String(input.command).length > 60 ? "..." : ""}`
     else if (input.url) subtitle = String(input.url)
     else if (input.query) subtitle = String(input.query)
     else if (input.pattern) subtitle = String(input.pattern)
   }
 
+  const canOpenArtifact = filePath && FILE_TOOLS.has(toolName)
+  const fileName = filePath ? filePath.split("/").pop() ?? filePath : ""
+
   return (
-    <Tool defaultOpen={false}>
-      <ToolHeader
-        title={subtitle ? `${toolName}  ${subtitle}` : toolName}
-        type="tool-invocation"
-        state={isCompleted ? "output-available" : "input-available"}
-      />
-      <ToolContent>
-        {input != null && (
-          <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
-        )}
-      </ToolContent>
-    </Tool>
+    <div className="flex flex-col gap-1.5">
+      <Tool defaultOpen={false}>
+        <ToolHeader
+          title={subtitle ? `${toolName}  ${subtitle}` : toolName}
+          type="tool-invocation"
+          state={isCompleted ? "output-available" : "input-available"}
+        />
+        <ToolContent>
+          {input != null && (
+            <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+          )}
+        </ToolContent>
+      </Tool>
+      {canOpenArtifact && filePath && (
+        <button
+          type="button"
+          onClick={() =>
+            openArtifact({
+              id: filePath,
+              path: filePath,
+              title: fileName,
+            })
+          }
+          className="flex items-center gap-2 px-3 py-1.5 bg-primary/5 border border-primary/20 rounded-lg text-label text-primary hover:bg-primary/10 max-w-md transition-colors w-fit"
+        >
+          <FileCode className="h-3.5 w-3.5" />
+          <span>Open in Artifact</span>
+          <span className="font-mono text-micro text-muted-foreground truncate max-w-[200px]">{fileName}</span>
+        </button>
+      )}
+    </div>
   )
 }
 
