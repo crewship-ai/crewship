@@ -134,3 +134,113 @@ func TestAgentInbox_Consolidated(t *testing.T) {
 		t.Errorf("missing agentId status = %d, want 400", rr4.Code)
 	}
 }
+
+// Pin the JSON shape of GET /api/v1/agents/{agentId}/inbox so the
+// frontend can rely on field names that don't drift.
+//
+// During the /crews redesign the FE assumed escalations was an ARRAY;
+// it's actually escalations_open as an INT count. The agent canvas
+// computed inbox count as
+// `(peer_messages?.length ?? 0) + (escalations?.length ?? 0)` and
+// silently always read 0 for escalations because data.escalations was
+// undefined. This test makes that mistake structurally impossible by
+// pinning the public field names.
+func TestAgentInboxResponseShape(t *testing.T) {
+	resp := agentInboxResponse{
+		ApprovalsPending:    1,
+		AssignmentsOpen:     2,
+		EscalationsOpen:     3,
+		PeerMessages:        []peerMessageRow{},
+		CostUSDThisMonth:    0.42,
+		LLMCallsThisMonth:   17,
+		TokensUsedThisMonth: 12345,
+	}
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(b)
+
+	mustContain := []string{
+		`"approvals_pending"`,
+		`"assignments_open"`,
+		`"escalations_open"`,
+		`"peer_messages"`,
+		`"cost_usd_this_month"`,
+		`"llm_calls_this_month"`,
+		`"tokens_used_this_month"`,
+	}
+	for _, k := range mustContain {
+		if !contains(got, k) {
+			t.Errorf("expected key %s in response, got %s", k, got)
+		}
+	}
+
+	// Negative pin — earlier the FE assumed plural array names. If
+	// any *_open field is renamed to a plural array, this catches it.
+	mustNotContain := []string{
+		`"escalations":[`,
+		`"assignments":[`,
+		`"approvals":[`,
+	}
+	for _, k := range mustNotContain {
+		if contains(got, k) {
+			t.Errorf("unexpected key %s in response: %s", k, got)
+		}
+	}
+}
+
+// Pin the peer message row shape. Earlier the FE expected
+// `from_agent_id` + `content`; the real fields are `from_agent_name`,
+// `from_agent_slug`, `question`. The MessagesTab in bottom-panel was
+// reading the wrong fields and rendering blank cards.
+func TestPeerMessageRowShape(t *testing.T) {
+	row := peerMessageRow{
+		ID:            "pm1",
+		FromAgentName: "Lucie",
+		FromAgentSlug: "lucie",
+		Question:      "What did the API return?",
+		Status:        "pending",
+		CreatedAt:     "2026-04-28T10:00:00Z",
+		Direction:     "incoming",
+	}
+	b, _ := json.Marshal(row)
+	got := string(b)
+
+	mustContain := []string{
+		`"id"`, `"from_agent_name"`, `"from_agent_slug"`,
+		`"question"`, `"status"`, `"created_at"`, `"direction"`,
+	}
+	for _, k := range mustContain {
+		if !contains(got, k) {
+			t.Errorf("expected key %s in peer message: %s", k, got)
+		}
+	}
+
+	mustNotContain := []string{
+		`"from_agent_id"`,
+		`"content"`,
+		`"body"`,
+	}
+	for _, k := range mustNotContain {
+		if contains(got, k) {
+			t.Errorf("unexpected key %s in peer message: %s", k, got)
+		}
+	}
+}
+
+// Tiny inline helper — avoids importing strings just for this.
+func contains(haystack, needle string) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// Compile-time pin: silence "imported and not used" if time becomes unused.
+var _ = time.Now

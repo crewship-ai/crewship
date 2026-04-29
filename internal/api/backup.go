@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -28,6 +27,7 @@ import (
 // by backup.MobyDockerOps) rather than the concrete *docker.Client,
 // keeping the HTTP layer honest about the provider pattern and
 // trivially mockable from unit tests.
+
 type BackupHandler struct {
 	db        *sql.DB
 	logger    *slog.Logger
@@ -41,6 +41,7 @@ type BackupHandler struct {
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
 // in test setups; Create/Restore then run in pure-DB mode (useful for
 // restoring a workspace that has no crews with containers).
+
 func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerOps backup.DockerOps, crewshipVersion string) *BackupHandler {
 	return &BackupHandler{db: db, logger: logger, dockerOps: dockerOps, crewshipVersion: crewshipVersion}
 }
@@ -50,6 +51,7 @@ func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerOps backup.DockerOp
 // Exactly one of Passphrase, Recipient or NoEncrypt must be set (the
 // CLI enforces this before calling). Recipient is an `age1…` X25519
 // public key; Passphrase is a user-supplied secret run through scrypt.
+
 type createRequest struct {
 	Scope      string `json:"scope"` // "crew" or "workspace"
 	CrewID     string `json:"crew_id,omitempty"`
@@ -71,6 +73,7 @@ type createResponse struct {
 
 // Create handles POST /api/v1/admin/backups. Runs the backup inline;
 // typical durations are seconds-to-minute so no async job queue yet.
+
 func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
@@ -223,123 +226,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 // List handles GET /api/v1/admin/backups.
-func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
 
-	type outEntry struct {
-		Path          string    `json:"path"`
-		FileName      string    `json:"file_name"`
-		Size          int64     `json:"size_bytes"`
-		Scope         string    `json:"scope"`
-		Encrypted     bool      `json:"encrypted"`
-		CreatedAt     time.Time `json:"created_at,omitempty"`
-		FormatVersion int       `json:"format_version,omitempty"`
-	}
-
-	// Prefer the backup_catalog index — since CRE-128 every create/
-	// delete keeps it in sync, so a workspace-scoped SELECT is O(rows)
-	// instead of O(bundles) filesystem scan + per-file Inspect. Fall
-	// back to the filesystem when the catalog is empty (fresh install,
-	// pre-migration data, or a startup backfill that hasn't run yet).
-	cat, err := backup.ListCatalog(ctx, h.db, workspaceID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if len(cat) > 0 {
-		out := make([]outEntry, 0, len(cat))
-		for _, e := range cat {
-			out = append(out, outEntry{
-				Path:          e.FilePath,
-				FileName:      filepath.Base(e.FilePath),
-				Size:          e.Size,
-				Scope:         e.Scope,
-				Encrypted:     e.Encrypted,
-				CreatedAt:     e.CreatedAt,
-				FormatVersion: e.FormatVersion,
-			})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"data": out})
-		return
-	}
-
-	// Legacy / fallback path — scan the filesystem and filter per
-	// workspace. Kept so an admin with pre-catalog bundles can still
-	// list without a manual backfill step.
-	dir, err := backup.DefaultBackupsDir()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	entries, err := backup.ListBackups(ctx, dir)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	filtered := entries[:0]
-	for _, e := range entries {
-		if bundleBelongsToWorkspace(ctx, e.Path, workspaceID) {
-			filtered = append(filtered, e)
-		}
-	}
-	entries = filtered
-
-	out := make([]outEntry, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, outEntry{
-			Path:          e.Path,
-			FileName:      filepath.Base(e.Path),
-			Size:          e.Size,
-			Scope:         string(e.Scope),
-			Encrypted:     e.Encrypted,
-			CreatedAt:     e.CreatedAt,
-			FormatVersion: e.FormatVersion,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": out})
-}
-
-// Inspect handles GET /api/v1/admin/backups/inspect?path=…
-func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
-		return
-	}
-	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		// Either the bundle doesn't exist, failed to inspect, or
-		// belongs to a different workspace. Return 404 rather than
-		// 403 so we don't confirm the existence of a bundle the
-		// caller is not meant to see.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
-		return
-	}
-	m, err := backup.Inspect(ctx, path)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, m)
-}
-
-// restoreRequest is the body of POST /api/v1/admin/backups/restore.
 type restoreRequest struct {
 	Path        string `json:"path"`
 	Passphrase  string `json:"passphrase,omitempty"`
@@ -349,6 +236,7 @@ type restoreRequest struct {
 }
 
 // Restore handles POST /api/v1/admin/backups/restore.
+
 func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
@@ -430,284 +318,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 // advisory backup_lock row is currently held for the caller's workspace.
 // Useful when Create returns 409 "another backup is already in progress"
 // and the admin wants to know who has the lock and when it expires.
-func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace context required"})
-		return
-	}
 
-	type statusResp struct {
-		Held        bool   `json:"held"`
-		WorkspaceID string `json:"workspace_id,omitempty"`
-		AcquiredBy  string `json:"acquired_by,omitempty"`
-		AcquiredAt  string `json:"acquired_at,omitempty"`
-		ExpiresAt   string `json:"expires_at,omitempty"`
-	}
-
-	var out statusResp
-	out.WorkspaceID = workspaceID
-	held, err := backup.IsLockHeld(ctx, h.db, workspaceID, time.Now())
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	out.Held = held
-	if held {
-		// Pull the row detail so the CLI can show who / when. Errors
-		// here degrade to "held=true with empty fields" rather than a
-		// 500 — the lock detection itself is authoritative.
-		_ = h.db.QueryRowContext(ctx,
-			`SELECT acquired_by, acquired_at, expires_at FROM backup_locks WHERE workspace_id = ?`,
-			workspaceID,
-		).Scan(&out.AcquiredBy, &out.AcquiredAt, &out.ExpiresAt)
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// Verify handles GET /api/v1/admin/backups/verify?path=…. Opens the
-// bundle, verifies the sealed payload SHA-256 against the manifest,
-// and returns a VerifyResult JSON. Does NOT decrypt — checksum
-// covers sealed bytes so no key is needed. Handy for periodic
-// bundle-rot checks ("is my 3-month-old backup still restorable?").
-func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
-		return
-	}
-	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
-		return
-	}
-	res, err := backup.Verify(ctx, path)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	errStr := ""
-	if res.Err != nil {
-		errStr = res.Err.Error()
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"valid":      res.Valid,
-		"size_bytes": res.Size,
-		"manifest":   res.Manifest,
-		"error":      errStr,
-	})
-}
-
-// Unlock handles DELETE /api/v1/admin/backups/status. Force-releases
-// the advisory lock for the caller's workspace regardless of owner.
-// Emergency escape hatch when a crashed backup left a stale lock
-// behind and the 1 h TTL has not yet fired.
-func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	if user == nil || workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	if err := backup.ForceReleaseLock(ctx, h.db, workspaceID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	WriteAuditLog(ctx, h.db, "backup.unlock", "backup", workspaceID, user.ID, workspaceID, nil)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// rotateRequest is the body of POST /api/v1/admin/backups/rotate.
-type rotateRequest struct {
-	KeepLast int  `json:"keep_last,omitempty"`
-	KeepDays int  `json:"keep_days,omitempty"`
-	DryRun   bool `json:"dry_run,omitempty"`
-}
-
-// Rotate handles POST /api/v1/admin/backups/rotate. Applies retention
-// policy (by count and/or age) to the caller's workspace bundles.
-// DryRun returns the list of paths that WOULD be deleted without
-// touching disk.
-func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	if user == nil || workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	var req rotateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	// Reject negatives explicitly. 0 disables a rule (documented);
-	// a caller passing -1 otherwise slipped past the "at least one
-	// positive" gate with a positive counterpart and then fed the
-	// negative into Rotate, producing undefined behaviour.
-	if req.KeepLast < 0 || req.KeepDays < 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "keep_last and keep_days must be >= 0 (0 disables the rule)"})
-		return
-	}
-	if req.KeepLast == 0 && req.KeepDays == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one of keep_last or keep_days must be positive"})
-		return
-	}
-	dir, err := backup.DefaultBackupsDir()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	deleted, err := backup.Rotate(ctx, dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if !req.DryRun {
-		for _, p := range deleted {
-			WriteAuditLog(ctx, h.db, "backup.rotate", "backup", p, user.ID, workspaceID, map[string]interface{}{
-				"keep_last": req.KeepLast,
-				"keep_days": req.KeepDays,
-			})
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"deleted": deleted,
-		"dry_run": req.DryRun,
-	})
-}
-
-// Delete handles DELETE /api/v1/admin/backups?path=…
-func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
-		return
-	}
-	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
-		return
-	}
-	if err := backup.Delete(ctx, path); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	// Drop the catalog row too so the admin UI list view refreshes
-	// cleanly. A best-effort failure here is not fatal — the bundle is
-	// gone from disk; a stale row would surface on the next refresh
-	// (ListCatalog) and either get ignored by the UI or re-resolved by
-	// the startup backfill scan.
-	if err := backup.DeleteCatalogEntry(ctx, h.db, path); err != nil {
-		h.logger.Warn("backup catalog delete failed", "error", err, "path", path)
-	}
-	WriteAuditLog(ctx, h.db, "backup.delete", "backup", path, user.ID, workspaceID, nil)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// Download handles GET /api/v1/admin/backups/download?path=…. Streams
-// the raw bundle bytes so the admin can `scp`-like pull from a remote
-// Crewship install.
-func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
-		return
-	}
-	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
-		return
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
-		return
-	}
-	defer func() { _ = f.Close() }()
-	info, err := f.Stat()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	// Bundle bytes contain sensitive workspace contents (even encrypted,
-	// the metadata is plaintext). Disable proxy / browser caching so a
-	// compromised intermediary does not retain a copy after download.
-	w.Header().Set("Content-Type", "application/zstd")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(path)))
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = io.Copy(w, f)
-
-	if user != nil {
-		WriteAuditLog(ctx, h.db, "backup.download", "backup", path, user.ID, workspaceID, nil)
-	}
-}
-
-// bundleBelongsToWorkspace reports whether the bundle at path was
-// produced for (or contains) the given workspace. Used by the
-// per-endpoint authZ check so admin of workspace A cannot inspect,
-// download, restore or delete bundles of workspace B even though
-// every bundle lives in the shared DefaultBackupsDir.
-//
-// A bundle with no workspace in its manifest (e.g. a future
-// instance-scope bundle) returns false — instance admin endpoints
-// will handle those separately once CRE-129 lands.
 func bundleBelongsToWorkspace(ctx context.Context, path, workspaceID string) bool {
 	if workspaceID == "" {
 		return false
@@ -732,6 +343,7 @@ func bundleBelongsToWorkspace(ctx context.Context, path, workspaceID string) boo
 // ~/.crewship/backups/evil -> /etc/passwd) cannot bypass the
 // boundary once os.Open follows it. A future --allow-external-dir
 // flag can relax this once a real use case appears.
+
 func validateBackupPath(path string) error {
 	if strings.Contains(path, "..") {
 		return fmt.Errorf("path must not contain '..'")
@@ -779,6 +391,7 @@ func validateBackupPath(path string) error {
 // yet exist still gets a canonical prefix so validateBackupPath can
 // compare against a resolved default directory. When every ancestor
 // fails EvalSymlinks we return the original absolute path unchanged.
+
 func resolveExistingAncestor(p string) string {
 	for dir := p; dir != "/" && dir != "." && dir != ""; dir = filepath.Dir(dir) {
 		if rp, err := filepath.EvalSymlinks(dir); err == nil {
@@ -798,24 +411,7 @@ func resolveExistingAncestor(p string) string {
 // lock-held map, global counters), so workspace admins must not see
 // it: the endpoint is gated to the instance-level OWNER
 // (CREWSHIP_OWNER_EMAIL env) only.
-func (h *BackupHandler) Metrics(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	user := UserFromContext(ctx)
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	if !backup.IsInstanceOwner(user.Email) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instance owner required"})
-		return
-	}
-	writeJSON(w, http.StatusOK, backup.Snapshot())
-}
 
-// statusForBackupError maps a backup package error to the right HTTP
-// status using sentinel errors (errors.Is) rather than substring
-// matching on the message. When the backup package reworks its
-// wording the status codes stay stable.
 func statusForBackupError(err error) int {
 	if err == nil {
 		return http.StatusOK
@@ -847,85 +443,9 @@ func statusForBackupError(err error) int {
 // crewContainerNameFunc returns the slug→container-name mapping used
 // by the Docker provider. Hard-coded here to avoid importing
 // internal/provider/docker (which would create a dependency cycle).
+
 func crewContainerNameFunc() func(slug string) string {
 	return func(slug string) string { return "crewship-team-" + slug }
 }
 
 // selfTestRequest is the JSON body of POST /api/v1/admin/backups/self-test.
-type selfTestRequest struct {
-	CrewID string `json:"crew_id"`
-}
-
-// SelfTest handles POST /api/v1/admin/backups/self-test. Runs the canary
-// round-trip server-side so the seed CLI (and future CI harness) can
-// validate the backup pipeline end-to-end without depending on a
-// bundle-on-disk CLI roundtrip. Lightweight: no encryption, no DB dump,
-// just collect → destroy canary → restore → verify → cleanup.
-//
-// Admin-only. The BackupHandler's DockerOps must be wired; otherwise
-// the endpoint 503s since there's nothing to talk to.
-func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	role := RoleFromContext(ctx)
-	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
-		return
-	}
-	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
-		return
-	}
-	if h.dockerOps == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error": "backup self-test unavailable: docker not configured",
-		})
-		return
-	}
-
-	var req selfTestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-	crewID := strings.TrimSpace(req.CrewID)
-	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
-		return
-	}
-
-	// Resolve crew. The row must belong to the caller's workspace so an
-	// ADMIN in workspace A can't self-test crews in workspace B.
-	var crewSlug string
-	err := h.db.QueryRowContext(ctx, `
-		SELECT slug FROM crews
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
-	`, crewID, workspaceID).Scan(&crewSlug)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
-			return
-		}
-		h.logger.Error("backup self-test: lookup crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-
-	containerID := crewContainerNameFunc()(crewSlug)
-	result, err := backup.BackupSelfTest(ctx, h.dockerOps, backup.SelfTestOpts{
-		ContainerID: containerID,
-		Crew: backup.CrewTarget{
-			ID:          crewID,
-			Slug:        crewSlug,
-			ContainerID: containerID,
-		},
-	})
-	if err != nil {
-		h.logger.Error("backup self-test: pipeline", "crew_id", crewID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	// Happy and content-mismatch paths both return 200 with the result
-	// body — the "ok" field tells the caller what happened.
-	writeJSON(w, http.StatusOK, result)
-}

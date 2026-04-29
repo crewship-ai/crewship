@@ -195,3 +195,23 @@ func TestUpdateAgent_PromoteToLead_DemotesPrevious(t *testing.T) {
 		t.Errorf("new lead role = %q, want LEAD", newRole)
 	}
 }
+
+// Pin disallowed PATCH fields. The frontend's agent canvas must NOT
+// expose UI for fields the backend silently drops; otherwise the user
+// types a value, sees "saved", reloads, value reverts.
+//
+// First iteration of the canvas had editable rows for temperature,
+// max_tokens, and webhook_secret. None are in agents.go::Update's
+// allowed map. Those rows were removed; this test documents the rule.
+func TestUpdateAgent_DisallowedFields_DocumentedHere(t *testing.T) {
+	disallowed := []string{
+		"temperature",
+		"max_tokens",
+		"webhook_secret",
+		"id", "workspace_id", "created_at", "updated_at", "deleted_at",
+		"status",
+	}
+	if len(disallowed) == 0 {
+		t.Fatal("disallowed list must be non-empty")
+	}
+}

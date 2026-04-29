@@ -2,26 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  ChevronRight, Search, PanelLeftClose, PanelLeftOpen, Filter, ChevronDown,
+  ChevronRight, Search, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-
-type StatusFilter = "all" | "RUNNING" | "IDLE" | "ERROR" | "STOPPED"
-
-const STATUS_FILTERS: { value: StatusFilter; label: string; dot?: string }[] = [
-  { value: "all", label: "All" },
-  { value: "RUNNING", label: "Running", dot: "bg-emerald-500" },
-  { value: "IDLE", label: "Idle", dot: "bg-gray-400" },
-  { value: "ERROR", label: "Error", dot: "bg-red-500" },
-  { value: "STOPPED", label: "Stopped", dot: "bg-amber-500" },
-]
 
 const STATUS_BADGE: Record<string, { label: string; className: string; pulse?: boolean }> = {
   RUNNING: { label: "Running", className: "text-emerald-400", pulse: true },
@@ -74,7 +61,6 @@ export function CrewsExplorer({
   onAgentSelect,
 }: CrewsExplorerProps) {
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [expandedCrews, setExpandedCrews] = useState<Set<string>>(() => new Set(crews.map((c) => c.id)))
 
   // Auto-expand newly added crews
@@ -110,9 +96,6 @@ export function CrewsExplorer({
 
   const filteredAgents = useMemo(() => {
     let result = agents
-    if (statusFilter !== "all") {
-      result = result.filter((a) => a.status === statusFilter)
-    }
     if (search.trim()) {
       const q = search.toLowerCase()
       result = result.filter(
@@ -120,27 +103,24 @@ export function CrewsExplorer({
       )
     }
     return new Set(result.map((a) => a.id))
-  }, [agents, statusFilter, search])
+  }, [agents, search])
 
   const filteredCrews = useMemo(() => {
-    if (statusFilter === "all" && !search.trim()) return new Set(crews.map((c) => c.id))
+    if (!search.trim()) return new Set(crews.map((c) => c.id))
     const crewIds = new Set<string>()
     for (const agent of agents) {
       if (filteredAgents.has(agent.id) && agent.crew_id) {
         crewIds.add(agent.crew_id)
       }
     }
-    // Also include crews matching search by name
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      for (const crew of crews) {
-        if (crew.name.toLowerCase().includes(q) || crew.slug.toLowerCase().includes(q)) {
-          crewIds.add(crew.id)
-        }
+    const q = search.toLowerCase()
+    for (const crew of crews) {
+      if (crew.name.toLowerCase().includes(q) || crew.slug.toLowerCase().includes(q)) {
+        crewIds.add(crew.id)
       }
     }
     return crewIds
-  }, [crews, agents, filteredAgents, statusFilter, search])
+  }, [crews, agents, filteredAgents, search])
 
   const unassigned = useMemo(() => {
     return (agentsByCrew.get(null) || []).filter((a) => filteredAgents.has(a.id))
@@ -176,43 +156,17 @@ export function CrewsExplorer({
 
       {!collapsed && (
         <div className="flex-1 min-h-0 flex flex-col">
-          {/* Search + filter dropdown in one row */}
-          <div className="px-2 py-2 shrink-0 flex items-center gap-1.5">
-            <div className="relative flex-1">
+          {/* Search — status/role filtering driven by sub-bar */}
+          <div className="px-2 py-2 shrink-0">
+            <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               <Input
-                placeholder="Search..."
+                placeholder="Search agents, crews…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="h-7 pl-7 text-[12px] bg-white/[0.04] border-white/[0.1]"
               />
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className={cn(
-                  "inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium border transition-colors shrink-0",
-                  statusFilter !== "all"
-                    ? "bg-blue-500/15 border-blue-500/35 text-blue-400"
-                    : "bg-white/[0.04] border-white/[0.1] text-muted-foreground hover:text-foreground/80",
-                )}>
-                  <Filter className="h-3 w-3" />
-                  {statusFilter === "all" ? "All" : STATUS_FILTERS.find((f) => f.value === statusFilter)?.label}
-                  <ChevronDown className="h-2.5 w-2.5 opacity-50" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[140px]">
-                {STATUS_FILTERS.map((f) => (
-                  <DropdownMenuItem
-                    key={f.value}
-                    onClick={() => setStatusFilter(f.value)}
-                    className={cn("text-[12px] gap-2", statusFilter === f.value && "font-medium text-blue-400")}
-                  >
-                    {f.dot ? <span className={cn("h-2 w-2 rounded-full", f.dot)} /> : <span className="h-2 w-2" />}
-                    {f.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
 
           {/* Tree */}

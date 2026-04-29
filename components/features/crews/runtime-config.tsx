@@ -1,33 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { IconType } from "react-icons"
 import {
-  Search, Copy, Check, Pencil, X,
-  Package, Cloud, AlertCircle, Boxes,
+  AlertCircle, Check, Cloud, Copy, Package, Pencil, Search, X,
 } from "lucide-react"
-import {
-  SiDebian, SiUbuntu, SiAlpinelinux,
-  SiPython, SiNodedotjs, SiGo, SiRust, SiRuby, SiPhp,
-  SiOpenjdk, SiElixir, SiErlang, SiDeno, SiBun,
-  SiDotnet, SiKotlin, SiScala, SiSwift, SiZig, SiCrystal,
-  SiDocker, SiKubernetes, SiTerraform, SiAnsible, SiHelm,
-  SiGooglecloud, SiDigitalocean,
-  SiGithub, SiGitlab, SiGit,
-  SiPostgresql, SiMysql, SiMariadb, SiRedis, SiMongodb, SiSqlite,
-  SiHashicorp, SiVault, SiPulumi,
-  SiVim, SiZsh, SiGnubash,
-  SiPnpm, SiYarn, SiNpm,
-  SiFirebase, SiSupabase,
-  SiNginx, SiApache,
-  SiFlutter, SiDart, SiElm,
-  SiHugo, SiVite, SiWebpack,
-  SiJulia, SiLua, SiPerl, SiR, SiHaskell,
-  SiGraphql,
-  SiOpenai, SiAnthropic,
-  SiHeroku, SiVercel, SiCloudflare, SiFlydotio,
-  SiOllama, SiSentry, SiDatadog, SiRailway, SiNetlify,
-} from "react-icons/si"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -43,6 +19,22 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 // ---- Types ----------------------------------------------------------------
+
+import {
+  featureRefToTool,
+  getBrandColor,
+  getBrandIcon,
+} from "./runtime-config-brands"
+import {
+  BASE_IMAGES,
+  CATEGORY_FILTERS,
+  CATEGORY_LABELS,
+  buildDevcontainerJSON,
+  buildMiseJSON,
+  parseDevcontainerConfig,
+  parseMiseConfig,
+} from "./runtime-config-data"
+import type { CategoryFilter } from "./runtime-config-data"
 
 export interface RuntimeConfigValue {
   runtimeImage: string
@@ -75,276 +67,6 @@ interface RuntimeEntry {
   backends?: string[]
 }
 
-type CategoryFilter = "all" | "languages" | "tools" | "cloud" | "databases"
-
-// ---- Brand icon map -------------------------------------------------------
-
-const BRAND_ICONS: Record<string, IconType> = {
-  python: SiPython,
-  node: SiNodedotjs,
-  nodejs: SiNodedotjs,
-  "node.js": SiNodedotjs,
-  go: SiGo,
-  golang: SiGo,
-  rust: SiRust,
-  ruby: SiRuby,
-  php: SiPhp,
-  java: SiOpenjdk,
-  openjdk: SiOpenjdk,
-  jdk: SiOpenjdk,
-  elixir: SiElixir,
-  erlang: SiErlang,
-  deno: SiDeno,
-  bun: SiBun,
-  dotnet: SiDotnet,
-  "dotnet-core": SiDotnet,
-  kotlin: SiKotlin,
-  scala: SiScala,
-  swift: SiSwift,
-  zig: SiZig,
-  crystal: SiCrystal,
-  docker: SiDocker,
-  "docker-in-docker": SiDocker,
-  "docker-outside-of-docker": SiDocker,
-  "docker-from-docker": SiDocker,
-  kubectl: SiKubernetes,
-  "kubectl-helm-minikube": SiKubernetes,
-  kubernetes: SiKubernetes,
-  k8s: SiKubernetes,
-  minikube: SiKubernetes,
-  helm: SiHelm,
-  terraform: SiTerraform,
-  ansible: SiAnsible,
-  gcloud: SiGooglecloud,
-  "google-cloud": SiGooglecloud,
-  "google-cloud-cli": SiGooglecloud,
-  digitalocean: SiDigitalocean,
-  doctl: SiDigitalocean,
-  github: SiGithub,
-  "github-cli": SiGithub,
-  gh: SiGithub,
-  gitlab: SiGitlab,
-  "glab-cli": SiGitlab,
-  git: SiGit,
-  "git-lfs": SiGit,
-  postgres: SiPostgresql,
-  postgresql: SiPostgresql,
-  psql: SiPostgresql,
-  mysql: SiMysql,
-  mariadb: SiMariadb,
-  redis: SiRedis,
-  "redis-cli": SiRedis,
-  mongo: SiMongodb,
-  mongodb: SiMongodb,
-  mongosh: SiMongodb,
-  sqlite: SiSqlite,
-  sqlite3: SiSqlite,
-  hashicorp: SiHashicorp,
-  vault: SiVault,
-  pulumi: SiPulumi,
-  pnpm: SiPnpm,
-  yarn: SiYarn,
-  npm: SiNpm,
-  vim: SiVim,
-  neovim: SiVim,
-  nvim: SiVim,
-  zsh: SiZsh,
-  bash: SiGnubash,
-  sh: SiGnubash,
-  firebase: SiFirebase,
-  supabase: SiSupabase,
-  nginx: SiNginx,
-  apache: SiApache,
-  httpd: SiApache,
-  flutter: SiFlutter,
-  dart: SiDart,
-  elm: SiElm,
-  hugo: SiHugo,
-  vite: SiVite,
-  webpack: SiWebpack,
-  julia: SiJulia,
-  lua: SiLua,
-  perl: SiPerl,
-  r: SiR,
-  haskell: SiHaskell,
-  ghc: SiHaskell,
-  graphql: SiGraphql,
-  openai: SiOpenai,
-  anthropic: SiAnthropic,
-  claude: SiAnthropic,
-  // AWS family (no dedicated react-icons entry; use lucide Cloud fallback)
-  aws: Cloud,
-  "aws-cli": Cloud,
-  awscli: Cloud,
-  // Azure family (no dedicated react-icons entry; use lucide Cloud fallback)
-  azure: Cloud,
-  "azure-cli": Cloud,
-  az: Cloud,
-  // Heroku
-  heroku: SiHeroku,
-  "heroku-cli": SiHeroku,
-  // Vercel
-  vercel: SiVercel,
-  "vercel-cli": SiVercel,
-  // Cloudflare
-  cloudflare: SiCloudflare,
-  "cloudflare-cli": SiCloudflare,
-  wrangler: SiCloudflare,
-  flarectl: SiCloudflare,
-  // Fly.io
-  fly: SiFlydotio,
-  "fly-cli": SiFlydotio,
-  flyctl: SiFlydotio,
-  // Ollama
-  ollama: SiOllama,
-  // Sentry
-  sentry: SiSentry,
-  "sentry-cli": SiSentry,
-  // Datadog
-  datadog: SiDatadog,
-  "datadog-ci": SiDatadog,
-  // Railway
-  railway: SiRailway,
-  // Netlify
-  netlify: SiNetlify,
-}
-
-function getBrandIcon(tool: string): IconType | null {
-  if (!tool) return null
-  const key = tool.toLowerCase()
-  if (BRAND_ICONS[key]) return BRAND_ICONS[key]
-  // Try stripping common suffixes/prefixes
-  const stripped = key.replace(/-cli$|^cli-/, "").replace(/\d+$/, "")
-  return BRAND_ICONS[stripped] || null
-}
-
-function featureRefToTool(ref: string): string {
-  // ghcr.io/devcontainers/features/python:1 -> "python"
-  const withoutTag = ref.split(":")[0]
-  const parts = withoutTag.split("/")
-  return parts[parts.length - 1] || ""
-}
-
-// ---- Constants ------------------------------------------------------------
-
-const CATEGORY_LABELS: Record<string, string> = {
-  languages: "Languages",
-  tools: "Tools",
-  cloud: "Cloud",
-  databases: "Databases",
-}
-
-const CATEGORY_FILTERS: CategoryFilter[] = ["all", "languages", "tools", "cloud", "databases"]
-
-const BASE_IMAGES: Array<{
-  value: string
-  label: string
-  description: string
-  icon: IconType
-  recommended?: boolean
-}> = [
-  {
-    value: "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
-    label: "Node 22 (Debian) — recommended",
-    description: "Node.js 22 + npm + git + curl. Best for Claude Code and most AI workloads.",
-    icon: SiNodedotjs,
-    recommended: true,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/base:bookworm",
-    label: "Debian 12 (bookworm)",
-    description: "Minimal Debian with common utilities. Add features/runtimes as needed.",
-    icon: SiDebian,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
-    label: "Ubuntu 24.04",
-    description: "Ubuntu LTS with common utilities.",
-    icon: SiUbuntu,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
-    label: "Python 3.12 (Debian)",
-    description: "Python 3.12 + pip + venv pre-installed on Debian.",
-    icon: SiPython,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
-    label: "Go 1.23 (Debian)",
-    description: "Go 1.23 toolchain on Debian.",
-    icon: SiGo,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/rust:bookworm",
-    label: "Rust (Debian)",
-    description: "Rust stable + cargo on Debian.",
-    icon: SiRust,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/java:21-bookworm",
-    label: "Java 21 (OpenJDK)",
-    description: "OpenJDK 21 + Maven/Gradle on Debian.",
-    icon: SiOpenjdk,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/universal:2",
-    label: "Universal (kitchen sink)",
-    description: "Node + Python + Go + Rust + Java + Ruby pre-installed. ~8GB.",
-    icon: Boxes,
-  },
-  {
-    value: "mcr.microsoft.com/devcontainers/base:alpine-3.20",
-    label: "Alpine 3.20 (experimental)",
-    description: "Tiny (~7MB). WARNING: musl incompatible with Claude Code.",
-    icon: SiAlpinelinux,
-  },
-]
-
-// ---- Helpers --------------------------------------------------------------
-
-function parseDevcontainerConfig(jsonStr: string): {
-  image: string
-  features: Record<string, Record<string, unknown>>
-} {
-  if (!jsonStr) return { image: "debian:bookworm-slim", features: {} }
-  try {
-    const parsed = JSON.parse(jsonStr)
-    return {
-      image: parsed.image || "debian:bookworm-slim",
-      features: parsed.features || {},
-    }
-  } catch {
-    return { image: "debian:bookworm-slim", features: {} }
-  }
-}
-
-function parseMiseConfig(jsonStr: string): Record<string, string> {
-  if (!jsonStr) return {}
-  try {
-    const parsed = JSON.parse(jsonStr)
-    return parsed.tools || {}
-  } catch {
-    return {}
-  }
-}
-
-function buildDevcontainerJSON(
-  image: string,
-  features: Record<string, Record<string, unknown>>
-): string {
-  const config: Record<string, unknown> = { image }
-  if (Object.keys(features).length > 0) {
-    config.features = features
-  }
-  return JSON.stringify(config, null, 2)
-}
-
-function buildMiseJSON(tools: Record<string, string>): string {
-  if (Object.keys(tools).length === 0) return ""
-  return JSON.stringify({ tools }, null, 2)
-}
-
-// ---- Component ------------------------------------------------------------
 
 export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // Parse initial state from value
@@ -692,6 +414,11 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                   {BASE_IMAGES.map((img) => {
                     const Icon = img.icon
                     const isSelected = baseImage === img.value
+                    // colorKey is set explicitly on each entry above
+                    // (e.g. "node", "debian", "ubuntu") because img.value
+                    // is a full registry path. Falls back to muted
+                    // foreground when no key is set (Universal/Boxes).
+                    const brandColor = img.colorKey ? getBrandColor(img.colorKey) : null
                     return (
                       <button
                         key={img.value}
@@ -706,7 +433,10 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                             : "border-border/40 hover:bg-accent/30"
                         )}
                       >
-                        <Icon className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+                        <Icon
+                          className="w-4 h-4 mt-0.5 shrink-0"
+                          style={brandColor ? { color: brandColor } : undefined}
+                        />
                         <div className="min-w-0 flex-1">
                           <div className="font-medium flex items-center gap-1.5">
                             {img.label}
@@ -794,6 +524,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                   const isSelected = feature.ref in selectedFeatures
                   const toolName = featureRefToTool(feature.ref)
                   const BrandIcon = getBrandIcon(toolName) || getBrandIcon(feature.icon || "")
+                  const brandColor = getBrandColor(toolName) || getBrandColor(feature.icon || "")
                   const isCloud = feature.category === "cloud"
                   return (
                     <div
@@ -805,7 +536,10 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                     >
                       <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
                         {BrandIcon ? (
-                          <BrandIcon className="w-4 h-4" />
+                          <BrandIcon
+                            className="w-4 h-4"
+                            style={brandColor ? { color: brandColor } : undefined}
+                          />
                         ) : isCloud ? (
                           <Cloud className="w-4 h-4" />
                         ) : (
@@ -935,6 +669,7 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                     entry.default_version ||
                     (entry.versions?.[0] ?? "latest")
                   const BrandIcon = getBrandIcon(entry.tool) || getBrandIcon(entry.icon || "")
+                  const brandColor = getBrandColor(entry.tool) || getBrandColor(entry.icon || "")
                   const hasVersions = Array.isArray(entry.versions) && entry.versions.length > 0
                   const defaultVersion = entry.default_version || (hasVersions ? entry.versions![0] : "latest")
                   const isCloud = entry.category === "cloud"
@@ -948,7 +683,10 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
                     >
                       <div className="shrink-0 w-4 h-4 flex items-center justify-center text-muted-foreground">
                         {BrandIcon ? (
-                          <BrandIcon className="w-4 h-4" />
+                          <BrandIcon
+                            className="w-4 h-4"
+                            style={brandColor ? { color: brandColor } : undefined}
+                          />
                         ) : isCloud ? (
                           <Cloud className="w-4 h-4" />
                         ) : (

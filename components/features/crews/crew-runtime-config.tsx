@@ -66,7 +66,7 @@ export function CrewRuntimeConfig({
         devcontainer_config: value.devcontainerConfig || null,
         mise_config: value.miseConfig || null,
       })
-      toast.success("Runtime configuration updated")
+      toast.success("Saved · Use the toolbar Build button to rebuild")
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to save"
       toast.error(message)
@@ -204,6 +204,7 @@ export function CrewRuntimeConfig({
           )}
         </div>
       )}
+
     </div>
   )
 }
