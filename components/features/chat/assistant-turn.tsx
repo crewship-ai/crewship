@@ -2,6 +2,9 @@
 
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, Clock, FileText, DollarSign, Zap, CircleDot, HelpCircle, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
+import { useReactionsStore } from "@/stores/reactions-store"
+import { ReactionPicker } from "./reactions/reaction-picker"
+import { ReactionsRow } from "./reactions/reactions-row"
 import {
   Message,
   MessageContent,
@@ -504,6 +507,9 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
         </button>
       )}
 
+      {/* Reactions row */}
+      <TurnReactions turnId={turn.id} streaming={turn.isStreaming} />
+
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
         <MessageActions>
@@ -516,8 +522,22 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
           <MessageAction tooltip="Bad response">
             <ThumbsDown className="h-3.5 w-3.5" />
           </MessageAction>
+          <ReactionPicker onPick={(emoji) => useReactionsStore.getState().add(turn.id, emoji)} />
         </MessageActions>
       )}
     </Message>
+  )
+}
+
+function TurnReactions({ turnId, streaming }: { turnId: string; streaming: boolean }) {
+  const reactions = useReactionsStore((s) => s.byTurn[turnId])
+  const toggle = useReactionsStore((s) => s.toggle)
+  if (streaming || !reactions || Object.keys(reactions).length === 0) return null
+  return (
+    <ReactionsRow
+      reactions={reactions}
+      onToggle={(emoji) => toggle(turnId, emoji)}
+      className="mt-1"
+    />
   )
 }
