@@ -49,7 +49,13 @@ export function ThreeTierFiles({
   }, [agentFiles])
 
   useEffect(() => {
-    if (!crewId || !workspaceId) return
+    if (!crewId || !workspaceId) {
+      // Clear stale crew tree on context loss — otherwise a swap to an
+      // agent without a crew briefly renders the previous crew's files.
+      setCrewFiles([])
+      setCrewLoading(false)
+      return
+    }
     const ac = new AbortController()
     setCrewLoading(true)
     fetch(`/api/v1/crews/${crewId}/files?workspace_id=${workspaceId}`, {

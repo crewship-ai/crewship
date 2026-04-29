@@ -91,11 +91,19 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
       for (const { att, file } of queued) {
         try {
           const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
-          // Update chip to ready + remember server path on URL field.
-          // Re-using the existing addAttachments to overwrite by id.
+          // User removal is authoritative — if the chip was deleted
+          // while the upload was in flight, the success/error path
+          // must not put it back. Re-read the latest store snapshot
+          // and only promote the chip if it still exists.
+          const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
+            .some((a) => a.id === att.id)
+          if (!stillThere) continue
           removeAttachment(sessionId, att.id)
           addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path }])
         } catch (err) {
+          const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
+            .some((a) => a.id === att.id)
+          if (!stillThere) continue
           removeAttachment(sessionId, att.id)
           addAttachments(sessionId, [{ ...att, status: "error" }])
           toast.error(`${att.name}: ${err instanceof Error ? err.message : String(err)}`)
@@ -156,9 +164,15 @@ export function AttachmentButton({ agentId, sessionId }: { agentId: string; sess
         for (const { att, file } of queued) {
           try {
             const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
+            const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
+              .some((a) => a.id === att.id)
+            if (!stillThere) continue
             removeAttachment(sessionId, att.id)
             addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path }])
           } catch (err) {
+            const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
+              .some((a) => a.id === att.id)
+            if (!stillThere) continue
             removeAttachment(sessionId, att.id)
             addAttachments(sessionId, [{ ...att, status: "error" }])
             toast.error(`${att.name}: ${err instanceof Error ? err.message : String(err)}`)

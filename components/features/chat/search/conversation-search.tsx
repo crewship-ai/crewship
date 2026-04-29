@@ -99,6 +99,7 @@ export function ConversationSearch({ turns }: ConversationSearchProps) {
             <Search className="h-3.5 w-3.5 text-muted-foreground" />
             <input
               type="text"
+              aria-label="Search conversation"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search in conversation…"
@@ -115,13 +116,13 @@ export function ConversationSearch({ turns }: ConversationSearchProps) {
             <span className="text-xs text-muted-foreground tabular-nums">
               {hits.length === 0 ? "0" : `${cursor + 1}/${hits.length}`}
             </span>
-            <Button size="icon-sm" variant="ghost" onClick={goPrev} disabled={!hits.length}>
+            <Button aria-label="Previous result" size="icon-sm" variant="ghost" onClick={goPrev} disabled={!hits.length}>
               <ChevronUp className="h-3.5 w-3.5" />
             </Button>
-            <Button size="icon-sm" variant="ghost" onClick={goNext} disabled={!hits.length}>
+            <Button aria-label="Next result" size="icon-sm" variant="ghost" onClick={goNext} disabled={!hits.length}>
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
-            <Button size="icon-sm" variant="ghost" onClick={() => setOpen(false)}>
+            <Button aria-label="Close search" size="icon-sm" variant="ghost" onClick={() => setOpen(false)}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>

@@ -86,10 +86,17 @@ ORDER BY cnt DESC, emoji ASC`, userID, chatID, messageID)
 		var rr reactionRow
 		var mineCnt int
 		if err := rows.Scan(&rr.Emoji, &rr.Count, &mineCnt); err != nil {
-			continue
+			h.logger.Error("list reactions scan", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
 		}
 		rr.Mine = mineCnt > 0
 		out = append(out, rr)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("list reactions rows", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"reactions": out})
 }
@@ -97,6 +104,14 @@ ORDER BY cnt DESC, emoji ASC`, userID, chatID, messageID)
 func (h *MessageReactionsHandler) Add(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	messageID := r.PathValue("messageId")
+	// Auth check first — ensureChatVisible itself reads the user from
+	// context and returns false on missing user, which would surface as
+	// 404 instead of the correct 401.
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
 	if !h.ensureChatVisible(r, chatID) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
 		return
@@ -110,11 +125,6 @@ func (h *MessageReactionsHandler) Add(w http.ResponseWriter, r *http.Request) {
 	}
 	if l := len([]rune(body.Emoji)); l == 0 || l > 8 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "emoji length invalid"})
-		return
-	}
-	user := UserFromContext(r.Context())
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
 	id := generateCUID()
@@ -135,13 +145,14 @@ func (h *MessageReactionsHandler) Remove(w http.ResponseWriter, r *http.Request)
 	chatID := r.PathValue("chatId")
 	messageID := r.PathValue("messageId")
 	emoji := r.PathValue("emoji")
-	if !h.ensureChatVisible(r, chatID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
-		return
-	}
+	// Auth check first — see comment on Add().
 	user := UserFromContext(r.Context())
 	if user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if !h.ensureChatVisible(r, chatID) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
 		return
 	}
 	_, err := h.db.ExecContext(r.Context(),

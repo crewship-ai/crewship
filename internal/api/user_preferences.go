@@ -70,11 +70,18 @@ func (h *UserPreferencesHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
-			continue
+			h.logger.Error("scan user preference row", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			return
 		}
 		// Round-trip via RawMessage so the FE receives parsed JSON
 		// (number / object / array) rather than a JSON-encoded string.
 		out[k] = json.RawMessage(v)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate user preferences", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -27,6 +27,11 @@ interface AssistantTurnProps {
   turn: ChatTurn
   onCopy: (content: string) => void
   onFileClick: (fileName: string) => void
+  /** Active agent — required for "Open in Artifact" so tabs are scoped
+   *  to the agent that produced them. When omitted (older callers,
+   *  tests), the affordance is hidden rather than risk cross-agent
+   *  reads/writes against the global artifact store. */
+  agentId?: string
 }
 
 function formatDuration(ms: number): string {
@@ -130,11 +135,11 @@ interface AskQuestion {
   multiSelect?: boolean
 }
 
-function AskUserCard({ part }: { part: TurnPart }) {
+function AskUserCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const input = part.metadata?.input as { questions?: AskQuestion[] } | undefined
   const questions = input?.questions
   if (!questions?.length) {
-    return <DefaultToolCall part={part} />
+    return <DefaultToolCall part={part} agentId={agentId} />
   }
 
   return (
@@ -172,10 +177,10 @@ interface TodoItem {
   activeForm?: string
 }
 
-function TodoWriteCard({ part }: { part: TurnPart }) {
+function TodoWriteCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const input = part.metadata?.input as { todos?: TodoItem[] } | undefined
   const todos = input?.todos
-  if (!todos?.length) return <DefaultToolCall part={part} />
+  if (!todos?.length) return <DefaultToolCall part={part} agentId={agentId} />
 
   const completed = todos.filter((t) => t.status === "completed").length
   const inProgress = todos.filter((t) => t.status === "in_progress").length
@@ -221,9 +226,9 @@ function TodoWriteCard({ part }: { part: TurnPart }) {
   )
 }
 
-function TaskCard({ part }: { part: TurnPart }) {
+function TaskCard({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const input = part.metadata?.input as { description?: string; prompt?: string; subagent_type?: string } | undefined
-  if (!input?.description) return <DefaultToolCall part={part} />
+  if (!input?.description) return <DefaultToolCall part={part} agentId={agentId} />
 
   const isCompleted = !!part.metadata?.completed
   const promptPreview = input.prompt ? (input.prompt.length > 120 ? input.prompt.slice(0, 120) + "..." : input.prompt) : null
@@ -271,7 +276,7 @@ function redactSensitiveKeys(value: unknown): unknown {
 
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"])
 
-function DefaultToolCall({ part }: { part: TurnPart }) {
+function DefaultToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
   const isCompleted = !!part.metadata?.completed
   const rawInput = part.metadata?.input as Record<string, unknown> | undefined
@@ -301,7 +306,9 @@ function DefaultToolCall({ part }: { part: TurnPart }) {
     return p.length > 0
   }
   const safeFilePath = isSafeArtifactPath(filePath) ? filePath : null
-  const canOpenArtifact = safeFilePath && FILE_TOOLS.has(toolName)
+  // agentId is required for safe scoping — without it we can't bind the
+  // tab to the agent that produced it, so don't expose the affordance.
+  const canOpenArtifact = safeFilePath && FILE_TOOLS.has(toolName) && !!agentId
   const fileName = safeFilePath ? safeFilePath.split("/").pop() ?? safeFilePath : ""
 
   return (
@@ -318,12 +325,13 @@ function DefaultToolCall({ part }: { part: TurnPart }) {
           )}
         </ToolContent>
       </Tool>
-      {canOpenArtifact && safeFilePath && (
+      {canOpenArtifact && safeFilePath && agentId && (
         <button
           type="button"
           onClick={() =>
             openArtifact({
-              id: safeFilePath,
+              id: `${agentId}::${safeFilePath}`,
+              agentId,
               path: safeFilePath,
               title: fileName,
             })
@@ -339,14 +347,14 @@ function DefaultToolCall({ part }: { part: TurnPart }) {
   )
 }
 
-function InlineToolCall({ part }: { part: TurnPart }) {
+function InlineToolCall({ part, agentId }: { part: TurnPart; agentId?: string }) {
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
 
   switch (toolName) {
-    case "AskUserQuestion": return <AskUserCard part={part} />
-    case "TodoWrite": return <TodoWriteCard part={part} />
-    case "Task": return <TaskCard part={part} />
-    default: return <DefaultToolCall part={part} />
+    case "AskUserQuestion": return <AskUserCard part={part} agentId={agentId} />
+    case "TodoWrite": return <TodoWriteCard part={part} agentId={agentId} />
+    case "Task": return <TaskCard part={part} agentId={agentId} />
+    default: return <DefaultToolCall part={part} agentId={agentId} />
   }
 }
 
@@ -407,7 +415,7 @@ function DelegationContent({ content }: { content: string }) {
   )
 }
 
-export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps) {
+export function AssistantTurn({ turn, onCopy, onFileClick, agentId }: AssistantTurnProps) {
   // Collect all text content for copy action
   const fullText = turn.parts
     .filter((p) => p.type === "text")
@@ -445,7 +453,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
             )
 
           case "tool_call":
-            return <InlineToolCall key={part.id} part={part} />
+            return <InlineToolCall key={part.id} part={part} agentId={agentId} />
 
           case "tool_result":
             return <InlineToolResult key={part.id} part={part} />

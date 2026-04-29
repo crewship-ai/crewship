@@ -127,6 +127,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 					&pm.ToAgentName, &pm.ToAgentSlug,
 					&pm.Question, &response, &pm.Status, &pm.CreatedAt,
 					&fromID, &escalated, &duration); err != nil {
+					h.logger.Warn("inbox: peer messages scan", "err", err, "agent_id", agentID)
 					continue
 				}
 				if fromID == agentID {
@@ -144,6 +145,9 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 					pm.DurationMs = &d
 				}
 				resp.PeerMessages = append(resp.PeerMessages, pm)
+			}
+			if err := rows.Err(); err != nil {
+				h.logger.Warn("inbox: peer messages iteration", "err", err, "agent_id", agentID)
 			}
 		}
 	}

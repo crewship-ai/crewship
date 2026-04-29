@@ -55,10 +55,12 @@ interface ChatPanelProps {
   sessionId: string
   agentName?: string
   /** Canonical agent slug used to build URLs (`/chat/[agentSlug]`).
-   *  Required by SlashPalette commands like /new-session that navigate
+   *  Required because SlashPalette commands like /new-session navigate
    *  back to the agent route — passing the display name there breaks
-   *  for agents whose name has spaces or non-URL-safe characters. */
-  agentSlug?: string
+   *  for agents whose name has spaces or non-URL-safe characters. No
+   *  fallback to agentName: the display label is the source of the bug
+   *  the previous review flagged. */
+  agentSlug: string
   /** Agent role / role_title. Used to pick role-aware suggestion packs. */
   agentRole?: string | null
   /** How this session was created — UI / CLI / WEBHOOK / CRON / AGENT.
@@ -290,6 +292,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                       onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
                       onEditUserMessage={!isStreaming ? editAndResend : undefined}
                       animateAfter={animateAfter}
+                      agentId={agentId}
                     />
                   ))}
                 </AnimatePresence>
@@ -365,6 +368,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                       onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
                       onEditUserMessage={!isStreaming ? editAndResend : undefined}
                       animateAfter={animateAfter}
+                      agentId={agentId}
                     />
                   ))}
                 </AnimatePresence>
@@ -427,7 +431,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       </RightDrawer>
 
       <RightRail className={cn(pushOpen && "border-l-0")} />
-      <SlashPalette agentSlug={agentSlug ?? agentName} onCommand={handleSlashCommand} />
+      <SlashPalette agentSlug={agentSlug} onCommand={handleSlashCommand} />
       <ArtifactPane agentId={agentId} />
       <ConversationSearch turns={turns} />
       <ExportDialog turns={turns} agentName={agentName} />

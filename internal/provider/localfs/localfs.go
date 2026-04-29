@@ -22,8 +22,12 @@ type Provider struct {
 
 // New creates a local filesystem Provider rooted at basePath, creating the
 // directory if it does not exist.
+//
+// Mode 0775 matches Write/EnsureDir so a base dir created here is also
+// group-writable for sibling processes (agent uid vs crewshipd uid on
+// the same shared bind-mount).
 func New(basePath string) (*Provider, error) {
-	if err := os.MkdirAll(basePath, 0750); err != nil {
+	if err := os.MkdirAll(basePath, 0775); err != nil {
 		return nil, fmt.Errorf("create base dir %s: %w", basePath, err)
 	}
 	return &Provider{basePath: basePath}, nil
@@ -82,12 +86,31 @@ func (p *Provider) Write(_ context.Context, path string, r io.Reader) error {
 	if err := os.MkdirAll(filepath.Dir(full), 0775); err != nil {
 		return fmt.Errorf("create parent dir: %w", err)
 	}
-	// Best-effort: relax mode on the existing file before re-opening
-	// it for write. Ignore failures (file may not exist yet, or we
-	// may not own it — os.Create will report the real problem).
-	_ = os.Chmod(full, 0664)
+	// Reject writes that would land on a symlink. resolve() already
+	// blocks symlink-escape for *existing* targets, but for new files
+	// (and across the gap between resolve→chmod/create) an attacker
+	// who can write to the parent dir could swap in a symlink that
+	// redirects this Write outside basePath. lstat (no follow) before
+	// each touch and bail if the path is a symlink or non-regular.
+	if st, statErr := os.Lstat(full); statErr == nil {
+		if st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refuse symlink target: %s", path)
+		}
+		if !st.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type at %s", path)
+		}
+		// Best-effort: relax mode on the existing file before re-opening
+		// it for write. Ignore failures (we may not own it — os.Create
+		// will report the real problem).
+		_ = os.Chmod(full, 0664)
+	}
 	f, err := os.Create(full)
 	if err != nil && os.IsPermission(err) {
+		// Re-check before destructive Remove — another process could
+		// have raced a symlink into place between Create and Remove.
+		if st, statErr := os.Lstat(full); statErr == nil && st.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refuse symlink target: %s", path)
+		}
 		// Last-resort: unlink and recreate. Works when the parent dir
 		// is group-writable to us. Files we recreate this way drop
 		// previous ownership; the entrypoint sets umask 0002 so

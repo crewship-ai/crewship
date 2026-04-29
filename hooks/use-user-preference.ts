@@ -38,7 +38,10 @@ export function useUserPreference<T>(
   })
   const [ready, setReady] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingValueRef = useRef<T | null>(null)
+  // hasPendingRef is the source of truth — pendingValueRef can be a
+  // legitimate `null` preference (or `undefined` for never-set), so we
+  // must not gate the unmount flush on its value.
+  const pendingValueRef = useRef<T | undefined>(undefined)
   const hasPendingRef = useRef(false)
   const valueRef = useRef(value)
   valueRef.current = value
@@ -89,7 +92,7 @@ export function useUserPreference<T>(
       hasPendingRef.current = true
       debounceRef.current = setTimeout(() => {
         hasPendingRef.current = false
-        pendingValueRef.current = null
+        pendingValueRef.current = undefined
         fetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
           method: "PUT",
           credentials: "include",
@@ -109,14 +112,18 @@ export function useUserPreference<T>(
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      if (hasPendingRef.current && pendingValueRef.current !== null) {
+      if (hasPendingRef.current) {
         fetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
           method: "PUT",
           credentials: "include",
           keepalive: true,
           headers: { "Content-Type": "application/json" },
+          // pendingValueRef.current may legitimately be null — JSON.stringify
+          // serialises that as the string "null", which is exactly what
+          // the server expects.
           body: JSON.stringify(pendingValueRef.current),
         }).catch(() => {})
+        hasPendingRef.current = false
       }
     }
   }, [key])

@@ -38,13 +38,22 @@ interface ArtifactPaneProps {
 
 export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
   const { workspaceId } = useWorkspace()
-  const { open, tabs, activeId, setOpen, setActive, closeTab } = useArtifactStore()
+  const { open, tabs, activeId, setOpen, setActive, closeTab, pruneToAgent } = useArtifactStore()
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Drop tabs that belong to a previously-active agent. Without this,
+  // a tab opened for agent A would be loaded/saved through agent B's
+  // endpoints after a context swap.
+  useEffect(() => {
+    pruneToAgent(agentId)
+  }, [agentId, pruneToAgent])
+
+  // Filter to the current agent before picking the active tab —
+  // belt-and-suspenders against a race where pruneToAgent hasn't run yet.
   const active = useMemo(
-    () => tabs.find((t) => t.id === activeId) ?? null,
-    [tabs, activeId],
+    () => tabs.find((t) => t.id === activeId && t.agentId === agentId) ?? null,
+    [tabs, activeId, agentId],
   )
 
   useEffect(() => {
@@ -90,6 +99,10 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
         },
       )
       if (!res.ok) throw new Error("Save failed")
+      // Replace the in-memory baseline with what we just wrote so a
+      // remount (mode toggle, tab switch back) doesn't show pre-save
+      // text and a Cancel doesn't revert through stale state.
+      setContent(next)
       toast.success(`${active.title} saved`)
     } catch {
       toast.error("Failed to save file")

@@ -70,15 +70,17 @@ export const ChainOfThoughtTrigger = ({
   return (
     <button
       type="button"
-      onClick={() => {
-        if (!isStreaming) setOpen(!open);
+      {...props}
+      onClick={(e) => {
+        props.onClick?.(e);
+        if (e.defaultPrevented || isStreaming) return;
+        setOpen(!open);
       }}
       aria-expanded={open}
       className={cn(
         "flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit",
         className,
       )}
-      {...props}
     >
       {isStreaming ? (
         <Loader2 className="h-3 w-3 animate-spin" />

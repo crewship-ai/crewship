@@ -32,10 +32,14 @@ interface TurnRendererProps {
    *  arrival animation — they're either loaded from history or already
    *  rendered before the user switched session. */
   animateAfter?: number
+  /** Active agent — forwarded to AssistantTurn so artifact tabs are
+   *  scoped to the agent that produced the turn. Optional; tests and
+   *  legacy callers can omit it (the artifact affordance hides itself). */
+  agentId?: string
 }
 
 /** Render a single turn (user, assistant, or system). */
-export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter }: TurnRendererProps) {
+export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
@@ -133,7 +137,7 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
       transition={transition}
       data-turn-id={turn.id}
     >
-      <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} />
+      <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} agentId={agentId} />
       {isLastAssistant && onRegenerate && !turn.isStreaming && (
         <div className="flex pl-4 -mt-1 mb-2">
           <button

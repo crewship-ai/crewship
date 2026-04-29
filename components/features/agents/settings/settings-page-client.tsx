@@ -287,11 +287,17 @@ export function SettingsPageClient() {
         <SectionCard title={<span className="flex items-center gap-2"><Users className="h-4 w-4 text-muted-foreground" />Crew &amp; Role</span>}>
           <div className="space-y-0">
             <PropertyRow label="Crew" icon={Users}>
-              <Select value={crewId} onValueChange={setTeamId}>
+              {/* Radix Select rejects "" as a SelectItem value, so we use a
+                  sentinel for "no crew" and translate at the boundary. */}
+              <Select
+                value={crewId === "" ? "__none__" : crewId}
+                onValueChange={(v) => setTeamId(v === "__none__" ? "" : v)}
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a crew" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="__none__">Unassigned</SelectItem>
                   {crews.map((crew) => (
                     <SelectItem key={crew.id} value={crew.id}>{crew.name}</SelectItem>
                   ))}
@@ -299,27 +305,36 @@ export function SettingsPageClient() {
               </Select>
             </PropertyRow>
             <PropertyRow label="Agent role" icon={Shield}>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { id: "AGENT", label: "Agent", description: "Standard contributor" },
-                  { id: "LEAD", label: "Lead", description: "Plans + assigns work in crew" },
-                ].map((r) => {
-                  const active = agentRole === r.id
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => setAgentRole(r.id)}
-                      className={cn(
-                        "rounded-lg border px-3 py-2 text-left transition-colors min-w-[160px]",
-                        active ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted text-muted-foreground",
-                      )}
-                    >
-                      <div className="text-body font-medium">{r.label}</div>
-                      <div className="text-micro text-muted-foreground">{r.description}</div>
-                    </button>
-                  )
-                })}
+              <div className="space-y-2">
+                {agentRole === "COORDINATOR" && (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+                    This agent is a <strong>COORDINATOR</strong> — a deprecated role
+                    kept for backward compatibility. Selecting Agent or Lead below
+                    will migrate it; the choice is one-way.
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: "AGENT", label: "Agent", description: "Standard contributor" },
+                    { id: "LEAD", label: "Lead", description: "Plans + assigns work in crew" },
+                  ].map((r) => {
+                    const active = agentRole === r.id
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setAgentRole(r.id)}
+                        className={cn(
+                          "rounded-lg border px-3 py-2 text-left transition-colors min-w-[160px]",
+                          active ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted text-muted-foreground",
+                        )}
+                      >
+                        <div className="text-body font-medium">{r.label}</div>
+                        <div className="text-micro text-muted-foreground">{r.description}</div>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </PropertyRow>
             {agentRole === "LEAD" && (
