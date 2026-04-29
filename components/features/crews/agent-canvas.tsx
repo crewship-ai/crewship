@@ -22,13 +22,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { CLI_ADAPTERS, getProviderLabel } from "@/lib/cli-adapters"
 import { ModelLibraryPicker, getCompatibleAdapters } from "./model-library-picker"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -660,10 +653,10 @@ export function AgentCanvas({
                 />
               </div>
 
-              {/* Adapter — only shown when the current provider has more
-                  than one compatible CLI binary (e.g. Anthropic models can
-                  run on Claude Code OR OpenCode). For OpenAI-only agents
-                  this row is hidden so the UI stays focused. */}
+              {/* Adapter — inline pill selector. Renders only when the
+                  current provider has more than one compatible CLI binary
+                  (Anthropic ↔ Claude Code / OpenCode). For OpenAI / Google
+                  the row is hidden so the UI stays focused on the model. */}
               {(() => {
                 const compat = agent.llm_provider
                   ? getCompatibleAdapters(agent.llm_provider)
@@ -672,35 +665,39 @@ export function AgentCanvas({
                 return (
                   <div className="space-y-2">
                     <div className="text-xs text-muted-foreground">CLI adapter</div>
-                    <Select
-                      value={agent.cli_adapter}
-                      onValueChange={(v) => patch({ cli_adapter: v })}
-                    >
-                      <SelectTrigger className="w-full h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {compat.map((key) => {
-                          const cfg = CLI_ADAPTERS[key]
-                          if (!cfg) return null
-                          const Icon = cfg.icon
-                          return (
-                            <SelectItem key={key} value={key}>
-                              <div className="flex items-center gap-2">
-                                <Icon className="h-4 w-4" />
-                                <div className="flex flex-col">
-                                  <span className="text-sm">{cfg.label}</span>
-                                  <span className="text-[11px] text-muted-foreground">{cfg.description}</span>
-                                </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {compat.map((key) => {
+                        const cfg = CLI_ADAPTERS[key]
+                        if (!cfg) return null
+                        const Icon = cfg.icon
+                        const isActive = agent.cli_adapter === key
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              if (!isActive) patch({ cli_adapter: key })
+                            }}
+                            className={cn(
+                              "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
+                              isActive
+                                ? "border-blue-400 bg-blue-500/10 ring-1 ring-blue-500/30"
+                                : "border-white/10 hover:bg-white/[0.03]",
+                            )}
+                          >
+                            <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-blue-300" : "text-muted-foreground")} />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium leading-tight">{cfg.label}</div>
+                              <div className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
+                                {cfg.description}
                               </div>
-                            </SelectItem>
-                          )
-                        })}
-                      </SelectContent>
-                    </Select>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
                     <p className="text-[11px] text-muted-foreground pl-1">
-                      Both adapters can run {getProviderLabel(agent.llm_provider ?? "")} models.
-                      Stick with the default unless you have a reason to switch.
+                      Both adapters run {getProviderLabel(agent.llm_provider ?? "")} models — stick with the default unless you have a reason to switch.
                     </p>
                   </div>
                 )
