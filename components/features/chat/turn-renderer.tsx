@@ -28,19 +28,25 @@ interface TurnRendererProps {
   isLastAssistant?: boolean
   onRegenerate?: () => void
   onEditUserMessage?: (turnId: string, newContent: string) => void
+  /** Epoch ms cutoff. Turns whose timestamp is BEFORE this skip the
+   *  arrival animation — they're either loaded from history or already
+   *  rendered before the user switched session. */
+  animateAfter?: number
 }
 
 /** Render a single turn (user, assistant, or system). */
-export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage }: TurnRendererProps) {
+export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter }: TurnRendererProps) {
+  const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
+  const initialAnim = shouldAnimate ? arrival.initial : false
+  const transition = shouldAnimate ? arrival.transition : { duration: 0 }
   if (turn.role === "user") {
     const textContent = turn.parts.find((p) => p.type === "text")?.content ?? ""
     return (
       <motion.div
-        layout="position"
-        initial={arrival.initial}
+        initial={initialAnim}
         animate={arrival.animate}
         exit={arrival.exit}
-        transition={arrival.transition}
+        transition={transition}
         data-turn-id={turn.id}
         className="group flex flex-col"
       >
@@ -102,10 +108,9 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
 
     return (
       <motion.div
-        layout="position"
-        initial={arrival.initial}
+        initial={initialAnim}
         animate={arrival.animate}
-        transition={arrival.transition}
+        transition={transition}
         data-turn-id={turn.id}
       >
       <Message from="assistant">
@@ -123,10 +128,9 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
   // Assistant turn - use the new grouped component
   return (
     <motion.div
-      layout="position"
-      initial={arrival.initial}
+      initial={initialAnim}
       animate={arrival.animate}
-      transition={arrival.transition}
+      transition={transition}
       data-turn-id={turn.id}
     >
       <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} />

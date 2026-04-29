@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { AnimatePresence } from "motion/react"
 import {
   Bot,
   AlertCircle,
@@ -75,8 +76,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
   const [input, setInput] = useState(initialInput ?? "")
   const [sessionReady, setSessionReady] = useState(false)
 
+  // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
+  // animation. Bumped on every session swap so loaded-from-history turns
+  // appear instantly (no slide-up flash) while genuinely-new turns sent
+  // or streamed AFTER the swap still animate.
+  const [animateAfter, setAnimateAfter] = useState(() => Date.now())
+  const sessionLoadedFor = useRef<string | null>(null)
+
   useEffect(() => {
     setSessionReady(false)
+    setAnimateAfter(Date.now() + 250)
+    sessionLoadedFor.current = sessionId
   }, [sessionId])
 
   // Pre-populate input when a new session is started with a prefill value
@@ -233,17 +243,20 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
                     description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
                   />
                 )}
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                  />
-                ))}
+                <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+                  {turns.map((turn, idx) => (
+                    <TurnRenderer
+                      key={turn.id}
+                      turn={turn}
+                      onCopy={handleCopy}
+                      onFileClick={noopFileClick}
+                      isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                      onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                      onEditUserMessage={!isStreaming ? editAndResend : undefined}
+                      animateAfter={animateAfter}
+                    />
+                  ))}
+                </AnimatePresence>
                 <StreamingIndicator isStreaming={isStreaming} turns={turns} />
               </ConversationContent>
               <ConversationScrollButton />
@@ -304,17 +317,20 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
                     description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
                   />
                 )}
-                {turns.map((turn, idx) => (
-                  <TurnRenderer
-                    key={turn.id}
-                    turn={turn}
-                    onCopy={handleCopy}
-                    onFileClick={noopFileClick}
-                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                  />
-                ))}
+                <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+                  {turns.map((turn, idx) => (
+                    <TurnRenderer
+                      key={turn.id}
+                      turn={turn}
+                      onCopy={handleCopy}
+                      onFileClick={noopFileClick}
+                      isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                      onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                      onEditUserMessage={!isStreaming ? editAndResend : undefined}
+                      animateAfter={animateAfter}
+                    />
+                  ))}
+                </AnimatePresence>
                 <StreamingIndicator isStreaming={isStreaming} turns={turns} />
               </ConversationContent>
               <ConversationScrollButton />
