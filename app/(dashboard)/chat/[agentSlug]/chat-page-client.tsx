@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { ChevronLeft, MessageSquarePlus } from "lucide-react"
 import { toast } from "sonner"
@@ -66,7 +66,6 @@ interface SessionRecord {
  * RightPanel files/team/context) without modification.
  */
 export function ChatPageClient() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const slug = useAgentSlugFromUrl()
@@ -77,7 +76,36 @@ export function ChatPageClient() {
   const [error, setError] = useState<string | null>(null)
   const [creatingSession, setCreatingSession] = useState(false)
 
-  const sessionId = searchParams.get("session")
+  // Active session id is held in local state (not derived from useSearchParams)
+  // so swapping sessions never goes through Next.js's router. router.replace +
+  // useSearchParams forces the entire layout subtree to re-evaluate, which
+  // visibly remounts the topbar / left rail / dashboard chrome on production
+  // static-export builds. We update the URL via history.replaceState (no
+  // router involvement) and listen for back/forward via popstate.
+  const initialSessionFromUrl = searchParams.get("session")
+  const [sessionId, setSessionIdState] = useState<string | null>(initialSessionFromUrl)
+
+  const selectSession = useCallback((id: string | null) => {
+    setSessionIdState(id)
+    if (typeof window === "undefined" || slug === null) return
+    const url = id
+      ? `/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(id)}`
+      : `/chat/${encodeURIComponent(slug)}`
+    if (window.location.pathname + window.location.search !== url) {
+      window.history.replaceState(null, "", url)
+    }
+  }, [slug])
+
+  // Sync from URL on back/forward (the only path that should change sessionId
+  // outside of selectSession, since we now own URL writes ourselves).
+  useEffect(() => {
+    const onPop = () => {
+      const params = new URLSearchParams(window.location.search)
+      setSessionIdState(params.get("session"))
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
 
   // Resolve agent by slug (workspace-scoped).
   useEffect(() => {
@@ -145,7 +173,7 @@ export function ChatPageClient() {
     if (!agent || !workspaceId || !slug || sessionId || creatingSession || !sessionsLoaded) return
     if (sessions.length > 0) {
       // /chats?limit=20 returns sorted desc by created_at, so [0] is freshest.
-      router.replace(`/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(sessions[0].id)}`)
+      selectSession(sessions[0].id)
       return
     }
     setCreatingSession(true)
@@ -163,13 +191,13 @@ export function ChatPageClient() {
           ? prev
           : [{ id: created.id, title: null, status: "ACTIVE", message_count: 0, started_at: nowIso, ended_at: null }, ...prev],
       )
-      router.replace(`/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(created.id)}`)
+      selectSession(created.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setCreatingSession(false)
     }
-  }, [agent, workspaceId, sessionId, creatingSession, sessionsLoaded, sessions, slug, router])
+  }, [agent, workspaceId, sessionId, creatingSession, sessionsLoaded, sessions, slug, selectSession])
 
   useEffect(() => {
     if (agent && !sessionId && !creatingSession && sessionsLoaded) void ensureSession()
@@ -193,13 +221,13 @@ export function ChatPageClient() {
         const list: SessionRecord[] = await listRes.json()
         if (Array.isArray(list)) setSessions(list)
       }
-      router.replace(`/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(created.id)}`)
+      selectSession(created.id)
     } catch (err) {
       toast.error(`Could not create session: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setCreatingSession(false)
     }
-  }, [agent, workspaceId, slug, router])
+  }, [agent, workspaceId, slug, selectSession])
 
   const avatarSrc = useMemo(() => {
     if (!agent) return ""
@@ -277,6 +305,7 @@ export function ChatPageClient() {
           sessions={sessions}
           activeSessionId={sessionId}
           agentSlug={slug}
+          onSelect={selectSession}
         />
         <div className="min-w-0 min-h-0 overflow-hidden">
           {sessionId ? (

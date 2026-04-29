@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { useRouter } from "next/navigation"
 import { Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -16,6 +15,11 @@ export interface SessionsSidebarProps {
   }>
   activeSessionId: string | null
   agentSlug: string
+  /** Called when the user clicks a session row. Owner is responsible
+   *  for updating both local state AND the URL (via history.replaceState
+   *  or similar) — this component does not touch the router so layout-
+   *  level subtrees (topbar, sidebar) can never be remounted by a swap. */
+  onSelect: (sessionId: string) => void
 }
 
 function formatTime(iso: string): string {
@@ -36,8 +40,7 @@ function formatTime(iso: string): string {
  * agent with a search box. Click a session → swaps the chat panel via
  * URL ?session=. New session button lives in the header strip above.
  */
-export function SessionsSidebar({ sessions, activeSessionId, agentSlug }: SessionsSidebarProps) {
-  const router = useRouter()
+export function SessionsSidebar({ sessions, activeSessionId, onSelect }: SessionsSidebarProps) {
   const [search, setSearch] = useState("")
 
   const filtered = search.trim()
@@ -72,9 +75,7 @@ export function SessionsSidebar({ sessions, activeSessionId, agentSlug }: Sessio
               <button
                 key={s.id}
                 type="button"
-                onClick={() =>
-                  router.replace(`/chat/${encodeURIComponent(agentSlug)}?session=${encodeURIComponent(s.id)}`)
-                }
+                onClick={() => onSelect(s.id)}
                 className={cn(
                   "w-full text-left px-3 py-2 hover:bg-white/[0.04] border-l-2 transition-colors",
                   active ? "bg-blue-500/10 border-blue-400" : "border-transparent",
