@@ -6,7 +6,7 @@ import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
   ChevronDown, MessageSquare, MoreHorizontal, Square,
-  CheckCircle2, Trash2, RotateCcw,
+  Trash2, RotateCcw,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EditableField } from "@/components/shared/editable-field"
@@ -29,7 +29,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
+import { CLI_ADAPTERS, getProviderLabel } from "@/lib/cli-adapters"
+import { ModelLibraryPicker, getCompatibleAdapters } from "./model-library-picker"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
@@ -51,28 +52,6 @@ const ROLE_OPTIONS = [
   { value: "LEAD", label: "Lead" },
   { value: "COORDINATOR", label: "Coordinator" },
 ] as const
-
-const MODEL_DESCRIPTIONS: Record<string, { description: string; badge?: string; legacy?: boolean }> = {
-  // Anthropic — current
-  "claude-opus-4-7": { description: "Latest · most capable · 1M context", badge: "Latest" },
-  "claude-sonnet-4-6": { description: "Balanced speed and capability · default", badge: "Default" },
-  "claude-haiku-4-5-20251001": { description: "Fast and cheap · quick replies", badge: "Fast" },
-  // Anthropic — legacy (kept for existing agents)
-  "claude-opus-4-20250514": { description: "Older Opus 4 — superseded by 4.7", badge: "Legacy", legacy: true },
-  "claude-sonnet-4-20250514": { description: "Older Sonnet 4 — superseded by 4.6", badge: "Legacy", legacy: true },
-  "claude-3-5-sonnet-20241022": { description: "Pre-4.x flagship", badge: "Legacy", legacy: true },
-  "claude-3-5-haiku-20241022": { description: "Pre-4.x fast tier", badge: "Legacy", legacy: true },
-  // OpenAI
-  o3: { description: "Frontier reasoning model", badge: "Reasoning" },
-  "o3-mini": { description: "Smaller reasoning model", badge: "Reasoning" },
-  "o4-mini": { description: "Newest small reasoning model", badge: "Fast" },
-  "gpt-4o": { description: "Multimodal flagship", badge: "Multimodal" },
-  "gpt-4o-mini": { description: "Smaller multimodal · cheap", badge: "Fast" },
-  // Google
-  "gemini-2.5-pro": { description: "Google flagship · 1M-token context", badge: "Long ctx" },
-  "gemini-2.5-flash": { description: "Faster, cheaper Gemini", badge: "Fast" },
-  "gemini-2.0-flash": { description: "Older Flash · still supported", badge: "Legacy", legacy: true },
-}
 
 const TOOL_PROFILE_OPTIONS = [
   { value: "CODING", label: "Coding (full)" },
@@ -211,6 +190,8 @@ export function AgentCanvas({
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<AgentTab>("overview")
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [customModelOpen, setCustomModelOpen] = useState(false)
+  const [customModelDraft, setCustomModelDraft] = useState("")
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
 
   // Reset to Overview when switching agents.
@@ -665,62 +646,120 @@ export function AgentCanvas({
           <section className="space-y-3">
             <h2 className="text-lg font-semibold">Runtime</h2>
 
-            <div className="rounded-xl border border-white/8 bg-card p-4 space-y-5">
-              {/* Provider + Adapter chip selector */}
+            <div className="rounded-xl border border-white/8 bg-card p-4 space-y-4">
+              {/* Model — primary, model-first picker. Adapter is auto-resolved
+                  and shown only when the choice is meaningful (Anthropic ↔
+                  Claude Code / OpenCode). */}
               <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">Provider &amp; CLI adapter</div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {CLI_ADAPTER_KEYS.map((key) => {
-                    const cfg = CLI_ADAPTERS[key]
-                    const Icon = cfg.icon
-                    const isActive = agent.cli_adapter === key
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => {
-                          if (key === agent.cli_adapter) return
-                          patch({
-                            cli_adapter: key,
-                            llm_provider: cfg.provider,
-                            llm_model: cfg.defaultModel,
-                          })
-                        }}
-                        className={cn(
-                          "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
-                          isActive
-                            ? "border-blue-400 bg-blue-500/10 ring-1 ring-blue-500/30"
-                            : "border-white/10 hover:bg-white/[0.03]",
-                        )}
-                      >
-                        <Icon className={cn("h-6 w-6 shrink-0", isActive ? "text-blue-300" : "text-muted-foreground")} />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-medium flex items-center gap-1.5">
-                            {cfg.label}
-                            {isActive && <CheckCircle2 className="h-3.5 w-3.5 text-blue-300" />}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground truncate">
-                            <span className="font-mono">{cfg.provider}</span> · {cfg.description}
-                          </div>
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
+                <div className="text-xs text-muted-foreground">Model</div>
+                <ModelLibraryPicker
+                  cliAdapter={agent.cli_adapter}
+                  llmModel={agent.llm_model ?? ""}
+                  onPick={(next) => patch(next)}
+                  onCustom={() => setCustomModelOpen(true)}
+                />
               </div>
 
-              {/* Model — primary path is the dropdown of preset model IDs.
-                  Custom write-in stays as a secondary path: pick "Custom…"
-                  to switch to a free-text input. Off-list values (legacy or
-                  truly custom) get a one-off "Current" item pinned at the
-                  top of the dropdown so the user can always see + change
-                  what's set without losing the context. */}
-              <ModelPickerRow
-                cliAdapter={agent.cli_adapter}
-                value={agent.llm_model ?? ""}
-                onSave={(v) => patch({ llm_model: v })}
-              />
+              {/* Adapter — only shown when the current provider has more
+                  than one compatible CLI binary (e.g. Anthropic models can
+                  run on Claude Code OR OpenCode). For OpenAI-only agents
+                  this row is hidden so the UI stays focused. */}
+              {(() => {
+                const compat = agent.llm_provider
+                  ? getCompatibleAdapters(agent.llm_provider)
+                  : []
+                if (compat.length <= 1) return null
+                return (
+                  <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground">CLI adapter</div>
+                    <Select
+                      value={agent.cli_adapter}
+                      onValueChange={(v) => patch({ cli_adapter: v })}
+                    >
+                      <SelectTrigger className="w-full h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {compat.map((key) => {
+                          const cfg = CLI_ADAPTERS[key]
+                          if (!cfg) return null
+                          const Icon = cfg.icon
+                          return (
+                            <SelectItem key={key} value={key}>
+                              <div className="flex items-center gap-2">
+                                <Icon className="h-4 w-4" />
+                                <div className="flex flex-col">
+                                  <span className="text-sm">{cfg.label}</span>
+                                  <span className="text-[11px] text-muted-foreground">{cfg.description}</span>
+                                </div>
+                              </div>
+                            </SelectItem>
+                          )
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground pl-1">
+                      Both adapters can run {getProviderLabel(agent.llm_provider ?? "")} models.
+                      Stick with the default unless you have a reason to switch.
+                    </p>
+                  </div>
+                )
+              })()}
             </div>
+
+            {/* Custom model name — modal swap on the picker */}
+            {customModelOpen && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+                <div className="text-xs text-amber-300">Custom model identifier</div>
+                <div className="flex gap-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={customModelDraft}
+                    onChange={(e) => setCustomModelDraft(e.target.value)}
+                    placeholder="e.g. claude-3-7-sonnet or my-fine-tuned-llama"
+                    className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-blue-400"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && customModelDraft.trim()) {
+                        patch({ llm_model: customModelDraft.trim() })
+                        setCustomModelOpen(false)
+                        setCustomModelDraft("")
+                      } else if (e.key === "Escape") {
+                        setCustomModelOpen(false)
+                        setCustomModelDraft("")
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (customModelDraft.trim()) {
+                        patch({ llm_model: customModelDraft.trim() })
+                        setCustomModelOpen(false)
+                        setCustomModelDraft("")
+                      }
+                    }}
+                    disabled={!customModelDraft.trim()}
+                    className="px-3 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 disabled:opacity-40 text-sm text-white"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomModelOpen(false)
+                      setCustomModelDraft("")
+                    }}
+                    className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/5 text-sm text-muted-foreground"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  ⏎ to save · Esc to cancel · keeps current adapter and provider.
+                </p>
+              </div>
+            )}
 
             {/* Advanced — collapsible */}
             <div className="rounded-xl border border-white/8 bg-card">
@@ -832,157 +871,6 @@ export function AgentCanvas({
 // =============================================================================
 // Layout helpers
 // =============================================================================
-
-interface ModelPickerRowProps {
-  cliAdapter: string
-  value: string
-  onSave: (next: string) => void
-}
-
-/**
- * Model picker. Primary path is the preset dropdown (always rendered).
- * If the agent's current value isn't one of the preset IDs (legacy or
- * truly custom), it's pinned at the top of the dropdown as "Current"
- * so users can see + change it. Secondary "Custom…" item swaps the
- * trigger to a free-text input that saves on blur or Enter.
- */
-function ModelPickerRow({ cliAdapter, value, onSave }: ModelPickerRowProps) {
-  const adapterCfg = CLI_ADAPTERS[cliAdapter]
-  const presetModels = adapterCfg?.models ?? []
-  const inList = presetModels.some((m) => m.value === value)
-  const meta = value ? MODEL_DESCRIPTIONS[value] : undefined
-
-  const [customMode, setCustomMode] = useState(false)
-  const [customDraft, setCustomDraft] = useState("")
-
-  if (customMode) {
-    return (
-      <div className="space-y-2">
-        <div className="text-xs text-muted-foreground">Model</div>
-        <div className="flex gap-2">
-          <input
-            autoFocus
-            type="text"
-            value={customDraft}
-            onChange={(e) => setCustomDraft(e.target.value)}
-            placeholder="e.g. claude-haiku-4-5 or claude-3-7-sonnet"
-            className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-blue-400"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && customDraft.trim()) {
-                onSave(customDraft.trim())
-                setCustomMode(false)
-              } else if (e.key === "Escape") {
-                setCustomMode(false)
-                setCustomDraft("")
-              }
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              if (customDraft.trim()) {
-                onSave(customDraft.trim())
-                setCustomMode(false)
-              }
-            }}
-            disabled={!customDraft.trim()}
-            className="px-3 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 disabled:opacity-40 disabled:hover:bg-blue-500 text-sm text-white"
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCustomMode(false)
-              setCustomDraft("")
-            }}
-            className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/5 text-sm text-muted-foreground"
-          >
-            Back
-          </button>
-        </div>
-        <p className="text-[11px] text-muted-foreground pl-1">
-          Type any model identifier supported by the selected adapter. ⏎ to save · Esc to cancel.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="text-xs text-muted-foreground">Model</div>
-      <Select
-        value={value || "__none__"}
-        onValueChange={(v) => {
-          if (v === "__custom__") {
-            setCustomDraft("")
-            setCustomMode(true)
-          } else if (v !== "__none__") {
-            onSave(v)
-          }
-        }}
-      >
-        <SelectTrigger className="w-full font-mono text-sm h-9">
-          <SelectValue placeholder="Select a model" />
-        </SelectTrigger>
-        <SelectContent>
-          {!inList && value && (
-            <SelectItem key={value} value={value}>
-              <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-sm">{value}</span>
-                  <span className="rounded bg-amber-500/15 text-amber-300 px-1.5 py-px text-[10px] font-medium">
-                    Current
-                  </span>
-                </div>
-                <span className="text-[11px] text-muted-foreground">
-                  Not in preset list — kept so you can switch back.
-                </span>
-              </div>
-            </SelectItem>
-          )}
-          {presetModels.map((m) => {
-            const itemMeta = MODEL_DESCRIPTIONS[m.value]
-            return (
-              <SelectItem key={m.value} value={m.value}>
-                <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className={cn("font-mono text-sm", itemMeta?.legacy && "text-muted-foreground")}>
-                      {m.label}
-                    </span>
-                    {itemMeta?.badge && (
-                      <span
-                        className={cn(
-                          "rounded px-1.5 py-px text-[10px] font-medium",
-                          itemMeta.legacy
-                            ? "bg-zinc-700/40 text-zinc-400"
-                            : "bg-blue-500/15 text-blue-300",
-                        )}
-                      >
-                        {itemMeta.badge}
-                      </span>
-                    )}
-                  </div>
-                  {itemMeta?.description && (
-                    <span className="text-[11px] text-muted-foreground">
-                      {itemMeta.description}
-                    </span>
-                  )}
-                </div>
-              </SelectItem>
-            )
-          })}
-          <SelectItem value="__custom__" className="text-muted-foreground italic">
-            Custom model name…
-          </SelectItem>
-        </SelectContent>
-      </Select>
-      {meta && inList && (
-        <p className="text-[11px] text-muted-foreground pl-1">{meta.description}</p>
-      )}
-    </div>
-  )
-}
 
 
 function Row({
