@@ -124,17 +124,21 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
       .then((r) => r.ok ? r.json() : null)
       .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
         if (cancelled) return
-        if (data?.messages?.length) {
-          setSessionReady(true)
-          loadHistory(data.messages.map((m) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant" | "system" | "tool",
-            content: m.content,
-            timestamp: new Date(m.ts),
-          })))
-        }
+        setSessionReady(true)
+        // Always replace — including with [] for an empty (newly created)
+        // session — so the visible turns swap atomically from old session
+        // → new session with no blank gap in between.
+        const messages = data?.messages ?? []
+        loadHistory(messages.map((m) => ({
+          id: m.id,
+          role: m.role as "user" | "assistant" | "system" | "tool",
+          content: m.content,
+          timestamp: new Date(m.ts),
+        })))
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) loadHistory([])
+      })
       .finally(() => {
         if (!cancelled) setHistoryLoading(false)
       })
