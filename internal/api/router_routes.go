@@ -359,6 +359,18 @@ func (r *Router) registerRoutes() {
 	aih := NewAgentInboxHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/agents/{agentId}/inbox", authed(wsCtx(http.HandlerFunc(aih.Handle))))
 
+	// Message reactions: per-(chat, message, emoji, user) emoji react with
+	// idempotent INSERT OR IGNORE. Migration v57 created the underlying
+	// table; endpoints are scoped via chats.workspace_id so cross-tenant
+	// reads/writes return 404.
+	mrh := NewMessageReactionsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/chats/{chatId}/messages/{messageId}/reactions",
+		authed(wsCtx(http.HandlerFunc(mrh.List))))
+	r.mux.Handle("POST /api/v1/chats/{chatId}/messages/{messageId}/reactions",
+		authed(wsCtx(http.HandlerFunc(mrh.Add))))
+	r.mux.Handle("DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}",
+		authed(wsCtx(http.HandlerFunc(mrh.Remove))))
+
 	// Hooks registry: lifecycle intercepts. List is available to every
 	// workspace member for auditability; enable/disable is OWNER/ADMIN
 	// only because flipping a hook can invoke shell commands.

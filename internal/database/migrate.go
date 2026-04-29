@@ -470,6 +470,64 @@ CREATE INDEX IF NOT EXISTS idx_health_snapshots_ws_crew ON memory_health_snapsho
 	{version: 56, name: "add_journal_ws_crew_ts_index", sql: `
 CREATE INDEX IF NOT EXISTS idx_journal_ws_crew_ts ON journal_entries(workspace_id, crew_id, ts DESC);
 `},
+	// Chat UI overhaul — server-backed branches, reactions, attachments,
+	// and workspace-level shared files. Messages themselves live in JSONL
+	// files (chats.jsonl_path), so branching uses a sidecar table mapping
+	// message_id → parent_id rather than altering the message log.
+	{version: 57, name: "add_chat_extras", sql: `
+CREATE TABLE IF NOT EXISTS chat_branches (
+	id TEXT PRIMARY KEY,
+	chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+	message_id TEXT NOT NULL,
+	parent_id TEXT,
+	branch_index INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_branches_chat ON chat_branches(chat_id);
+CREATE INDEX IF NOT EXISTS idx_chat_branches_msg ON chat_branches(message_id);
+CREATE INDEX IF NOT EXISTS idx_chat_branches_parent ON chat_branches(parent_id);
+
+CREATE TABLE IF NOT EXISTS message_reactions (
+	id TEXT PRIMARY KEY,
+	chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+	message_id TEXT NOT NULL,
+	emoji TEXT NOT NULL,
+	user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(chat_id, message_id, emoji, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reactions_msg ON message_reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_reactions_chat ON message_reactions(chat_id);
+
+CREATE TABLE IF NOT EXISTS chat_attachments (
+	id TEXT PRIMARY KEY,
+	chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	filename TEXT NOT NULL,
+	mime TEXT NOT NULL,
+	size_bytes INTEGER NOT NULL,
+	sha256 TEXT NOT NULL,
+	storage_path TEXT NOT NULL,
+	uploaded_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_attachments_chat ON chat_attachments(chat_id);
+CREATE INDEX IF NOT EXISTS idx_chat_attachments_ws ON chat_attachments(workspace_id);
+
+CREATE TABLE IF NOT EXISTS workspace_files (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	rel_path TEXT NOT NULL,
+	size_bytes INTEGER NOT NULL DEFAULT 0,
+	mime TEXT,
+	sha256 TEXT,
+	created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(workspace_id, rel_path)
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_files_ws ON workspace_files(workspace_id);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
