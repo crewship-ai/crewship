@@ -77,8 +77,13 @@ Examples:
 		// Create or reuse chat
 		chatID := existingChat
 		if chatID == "" {
+			// Tag the session as CLI-origin so the SessionsSidebar in
+			// the chat UI shows a violet "CLI" chip — lets the user
+			// tell at a glance which sessions were spun up from a
+			// terminal vs the web UI.
 			resp, err := client.Post("/api/v1/agents/"+agentID+"/chats", map[string]string{
-				"mode": "CHAT",
+				"mode":   "CHAT",
+				"origin": "CLI",
 			})
 			if err != nil {
 				return fmt.Errorf("create chat: %w", err)

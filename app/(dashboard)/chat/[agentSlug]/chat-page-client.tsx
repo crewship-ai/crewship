@@ -59,6 +59,9 @@ interface SessionRecord {
   message_count: number
   started_at: string
   ended_at: string | null
+  /** Backend tag added in migration v59 — UI / CLI / WEBHOOK / CRON
+   *  / AGENT. Older rows that pre-date the migration are NULL. */
+  origin?: string | null
 }
 
 /**
@@ -189,7 +192,7 @@ export function ChatPageClient() {
       const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ origin: "UI" }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const created: { id: string } = await res.json()
@@ -197,7 +200,7 @@ export function ChatPageClient() {
       setSessions((prev) =>
         prev.some((s) => s.id === created.id)
           ? prev
-          : [{ id: created.id, title: null, status: "ACTIVE", message_count: 0, started_at: nowIso, ended_at: null }, ...prev],
+          : [{ id: created.id, title: null, status: "ACTIVE", message_count: 0, started_at: nowIso, ended_at: null, origin: "UI" }, ...prev],
       )
       selectSession(created.id)
     } catch (err) {
@@ -244,7 +247,7 @@ export function ChatPageClient() {
       const res = await fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ origin: "UI" }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const created: { id: string } = await res.json()

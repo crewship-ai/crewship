@@ -150,7 +150,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
     try {
       const res = await fetch(
         `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, origin: "UI" }) },
       )
       if (res.ok) setSessionReady(true)
     } catch { /* ignore */ }

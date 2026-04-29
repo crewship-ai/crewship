@@ -544,6 +544,16 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 );
 CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id);
 `},
+	// Origin tag on chats — distinguishes sessions started from the
+	// chat UI vs `crewship run` CLI vs webhooks vs cron triggers vs
+	// agent-to-agent assignments. The SessionsSidebar already renders
+	// a chip per origin; this migration is what populates the field.
+	// NULL means "unknown / pre-migration" and the UI falls back to
+	// not showing a chip — no fake heuristics.
+	{version: 59, name: "add_chats_origin", sql: `
+ALTER TABLE chats ADD COLUMN origin TEXT;
+CREATE INDEX IF NOT EXISTS idx_chats_origin ON chats(origin) WHERE origin IS NOT NULL;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
