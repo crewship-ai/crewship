@@ -279,15 +279,13 @@ export function ChatPageClient() {
           agentSlug={slug}
         />
         <div className="min-w-0 min-h-0 overflow-hidden">
-          {sessionId && (
+          {sessionId ? (
             <ChatPanel
-              key={sessionId}
               agentId={agent.id}
               sessionId={sessionId}
               agentName={agent.name}
             />
-          )}
-          {!sessionId && (
+          ) : (
             <div className="h-full grid place-items-center text-xs text-muted-foreground">
               Allocating session…
             </div>

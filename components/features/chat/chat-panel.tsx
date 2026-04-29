@@ -81,10 +81,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
   // appear instantly (no slide-up flash) while genuinely-new turns sent
   // or streamed AFTER the swap still animate.
   const [animateAfter, setAnimateAfter] = useState(() => Date.now())
+  const [historyLoading, setHistoryLoading] = useState(true)
   const sessionLoadedFor = useRef<string | null>(null)
 
   useEffect(() => {
     setSessionReady(false)
+    setHistoryLoading(true)
     setAnimateAfter(Date.now() + 250)
     sessionLoadedFor.current = sessionId
   }, [sessionId])
@@ -117,19 +119,26 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
 
   useEffect(() => {
     if (!sessionId) return
+    let cancelled = false
     fetch(`/api/v1/chats/${sessionId}/messages`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
       .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
-        if (!data?.messages?.length) return
-        setSessionReady(true)
-        loadHistory(data.messages.map((m) => ({
-          id: m.id,
-          role: m.role as "user" | "assistant" | "system" | "tool",
-          content: m.content,
-          timestamp: new Date(m.ts),
-        })))
+        if (cancelled) return
+        if (data?.messages?.length) {
+          setSessionReady(true)
+          loadHistory(data.messages.map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant" | "system" | "tool",
+            content: m.content,
+            timestamp: new Date(m.ts),
+          })))
+        }
       })
       .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false)
+      })
+    return () => { cancelled = true }
   }, [sessionId, loadHistory])
 
   const ensureSession = useCallback(async () => {
@@ -236,7 +245,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
           ) : (
             <Conversation>
               <ConversationContent className="mx-auto w-full max-w-3xl">
-                {turns.length === 0 && (
+                {turns.length === 0 && !historyLoading && (
                   <ConversationEmptyState
                     icon={<Bot className="h-12 w-12" />}
                     title="Start a conversation"
@@ -263,7 +272,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
             </Conversation>
           )}
         </div>
-        {turns.length === 0 && !authError && (
+        {turns.length === 0 && !authError && !historyLoading && (
           <div className="px-4 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
@@ -310,7 +319,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
           ) : (
             <Conversation>
               <ConversationContent className="mx-auto w-full max-w-3xl">
-                {turns.length === 0 && (
+                {turns.length === 0 && !historyLoading && (
                   <ConversationEmptyState
                     icon={<Bot className="h-12 w-12" />}
                     title="Start a conversation"
@@ -337,7 +346,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
             </Conversation>
           )}
         </div>
-        {turns.length === 0 && !authError && (
+        {turns.length === 0 && !authError && !historyLoading && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
