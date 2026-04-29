@@ -34,7 +34,6 @@ import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
 import { SlashPalette } from "./composer/slash-palette"
-import { ModelPicker } from "./composer/model-picker"
 import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
@@ -383,7 +382,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOri
               <PromptInputFooter className="justify-between p-2 gap-2">
                 <div className="flex items-center gap-1">
                   <AttachmentButton sessionId={sessionId} />
-                  <ModelPicker />
                 </div>
                 <PromptInputSubmit
                   disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}

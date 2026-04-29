@@ -1,6 +1,7 @@
 "use client"
 
-import { FileText, Zap, Users, Bookmark } from "lucide-react"
+import { useEffect } from "react"
+import { FileText, Zap, Users } from "lucide-react"
 import { motion } from "motion/react"
 import { useHotkeys } from "react-hotkeys-hook"
 
@@ -22,15 +23,26 @@ interface RailItem {
   shortcut?: string
 }
 
+// Context tab intentionally dropped from the chat drawer — that surface
+// belongs to the agent canvas / settings page, not the per-session chat.
+// Keeping the rail tight to Files / Triggers / Team makes the drawer
+// feel less like a kitchen-sink and more like a focused chat sidekick.
 const ITEMS: RailItem[] = [
   { id: "files", label: "Files", icon: FileText, shortcut: "1" },
   { id: "triggers", label: "Triggers", icon: Zap, shortcut: "2" },
   { id: "team", label: "Team", icon: Users, shortcut: "3" },
-  { id: "context", label: "Context", icon: Bookmark, shortcut: "4" },
 ]
 
 export function RightRail({ className }: { className?: string }) {
-  const { open, activeTab, toggle } = useDrawerStore()
+  const { open, activeTab, toggle, setActiveTab } = useDrawerStore()
+
+  // Migrate persisted "context" → "files" once on mount. Old user
+  // preference may still hold the dropped tab; rail buttons don't
+  // render it, so the panel would show nothing without this nudge.
+  useEffect(() => {
+    if (activeTab === "context") setActiveTab("files")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useHotkeys(
     ["mod+b"],
