@@ -1,12 +1,12 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
 import { Zap, Key, Plug } from "lucide-react"
 import { ToolbarStrip, type ToolbarTab } from "@/components/layout/toolbar-strip"
 import { SkillsPageClient } from "@/components/features/agents/tools/skills-pane"
 import { CredentialsPageClient } from "@/components/features/agents/tools/credentials-pane"
 import { MCPPageClient } from "@/components/features/agents/tools/mcp-pane"
+import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
 
 type Section = "skills" | "credentials" | "mcp"
 
@@ -22,17 +22,14 @@ function parseSection(value: string | null): Section {
 }
 
 export function ToolsPageClient() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const activeSection = useMemo(() => parseSection(searchParams.get("section")), [searchParams])
+  const [sectionRaw, setSectionRaw] = useShallowSearchParam("section", "skills")
+  const activeSection = useMemo(() => parseSection(sectionRaw), [sectionRaw])
 
   const handleChange = useCallback(
     (section: Section) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set("section", section)
-      router.replace(`?${params.toString()}`, { scroll: false })
+      setSectionRaw(section)
     },
-    [router, searchParams],
+    [setSectionRaw],
   )
 
   return (

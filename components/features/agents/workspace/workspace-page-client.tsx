@@ -1,11 +1,11 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
 import { FolderOpen, TerminalSquare } from "lucide-react"
 import { ToolbarStrip, type ToolbarTab } from "@/components/layout/toolbar-strip"
 import { FilesPageClient } from "@/components/features/agents/workspace/files-pane"
 import { TerminalPageClient } from "@/components/features/agents/workspace/terminal-pane"
+import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
 
 type Pane = "files" | "terminal"
 
@@ -19,17 +19,14 @@ function parsePane(value: string | null): Pane {
 }
 
 export function WorkspacePageClient() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const activePane = useMemo(() => parsePane(searchParams.get("pane")), [searchParams])
+  const [paneRaw, setPaneRaw] = useShallowSearchParam("pane", "files")
+  const activePane = useMemo(() => parsePane(paneRaw), [paneRaw])
 
   const handleChange = useCallback(
     (pane: Pane) => {
-      const params = new URLSearchParams(searchParams.toString())
-      params.set("pane", pane)
-      router.replace(`?${params.toString()}`, { scroll: false })
+      setPaneRaw(pane)
     },
-    [router, searchParams],
+    [setPaneRaw],
   )
 
   return (

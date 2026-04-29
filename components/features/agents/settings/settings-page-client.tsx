@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
+import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
 import { useAgentId } from "@/hooks/use-agent-id"
 import {
   Save, Trash2, Loader2, AlertCircle, CheckCircle2,
@@ -68,23 +69,19 @@ const SECTION_TABS: ToolbarTab<Section>[] = [
 export function SettingsPageClient() {
   const agentId = useAgentId()
   const router = useRouter()
-  const searchParams = useSearchParams()
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const [sectionRaw, setSectionRaw] = useShallowSearchParam("section", "general")
 
   const activeSection = useMemo<Section>(
-    () => (searchParams.get("section") === "schedule" ? "schedule" : "general"),
-    [searchParams],
+    () => (sectionRaw === "schedule" ? "schedule" : "general"),
+    [sectionRaw],
   )
 
   const handleSectionChange = useCallback(
     (section: Section) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (section === "general") params.delete("section")
-      else params.set("section", section)
-      const qs = params.toString()
-      router.replace(qs ? `?${qs}` : "?", { scroll: false })
+      setSectionRaw(section)
     },
-    [router, searchParams],
+    [setSectionRaw],
   )
 
   const [agent, setAgent] = useState<AgentDetail | null>(null)

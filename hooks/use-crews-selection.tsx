@@ -1,7 +1,8 @@
 "use client"
 
 import { useCallback } from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+
+import { useShallowSearchParam } from "@/hooks/use-shallow-search-param"
 
 export interface CrewsSelectionUpdate {
   agent?: string | null
@@ -19,54 +20,46 @@ export interface CrewsSelection {
 
 /**
  * URL-driven selection state for /crews. Reads/writes `?agent=<slug>` and
- * `?crew=<slug>` via shallow routing so deep-links, refresh, and back-button
- * behave naturally.
+ * `?crew=<slug>` via window.history.replaceState — NOT next/navigation —
+ * so picking another agent/crew never re-evaluates the dashboard layout
+ * subtree. (router.replace caused a full-screen Loader2 spinner blip
+ * from layout.tsx on every selection in production builds; see the
+ * chat-page-client fix on feat/chat-ui-overhaul for the precedent.)
  *
  * `selectCrew` clears the agent (focus is on the crew). Use
  * `update({ agent, crew })` for atomic multi-field changes.
  */
 export function useCrewsSelection(): CrewsSelection {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const pathname = usePathname()
-
-  const selectedAgentSlug = searchParams.get("agent")
-  const selectedCrewSlug = searchParams.get("crew")
+  const [selectedAgentSlug, setAgent] = useShallowSearchParam("agent")
+  const [selectedCrewSlug, setCrew] = useShallowSearchParam("crew")
 
   const update = useCallback(
     (updates: CrewsSelectionUpdate) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if ("agent" in updates) {
-        if (updates.agent) params.set("agent", updates.agent)
-        else params.delete("agent")
-      }
-      if ("crew" in updates) {
-        if (updates.crew) params.set("crew", updates.crew)
-        else params.delete("crew")
-      }
-      const query = params.toString()
-      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+      if ("agent" in updates) setAgent(updates.agent ?? null)
+      if ("crew" in updates) setCrew(updates.crew ?? null)
     },
-    [pathname, router, searchParams],
+    [setAgent, setCrew],
   )
 
   const selectAgent = useCallback(
     (slug: string | null) => {
-      update({ agent: slug })
+      setAgent(slug ?? null)
     },
-    [update],
+    [setAgent],
   )
 
   const selectCrew = useCallback(
     (slug: string | null) => {
-      update({ crew: slug, agent: null })
+      setCrew(slug ?? null)
+      setAgent(null)
     },
-    [update],
+    [setCrew, setAgent],
   )
 
   const clearSelection = useCallback(() => {
-    update({ agent: null, crew: null })
-  }, [update])
+    setAgent(null)
+    setCrew(null)
+  }, [setAgent, setCrew])
 
   return {
     selectedAgentSlug,
