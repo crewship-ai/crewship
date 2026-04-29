@@ -35,7 +35,11 @@ type peerMessageRow struct {
 	FromAgentName string  `json:"from_agent_name"`
 	FromAgentSlug string  `json:"from_agent_slug"`
 	ToAgentName   *string `json:"to_agent_name,omitempty"`
+	ToAgentSlug   *string `json:"to_agent_slug,omitempty"`
 	Question      string  `json:"question"`
+	Response      *string `json:"response,omitempty"`
+	Escalated     bool    `json:"escalated"`
+	DurationMs    *int64  `json:"duration_ms,omitempty"`
 	Status        string  `json:"status"`
 	CreatedAt     string  `json:"created_at"`
 	Direction     string  `json:"direction"` // "incoming" or "outgoing"
@@ -98,16 +102,16 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		rows, err := h.db.QueryContext(r.Context(), `
 			SELECT pc.id,
 			       from_a.name, from_a.slug,
-			       to_a.name,
-			       pc.question, pc.status, pc.created_at,
-			       pc.from_agent_id
+			       to_a.name, to_a.slug,
+			       pc.question, pc.response, pc.status, pc.created_at,
+			       pc.from_agent_id, pc.escalated, pc.duration_ms
 			FROM peer_conversations pc
 			JOIN agents from_a ON from_a.id = pc.from_agent_id
 			LEFT JOIN agents to_a ON to_a.id = pc.to_agent_id
 			WHERE pc.workspace_id = ? AND pc.crew_id = ?
 			  AND (pc.from_agent_id = ? OR pc.to_agent_id = ?)
 			ORDER BY pc.created_at DESC
-			LIMIT 3
+			LIMIT 20
 		`, workspaceID, crewID.String, agentID, agentID)
 		if err != nil {
 			h.logger.Warn("inbox: peer messages", "err", err, "agent_id", agentID)
@@ -116,14 +120,28 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			for rows.Next() {
 				var pm peerMessageRow
 				var fromID string
-				if err := rows.Scan(&pm.ID, &pm.FromAgentName, &pm.FromAgentSlug, &pm.ToAgentName,
-					&pm.Question, &pm.Status, &pm.CreatedAt, &fromID); err != nil {
+				var escalated sql.NullInt64
+				var duration sql.NullInt64
+				var response sql.NullString
+				if err := rows.Scan(&pm.ID, &pm.FromAgentName, &pm.FromAgentSlug,
+					&pm.ToAgentName, &pm.ToAgentSlug,
+					&pm.Question, &response, &pm.Status, &pm.CreatedAt,
+					&fromID, &escalated, &duration); err != nil {
 					continue
 				}
 				if fromID == agentID {
 					pm.Direction = "outgoing"
 				} else {
 					pm.Direction = "incoming"
+				}
+				if response.Valid && response.String != "" {
+					s := response.String
+					pm.Response = &s
+				}
+				pm.Escalated = escalated.Valid && escalated.Int64 != 0
+				if duration.Valid {
+					d := duration.Int64
+					pm.DurationMs = &d
 				}
 				resp.PeerMessages = append(resp.PeerMessages, pm)
 			}

@@ -67,10 +67,14 @@ interface PeerMessage {
   from_agent_name: string
   from_agent_slug: string
   to_agent_name?: string | null
+  to_agent_slug?: string | null
   question: string
+  response?: string | null
   status: string
   created_at: string
   direction: "incoming" | "outgoing"
+  escalated?: boolean
+  duration_ms?: number | null
 }
 
 interface FileEntry {
@@ -380,17 +384,66 @@ function MessagesTab({ workspaceId, context }: { workspaceId: string; context: B
           {counters.approvals > 0 && <span className="text-amber-200">{counters.approvals} approval{counters.approvals === 1 ? "" : "s"}</span>}
         </div>
       )}
-      {messages.map((m) => (
-        <div key={m.id} className="rounded border border-white/10 bg-zinc-900/40 px-3 py-2">
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-blue-300 font-medium">
-              {m.direction === "outgoing" ? "→" : "←"} {m.from_agent_name}
-            </span>
-            <span className="text-[10px] text-muted-foreground">{formatTime(m.created_at)}</span>
-          </div>
-          <div className="text-foreground/85 whitespace-pre-wrap">{m.question}</div>
+      {messages.map((m) => <PeerMessageCard key={m.id} m={m} />)}
+    </div>
+  )
+}
+
+/** Single peer-conversation card. Tags: Direction (in/out), Status,
+ *  Escalation, Type. Renders both the question and the response (when
+ *  COMPLETED) so the user sees the full peer exchange in one place. */
+function PeerMessageCard({ m }: { m: PeerMessage }) {
+  const status = (m.status ?? "").toUpperCase()
+  const statusChip =
+    status === "COMPLETED"
+      ? { label: "Completed", cls: "bg-emerald-500/15 text-emerald-300" }
+      : status === "RUNNING"
+        ? { label: "Running", cls: "bg-blue-500/15 text-blue-300" }
+        : status === "FAILED"
+          ? { label: "Failed", cls: "bg-red-500/15 text-red-300" }
+          : { label: "Pending", cls: "bg-amber-500/15 text-amber-300" }
+  const directionChip =
+    m.direction === "outgoing"
+      ? { label: "Sent", cls: "bg-violet-500/15 text-violet-300", icon: "→" }
+      : { label: "Received", cls: "bg-blue-500/15 text-blue-300", icon: "←" }
+  const peer = m.direction === "outgoing"
+    ? (m.to_agent_name ?? "unknown")
+    : m.from_agent_name
+  return (
+    <div className="rounded border border-white/10 bg-zinc-900/40 px-3 py-2 space-y-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className={cn("text-[10px] px-1.5 py-px rounded inline-flex items-center gap-0.5", directionChip.cls)}>
+          <span className="font-mono">{directionChip.icon}</span>
+          {directionChip.label}
+        </span>
+        <span className={cn("text-[10px] px-1.5 py-px rounded", statusChip.cls)}>
+          {statusChip.label}
+        </span>
+        {m.escalated && (
+          <span className="text-[10px] px-1.5 py-px rounded bg-amber-500/15 text-amber-300 inline-flex items-center gap-0.5">
+            ⚠ Escalation
+          </span>
+        )}
+        <span className="text-[10px] px-1.5 py-px rounded bg-zinc-800 text-muted-foreground">
+          Peer query
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+          {formatTime(m.created_at)}
+          {m.duration_ms != null && ` · ${(m.duration_ms / 1000).toFixed(1)}s`}
+        </span>
+      </div>
+      <div className="text-blue-300 font-medium text-[11px]">
+        {m.direction === "outgoing"
+          ? <>→ <span className="text-foreground/85">{peer}</span></>
+          : <><span className="text-foreground/85">{peer}</span> →</>}
+      </div>
+      <div className="text-foreground/85 whitespace-pre-wrap text-xs">{m.question}</div>
+      {m.response && (
+        <div className="mt-1 pt-1.5 border-t border-white/5">
+          <div className="text-[10px] text-muted-foreground mb-0.5">Reply</div>
+          <div className="text-foreground/70 whitespace-pre-wrap text-xs italic">{m.response}</div>
         </div>
-      ))}
+      )}
     </div>
   )
 }

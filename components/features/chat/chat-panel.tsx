@@ -57,6 +57,10 @@ interface ChatPanelProps {
   agentName?: string
   /** Agent role / role_title. Used to pick role-aware suggestion packs. */
   agentRole?: string | null
+  /** How this session was created — UI / CLI / WEBHOOK / CRON / AGENT.
+   *  Rendered as a chip in the connection bar so the user knows where
+   *  they are at a glance. Undefined = unknown (pre-migration). */
+  sessionOrigin?: string | null
   /** Pre-populate the chat input with this text on first render. */
   initialInput?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
@@ -66,7 +70,7 @@ interface ChatPanelProps {
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInput, mobilePanel }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOrigin, initialInput, mobilePanel }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -313,6 +317,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
       <div className="flex flex-col overflow-hidden flex-1 min-w-0">
         <div className="flex items-center gap-2 px-4 md:px-6 h-[41px] border-b shrink-0">
           <ConnectionBadge status={connectionStatus} />
+          <OriginChip origin={sessionOrigin} />
           <span className="text-micro text-muted-foreground ml-auto font-mono">
             {sessionId.slice(0, 8)}
           </span>
@@ -434,6 +439,28 @@ function ConnectionBadge({ status }: { status: string }) {
       )}
       <span className="capitalize">{status}</span>
     </div>
+  )
+}
+
+/** Origin chip in the chat header strip — tells the user at a glance
+ *  whether they're looking at a session started from the UI, the CLI,
+ *  a webhook, a cron, or an agent-to-agent assignment. Hidden when
+ *  origin is unknown (pre-migration sessions or legacy backends). */
+function OriginChip({ origin }: { origin?: string | null }) {
+  if (!origin) return null
+  const map: Record<string, { label: string; className: string }> = {
+    UI:      { label: "UI",      className: "bg-blue-500/15 text-blue-300" },
+    CLI:     { label: "CLI",     className: "bg-violet-500/15 text-violet-300" },
+    WEBHOOK: { label: "Hook",    className: "bg-amber-500/15 text-amber-300" },
+    CRON:    { label: "Cron",    className: "bg-amber-500/15 text-amber-300" },
+    AGENT:   { label: "Agent",   className: "bg-fuchsia-500/15 text-fuchsia-300" },
+  }
+  const tag = map[origin]
+  if (!tag) return null
+  return (
+    <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", tag.className)}>
+      {tag.label}
+    </span>
   )
 }
 

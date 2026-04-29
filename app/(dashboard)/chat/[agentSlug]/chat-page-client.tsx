@@ -397,6 +397,7 @@ export function ChatPageClient() {
               agentId={agent.id}
               sessionId={sessionId}
               agentName={agent.name}
+              sessionOrigin={sessions.find((s) => s.id === sessionId)?.origin ?? null}
             />
           ) : (
             <div className="h-full grid place-items-center text-xs text-muted-foreground">
