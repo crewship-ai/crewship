@@ -16,6 +16,21 @@ const FileEditor = dynamic(
     ),
   },
 )
+
+// Terminal tab is heavy (xterm.js + addons + CSS) — load only when the
+// user opens the tab, not eagerly on canvas mount. ssr:false because
+// xterm needs the real DOM.
+const BottomPanelTerminal = dynamic(
+  () => import("@/components/features/crews/bottom-panel-terminal").then((m) => m.BottomPanelTerminal),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full grid place-items-center text-xs text-muted-foreground">
+        Loading terminal…
+      </div>
+    ),
+  },
+)
 import {
   ChevronDown, ChevronUp, Container, File, FileCode2, Files, Folder,
   MessageSquare, Terminal, Pencil, Save, Loader2,
@@ -31,7 +46,7 @@ const TABS: Array<{ id: BottomTab; label: string; icon: typeof MessageSquare; so
   { id: "yaml", label: "YAML", icon: FileCode2 },
   { id: "docker", label: "Docker", icon: Container },
   { id: "files", label: "Files", icon: Files },
-  { id: "terminal", label: "Terminal", icon: Terminal, soon: true },
+  { id: "terminal", label: "Terminal", icon: Terminal },
 ]
 
 interface ContainerStatus {
@@ -75,7 +90,10 @@ export interface BottomPanelProps {
   workspaceId: string
   /** Currently selected entity context. Null when no selection — panel
    *  shows workspace-wide data. */
-  context: { kind: "agent"; agentId: string; agentSlug: string; agentName: string } | { kind: "crew"; crewId: string; crewSlug: string } | null
+  context:
+    | { kind: "agent"; agentId: string; agentSlug: string; agentName: string; crewId: string | null; crewSlug: string | null }
+    | { kind: "crew"; crewId: string; crewSlug: string }
+    | null
   /** Optional initial tab + open state — lets parent (e.g. crew Files
    *  button) jump directly to a tab and expand. */
   initialTab?: BottomTab
@@ -271,6 +289,22 @@ export function BottomPanel({
           {tab === "yaml" && <YamlTab workspaceId={workspaceId} context={context} />}
           {tab === "docker" && <DockerTab />}
           {tab === "files" && <FilesTab workspaceId={workspaceId} context={context} />}
+          {tab === "terminal" && (
+            context?.kind === "agent" && context.crewId && context.crewSlug ? (
+              <BottomPanelTerminal
+                agentName={context.agentName}
+                agentSlug={context.agentSlug}
+                crewId={context.crewId}
+                crewSlug={context.crewSlug}
+              />
+            ) : (
+              <EmptyState>
+                {context?.kind === "agent"
+                  ? "Agent has no crew assigned — terminal needs a crew container."
+                  : "Select an agent to open a shell."}
+              </EmptyState>
+            )
+          )}
         </div>
       )}
     </div>
