@@ -159,7 +159,21 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(cleanPath))
+	// Match the path-resolution rules used by AgentFileDownload: accept
+	// either relative ("workspace/x.toml") or full storage paths
+	// ("<crewID>/<slug>/workspace/x.toml"). Cross-agent writes get a 403.
+	prefix := crewID.String + "/" + slug.String + "/"
+	var fullPath string
+	if strings.HasPrefix(cleanPath, prefix) {
+		fullPath = cleanPath
+	} else if strings.HasPrefix(cleanPath, crewID.String+"/") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "path not scoped to this agent"})
+		return
+	} else {
+		fullPath = prefix + cleanPath
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(fullPath))
 
 	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
 	if err != nil {

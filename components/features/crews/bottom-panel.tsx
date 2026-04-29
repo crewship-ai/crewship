@@ -18,8 +18,9 @@ const FileEditor = dynamic(
 )
 import {
   ChevronDown, ChevronUp, Container, File, FileCode2, Files, Folder,
-  MessageSquare, Terminal,
+  MessageSquare, Terminal, Pencil, Save, Loader2,
 } from "lucide-react"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 type BottomTab = "messages" | "exec" | "yaml" | "docker" | "files" | "terminal"
@@ -554,6 +555,13 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  // Edit mode state — false means read-only (default). Toggle via the
+  // top-right button. dirty is tracked by the FileEditor's onDirtyChange
+  // callback so Save only enables when there are real changes.
+  const [editing, setEditing] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const editorSaveRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!context) return
@@ -563,6 +571,8 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
     setExpanded({})
     setPreviewPath(null)
     setPreviewContent(null)
+    setEditing(false)
+    setDirty(false)
     const url = context.kind === "agent"
       ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&path=/`
       : `/api/v1/crews/${context.crewId}/files?workspace_id=${workspaceId}`
@@ -610,6 +620,8 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
     setPreviewPath(filePath)
     setPreviewContent(null)
     setPreviewError(null)
+    setEditing(false)
+    setDirty(false)
     try {
       const url = `/api/v1/agents/${context.agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(filePath)}`
       const r = await fetch(url)
@@ -622,6 +634,34 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
       setPreviewError(err instanceof Error ? err.message : String(err))
     }
   }, [context, workspaceId])
+
+  const handleSave = useCallback(async (next: string) => {
+    if (!context || context.kind !== "agent" || !previewPath) return
+    setSaving(true)
+    try {
+      const url = `/api/v1/agents/${context.agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(previewPath)}`
+      const r = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "text/plain" },
+        body: next,
+      })
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+        toast.error(typeof data.error === "string" ? data.error : "Save failed")
+        return
+      }
+      // Persist the new content as the new baseline so re-opening the
+      // file or hitting Cancel doesn't revert to the pre-save text.
+      setPreviewContent(next)
+      setDirty(false)
+      setEditing(false)
+      toast.success(`Saved · ${previewPath.split("/").pop()}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed")
+    } finally {
+      setSaving(false)
+    }
+  }, [context, previewPath, workspaceId])
 
   if (!context) return <EmptyState>Select an agent or crew to browse files.</EmptyState>
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
@@ -666,12 +706,65 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
         {previewPath ? (
           <>
             <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/8 text-xs text-muted-foreground">
-              <File className="h-3 w-3" />
-              <span className="font-mono truncate">{previewPath}</span>
-              {previewContent !== null && (
-                <span className="ml-auto text-[10px]">
+              <File className="h-3 w-3 shrink-0" />
+              <span className="font-mono truncate flex-1">{previewPath}</span>
+              {dirty && (
+                <span className="text-[10px] text-amber-300 inline-flex items-center gap-1">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                  Unsaved
+                </span>
+              )}
+              {previewContent !== null && !dirty && (
+                <span className="text-[10px]">
                   {previewContent.length.toLocaleString()} chars
                 </span>
+              )}
+              {/* Edit / Save / Cancel — primary actions for the pane */}
+              {previewContent !== null && previewError === null && (
+                <>
+                  {!editing ? (
+                    <button
+                      type="button"
+                      onClick={() => setEditing(true)}
+                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 ml-1"
+                    >
+                      <Pencil className="h-3 w-3" />
+                      Edit
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1 ml-1">
+                      <button
+                        type="button"
+                        onClick={() => editorSaveRef.current?.()}
+                        disabled={!dirty || saving}
+                        className={cn(
+                          "flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors",
+                          dirty && !saving
+                            ? "bg-blue-500 hover:bg-blue-400 text-white border-blue-400"
+                            : "bg-zinc-800 text-muted-foreground border-white/10 cursor-default",
+                        )}
+                      >
+                        {saving
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : <Save className="h-3 w-3" />}
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditing(false)
+                          setDirty(false)
+                          // Re-fetch to drop in-flight CodeMirror edits
+                          if (previewPath) void openFile(previewPath, previewPath.split("/").pop() ?? "")
+                        }}
+                        disabled={saving}
+                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-white/10 hover:bg-white/5 text-muted-foreground"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             {previewError ? (
@@ -679,15 +772,19 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
             ) : previewContent === null ? (
               <div className="p-4 text-xs text-muted-foreground">Loading…</div>
             ) : (
-              <div className="flex-1 min-h-0 overflow-hidden">
+              <div className={cn("flex-1 min-h-0 overflow-hidden", !editing && "pointer-events-none")}>
                 <FileEditor
                   // CodeMirror remounts when the doc string ref changes,
-                  // so the key forces a fresh editor when the user picks
-                  // a different file (avoids stale state on language switch).
-                  key={previewPath}
+                  // so the key includes the editing flag — switching
+                  // between read-only and editable modes builds a fresh
+                  // editor with the current baseline content (otherwise
+                  // dirty state can leak across mode toggles).
+                  key={`${previewPath}::${editing ? "edit" : "read"}`}
                   code={previewContent}
                   language={getEditorLanguage(previewPath.split("/").pop() ?? "")}
-                  onSave={() => { /* preview is read-only for now */ }}
+                  onSave={handleSave}
+                  onDirtyChange={setDirty}
+                  saveRef={editorSaveRef}
                 />
               </div>
             )}
