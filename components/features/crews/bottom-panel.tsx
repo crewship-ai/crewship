@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   ChevronDown, ChevronUp, Container, File, FileCode2, Files, Folder,
   MessageSquare, Terminal,
@@ -419,16 +419,27 @@ function DockerTab() {
  * Files — uses /api/v1/agents/{agentId}/files for an agent and
  * /api/v1/crews/{crewId}/files for a crew. The crew variant lists the
  * shared crew tree (/crew/shared) via the sidecar proxy.
+ *
+ * Now supports lazy directory expansion (click a folder to fetch its
+ * children inline) + inline file preview pane on the right (click a
+ * file to read its contents via /agents/{id}/files/download).
  */
 function FilesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelProps["context"] }) {
-  const [files, setFiles] = useState<FileEntry[] | null>(null)
+  const [tree, setTree] = useState<FileEntry[] | null>(null)
+  const [expanded, setExpanded] = useState<Record<string, FileEntry[] | "loading" | "error">>({})
   const [error, setError] = useState<string | null>(null)
+  const [previewPath, setPreviewPath] = useState<string | null>(null)
+  const [previewContent, setPreviewContent] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!context) return
     let cancelled = false
-    setFiles(null)
+    setTree(null)
     setError(null)
+    setExpanded({})
+    setPreviewPath(null)
+    setPreviewContent(null)
     const url = context.kind === "agent"
       ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&path=/`
       : `/api/v1/crews/${context.crewId}/files?workspace_id=${workspaceId}`
@@ -436,16 +447,63 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return
-        setFiles(Array.isArray(data?.entries) ? data.entries : Array.isArray(data) ? data : [])
+        setTree(Array.isArray(data?.entries) ? data.entries : Array.isArray(data) ? data : [])
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
   }, [context, workspaceId])
 
+  const fetchDir = useCallback(async (subdir: string) => {
+    if (!context || context.kind !== "agent") return
+    setExpanded((p) => ({ ...p, [subdir]: "loading" }))
+    try {
+      const url = `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(subdir)}`
+      const r = await fetch(url)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json()
+      const entries = Array.isArray(data?.entries) ? data.entries : Array.isArray(data) ? data : []
+      setExpanded((p) => ({ ...p, [subdir]: entries as FileEntry[] }))
+    } catch {
+      setExpanded((p) => ({ ...p, [subdir]: "error" }))
+    }
+  }, [context, workspaceId])
+
+  const toggleFolder = useCallback((path: string) => {
+    setExpanded((p) => {
+      if (p[path] && p[path] !== "loading" && p[path] !== "error") {
+        const next = { ...p }
+        delete next[path]
+        return next
+      }
+      return p
+    })
+    if (!expanded[path] || expanded[path] === "error") {
+      void fetchDir(path)
+    }
+  }, [expanded, fetchDir])
+
+  const openFile = useCallback(async (filePath: string, _fileName: string) => {
+    if (!context || context.kind !== "agent") return
+    setPreviewPath(filePath)
+    setPreviewContent(null)
+    setPreviewError(null)
+    try {
+      const url = `/api/v1/agents/${context.agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(filePath)}`
+      const r = await fetch(url)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const text = await r.text()
+      // Cap at 256 KB to avoid hammering the panel with pathological files.
+      const MAX = 256 * 1024
+      setPreviewContent(text.length > MAX ? text.slice(0, MAX) + `\n\n... [truncated · file is ${text.length.toLocaleString()} bytes total]` : text)
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : String(err))
+    }
+  }, [context, workspaceId])
+
   if (!context) return <EmptyState>Select an agent or crew to browse files.</EmptyState>
   if (error) return <EmptyState><span className="text-red-300">Failed to load: {error}</span></EmptyState>
-  if (files === null) return <EmptyState>Loading…</EmptyState>
-  if (files.length === 0) {
+  if (tree === null) return <EmptyState>Loading…</EmptyState>
+  if (tree.length === 0) {
     return (
       <EmptyState>
         {context.kind === "agent"
@@ -460,22 +518,128 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
     : `/crew/shared/`
 
   return (
-    <div className="h-full overflow-y-auto p-3 text-xs">
-      <div className="text-muted-foreground mb-2 font-mono">{rootPath}</div>
-      <ul className="font-mono space-y-0.5">
-        {files.map((f) => (
-          <li key={f.name} className="flex items-center gap-2 text-foreground/85 hover:bg-white/[0.03] px-2 -mx-2 py-0.5 rounded">
-            {f.is_dir
-              ? <Folder className="h-3 w-3 shrink-0 text-blue-300" />
-              : <File className="h-3 w-3 shrink-0 text-muted-foreground" />}
-            <span className="flex-1">{f.name}</span>
-            {f.size !== undefined && !f.is_dir && (
-              <span className="text-[10px] text-muted-foreground">{formatBytes(f.size)}</span>
+    <div className="h-full grid grid-cols-1 md:grid-cols-[minmax(220px,40%)_1fr] gap-0">
+      {/* Tree */}
+      <div className="overflow-y-auto p-3 text-xs border-r border-white/8">
+        <div className="text-muted-foreground mb-2 font-mono">{rootPath}</div>
+        <ul className="font-mono space-y-0.5">
+          {tree.map((f) => (
+            <FileRow
+              key={f.name}
+              entry={f}
+              parentPath=""
+              depth={0}
+              expanded={expanded}
+              onToggleFolder={toggleFolder}
+              onOpenFile={openFile}
+              activePath={previewPath}
+              isAgent={context.kind === "agent"}
+            />
+          ))}
+        </ul>
+      </div>
+      {/* Preview pane */}
+      <div className="overflow-hidden flex flex-col min-h-0">
+        {previewPath ? (
+          <>
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/8 text-xs text-muted-foreground">
+              <File className="h-3 w-3" />
+              <span className="font-mono truncate">{previewPath}</span>
+              {previewContent !== null && (
+                <span className="ml-auto text-[10px]">
+                  {previewContent.length.toLocaleString()} chars
+                </span>
+              )}
+            </div>
+            {previewError ? (
+              <div className="p-4 text-xs text-red-300">Failed: {previewError}</div>
+            ) : previewContent === null ? (
+              <div className="p-4 text-xs text-muted-foreground">Loading…</div>
+            ) : (
+              <pre className="flex-1 overflow-auto p-3 text-[11px] font-mono leading-relaxed text-foreground/85 whitespace-pre-wrap break-words">
+                {previewContent}
+              </pre>
             )}
-          </li>
-        ))}
-      </ul>
+          </>
+        ) : (
+          <div className="flex items-center justify-center h-full text-xs text-muted-foreground/60 px-6 text-center">
+            Click a file in the tree to preview its contents.
+          </div>
+        )}
+      </div>
     </div>
+  )
+}
+
+interface FileRowProps {
+  entry: FileEntry
+  parentPath: string
+  depth: number
+  expanded: Record<string, FileEntry[] | "loading" | "error">
+  onToggleFolder: (path: string) => void
+  onOpenFile: (path: string, name: string) => void
+  activePath: string | null
+  isAgent: boolean
+}
+
+function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFile, activePath, isAgent }: FileRowProps) {
+  const path = parentPath ? `${parentPath}/${entry.name}` : entry.name
+  const state = expanded[path]
+  const isOpen = state && state !== "loading" && state !== "error"
+  const children = isOpen ? (state as FileEntry[]) : []
+  const isActive = activePath === path
+
+  return (
+    <>
+      <li>
+        <button
+          type="button"
+          onClick={() => {
+            if (entry.is_dir) {
+              if (!isAgent) return // crew tree expansion not yet supported
+              onToggleFolder(path)
+            } else if (isAgent) {
+              onOpenFile(path, entry.name)
+            }
+          }}
+          className={cn(
+            "w-full flex items-center gap-2 px-2 -mx-2 py-0.5 rounded text-left transition-colors",
+            isActive ? "bg-blue-500/15 text-blue-200" : "text-foreground/85 hover:bg-white/[0.03]",
+          )}
+          style={{ paddingLeft: `${depth * 12 + 8}px` }}
+        >
+          {entry.is_dir ? (
+            <span className="inline-flex items-center w-3 shrink-0">
+              <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", !isOpen && "-rotate-90")} />
+            </span>
+          ) : (
+            <span className="inline-block w-3 shrink-0" />
+          )}
+          {entry.is_dir
+            ? <Folder className="h-3 w-3 shrink-0 text-blue-300" />
+            : <File className="h-3 w-3 shrink-0 text-muted-foreground" />}
+          <span className="flex-1 truncate">{entry.name}</span>
+          {entry.size !== undefined && !entry.is_dir && (
+            <span className="text-[10px] text-muted-foreground">{formatBytes(entry.size)}</span>
+          )}
+          {state === "loading" && <span className="text-[10px] text-muted-foreground italic">…</span>}
+          {state === "error" && <span className="text-[10px] text-red-400">!</span>}
+        </button>
+      </li>
+      {isOpen && children.map((child) => (
+        <FileRow
+          key={child.name}
+          entry={child}
+          parentPath={path}
+          depth={depth + 1}
+          expanded={expanded}
+          onToggleFolder={onToggleFolder}
+          onOpenFile={onOpenFile}
+          activePath={activePath}
+          isAgent={isAgent}
+        />
+      ))}
+    </>
   )
 }
 
