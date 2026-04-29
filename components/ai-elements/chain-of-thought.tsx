@@ -76,6 +76,9 @@ export const ChainOfThoughtTrigger = ({
         if (e.defaultPrevented || isStreaming) return;
         setOpen(!open);
       }}
+      disabled={isStreaming}
+      aria-disabled={isStreaming}
+      aria-busy={isStreaming}
       aria-expanded={open}
       className={cn(
         "flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit",
@@ -113,7 +116,7 @@ export const ChainOfThoughtContent = ({
           className="overflow-hidden"
         >
           <motion.ol
-            variants={{ open: stagger.steps }}
+            variants={{ closed: {}, open: stagger.steps }}
             initial="closed"
             animate="open"
             className={cn(

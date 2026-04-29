@@ -23,6 +23,26 @@ interface AttachmentZoneProps {
   children: React.ReactNode
 }
 
+// Module-level abort registry, keyed by `${sessionId}::${attachmentId}`.
+// Both AttachmentZone (drop) and AttachmentButton (file picker) write
+// here when they kick off an upload; the user-removal handler in
+// AttachmentZone reads here to cancel in-flight requests so deleted
+// files can't sneak through to the server side.
+const abortRegistry = new Map<string, AbortController>()
+const abortKey = (sessionId: string, id: string) => `${sessionId}::${id}`
+
+function abortIfPending(sessionId: string, id: string) {
+  const ac = abortRegistry.get(abortKey(sessionId, id))
+  if (ac) {
+    ac.abort()
+    abortRegistry.delete(abortKey(sessionId, id))
+  }
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError"
+}
+
 /**
  * Upload a single file to the session's attachment store. The endpoint
  * lives at POST /api/v1/agents/{agentId}/chats/{chatId}/attachments —
@@ -35,6 +55,7 @@ async function uploadOne(
   sessionId: string,
   workspaceId: string,
   file: File,
+  signal?: AbortSignal,
 ): Promise<{ path: string; agent_path: string }> {
   const form = new FormData()
   form.append("file", file)
@@ -46,6 +67,7 @@ async function uploadOne(
     method: "POST",
     credentials: "include",
     body: form,
+    signal,
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
@@ -89,8 +111,10 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
       if (queued.length === 0) return
       addAttachments(sessionId, queued.map(({ att }) => att))
       for (const { att, file } of queued) {
+        const ac = new AbortController()
+        abortRegistry.set(abortKey(sessionId, att.id), ac)
         try {
-          const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
+          const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file, ac.signal)
           // User removal is authoritative — if the chip was deleted
           // while the upload was in flight, the success/error path
           // must not put it back. Re-read the latest store snapshot
@@ -101,16 +125,30 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
           removeAttachment(sessionId, att.id)
           addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path }])
         } catch (err) {
+          if (isAbortError(err)) continue
           const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
             .some((a) => a.id === att.id)
           if (!stillThere) continue
           removeAttachment(sessionId, att.id)
           addAttachments(sessionId, [{ ...att, status: "error" }])
           toast.error(`${att.name}: ${err instanceof Error ? err.message : String(err)}`)
+        } finally {
+          abortRegistry.delete(abortKey(sessionId, att.id))
         }
       }
     },
     [agentId, sessionId, workspaceId, addAttachments, removeAttachment],
+  )
+
+  // Wrap user removal so an in-flight upload is aborted before the
+  // chip disappears from the store. Without this, a deleted file can
+  // still finish uploading server-side.
+  const handleRemove = useCallback(
+    (id: string) => {
+      abortIfPending(sessionId, id)
+      removeAttachment(sessionId, id)
+    },
+    [sessionId, removeAttachment],
   )
 
   return (
@@ -121,7 +159,7 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
       {sessionAttachments.length > 0 && (
         <Attachments
           attachments={sessionAttachments}
-          onRemove={(id) => removeAttachment(sessionId, id)}
+          onRemove={handleRemove}
           className="px-2"
         />
       )}
@@ -162,20 +200,25 @@ export function AttachmentButton({ agentId, sessionId }: { agentId: string; sess
         if (queued.length === 0) return
         addAttachments(sessionId, queued.map(({ att }) => att))
         for (const { att, file } of queued) {
+          const ac = new AbortController()
+          abortRegistry.set(abortKey(sessionId, att.id), ac)
           try {
-            const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
+            const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file, ac.signal)
             const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
               .some((a) => a.id === att.id)
             if (!stillThere) continue
             removeAttachment(sessionId, att.id)
             addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path }])
           } catch (err) {
+            if (isAbortError(err)) continue
             const stillThere = (useComposerStore.getState().attachments[sessionId] ?? [])
               .some((a) => a.id === att.id)
             if (!stillThere) continue
             removeAttachment(sessionId, att.id)
             addAttachments(sessionId, [{ ...att, status: "error" }])
             toast.error(`${att.name}: ${err instanceof Error ? err.message : String(err)}`)
+          } finally {
+            abortRegistry.delete(abortKey(sessionId, att.id))
           }
         }
       }}
