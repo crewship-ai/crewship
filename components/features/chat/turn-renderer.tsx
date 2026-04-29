@@ -1,6 +1,7 @@
 "use client"
 
 import React from "react"
+import { motion } from "motion/react"
 import {
   AlertCircle,
   Settings2,
@@ -11,6 +12,7 @@ import {
   Message,
   MessageContent,
 } from "@/components/ai-elements/message"
+import { arrival } from "@/lib/motion"
 import type { ChatTurn } from "@/hooks/use-chat"
 import { AssistantTurn } from "./assistant-turn"
 
@@ -31,6 +33,13 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
   if (turn.role === "user") {
     const textContent = turn.parts.find((p) => p.type === "text")?.content ?? ""
     return (
+      <motion.div
+        layout="position"
+        initial={arrival.initial}
+        animate={arrival.animate}
+        exit={arrival.exit}
+        transition={arrival.transition}
+      >
       <Message from="user">
         <MessageContent>
           <div className="flex items-start gap-2">
@@ -41,6 +50,7 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
           {formatTimestamp(turn.timestamp)}
         </div>
       </Message>
+      </motion.div>
     )
   }
 
@@ -55,7 +65,12 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
       const model = meta.model as string | undefined
       const tools = meta.tools as string[] | undefined
       return (
-        <div className="flex items-center justify-center py-2">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={arrival.transition}
+          className="flex items-center justify-center py-2"
+        >
           <div className="flex items-center gap-3 px-4 py-2 bg-muted/40 border rounded-full text-label text-muted-foreground">
             <Settings2 className="h-3 w-3" />
             <span>Session started</span>
@@ -69,11 +84,17 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
               </span>
             )}
           </div>
-        </div>
+        </motion.div>
       )
     }
 
     return (
+      <motion.div
+        layout="position"
+        initial={arrival.initial}
+        animate={arrival.animate}
+        transition={arrival.transition}
+      >
       <Message from="assistant">
         <MessageContent className={isError ? "border-destructive/50 bg-destructive/5 rounded-lg px-4 py-3" : ""}>
           <div className={`flex items-center gap-2 text-body ${isError ? "text-destructive" : "text-muted-foreground"}`}>
@@ -82,12 +103,18 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
           </div>
         </MessageContent>
       </Message>
+      </motion.div>
     )
   }
 
   // Assistant turn - use the new grouped component
   return (
-    <div>
+    <motion.div
+      layout="position"
+      initial={arrival.initial}
+      animate={arrival.animate}
+      transition={arrival.transition}
+    >
       <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} />
       {isLastAssistant && onRegenerate && !turn.isStreaming && (
         <div className="flex pl-4 -mt-1 mb-2">
@@ -101,6 +128,6 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
           </button>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 })
