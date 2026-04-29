@@ -39,7 +39,13 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
   <div
     className={cn(
       "group flex w-full flex-col gap-2",
-      from === "user" ? "is-user ml-auto max-w-[80%] justify-end" : "is-assistant",
+      // User bubble hugs the right edge with a comfortable max-width.
+      // Assistant bubble hugs the left and is slightly wider — agents
+      // tend to write paragraphs, so giving them a bit more room
+      // reduces "tall narrow column of text" feel.
+      from === "user"
+        ? "is-user ml-auto max-w-[80%] justify-end"
+        : "is-assistant mr-auto max-w-[88%]",
       className
     )}
     {...props}
@@ -56,7 +62,18 @@ export const MessageContent = ({
   <div
     className={cn(
       "flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
-      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm group-[.is-user]:bg-muted group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      // User bubble — solid muted (zinc-800-ish in dark, gray-100 in light),
+      // tail on bottom-right so it visually anchors to the user side.
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm",
+      "group-[.is-user]:bg-muted group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      // Assistant bubble — subtler card surface so it stands out from the
+      // page bg (was invisible before — text floated on bg-background).
+      // Soft 1px border for definition without shouting; tail on
+      // bottom-left to mirror the user's bottom-right tail.
+      "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-bl-sm",
+      "group-[.is-assistant]:bg-zinc-900/50 dark:group-[.is-assistant]:bg-zinc-900/50",
+      "group-[.is-assistant]:border group-[.is-assistant]:border-white/5",
+      "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3",
       "group-[.is-assistant]:text-foreground",
       className
     )}
