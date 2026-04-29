@@ -62,19 +62,23 @@ export const MessageContent = ({
   <div
     className={cn(
       "flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
-      // User bubble — solid muted (zinc-800-ish in dark, gray-100 in light),
-      // tail on bottom-right so it visually anchors to the user side.
+      // Style C ("GitHub Copilot Chat" feel) — both bubbles are real
+      // cards with a clear value lift over bg-background. User bubble
+      // is the lighter of the two (zinc-700/40) so it reads as "your
+      // outgoing", assistant bubble (zinc-800/60) sits a half-step
+      // below to keep the eye flowing through the conversation.
+      // Border + soft shadow gives definition without shouting.
+      //
+      // User bubble — anchored right with bottom-right tail.
       "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm",
-      "group-[.is-user]:bg-muted group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
-      // Assistant bubble — subtler card surface so it stands out from the
-      // page bg (was invisible before — text floated on bg-background).
-      // Soft 1px border for definition without shouting; tail on
-      // bottom-left to mirror the user's bottom-right tail.
+      "group-[.is-user]:bg-zinc-700/40 group-[.is-user]:border group-[.is-user]:border-white/10",
+      "group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      "group-[.is-user]:shadow-sm",
+      // Assistant bubble — anchored left with bottom-left tail.
       "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-bl-sm",
-      "group-[.is-assistant]:bg-zinc-900/50 dark:group-[.is-assistant]:bg-zinc-900/50",
-      "group-[.is-assistant]:border group-[.is-assistant]:border-white/5",
-      "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3",
-      "group-[.is-assistant]:text-foreground",
+      "group-[.is-assistant]:bg-zinc-800/60 group-[.is-assistant]:border group-[.is-assistant]:border-white/10",
+      "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3 group-[.is-assistant]:text-foreground",
+      "group-[.is-assistant]:shadow-sm",
       className
     )}
     {...props}

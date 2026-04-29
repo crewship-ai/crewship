@@ -10,8 +10,12 @@ import {
   type Attachment,
 } from "@/components/ai-elements/attachments"
 import { useComposerStore } from "@/stores/composer-store"
+import { useWorkspace } from "@/hooks/use-workspace"
 
-const MAX_SIZE = 10 * 1024 * 1024
+// 25 MB cap — best practice for chat attachments. Bigger than the
+// previous 10 MB which was too small for screenshots / log dumps but
+// well under the multipart parsing slowdown threshold.
+const MAX_SIZE = 25 * 1024 * 1024
 
 interface AttachmentZoneProps {
   agentId: string
@@ -29,11 +33,16 @@ interface AttachmentZoneProps {
 async function uploadOne(
   agentId: string,
   sessionId: string,
+  workspaceId: string,
   file: File,
 ): Promise<{ path: string; agent_path: string }> {
   const form = new FormData()
   form.append("file", file)
-  const res = await fetch(`/api/v1/agents/${agentId}/chats/${sessionId}/attachments`, {
+  // workspace_id is required by the wsCtx middleware — without it the
+  // request 400s before reaching the handler. Same pattern as every
+  // other agent-scoped endpoint on the canvas.
+  const url = `/api/v1/agents/${agentId}/chats/${sessionId}/attachments?workspace_id=${encodeURIComponent(workspaceId)}`
+  const res = await fetch(url, {
     method: "POST",
     credentials: "include",
     body: form,
@@ -47,16 +56,21 @@ async function uploadOne(
 
 export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneProps) {
   const { attachments, addAttachments, removeAttachment } = useComposerStore()
+  const { workspaceId } = useWorkspace()
   const sessionAttachments = attachments[sessionId] ?? []
 
   const handleFiles = useCallback(
     async (files: File[]) => {
+      if (!workspaceId) {
+        toast.error("Workspace not loaded yet — try again in a moment")
+        return
+      }
       // Optimistically add chips with status: uploading; flip to ready
       // (with the server-side path) on success or to error on fail.
       const queued: Attachment[] = []
       for (const f of files) {
         if (f.size > MAX_SIZE) {
-          toast.error(`${f.name} exceeds 10 MB`)
+          toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
           continue
         }
         queued.push({
@@ -73,7 +87,7 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
         const att = queued[i]
         const file = files[i]
         try {
-          const { agent_path } = await uploadOne(agentId, sessionId, file)
+          const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
           // Update chip to ready + remember server path on URL field.
           // Re-using the existing addAttachments to overwrite by id.
           removeAttachment(sessionId, att.id)
@@ -85,7 +99,7 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
         }
       }
     },
-    [agentId, sessionId, addAttachments, removeAttachment],
+    [agentId, sessionId, workspaceId, addAttachments, removeAttachment],
   )
 
   return (
@@ -106,13 +120,21 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
 
 export function AttachmentButton({ agentId, sessionId }: { agentId: string; sessionId: string }) {
   const { addAttachments, removeAttachment } = useComposerStore()
+  const { workspaceId } = useWorkspace()
   return (
     <AttachmentTrigger
+      // No `accept` filter — chat attachments can be any file type
+      // the agent might want to inspect (logs, screenshots, configs,
+      // CSVs, archives). Server enforces size; type is informational.
       onSelect={async (files) => {
+        if (!workspaceId) {
+          toast.error("Workspace not loaded yet — try again in a moment")
+          return
+        }
         const queued: Attachment[] = files
           .filter((f) => {
             if (f.size > MAX_SIZE) {
-              toast.error(`${f.name} exceeds 10 MB`)
+              toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
               return false
             }
             return true
@@ -130,7 +152,7 @@ export function AttachmentButton({ agentId, sessionId }: { agentId: string; sess
           const att = queued[i]
           const file = files[i]
           try {
-            const { agent_path } = await uploadOne(agentId, sessionId, file)
+            const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
             removeAttachment(sessionId, att.id)
             addAttachments(sessionId, [{ ...att, status: "ready", url: agent_path }])
           } catch (err) {

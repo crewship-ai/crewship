@@ -63,12 +63,14 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// 10 MB upload cap — same as crew-messaging WriteFile. Larger media
-	// gets pushed at /api/v1/files endpoints once those exist; the
-	// chat composer is intentionally for snapshots, not blob storage.
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form or file too large (max 10MB)"})
+	// 25 MB upload cap — best-practice for chat attachments. Bigger
+	// than the crew-messaging WriteFile (10 MB) which is for inter-
+	// crew transfers; the chat composer needs headroom for log dumps
+	// and screenshots without hitting the cap.
+	const maxBytes = 25 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	if err := r.ParseMultipartForm(maxBytes); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form or file too large (max 25MB)"})
 		return
 	}
 	file, header, err := r.FormFile("file")
