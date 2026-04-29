@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { type ComponentProps, type ReactNode } from "react";
 import { ExternalLink, BookOpen, ChevronDown } from "lucide-react";
 import { AnimatePresence, motion, type HTMLMotionProps } from "motion/react";
 
@@ -19,22 +19,26 @@ export const Sources = ({ className, children, ...props }: SourcesProps) => (
 
 export type SourcesTriggerProps = ComponentProps<"button"> & {
   count: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 };
 
 export const SourcesTrigger = ({
   count,
+  open,
+  onOpenChange,
   className,
   onClick,
   ...props
 }: SourcesTriggerProps) => {
-  const [open, setOpen] = useState(false);
   return (
     <button
       type="button"
       onClick={(e) => {
-        setOpen(!open);
+        onOpenChange(!open);
         onClick?.(e);
       }}
+      aria-expanded={open}
       className={cn(
         "flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit",
         className,

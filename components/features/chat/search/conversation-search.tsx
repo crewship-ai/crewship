@@ -77,11 +77,12 @@ export function ConversationSearch({ turns }: ConversationSearchProps) {
   }
 
   useEffect(() => {
-    if (!hits.length) return
+    if (!open || !hits.length) return
+    if (cursor < 0 || cursor >= hits.length) return
     const hit = hits[cursor]
     const node = document.querySelector(`[data-turn-id="${hit.turnId}"]`)
     node?.scrollIntoView({ behavior: "smooth", block: "center" })
-  }, [hits, cursor])
+  }, [open, hits, cursor])
 
   return (
     <AnimatePresence>

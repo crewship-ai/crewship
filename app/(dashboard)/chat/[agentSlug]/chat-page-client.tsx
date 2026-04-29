@@ -103,7 +103,9 @@ export function ChatPageClient() {
       ? `/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(id)}`
       : `/chat/${encodeURIComponent(slug)}`
     if (window.location.pathname + window.location.search !== url) {
-      window.history.replaceState(null, "", url)
+      // pushState (not replaceState) so back/forward can traverse the
+      // session history. The popstate listener below will sync state.
+      window.history.pushState(null, "", url)
     }
   }, [slug])
 
@@ -397,6 +399,7 @@ export function ChatPageClient() {
               agentId={agent.id}
               sessionId={sessionId}
               agentName={agent.name}
+              agentSlug={agent.slug}
               sessionOrigin={sessions.find((s) => s.id === sessionId)?.origin ?? null}
             />
           ) : (

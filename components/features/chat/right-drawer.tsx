@@ -42,6 +42,9 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
     return () => {
       document.removeEventListener("mousemove", onMove)
       document.removeEventListener("mouseup", onUp)
+      // Always restore — if the component unmounts mid-drag (before
+      // mouseup fires), we'd otherwise leave the page un-selectable.
+      document.body.style.userSelect = ""
     }
   }, [open, setWidth])
 

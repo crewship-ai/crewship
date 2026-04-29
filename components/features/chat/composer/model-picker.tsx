@@ -48,11 +48,19 @@ export function ModelPicker() {
     fetch("/api/v1/llm/models", { credentials: "include", signal: ac.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { models?: ModelOption[] } | null) => {
-        if (data?.models?.length) setModels(data.models)
+        if (!data?.models?.length) return
+        setModels(data.models)
+        // Keep the composer store in sync with the loaded list. If the
+        // persisted modelId is null or no longer offered by the server,
+        // fall back to the first option so the visible selection in
+        // ModelSelector matches what `submit` will actually send.
+        if (!modelId || !data.models.some((m) => m.id === modelId)) {
+          setModel(data.models[0].id)
+        }
       })
       .catch(() => {})
     return () => ac.abort()
-  }, [])
+  }, [modelId, setModel])
 
   return (
     <ModelSelector

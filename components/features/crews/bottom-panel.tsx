@@ -1097,7 +1097,11 @@ interface FileRowProps {
 }
 
 function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFile, activePath }: FileRowProps) {
-  const path = parentPath ? `${parentPath}/${entry.name}` : entry.name
+  // Prefer the storage-rooted path returned by the API. The IPC layer
+  // prefix-checks against the crewID, so reconstructing from name +
+  // parentPath would drop the leading `<crewID>/<slug>/` prefix and
+  // hit the wrong target (or fail the prefix check entirely).
+  const path = entry.path ?? (parentPath ? `${parentPath}/${entry.name}` : entry.name)
   const state = expanded[path]
   const isOpen = state && state !== "loading" && state !== "error"
   const children = isOpen ? (state as FileEntry[]) : []

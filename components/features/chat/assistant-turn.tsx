@@ -291,8 +291,18 @@ function DefaultToolCall({ part }: { part: TurnPart }) {
     else if (input.pattern) subtitle = String(input.pattern)
   }
 
-  const canOpenArtifact = filePath && FILE_TOOLS.has(toolName)
-  const fileName = filePath ? filePath.split("/").pop() ?? filePath : ""
+  // Reject absolute paths and traversal segments before exposing the
+  // "Open in Artifact" affordance — a crafted tool payload could
+  // otherwise surface arbitrary host paths.
+  const isSafeArtifactPath = (p: string | null): p is string => {
+    if (!p) return false
+    if (p.startsWith("/") || p.startsWith("\\")) return false
+    if (/(^|\/)\.\.(\/|$)/.test(p)) return false
+    return p.length > 0
+  }
+  const safeFilePath = isSafeArtifactPath(filePath) ? filePath : null
+  const canOpenArtifact = safeFilePath && FILE_TOOLS.has(toolName)
+  const fileName = safeFilePath ? safeFilePath.split("/").pop() ?? safeFilePath : ""
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -308,13 +318,13 @@ function DefaultToolCall({ part }: { part: TurnPart }) {
           )}
         </ToolContent>
       </Tool>
-      {canOpenArtifact && filePath && (
+      {canOpenArtifact && safeFilePath && (
         <button
           type="button"
           onClick={() =>
             openArtifact({
-              id: filePath,
-              path: filePath,
+              id: safeFilePath,
+              path: safeFilePath,
               title: fileName,
             })
           }

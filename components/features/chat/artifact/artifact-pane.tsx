@@ -12,7 +12,6 @@ import {
   ArtifactHeader,
   ArtifactViewSwitch,
 } from "@/components/ai-elements/artifact"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
 import { useArtifactStore } from "@/stores/artifact-store"
@@ -51,6 +50,7 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
   useEffect(() => {
     if (!active || !workspaceId) {
       setContent(null)
+      setLoading(false)
       return
     }
     const ac = new AbortController()
@@ -59,10 +59,18 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
       `/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&path=${encodeURIComponent(active.path)}`,
       { signal: ac.signal },
     )
-      .then((r) => (r.ok ? r.text() : null))
-      .then((data) => setContent(data ?? ""))
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Failed to load: HTTP ${r.status}`)
+        return r.text()
+      })
+      .then((data) => setContent(data))
       .catch(() => {
-        if (!ac.signal.aborted) setContent("")
+        if (!ac.signal.aborted) {
+          // Distinct from "" (an actually empty file) so a save can't
+          // overwrite a real file with empty contents on a load miss.
+          setContent(null)
+          toast.error("Failed to load artifact")
+        }
       })
       .finally(() => {
         if (!ac.signal.aborted) setLoading(false)
@@ -101,12 +109,10 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
           {tabs.map((t) => {
             const isActive = t.id === activeId
             return (
-              <motion.button
+              <motion.div
                 key={t.id}
-                type="button"
                 layout
                 transition={spring.snappy}
-                onClick={() => setActive(t.id)}
                 className={cn(
                   "group/tab inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs whitespace-nowrap transition-colors",
                   isActive
@@ -114,26 +120,25 @@ export function ArtifactPane({ agentId, width = 540 }: ArtifactPaneProps) {
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                <span className="truncate max-w-[140px]">{t.title}</span>
-                <Button
-                  asChild
-                  size="icon-sm"
-                  variant="ghost"
-                  className="h-4 w-4 opacity-0 group-hover/tab:opacity-100"
-                  aria-label={`Close ${t.title}`}
+                <button
+                  type="button"
+                  onClick={() => setActive(t.id)}
+                  className="truncate max-w-[140px] text-left"
                 >
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      closeTab(t.id)
-                    }}
-                  >
-                    <X className="h-3 w-3" />
-                  </span>
-                </Button>
-              </motion.button>
+                  {t.title}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeTab(t.id)
+                  }}
+                  aria-label={`Close ${t.title}`}
+                  className="h-4 w-4 inline-flex items-center justify-center rounded opacity-0 group-hover/tab:opacity-100 focus-visible:opacity-100 hover:bg-muted/60 transition-opacity"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </motion.div>
             )
           })}
         </div>

@@ -3,6 +3,8 @@
 import {
   createContext,
   useContext,
+  useEffect,
+  useMemo,
   useState,
   type ComponentProps,
   type ReactNode,
@@ -42,8 +44,12 @@ export const ChainOfThought = ({
   ...props
 }: ChainOfThoughtProps) => {
   const [open, setOpen] = useState(defaultOpen || !!isStreaming);
+  useEffect(() => {
+    if (isStreaming) setOpen(true);
+  }, [isStreaming]);
+  const value = useMemo(() => ({ open, setOpen, isStreaming }), [open, isStreaming]);
   return (
-    <Ctx.Provider value={{ open, setOpen, isStreaming }}>
+    <Ctx.Provider value={value}>
       <div className={cn("flex flex-col gap-1", className)} {...props}>
         {children}
       </div>
@@ -64,7 +70,10 @@ export const ChainOfThoughtTrigger = ({
   return (
     <button
       type="button"
-      onClick={() => setOpen(!open)}
+      onClick={() => {
+        if (!isStreaming) setOpen(!open);
+      }}
+      aria-expanded={open}
       className={cn(
         "flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors w-fit",
         className,

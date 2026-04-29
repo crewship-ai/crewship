@@ -38,6 +38,8 @@ export function useUserPreference<T>(
   })
   const [ready, setReady] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingValueRef = useRef<T | null>(null)
+  const hasPendingRef = useRef(false)
   const valueRef = useRef(value)
   valueRef.current = value
 
@@ -83,7 +85,11 @@ export function useUserPreference<T>(
         /* ignore */
       }
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      pendingValueRef.current = next
+      hasPendingRef.current = true
       debounceRef.current = setTimeout(() => {
+        hasPendingRef.current = false
+        pendingValueRef.current = null
         fetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
           method: "PUT",
           credentials: "include",
@@ -98,12 +104,22 @@ export function useUserPreference<T>(
   )
 
   // Flush pending write on unmount so a fast unmount-after-drag
-  // doesn't lose the latest value.
+  // doesn't lose the latest value. `keepalive: true` lets the request
+  // survive a page navigation; same-tab unmounts run normally.
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (hasPendingRef.current && pendingValueRef.current !== null) {
+        fetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
+          method: "PUT",
+          credentials: "include",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(pendingValueRef.current),
+        }).catch(() => {})
+      }
     }
-  }, [])
+  }, [key])
 
   return [value, set, { ready }]
 }

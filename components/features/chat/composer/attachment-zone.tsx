@@ -67,25 +67,28 @@ export function AttachmentZone({ agentId, sessionId, children }: AttachmentZoneP
       }
       // Optimistically add chips with status: uploading; flip to ready
       // (with the server-side path) on success or to error on fail.
-      const queued: Attachment[] = []
+      // Pair each chip with its source File so a skipped (oversized)
+      // file can't shift indices and mismatch chip ↔ file.
+      const queued: Array<{ att: Attachment; file: File }> = []
       for (const f of files) {
         if (f.size > MAX_SIZE) {
           toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
           continue
         }
         queued.push({
-          id: crypto.randomUUID(),
-          name: f.name,
-          size: f.size,
-          type: f.type || "application/octet-stream",
-          status: "uploading",
+          file: f,
+          att: {
+            id: crypto.randomUUID(),
+            name: f.name,
+            size: f.size,
+            type: f.type || "application/octet-stream",
+            status: "uploading",
+          },
         })
       }
       if (queued.length === 0) return
-      addAttachments(sessionId, queued)
-      for (let i = 0; i < queued.length; i++) {
-        const att = queued[i]
-        const file = files[i]
+      addAttachments(sessionId, queued.map(({ att }) => att))
+      for (const { att, file } of queued) {
         try {
           const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
           // Update chip to ready + remember server path on URL field.
@@ -131,26 +134,26 @@ export function AttachmentButton({ agentId, sessionId }: { agentId: string; sess
           toast.error("Workspace not loaded yet — try again in a moment")
           return
         }
-        const queued: Attachment[] = files
-          .filter((f) => {
-            if (f.size > MAX_SIZE) {
-              toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
-              return false
-            }
-            return true
+        const queued: Array<{ att: Attachment; file: File }> = []
+        for (const f of files) {
+          if (f.size > MAX_SIZE) {
+            toast.error(`${f.name} exceeds ${Math.round(MAX_SIZE / 1024 / 1024)} MB`)
+            continue
+          }
+          queued.push({
+            file: f,
+            att: {
+              id: crypto.randomUUID(),
+              name: f.name,
+              size: f.size,
+              type: f.type || "application/octet-stream",
+              status: "uploading",
+            },
           })
-          .map((f) => ({
-            id: crypto.randomUUID(),
-            name: f.name,
-            size: f.size,
-            type: f.type || "application/octet-stream",
-            status: "uploading" as const,
-          }))
+        }
         if (queued.length === 0) return
-        addAttachments(sessionId, queued)
-        for (let i = 0; i < queued.length; i++) {
-          const att = queued[i]
-          const file = files[i]
+        addAttachments(sessionId, queued.map(({ att }) => att))
+        for (const { att, file } of queued) {
           try {
             const { agent_path } = await uploadOne(agentId, sessionId, workspaceId, file)
             removeAttachment(sessionId, att.id)

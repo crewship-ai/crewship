@@ -33,8 +33,16 @@ export function ThreeTierFiles({
   const [agentTree, setAgentTree] = useState<TreeNode[]>([])
   const [crewFiles, setCrewFiles] = useState<FileEntry[]>([])
   const [crewLoading, setCrewLoading] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  const expanded = new Set<string>()
+  const toggleFolder = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
 
   useEffect(() => {
     setAgentTree(buildTopLevelTree(agentFiles))
@@ -83,7 +91,7 @@ export function ThreeTierFiles({
                 expanded={expanded}
                 loadingDirs={new Set()}
                 selectedFile={selectedFile ?? null}
-                onToggle={() => {}}
+                onToggle={toggleFolder}
                 onFileClick={onFileClick}
               />
             ))}
@@ -114,7 +122,7 @@ export function ThreeTierFiles({
                 expanded={expanded}
                 loadingDirs={new Set()}
                 selectedFile={selectedFile ?? null}
-                onToggle={() => {}}
+                onToggle={toggleFolder}
                 onFileClick={onFileClick}
               />
             ))}

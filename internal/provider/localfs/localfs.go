@@ -211,7 +211,7 @@ func (p *Provider) EnsureDir(_ context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	return os.MkdirAll(full, 0750)
+	return os.MkdirAll(full, 0775)
 }
 
 // Watch starts watching the directory tree for filesystem changes, sending

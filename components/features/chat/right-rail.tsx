@@ -36,13 +36,12 @@ const ITEMS: RailItem[] = [
 export function RightRail({ className }: { className?: string }) {
   const { open, activeTab, toggle, setActiveTab } = useDrawerStore()
 
-  // Migrate persisted "context" → "files" once on mount. Old user
-  // preference may still hold the dropped tab; rail buttons don't
-  // render it, so the panel would show nothing without this nudge.
+  // Migrate persisted "context" → "files". Depend on activeTab so this
+  // also fires after the persist middleware hydrates with the legacy
+  // value (which can land after the first render).
   useEffect(() => {
     if (activeTab === "context") setActiveTab("files")
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [activeTab, setActiveTab])
 
   useHotkeys(
     ["mod+b"],

@@ -188,16 +188,16 @@ export function SettingsPageClient() {
       cli_adapter: cliAdapter,
       tool_profile: toolProfile,
       timeout_seconds: parseInt(timeoutSeconds, 10),
+      description: description || null,
+      role_title: roleTitle || null,
+      avatar_seed: avatarSeed || null,
+      avatar_style: avatarStyle || null,
+      llm_provider: llmProvider || null,
+      llm_model: llmModel || null,
+      system_prompt: systemPrompt || null,
+      crew_id: crewId || null,
     }
-    if (description) body.description = description
-    if (roleTitle) body.role_title = roleTitle
-    body.avatar_seed = avatarSeed || null
-    body.avatar_style = avatarStyle || null
     if (agentRole === "LEAD") body.lead_mode = leadMode
-    if (llmProvider) body.llm_provider = llmProvider
-    if (llmModel) body.llm_model = llmModel
-    if (systemPrompt) body.system_prompt = systemPrompt
-    if (crewId) body.crew_id = crewId
 
     try {
       const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {

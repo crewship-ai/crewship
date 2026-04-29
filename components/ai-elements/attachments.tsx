@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, type ComponentProps, type DragEvent } from "react";
-import { File, FileImage, FileText, Paperclip, X, Upload } from "lucide-react";
+import { File as FileIcon, FileImage, FileText, Paperclip, X, Upload } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
@@ -51,7 +51,7 @@ export const AttachmentChip = ({ attachment, onRemove }: AttachmentChipProps) =>
       ? FileImage
       : attachment.type.startsWith("text/") || attachment.type === "application/json"
         ? FileText
-        : File;
+        : FileIcon;
 
   return (
     <motion.span

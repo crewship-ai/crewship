@@ -308,6 +308,15 @@ export function AgentCanvas({
     onAgentChanged()
   }, [agent, workspaceId, onAgentChanged])
 
+  // Fire-and-forget wrapper for click/key handlers that can't await.
+  // Without this the rejected promise becomes an unhandled rejection
+  // and the UI shows nothing on save failure.
+  const safePatch = useCallback((body: Record<string, unknown>) => {
+    patch(body).catch((err) => {
+      toast.error(`Save failed: ${err instanceof Error ? err.message : err}`)
+    })
+  }, [patch])
+
   const handleStop = useCallback(async () => {
     if (!agent) return
     try {
@@ -648,7 +657,7 @@ export function AgentCanvas({
                 <ModelLibraryPicker
                   cliAdapter={agent.cli_adapter}
                   llmModel={agent.llm_model ?? ""}
-                  onPick={(next) => patch(next)}
+                  onPick={(next) => safePatch(next)}
                   onCustom={() => setCustomModelOpen(true)}
                 />
               </div>
@@ -676,7 +685,7 @@ export function AgentCanvas({
                             key={key}
                             type="button"
                             onClick={() => {
-                              if (!isActive) patch({ cli_adapter: key })
+                              if (!isActive) safePatch({ cli_adapter: key })
                             }}
                             className={cn(
                               "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
@@ -718,7 +727,7 @@ export function AgentCanvas({
                     className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-blue-400"
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && customModelDraft.trim()) {
-                        patch({ llm_model: customModelDraft.trim() })
+                        safePatch({ llm_model: customModelDraft.trim() })
                         setCustomModelOpen(false)
                         setCustomModelDraft("")
                       } else if (e.key === "Escape") {
@@ -731,7 +740,7 @@ export function AgentCanvas({
                     type="button"
                     onClick={() => {
                       if (customModelDraft.trim()) {
-                        patch({ llm_model: customModelDraft.trim() })
+                        safePatch({ llm_model: customModelDraft.trim() })
                         setCustomModelOpen(false)
                         setCustomModelDraft("")
                       }

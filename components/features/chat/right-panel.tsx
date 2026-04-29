@@ -485,7 +485,10 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     `chat.fileTree.${agentId}`,
     { expandedPaths: [], lastOpenedPath: null },
   )
-  const replayedRef = React.useRef(false)
+  // Keyed by agentId so per-agent replay state doesn't leak to the
+  // next agent. Cleared in the agent-change effect below.
+  const replayedForAgentRef = React.useRef<string | null>(null)
+  const fetchedDirsRef = React.useRef<Set<string>>(new Set())
 
   const {
     editorFile,
@@ -511,54 +514,78 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     }
   }, [files])
 
-  // Replay saved expanded paths + last-opened file once on mount per
-  // agentId. Top-level tree must be built first; we wait for files
-  // to land. toggleFolder is idempotent — calling it for already-
-  // expanded paths is a no-op via the Set check inside.
+  // Reset all per-agent state on agent change so the next agent
+  // doesn't inherit the previous one's expanded set or open editor.
   useEffect(() => {
-    if (replayedRef.current) return
+    replayedForAgentRef.current = null
+    fetchedDirsRef.current = new Set()
+    setExpanded(new Set())
+    closeEditor()
+  }, [agentId, closeEditor])
+
+  // Replay saved expanded paths + last-opened file. Bulk-adds to
+  // `expanded`; the fetch effect below handles loading children
+  // sequentially as each parent's response arrives, so deeply-nested
+  // saved paths restore correctly.
+  useEffect(() => {
+    if (replayedForAgentRef.current === agentId) return
     if (files.length === 0 || !workspaceId) return
-    replayedRef.current = true
+    replayedForAgentRef.current = agentId
     const saved = savedTreeState
-    for (const p of saved.expandedPaths) {
-      // toggleFolder both expands and lazy-fetches subdir if needed.
-      toggleFolder(p)
+    if (saved.expandedPaths.length > 0) {
+      setExpanded(new Set(saved.expandedPaths))
     }
     if (saved.lastOpenedPath) {
       const name = saved.lastOpenedPath.split("/").pop() ?? ""
       openFileEditor({ path: saved.lastOpenedPath, name })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [files, workspaceId])
+  }, [agentId, files, workspaceId])
 
   // Persist current state. Debounced inside the useUserPreference hook.
   useEffect(() => {
-    if (!replayedRef.current) return
+    if (replayedForAgentRef.current !== agentId) return
     setSavedTreeState({
       expandedPaths: Array.from(expanded),
       lastOpenedPath: editorFile?.path ?? null,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, editorFile?.path])
+  }, [expanded, editorFile?.path, agentId])
+
+  // Fetch children for any expanded path whose tree node is reachable
+  // but not yet loaded. Both user toggles and replay write into
+  // `expanded`; this watcher centralizes the fetch logic so deep
+  // saved paths (`src/components/foo`) replay correctly — once `src`
+  // resolves, the watcher re-fires and fetches `src/components`,
+  // and so on.
+  useEffect(() => {
+    if (!workspaceId) return
+    for (const path of expanded) {
+      if (loadingDirs.has(path) || fetchedDirsRef.current.has(path)) continue
+      const node = tree.reduce<TreeNode | undefined>(
+        (found, n) => found ?? findTreeNode(n, path),
+        undefined,
+      )
+      if (!node || node.childrenLoaded) continue
+      fetchedDirsRef.current.add(path)
+      const relPath = path.startsWith(basePrefix) ? path.slice(basePrefix.length) : path
+      setLoadingDirs((p) => new Set(p).add(path))
+      fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
+        .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json() })
+        .then((data: FileEntry[] | null) => setTree((prev) => insertTreeChildren(prev, path, data ?? [])))
+        .catch(() => { toast.error("Failed to load folder") })
+        .finally(() => setLoadingDirs((p) => { const n = new Set(p); n.delete(path); return n }))
+    }
+  }, [tree, expanded, workspaceId, basePrefix, agentId, loadingDirs])
 
   const toggleFolder = useCallback((path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(path)) { next.delete(path); return next }
-      next.add(path)
-      const node = tree.reduce<TreeNode | undefined>((found, n) => found ?? findTreeNode(n, path), undefined)
-      if (node && !node.childrenLoaded && workspaceId) {
-        const relPath = path.startsWith(basePrefix) ? path.slice(basePrefix.length) : path
-        setLoadingDirs((p) => new Set(p).add(path))
-        fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
-          .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json() })
-          .then((data: FileEntry[] | null) => setTree((prev) => insertTreeChildren(prev, path, data ?? [])))
-          .catch(() => { toast.error("Failed to load folder") })
-          .finally(() => setLoadingDirs((p) => { const n = new Set(p); n.delete(path); return n }))
-      }
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
       return next
     })
-  }, [tree, agentId, workspaceId, basePrefix])
+  }, [])
 
   const fileCount = files.filter((f) => !f.is_dir).length
   const editorOpen = editorFile !== null && activeTab === "files"

@@ -31,18 +31,29 @@ type reactionRow struct {
 	Mine  bool   `json:"mine"`
 }
 
+// ensureChatVisible derives the chat's workspace from the chat row and
+// confirms the authenticated user is a member. Routes are mounted as
+// `/api/v1/chats/{chatId}/...` (no workspace_id in path/query), so we
+// can't rely on RequireWorkspace — the handler enforces tenancy itself.
 func (h *MessageReactionsHandler) ensureChatVisible(r *http.Request, chatID string) bool {
-	workspaceID := WorkspaceIDFromContext(r.Context())
-	if workspaceID == "" || chatID == "" {
+	if chatID == "" {
+		return false
+	}
+	user := UserFromContext(r.Context())
+	if user == nil {
 		return false
 	}
 	var owner string
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&owner)
-	if err != nil || owner != workspaceID {
+	if err != nil {
 		return false
 	}
-	return true
+	var role string
+	err = h.db.QueryRowContext(r.Context(),
+		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+		owner, user.ID).Scan(&role)
+	return err == nil
 }
 
 func (h *MessageReactionsHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -101,16 +112,17 @@ func (h *MessageReactionsHandler) Add(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "emoji length invalid"})
 		return
 	}
-	var userID string
-	if u := UserFromContext(r.Context()); u != nil {
-		userID = u.ID
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
 	}
 	id := generateCUID()
 	// UNIQUE(chat_id, message_id, emoji, user_id) — INSERT OR IGNORE
 	// makes the operation idempotent (one user, one emoji, one row).
 	_, err := h.db.ExecContext(r.Context(),
 		`INSERT OR IGNORE INTO message_reactions (id, chat_id, message_id, emoji, user_id) VALUES (?, ?, ?, ?, ?)`,
-		id, chatID, messageID, body.Emoji, nullable(userID))
+		id, chatID, messageID, body.Emoji, user.ID)
 	if err != nil {
 		h.logger.Error("add reaction", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -127,13 +139,14 @@ func (h *MessageReactionsHandler) Remove(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
 		return
 	}
-	var userID string
-	if u := UserFromContext(r.Context()); u != nil {
-		userID = u.ID
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
 	}
 	_, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM message_reactions WHERE chat_id = ? AND message_id = ? AND emoji = ? AND user_id IS ?`,
-		chatID, messageID, emoji, nullable(userID))
+		`DELETE FROM message_reactions WHERE chat_id = ? AND message_id = ? AND emoji = ? AND user_id = ?`,
+		chatID, messageID, emoji, user.ID)
 	if err != nil {
 		h.logger.Error("remove reaction", "err", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
@@ -142,9 +155,3 @@ func (h *MessageReactionsHandler) Remove(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func nullable(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
-}

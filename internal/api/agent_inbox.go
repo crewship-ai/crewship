@@ -97,7 +97,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("inbox: escalations count", "err", err, "agent_id", agentID)
 	}
 
-	// Peer messages involving this agent (either direction), 3 most recent
+	// Peer messages involving this agent (either direction), 20 most recent
 	if crewID.Valid && crewID.String != "" {
 		rows, err := h.db.QueryContext(r.Context(), `
 			SELECT pc.id,

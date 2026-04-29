@@ -3,9 +3,10 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 )
 
 // UserPreferencesHandler — generic key-value store for per-user UI
@@ -90,19 +91,21 @@ func (h *UserPreferencesHandler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Read up to 16 KB — preferences are small UI settings, not blobs.
+	// MaxBytesReader returns *http.MaxBytesError once the cap is hit;
+	// we surface that as 413 instead of silently persisting a truncated
+	// (but still parseable) JSON payload.
 	limited := http.MaxBytesReader(w, r.Body, 16*1024)
-	body := strings.Builder{}
-	buf := make([]byte, 4096)
-	for {
-		n, err := limited.Read(buf)
-		if n > 0 {
-			body.Write(buf[:n])
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "value too large (max 16 KB)"})
+			return
 		}
-		if err != nil {
-			break
-		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
 	}
-	value := body.String()
+	value := string(body)
 	if value == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "empty value"})
 		return
@@ -114,7 +117,7 @@ func (h *UserPreferencesHandler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := generateCUID()
-	_, err := h.db.ExecContext(r.Context(),
+	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO user_preferences (id, user_id, pref_key, pref_value, updated_at)
 		 VALUES (?, ?, ?, ?, datetime('now'))
 		 ON CONFLICT(user_id, pref_key) DO UPDATE SET

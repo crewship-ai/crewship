@@ -54,6 +54,11 @@ interface ChatPanelProps {
   agentId: string
   sessionId: string
   agentName?: string
+  /** Canonical agent slug used to build URLs (`/chat/[agentSlug]`).
+   *  Required by SlashPalette commands like /new-session that navigate
+   *  back to the agent route — passing the display name there breaks
+   *  for agents whose name has spaces or non-URL-safe characters. */
+  agentSlug?: string
   /** Agent role / role_title. Used to pick role-aware suggestion packs. */
   agentRole?: string | null
   /** How this session was created — UI / CLI / WEBHOOK / CRON / AGENT.
@@ -69,7 +74,7 @@ interface ChatPanelProps {
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOrigin, initialInput, mobilePanel }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, sessionOrigin, initialInput, mobilePanel }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -124,14 +129,26 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOri
     if (!sessionId) return
     let cancelled = false
     fetch(`/api/v1/chats/${sessionId}/messages`, { credentials: "include" })
-      .then((r) => r.ok ? r.json() : null)
-      .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
+      .then(async (r) => {
+        // 404 means the chat row doesn't exist yet — it's a brand-new
+        // session. Don't mark it ready; ensureSession() must still run
+        // on first send to create the chat row.
+        if (r.status === 404) {
+          return { exists: false, messages: [] as { id: string; role: string; content: string; ts: string }[] }
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const data = await r.json()
+        return {
+          exists: true,
+          messages: (data?.messages ?? []) as { id: string; role: string; content: string; ts: string }[],
+        }
+      })
+      .then(({ exists, messages }) => {
         if (cancelled) return
-        setSessionReady(true)
+        setSessionReady(exists)
         // Always replace — including with [] for an empty (newly created)
         // session — so the visible turns swap atomically from old session
         // → new session with no blank gap in between.
-        const messages = data?.messages ?? []
         loadHistory(messages.map((m) => ({
           id: m.id,
           role: m.role as "user" | "assistant" | "system" | "tool",
@@ -140,7 +157,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOri
         })))
       })
       .catch(() => {
-        if (!cancelled) loadHistory([])
+        if (!cancelled) {
+          setSessionReady(false)
+          loadHistory([])
+        }
       })
       .finally(() => {
         if (!cancelled) setHistoryLoading(false)
@@ -407,7 +427,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOri
       </RightDrawer>
 
       <RightRail className={cn(pushOpen && "border-l-0")} />
-      <SlashPalette agentSlug={agentName} onCommand={handleSlashCommand} />
+      <SlashPalette agentSlug={agentSlug ?? agentName} onCommand={handleSlashCommand} />
       <ArtifactPane agentId={agentId} />
       <ConversationSearch turns={turns} />
       <ExportDialog turns={turns} agentName={agentName} />

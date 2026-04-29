@@ -374,11 +374,11 @@ func (r *Router) registerRoutes() {
 	// reads/writes return 404.
 	mrh := NewMessageReactionsHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/messages/{messageId}/reactions",
-		authed(wsCtx(http.HandlerFunc(mrh.List))))
+		authed(http.HandlerFunc(mrh.List)))
 	r.mux.Handle("POST /api/v1/chats/{chatId}/messages/{messageId}/reactions",
-		authed(wsCtx(http.HandlerFunc(mrh.Add))))
+		authed(http.HandlerFunc(mrh.Add)))
 	r.mux.Handle("DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}",
-		authed(wsCtx(http.HandlerFunc(mrh.Remove))))
+		authed(http.HandlerFunc(mrh.Remove)))
 
 	// Hooks registry: lifecycle intercepts. List is available to every
 	// workspace member for auditability; enable/disable is OWNER/ADMIN

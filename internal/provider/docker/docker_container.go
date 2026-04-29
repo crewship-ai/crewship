@@ -261,6 +261,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if imgEnv, err := imageEnvMap(ctx, p.client, runtimeImage); err == nil {
 		env = expandContainerEnv(env, imgEnv)
 	} else {
+		needsExpansion := false
+		for _, e := range env {
+			if eq := strings.IndexByte(e, '='); eq > 0 && strings.Contains(e[eq+1:], "${") {
+				needsExpansion = true
+				break
+			}
+		}
+		if needsExpansion {
+			return "", fmt.Errorf("inspect image env for containerEnv expansion (%s): %w", runtimeImage, err)
+		}
 		p.logger.Warn("could not inspect image for env expansion — passing containerEnv literally",
 			"image", runtimeImage, "error", err)
 	}

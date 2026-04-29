@@ -492,7 +492,7 @@ CREATE TABLE IF NOT EXISTS message_reactions (
 	chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
 	message_id TEXT NOT NULL,
 	emoji TEXT NOT NULL,
-	user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 	created_at TEXT NOT NULL DEFAULT (datetime('now')),
 	UNIQUE(chat_id, message_id, emoji, user_id)
 );

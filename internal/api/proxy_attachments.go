@@ -73,6 +73,14 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form or file too large (max 25MB)"})
 		return
 	}
+	// ParseMultipartForm spills uploads near the size limit to disk —
+	// without this defer those temp files accumulate under repeated
+	// uploads.
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file field is required"})
