@@ -14,28 +14,31 @@
 
 ---
 
-Crewship lets you organize AI agents into teams, assign them roles, credentials, and skills, and run them in isolated containers. Think of it as an HR platform — but for AI workers.
+Crewship lets you organize AI agents into crews, assign them roles, credentials, and skills, and run them in isolated containers. Think of it as an HR platform — but for AI workers.
 
 ## Features
 
-- **Agents as employees** — each agent has a role, team, credentials, and work history
-- **Team-based organization** — group agents into teams with shared context
+- **Agents as colleagues** — each agent has a role, crew, credentials, and persistent memory
+- **Crew-based organization** — group agents into crews with shared filesystem and lead-mode coordination
 - **Credential vault** — AES-256-GCM encrypted keys with priority-based failover
-- **Isolated execution** — every agent runs in its own Docker container (K8s ready)
-- **Role-based access** — 5-tier RBAC (Owner, Admin, Manager, Member, Viewer)
-- **Real-time logs** — JSONL streaming via WebSocket
-- **Multi-org support** — manage multiple organizations from a single instance
+- **Keeper** — agent-side credential access guarded by a local LLM (Ollama)
+- **Isolated execution** — every crew runs in its own Docker container; agents share via Unix socket IPC
+- **Crew Journal** — append-only event stream is the canonical source of truth (cost, guardrails, approvals, checkpoints)
+- **Single binary** — Next.js static export embedded into the Go server; no Node.js at runtime
 - **Self-hosted** — run on your own infrastructure, keep your data
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| UI | Next.js 16, React 19, Tailwind CSS 4, shadcn/ui |
+| UI | Next.js 16 (static export), React 19, Tailwind CSS 4, shadcn/ui |
 | Auth | NextAuth.js v5 (Auth.js) |
-| Database | PostgreSQL 16 via Prisma 7 |
-| Backend | Go (crewshipd) — WebSocket, Docker orchestration, logs |
-| Agent runtime | Docker containers with CLI adapters (Claude, GPT, etc.) |
+| Database | SQLite via `modernc.org/sqlite` (PostgreSQL opt-in) |
+| Backend | Go (`crewshipd`) — WebSocket, Docker orchestration, Crew Journal, embedded UI |
+| Agent runtime | Docker containers with CLI adapters (Claude Code, OpenCode, Codex, …) |
+| IPC | HTTP-over-Unix-socket on `/tmp/crewship.sock` (X-Internal-Token auth) |
+
+> **Prisma is TypeScript-types only** — all DB migrations are Go-side in `internal/database/migrate.go`. Never run `prisma migrate`.
 
 ## Quick Start
 
@@ -44,43 +47,71 @@ Crewship lets you organize AI agents into teams, assign them roles, credentials,
 git clone https://github.com/crewship-ai/crewship.git
 cd crewship
 
-# Start PostgreSQL
-docker compose -f docker/docker-compose.yml up -d
-
-# Install dependencies
+# Install frontend dependencies (pnpm only — never npm/yarn)
 pnpm install
 
-# Set up environment
-cp .env.example .env
-# Edit .env with your DATABASE_URL, NEXTAUTH_SECRET, ENCRYPTION_KEY
+# Set up environment (SQLite is default; no DB container needed)
+cp .env.example .env.local
+# Edit .env.local — at minimum set NEXTAUTH_SECRET and ENCRYPTION_KEY:
+#   openssl rand -base64 32   # NEXTAUTH_SECRET
+#   openssl rand -hex 32      # ENCRYPTION_KEY
 
-# Generate Prisma client & push schema
-pnpm db:generate
-pnpm db:push
-
-# Run
-pnpm dev
+# Start backend + frontend (and PostgreSQL only if DATABASE_URL points to it)
+./dev.sh start
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+- Frontend: <http://localhost:3001>
+- Backend API + WebSocket: <http://localhost:8080>
+
+Other `./dev.sh` subcommands: `stop`, `restart`, `status`, `seed`, `nuke`, `logs`, `logs:go`, `logs:next`.
+
+### Production build (single binary)
+
+```bash
+make build           # pnpm build → cp -r out web/out → go build
+./crewshipd          # serves embedded UI + API on $CREWSHIP_PORT (default 8080)
+```
+
+`make build` is end-to-end. Don't run `pnpm build` followed directly by `go build` — the `cp -r out web/out` step is required, otherwise the embedded FS drifts out of sync with Next.js output.
 
 ## Project Structure
 
 ```
-app/              Next.js frontend (TypeScript)
-cmd/crewshipd/    Go backend service
-prisma/           Database schema
-lib/              Shared utilities, auth, RBAC, encryption
-components/       UI components (shadcn/ui)
-docker/           Docker Compose & container configs
+app/                   Next.js frontend (TypeScript, static-export)
+components/            UI components (shadcn/ui + feature folders)
+hooks/  stores/  lib/  Frontend hooks, Zustand stores, shared utilities
+
+cmd/crewship/          Go CLI binary (subcommands: run, seed, doctor, …)
+cmd/crewship-sidecar/  Sidecar process that runs inside crew containers
+internal/api/          HTTP / WebSocket handlers
+internal/database/     SQLite schema + Go-side migrations (DO NOT use Prisma)
+internal/orchestrator/ Agent run loop, lead-mode coordination
+internal/journal/      Append-only event stream (the canonical source of truth)
+internal/paymaster/    LLM cost tracking + budget enforcement
+internal/lookout/      Guardrails (prompt-injection, schema validation, redaction)
+internal/harbormaster/ Human-in-the-loop approval queue
+internal/keeper/       Credential gatekeeping (Ollama-backed)
+internal/provider/     Pluggable container / storage / state providers
+
+dev.sh                 Local dev orchestration (SQLite + go run + next dev)
+prisma/                Prisma schema for TypeScript type generation only
+```
+
+## Verify any change
+
+```bash
+go test ./... -count=1 && go vet ./...    # Go — must pass
+pnpm lint && pnpm build                    # Frontend — must pass for UI changes
 ```
 
 ## Contributing
 
-Contributions are welcome. Please open an issue first to discuss what you'd like to change.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [CLAUDE.md](CLAUDE.md) for project rules and anti-patterns. Please open an issue first to discuss what you'd like to change.
+
+Security issues: see [SECURITY.md](SECURITY.md).
 
 ## License
 
-[Apache License 2.0](LICENSE) — free to use, modify, and distribute.
+[Apache License 2.0](LICENSE) — free to use, modify, and distribute. The `ee/` directory (when present) is governed by a separate enterprise license.
 
 Copyright 2025-2026 Unify Technology s.r.o.

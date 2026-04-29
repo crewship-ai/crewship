@@ -134,9 +134,12 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
   const textBufferRef = useRef("")
   const thinkingBufferRef = useRef("")
 
-  // Reset state when session changes
+  // Reset stream-side state when session changes. We deliberately do NOT
+  // reset turns here — that would cause a blank-canvas flash between the
+  // old session and the new one's history fetch. The chat-panel calls
+  // loadHistory() once the new session's messages arrive, which performs
+  // an atomic replace (including the empty-array case for fresh sessions).
   useEffect(() => {
-    setTurns([])
     setIsStreaming(false)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""

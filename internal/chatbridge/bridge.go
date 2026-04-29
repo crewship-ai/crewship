@@ -306,9 +306,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			cc.CapAdd = append(cc.CapAdd, info.CachedRequirements.CapAdd...)
 			cc.SecurityOpt = append(cc.SecurityOpt, info.CachedRequirements.SecurityOpt...)
 			for _, m := range info.CachedRequirements.Mounts {
+				// Expand devcontainer.json variables (e.g. ${devcontainerId})
+				// before passing the source/target to Docker — Docker rejects
+				// volume names containing "$" with a cryptic error otherwise.
 				cc.ExtraMounts = append(cc.ExtraMounts, provider.CrewMount{
-					Source: m.Source,
-					Target: m.Target,
+					Source: devcontainer.ExpandVars(m.Source, info.CrewID),
+					Target: devcontainer.ExpandVars(m.Target, info.CrewID),
 					Type:   m.Type,
 				})
 			}

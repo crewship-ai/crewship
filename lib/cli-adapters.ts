@@ -23,21 +23,32 @@ export interface CLIAdapterConfig {
   description: string
 }
 
+// Current canonical Anthropic model IDs as of 2026-04-29. Older 4.x and
+// 3.x identifiers are kept further down so existing agents configured
+// with them still resolve in the dropdown — they're flagged "legacy" in
+// MODEL_DESCRIPTIONS at the UI layer.
 const ANTHROPIC_MODELS: ModelOption[] = [
-  { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-  { value: "claude-opus-4-20250514", label: "Claude Opus 4" },
+  { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+  { value: "claude-opus-4-20250514", label: "Claude Opus 4" },
+  { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+  { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
+  { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
 ]
 
 const OPENAI_MODELS: ModelOption[] = [
   { value: "o3", label: "o3" },
+  { value: "o3-mini", label: "o3-mini" },
   { value: "o4-mini", label: "o4-mini" },
   { value: "gpt-4o", label: "GPT-4o" },
+  { value: "gpt-4o-mini", label: "GPT-4o mini" },
 ]
 
 const GOOGLE_MODELS: ModelOption[] = [
   { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
 ]
 
 /** Registry of all supported CLI adapters with their provider, models, and icon. */
@@ -48,7 +59,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     provider: "ANTHROPIC",
     envVar: "ANTHROPIC_API_KEY",
     models: ANTHROPIC_MODELS,
-    defaultModel: "claude-sonnet-4-20250514",
+    defaultModel: "claude-sonnet-4-6",
     description: "Anthropic's coding agent",
   },
   OPENCODE: {
@@ -57,7 +68,7 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     provider: "ANTHROPIC",
     envVar: "ANTHROPIC_API_KEY",
     models: [...ANTHROPIC_MODELS, ...OPENAI_MODELS],
-    defaultModel: "claude-sonnet-4-20250514",
+    defaultModel: "claude-sonnet-4-6",
     description: "Open-source multi-provider CLI",
   },
   CODEX_CLI: {

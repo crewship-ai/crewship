@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useState, useEffect, useCallback } from "react"
 import { useAgentId } from "@/hooks/use-agent-id"
 import {
-  Save, Trash2, Loader2, AlertCircle, CheckCircle2,
+  Save, Loader2, AlertCircle, CheckCircle2,
   User, Hash, Users, FileText, Briefcase, Shield, Cpu,
-  Wrench, Timer, MessageSquare, Image as ImageIcon, Settings as SettingsIcon, Clock,
+  Wrench, Timer, MessageSquare, Image as ImageIcon,
+  ChevronDown, Maximize2, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SectionCard } from "@/components/ui/section-card"
 import { PropertyRow } from "@/components/layout/property-row"
-import { ToolbarStrip, type ToolbarTab } from "@/components/layout/toolbar-strip"
 import {
   Select,
   SelectContent,
@@ -23,11 +22,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AvatarOverrideBadge } from "@/components/features/agents/settings/avatar-override-badge"
-import { ScheduleSection } from "@/components/features/agents/settings/schedule-section"
 import { cn } from "@/lib/utils"
 
 interface AgentDetail {
@@ -58,42 +62,29 @@ interface TeamOption {
   slug: string
 }
 
-type Section = "general" | "schedule"
-
-const SECTION_TABS: ToolbarTab<Section>[] = [
-  { id: "general", label: "General", icon: SettingsIcon },
-  { id: "schedule", label: "Schedule", icon: Clock },
-]
+const MODEL_DESCRIPTIONS: Record<string, { description: string; badge?: string }> = {
+  "claude-opus-4-20250514": { description: "Most capable · best for complex analysis", badge: "Reasoning" },
+  "claude-sonnet-4-20250514": { description: "Balanced speed and capability · default", badge: "Balanced" },
+  "claude-haiku-4-5-20251001": { description: "Fast and cheap · quick replies", badge: "Fast" },
+  "o3": { description: "Frontier reasoning model", badge: "Reasoning" },
+  "o4-mini": { description: "Smaller, faster reasoning", badge: "Fast" },
+  "gpt-4o": { description: "Multimodal flagship", badge: "Multimodal" },
+  "gemini-2.5-pro": { description: "Google's flagship · 1M-token context", badge: "Long ctx" },
+  "gemini-2.5-flash": { description: "Faster, cheaper Gemini", badge: "Fast" },
+}
 
 export function SettingsPageClient() {
   const agentId = useAgentId()
-  const router = useRouter()
-  const searchParams = useSearchParams()
   const { workspaceId, loading: wsLoading } = useWorkspace()
-
-  const activeSection = useMemo<Section>(
-    () => (searchParams.get("section") === "schedule" ? "schedule" : "general"),
-    [searchParams],
-  )
-
-  const handleSectionChange = useCallback(
-    (section: Section) => {
-      const params = new URLSearchParams(searchParams.toString())
-      if (section === "general") params.delete("section")
-      else params.set("section", section)
-      const qs = params.toString()
-      router.replace(qs ? `?${qs}` : "?", { scroll: false })
-    },
-    [router, searchParams],
-  )
 
   const [agent, setAgent] = useState<AgentDetail | null>(null)
   const [crews, setTeams] = useState<TeamOption[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [systemPromptFullscreen, setSystemPromptFullscreen] = useState(false)
 
   // Form fields
   const [name, setName] = useState("")
@@ -134,7 +125,6 @@ export function SettingsPageClient() {
 
   useEffect(() => {
     if (!workspaceId || !agentId) return
-
     let cancelled = false
 
     async function fetchData() {
@@ -143,12 +133,10 @@ export function SettingsPageClient() {
           fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`),
           fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         ])
-
         if (!agentRes.ok) {
           if (!cancelled) setError("Failed to load agent")
           return
         }
-
         const agentData: AgentDetail = await agentRes.json()
         if (!cancelled) {
           setAgent(agentData)
@@ -171,7 +159,6 @@ export function SettingsPageClient() {
           setToolProfile(agentData.tool_profile)
           setTeamId(agentData.crew_id ?? "")
         }
-
         if (teamsRes.ok) {
           const teamsData: TeamOption[] = await teamsRes.json()
           if (!cancelled) setTeams(teamsData)
@@ -201,17 +188,16 @@ export function SettingsPageClient() {
       cli_adapter: cliAdapter,
       tool_profile: toolProfile,
       timeout_seconds: parseInt(timeoutSeconds, 10),
+      description: description || null,
+      role_title: roleTitle || null,
+      avatar_seed: avatarSeed || null,
+      avatar_style: avatarStyle || null,
+      llm_provider: llmProvider || null,
+      llm_model: llmModel || null,
+      system_prompt: systemPrompt || null,
+      crew_id: crewId || null,
     }
-
-    if (description) body.description = description
-    if (roleTitle) body.role_title = roleTitle
-    body.avatar_seed = avatarSeed || null
-    body.avatar_style = avatarStyle || null
     if (agentRole === "LEAD") body.lead_mode = leadMode
-    if (llmProvider) body.llm_provider = llmProvider
-    if (llmModel) body.llm_model = llmModel
-    if (systemPrompt) body.system_prompt = systemPrompt
-    if (crewId) body.crew_id = crewId
 
     try {
       const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
@@ -219,13 +205,11 @@ export function SettingsPageClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Failed to save changes" }))
         setError(typeof data.error === "string" ? data.error : "Failed to save changes. Please check your input.")
         return
       }
-
       setSuccess("Changes saved successfully.")
     } catch {
       setError("Network error. Please try again.")
@@ -234,36 +218,7 @@ export function SettingsPageClient() {
     }
   }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, timeoutSeconds, toolProfile, crewId, avatarSeed, avatarStyle])
 
-  const handleDelete = useCallback(async () => {
-    if (!workspaceId || !agentId) return
-    if (!confirm("Are you sure you want to delete this agent? This action cannot be undone.")) return
-
-    setDeleting(true)
-    setError(null)
-    setSuccess(null)
-
-    try {
-      const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
-        method: "DELETE",
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Failed to delete agent" }))
-        setError(typeof data.error === "string" ? data.error : "Failed to delete agent")
-        return
-      }
-
-      router.push("/crews/agents")
-    } catch {
-      setError("Network error. Please try again.")
-    } finally {
-      setDeleting(false)
-    }
-  }, [workspaceId, agentId, router])
-
-  if (wsLoading || loading) {
-    return <SettingsSkeleton />
-  }
+  if (wsLoading || loading) return <SettingsSkeleton />
 
   if (!agent && error) {
     return (
@@ -276,164 +231,136 @@ export function SettingsPageClient() {
     )
   }
 
-  if (activeSection === "schedule") {
-    return (
-      <div className="flex flex-col h-full min-h-0">
-        <ToolbarStrip
-          tabs={SECTION_TABS}
-          activeTab={activeSection}
-          onTabChange={handleSectionChange}
-          ariaLabel="Settings section"
-        />
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <ScheduleSection />
-        </div>
-      </div>
-    )
-  }
+  const adapterCfg = CLI_ADAPTERS[cliAdapter]
+  const availableModels = adapterCfg?.models ?? []
+  const modelMeta = llmModel ? MODEL_DESCRIPTIONS[llmModel] : undefined
 
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <ToolbarStrip
-        tabs={SECTION_TABS}
-        activeTab={activeSection}
-        onTabChange={handleSectionChange}
-        ariaLabel="Settings section"
-      />
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="p-6 mx-auto w-full max-w-3xl space-y-6">
       <div>
         <h2 className="text-title font-semibold">Settings</h2>
         <p className="text-body text-muted-foreground mt-1">
-          Configure this agent&apos;s identity, runtime, and system prompt.
+          Identity, runtime, and system prompt for this agent.
         </p>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6">
-        {/* General */}
-        <SectionCard title="General">
+        {/* Identity + Avatar side-by-side on lg+, stacked on small */}
+        <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+          <SectionCard title={<span className="flex items-center gap-2"><User className="h-4 w-4 text-muted-foreground" />Identity</span>}>
+            <div className="space-y-0">
+              <PropertyRow label="Name" icon={User}>
+                <Input value={name} onChange={(e) => setName(e.target.value)} required />
+              </PropertyRow>
+              <PropertyRow label="Slug" icon={Hash}>
+                <Input value={agent?.slug ?? ""} disabled className="font-mono text-label opacity-60" />
+              </PropertyRow>
+              <PropertyRow label="Role title" icon={Briefcase}>
+                <Input value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} placeholder="e.g. Senior Developer" />
+              </PropertyRow>
+              <PropertyRow label="Description" icon={FileText}>
+                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+              </PropertyRow>
+            </div>
+          </SectionCard>
+
+          <SectionCard title={<span className="flex items-center gap-2"><ImageIcon className="h-4 w-4 text-muted-foreground" />Avatar</span>}>
+            <div className="space-y-3">
+              <AvatarOverrideBadge
+                agentId={agentId}
+                workspaceId={workspaceId ?? ""}
+                hasOverride={!!avatarStyle}
+                onReset={() => setAvatarStyle("")}
+              />
+              <AvatarPicker
+                seed={avatarSeed || agent?.name || ""}
+                style={avatarStyle}
+                onSeedChange={setAvatarSeed}
+                onStyleChange={() => { /* style is crew-controlled */ }}
+                lockedStyle={avatarStyle || agent?.crew?.avatar_style || "bottts-neutral"}
+              />
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* Crew & Role */}
+        <SectionCard title={<span className="flex items-center gap-2"><Users className="h-4 w-4 text-muted-foreground" />Crew &amp; Role</span>}>
           <div className="space-y-0">
-            <PropertyRow label="Name" icon={User}>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-              />
-            </PropertyRow>
-            <PropertyRow label="Slug" icon={Hash}>
-              <Input
-                id="slug"
-                value={agent?.slug ?? ""}
-                disabled
-                className="font-mono text-label opacity-60"
-              />
-            </PropertyRow>
             <PropertyRow label="Crew" icon={Users}>
-              <Select value={crewId} onValueChange={setTeamId}>
-                <SelectTrigger id="crew_id" className="w-full">
+              {/* Radix Select rejects "" as a SelectItem value, so we use a
+                  sentinel for "no crew" and translate at the boundary. */}
+              <Select
+                value={crewId === "" ? "__none__" : crewId}
+                onValueChange={(v) => setTeamId(v === "__none__" ? "" : v)}
+              >
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a crew" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="__none__">Unassigned</SelectItem>
                   {crews.map((crew) => (
-                    <SelectItem key={crew.id} value={crew.id}>
-                      {crew.name}
-                    </SelectItem>
+                    <SelectItem key={crew.id} value={crew.id}>{crew.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </PropertyRow>
-            <PropertyRow label="Description" icon={FileText}>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-              />
-            </PropertyRow>
-            <PropertyRow label="Role title" icon={Briefcase}>
-              <Input
-                id="role_title"
-                value={roleTitle}
-                onChange={(e) => setRoleTitle(e.target.value)}
-                placeholder="e.g. Senior Developer"
-              />
-            </PropertyRow>
             <PropertyRow label="Agent role" icon={Shield}>
-              <Select value={agentRole} onValueChange={setAgentRole}>
-                <SelectTrigger id="agent_role" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="AGENT">Agent</SelectItem>
-                  <SelectItem value="LEAD">Lead</SelectItem>
-                  {/* COORDINATOR role is deprecated (2026-04-16) — see docs/guides/coordinator.mdx.
-                      Option kept so existing COORDINATOR agents can still be edited. */}
-                  <SelectItem value="COORDINATOR">Coordinator (deprecated)</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-2">
+                {agentRole === "COORDINATOR" && (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
+                    This agent is a <strong>COORDINATOR</strong> — a deprecated role
+                    kept for backward compatibility. Selecting Agent or Lead below
+                    will migrate it; the choice is one-way.
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: "AGENT", label: "Agent", description: "Standard contributor" },
+                    { id: "LEAD", label: "Lead", description: "Plans + assigns work in crew" },
+                  ].map((r) => {
+                    const active = agentRole === r.id
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setAgentRole(r.id)}
+                        className={cn(
+                          "rounded-lg border px-3 py-2 text-left transition-colors min-w-[160px]",
+                          active ? "border-primary bg-primary/5 text-foreground" : "border-border hover:bg-muted text-muted-foreground",
+                        )}
+                      >
+                        <div className="text-body font-medium">{r.label}</div>
+                        <div className="text-micro text-muted-foreground">{r.description}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </PropertyRow>
             {agentRole === "LEAD" && (
               <PropertyRow label="Lead mode" icon={Shield}>
                 <div className="space-y-2">
                   <Select value={leadMode} onValueChange={setLeadMode}>
-                    <SelectTrigger id="lead_mode" className="w-full">
+                    <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="active">Active</SelectItem>
-                      <SelectItem value="passive">Passive</SelectItem>
+                      <SelectItem value="active">Active — autonomously plans and assigns</SelectItem>
+                      <SelectItem value="passive">Passive — receives updates, manual task delegation</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-label text-muted-foreground">
-                    {leadMode === "passive"
-                      ? "Passive: Lead receives updates but does not autonomously plan tasks. You manage tasks manually."
-                      : "Active: Lead receives crew context and autonomously plans and assigns tasks."}
-                  </p>
                 </div>
               </PropertyRow>
             )}
           </div>
         </SectionCard>
 
-        {/* Avatar */}
-        <SectionCard
-          title={
-            <span className="flex items-center gap-2">
-              <ImageIcon className="h-4 w-4 text-muted-foreground" />
-              Avatar
-            </span>
-          }
-        >
-          <div className="space-y-3">
-            <AvatarOverrideBadge
-              agentId={agentId}
-              workspaceId={workspaceId ?? ""}
-              hasOverride={!!avatarStyle}
-              onReset={() => setAvatarStyle("")}
-            />
-            <AvatarPicker
-              seed={avatarSeed || agent?.name || ""}
-              style={avatarStyle}
-              onSeedChange={setAvatarSeed}
-              onStyleChange={() => { /* style is crew-controlled */ }}
-              lockedStyle={avatarStyle || agent?.crew?.avatar_style || "bottts-neutral"}
-            />
-          </div>
-        </SectionCard>
-
         {/* Runtime */}
-        <SectionCard
-          title={
-            <span className="flex items-center gap-2">
-              <Cpu className="h-4 w-4 text-muted-foreground" />
-              Runtime
-            </span>
-          }
-        >
-          <div className="space-y-4">
+        <SectionCard title={<span className="flex items-center gap-2"><Cpu className="h-4 w-4 text-muted-foreground" />Runtime</span>}>
+          <div className="space-y-5">
             <div className="space-y-2">
-              <Label className="text-label">CLI Adapter</Label>
-              <div className="grid grid-cols-2 gap-2">
+              <Label className="text-label">Provider &amp; CLI adapter</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {CLI_ADAPTER_KEYS.map((key) => {
                   const cfg = CLI_ADAPTERS[key]
                   const Icon = cfg.icon
@@ -445,13 +372,18 @@ export function SettingsPageClient() {
                       onClick={() => handleAdapterChange(key)}
                       className={cn(
                         "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
-                        isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
+                        isActive ? "border-primary bg-primary/5 ring-1 ring-primary/20" : "border-border hover:bg-muted",
                       )}
                     >
-                      <Icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
-                      <div className="min-w-0">
-                        <div className="text-body font-medium">{cfg.label}</div>
-                        <div className="text-micro text-muted-foreground">{cfg.description}</div>
+                      <Icon className={cn("h-6 w-6 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-body font-medium flex items-center gap-1.5">
+                          {cfg.label}
+                          {isActive && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+                        </div>
+                        <div className="text-micro text-muted-foreground truncate">
+                          <span className="font-mono">{cfg.provider}</span> · {cfg.description}
+                        </div>
                       </div>
                     </button>
                   )
@@ -459,59 +391,86 @@ export function SettingsPageClient() {
               </div>
             </div>
 
-            <div className="space-y-0">
-              <PropertyRow label="Model" icon={Cpu}>
-                {showCustomModel ? (
-                  <div className="flex gap-2">
-                    <Input
-                      value={llmModel}
-                      onChange={(e) => setLlmModel(e.target.value)}
-                      placeholder="Enter model name"
-                      className="font-mono text-label"
-                    />
-                    <Button type="button" variant="outline" size="sm" onClick={() => {
+            <div className="space-y-2">
+              <Label className="text-label">Model</Label>
+              {showCustomModel ? (
+                <div className="flex gap-2">
+                  <Input
+                    value={llmModel}
+                    onChange={(e) => setLlmModel(e.target.value)}
+                    placeholder="Enter custom model name"
+                    className="font-mono text-label"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
                       setShowCustomModel(false)
-                      const cfg = CLI_ADAPTERS[cliAdapter]
-                      if (cfg) setLlmModel(cfg.defaultModel)
-                    }}>
-                      Back
-                    </Button>
-                  </div>
-                ) : (
+                      if (adapterCfg) setLlmModel(adapterCfg.defaultModel)
+                    }}
+                  >
+                    Use list
+                  </Button>
+                </div>
+              ) : (
+                <>
                   <Select value={llmModel} onValueChange={handleModelSelect}>
                     <SelectTrigger className="w-full font-mono text-label">
-                      <SelectValue placeholder="Select model" />
+                      <SelectValue placeholder="Select a model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(CLI_ADAPTERS[cliAdapter]?.models ?? []).map((m) => (
-                        <SelectItem key={m.value} value={m.value} className="font-mono text-label">
-                          {m.label}
-                        </SelectItem>
-                      ))}
-                      <SelectItem value="__custom__" className="text-muted-foreground">
-                        Custom...
+                      {availableModels.map((m) => {
+                        const meta = MODEL_DESCRIPTIONS[m.value]
+                        return (
+                          <SelectItem key={m.value} value={m.value}>
+                            <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-label">{m.label}</span>
+                                {meta?.badge && (
+                                  <span className="rounded bg-primary/10 text-primary px-1.5 py-px text-[10px] font-medium">
+                                    {meta.badge}
+                                  </span>
+                                )}
+                              </div>
+                              {meta?.description && (
+                                <span className="text-micro text-muted-foreground">{meta.description}</span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        )
+                      })}
+                      <SelectItem value="__custom__" className="text-muted-foreground italic">
+                        Custom model name…
                       </SelectItem>
                     </SelectContent>
                   </Select>
-                )}
-              </PropertyRow>
+                  {modelMeta && (
+                    <p className="text-micro text-muted-foreground pl-1">
+                      {modelMeta.description}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="space-y-0">
               <PropertyRow label="Tool profile" icon={Wrench}>
                 <Select value={toolProfile} onValueChange={setToolProfile}>
-                  <SelectTrigger id="tool_profile" className="w-full">
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="MINIMAL">Minimal</SelectItem>
-                    <SelectItem value="CODING">Coding</SelectItem>
-                    <SelectItem value="MESSAGING">Messaging</SelectItem>
-                    <SelectItem value="FULL">Full</SelectItem>
+                    <SelectItem value="MINIMAL">Minimal — read-only ops</SelectItem>
+                    <SelectItem value="CODING">Coding — files + shell</SelectItem>
+                    <SelectItem value="MESSAGING">Messaging — peers + status</SelectItem>
+                    <SelectItem value="FULL">Full — everything available</SelectItem>
                   </SelectContent>
                 </Select>
               </PropertyRow>
               <PropertyRow label="Timeout" icon={Timer}>
                 <div className="flex items-center gap-2">
                   <Input
-                    id="timeout"
                     type="number"
                     min={30}
                     max={7200}
@@ -528,23 +487,76 @@ export function SettingsPageClient() {
         {/* System Prompt */}
         <SectionCard
           title={
-            <span className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-              System Prompt
-            </span>
+            <div className="flex items-center justify-between gap-2 w-full">
+              <span className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                System Prompt
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 text-muted-foreground hover:text-foreground"
+                onClick={() => setSystemPromptFullscreen(true)}
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+                Expand
+              </Button>
+            </div>
           }
-          description="Sent as the system message on every run. Keep it focused on behavior and constraints."
+          description="Sent as the system message on every run. Focus on behavior and constraints."
         >
-          <Textarea
-            id="system_prompt"
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="You are a helpful AI assistant that..."
-            rows={6}
-          />
+          <div className="space-y-1.5">
+            <Textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="You are a helpful AI assistant that…"
+              rows={10}
+              className="font-mono text-label leading-relaxed resize-y min-h-[180px]"
+            />
+            <div className="flex items-center justify-between text-micro text-muted-foreground px-1">
+              <span>{systemPrompt.length.toLocaleString()} characters</span>
+              <span>~{Math.ceil(systemPrompt.length / 4).toLocaleString()} tokens</span>
+            </div>
+          </div>
         </SectionCard>
 
-        {/* Messages */}
+        {/* Advanced (collapsible) */}
+        <SectionCard
+          title={
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              className="flex items-center gap-2 text-left w-full"
+            >
+              <ChevronRight className={cn("h-4 w-4 transition-transform", advancedOpen && "rotate-90")} />
+              <span>Advanced</span>
+              <span className="text-micro text-muted-foreground font-normal">
+                Power-user settings
+              </span>
+            </button>
+          }
+        >
+          {advancedOpen && (
+            <div className="space-y-3">
+              <PropertyRow label="LLM provider" icon={Cpu}>
+                <Input
+                  value={llmProvider}
+                  onChange={(e) => setLlmProvider(e.target.value)}
+                  placeholder="Auto-detected from adapter"
+                  className="font-mono text-label"
+                />
+              </PropertyRow>
+              <p className="text-micro text-muted-foreground pl-1">
+                Memory budget, paymaster cap, and per-agent feature flags will land here. For now the
+                provider override is the main escape hatch — change it only if you really know what
+                you&apos;re doing.
+              </p>
+            </div>
+          )}
+        </SectionCard>
+
+        {/* Status messages */}
         {error && (
           <div className="flex items-center gap-2 text-destructive">
             <AlertCircle className="h-4 w-4" />
@@ -553,53 +565,78 @@ export function SettingsPageClient() {
         )}
         {success && (
           <div className="flex items-center gap-2 rounded-md border border-border bg-surface-subtle px-3 py-2">
-            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
             <p className="text-body">{success}</p>
           </div>
         )}
 
-        {/* Actions */}
-        <div className="flex flex-wrap items-center gap-3 pt-2">
+        {/* Save (Delete moved to chat header 3-dots menu) */}
+        <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting} className="gap-2">
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save Changes
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={deleting}
-            onClick={handleDelete}
-            className="gap-2 text-destructive border-destructive/30 hover:bg-destructive/10"
-          >
-            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-            Delete Agent
-          </Button>
+          <span className="text-micro text-muted-foreground">
+            Delete this agent from the chat header menu (⋮) — owners only.
+          </span>
         </div>
       </form>
-    </div>
+
+      {/* Fullscreen system-prompt editor */}
+      <Dialog open={systemPromptFullscreen} onOpenChange={setSystemPromptFullscreen}>
+        <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              System Prompt
+            </DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            className="flex-1 font-mono text-label leading-relaxed resize-none"
+          />
+          <div className="flex items-center justify-between text-micro text-muted-foreground">
+            <span>{systemPrompt.length.toLocaleString()} characters · ~{Math.ceil(systemPrompt.length / 4).toLocaleString()} tokens</span>
+            <Button type="button" size="sm" onClick={() => setSystemPromptFullscreen(false)} className="gap-1.5">
+              <ChevronDown className="h-3.5 w-3.5" />
+              Done
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
 function SettingsSkeleton() {
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="p-6 mx-auto w-full max-w-3xl space-y-6">
       <div className="space-y-2">
         <Skeleton className="h-7 w-32" />
         <Skeleton className="h-4 w-72" />
       </div>
-      {Array.from({ length: 3 }).map((_, i) => (
-        <SectionCard key={i} title={<Skeleton className="h-5 w-24" />}>
+      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+        <SectionCard title={<Skeleton className="h-5 w-24" />}>
           <div className="space-y-4">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        </SectionCard>
+        <SectionCard title={<Skeleton className="h-5 w-24" />}>
+          <Skeleton className="h-32 w-full" />
+        </SectionCard>
+      </div>
+      {Array.from({ length: 3 }).map((_, i) => (
+        <SectionCard key={i} title={<Skeleton className="h-5 w-32" />}>
+          <div className="space-y-3">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
         </SectionCard>
       ))}
-      <div className="flex gap-3">
-        <Skeleton className="h-10 w-32" />
-        <Skeleton className="h-10 w-32" />
-      </div>
+      <Skeleton className="h-10 w-32" />
     </div>
   )
 }

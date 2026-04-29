@@ -39,7 +39,13 @@ export const Message = ({ className, from, ...props }: MessageProps) => (
   <div
     className={cn(
       "group flex w-full flex-col gap-2",
-      from === "user" ? "is-user ml-auto max-w-[80%] justify-end" : "is-assistant",
+      // User bubble hugs the right edge with a comfortable max-width.
+      // Assistant bubble hugs the left and is slightly wider — agents
+      // tend to write paragraphs, so giving them a bit more room
+      // reduces "tall narrow column of text" feel.
+      from === "user"
+        ? "is-user ml-auto max-w-[80%] justify-end"
+        : "is-assistant mr-auto max-w-[88%]",
       className
     )}
     {...props}
@@ -56,8 +62,27 @@ export const MessageContent = ({
   <div
     className={cn(
       "flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden text-sm",
-      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm group-[.is-user]:bg-muted group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
-      "group-[.is-assistant]:text-foreground",
+      // Style C ("GitHub Copilot Chat" feel) — both bubbles are real
+      // cards with a clear value lift over bg-background. User bubble
+      // is the lighter of the two (zinc-700/40) so it reads as "your
+      // outgoing", assistant bubble (zinc-800/60) sits a half-step
+      // below to keep the eye flowing through the conversation.
+      // Border + soft shadow gives definition without shouting.
+      //
+      // User bubble — anchored right with bottom-right tail. Subtle
+      // blue tint pulled from the brand palette (matches the +Assign
+      // skill button + connection-status pill) so "your" outgoing
+      // messages read as a hint of brand colour without going full
+      // iMessage saturation.
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm",
+      "group-[.is-user]:bg-blue-500/10 group-[.is-user]:border group-[.is-user]:border-blue-400/20",
+      "group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
+      "group-[.is-user]:shadow-sm",
+      // Assistant bubble — anchored left with bottom-left tail.
+      "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-bl-sm",
+      "group-[.is-assistant]:bg-zinc-800/60 group-[.is-assistant]:border group-[.is-assistant]:border-white/10",
+      "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3 group-[.is-assistant]:text-foreground",
+      "group-[.is-assistant]:shadow-sm",
       className
     )}
     {...props}

@@ -3,6 +3,13 @@ set -e
 
 export HOME=/home/agent
 
+# Make new files group-writable so the host (crewshipd, uid 1000)
+# can edit / save files through the Files UI. Without this, files
+# the agent creates (uid 1001) come out as 0644 and host fs writes
+# fail with EACCES on os.Create. Combined with setgid on the bind-
+# mount root, this gives both processes rw on the same files.
+umask 0002
+
 # First-boot skeleton: initialize home directory on empty volume.
 if [ ! -f /home/agent/.bashrc ]; then
     cp /etc/skel/.bashrc /home/agent/.bashrc 2>/dev/null || true
