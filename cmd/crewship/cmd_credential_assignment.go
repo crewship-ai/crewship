@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -137,7 +136,7 @@ var credTestCmd = &cobra.Command{
 		if value == "" && valueStdin {
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
-				value = strings.TrimSpace(scanner.Text())
+				value = scanner.Text()
 			}
 		}
 

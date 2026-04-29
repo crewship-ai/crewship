@@ -222,7 +222,11 @@ var missionTaskUpdateCmd = &cobra.Command{
 			body["status"] = strings.ToUpper(v)
 		}
 		if v, _ := cmd.Flags().GetString("assigned-agent"); v != "" {
-			body["assigned_agent_id"] = v
+			agentID, err := resolveAgentID(client, v)
+			if err != nil {
+				return fmt.Errorf("cannot resolve assigned agent %q: %w", v, err)
+			}
+			body["assigned_agent_id"] = agentID
 		}
 		if len(body) == 0 {
 			return fmt.Errorf("no updates specified (use --title, --description, --status, or --assigned-agent)")

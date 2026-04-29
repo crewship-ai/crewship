@@ -52,16 +52,21 @@ var issueCreateCmd = &cobra.Command{
 			body["priority"] = v
 		}
 		if v, _ := flags.GetString("assignee"); v != "" {
-			agentID, err := resolveAgentID(client, v)
-			if err != nil {
-				return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
+			atype, _ := flags.GetString("assignee-type")
+			if atype == "" {
+				atype = "agent"
 			}
-			body["assignee_id"] = agentID
-			if atype, _ := flags.GetString("assignee-type"); atype != "" {
-				body["assignee_type"] = atype
-			} else {
-				body["assignee_type"] = "agent"
+			switch atype {
+			case "agent":
+				agentID, err := resolveAgentID(client, v)
+				if err != nil {
+					return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
+				}
+				body["assignee_id"] = agentID
+			default:
+				return fmt.Errorf("--assignee-type %q is not supported (only 'agent')", atype)
 			}
+			body["assignee_type"] = atype
 		}
 		if v, _ := flags.GetString("labels"); v != "" {
 			body["labels"] = strings.Split(v, ",")
@@ -134,22 +139,28 @@ var issueUpdateCmd = &cobra.Command{
 				body["assignee_id"] = nil
 				body["assignee_type"] = nil
 			} else {
-				// Resolve agent slug to ID
-				agentID, err := resolveAgentID(client, v)
-				if err != nil {
-					return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
+				atype, _ := flags.GetString("assignee-type")
+				if atype == "" {
+					atype = "agent"
 				}
-				body["assignee_id"] = agentID
-				// Auto-set type to agent if not explicitly set
-				if !flags.Changed("assignee-type") {
-					body["assignee_type"] = "agent"
+				switch atype {
+				case "agent":
+					agentID, err := resolveAgentID(client, v)
+					if err != nil {
+						return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
+					}
+					body["assignee_id"] = agentID
+				default:
+					return fmt.Errorf("--assignee-type %q is not supported (only 'agent')", atype)
 				}
+				body["assignee_type"] = atype
 			}
-		}
-		if flags.Changed("assignee-type") {
+		} else if flags.Changed("assignee-type") {
 			v, _ := flags.GetString("assignee-type")
 			if strings.TrimSpace(v) == "" {
 				body["assignee_type"] = nil
+			} else if v != "agent" {
+				return fmt.Errorf("--assignee-type %q is not supported (only 'agent')", v)
 			} else {
 				body["assignee_type"] = v
 			}

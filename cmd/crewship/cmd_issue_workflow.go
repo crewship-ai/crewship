@@ -111,11 +111,10 @@ var issueStartCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if iss.Identifier == nil {
-			return fmt.Errorf("issue has no identifier")
-		}
+		identifier := derefStr(iss.Identifier, iss.ID)
+		escaped := url.PathEscape(identifier)
 
-		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/start", iss.CrewID, *iss.Identifier), nil)
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/start", iss.CrewID, escaped), nil)
 		if err != nil {
 			return err
 		}
@@ -123,7 +122,7 @@ var issueStartCmd = &cobra.Command{
 			return err
 		}
 		resp.Body.Close()
-		cli.PrintSuccess(fmt.Sprintf("Started %s — agent dispatched", *iss.Identifier))
+		cli.PrintSuccess(fmt.Sprintf("Started %s — agent dispatched", identifier))
 		return nil
 	},
 }
@@ -145,11 +144,10 @@ var issueStopCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if iss.Identifier == nil {
-			return fmt.Errorf("issue has no identifier")
-		}
+		identifier := derefStr(iss.Identifier, iss.ID)
+		escaped := url.PathEscape(identifier)
 
-		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/stop", iss.CrewID, *iss.Identifier), nil)
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/stop", iss.CrewID, escaped), nil)
 		if err != nil {
 			return err
 		}
@@ -157,7 +155,7 @@ var issueStopCmd = &cobra.Command{
 			return err
 		}
 		resp.Body.Close()
-		cli.PrintSuccess(fmt.Sprintf("Stopped %s", *iss.Identifier))
+		cli.PrintSuccess(fmt.Sprintf("Stopped %s", identifier))
 		return nil
 	},
 }
@@ -179,9 +177,8 @@ var issueReviewCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if iss.Identifier == nil {
-			return fmt.Errorf("issue has no identifier")
-		}
+		identifier := derefStr(iss.Identifier, iss.ID)
+		escaped := url.PathEscape(identifier)
 
 		action, _ := cmd.Flags().GetString("action")
 		if action == "" {
@@ -199,7 +196,7 @@ var issueReviewCmd = &cobra.Command{
 			body["reassign_to"] = reassign
 		}
 
-		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/review", iss.CrewID, *iss.Identifier), body)
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/review", iss.CrewID, escaped), body)
 		if err != nil {
 			return err
 		}
@@ -208,9 +205,9 @@ var issueReviewCmd = &cobra.Command{
 		}
 		resp.Body.Close()
 		if action == "approve" {
-			cli.PrintSuccess(fmt.Sprintf("Approved %s", *iss.Identifier))
+			cli.PrintSuccess(fmt.Sprintf("Approved %s", identifier))
 		} else {
-			cli.PrintSuccess(fmt.Sprintf("Changes requested on %s", *iss.Identifier))
+			cli.PrintSuccess(fmt.Sprintf("Changes requested on %s", identifier))
 		}
 		return nil
 	},

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -40,7 +39,7 @@ var credCreateCmd = &cobra.Command{
 		if valueStdin {
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
-				value = strings.TrimSpace(scanner.Text())
+				value = scanner.Text()
 			}
 		}
 
@@ -130,6 +129,9 @@ var credUpdateCmd = &cobra.Command{
 
 		if flags.Changed("value") {
 			v, _ := flags.GetString("value")
+			if v == "" {
+				return fmt.Errorf("--value cannot be empty")
+			}
 			body["value"] = v
 		}
 		if flags.Changed("name") {
@@ -139,7 +141,11 @@ var credUpdateCmd = &cobra.Command{
 		if flags.Changed("value-stdin") {
 			scanner := bufio.NewScanner(os.Stdin)
 			if scanner.Scan() {
-				body["value"] = strings.TrimSpace(scanner.Text())
+				v := scanner.Text()
+				if v == "" {
+					return fmt.Errorf("stdin value cannot be empty")
+				}
+				body["value"] = v
 			}
 		}
 		if flags.Changed("security-level") {

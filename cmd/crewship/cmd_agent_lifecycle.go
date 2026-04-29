@@ -57,11 +57,13 @@ var agentCreateCmd = &cobra.Command{
 		if v, _ := flags.GetString("llm-model"); v != "" {
 			body["llm_model"] = v
 		}
-		if v, _ := flags.GetInt("timeout"); v > 0 {
+		if flags.Changed("timeout") {
+			v, _ := flags.GetInt("timeout")
 			body["timeout_seconds"] = v
 		}
-		if v, _ := flags.GetBool("memory"); v {
-			body["memory_enabled"] = true
+		if flags.Changed("memory") {
+			v, _ := flags.GetBool("memory")
+			body["memory_enabled"] = v
 		}
 		if v, _ := flags.GetString("avatar-seed"); v != "" {
 			body["avatar_seed"] = v
