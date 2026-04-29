@@ -1,17 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useState, useRef } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   Bot,
   AlertCircle,
   Wifi,
   WifiOff,
   Loader2,
-  PanelRightOpen,
-  PanelRightClose,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
 
 import {
   Conversation,
@@ -29,9 +26,12 @@ import {
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { useChat } from "@/hooks/use-chat"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useDrawerStore } from "@/stores/drawer-store"
 
 import { TurnRenderer } from "./turn-renderer"
 import { RightPanel } from "./right-panel"
+import { RightRail } from "./right-rail"
+import { RightDrawer } from "./right-drawer"
 import type { FileEntry } from "./chat-tree-row"
 
 function getWsUrl(): string {
@@ -76,10 +76,8 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     if (initialInput) setInput(initialInput)
   }, [initialInput])
 
-  const [showPreview, setShowPreview] = useState(true)
   const [files, setFiles] = useState<FileEntry[]>([])
-  const [splitRatio, setSplitRatio] = useState(60)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const drawer = useDrawerStore()
 
   useEffect(() => {
     fetch("/api/v1/ws-token", { credentials: "include" })
@@ -127,14 +125,15 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     } catch { /* ignore */ }
   }, [agentId, workspaceId, sessionId, sessionReady])
 
-  // Fetch files for the preview panel
+  // Fetch files only when the Files tab might be visible (drawer open + active)
+  const filesVisible = drawer.open && drawer.activeTab === "files"
   useEffect(() => {
-    if (!workspaceId || !showPreview || !sessionId) return
+    if (!workspaceId || !filesVisible || !sessionId) return
     fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data: FileEntry[] | null) => setFiles(data ?? []))
       .catch(() => {})
-  }, [agentId, workspaceId, showPreview, sessionId])
+  }, [agentId, workspaceId, filesVisible, sessionId])
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const text = message.text?.trim()
@@ -152,40 +151,6 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
-  }, [])
-
-  // Drag resize handler
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startRatio = splitRatio
-
-    const handleMove = (ev: MouseEvent) => {
-      if (!containerRef.current) return
-      const containerWidth = containerRef.current.offsetWidth
-      const dx = ev.clientX - startX
-      const newRatio = Math.min(80, Math.max(30, startRatio + (dx / containerWidth) * 100))
-      setSplitRatio(newRatio)
-    }
-
-    const handleUp = () => {
-      document.removeEventListener("mousemove", handleMove)
-      document.removeEventListener("mouseup", handleUp)
-    }
-
-    document.addEventListener("mousemove", handleMove)
-    document.addEventListener("mouseup", handleUp)
-  }, [splitRatio])
-
-  const handleResizeKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const step = 2
-    if (e.key === "ArrowLeft") {
-      e.preventDefault()
-      setSplitRatio((r) => Math.max(30, r - step))
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault()
-      setSplitRatio((r) => Math.min(80, r + step))
-    }
   }, [])
 
   const chatStatus = isStreaming ? "streaming" as const : "ready" as const
@@ -297,24 +262,16 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
     )
   }
 
-  // Desktop: full split layout
+  // Desktop: chat + icon rail; drawer overlays (or pushes) when open
+  const pushOpen = drawer.open && drawer.mode === "push"
   return (
-    <div ref={containerRef} className="flex h-full">
-      <div className="flex flex-col overflow-hidden" style={{ width: showPreview ? `${splitRatio}%` : "100%" }}>
+    <div className="relative flex h-full">
+      <div className="flex flex-col overflow-hidden flex-1 min-w-0">
         <div className="flex items-center gap-2 px-4 md:px-6 h-[41px] border-b shrink-0">
           <ConnectionBadge status={connectionStatus} />
           <span className="text-micro text-muted-foreground ml-auto font-mono">
             {sessionId.slice(0, 8)}
           </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => setShowPreview(!showPreview)}
-            title={showPreview ? "Hide panel" : "Show panel"}
-          >
-            {showPreview ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
-          </Button>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {authError ? (
@@ -373,27 +330,19 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
         </div>
       </div>
 
-      {showPreview && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize chat pane"
-          tabIndex={0}
-          className="w-1 bg-border hover:bg-primary/40 focus-visible:bg-primary/40 cursor-col-resize shrink-0 transition-colors outline-none"
-          onMouseDown={handleDragStart}
-          onKeyDown={handleResizeKeyDown}
-          title="Drag to resize"
-        />
-      )}
-
-      {showPreview && (
+      <RightDrawer>
         <RightPanel
+          key={drawer.activeTab}
           agentId={agentId}
           workspaceId={workspaceId}
           files={files}
-          style={{ width: `${100 - splitRatio}%` }}
+          initialTab={drawer.activeTab}
+          hideTabs
+          style={{ width: "100%", height: "100%" }}
         />
-      )}
+      </RightDrawer>
+
+      <RightRail className={cn(pushOpen && "border-l-0")} />
     </div>
   )
 }
