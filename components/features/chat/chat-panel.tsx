@@ -37,6 +37,9 @@ import { ModelPicker } from "./composer/model-picker"
 import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
+import { ConversationSearch } from "./search/conversation-search"
+import { ExportDialog } from "./export/export-dialog"
+import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
 import { useComposerStore } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
@@ -370,6 +373,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
       <RightRail className={cn(pushOpen && "border-l-0")} />
       <SlashPalette agentSlug={agentName} onCommand={handleSlashCommand} />
       <ArtifactPane agentId={agentId} />
+      <ConversationSearch turns={turns} />
+      <ExportDialog turns={turns} agentName={agentName} />
+      <ReconnectBanner status={connectionStatus} />
     </div>
   )
 }
