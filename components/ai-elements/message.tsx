@@ -69,9 +69,13 @@ export const MessageContent = ({
       // below to keep the eye flowing through the conversation.
       // Border + soft shadow gives definition without shouting.
       //
-      // User bubble — anchored right with bottom-right tail.
+      // User bubble — anchored right with bottom-right tail. Subtle
+      // blue tint pulled from the brand palette (matches the +Assign
+      // skill button + connection-status pill) so "your" outgoing
+      // messages read as a hint of brand colour without going full
+      // iMessage saturation.
       "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-sm",
-      "group-[.is-user]:bg-zinc-700/40 group-[.is-user]:border group-[.is-user]:border-white/10",
+      "group-[.is-user]:bg-blue-500/10 group-[.is-user]:border group-[.is-user]:border-blue-400/20",
       "group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
       "group-[.is-user]:shadow-sm",
       // Assistant bubble — anchored left with bottom-left tail.
