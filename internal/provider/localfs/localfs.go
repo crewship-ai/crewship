@@ -64,15 +64,38 @@ func (p *Provider) Read(_ context.Context, path string) (io.ReadCloser, error) {
 }
 
 // Write creates or overwrites the file at path with content from r.
+//
+// On a shared bind-mount where files may have been created by another
+// uid (e.g. the agent container at uid 1001 while crewshipd runs as
+// uid 1000), os.Create can fail with EACCES on an existing file even
+// though the calling process has group-write via the bind-mount setgid
+// + group-shared layout. Retry path:
+//  1. Best-effort chmod 0664 — opens up the file if we own it OR if
+//     it's group-writable already (no-op in those cases).
+//  2. If create still fails with EACCES, try unlink + create — works
+//     when the parent dir is writable for our uid/gid.
 func (p *Provider) Write(_ context.Context, path string, r io.Reader) error {
 	full, err := p.resolve(path)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(full), 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(full), 0775); err != nil {
 		return fmt.Errorf("create parent dir: %w", err)
 	}
+	// Best-effort: relax mode on the existing file before re-opening
+	// it for write. Ignore failures (file may not exist yet, or we
+	// may not own it — os.Create will report the real problem).
+	_ = os.Chmod(full, 0664)
 	f, err := os.Create(full)
+	if err != nil && os.IsPermission(err) {
+		// Last-resort: unlink and recreate. Works when the parent dir
+		// is group-writable to us. Files we recreate this way drop
+		// previous ownership; the entrypoint sets umask 0002 so
+		// future writes from agent-side land at 0664 instead of 0644.
+		if rmErr := os.Remove(full); rmErr == nil {
+			f, err = os.Create(full)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}

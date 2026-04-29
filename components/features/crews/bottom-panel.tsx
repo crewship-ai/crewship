@@ -548,6 +548,15 @@ function DockerTab() {
  * children inline) + inline file preview pane on the right (click a
  * file to read its contents via /agents/{id}/files/download).
  */
+/** Per-context tree state we persist for the user. The pref is keyed
+ *  by `<kind>:<id>` so each agent + each crew has its own remembered
+ *  tree (agent on Filip ≠ agent on Lucie ≠ crew DevOps view). */
+interface TreeState {
+  expandedPaths: string[]
+  lastOpenedPath: string | null
+  editing: boolean
+}
+
 function FilesTab({ workspaceId, context }: { workspaceId: string; context: BottomPanelProps["context"] }) {
   const [tree, setTree] = useState<FileEntry[] | null>(null)
   const [expanded, setExpanded] = useState<Record<string, FileEntry[] | "loading" | "error">>({})
@@ -563,15 +572,34 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
   const [saving, setSaving] = useState(false)
   const editorSaveRef = useRef<(() => void) | null>(null)
 
+  // Per-user persistence: which folders are open + which file the
+  // user last had open + whether they were editing it. Keyed by
+  // context so each agent and each crew remembers its own state.
+  const ctxKey = context
+    ? context.kind === "agent"
+      ? `agent.${context.agentId}`
+      : `crew.${context.crewId}`
+    : "none"
+  const [savedTreeState, setSavedTreeState] = useUserPreference<TreeState>(
+    `crews.fileTree.${ctxKey}`,
+    { expandedPaths: [], lastOpenedPath: null, editing: false },
+  )
+  // Snapshot the saved state at context-change time. Subsequent updates
+  // (when the user clicks around) flow OUT to the pref; we don't want
+  // those to retrigger the replay path.
+  const savedRef = useRef(savedTreeState)
+  savedRef.current = savedTreeState
+
   useEffect(() => {
     if (!context) return
     let cancelled = false
+    const saved = savedRef.current
     setTree(null)
     setError(null)
     setExpanded({})
-    setPreviewPath(null)
+    setPreviewPath(saved.lastOpenedPath)
     setPreviewContent(null)
-    setEditing(false)
+    setEditing(saved.editing && saved.lastOpenedPath !== null)
     setDirty(false)
     const url = context.kind === "agent"
       ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&path=/`
@@ -580,21 +608,40 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => {
         if (cancelled) return
-        setTree(Array.isArray(data?.entries) ? data.entries : Array.isArray(data) ? data : [])
+        // Crew endpoint wraps in {crew_id, files}; agent endpoint
+        // already unwraps to a bare array via the proxy. Accept both.
+        const entries = Array.isArray(data?.files)
+          ? data.files
+          : Array.isArray(data?.entries)
+            ? data.entries
+            : Array.isArray(data)
+              ? data
+              : []
+        setTree(entries)
       })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)) })
     return () => { cancelled = true }
   }, [context, workspaceId])
 
   const fetchDir = useCallback(async (subdir: string) => {
-    if (!context || context.kind !== "agent") return
+    if (!context) return
     setExpanded((p) => ({ ...p, [subdir]: "loading" }))
     try {
-      const url = `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(subdir)}`
+      const url = context.kind === "agent"
+        ? `/api/v1/agents/${context.agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(subdir)}`
+        : `/api/v1/crews/${context.crewId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(subdir)}`
       const r = await fetch(url)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const data = await r.json()
-      const entries = Array.isArray(data?.entries) ? data.entries : Array.isArray(data) ? data : []
+      // Crew endpoint wraps in {crew_id, files}; agent endpoint already
+      // unwraps to a bare array. Handle both.
+      const entries = Array.isArray(data?.files)
+        ? data.files
+        : Array.isArray(data?.entries)
+          ? data.entries
+          : Array.isArray(data)
+            ? data
+            : []
       setExpanded((p) => ({ ...p, [subdir]: entries as FileEntry[] }))
     } catch {
       setExpanded((p) => ({ ...p, [subdir]: "error" }))
@@ -615,15 +662,56 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
     }
   }, [expanded, fetchDir])
 
+  // Replay saved tree state once the top-level listing loads. Folders
+  // open in the saved order; the last-opened file is fetched + shown
+  // (along with the editing flag if the user had Edit mode active
+  // when they last left). Runs once per context-change cycle.
+  const replayedForCtxRef = useRef<string>("")
+  useEffect(() => {
+    if (!context || tree === null) return
+    if (replayedForCtxRef.current === ctxKey) return
+    replayedForCtxRef.current = ctxKey
+    const saved = savedRef.current
+    for (const p of saved.expandedPaths) {
+      void fetchDir(p)
+    }
+    if (saved.lastOpenedPath) {
+      const name = saved.lastOpenedPath.split("/").pop() ?? ""
+      void openFile(saved.lastOpenedPath, name).then(() => {
+        if (saved.editing) setEditing(true)
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context, tree, ctxKey])
+
+  // Persist current tree state. Debounced inside useUserPreference
+  // so a folder-expand storm doesn't hammer the API.
+  useEffect(() => {
+    if (!context || tree === null) return
+    const expandedPaths = Object.keys(expanded).filter(
+      (k) => Array.isArray(expanded[k]),
+    )
+    setSavedTreeState({
+      expandedPaths,
+      lastOpenedPath: previewPath,
+      editing,
+    })
+    // setSavedTreeState is stable from the hook; including it would
+    // be a no-op but keeps the dep linter happy.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context, tree, expanded, previewPath, editing])
+
   const openFile = useCallback(async (filePath: string, _fileName: string) => {
-    if (!context || context.kind !== "agent") return
+    if (!context) return
     setPreviewPath(filePath)
     setPreviewContent(null)
     setPreviewError(null)
     setEditing(false)
     setDirty(false)
     try {
-      const url = `/api/v1/agents/${context.agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(filePath)}`
+      const url = context.kind === "agent"
+        ? `/api/v1/agents/${context.agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(filePath)}`
+        : `/api/v1/crews/${context.crewId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(filePath)}`
       const r = await fetch(url)
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
       const text = await r.text()
@@ -636,10 +724,12 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
   }, [context, workspaceId])
 
   const handleSave = useCallback(async (next: string) => {
-    if (!context || context.kind !== "agent" || !previewPath) return
+    if (!context || !previewPath) return
     setSaving(true)
     try {
-      const url = `/api/v1/agents/${context.agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(previewPath)}`
+      const url = context.kind === "agent"
+        ? `/api/v1/agents/${context.agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(previewPath)}`
+        : `/api/v1/crews/${context.crewId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(previewPath)}`
       const r = await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "text/plain" },
@@ -676,9 +766,14 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
     )
   }
 
+  // Path label shown atop the tree. For an agent this is the agent's
+  // home dir inside the runtime container. For a crew it's the bind-
+  // mount root that holds every member's workspace — so the label
+  // names the crew rather than calling it "shared" (which incorrectly
+  // suggests there's only one merged folder).
   const rootPath = context.kind === "agent"
     ? `/crew/agents/${context.agentSlug}/`
-    : `/crew/shared/`
+    : `${context.crewSlug} · all agents`
 
   return (
     <div className="h-full grid grid-cols-1 md:grid-cols-[minmax(220px,40%)_1fr] gap-0">
@@ -696,7 +791,6 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
               onToggleFolder={toggleFolder}
               onOpenFile={openFile}
               activePath={previewPath}
-              isAgent={context.kind === "agent"}
             />
           ))}
         </ul>
@@ -807,10 +901,9 @@ interface FileRowProps {
   onToggleFolder: (path: string) => void
   onOpenFile: (path: string, name: string) => void
   activePath: string | null
-  isAgent: boolean
 }
 
-function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFile, activePath, isAgent }: FileRowProps) {
+function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFile, activePath }: FileRowProps) {
   const path = parentPath ? `${parentPath}/${entry.name}` : entry.name
   const state = expanded[path]
   const isOpen = state && state !== "loading" && state !== "error"
@@ -824,9 +917,8 @@ function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFil
           type="button"
           onClick={() => {
             if (entry.is_dir) {
-              if (!isAgent) return // crew tree expansion not yet supported
               onToggleFolder(path)
-            } else if (isAgent) {
+            } else {
               onOpenFile(path, entry.name)
             }
           }}
@@ -864,7 +956,6 @@ function FileRow({ entry, parentPath, depth, expanded, onToggleFolder, onOpenFil
           onToggleFolder={onToggleFolder}
           onOpenFile={onOpenFile}
           activePath={activePath}
-          isAgent={isAgent}
         />
       ))}
     </>
