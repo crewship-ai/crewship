@@ -32,7 +32,11 @@ import { TurnRenderer } from "./turn-renderer"
 import { RightPanel } from "./right-panel"
 import { RightRail } from "./right-rail"
 import { RightDrawer } from "./right-drawer"
+import { SlashPalette } from "./composer/slash-palette"
+import { ModelPicker } from "./composer/model-picker"
+import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
 import type { FileEntry } from "./chat-tree-row"
+import { useComposerStore } from "@/stores/composer-store"
 
 function getWsUrl(): string {
   if (typeof window === "undefined") return ""
@@ -135,13 +139,17 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
       .catch(() => {})
   }, [agentId, workspaceId, filesVisible, sessionId])
 
+  const composer = useComposerStore()
+
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const text = message.text?.trim()
     if (!text || isStreaming) return
     await ensureSession()
     sendMessage(text)
     setInput("")
-  }, [isStreaming, sendMessage, ensureSession])
+    composer.clearDraft(sessionId)
+    composer.clearAttachments(sessionId)
+  }, [isStreaming, sendMessage, ensureSession, composer, sessionId])
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
@@ -152,6 +160,11 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])
+
+  const handleSlashCommand = useCallback((id: string) => {
+    if (id === "regenerate") regenerateLastTurn()
+    else if (id === "clear") loadHistory([])
+  }, [regenerateLastTurn, loadHistory])
 
   const chatStatus = isStreaming ? "streaming" as const : "ready" as const
 
@@ -312,21 +325,27 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
           </div>
         )}
         <div className="p-3 md:px-6 shrink-0">
-          <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
-            <PromptInputTextarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}
-              className="min-h-[44px]"
-            />
-            <PromptInputFooter className="justify-end p-2">
-              <PromptInputSubmit
-                disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
-                status={chatStatus}
-                onStop={stopGeneration}
+          <AttachmentZone sessionId={sessionId}>
+            <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
+              <PromptInputTextarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={agentName ? `Message ${agentName}...` : "Send a message..."}
+                className="min-h-[44px]"
               />
-            </PromptInputFooter>
-          </PromptInput>
+              <PromptInputFooter className="justify-between p-2 gap-2">
+                <div className="flex items-center gap-1">
+                  <AttachmentButton sessionId={sessionId} />
+                  <ModelPicker />
+                </div>
+                <PromptInputSubmit
+                  disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
+                  status={chatStatus}
+                  onStop={stopGeneration}
+                />
+              </PromptInputFooter>
+            </PromptInput>
+          </AttachmentZone>
         </div>
       </div>
 
@@ -343,6 +362,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
       </RightDrawer>
 
       <RightRail className={cn(pushOpen && "border-l-0")} />
+      <SlashPalette agentSlug={agentName} onCommand={handleSlashCommand} />
     </div>
   )
 }

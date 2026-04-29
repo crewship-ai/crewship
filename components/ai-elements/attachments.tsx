@@ -157,7 +157,7 @@ export const AttachmentDropZone = ({
   );
 };
 
-export type AttachmentTriggerProps = ComponentProps<typeof Button> & {
+export type AttachmentTriggerProps = Omit<ComponentProps<typeof Button>, "onSelect"> & {
   onSelect: (files: File[]) => void;
   accept?: string;
   multiple?: boolean;
