@@ -260,7 +260,14 @@ func (u *updateBuilder) Empty() bool {
 //   - "update" — OWNER, ADMIN, MANAGER (same tier as create; reversible mutations)
 //   - "manage" — OWNER, ADMIN
 //   - "delete" — OWNER, ADMIN (same tier as manage; destructive)
+//
+// Empty role is rejected for every action — defense-in-depth against an auth
+// middleware bypass that would otherwise let unauthenticated callers through
+// the read tier.
 func canRole(role string, actions ...string) bool {
+	if role == "" {
+		return false
+	}
 	for _, action := range actions {
 		switch action {
 		case "create", "update":

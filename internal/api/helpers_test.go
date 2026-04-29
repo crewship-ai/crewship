@@ -81,13 +81,13 @@ func TestCanRole(t *testing.T) {
 		action string
 		want   bool
 	}{
-		// read — any authenticated role
+		// read — any authenticated role; empty role is rejected (fail-closed).
 		{"OWNER", "read", true},
 		{"ADMIN", "read", true},
 		{"MANAGER", "read", true},
 		{"MEMBER", "read", true},
 		{"VIEWER", "read", true},
-		{"", "read", true}, // empty role still passes read; auth middleware enforces presence
+		{"", "read", false}, // empty role denied — guards against auth middleware bypass
 
 		// create — OWNER/ADMIN/MANAGER
 		{"OWNER", "create", true},
@@ -111,6 +111,7 @@ func TestCanRole(t *testing.T) {
 		{"MANAGER", "manage", false},
 		{"MEMBER", "manage", false},
 		{"VIEWER", "manage", false},
+		{"", "manage", false},
 
 		// delete — same tier as manage (destructive)
 		{"OWNER", "delete", true},
@@ -118,6 +119,7 @@ func TestCanRole(t *testing.T) {
 		{"MANAGER", "delete", false},
 		{"MEMBER", "delete", false},
 		{"VIEWER", "delete", false},
+		{"", "delete", false},
 
 		// Unknown actions must deny — fail-closed by design.
 		{"OWNER", "wat", false},
