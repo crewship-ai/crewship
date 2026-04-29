@@ -1,5 +1,16 @@
 import type { Transition } from "motion/react";
 
+/**
+ * Returns true when the user has requested reduced motion at the OS level.
+ * Use to gate animation distance / stagger / spring physics.
+ *
+ * SSR-safe: returns false on the server.
+ */
+export function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
 export const spring = {
   snappy: { type: "spring", stiffness: 600, damping: 40 } satisfies Transition,
   smooth: { type: "spring", stiffness: 280, damping: 32 } satisfies Transition,
