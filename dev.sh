@@ -192,6 +192,44 @@ start_postgres() {
   fi
 }
 
+# The Go binary embeds web/out/ via //go:embed. Running `go build` without
+# a fresh `pnpm build && cp -r out web/out` silently bakes a stale UI into
+# the new binary -- exactly the "make build piecemeal" trap documented in
+# CLAUDE.md. Detect frontend source changes against a marker file and run
+# the Next.js pipeline only when needed (idempotent; warm runs are ~0.1 s).
+ensure_web_build_fresh() {
+  local marker="$PROJECT_DIR/.web-build-marker"
+
+  if [[ -f "$marker" ]] && [[ -d "$PROJECT_DIR/web/out" ]] && [[ -s "$PROJECT_DIR/web/out/index.html" ]]; then
+    local newer
+    newer=$(cd "$PROJECT_DIR" && find \
+      app components hooks lib types \
+      package.json pnpm-lock.yaml tsconfig.json \
+      -type f -newer "$marker" 2>/dev/null | head -1)
+    if [[ -z "$newer" ]]; then
+      newer=$(cd "$PROJECT_DIR" && find . -maxdepth 1 -type f \
+        \( -name 'next.config.*' -o -name 'tailwind.config.*' -o -name 'postcss.config.*' \) \
+        -newer "$marker" 2>/dev/null | head -1)
+    fi
+    if [[ -z "$newer" ]]; then
+      log "web/out/ is up-to-date (skipping pnpm build)"
+      return 0
+    fi
+    log "Frontend source changed ($newer) -- rebuilding web/out/..."
+  else
+    log "web/out/ missing or stale -- running initial pnpm build..."
+  fi
+
+  if ! (cd "$PROJECT_DIR" && pnpm build); then
+    err "pnpm build failed -- web/out/ left untouched"
+    return 1
+  fi
+  rm -rf "$PROJECT_DIR/web/out"
+  cp -r "$PROJECT_DIR/out" "$PROJECT_DIR/web/out"
+  touch "$marker"
+  ok "Frontend build refreshed -> web/out/"
+}
+
 start_go() {
   if pid=$(is_running "$GO_PID_FILE"); then
     ok "crewship already running (pid $pid)"
@@ -205,6 +243,8 @@ start_go() {
 
   log "Starting crewship on :$GO_PORT..."
   mkdir -p "$DATA_DIR" "$LOG_PATH" "$STATE_DIR"
+
+  ensure_web_build_fresh || return 1
 
   # Build first (cached builds are <1s, cold ~9s on external SSD).
   # "go run" compiles on every start and the compilation time eats into
@@ -417,6 +457,25 @@ cmd_status() {
   fi
   echo "========================"
 
+  if git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    local branch sha dirty
+    branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "?")
+    sha=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
+    if git -C "$PROJECT_DIR" diff --quiet 2>/dev/null \
+        && git -C "$PROJECT_DIR" diff --cached --quiet 2>/dev/null \
+        && [[ -z "$(git -C "$PROJECT_DIR" ls-files --others --exclude-standard 2>/dev/null)" ]]; then
+      dirty=""
+    else
+      dirty=" ${YELLOW}(dirty)${NC}"
+    fi
+    echo -e "  Branch:      ${CYAN}${branch}${NC} @ ${sha}${dirty}"
+    if [[ -f "$PROJECT_DIR/.web-build-marker" ]]; then
+      echo -e "  web/out/:    built $(date -r "$PROJECT_DIR/.web-build-marker" '+%Y-%m-%d %H:%M' 2>/dev/null || stat -c '%y' "$PROJECT_DIR/.web-build-marker" 2>/dev/null | cut -d. -f1)"
+    else
+      echo -e "  web/out/:    ${YELLOW}no marker (will rebuild on next start)${NC}"
+    fi
+  fi
+
   local db_mode
   db_mode=$(detect_db_mode)
 
@@ -574,28 +633,132 @@ cmd_seed() {
   ok "Seed complete."
 }
 
+# Switch the working tree to a different ref (branch / PR / tag / SHA) and
+# restart all services. Always stashes WIP first so nothing is lost. Pairs
+# with ensure_web_build_fresh() so Next.js + Go are rebuilt on demand.
+#
+# Usage:
+#   ./dev.sh deploy main              -- track origin/main
+#   ./dev.sh deploy feat/my-thing     -- track origin/feat/my-thing
+#   ./dev.sh deploy pr/220            -- check out GitHub PR #220
+#   ./dev.sh deploy v1.4.0            -- detached HEAD on tag
+#   ./dev.sh deploy 404650b7          -- detached HEAD on SHA
+cmd_deploy() {
+  local ref="${1:-}"
+  if [[ -z "$ref" ]]; then
+    err "usage: ./dev.sh deploy <branch|tag|sha|pr/<NUM>>"
+    err ""
+    err "  ./dev.sh deploy main"
+    err "  ./dev.sh deploy feat/my-feature"
+    err "  ./dev.sh deploy pr/220"
+    err "  ./dev.sh deploy 404650b7"
+    return 1
+  fi
+
+  if ! git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    err "not a git repository: $PROJECT_DIR"
+    return 1
+  fi
+
+  echo -e "${BOLD}Deploying ${CYAN}${ref}${NC}${BOLD} to crewship${S} dev environment${NC}"
+  echo "========================"
+  echo ""
+
+  # Stash WIP (working tree + index + untracked) so a redeploy never destroys
+  # in-progress work. Recover via: git stash list   then git stash apply <ref>.
+  local has_wip=false
+  if ! git -C "$PROJECT_DIR" diff --quiet 2>/dev/null \
+     || ! git -C "$PROJECT_DIR" diff --cached --quiet 2>/dev/null \
+     || [[ -n "$(git -C "$PROJECT_DIR" ls-files --others --exclude-standard 2>/dev/null)" ]]; then
+    has_wip=true
+  fi
+
+  if $has_wip; then
+    local current_branch stash_msg
+    current_branch=$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD")
+    stash_msg="dev.sh deploy auto-stash @ ${current_branch} ($(date -u +%FT%TZ))"
+    log "Stashing local WIP -> ${stash_msg}"
+    git -C "$PROJECT_DIR" stash push --include-untracked -m "${stash_msg}" >/dev/null
+    warn "WIP stashed -- recover with: git stash list && git stash apply <ref>"
+  fi
+
+  cmd_stop
+
+  log "Fetching origin..."
+  git -C "$PROJECT_DIR" fetch origin --prune --tags
+
+  # Resolve ref:
+  #   pr/<NUM>   -> fetch refs/pull/<NUM>/head -> local branch pr-<NUM>
+  #   <branch>   -> create-or-reset local branch to origin/<branch>
+  #   <sha|tag>  -> detached HEAD
+  if [[ "$ref" =~ ^pr/([0-9]+)$ ]]; then
+    local pr_num="${BASH_REMATCH[1]}"
+    local local_ref="pr-$pr_num"
+    log "Resolving GitHub PR #${pr_num} -> branch ${local_ref}"
+    if ! git -C "$PROJECT_DIR" fetch origin "pull/${pr_num}/head:${local_ref}" --force; then
+      err "Could not fetch PR #${pr_num} -- does it exist on origin?"
+      return 1
+    fi
+    git -C "$PROJECT_DIR" checkout "$local_ref"
+  elif git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/remotes/origin/$ref"; then
+    log "Resolving branch ${ref} -> origin/${ref}"
+    # Warn about unpushed local commits before force-resetting the branch.
+    # (Commits stay reachable via reflog; just want to surface the fact.)
+    if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$ref"; then
+      local local_sha remote_sha
+      local_sha=$(git -C "$PROJECT_DIR" rev-parse "$ref")
+      remote_sha=$(git -C "$PROJECT_DIR" rev-parse "origin/$ref")
+      if [[ "$local_sha" != "$remote_sha" ]] \
+          && ! git -C "$PROJECT_DIR" merge-base --is-ancestor "$local_sha" "$remote_sha" 2>/dev/null; then
+        warn "Local '${ref}' diverged from origin/${ref}; resetting to remote"
+        warn "  recovery: git reflog show ${ref}"
+      fi
+    fi
+    git -C "$PROJECT_DIR" checkout -B "$ref" "origin/$ref"
+  elif git -C "$PROJECT_DIR" rev-parse --verify --quiet "${ref}^{commit}" >/dev/null; then
+    log "Resolving ${ref} -> detached HEAD"
+    git -C "$PROJECT_DIR" checkout --detach "$ref"
+  else
+    err "Could not resolve ref: ${ref}"
+    err "Tried: origin/${ref}, pr/<NUM>, local sha/tag"
+    return 1
+  fi
+
+  echo ""
+  log "Now on:"
+  git -C "$PROJECT_DIR" log -1 --oneline
+  echo ""
+
+  # cmd_start runs ensure_web_build_fresh -> pnpm build (only if frontend
+  # changed) -> go build -> start services. Idempotent on warm runs.
+  cmd_start
+}
+
 case "${1:-help}" in
   start)     cmd_start ;;
   stop)      cmd_stop ;;
   restart)   cmd_restart ;;
   status)    cmd_status ;;
+  deploy)    cmd_deploy "${2:-}" ;;
   nuke)      cmd_nuke "$@" ;;
   seed)      cmd_seed ;;
   logs)      cmd_logs ;;
   logs:go)   cmd_logs_go ;;
   logs:next) cmd_logs_next ;;
   *)
-    echo "Usage: ./dev.sh {start|stop|restart|status|seed|nuke|logs|logs:go|logs:next}"
+    echo "Usage: ./dev.sh {start|stop|restart|status|deploy|seed|nuke|logs|logs:go|logs:next}"
     echo ""
-    echo "  start     Start crewship + Next.js (+ PostgreSQL if configured)"
-    echo "  stop      Stop crewship + Next.js"
-    echo "  restart   Stop then start all services"
-    echo "  status    Show status of all services"
-    echo "  seed      Seed database with demo data (requires running server)"
-    echo "  nuke      Factory reset (destroy all data, containers, start fresh)"
-    echo "  logs      Tail combined logs"
-    echo "  logs:go   Tail crewship logs only"
-    echo "  logs:next Tail Next.js logs only"
+    echo "  start             Start crewship + Next.js (+ PostgreSQL if configured)"
+    echo "  stop              Stop crewship + Next.js"
+    echo "  restart           Stop then start all services"
+    echo "  status            Show branch / build / service status"
+    echo "  deploy <ref>      Switch to <ref> and restart (stashes WIP)"
+    echo "                    ref = branch | pr/<NUM> | tag | <sha>"
+    echo "  seed              Seed database with demo data (requires running server)"
+    echo "  nuke              Factory reset (destroy all data, containers, start fresh)"
+    echo "  logs              Tail combined logs"
+    echo "  logs:go           Tail crewship logs only"
+    echo "  logs:next         Tail Next.js logs only"
     if [[ "$INSTANCE_NUM" -gt 0 ]]; then
       echo ""
       echo "  Instance:  ${INSTANCE_NUM} (Go :${GO_PORT}, Next.js :${NEXT_PORT})"
