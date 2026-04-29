@@ -1,6 +1,20 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import dynamic from "next/dynamic"
+import { getEditorLanguage } from "@/components/features/chat/chat-tree-row"
+
+const FileEditor = dynamic(
+  () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-full grid place-items-center text-xs text-muted-foreground">
+        Loading editor…
+      </div>
+    ),
+  },
+)
 import {
   ChevronDown, ChevronUp, Container, File, FileCode2, Files, Folder,
   MessageSquare, Terminal,
@@ -44,9 +58,15 @@ interface PeerMessage {
 
 interface FileEntry {
   name: string
+  /** Full storage-rooted path returned by the list endpoint —
+   *  `<crewID>/<slug>/<rest>`. Use this verbatim when issuing
+   *  download / save / subdir queries; the IPC layer expects the
+   *  full path (prefix-checks against crewID). */
+  path?: string
   size?: number
   is_dir?: boolean
   modified?: string
+  mod_time?: string
 }
 
 export interface BottomPanelProps {
@@ -556,9 +576,17 @@ function FilesTab({ workspaceId, context }: { workspaceId: string; context: Bott
             ) : previewContent === null ? (
               <div className="p-4 text-xs text-muted-foreground">Loading…</div>
             ) : (
-              <pre className="flex-1 overflow-auto p-3 text-[11px] font-mono leading-relaxed text-foreground/85 whitespace-pre-wrap break-words">
-                {previewContent}
-              </pre>
+              <div className="flex-1 min-h-0 overflow-hidden">
+                <FileEditor
+                  // CodeMirror remounts when the doc string ref changes,
+                  // so the key forces a fresh editor when the user picks
+                  // a different file (avoids stale state on language switch).
+                  key={previewPath}
+                  code={previewContent}
+                  language={getEditorLanguage(previewPath.split("/").pop() ?? "")}
+                  onSave={() => { /* preview is read-only for now */ }}
+                />
+              </div>
             )}
           </>
         ) : (
