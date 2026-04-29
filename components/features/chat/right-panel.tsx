@@ -36,6 +36,8 @@ import {
   getEditorLanguage,
 } from "./chat-tree-row"
 import { useFileEditor } from "./hooks/use-file-editor"
+import { ScopeSection } from "./files/scope-section"
+import { Bot as BotIcon } from "lucide-react"
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
@@ -540,27 +542,52 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       {/* Tree area -- scrolls independently */}
       <div className={cn("overflow-y-auto", editorOpen ? "flex-1 min-h-0" : "flex-1")}>
         {activeTab === "files" && (
-          tree.length > 0 ? (
-            <div className="py-1">
-              {tree.map((node) => (
-                <ChatTreeRow
-                  key={node.path}
-                  node={node}
-                  depth={0}
-                  expanded={expanded}
-                  loadingDirs={loadingDirs}
-                  selectedFile={editorFile?.path ?? null}
-                  onToggle={toggleFolder}
-                  onFileClick={openFileEditor}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <FileText className="h-8 w-8 mb-2 opacity-20" />
-              <p className="text-label">No files yet</p>
-            </div>
-          )
+          <div>
+            <ScopeSection icon={BotIcon} title="Agent" count={fileCount} defaultOpen>
+              {tree.length > 0 ? (
+                <div className="py-0.5">
+                  {tree.map((node) => (
+                    <ChatTreeRow
+                      key={node.path}
+                      node={node}
+                      depth={0}
+                      expanded={expanded}
+                      loadingDirs={loadingDirs}
+                      selectedFile={editorFile?.path ?? null}
+                      onToggle={toggleFolder}
+                      onFileClick={openFileEditor}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground/70">
+                  <FileText className="h-3 w-3" />
+                  No files in this session yet
+                </div>
+              )}
+            </ScopeSection>
+            <ScopeSection icon={Users} title="Crew" defaultOpen={false}>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground/70">
+                <FileText className="h-3 w-3" />
+                Shared crew files (loaded on demand)
+              </div>
+            </ScopeSection>
+            <ScopeSection
+              icon={Globe}
+              title="Workspace"
+              defaultOpen={false}
+              badge={
+                <span className="rounded bg-amber-50 dark:bg-amber-950/30 px-1.5 text-[10px] text-amber-700 dark:text-amber-400">
+                  soon
+                </span>
+              }
+            >
+              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground/70">
+                <FileText className="h-3 w-3" />
+                Workspace-level files — backend pending
+              </div>
+            </ScopeSection>
+          </div>
         )}
 
         {activeTab === "triggers" && (

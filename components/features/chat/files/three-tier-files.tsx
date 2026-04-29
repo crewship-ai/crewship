@@ -10,28 +10,30 @@ import {
   type TreeNode,
   buildTopLevelTree,
 } from "../chat-tree-row"
-import { useFileEditor } from "../hooks/use-file-editor"
 import { ScopeSection } from "./scope-section"
 
 interface ThreeTierFilesProps {
-  agentId: string
   crewId?: string | null
   workspaceId: string | null
   /** Pre-fetched agent-level files (for the active session). */
   agentFiles: FileEntry[]
+  /** Currently open file (path), used for selection highlight. */
+  selectedFile?: string | null
+  /** Click handler — fires for any file row across all 3 scopes. */
+  onFileClick: (node: TreeNode) => void
 }
 
 export function ThreeTierFiles({
-  agentId,
   crewId,
   workspaceId,
   agentFiles,
+  selectedFile,
+  onFileClick,
 }: ThreeTierFilesProps) {
   const [agentTree, setAgentTree] = useState<TreeNode[]>([])
   const [crewFiles, setCrewFiles] = useState<FileEntry[]>([])
   const [crewLoading, setCrewLoading] = useState(false)
 
-  const editor = useFileEditor({ agentId, workspaceId })
   const expanded = new Set<string>()
 
   useEffect(() => {
@@ -80,9 +82,9 @@ export function ThreeTierFiles({
                 depth={0}
                 expanded={expanded}
                 loadingDirs={new Set()}
-                selectedFile={editor.editorFile?.path ?? null}
+                selectedFile={selectedFile ?? null}
                 onToggle={() => {}}
-                onFileClick={editor.openFileEditor}
+                onFileClick={onFileClick}
               />
             ))}
           </div>
@@ -111,9 +113,9 @@ export function ThreeTierFiles({
                 depth={0}
                 expanded={expanded}
                 loadingDirs={new Set()}
-                selectedFile={null}
+                selectedFile={selectedFile ?? null}
                 onToggle={() => {}}
-                onFileClick={() => {}}
+                onFileClick={onFileClick}
               />
             ))}
           </div>
