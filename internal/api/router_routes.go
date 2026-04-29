@@ -546,6 +546,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/files", authed(wsCtx(http.HandlerFunc(proxy.AgentFiles))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.AgentFileDownload))))
 	r.mux.Handle("PUT /api/v1/agents/{agentId}/files/save", authed(wsCtx(http.HandlerFunc(proxy.AgentFileSave))))
+	// Multipart upload tied to a (agent, chat) pair. Lands at
+	// /output/<slug>/attachments/<chatId>/<filename> on the agent side.
+	r.mux.Handle("POST /api/v1/agents/{agentId}/chats/{chatId}/attachments",
+		authed(wsCtx(http.HandlerFunc(proxy.AgentChatAttachment))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files", authed(wsCtx(http.HandlerFunc(proxy.CrewFiles))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.CrewFileDownload))))
 	r.mux.Handle("PUT /api/v1/crews/{crewId}/files/save", authed(wsCtx(http.HandlerFunc(proxy.CrewFileSave))))

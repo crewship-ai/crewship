@@ -371,7 +371,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOri
         />
         </div>
         <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
-          <AttachmentZone sessionId={sessionId}>
+          <AttachmentZone agentId={agentId} sessionId={sessionId}>
             <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
               <PromptInputTextarea
                 value={input}
@@ -381,7 +381,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, sessionOri
               />
               <PromptInputFooter className="justify-between p-2 gap-2">
                 <div className="flex items-center gap-1">
-                  <AttachmentButton sessionId={sessionId} />
+                  <AttachmentButton agentId={agentId} sessionId={sessionId} />
                 </div>
                 <PromptInputSubmit
                   disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
