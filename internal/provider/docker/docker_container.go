@@ -252,6 +252,18 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			env = append(env, k+"="+v)
 		}
 	}
+	// Expand ${VAR} references in env values against the image's default
+	// ENV. Devcontainer features sometimes emit literals like
+	// "PATH=/usr/local/cargo/bin:${PATH}" expecting the runtime to do
+	// shell expansion at container start. Without this, Docker stores the
+	// literal "${PATH}" string and the runtime PATH ends up missing
+	// /usr/bin / /bin entirely (mkdir / touch / etc. all become exit 127).
+	if imgEnv, err := imageEnvMap(ctx, p.client, runtimeImage); err == nil {
+		env = expandContainerEnv(env, imgEnv)
+	} else {
+		p.logger.Warn("could not inspect image for env expansion — passing containerEnv literally",
+			"image", runtimeImage, "error", err)
+	}
 	containerCfg := &container.Config{
 		Image: runtimeImage,
 		User:  "1001:1001",
