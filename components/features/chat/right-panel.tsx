@@ -36,6 +36,12 @@ import {
   getEditorLanguage,
 } from "./chat-tree-row"
 import { useFileEditor } from "./hooks/use-file-editor"
+import { useUserPreference } from "@/hooks/use-user-preference"
+
+interface ChatFileTreeState {
+  expandedPaths: string[]
+  lastOpenedPath: string | null
+}
 import { ScopeSection } from "./files/scope-section"
 import { Bot as BotIcon } from "lucide-react"
 
@@ -472,6 +478,14 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
   const [basePrefix, setBasePrefix] = useState("")
+  // Per-agent persistence for the chat-side Files tab — same shape as
+  // the bottom-panel FilesTab pref. Keyed by agentId so each agent
+  // remembers its own tree state.
+  const [savedTreeState, setSavedTreeState] = useUserPreference<ChatFileTreeState>(
+    `chat.fileTree.${agentId}`,
+    { expandedPaths: [], lastOpenedPath: null },
+  )
+  const replayedRef = React.useRef(false)
 
   const {
     editorFile,
@@ -496,6 +510,36 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       setBasePrefix(idx > 0 ? first.path.slice(0, idx) : "")
     }
   }, [files])
+
+  // Replay saved expanded paths + last-opened file once on mount per
+  // agentId. Top-level tree must be built first; we wait for files
+  // to land. toggleFolder is idempotent — calling it for already-
+  // expanded paths is a no-op via the Set check inside.
+  useEffect(() => {
+    if (replayedRef.current) return
+    if (files.length === 0 || !workspaceId) return
+    replayedRef.current = true
+    const saved = savedTreeState
+    for (const p of saved.expandedPaths) {
+      // toggleFolder both expands and lazy-fetches subdir if needed.
+      toggleFolder(p)
+    }
+    if (saved.lastOpenedPath) {
+      const name = saved.lastOpenedPath.split("/").pop() ?? ""
+      openFileEditor({ path: saved.lastOpenedPath, name })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, workspaceId])
+
+  // Persist current state. Debounced inside the useUserPreference hook.
+  useEffect(() => {
+    if (!replayedRef.current) return
+    setSavedTreeState({
+      expandedPaths: Array.from(expanded),
+      lastOpenedPath: editorFile?.path ?? null,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, editorFile?.path])
 
   const toggleFolder = useCallback((path: string) => {
     setExpanded((prev) => {
