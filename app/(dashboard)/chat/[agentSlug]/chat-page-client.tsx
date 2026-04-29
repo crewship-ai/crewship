@@ -3,7 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { ChevronLeft, MessageSquarePlus } from "lucide-react"
+import { ChevronLeft, MessageSquarePlus, MoreVertical, Trash2, RotateCcw, Settings as SettingsIcon, FolderOpen, Loader2 } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -203,6 +211,32 @@ export function ChatPageClient() {
     if (agent && !sessionId && !creatingSession && sessionsLoaded) void ensureSession()
   }, [agent, sessionId, creatingSession, sessionsLoaded, ensureSession])
 
+  // Owner-restricted: delete this agent. Confirmed via native confirm
+  // (a richer Dialog variant lands later). On success the user is sent
+  // back to the canvas, where the agent is no longer in the list.
+  const [deleting, setDeleting] = useState(false)
+  const handleDeleteAgent = useCallback(async () => {
+    if (!agent || !workspaceId) return
+    if (!confirm(`Delete agent "${agent.name}"?\n\nThis cannot be undone.`)) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, {
+        method: "DELETE",
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to delete agent" }))
+        toast.error(typeof data.error === "string" ? data.error : "Failed to delete agent")
+        return
+      }
+      toast.success("Agent deleted")
+      window.location.href = "/crews"
+    } catch (err) {
+      toast.error(`Failed to delete: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setDeleting(false)
+    }
+  }, [agent, workspaceId])
+
   const handleNewSession = useCallback(async () => {
     if (!agent || !workspaceId || !slug) return
     setCreatingSession(true)
@@ -295,6 +329,53 @@ export function ChatPageClient() {
           <MessageSquarePlus className="h-3 w-3" />
           New session
         </button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="p-1.5 rounded hover:bg-white/5 text-muted-foreground"
+              title="Agent actions"
+              aria-label="Agent actions"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[220px]">
+            <DropdownMenuLabel className="text-xs text-muted-foreground">
+              {agent.name}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href={`/crews/agents/${agent.id}/settings`} className="flex items-center gap-2">
+                <SettingsIcon className="h-4 w-4" />
+                <span>Agent settings</span>
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href={`/crews/agents/${agent.id}/workspace`} className="flex items-center gap-2">
+                <FolderOpen className="h-4 w-4" />
+                <span>Workspace files</span>
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => toast.info("Container restart will land in a follow-up")}
+              className="flex items-center gap-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              <span>Restart container</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={handleDeleteAgent}
+              disabled={deleting}
+              className="flex items-center gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              <span>Delete agent</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <div
