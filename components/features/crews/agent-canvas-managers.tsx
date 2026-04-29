@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { Plus, Trash2 } from "lucide-react"
 import type { AgentCredRow, AgentSkillRow } from "./agent-canvas"
@@ -336,17 +336,37 @@ function PickerSheet<T>({
   loading: boolean
   busy: boolean
 }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  // Focus the dialog on open + listen for Escape on the document so the key
+  // dismisses the picker even if focus is somewhere outside the inner div.
+  // Restore focus to the original trigger element when we unmount so the
+  // user keeps their place in the page.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    dialogRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      previouslyFocused?.focus?.()
+    }
+  }, [onClose])
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/60 grid place-items-center"
       onClick={onClose}
-      onKeyDown={(e) => { if (e.key === "Escape") onClose() }}
       role="presentation"
     >
       <div
-        className="w-[460px] max-w-[90vw] max-h-[70vh] rounded-xl border border-white/10 bg-card shadow-2xl overflow-hidden flex flex-col"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="w-[460px] max-w-[90vw] max-h-[70vh] rounded-xl border border-white/10 bg-card shadow-2xl overflow-hidden flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
+        aria-modal="true"
         aria-label={title}
       >
         <div className="px-4 py-3 border-b border-white/8">
