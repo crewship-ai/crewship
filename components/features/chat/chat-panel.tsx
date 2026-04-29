@@ -235,7 +235,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
             <AuthErrorState />
           ) : (
             <Conversation>
-              <ConversationContent>
+              <ConversationContent className="mx-auto w-full max-w-3xl">
                 {turns.length === 0 && (
                   <ConversationEmptyState
                     icon={<Bot className="h-12 w-12" />}
@@ -309,7 +309,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
             <AuthErrorState />
           ) : (
             <Conversation>
-              <ConversationContent>
+              <ConversationContent className="mx-auto w-full max-w-3xl">
                 {turns.length === 0 && (
                   <ConversationEmptyState
                     icon={<Bot className="h-12 w-12" />}
@@ -338,7 +338,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
           )}
         </div>
         {turns.length === 0 && !authError && (
-          <div className="px-4 md:px-6 pb-2 shrink-0">
+          <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
                 <Suggestion key={s} suggestion={s} onClick={() => handleSuggestionClick(s)}>{s}</Suggestion>
@@ -346,12 +346,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInp
             </Suggestions>
           </div>
         )}
+        <div className="mx-auto w-full max-w-3xl">
         <FollowUps
           prompts={followUpPrompts}
           onPick={handleSuggestionClick}
           show={!isStreaming && turns.length > 0 && turns[turns.length - 1].role === "assistant"}
         />
-        <div className="p-3 md:px-6 shrink-0">
+        </div>
+        <div className="mx-auto w-full max-w-3xl p-3 md:px-6 shrink-0">
           <AttachmentZone sessionId={sessionId}>
             <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
               <PromptInputTextarea

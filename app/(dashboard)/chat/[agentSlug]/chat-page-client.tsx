@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { motion } from "motion/react"
 import { ChevronLeft, MessageSquarePlus } from "lucide-react"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -231,13 +230,7 @@ export function ChatPageClient() {
   }
 
   return (
-    <motion.div
-      initial={{ x: "100%", opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: "100%", opacity: 0 }}
-      transition={{ type: "spring", stiffness: 320, damping: 32, mass: 0.8 }}
-      className="flex flex-col h-full bg-background"
-    >
+    <div className="flex flex-col h-full bg-background">
       {/* Identity strip */}
       <header className="h-12 shrink-0 border-b border-white/8 flex items-center gap-3 px-4 bg-card">
         <Link
@@ -276,10 +269,7 @@ export function ChatPageClient() {
         </button>
       </header>
 
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, ease: [0.32, 0.72, 0, 1], delay: 0.08 }}
+      <div
         className="flex-1 min-h-0 grid"
         style={{ gridTemplateColumns: "240px 1fr" }}
       >
@@ -303,7 +293,7 @@ export function ChatPageClient() {
             </div>
           )}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }
