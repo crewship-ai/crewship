@@ -6,14 +6,30 @@ import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
   ChevronDown, MessageSquare, MoreHorizontal, Square,
+  CheckCircle2, Trash2, RotateCcw,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EditableField } from "@/components/shared/editable-field"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
-import { ScheduleEditor } from "@/components/features/crews/schedule-editor"
 import { InboxBanner } from "@/components/features/crews/inbox-banner"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
@@ -36,12 +52,16 @@ const ROLE_OPTIONS = [
   { value: "COORDINATOR", label: "Coordinator" },
 ] as const
 
-const ADAPTER_OPTIONS = [
-  { value: "CLAUDE_CODE", label: "Claude Code" },
-  { value: "OPENCODE", label: "OpenCode" },
-  { value: "CODEX", label: "Codex CLI" },
-  { value: "GEMINI", label: "Gemini CLI" },
-] as const
+const MODEL_DESCRIPTIONS: Record<string, { description: string; badge?: string }> = {
+  "claude-opus-4-20250514": { description: "Most capable · best for complex analysis", badge: "Reasoning" },
+  "claude-sonnet-4-20250514": { description: "Balanced speed and capability · default", badge: "Balanced" },
+  "claude-haiku-4-5-20251001": { description: "Fast and cheap · quick replies", badge: "Fast" },
+  o3: { description: "Frontier reasoning model", badge: "Reasoning" },
+  "o4-mini": { description: "Smaller, faster reasoning", badge: "Fast" },
+  "gpt-4o": { description: "Multimodal flagship", badge: "Multimodal" },
+  "gemini-2.5-pro": { description: "Google flagship · 1M-token context", badge: "Long ctx" },
+  "gemini-2.5-flash": { description: "Faster, cheaper Gemini", badge: "Fast" },
+}
 
 const TOOL_PROFILE_OPTIONS = [
   { value: "CODING", label: "Coding (full)" },
@@ -446,13 +466,39 @@ export function AgentCanvas({
             <MessageSquare className="h-3.5 w-3.5" />
             Chat
           </Link>
-          <button
-            type="button"
-            className="p-2 rounded-lg border border-white/10 hover:bg-white/5 text-muted-foreground"
-            title="More actions"
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="p-2 rounded-lg border border-white/10 hover:bg-white/5 text-muted-foreground"
+                title="More actions"
+                aria-label="Agent actions"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[220px]">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">
+                {agent.name}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => toast.info("Container restart will land in a follow-up")}
+                className="flex items-center gap-2"
+              >
+                <RotateCcw className="h-4 w-4" />
+                <span>Restart container</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={handleDelete}
+                className="flex items-center gap-2 text-destructive focus:text-destructive focus:bg-destructive/10"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>Delete agent</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </motion.header>
 
@@ -597,40 +643,135 @@ export function AgentCanvas({
 
       {tab === "settings" && (
         <div className="space-y-7">
+          {/* System Prompt — top, biggest single setting that matters */}
           <SystemPromptEditor
             value={agent.system_prompt}
             onSave={(v) => patch({ system_prompt: v })}
             updatedHint={`updated ${new Date(agent.updated_at).toLocaleDateString()}`}
           />
 
-          {/* Runtime + Advanced */}
+          {/* Runtime — provider chips + rich model dropdown */}
           <section className="space-y-3">
             <h2 className="text-lg font-semibold">Runtime</h2>
-            <div className="rounded-xl border border-white/8 bg-card">
-              <div className="divide-y divide-white/5">
-                <Row label="Adapter">
-                  <EditableField
-                    value={agent.cli_adapter}
-                    onSave={(v) => patch({ cli_adapter: v })}
-                    options={[...ADAPTER_OPTIONS]}
-                    format={(v) => ADAPTER_OPTIONS.find((o) => o.value === v)?.label ?? v}
-                  />
-                </Row>
-                <Row label="Model">
-                  <EditableField
-                    value={agent.llm_model ?? ""}
-                    onSave={(v) => patch({ llm_model: v })}
-                    placeholder="claude-haiku-4-5"
-                  />
-                </Row>
-                <Row label="Provider" align="center">
-                  <span className="text-sm text-foreground/80">{agent.llm_provider || "—"}</span>
-                </Row>
+
+            <div className="rounded-xl border border-white/8 bg-card p-4 space-y-5">
+              {/* Provider + Adapter chip selector */}
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">Provider &amp; CLI adapter</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {CLI_ADAPTER_KEYS.map((key) => {
+                    const cfg = CLI_ADAPTERS[key]
+                    const Icon = cfg.icon
+                    const isActive = agent.cli_adapter === key
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          if (key === agent.cli_adapter) return
+                          patch({
+                            cli_adapter: key,
+                            llm_provider: cfg.provider,
+                            llm_model: cfg.defaultModel,
+                          })
+                        }}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
+                          isActive
+                            ? "border-blue-400 bg-blue-500/10 ring-1 ring-blue-500/30"
+                            : "border-white/10 hover:bg-white/[0.03]",
+                        )}
+                      >
+                        <Icon className={cn("h-6 w-6 shrink-0", isActive ? "text-blue-300" : "text-muted-foreground")} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium flex items-center gap-1.5">
+                            {cfg.label}
+                            {isActive && <CheckCircle2 className="h-3.5 w-3.5 text-blue-300" />}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground truncate">
+                            <span className="font-mono">{cfg.provider}</span> · {cfg.description}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
+
+              {/* Model dropdown — rich items with badge + description */}
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">Model</div>
+                {(() => {
+                  const adapterCfg = CLI_ADAPTERS[agent.cli_adapter]
+                  const models = adapterCfg?.models ?? []
+                  const inList = models.some((m) => m.value === agent.llm_model)
+                  const meta = agent.llm_model ? MODEL_DESCRIPTIONS[agent.llm_model] : undefined
+                  if (!inList && agent.llm_model) {
+                    // Custom value — fall back to EditableField so the user can keep / edit it
+                    return (
+                      <EditableField
+                        value={agent.llm_model ?? ""}
+                        onSave={(v) => patch({ llm_model: v })}
+                        placeholder="claude-haiku-4-5"
+                      />
+                    )
+                  }
+                  return (
+                    <>
+                      <Select
+                        value={agent.llm_model ?? ""}
+                        onValueChange={(v) => {
+                          if (v === "__custom__") {
+                            patch({ llm_model: "" })
+                          } else {
+                            patch({ llm_model: v })
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="w-full font-mono text-sm h-9">
+                          <SelectValue placeholder="Select a model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {models.map((m) => {
+                            const meta = MODEL_DESCRIPTIONS[m.value]
+                            return (
+                              <SelectItem key={m.value} value={m.value}>
+                                <div className="flex flex-col gap-0.5 py-0.5 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-sm">{m.label}</span>
+                                    {meta?.badge && (
+                                      <span className="rounded bg-blue-500/15 text-blue-300 px-1.5 py-px text-[10px] font-medium">
+                                        {meta.badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {meta?.description && (
+                                    <span className="text-[11px] text-muted-foreground">{meta.description}</span>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            )
+                          })}
+                          <SelectItem value="__custom__" className="text-muted-foreground italic">
+                            Custom model name…
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {meta && (
+                        <p className="text-[11px] text-muted-foreground pl-1">{meta.description}</p>
+                      )}
+                    </>
+                  )
+                })()}
+              </div>
+            </div>
+
+            {/* Advanced — collapsible */}
+            <div className="rounded-xl border border-white/8 bg-card">
               <button
                 type="button"
                 onClick={() => setShowAdvanced((v) => !v)}
-                className="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground hover:bg-white/[0.03] hover:text-foreground border-t border-white/5 transition-colors"
+                className="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground hover:bg-white/[0.03] hover:text-foreground transition-colors"
               >
                 <ChevronDown
                   className={cn("h-3 w-3 transition-transform duration-200", !showAdvanced && "-rotate-90")}
@@ -643,7 +784,8 @@ export function AgentCanvas({
                   animate={{ opacity: 1, height: "auto" }}
                   exit={{ opacity: 0, height: 0 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
-                  className="divide-y divide-white/5 border-t border-white/5 overflow-hidden">
+                  className="divide-y divide-white/5 border-t border-white/5 overflow-hidden"
+                >
                   <Row label="Timeout (s)">
                     <EditableField
                       value={String(agent.timeout_seconds)}
@@ -719,38 +861,12 @@ export function AgentCanvas({
             </div>
           </section>
 
-          <ScheduleEditor
-            cron={agent.schedule_cron}
-            prompt={agent.schedule_prompt}
-            enabled={Boolean(agent.schedule_enabled)}
-            lastRun={agent.schedule_last_run ?? null}
-            nextRun={agent.schedule_next_run ?? null}
-            onSave={(s) => patch({
-              schedule_cron: s.cron || null,
-              schedule_prompt: s.prompt || null,
-              schedule_enabled: s.enabled,
-            })}
-          />
-
-          {/* Danger */}
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-red-400">Danger zone</h2>
-            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">Delete this agent</div>
-                <div className="text-xs text-muted-foreground">
-                  Sessions, runs, and journal entries are kept for 30 days then purged.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="text-xs px-3 py-1.5 rounded bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30"
-              >
-                Delete {agent.name}
-              </button>
-            </div>
-          </section>
+          <p className="text-xs text-muted-foreground">
+            Schedule moved to orchestration · Delete agent moved to the {" "}
+            <span className="inline-flex items-center gap-0.5">
+              <MoreHorizontal className="h-3 w-3" /> menu
+            </span>{" "} next to the Chat button (owners only).
+          </p>
         </div>
       )}
     </div>
