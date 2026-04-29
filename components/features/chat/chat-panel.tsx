@@ -36,8 +36,10 @@ import { SlashPalette } from "./composer/slash-palette"
 import { ModelPicker } from "./composer/model-picker"
 import { AttachmentZone, AttachmentButton } from "./composer/attachment-zone"
 import { ArtifactPane } from "./artifact/artifact-pane"
+import { FollowUps } from "./suggestions/follow-ups"
 import type { FileEntry } from "./chat-tree-row"
 import { useComposerStore } from "@/stores/composer-store"
+import { getSuggestions } from "@/lib/agent-suggestions"
 
 function getWsUrl(): string {
   if (typeof window === "undefined") return ""
@@ -49,23 +51,21 @@ interface ChatPanelProps {
   agentId: string
   sessionId: string
   agentName?: string
+  /** Agent role / role_title. Used to pick role-aware suggestion packs. */
+  agentRole?: string | null
   /** Pre-populate the chat input with this text on first render. */
   initialInput?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "files" | "files-only" | "more"
 }
 
-const defaultSuggestions = [
-  "Help me get started",
-  "What can you do?",
-  "Show me your skills",
-  "Run a quick task",
-]
-
 const noopFileClick = () => {}
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobilePanel }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentRole, initialInput, mobilePanel }: ChatPanelProps) {
+  const suggestionPack = getSuggestions(agentRole)
+  const defaultSuggestions = suggestionPack.empty
+  const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
   const [authError, setAuthError] = useState(false)
@@ -325,6 +325,11 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
             </Suggestions>
           </div>
         )}
+        <FollowUps
+          prompts={followUpPrompts}
+          onPick={handleSuggestionClick}
+          show={!isStreaming && turns.length > 0 && turns[turns.length - 1].role === "assistant"}
+        />
         <div className="p-3 md:px-6 shrink-0">
           <AttachmentZone sessionId={sessionId}>
             <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
