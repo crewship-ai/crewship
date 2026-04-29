@@ -73,7 +73,7 @@ func TestRestartCrewAgents_RealDocker(t *testing.T) {
 	// Two agents in this crew so the response counter is non-trivial.
 	for _, agentID := range []string{"agent-r1", "agent-r2"} {
 		if _, err := db.Exec(
-			`INSERT INTO agents (id, workspace_id, crew_id, name, slug, persona, agent_role)
+			`INSERT INTO agents (id, workspace_id, crew_id, name, slug, system_prompt, agent_role)
 			 VALUES (?, ?, ?, ?, ?, '', 'AGENT')`,
 			agentID, wsID, crewID, agentID, agentID,
 		); err != nil {
@@ -182,6 +182,58 @@ func TestRestartCrewAgents_NoContainer(t *testing.T) {
 	}
 	if resp.Restarted != 0 {
 		t.Errorf("restarted = %d, want 0 (no container existed)", resp.Restarted)
+	}
+}
+
+// TestRestartCrewAgents_ForbiddenRole locks down the authorization gate. Roles
+// below MANAGER must get 403 — destroying a live crew container is a
+// privileged action even when the workspace is otherwise readable. No Docker
+// needed: the role check fires before any container work.
+func TestRestartCrewAgents_ForbiddenRole(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/crews/{crewId}/restart-agents", h.RestartCrewAgents)
+
+	for _, role := range []string{"MEMBER", "VIEWER", ""} {
+		t.Run("role="+role, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/v1/crews/whatever/restart-agents", nil)
+			req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, role))
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, req)
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("role %q: status = %d, want 403; body: %s", role, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestRestartCrewAgents_NoDocker covers the 503 path. With a permitted role
+// but a nil Docker client (e.g. server started without container runtime),
+// the handler must return 503 — not 200, not 500. Catches regressions where
+// the nil-check is reordered after the DB call.
+func TestRestartCrewAgents_NoDocker(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := NewProvisioningHandler(db, logger, nil, nil, nil /* docker */, "", nil)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/crews/{crewId}/restart-agents", h.RestartCrewAgents)
+
+	req := httptest.NewRequest("POST", "/api/v1/crews/anything/restart-agents", nil)
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", rr.Code, rr.Body.String())
 	}
 }
 
