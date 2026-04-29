@@ -254,18 +254,23 @@ func (u *updateBuilder) Empty() bool {
 }
 
 // canRole returns true if the given workspace role is allowed to perform all of the specified actions.
-// Supported actions: "create" (OWNER/ADMIN/MANAGER), "manage" (OWNER/ADMIN), "read" (any role).
+// Supported actions:
+//   - "read"   — any authenticated role
+//   - "create" — OWNER, ADMIN, MANAGER
+//   - "update" — OWNER, ADMIN, MANAGER (same tier as create; reversible mutations)
+//   - "manage" — OWNER, ADMIN
+//   - "delete" — OWNER, ADMIN (same tier as manage; destructive)
 func canRole(role string, actions ...string) bool {
 	for _, action := range actions {
 		switch action {
-		case "create":
+		case "create", "update":
 			switch role {
 			case "OWNER", "ADMIN", "MANAGER":
 				continue
 			default:
 				return false
 			}
-		case "manage":
+		case "manage", "delete":
 			switch role {
 			case "OWNER", "ADMIN":
 				continue
