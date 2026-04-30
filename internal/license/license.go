@@ -134,11 +134,18 @@ func (l *License) LoadFromBytes(data []byte) error {
 	return nil
 }
 
-// Claims returns a copy of the current license claims.
+// Claims returns a copy of the current license claims. The Features slice
+// is deep-copied so a caller mutating its result can't poison the live
+// in-process license state — value-copying the struct alone shares the
+// backing array.
 func (l *License) Claims() Claims {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.claims
+	c := l.claims
+	if c.Features != nil {
+		c.Features = append([]string(nil), c.Features...)
+	}
+	return c
 }
 
 // Edition returns the current license edition (community, team, or enterprise).
