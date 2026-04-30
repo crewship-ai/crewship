@@ -740,6 +740,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.updateRunStatus(ctx, runState.ID, status)
 
+	// Capture the container's actual installed-package state — apt + pip
+	// + npm + os-release. The journal is the source of truth for "what
+	// happened in this crew" and devcontainer.json is just declared
+	// intent; agents that ran apt-get / pip install during the session
+	// drift those two apart, and a quiet session writes no entry thanks
+	// to hash-based dedup. Best-effort: failures are swallowed inside
+	// recordContainerSnapshot so a probe error never breaks the run.
+	o.recordContainerSnapshot(ctx, req, req.ContainerID)
+
 	return nil
 }
 
