@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -112,6 +113,15 @@ func TestValidatePathSegment(t *testing.T) {
 		{"with backslash", "team\\bad", false},
 		{"with dotdot", "team..bad", false},
 		{"just dotdot", "..", false},
+		// New defenses against control / whitespace / oversize input.
+		// Null byte truncates paths in some FS layers; control chars and
+		// whitespace produce surprising filenames; 1KB segments fail
+		// every reasonable identifier shape.
+		{"with null byte", "ok\x00bad", false},
+		{"with newline", "ok\nbad", false},
+		{"with space", "ok bad", false},
+		{"with del char", "ok\x7fbad", false},
+		{"oversize", strings.Repeat("a", 1024), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

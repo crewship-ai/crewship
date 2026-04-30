@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Reader reads structured log entries from per-agent JSONL files.
@@ -32,9 +33,28 @@ func (r *Reader) ReadAgentLogs(crewID, agentID string, offset, limit int) ([]Log
 	return readJSONL(path, offset, limit)
 }
 
+// validatePathSegment guards path inputs that get joined into the on-disk
+// log layout. Beyond the obvious "/", "\", and ".." traversal blocks, it
+// rejects null bytes (which truncate paths in some FS layers and break
+// downstream tooling parsing the path), control / whitespace characters
+// (which produce surprising filenames), and oversize inputs.
 func validatePathSegment(s string) error {
-	if s == "" || strings.ContainsAny(s, "/\\") || strings.Contains(s, "..") {
+	if s == "" {
+		return fmt.Errorf("invalid path segment: empty")
+	}
+	if len(s) > 256 {
+		return fmt.Errorf("invalid path segment: too long (%d bytes)", len(s))
+	}
+	if strings.ContainsAny(s, "/\\") || strings.Contains(s, "..") {
 		return fmt.Errorf("invalid path segment: %q", s)
+	}
+	for i, r := range s {
+		// IsPrint covers ASCII control + DEL + most Unicode controls;
+		// IsSpace catches whitespace not classified as control. Together
+		// they leave only the safe printable + non-space character set.
+		if !unicode.IsPrint(r) || unicode.IsSpace(r) {
+			return fmt.Errorf("invalid path segment %q: disallowed character at %d (U+%04X)", s, i, r)
+		}
 	}
 	return nil
 }
