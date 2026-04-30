@@ -213,7 +213,7 @@ The same parameter works on the SSE stream — the seed slice and every subseque
 GET /api/v1/journal/lookup
 ```
 
-Returns a workspace-scoped map of `crews`, `agents`, and `missions` so the UI can render entry cards with palette-coloured chips and lucide icons without joining on the streaming path. The provider is fetched once on page mount and invalidated by realtime events (new crew, renamed agent, ...). `JournalLookupProvider` / `useJournalLookup` are the React hooks; backend handler is `internal/api/journal_lookup.go`.
+Returns a workspace-scoped map of `crews`, `agents`, and `missions` so the UI can render entry cards with palette-coloured chips and lucide icons without joining on the streaming path. The lookup payload is fetched once on page mount (the React `JournalLookupProvider` caches it) and invalidated by realtime events (new crew, renamed agent, ...). `useJournalLookup` is the consumer hook; backend handler is `internal/api/journal_lookup.go`.
 
 The endpoint returns:
 

@@ -111,8 +111,8 @@ The `path` is relative — the agent reads it from `/output/<agentSlug>/<path>`.
 | Status | Condition |
 |---|---|
 | 400 | Missing `file`, invalid multipart, or file > 25 MB. |
-| 403 | Insufficient role (need `create`). |
-| 404 | Agent or chat not in workspace, or chat not scoped to the agent. |
+| 403 | Insufficient role (need `create`), **or** chat exists but is scoped to a different agent. |
+| 404 | Agent not in workspace, or chat not in workspace. |
 
 ---
 

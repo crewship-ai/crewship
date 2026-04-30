@@ -6,7 +6,7 @@ icon: "credit-card"
 
 # Paymaster
 
-Paymaster owns cost accounting and budget enforcement. It is the read/write side of the `cost_ledger` and `budget_limits` tables (migration 52, extended by migration 62) and it ships as middleware on the [LLM call stack](/guides/llm-middleware). Every priced LLM round-trip produces exactly one `cost_ledger` row plus journal entries (`llm.call`, `cost.incurred`, optionally `budget.warning` / `budget.exceeded`).
+Paymaster owns cost accounting and budget enforcement. It is the read/write side of the `cost_ledger` and `budget_limits` tables (migration 52, extended by migration 62) and it ships as middleware on the [LLM call stack](/guides/llm-middleware). Every priced LLM round-trip produces exactly one `cost_ledger` row plus a `llm.call` journal entry; metered rows additionally emit `cost.incurred`, and either side can emit `budget.warning` / `budget.exceeded` when limits are hit.
 
 Paymaster separates two billing models that **cannot share a single \$ aggregate**:
 
@@ -53,10 +53,13 @@ CREATE TABLE cost_ledger (
   cost_confidence       TEXT NOT NULL DEFAULT 'estimate'
 );
 
--- [v62] Partial index for the Subscriptions panel — avoids a full-ledger scan
--- when grouping flat-rate rows by plan.
-CREATE INDEX idx_cost_ledger_workspace_billing
-  ON cost_ledger (workspace_id, billing_mode);
+-- [v62] Partial index for the Subscriptions panel — covers only flat-rate rows
+-- (most rows are 'metered'), so the index stays small and Subscriptions queries
+-- avoid a full-ledger scan. The (workspace_id, billing_mode, ts DESC) shape
+-- means "newest flat-rate row in this workspace" is an index-only seek.
+CREATE INDEX idx_cost_billing_mode
+  ON cost_ledger (workspace_id, billing_mode, ts DESC)
+  WHERE billing_mode = 'flat_rate';
 
 -- Optional per-scope limit. Walked hierarchically before every call.
 CREATE TABLE budget_limits (

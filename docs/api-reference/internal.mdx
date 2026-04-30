@@ -143,65 +143,70 @@ POST /api/v1/internal/cost/record
 
 The sidecar's write target after parsing an LLM response. Validates the request, calls `paymaster.Record` (which inserts the `cost_ledger` row and emits `llm.call` + optionally `cost.incurred`), then `paymaster.EnforceQuota` (which emits `budget.warning` / `budget.exceeded` based on the parsed rate-limit headers).
 
-**Request body:**
+**Request body:** body cap 16 KiB.
 
 ```json
 {
+  "workspace_id": "ws_…",
+  "crew_id": "crw_…",
+  "agent_id": "agt_…",
+  "mission_id": "MIS-42",
   "provider": "anthropic",
   "model": "claude-opus-4-7",
   "input_tokens": 12483,
   "output_tokens": 4521,
   "cached_input_tokens": 1024,
   "cache_creation_tokens": 0,
-  "cost_usd": 0.1742,
   "billing_mode": "metered",
-  "subscription_plan": null,
-  "cost_confidence": "precise",
+  "subscription_plan": "",
   "quota_remaining_pct": 0.42,
   "quota_window": "tokens",
-  "had_status_429": false,
-  "ts": "2026-04-30T11:42:18.221Z",
-  "tags": { "tool_call": "Read" }
+  "had_status_429": false
 }
 ```
 
 | Field | Type | Notes |
 |---|---|---|
+| `workspace_id` | string | **Required.** The sidecar fills this from its `IPCConfig` (set by `crewshipd` at container boot), so an agent that captures the token still cannot forge a row for a foreign workspace. |
+| `crew_id`, `agent_id`, `mission_id` | string | Optional scope. Same trust model — sidecar fills from `IPCConfig`. |
 | `provider`, `model` | string | Required. Used for rate-card lookup. |
-| `input_tokens`, `output_tokens` | integer | Required. Negative values clamped to 0 in `Estimate`. |
+| `input_tokens`, `output_tokens` | integer | Optional, default 0. Providers occasionally omit usage blocks; we record the audit row anyway rather than dropping. Negative values clamped to 0 by `Estimate`. |
 | `cached_input_tokens`, `cache_creation_tokens` | integer | Optional, default 0. |
-| `cost_usd` | number | Optional. If 0 and metered, server fills via `Estimate`. **Forced to 0** when `billing_mode=flat_rate`. |
-| `billing_mode` | string | `metered` or `flat_rate`. Default `metered`. |
-| `subscription_plan` | string \| null | Required when `billing_mode=flat_rate`. |
-| `cost_confidence` | string | `precise` \| `estimate` \| `unknown`. **Forced to `unknown`** for flat-rate. |
-| `quota_remaining_pct` | number \| null | 0–1, smallest of parsed quota windows. Null when no rate-limit headers present. |
-| `quota_window` | string \| null | Display label: `requests`, `tokens`, `input-tokens`, ... |
-| `had_status_429` | bool | When true, triggers `budget.exceeded` regardless of `quota_remaining_pct`. |
-| `ts` | string | Optional. Defaults to server-now. |
-| `tags` | object | Free-form JSON, persisted as `cost_ledger.tags`. |
+| `billing_mode` | string | `metered` (default), `flat_rate`. Anything else → 400. |
+| `subscription_plan` | string | Required when `billing_mode=flat_rate`. Display label like `"Anthropic Max"`. |
+| `quota_remaining_pct` | number | 0–1. Smallest of parsed quota windows. |
+| `quota_window` | string | Display label: `requests`, `tokens`, `input-tokens`, ... A non-empty value is the sentinel "rate-limit headers were present", which gates `EnforceQuota`. |
+| `had_status_429` | bool | When `true`, triggers `budget.exceeded` regardless of `quota_remaining_pct`. |
 
-The `workspace_id`, `crew_id`, `agent_id`, `mission_id` fields are **not** read from the body. They come from the sidecar's `IPCConfig` (set when the orchestrator launched the container). Including them in the body is harmless but they are silently ignored.
+Fields the sidecar has **no authority over** are derived server-side:
 
-**Response:** `200 OK`
+| Server-derived | How |
+|---|---|
+| Ledger ID | Generated in `paymaster.Record`. |
+| Timestamp | Server now (UTC). |
+| `cost_usd` | `paymaster.Estimate(provider, model, ...)` for `metered`; **forced to 0** for `flat_rate`. |
+| `cost_confidence` | `precise` if `input_tokens > 0 \|\| output_tokens > 0` (heuristic — the sidecar saw a usage block), else `estimate`. **Forced to `unknown`** for `flat_rate` by `paymaster.Record`. |
+| `tags` | Always `{"source": "sidecar"}`. Caller cannot override. |
+
+**Response:** `202 Accepted`
 
 ```json
 {
-  "ledger_id": "cl_a1b2c3d4",
-  "ts": "2026-04-30T11:42:18.221Z",
-  "cost_usd": 0.1742,
-  "billing_mode": "metered"
+  "id": "cl_a1b2c3d4"
 }
 ```
+
+The handler writes the ledger row synchronously, then runs `paymaster.EnforceQuota` (best-effort — its result does **not** affect the response code, only the journal). The response body is intentionally minimal; the journal entries (`llm.call`, `cost.incurred`, optionally `budget.warning` / `budget.exceeded`) are where the operator-visible artifacts land.
+
+When `had_status_429=true`, the response is **still 202** — the ledger row was written and `budget.exceeded` was emitted. The caller (sidecar) is responsible for propagating the upstream's 429 back to the agent; this endpoint does not echo the 429 because it succeeded at recording the cost.
 
 **Errors:**
 
 | Status | Condition |
 |---|---|
-| 400 | Missing `provider` / `model`, or `billing_mode=flat_rate` with no `subscription_plan`. |
+| 400 | Invalid JSON, body exceeds 16 KiB, missing `workspace_id` / `provider` / `model`, `billing_mode` not `metered` / `flat_rate`, or any validation wrapped as `paymaster.ErrInvalidRequest` (e.g. `flat_rate` without `subscription_plan`). |
 | 401 | Bad or missing `X-Internal-Token`. |
 | 500 | DB error from `paymaster.Record`. |
-
-When `had_status_429=true`, the response is **still 200** with a `quota_blocked: true` flag — the ledger row was written, the journal entries fired, and the caller (sidecar) then propagates the upstream's 429 back to the agent.
 
 ## Related
 

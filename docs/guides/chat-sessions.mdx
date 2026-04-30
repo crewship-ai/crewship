@@ -42,7 +42,7 @@ The bottom-of-page composer is a single textarea with three superpowers:
 
 - **Slash palette** — typing `/` at the start of a line opens a fuzzy-search palette over registered slash commands (e.g. `/eval`, `/checkpoint`, `/skill <name>`). Commands are registered server-side so a multi-line `/eval my-suite --baseline last-week` is parsed as a structured command rather than a chat message.
 - **Model picker** — dropdown next to the send button overrides the agent's default `llm_model` for this turn only. Useful when an operator wants to spend Opus on a hard reasoning step inside an agent that normally runs Sonnet.
-- **Attachments** — paste images, drag files, or paste pasted-image data. Files are uploaded via `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments` (handler `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`) and stored on the server's storage provider with a `chat_attachments` row pointing at them (migration v57). The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`. 25 MB cap per upload.
+- **Attachments** — paste images, drag files, or paste image data from the clipboard. Files are uploaded via `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments` (handler `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`) and stored on the server's storage provider with a `chat_attachments` row pointing at them (migration v57). The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`. 25 MB cap per upload.
 
 Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditionally.
 

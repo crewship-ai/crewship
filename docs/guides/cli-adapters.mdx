@@ -60,12 +60,12 @@ Adding any of these is a one-line change once the upstream surface is stable. Tr
 
 ## How the adapter signals the sidecar
 
-The orchestrator sets two environment variables on the agent process so the [Paymaster](/guides/paymaster) sidecar knows how to attribute every cost-ledger row:
+The orchestrator stamps two environment variables on the **container env** (visible to every process running inside that crew container — both the agent CLI and the sidecar process). The sidecar reads them once at startup and tags every `POST /api/v1/internal/cost/record` it sends to the server:
 
 - `CREWSHIP_BILLING_MODE` — `metered` for API-key credentials, `flat_rate` for subscription credentials (Claude Max, ChatGPT Plus, Cursor, Copilot).
-- `CREWSHIP_SUBSCRIPTION_PLAN` — display label like `"Anthropic Max 20×"` (only for `flat_rate`).
+- `CREWSHIP_SUBSCRIPTION_PLAN` — display label, currently `"Anthropic Max"` for the OAuth Claude Code path. Only set when `CREWSHIP_BILLING_MODE=flat_rate`.
 
-The sidecar reads these once at startup and includes them on every `POST /api/v1/internal/cost/record` call. The agent itself never sees these variables — they are scoped to the orchestrator-to-sidecar handoff.
+The agent CLI process technically inherits the same env (containers don't isolate env vars between sibling exec sessions), but the agent has no reason to read them — the variables are interpreted by the sidecar, which is the one code path that knows what to do with billing mode.
 
 See [Environment Variables](/configuration/environment#paymaster-billing-modes) for the operator-facing reference and [Paymaster billing modes](/guides/paymaster#billing-modes) for the full rationale.
 

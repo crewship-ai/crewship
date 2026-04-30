@@ -26,8 +26,8 @@ crewship runtimes list [flags]
 
 | Flag | Type | Description |
 |---|---|---|
-| `--search` | `string` | Filter by name, tool, description, or category (server-side substring). |
-| `--category` | `string` | Filter by category (case-insensitive exact match). Common values: `languages`, `tools`, `cloud`, `databases`. |
+| `--search` | `string` | Server-side substring filter — passed to `/api/v1/runtimes/catalog` as `?search=` and matched against name, tool, description, or category. |
+| `--category` | `string` | Client-side exact-match filter applied after the fetch (case-insensitive). Common values: `languages`, `tools`, `cloud`, `databases`. The CLI fetches the full catalog (or the search-filtered subset) and then filters locally. |
 
 **Example:**
 
@@ -66,7 +66,7 @@ The `info` view echoes whatever the catalog row carries. `Backends` lists the mi
 
 ## Notes
 
-- Search and category filters are client-side, so combining them is cheap.
+- `--search` is server-side (one round-trip with `?search=`), `--category` is applied client-side after the fetch. Combining the two is fine — the search narrows what's fetched, then category narrows the local result set.
 - The default version is the one mise reports for the catalog; pin a specific version in `devcontainer_config.mise` if you need reproducibility across upstream catalog updates.
 - Output respects the global `--format` flag (`table`, `json`, `yaml`).
 

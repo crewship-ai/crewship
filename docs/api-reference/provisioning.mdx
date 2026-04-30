@@ -56,7 +56,9 @@ Unknown publishers (anything outside the three allowlisted prefixes) are rejecte
 GET /api/v1/runtimes/catalog?search=…
 ```
 
-Lists the mise-managed runtimes (Node, Python, Go, Terraform, kubectl, …) the workspace can pin in `devcontainer_config.mise`. **Not** a base-image catalog — that is `crewship features base-images` (also under `/api/v1/features/catalog`). Falls back to `FallbackRuntimeCatalog` when the dynamic fetcher fails.
+Lists the mise-managed runtimes (Node, Python, Go, Terraform, kubectl, …) the workspace can pin in `devcontainer_config.mise`. Falls back to `FallbackRuntimeCatalog` when the dynamic fetcher fails.
+
+**Not** a base-image catalog. The base-image list is **CLI-only** — `crewship features base-images` reads `baseImagesCatalog` directly from `cmd/crewship/cmd_features.go`; there is no HTTP endpoint for it today.
 
 **Response:** `200 OK`
 

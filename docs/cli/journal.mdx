@@ -25,7 +25,7 @@ There are no subcommands -- the top-level command is the list view. Live tail (`
 | `--type` | `string` | | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). |
 | `--severity` | `string` | | Comma-separated severities (`info`, `notice`, `warn`, `error`). |
 | `--since` | `string` | | Time window (`1h`, `24h`, `7d`, or RFC3339). |
-| `--query` / `-q` | `string` | | FTS5 search across `summary` + `payload` (added with PR #234, migration 55). |
+| `--query` / `-q` | `string` | | Server-side FTS5 search across `summary` + `payload`. PR #234 wired the query path; the underlying virtual table comes from migration 55 (the memory-uplift PR #212, which also indexed memory). |
 | `--follow` | `bool` | `false` | Live tail via SSE (not yet implemented; use the web UI). |
 
 Global output flags apply: `--format table|json|yaml` (default table).
