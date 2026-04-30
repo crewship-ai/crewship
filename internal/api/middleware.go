@@ -145,9 +145,17 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			// user_sessions is the source of truth for "is this
 			// session still valid"; the JWT exp is just an upper
 			// bound on revocation latency.
+			//
+			// Critically: a transient store failure (DB timeout,
+			// momentary unavailability) MUST NOT 401 the user.
+			// 401 makes the frontend's apiFetch try refresh, fail
+			// the same way, and bounce to /login — every backend
+			// hiccup turns into a forced logout. We return 500
+			// instead so the access cookie survives until the
+			// store is reachable again.
 			if m.sessions == nil {
 				m.logger.Error("auth middleware: sessions store not configured")
-				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 				return
 			}
 			sess, err := m.sessions.Get(r.Context(), claims.Sid)
@@ -157,7 +165,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 					return
 				}
 				m.logger.Error("session lookup failed", "error", err)
-				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 				return
 			}
 			if !sess.Active(timeNow()) {

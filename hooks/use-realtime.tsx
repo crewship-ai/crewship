@@ -96,8 +96,23 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const statusRef = useRef<string>("disconnected")
 
   const getToken = useCallback(async (): Promise<string | null> => {
+    // Two error paths here, deliberately handled differently:
+    //   - apiFetch throws (network rejection, abort, …): we re-throw
+    //     so use-websocket's connect() sees a transient failure and
+    //     schedules a backoff retry instead of terminating.
+    //   - apiFetch returns non-ok: a 401 means apiFetch already
+    //     emitted session-expired; return null so the WS hook
+    //     stops trying. Anything else (5xx, 429) we treat as a
+    //     transient failure too — throw to drive the same retry
+    //     path the network-rejection branch hits.
+    // apiFetch throws on network rejection / abort. Re-throw so
+    // use-websocket's connect() sees a transient failure and
+    // schedules a backoff retry instead of terminating.
     const res = await apiFetch("/api/v1/ws-token")
-    if (!res.ok) return null
+    if (!res.ok) {
+      if (res.status === 401) return null
+      throw new Error(`/api/v1/ws-token returned ${res.status}`)
+    }
     try {
       const data = await res.json()
       return typeof data?.token === "string" ? data.token : null

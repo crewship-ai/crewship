@@ -134,9 +134,25 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 
 	// Session row may have been revoked between this request and the
 	// last refresh. Treat that as logged-out, same as missing cookie.
+	//
+	// But a transient sessions.Get failure must NOT clear cookies —
+	// that's the same false-logout trap the middleware fixed: a DB
+	// hiccup would evict the user permanently. Only ErrNotFound (row
+	// gone) or sess.Active==false (revoked/expired) clear the cookies.
+	// On other errors return 500 and leave the cookies intact so the
+	// next /api/auth/session call after recovery proceeds normally.
 	if h.sessions != nil && claims.Sid != "" {
 		sess, err := h.sessions.Get(r.Context(), claims.Sid)
-		if err != nil || !sess.Active(time.Now()) {
+		switch {
+		case errors.Is(err, sessions.ErrNotFound):
+			h.clearAuthCookies(w, r)
+			writeJSON(w, http.StatusOK, map[string]interface{}{})
+			return
+		case err != nil:
+			h.logger.Error("session lookup in /auth/session", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		case !sess.Active(time.Now()):
 			h.clearAuthCookies(w, r)
 			writeJSON(w, http.StatusOK, map[string]interface{}{})
 			return
@@ -364,11 +380,26 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Distinguish "session is gone" (clear cookies, 401) from
+	// "store is temporarily unreachable" (preserve cookies, 500).
+	// The frontend's tryRefresh treats 5xx as retryable_failed and
+	// won't fire session-expired — see lib/api-fetch.ts. Without
+	// this split, every transient DB blip on the refresh endpoint
+	// would evict every authenticated user.
 	sess, err := h.sessions.Get(r.Context(), claims.Sid)
-	if err != nil || !sess.Active(time.Now()) {
+	switch {
+	case errors.Is(err, sessions.ErrNotFound):
+		h.clearAuthCookies(w, r)
+		writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
+		return
+	case err != nil:
+		h.logger.Error("refresh: session lookup", "error", err, "sid", claims.Sid)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	case !sess.Active(time.Now()):
 		h.clearAuthCookies(w, r)
 		reason := reasonSessionExpired
-		if err == nil && sess.RevokedAt != nil {
+		if sess.RevokedAt != nil {
 			reason = reasonSessionRevoked
 		}
 		writeAuthError(w, http.StatusUnauthorized, reason)

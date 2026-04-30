@@ -171,22 +171,29 @@ describe("apiFetch", () => {
 })
 
 describe("tryRefresh", () => {
-  it("returns true on 200", async () => {
+  it("returns 'ok' on 200", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ ok: true }))
-    const ok = await tryRefresh()
-    expect(ok).toBe(true)
+    expect(await tryRefresh()).toBe("ok")
   })
 
-  it("returns false on non-2xx", async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse({}, { status: 401 }))
-    const ok = await tryRefresh()
-    expect(ok).toBe(false)
+  it("returns 'auth_failed' on 401 — that's the real session-gone signal", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({ error: "session_expired" }, { status: 401 }))
+    expect(await tryRefresh()).toBe("auth_failed")
   })
 
-  it("returns false on network error", async () => {
+  it("returns 'retryable_failed' on 500 — backend hiccup, not auth death", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({}, { status: 500 }))
+    expect(await tryRefresh()).toBe("retryable_failed")
+  })
+
+  it("returns 'retryable_failed' on 503 — service unavailable", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({}, { status: 503 }))
+    expect(await tryRefresh()).toBe("retryable_failed")
+  })
+
+  it("returns 'retryable_failed' on network error", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"))
-    const ok = await tryRefresh()
-    expect(ok).toBe(false)
+    expect(await tryRefresh()).toBe("retryable_failed")
   })
 
   it("dedupes concurrent calls into one network round-trip", async () => {
@@ -201,8 +208,52 @@ describe("tryRefresh", () => {
     const b = tryRefresh()
     resolveCall!(mockResponse({ ok: true }))
     const [ra, rb] = await Promise.all([a, b])
-    expect(ra).toBe(true)
-    expect(rb).toBe(true)
+    expect(ra).toBe("ok")
+    expect(rb).toBe("ok")
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// apiFetch must distinguish between "refresh said 401" (real expiry,
+// emit and redirect) vs "refresh threw / 503'd" (transient outage,
+// don't kick the user out — surface the original 401 and let them
+// recover naturally).
+describe("apiFetch retryable-refresh", () => {
+  it("does NOT emit session-expired when refresh returns 503", async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockResponse({ error: "session_expired" }, { status: 401 }))
+      .mockResolvedValueOnce(mockResponse({}, { status: 503 })) // refresh outage
+
+    const handler = vi.fn()
+    window.addEventListener(AUTH_EVENT, handler)
+    const res = await apiFetch("/api/v1/x")
+    expect(res.status).toBe(401)
+    expect(handler).not.toHaveBeenCalled() // crucial: no false logout
+    window.removeEventListener(AUTH_EVENT, handler)
+  })
+
+  it("does NOT emit session-expired when refresh throws (network)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockResponse({ error: "session_expired" }, { status: 401 }))
+      .mockRejectedValueOnce(new Error("network down"))
+
+    const handler = vi.fn()
+    window.addEventListener(AUTH_EVENT, handler)
+    const res = await apiFetch("/api/v1/x")
+    expect(res.status).toBe(401)
+    expect(handler).not.toHaveBeenCalled()
+    window.removeEventListener(AUTH_EVENT, handler)
+  })
+
+  it("DOES emit session-expired when refresh returns 401", async () => {
+    fetchMock
+      .mockResolvedValueOnce(mockResponse({ error: "session_expired" }, { status: 401 }))
+      .mockResolvedValueOnce(mockResponse({ error: "session_expired" }, { status: 401 }))
+
+    const handler = vi.fn()
+    window.addEventListener(AUTH_EVENT, handler)
+    await apiFetch("/api/v1/x")
+    expect(handler).toHaveBeenCalledTimes(1) // legitimate auth-death signal
+    window.removeEventListener(AUTH_EVENT, handler)
   })
 })

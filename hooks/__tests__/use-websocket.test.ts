@@ -183,6 +183,40 @@ describe("useWebSocket", () => {
     window.removeEventListener("auth:session-expired", authHandler)
   })
 
+  it("getToken rejection schedules backoff retry, not termination", async () => {
+    // Critical regression guard: a thrown getToken (apiFetch network
+    // failure, abort, …) must NOT take the auth path. The WS hook
+    // should treat it as transient and back off — same as a normal
+    // close. A previous version let the rejection escape unhandled
+    // and silently break the reconnect loop forever.
+    const handler = vi.fn()
+    window.addEventListener("auth:session-expired", handler)
+    let throwOnce = true
+    const getToken = vi.fn(async () => {
+      if (throwOnce) {
+        throwOnce = false
+        throw new Error("network down")
+      }
+      return "recovered-token"
+    })
+
+    renderHook(() =>
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken }),
+    )
+    // Run through both attempts: the first throws, backoff schedules
+    // a second, the second returns a valid token and connects.
+    await act(async () => { await vi.runAllTimersAsync() })
+
+    // The throw must NOT have emitted session-expired (no false
+    // logout), the retry must have happened, and the second attempt
+    // must have actually opened the socket.
+    expect(handler).not.toHaveBeenCalled()
+    expect(getToken.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(mockInstances.length).toBeGreaterThanOrEqual(1)
+
+    window.removeEventListener("auth:session-expired", handler)
+  })
+
   it("send is a no-op until socket is OPEN", async () => {
     const { result } = renderHook(() =>
       useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),

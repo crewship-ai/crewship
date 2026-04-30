@@ -132,7 +132,30 @@ export function useWebSocket({
     // from before a backend restart would 401 the upgrade and trip
     // an infinite loop; re-fetching forces apiFetch to either rotate
     // the access cookie or surface session_expired.
-    const token = await getTokenRef.current()
+    //
+    // Wrap in try-catch so that a thrown token-provider (network
+    // failure inside apiFetch, fetch rejection, etc.) doesn't
+    // escape connect() unhandled and break the reconnect loop.
+    // A throw is treated as transient: schedule the next backoff
+    // attempt instead of terminating. Real auth failures come
+    // through the null-return path below, which apiFetch only
+    // takes after the refresh-on-401 round-trip resolved
+    // auth_failed.
+    let token: string | null
+    try {
+      token = await getTokenRef.current()
+    } catch {
+      if (terminatedRef.current || disconnectingRef.current) return
+      const attempts = reconnectAttemptsRef.current
+      if (attempts >= MAX_RECONNECT_ATTEMPTS) {
+        terminateTransport()
+        return
+      }
+      const delay = backoffDelay(attempts)
+      reconnectAttemptsRef.current = attempts + 1
+      reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
+      return
+    }
 
     // Re-check after the await: getToken can take a refresh round-trip,
     // and the consumer (or React unmount) might have called disconnect

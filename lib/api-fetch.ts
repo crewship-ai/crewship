@@ -57,21 +57,23 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
     return res
   }
 
-  // session_expired (or unknown): try refresh first. The previous
-  // version short-circuited to session-expired when the body wasn't
-  // replayable (uploads, streams), bouncing the user to /login on
-  // every routine 15-min access-token expiry that happened during
-  // an upload. That wasn't an auth death — only the request-replay
-  // was unsafe, the session itself was fine.
-  //
-  // New flow: always try refresh. On success, replayable callers
-  // get the request retried; non-replayable callers get the 401
-  // back to handle themselves (their next request will pass on
-  // the freshly-rotated cookies). On failure, emit session-expired
-  // and return the original 401 either way.
-  const refreshOk = await tryRefresh()
-  if (!refreshOk) {
+  // session_expired (or unknown): try refresh first. tryRefresh
+  // distinguishes three outcomes — see RefreshResult — so we only
+  // bounce to /login when the refresh endpoint itself returns 401
+  // (the rightful "your session is gone" signal). A 5xx or network
+  // failure means we can't tell yet; surface the original 401 to
+  // the caller and let the page recover when the backend comes back,
+  // rather than evicting valid sessions on every blip.
+  const refreshResult = await tryRefresh()
+  if (refreshResult === "auth_failed") {
     emitSessionExpired(reason ?? "session_expired")
+    return res
+  }
+  if (refreshResult === "retryable_failed") {
+    // Don't emit; the user's session is presumably still valid, the
+    // backend is just temporarily unreachable. Return the original
+    // 401; the caller will see it and either retry on next user
+    // action or surface a transport error in their loading UI.
     return res
   }
 
@@ -88,7 +90,22 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   return fetch(input, initWithCreds)
 }
 
-let refreshInflight: Promise<boolean> | null = null
+/** RefreshResult separates the three outcomes that need different
+ *  handling. The previous boolean conflated "your refresh is dead"
+ *  with "the backend is currently unreachable", which made every
+ *  network blip look like a session expiry to the calling code.
+ *
+ *    ok                — refresh rotated; request can be retried.
+ *    auth_failed       — server said 401: refresh token itself is
+ *                        invalid/expired/revoked. Caller emits the
+ *                        session-expired event.
+ *    retryable_failed  — server unreachable, 5xx, or fetch threw.
+ *                        Caller surfaces the original 401 without
+ *                        bouncing the user to /login.
+ */
+export type RefreshResult = "ok" | "auth_failed" | "retryable_failed"
+
+let refreshInflight: Promise<RefreshResult> | null = null
 
 /** tryRefresh dedupes concurrent refresh attempts. The first call wins
  *  the network round-trip; followers await its result without firing
@@ -101,18 +118,27 @@ let refreshInflight: Promise<boolean> | null = null
  *  awaiting a fresh tryRefresh, leaving it observing a stale promise.
  *  Synchronous cleanup is fine — racers awaiting `refreshInflight`
  *  resolved their await before the finally block runs. */
-export async function tryRefresh(): Promise<boolean> {
+export async function tryRefresh(): Promise<RefreshResult> {
   if (refreshInflight) return refreshInflight
-  const promise = (async () => {
+  const promise = (async (): Promise<RefreshResult> => {
     try {
       const r = await fetch(REFRESH_PATH, {
         method: "POST",
         credentials: "include",
         headers: { Accept: "application/json" },
       })
-      return r.ok
+      if (r.ok) return "ok"
+      // Only a 401 from the refresh endpoint is "your session is gone".
+      // 5xx / 502 / 503 / 504 / 429 / anything else means the server
+      // is temporarily unhappy; the user's cookies are still valid in
+      // principle, just not actionable until the backend recovers.
+      if (r.status === 401) return "auth_failed"
+      return "retryable_failed"
     } catch {
-      return false
+      // Network rejection / abort / DNS / etc. — definitely transient
+      // from our perspective, even if the underlying cause is permanent
+      // (the user is offline, our server is down). Treat as retryable.
+      return "retryable_failed"
     }
   })()
   refreshInflight = promise
