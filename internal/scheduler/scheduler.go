@@ -396,6 +396,19 @@ func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 	if sched, err := s.parser.Parse(cronExpr); err == nil {
 		next := sched.Next(time.Now()).UTC().Format(time.RFC3339)
 		nextRun = &next
+	} else {
+		// A failed parse here means the cron stored on the agent row no
+		// longer parses (stored row was corrupted, validator drift, etc.).
+		// Without an explicit signal, schedule_next_run silently freezes
+		// at its stale value. Log loudly and clear next_run so the UI
+		// reflects the real state instead of pointing at a long-past
+		// timestamp.
+		s.logger.Warn("schedule cron unparsable; clearing schedule_next_run",
+			"agent_id", agentID, "cron", cronExpr, "error", err)
+		if _, err := s.db.ExecContext(context.Background(),
+			"UPDATE agents SET schedule_next_run = NULL WHERE id = ?", agentID); err != nil {
+			s.logger.Warn("clear schedule_next_run", "agent_id", agentID, "error", err)
+		}
 	}
 
 	if errorOnly {
