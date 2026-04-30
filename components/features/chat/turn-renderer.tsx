@@ -88,6 +88,8 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
       const meta = part?.metadata ?? {}
       const crewId = meta.crew_id as string | undefined
       const crewSlug = meta.crew_slug as string | undefined
+      const enqueueStatus = meta.status as string | undefined
+      const enqueueError = meta.error as string | undefined
       return (
         <motion.div
           initial={initialAnim}
@@ -96,7 +98,13 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
           data-turn-id={turn.id}
           className="px-4 py-2"
         >
-          <CrewProvisioningCard crewId={crewId} crewSlug={crewSlug} message={content} />
+          <CrewProvisioningCard
+            crewId={crewId}
+            crewSlug={crewSlug}
+            message={content}
+            enqueueStatus={enqueueStatus}
+            enqueueError={enqueueError}
+          />
         </motion.div>
       )
     }
