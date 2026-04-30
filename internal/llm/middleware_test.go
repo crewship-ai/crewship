@@ -272,24 +272,64 @@ func TestMiddleware_LookoutBlocksInjection(t *testing.T) {
 	}
 }
 
-// TestMiddleware_StreamPassThrough confirms Stream bypasses the wrapper
-// stack for now. Once the streaming variant of the ledger lands this
-// test should flip to asserting paymaster rows were written.
-func TestMiddleware_StreamPassThrough(t *testing.T) {
+// TestMiddleware_StreamWritesLedgerRow asserts that a successful streaming
+// call now flows through the same telemetry → paymaster → lookout chain
+// as Complete: one cost_ledger row, one llm.call journal entry, no
+// guardrail block. This locks in the "streamed calls pay too" contract
+// that closes the bypass the prior comment-only TODO described.
+func TestMiddleware_StreamWritesLedgerRow(t *testing.T) {
+	db := openLLMTestDB(t)
+	em := &fakeLLMEmitter{}
 	stub := &stubProvider{
 		name: "anthropic",
-		resp: &Response{Content: "streamed", StopReason: StopEndTurn},
+		resp: &Response{
+			Content:    "streamed",
+			StopReason: StopEndTurn,
+			InputToks:  17,
+			OutputToks: 23,
+		},
 	}
-	mw := Middleware(stub, &fakeLLMEmitter{}, openLLMTestDB(t))
-	resp, err := mw.Stream(context.Background(), Request{Model: "m"}, func(StreamEvent) error { return nil })
+	mw := Middleware(stub, em, db)
+	ctx := lookout.WithScope(context.Background(), lookout.Scope{WorkspaceID: "ws-stream-bill"})
+
+	resp, err := mw.Stream(ctx, Request{
+		Model:    "claude-haiku-4-5",
+		Messages: []Message{{Role: RoleUser, Content: "stream me"}},
+	}, func(StreamEvent) error { return nil })
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Stream: %v", err)
 	}
 	if resp.Content != "streamed" {
 		t.Errorf("got content %q, want streamed", resp.Content)
 	}
 	if !stub.streamed {
 		t.Error("Stream should delegate to base provider")
+	}
+	// Exactly one cost_ledger row for this workspace, with the provider's
+	// token counts propagated through the streamCaller wrapper.
+	var (
+		count       int
+		gotInToks   int64
+		gotOutToks  int64
+		gotProvider string
+	)
+	if err := db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(MAX(provider), '')
+		FROM cost_ledger WHERE workspace_id = 'ws-stream-bill'
+	`).Scan(&count, &gotInToks, &gotOutToks, &gotProvider); err != nil {
+		t.Fatalf("select cost_ledger: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("cost_ledger rows for ws-stream-bill: got %d, want 1", count)
+	}
+	if gotInToks != 17 || gotOutToks != 23 {
+		t.Errorf("ledger token counts: got %d/%d, want 17/23", gotInToks, gotOutToks)
+	}
+	if gotProvider != "anthropic" {
+		t.Errorf("ledger provider: got %q, want anthropic", gotProvider)
+	}
+	if n := len(em.byType(journal.EntryLLMCall)); n != 1 {
+		t.Errorf("expected 1 llm.call entry, got %d", n)
 	}
 }
 
