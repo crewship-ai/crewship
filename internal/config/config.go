@@ -8,10 +8,34 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// envBool parses a boolean env override accepting the common idiomatic
+// variants ("true"/"1"/"yes"/"on"/"y"/"t", case-insensitive, with the
+// inverse for false). Returns ok=false when the value is unset or doesn't
+// resolve to either polarity so the caller can preserve the YAML default
+// instead of silently coercing typos to false. Unknown non-empty values
+// are surfaced via stderr — mirrors the logging package's policy on
+// unrecognized inputs (see internal/logging/logger.go parseLevel).
+func envBool(name string) (val, ok bool) {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return false, false
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true", "1", "yes", "on", "y", "t":
+		return true, true
+	case "false", "0", "no", "off", "n", "f":
+		return false, true
+	default:
+		fmt.Fprintf(os.Stderr, "config: unrecognized boolean for %s=%q, ignoring\n", name, raw)
+		return false, false
+	}
+}
 
 // Config holds all configuration for the crewship server, including server,
 // IPC, container, storage, state, logging, auth, LLM proxy, Keeper, and license settings.
@@ -316,8 +340,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_RUNTIME_IMAGE"); v != "" {
 		cfg.Container.RuntimeImage = v
 	}
-	if v := os.Getenv("CREWSHIP_SIDECAR_ENABLED"); v == "true" || v == "1" {
-		cfg.Container.SidecarEnabled = true
+	if val, ok := envBool("CREWSHIP_SIDECAR_ENABLED"); ok {
+		cfg.Container.SidecarEnabled = val
 	}
 	if v := os.Getenv("CREWSHIP_SIDECAR_PATH"); v != "" {
 		cfg.Container.SidecarBinaryPath = v
@@ -331,8 +355,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_INTERNAL_TOKEN"); v != "" {
 		cfg.Auth.InternalToken = v
 	}
-	if v := os.Getenv("CREWSHIP_ALLOW_SIGNUP"); v != "" {
-		cfg.Auth.AllowSignup = v == "true" || v == "1"
+	if val, ok := envBool("CREWSHIP_ALLOW_SIGNUP"); ok {
+		cfg.Auth.AllowSignup = val
 	}
 	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
 		cfg.Auth.GoogleClientID = v
@@ -340,8 +364,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("GOOGLE_CLIENT_SECRET"); v != "" {
 		cfg.Auth.GoogleSecret = v
 	}
-	if v := os.Getenv("KEEPER_ENABLED"); v != "" {
-		cfg.Keeper.Enabled = v == "true" || v == "1"
+	if val, ok := envBool("KEEPER_ENABLED"); ok {
+		cfg.Keeper.Enabled = val
 	}
 	if v := os.Getenv("KEEPER_OLLAMA_URL"); v != "" {
 		cfg.Keeper.OllamaURL = v
