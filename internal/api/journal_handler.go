@@ -222,6 +222,17 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 		}
 		q.Limit = n
 	}
+	// Free-text search via FTS5 (?q=…). Trimmed and capped at 200 chars
+	// so we don't shovel arbitrary blobs into FTS5; the phrase-quoting
+	// in journal.fts5Phrase neutralises operators inside the input.
+	if v := qs.Get("q"); v != "" {
+		v = strings.TrimSpace(v)
+		const maxFTSQuery = 200
+		if len(v) > maxFTSQuery {
+			v = v[:maxFTSQuery]
+		}
+		q.FTSQuery = v
+	}
 	return q, nil
 }
 
