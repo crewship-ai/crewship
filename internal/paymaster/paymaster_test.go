@@ -15,7 +15,7 @@ import (
 
 // schemaSQL mirrors the cost_ledger / budget_limits tables. Kept inline so the
 // test stays decoupled from the migrate package — same approach the journal
-// package's tests use. The columns added in migration v60 (billing_mode,
+// package's tests use. The columns added in migration v62 (billing_mode,
 // quota_*, rate_*, cost_confidence, subscription_plan) are reflected here.
 const schemaSQL = `
 CREATE TABLE cost_ledger (
@@ -601,7 +601,7 @@ func TestMiddlewareBlocksOnHardBudget(t *testing.T) {
 	}
 }
 
-// TestRecordFlatRateNullsCost asserts the v60 flat-rate invariant: even if
+// TestRecordFlatRateNullsCost asserts the v62 flat-rate invariant: even if
 // the caller hands in a non-zero CostUSD, the row lands with cost=0 and
 // confidence=unknown. Pricing for subscription calls is structurally
 // nonsense, so we never persist a number that would imply otherwise.
@@ -660,7 +660,7 @@ func TestRecordFlatRateNullsCost(t *testing.T) {
 }
 
 // TestRecordMeteredSnapshotsRateCard is the Langfuse-pattern check: the
-// v60 ratecard columns are populated at write time so a future pricing.go
+// v62 ratecard columns are populated at write time so a future pricing.go
 // change can't retroactively rewrite history.
 func TestRecordMeteredSnapshotsRateCard(t *testing.T) {
 	db := openTestDB(t)

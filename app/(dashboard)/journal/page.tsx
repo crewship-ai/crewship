@@ -1,9 +1,9 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import {
+  Activity,
   BarChart3,
   BookOpen,
   Clock,
@@ -11,7 +11,6 @@ import {
   Radio,
   RadioTower,
   RefreshCw,
-  ShieldCheck,
   Zap,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -21,12 +20,14 @@ import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
+import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
 import {
   JournalFilters,
   DEFAULT_JOURNAL_FILTERS,
   type JournalFilterValue,
 } from "@/components/features/journal/journal-filters"
 import { JournalTimeline } from "@/components/features/journal/journal-timeline"
+import { RunsView } from "@/components/features/journal/runs-view"
 
 /** Convert the UI `timeRange` selection into an RFC3339 `since` string. */
 function sinceFromRange(range: JournalFilterValue["timeRange"]): string | undefined {
@@ -40,12 +41,12 @@ function sinceFromRange(range: JournalFilterValue["timeRange"]): string | undefi
   }
 }
 
-type JournalTab = "timeline" | "stats" | "audit"
+type JournalTab = "timeline" | "runs" | "stats"
 
 const JOURNAL_TABS: Array<{ id: JournalTab; label: string; icon: typeof ListOrdered }> = [
   { id: "timeline", label: "Timeline", icon: ListOrdered },
+  { id: "runs", label: "Runs", icon: Activity },
   { id: "stats", label: "Stats", icon: BarChart3 },
-  { id: "audit", label: "Audit", icon: ShieldCheck },
 ]
 
 /**
@@ -76,10 +77,19 @@ export default function JournalPage() {
   }, [])
 
   const [filters, setFilters] = useState<JournalFilterValue>(initialFilters)
-  const [activeTab, setActiveTab] = useState<JournalTab>("timeline")
+  // Initial tab from `?tab=runs` (deeplink target for the legacy /runs
+  // redirect — Phase F of unified-journal). Unknown values fall back to
+  // timeline so a stale bookmark can never break the page.
+  const initialTab = useMemo<JournalTab>(() => {
+    const t = searchParams.get("tab")
+    return t === "runs" || t === "stats" ? t : "timeline"
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const [activeTab, setActiveTab] = useState<JournalTab>(initialTab)
 
   // Apply UI filters to backend query params. The backend accepts CSV for
-  // list-shaped filters (entry_type, severity).
+  // list-shaped filters (entry_type, severity). The `q` param hits FTS5
+  // across summary + payload — server-side, not client-side filtering.
   const queryParams = useMemo<Record<string, string | undefined>>(() => {
     const since = sinceFromRange(filters.timeRange)
     return {
@@ -87,12 +97,19 @@ export default function JournalPage() {
       agent_id: filters.agentId || undefined,
       entry_type: filters.types.length ? filters.types.join(",") : undefined,
       severity: filters.severities.length ? filters.severities.join(",") : undefined,
+      q: filters.search.trim() || undefined,
       since,
     }
   }, [filters])
 
+  // Only the Timeline tab consumes the journal list + SSE stream. Runs
+  // and Stats render from their own data sources, so disabling these
+  // hooks elsewhere avoids a redundant fetch + open SSE connection on
+  // every page load that lands on a non-Timeline tab (deeplinks from
+  // /runs go straight to ?tab=runs).
+  const timelineEnabled = !wsLoading && activeTab === "timeline"
   const { entries, nextCursor, loading, loadingMore, error, refresh, loadMore, prependLive } =
-    useJournalList({ workspaceId, params: queryParams, enabled: !wsLoading })
+    useJournalList({ workspaceId, params: queryParams, enabled: timelineEnabled })
 
   // SSE prepend — the hook dedupes by id, so re-firing is safe.
   const handleLive = useCallback(
@@ -104,25 +121,17 @@ export default function JournalPage() {
   const { status: streamStatus } = useJournalStream({
     workspaceId,
     params: queryParams,
-    enabled: !wsLoading,
+    enabled: timelineEnabled,
     onEntry: handleLive,
   })
 
-  // Client-side search filter — the backend doesn't yet support free text, so
-  // we scope it to the already-fetched slice. Reasonable since we cap at
-  // ~100 entries per page.
-  const visibleEntries = useMemo(() => {
-    if (!filters.search.trim()) return entries
-    const needle = filters.search.toLowerCase()
-    return entries.filter(
-      (e) =>
-        e.summary.toLowerCase().includes(needle) ||
-        e.entry_type.toLowerCase().includes(needle) ||
-        (e.actor_id?.toLowerCase().includes(needle) ?? false),
-    )
-  }, [entries, filters.search])
+  // Search is now server-side via FTS5 (?q= maps to MATCH on
+  // journal_entries_fts). Entries returned from the API already
+  // reflect the search term, so no extra client filtering needed.
+  const visibleEntries = entries
 
   return (
+    <JournalLookupProvider workspaceId={workspaceId}>
     <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 bg-background min-h-[calc(100vh-48px)]">
       {/* Main column — header + tab strip + content */}
       <div className="flex-1 min-w-0 space-y-4">
@@ -186,6 +195,10 @@ export default function JournalPage() {
           />
         )}
 
+        {activeTab === "runs" && (
+          <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
+        )}
+
         {activeTab === "stats" && (
           <Card>
             <CardHeader>
@@ -206,35 +219,16 @@ export default function JournalPage() {
             </CardContent>
           </Card>
         )}
-
-        {activeTab === "audit" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Audit trail
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
-                <ShieldCheck className="h-4 w-4 text-muted-foreground/60" />
-              </div>
-              <div className="text-sm font-medium text-foreground/80">Audit lives in its own section</div>
-              <div className="text-[11px] text-muted-foreground max-w-sm">
-                Security-relevant actions (login, credential use, permission changes) are
-                tracked separately with stricter retention.
-              </div>
-              <Button asChild variant="outline" size="sm" className="h-7 px-2.5 text-xs mt-1">
-                <Link href="/audit">Open Audit</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
       </div>
 
-      {/* Filter rail */}
-      <JournalFilters workspaceId={workspaceId} value={filters} onChange={setFilters} />
+      {/* Filter rail — only meaningful for the Timeline tab. The Runs
+          tab brings its own filters (status / trigger), and Stats has
+          no filterable surface yet. */}
+      {activeTab === "timeline" && (
+        <JournalFilters workspaceId={workspaceId} value={filters} onChange={setFilters} />
+      )}
     </div>
+    </JournalLookupProvider>
   )
 }
 

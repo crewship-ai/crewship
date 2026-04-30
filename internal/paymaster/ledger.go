@@ -28,7 +28,7 @@ const tsLayout = "2006-01-02T15:04:05.000Z"
 // nil no journal entries are emitted. Production callers always pass a real
 // emitter so cost activity is observable.
 //
-// Billing-mode handling (added migration v60):
+// Billing-mode handling (added migration v62):
 //   - BillingFlatRate forces CostUSD to 0 and Confidence to Unknown on disk —
 //     subscription calls have no marginal $ cost. The ledger row still serves
 //     as audit ("this credential was used at this timestamp by this agent").

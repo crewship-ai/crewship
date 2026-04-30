@@ -67,7 +67,7 @@ CREATE TABLE cost_ledger (
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
     tags TEXT NOT NULL DEFAULT '{}',
-    -- v60 billing-mode columns. Mirror migrate_consts_v60_billing_mode.go
+    -- v62 billing-mode columns. Mirror migrate_consts_v62_billing_mode.go
     -- so this in-memory test schema stays in lockstep with the real one.
     billing_mode TEXT NOT NULL DEFAULT 'metered',
     quota_remaining_pct REAL,

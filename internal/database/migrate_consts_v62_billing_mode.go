@@ -1,6 +1,6 @@
 package database
 
-// SQL constant for migration v60: subscription-aware paymaster.
+// SQL constant for migration v62: subscription-aware paymaster.
 //
 // Rationale (recorded in CLAUDE.md commit log + plan file z-rove-ty-…):
 // the platform's billing model is heterogeneous — one workspace can mix

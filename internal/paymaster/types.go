@@ -157,7 +157,7 @@ type Scope struct {
 // Subscription fields (BillingMode through Confidence) are populated by the
 // sidecar / middleware that knows whether the credential was an API key or
 // an OAuth subscription token. Leaving them zero produces a metered row
-// with confidence=estimate — the historical default before migration v60.
+// with confidence=estimate — the historical default before migration v62.
 type Call struct {
 	Scope               Scope
 	Provider            string
@@ -171,7 +171,7 @@ type Call struct {
 	TS                  time.Time // zero ⇒ time.Now()
 
 	// BillingMode discriminates metered vs flat-rate. Empty defaults to
-	// BillingMetered for backwards-compat with pre-v60 callers.
+	// BillingMetered for backwards-compat with pre-v62 callers.
 	BillingMode BillingMode
 
 	// Confidence labels the trustworthiness of CostUSD. Empty defaults to

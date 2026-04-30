@@ -317,6 +317,12 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
 	r.mux.Handle("POST /api/v1/journal/{id}/priority", authed(wsCtx(http.HandlerFunc(jh.SetPriority))))
+	// Lookup table for journal-card enrichment (crew/agent/mission names
+	// + crew icons & palette colors). Frontend fetches once on mount;
+	// per-entry rendering reads from the cached map instead of running
+	// a JOIN on every list/stream request.
+	jlh := NewJournalLookupHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/journal/lookup", authed(wsCtx(http.HandlerFunc(jlh.Get))))
 
 	// Cartographer: mission checkpoint / restore / fork API. The package
 	// owns the row writes + journal emits; this handler is the HTTP
@@ -571,6 +577,7 @@ func (r *Router) registerRoutes() {
 	if r.keeperConfig != nil && r.keeperConfig.Enabled {
 		internal.SetKeeperEnabled(true)
 	}
+	internal.SetJournal(r.Journal())
 	internalAuth := internal.requireInternal
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
@@ -606,6 +613,7 @@ func (r *Router) registerRoutes() {
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	assign.SetJournal(r.Journal())
 	if r.missionCallback != nil {
 		assign.SetMissionCallback(r.missionCallback)
 		// Wire AssignmentHandler as the TaskDispatcher so the MissionEngine

@@ -10,7 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // execOrFatal is a helper that fails the test if a DB exec fails.
@@ -286,6 +289,11 @@ func TestRunAssignment_CreatesAgentRunRecord(t *testing.T) {
 		`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chat1', 'lead1', ?, 'CHAT', 'ACTIVE')`, wsID)
 
 	h := NewAssignmentHandler(db, nil, nil, "token", logger)
+	// Wire a real journal writer so runAssignment's emits land in DB
+	// before we read them back.
+	jw := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = jw.Close() })
+	h.SetJournal(jw)
 
 	body := createAssignmentBody{
 		TargetSlug:  "viktor",
@@ -301,38 +309,39 @@ func TestRunAssignment_CreatesAgentRunRecord(t *testing.T) {
 		CrewSlug: "eng",
 	}
 
-	// Call runAssignment directly — it will fail at orchestrator (nil) but the run record should exist
+	// Call runAssignment directly — it will fail at orchestrator (nil) but the journal entries should exist
 	h.runAssignment(context.Background(), "assign-test", body, target, nil)
+	_ = jw.Flush(context.Background())
 
-	// Verify agent_runs record was created with the target agent's ID
-	var runAgentID, runStatus, runTrigger string
+	// Verify run.started + run.failed journal entries exist with the target agent.
+	var traceID, agentID, entryType string
+	var startedPayload string
 	err := db.QueryRowContext(context.Background(),
-		`SELECT agent_id, status, trigger_type FROM agent_runs WHERE agent_id = ?`, "worker1",
-	).Scan(&runAgentID, &runStatus, &runTrigger)
+		`SELECT trace_id, agent_id, entry_type, payload FROM journal_entries
+		 WHERE agent_id = ? AND entry_type = 'run.started'`, "worker1",
+	).Scan(&traceID, &agentID, &entryType, &startedPayload)
 	if err != nil {
-		t.Fatalf("expected agent_runs record for worker1, got error: %v", err)
+		t.Fatalf("expected run.started journal entry for worker1, got error: %v", err)
 	}
-	if runAgentID != "worker1" {
-		t.Errorf("expected agent_id=worker1, got %s", runAgentID)
+	if agentID != "worker1" {
+		t.Errorf("expected agent_id=worker1, got %s", agentID)
 	}
-	if runTrigger != "ASSIGNMENT" {
-		t.Errorf("expected trigger_type=ASSIGNMENT, got %s", runTrigger)
-	}
-	// Should be FAILED because orchestrator is nil
-	if runStatus != "FAILED" {
-		t.Errorf("expected status=FAILED (nil orchestrator), got %s", runStatus)
+	// trigger_type lives inside the started payload now, not on a row column.
+	if !strings.Contains(startedPayload, `"trigger_type":"ASSIGNMENT"`) {
+		t.Errorf("expected trigger_type ASSIGNMENT in payload, got %s", startedPayload)
 	}
 
-	// Verify finished_at is set
-	var finishedAt *string
+	// Should have a run.failed terminal entry because orchestrator is nil.
+	var terminalType string
 	err = db.QueryRowContext(context.Background(),
-		`SELECT finished_at FROM agent_runs WHERE agent_id = ?`, "worker1",
-	).Scan(&finishedAt)
+		`SELECT entry_type FROM journal_entries
+		 WHERE trace_id = ? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')`, traceID,
+	).Scan(&terminalType)
 	if err != nil {
-		t.Fatalf("query finished_at: %v", err)
+		t.Fatalf("expected terminal run entry for trace %s: %v", traceID, err)
 	}
-	if finishedAt == nil {
-		t.Error("expected finished_at to be set for failed run")
+	if terminalType != "run.failed" {
+		t.Errorf("expected run.failed (nil orchestrator), got %s", terminalType)
 	}
 }
 
