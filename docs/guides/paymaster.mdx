@@ -6,12 +6,19 @@ icon: "credit-card"
 
 # Paymaster
 
-Paymaster owns cost accounting and budget enforcement. It is the read/write side of the `cost_ledger` and `budget_limits` tables (migration 52) and it ships as middleware on the [LLM call stack](/guides/llm-middleware). Every priced LLM round-trip produces exactly one `cost_ledger` row plus journal entries (`llm.call`, `cost.incurred`, optionally `budget.warning` / `budget.exceeded`).
+Paymaster owns cost accounting and budget enforcement. It is the read/write side of the `cost_ledger` and `budget_limits` tables (migration 52, extended by migration 62) and it ships as middleware on the [LLM call stack](/guides/llm-middleware). Every priced LLM round-trip produces exactly one `cost_ledger` row plus a `llm.call` journal entry; metered rows additionally emit `cost.incurred`, and either side can emit `budget.warning` / `budget.exceeded` when limits are hit.
+
+Paymaster separates two billing models that **cannot share a single \$ aggregate**:
+
+- **Metered** — pay-per-token API-key calls. Real \$ math, real budgets.
+- **Flat-rate** — subscription credentials (Anthropic Max, ChatGPT Plus, etc.). The \$200/mo is paid up front; the marginal cost of one more token is \$0 from our perspective.
+
+Mixing them in the same KPI silently misleads operators, so the ledger row carries a `billing_mode` column and the UI keeps the two surfaces disjoint: KPIs and budgets show **metered** spend; subscriptions get a separate panel with call/token counts but no \$ figure.
 
 ## Data model
 
 ```sql
--- One row per LLM round-trip.
+-- One row per LLM round-trip. Columns added in migration 62 marked [v62].
 CREATE TABLE cost_ledger (
   id                    TEXT PRIMARY KEY,
   workspace_id          TEXT NOT NULL,
@@ -26,8 +33,33 @@ CREATE TABLE cost_ledger (
   cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
   cost_usd              REAL NOT NULL DEFAULT 0,
   tags                  TEXT NOT NULL DEFAULT '{}',
-  ts                    TEXT NOT NULL
+  ts                    TEXT NOT NULL,
+  -- [v62] Billing-mode discriminator. 'metered' (default) | 'flat_rate'.
+  billing_mode          TEXT NOT NULL DEFAULT 'metered',
+  -- [v62] Live rate-limit signal harvested from upstream response headers.
+  -- NULL when the call had no rate-limit headers (e.g. local Ollama, errors).
+  quota_remaining_pct   REAL,
+  quota_window          TEXT,             -- 'requests' | 'tokens' (most-restrictive)
+  -- [v62] Display label for flat-rate rows. NULL for metered.
+  subscription_plan     TEXT,
+  -- [v62] Rate-card snapshot at write time (Langfuse pattern). A future
+  -- pricing.go change cannot retroactively rewrite history.
+  rate_input_per_m      REAL NOT NULL DEFAULT 0,
+  rate_output_per_m     REAL NOT NULL DEFAULT 0,
+  rate_cached_in_per_m  REAL NOT NULL DEFAULT 0,
+  rate_cache_write_per_m REAL NOT NULL DEFAULT 0,
+  -- [v62] Provenance label per row (Helicone pattern). UI never renders a
+  -- $ figure without telling the operator how trustworthy it is.
+  cost_confidence       TEXT NOT NULL DEFAULT 'estimate'
 );
+
+-- [v62] Partial index for the Subscriptions panel — covers only flat-rate rows
+-- (most rows are 'metered'), so the index stays small and Subscriptions queries
+-- avoid a full-ledger scan. The (workspace_id, billing_mode, ts DESC) shape
+-- means "newest flat-rate row in this workspace" is an index-only seek.
+CREATE INDEX idx_cost_billing_mode
+  ON cost_ledger (workspace_id, billing_mode, ts DESC)
+  WHERE billing_mode = 'flat_rate';
 
 -- Optional per-scope limit. Walked hierarchically before every call.
 CREATE TABLE budget_limits (
@@ -71,6 +103,101 @@ const (
 
 A tiered budget ties one emit per tick to the state it's in, so a once-warned call stays in the journal even if the subsequent call pushes it over the line.
 
+## Billing modes
+
+Every `cost_ledger` row is tagged `metered` or `flat_rate`. The orchestrator picks the mode from the credential type before exec and signals it to the sidecar via `CREWSHIP_BILLING_MODE` (and `CREWSHIP_SUBSCRIPTION_PLAN` for flat-rate). The sidecar copies the values onto every `POST /api/v1/internal/cost/record` it sends to the server.
+
+| Mode | When | `cost_usd` | `cost_confidence` | Budgets evaluated? |
+|---|---|---|---|---|
+| `metered` | API-key credentials (Anthropic, OpenAI, Google, xAI, DeepSeek, Mistral) | from `Estimate` (or provider-priced inline) | `precise` or `estimate` | yes |
+| `flat_rate` | Subscription credentials (Claude Max, ChatGPT Plus, GitHub Copilot, Cursor, etc.) | **forced to `0`** in `Record` | **forced to `unknown`** | no — `Middleware` skips `Enforce` |
+
+`Record` enforces the flat-rate invariants regardless of caller input — the LiteLLM-style "NULL beats fake-\$0" pattern, adapted to SQLite's NOT NULL. A flat-rate row is still a complete audit trail (which credential, which agent, which mission, when, how many tokens), it just refuses to invent a dollar figure.
+
+The `cost.incurred` journal entry is **suppressed** for flat-rate rows because no money was incurred. `llm.call` still emits, with the summary explicitly tagged `(flat-rate · <plan>)` so operators glancing at the timeline aren't misled.
+
+## Cost confidence
+
+Three values, written to every row:
+
+- **`precise`** — provider returned a usage block we trust verbatim (e.g. Anthropic non-streaming).
+- **`estimate`** — we computed it from `pricing.go` rates against parsed token counts.
+- **`unknown`** — flat-rate row, or we couldn't parse the response body (streaming with no body buffer, opaque proxy).
+
+The dashboard surfaces these as badges next to \$ figures. Aggregate KPIs deliberately do **not** mix confidences — when a rollup spans multiple bands, the lowest band wins so the operator sees the floor of certainty, not the average.
+
+## Quota enforcement
+
+The sidecar parses two header conventions on every upstream response:
+
+- `anthropic-ratelimit-{requests,input-tokens,output-tokens}-{limit,remaining,reset}`
+- `x-ratelimit-{remaining-tokens,remaining-requests,reset-tokens}` (OpenAI / xAI / DeepSeek)
+
+The **most restrictive** window's `remaining / limit` ratio is surfaced as a single fraction. Once parsed, the sidecar calls `EnforceQuota` (after `Record`):
+
+```go
+func EnforceQuota(
+    ctx context.Context,
+    j journal.Emitter,
+    scope Scope,
+    remainingPct float64,   // 0.0–1.0; smallest of the parsed windows
+    window QuotaWindow,     // "requests" | "tokens" — display only
+    hadStatus429 bool,      // upstream sent 429 → authoritative "out"
+) error
+```
+
+| Signal | Effect |
+|---|---|
+| `hadStatus429 == true` | emits `budget.exceeded` with `reason: "quota_exhausted"`, returns `*BudgetExceededError` (same shape as the \$-side so existing error handling keeps working) |
+| `remainingPct < 0.20` | emits `budget.warning`, returns `nil` (does **not** block) |
+| `remainingPct >= 0.20` or `0` (header missing) or `1.0` (full) | no-op |
+
+Quota signals are **per-call, ephemeral** — they are journaled but not persisted to a side table. `EnforceQuota` is called *after* `Record` so the row that triggered the signal is still present in `cost_ledger` for forensics.
+
+This is the only enforcement path that fires for flat-rate calls: subscription users hit provider rate limits before they hit a \$ ceiling. The error type is intentionally identical so `*BudgetExceededError` handlers do not need to know whether the cause was \$ or quota.
+
+## Rate-card snapshotting (Langfuse pattern)
+
+Every metered row writes the four `rate_*_per_m` columns from `RateCard(provider, model)` at the moment of write. When `pricing.go` is later edited (a provider repriced, a new model was added), historical rollups stay consistent: the old row continues to imply its old rate. New rollup queries can either trust `cost_usd` directly or recompute from `rate_*_per_m * tokens` to verify nothing has drifted.
+
+Zero is honest for ollama/local (genuinely free) and for unknown-provider lookups (we couldn't price). NULL would erase that distinction, so the columns are NOT NULL with default 0.
+
+## Pricing — current rates
+
+The canonical rate card lives in `internal/paymaster/pricing.go`. Adding a model is a one-line change. Prices are USD per 1,000,000 tokens and were verified against provider docs on 2026-04-30.
+
+| Provider / Model | Input | Output | Cached input | Cache write |
+|---|---|---|---|---|
+| **Anthropic** | | | | |
+| `claude-opus-4-7` | 5.00 | 25.00 | 0.50 | 6.25 |
+| `claude-sonnet-4-6` | 3.00 | 15.00 | 0.30 | 3.75 |
+| `claude-haiku-4-5` | 1.00 | 5.00 | 0.10 | 1.25 |
+| **OpenAI** | | | | |
+| `gpt-5.5` (alias `gpt-5`) | 4.00 | 24.00 | 0.40 | 4.00 |
+| `gpt-5.4-mini` (alias `gpt-5-mini`) | 0.75 | 4.50 | 0.075 | 0.75 |
+| `gpt-5.4-nano` (alias `gpt-5-nano`) | 0.10 | 0.40 | 0.01 | 0.10 |
+| `o3-pro` | 20.00 | 80.00 | 5.00 | 20.00 |
+| **Google** | | | | |
+| `gemini-2.5-pro` | 2.50 | 15.00 | 0.625 | 2.50 |
+| `gemini-2.5-flash` | 0.10 | 0.40 | 0.025 | 0.10 |
+| `gemini-2.5-flash-lite` | 0.05 | 0.20 | 0.0125 | 0.05 |
+| **xAI** | | | | |
+| `grok-4.20` | 2.00 | 6.00 | 2.00 | 2.00 |
+| `grok-4.1-fast` | 0.20 | 0.50 | 0.20 | 0.20 |
+| **DeepSeek** | | | | |
+| `deepseek-chat` (V3) | 0.252 | 0.378 | 0.0252 | 0.252 |
+| `deepseek-reasoner` | 0.70 | 2.50 | 0.07 | 0.70 |
+| **Mistral** | | | | |
+| `codestral-2508` | 0.30 | 0.90 | 0.30 | 0.30 |
+| **Local** | | | | |
+| `ollama/*`, `local/*` | 0 | 0 | 0 | 0 |
+
+<Note>
+  **Anthropic Opus 4.7 was repriced to \$5/\$25 from the old \$15/\$75 in early 2026.** The Crewship rate card was updated on 2026-04-30; ledger rows written before that date carry the old rate as a snapshot in `rate_*_per_m` and will continue to read out at the historical price. New rows use the corrected rate.
+</Note>
+
+When `(provider, model)` misses the table, lookup falls through to a **per-provider ceiling** in `providerFallback` rather than \$0 — picking the most-expensive known tier means budgets warn correctly even on premium reasoning models, at the cost of a mild over-estimate for cheap unknown ones. Better to over-estimate than to silently bill \$0.
+
 ## The call path
 
 `paymaster.Middleware(next, j, db)` wraps an `LLMCaller`. Order of operations:
@@ -85,12 +212,19 @@ See [llm.middleware.go](/guides/llm-middleware) for the full stack (`telemetry -
 
 ## Read endpoints
 
-- `GET /api/v1/paymaster/spend/by-crew?range=7d` -- one row per crew.
-- `GET /api/v1/paymaster/spend/by-agent/{crewId}?range=24h` -- per-agent rollup inside a crew.
-- `GET /api/v1/paymaster/spend/by-mission/{missionId}` -- single-mission total.
-- `GET /api/v1/paymaster/top-spenders?limit=10&range=7d` -- highest-cost scopes.
+- `GET /api/v1/paymaster/spend/by-crew?range=7d` -- one row per crew (metered only).
+- `GET /api/v1/paymaster/spend/by-agent/{crewId}?range=24h` -- per-agent rollup inside a crew (metered only).
+- `GET /api/v1/paymaster/spend/by-mission/{missionId}` -- single-mission total (metered only).
+- `GET /api/v1/paymaster/top-spenders?limit=10&range=7d` -- highest-cost scopes (metered only).
+- `GET /api/v1/paymaster/subscriptions?range=30d` -- flat-rate credentials grouped by `(plan, provider)` with call count, token count, last-used timestamp. **No \$ figure** — see "Billing modes" above for why.
 
 Window syntax: `range=1h|24h|7d|30d` or explicit `since=<RFC3339>&until=<RFC3339>`. Default is 7 days.
+
+The four `spend/*` endpoints filter `WHERE billing_mode = 'metered'` so flat-rate rows do not silently inflate metered totals. The Subscriptions panel is the only place flat-rate rows surface to the operator.
+
+## Internal write endpoint
+
+The sidecar writes ledger rows over the IPC socket, never directly. The handler is `POST /api/v1/internal/cost/record` (auth: `X-Internal-Token`). Authoritative scope (workspace / crew / agent IDs) comes from the sidecar's `IPCConfig` set at exec time, so an agent that captured the token still cannot forge cross-tenant attribution. Mirrors the `/internal/journal/emit` security model — see [Internal IPC API](/api-reference/internal).
 
 Workspace isolation: the `by-agent` and `by-mission` handlers reject cross-tenant IDs with 404 (same shape as "not found") so existence isn't leaked. See `crewBelongsToWorkspace` / `missionBelongsToWorkspace` in `internal/api/paymaster_handler.go`.
 
@@ -113,17 +247,23 @@ INSERT INTO budget_limits (id, workspace_id, scope_kind, scope_id, window, limit
 VALUES ('bl_default_daily', 'ws_123', 'workspace', 'ws_123', 'day', 250.0, 'hard', 1);
 ```
 
-## Known limitation: agent Claude CLI calls bypass the middleware
+## Sidecar coverage of agent CLI calls
 
-Paymaster wraps `llm.Provider.Complete()` -- the path used by internal server-side generation (summaries, Keeper, consolidation, reflection, quartermaster judge). It does **not** see calls made by the agent's own CLI adapter (`claude`, `codex`, `gemini`) running inside the crew container: those shell out to a vendor binary that talks directly to the provider's API using the credentials we injected.
+Paymaster wraps `llm.Provider.Complete()` for everything called from the Go side (summaries, Keeper, consolidation, reflection, quartermaster judge). For agent CLI calls (`claude`, `codex`, `gemini`, `cursor-agent`, `droid`) the sidecar is the metering point: the proxy intercepts the outbound HTTPS request, parses the response body for usage tokens, harvests rate-limit headers, and async-POSTs a Call to `POST /api/v1/internal/cost/record`. The handler validates auth and calls `Record` + `EnforceQuota`.
 
-Consequence: agent-driven spend shows up in the provider's dashboard but not in `cost_ledger`, and budgets configured at `agent` scope will not block an agent from continuing past its limit. Work is tracked to re-route those calls through an OpenAI-compatible local proxy so every token is metered; until then:
+What the sidecar can and cannot see:
 
-- **Workspace-level budgets are reliable** because the raw provider API key is metered externally and top-level operators still see the cost on their provider bill.
-- **Per-agent/mission budgets are advisory** for agent-driven work. Treat the UI numbers as a floor, not a ceiling, and use `mode=soft` so you don't give operators a false sense of blocking.
-- **Keeper, summaries, consolidation, reflection, and eval all ARE captured** -- they use `internal/llm` which is wrapped.
+| Traffic shape | Token counts | Quota signals |
+|---|---|---|
+| Non-streaming JSON (Anthropic / OpenAI / Google) | **yes** — per-provider body parser | **yes** |
+| Streaming (`text/event-stream`) | **no** — body is opaque without a parallel SSE parser | **yes** — headers are always present |
+| Pinned-cert TLS CONNECT (Claude Code Max OAuth tunnel) | **no** — body is end-to-end encrypted | **no** |
 
-Look for the `llm.call` journal entry: if it exists, the call flowed through Paymaster. If you see activity on `exec.command` with a `claude` binary but no `llm.call`, you've hit the bypass.
+For pinned-cert tunnels the sidecar emits a "credential was used" attribution row (`billing_mode=flat_rate`, no tokens, `cost_confidence=unknown`) so the Subscriptions panel still shows usage. We deliberately do not MITM with a custom CA — CLIs with pinned certs would reject it, and the honest answer is that the body is private.
+
+Body buffering uses `io.TeeReader` with a **10 MB cap** so streaming UX is preserved while a pathological upstream cannot OOM the sidecar. Reads beyond the cap pass through to the agent unmodified but are not parsed.
+
+Look for the `llm.call` journal entry: if it exists, the call was metered. If you see `exec.command` with `claude` and no `llm.call`, the OAuth tunnel was used and the row will land as flat-rate.
 
 ## Gotchas
 

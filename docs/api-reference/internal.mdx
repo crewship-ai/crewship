@@ -1,0 +1,215 @@
+---
+title: "Internal IPC"
+description: "Sidecar / orchestrator endpoints under /api/v1/internal/. X-Internal-Token authenticated, never exposed to agents."
+icon: "lock"
+---
+
+# Internal IPC
+
+Routes mounted under `/api/v1/internal/*` are not part of the public API. They are the surface used by the **sidecar** (running as UID 1002 inside every crew container) and a small set of orchestrator helpers. The sidecar holds the only copy of `CREWSHIP_INTERNAL_TOKEN` inside a container; agents (UID 1001) cannot read it from disk or process memory.
+
+This page is here so integrators building their own sidecar image, runtime adapter, or replay tool understand the contract. **End users should never call these endpoints directly.**
+
+## Authentication
+
+Every internal route is wrapped in `internalAuth`:
+
+```
+X-Internal-Token: <token>
+```
+
+The token is generated at server startup if `CREWSHIP_INTERNAL_TOKEN` is not set in the environment. For multi-host deployments, set it explicitly on every host so a sidecar restart on host A doesn't suddenly fail when its request lands on host B.
+
+Workspace / crew / agent / mission scope is **not** taken from request bodies. The IPC layer reads it from the sidecar's `IPCConfig` (set by the orchestrator at exec time and pinned to the container) and projects it onto the request. An agent that captured the token still cannot forge cross-tenant attribution because the auth context overrides whatever they put in the body.
+
+## Route catalog
+
+Sourced from `internal/api/router_routes.go`. Methods and paths are exact.
+
+### Cost ledger
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/cost/record` | Sidecar reports parsed LLM usage. See [Cost record](#cost-record) below. |
+
+### Journal
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/journal/emit` | Sidecar emits a journal entry. Same structure as the in-process `journal.Entry`. |
+
+### Credentials
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/internal/credentials` | List credentials this agent is allowed to use. |
+| `PATCH` | `/api/v1/internal/credentials/{credentialId}` | Update credential status (e.g. mark expired). |
+
+### Chats
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/chats` | Create a chat row from inside a container (e.g. webhook-triggered). |
+| `GET` | `/api/v1/internal/chats/{chatId}/resolve` | Resolve a chat ID to its scope (workspace, agent, etc.). |
+| `PATCH` | `/api/v1/internal/chats/{chatId}/message-count` | Increment message counter. |
+| `PATCH` | `/api/v1/internal/chats/{chatId}/title` | Set chat title (used by webhook-created chats). |
+
+### Agents and crews
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/internal/agents/{agentId}/resolve` | Resolve agent slug/ID to its full record. |
+| `GET` | `/api/v1/internal/agents/{agentId}/webhook-secret` | Fetch the agent's webhook HMAC secret (used by the webhook handler to verify signatures). |
+| `GET` | `/api/v1/internal/crews` | List crews (sidecar discovery). |
+| `POST` | `/api/v1/internal/crews` | Create a crew programmatically. |
+| `POST` | `/api/v1/internal/agents` | Create an agent programmatically. |
+| `GET` | `/api/v1/internal/crew-connections` | List crew connections. |
+
+### Runs
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/runs` | Create a run row. Idempotent on `(workspace_id, trace_id)`. |
+| `PATCH` | `/api/v1/internal/runs/{runId}` | Update run status / metrics. |
+
+Since PR #234, runs are reconstructed from journal entries; these endpoints exist for transitional callers and emit a `run.*` journal entry as a side effect. New integrations should emit journal entries directly via `/api/v1/internal/journal/emit` instead.
+
+### Crew messaging and files
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/crew-messages` | Send a peer message. |
+| `GET` | `/api/v1/internal/crew-messages` | List peer messages. |
+| `GET` | `/api/v1/internal/crew-files/{crewId}` | Read a file in the crew's shared volume. |
+| `POST` | `/api/v1/internal/crew-files/{crewId}` | Write a file in the crew's shared volume. |
+
+### Assignments and queries
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/assignments` | Create an assignment from inside a container. |
+| `GET` | `/api/v1/internal/assignments/{assignmentId}` | Fetch assignment status. |
+| `POST` | `/api/v1/internal/queries` | Free-form sub-query (e.g. agent asking another agent). |
+| `GET` | `/api/v1/internal/standup` | Fetch the standup digest the agent should read. |
+| `POST` | `/api/v1/internal/escalations` | Open an escalation. |
+| `GET` | `/api/v1/internal/escalations/{escalationId}/wait` | Long-poll for response. |
+| `POST` | `/api/v1/internal/report-confidence` | Report agent self-confidence after a turn. |
+
+### Missions, issues, proposals
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/missions` | Create a mission. |
+| `GET` | `/api/v1/internal/missions/{missionId}` | Get mission details. |
+| `POST` | `/api/v1/internal/missions/{missionId}/start` | Transition mission to running. |
+| `GET` | `/api/v1/internal/issues` | List issues. |
+| `GET` | `/api/v1/internal/issues/{identifier}` | Get a specific issue. |
+| `POST` | `/api/v1/internal/issues` | Create issue. |
+| `PATCH` | `/api/v1/internal/issues/{identifier}` | Update issue status. |
+| `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. |
+| `GET` | `/api/v1/internal/mission-proposals` | List mission proposals. |
+| `POST` | `/api/v1/internal/mission-proposals` | Create proposal. |
+| `GET` | `/api/v1/internal/mission-proposals/{proposalId}` | Get proposal. |
+
+### Keeper
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/keeper/request` | Sidecar forwards a credential read request. |
+
+The matching `keeper/execute` flow goes through the sidecar's HTTP surface (`POST /keeper/execute` on `127.0.0.1:9119`) which then forwards over the IPC socket — there is no `keeper/execute` on `/api/v1/internal/` because the agent never gets to make that request directly.
+
+### MCP audit
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/mcp-tool-calls` | Record an MCP tool invocation for audit. |
+
+### Port expose
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/port-expose` | Sidecar requests a capability URL for an internal port. |
+
+User-facing port-expose lifecycle endpoints live on the public API — see [Port Expose](/api-reference/port-expose).
+
+---
+
+## Cost record
+
+```
+POST /api/v1/internal/cost/record
+```
+
+The sidecar's write target after parsing an LLM response. Validates the request, calls `paymaster.Record` (which inserts the `cost_ledger` row and emits `llm.call` + optionally `cost.incurred`), then `paymaster.EnforceQuota` (which emits `budget.warning` / `budget.exceeded` based on the parsed rate-limit headers).
+
+**Request body:** body cap 16 KiB.
+
+```json
+{
+  "workspace_id": "ws_…",
+  "crew_id": "crw_…",
+  "agent_id": "agt_…",
+  "mission_id": "MIS-42",
+  "provider": "anthropic",
+  "model": "claude-opus-4-7",
+  "input_tokens": 12483,
+  "output_tokens": 4521,
+  "cached_input_tokens": 1024,
+  "cache_creation_tokens": 0,
+  "billing_mode": "metered",
+  "subscription_plan": "",
+  "quota_remaining_pct": 0.42,
+  "quota_window": "tokens",
+  "had_status_429": false
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id` | string | **Required.** The sidecar fills this from its `IPCConfig` (set by `crewshipd` at container boot), so an agent that captures the token still cannot forge a row for a foreign workspace. |
+| `crew_id`, `agent_id`, `mission_id` | string | Optional scope. Same trust model — sidecar fills from `IPCConfig`. |
+| `provider`, `model` | string | Required. Used for rate-card lookup. |
+| `input_tokens`, `output_tokens` | integer | Optional, default 0. Providers occasionally omit usage blocks; we record the audit row anyway rather than dropping. Negative values clamped to 0 by `Estimate`. |
+| `cached_input_tokens`, `cache_creation_tokens` | integer | Optional, default 0. |
+| `billing_mode` | string | `metered` (default), `flat_rate`. Anything else → 400. |
+| `subscription_plan` | string | Required when `billing_mode=flat_rate`. Display label like `"Anthropic Max"`. |
+| `quota_remaining_pct` | number | 0–1. Smallest of parsed quota windows. |
+| `quota_window` | string | Display label: `requests`, `tokens`, `input-tokens`, ... A non-empty value is the sentinel "rate-limit headers were present", which gates `EnforceQuota`. |
+| `had_status_429` | bool | When `true`, triggers `budget.exceeded` regardless of `quota_remaining_pct`. |
+
+Fields the sidecar has **no authority over** are derived server-side:
+
+| Server-derived | How |
+|---|---|
+| Ledger ID | Generated in `paymaster.Record`. |
+| Timestamp | Server now (UTC). |
+| `cost_usd` | `paymaster.Estimate(provider, model, ...)` for `metered`; **forced to 0** for `flat_rate`. |
+| `cost_confidence` | `precise` if `input_tokens > 0 \|\| output_tokens > 0` (heuristic — the sidecar saw a usage block), else `estimate`. **Forced to `unknown`** for `flat_rate` by `paymaster.Record`. |
+| `tags` | Always `{"source": "sidecar"}`. Caller cannot override. |
+
+**Response:** `202 Accepted`
+
+```json
+{
+  "id": "cl_a1b2c3d4"
+}
+```
+
+The handler writes the ledger row synchronously, then runs `paymaster.EnforceQuota` (best-effort — its result does **not** affect the response code, only the journal). The response body is intentionally minimal; the journal entries (`llm.call`, `cost.incurred`, optionally `budget.warning` / `budget.exceeded`) are where the operator-visible artifacts land.
+
+When `had_status_429=true`, the response is **still 202** — the ledger row was written and `budget.exceeded` was emitted. The caller (sidecar) is responsible for propagating the upstream's 429 back to the agent; this endpoint does not echo the 429 because it succeeded at recording the cost.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid JSON, body exceeds 16 KiB, missing `workspace_id` / `provider` / `model`, `billing_mode` not `metered` / `flat_rate`, or any validation wrapped as `paymaster.ErrInvalidRequest` (e.g. `flat_rate` without `subscription_plan`). |
+| 401 | Bad or missing `X-Internal-Token`. |
+| 500 | DB error from `paymaster.Record`. |
+
+## Related
+
+- [Paymaster guide](/guides/paymaster) — billing modes, quota enforcement.
+- [Crew Journal](/guides/crew-journal) — `llm.call`, `budget.*` entry types.
+- [Architecture — IPC](/architecture#ipc-inter-process-communication) — Unix socket mechanics.

@@ -83,18 +83,42 @@ Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite d
 For local development, use the `dev.sh` script which manages both the Go backend and Next.js dev server:
 
 ```bash
-./dev.sh start    # Start Go backend + Next.js dev server
-./dev.sh stop     # Stop all services
-./dev.sh restart  # Restart services
-./dev.sh status   # Show service status
-./dev.sh seed     # Seed demo data (crews, agents, skills)
-./dev.sh nuke     # Reset database and start fresh
-./dev.sh logs     # View service logs
+./dev.sh start          # Start Go backend + Next.js dev server
+./dev.sh stop           # Stop all services
+./dev.sh restart        # Restart services
+./dev.sh status         # Show service status, branch, SHA, dirty flag, last build
+./dev.sh seed           # Seed demo data (crews, agents, skills)
+./dev.sh nuke           # Reset database and start fresh
+./dev.sh logs           # View service logs (logs:go / logs:next for one)
+./dev.sh deploy <ref>   # Switch to <ref> and restart, auto-stashing WIP
 ```
 
 <Warning>
   Never start services manually in development. Always use `./dev.sh` to ensure proper coordination between the Go backend and Next.js frontend.
 </Warning>
+
+### `./dev.sh deploy <ref>` (PR #222)
+
+The deploy subcommand is the safe way to flip a dev VM between branches, tags, SHAs, and PRs without losing in-flight work. It accepts four ref forms:
+
+| Ref form | Example | Result |
+|---|---|---|
+| Branch name | `./dev.sh deploy main` | Tracks `origin/main`, fast-forwards on next deploy. |
+| Branch name | `./dev.sh deploy feat/my-thing` | Tracks `origin/feat/my-thing`. |
+| GitHub PR | `./dev.sh deploy pr/220` | Fetches `refs/pull/220/head` and checks it out. |
+| Git tag | `./dev.sh deploy v1.4.0` | Detached HEAD on the tag. |
+| Commit SHA | `./dev.sh deploy 404650b7` | Detached HEAD on the SHA. |
+
+Lifecycle:
+
+1. **Auto-stash** — if the working tree, index, or untracked files are dirty, the script runs `git stash push --include-untracked -m "dev.sh deploy auto-stash @ <branch> (<UTC timestamp>)"` so the deploy never destroys a WIP. Recover with `git stash list` to find the entry, then `git stash apply <ref>` (the script prints this hint as part of its output). Use `apply` rather than `pop` so a mistake doesn't drop the entry from the stash list.
+2. **Fetch and checkout** — resolves the ref, force-resets the working tree to it.
+3. **Self-healing build** — `ensure_web_build_fresh()` compares mtimes of frontend sources against `.web-build-marker`. When stale, runs the full `pnpm build → cp -r out web/out` sequence; when warm, the check completes in ~0.1s. This was added because skipping `cp -r out web/out` after `pnpm build` leaves `web/out/` ~100 files behind, which the Go embed FS then serves as 404 unpredictably.
+4. **Restart services** — same path as `./dev.sh restart`.
+
+The same `.web-build-marker` keeps `./dev.sh start` and `./dev.sh restart` self-healing too. If you ever see "fresh `pnpm build` produces stale UI", the marker file is the place to look.
+
+The prod-server VM uses a similar but separate flow — `crewship-deploy.timer` polls every 5 minutes, fast-forwards `release`, and rebuilds if the SHA changed. To deploy to prod, push `main:release` rather than running deploy directly on the VM.
 
 ### Remote Development Server
 

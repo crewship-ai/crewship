@@ -63,6 +63,37 @@ crewship memory status -p /path/to/agents/lead/.memory
 #   Ready:   true
 ```
 
+### health
+
+Print the 5-metric memory health score for the caller's workspace. Hits the running server (requires `crewship login` and a workspace context) — unlike `search`/`status`/`reindex` which read local FTS indexes, `health` calls `GET /api/v1/memory/health`, which **recomputes fresh** on every request from five aggregate SQL queries. The persisted `memory_health_snapshots` table is for trend graphs, not for this command.
+
+```bash
+crewship memory health [--crew <slug-or-id>]
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--crew` | Scope to a single crew by slug or ID. Omit for workspace-aggregate. |
+
+The global `--format` flag is honoured (`table`, `json`, `yaml`).
+
+**Example:**
+
+```bash
+crewship memory health
+# Memory health (workspace-wide): 77/100
+#
+#   freshness        83.1
+#   coverage         62.0
+#   coherence        80.2
+#   efficiency       77.4
+#   reachability     78.0
+```
+
+The `77/100` is colour-coded — red below 50, yellow 50–74, green 75 and above. The colour is applied via terminal escape codes; in pipes (`| cat` or `--format json`) it disappears. See [Episodic memory — health scoring](/guides/episodic-memory#health-scoring) for what each metric measures and the weighted-composite formula.
+
 ### reindex
 
 Rebuild FTS5 index from markdown files. Signal-aware (responds to SIGINT/SIGTERM).

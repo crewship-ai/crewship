@@ -228,7 +228,13 @@ mise is installed as the `agent` user (UID 1001), so tools land under `/home/age
 
 ## Triggering provisioning
 
-Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status.
+Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Three triggers can put a crew into provisioning state:
+
+1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
+2. **Crew rebuild** — `crewship crew rebuild <slug>` clears the cached image marker and re-runs provision.
+3. **Auto-provision on first chat** *(PR #230)* — when an operator opens a chat with an agent in a crew that has a config but no cached image, the chat handler calls `ProvisioningHandler.EnqueueForCrew` directly. The chat surface renders an inline `CrewProvisioningCard` with the live progress checklist; once provisioning succeeds, the agent's first message starts on the freshly cached image.
+
+The `EnqueueForCrew` API is idempotent: if a job is already running for the crew, the second call returns the existing job's ID rather than starting a duplicate. Rate limiting is enforced — `ErrRateLimited` is returned as RFC 7807 Problem Details if a workspace is enqueueing more than the per-minute cap.
 
 <Steps>
   <Step title="Trigger">
@@ -382,6 +388,39 @@ The parallel provisioning has a 5-minute timeout per crew and a 3-second poll in
 </Tip>
 
 ---
+
+## Container actuals
+
+`devcontainer.json` declares **what the container should look like**. After agents have run a session — installing packages with `apt-get`, `pip`, or `npm` — the container's actual state usually drifts from the declared intent. PR #231 closes that gap with the `container.snapshot` journal entry.
+
+After every successful agent exec, `internal/containerstate.Snapshot` runs four short probes inside the crew container:
+
+| Probe | What it captures |
+|---|---|
+| `dpkg-query -W -f='${Package} ${Version}\n'` | All apt-installed packages with versions |
+| `pip freeze` | Python packages globally and in venvs on `$PATH` |
+| `npm ls -g --json` | Globally installed Node packages |
+| `cat /etc/os-release` | OS family, version, and `PRETTY_NAME` |
+
+Every probe is **soft-fail**: missing binaries (no `pip` in a Node-only image, no `npm` in a Python-only one) yield empty lists rather than errors. The snapshot is hashed (`SHA-256` over the canonical-sorted package set + os details). The orchestrator emits a `container.snapshot` journal entry **only when the hash changes** — so quiet sessions that don't mutate the container produce no churn at all.
+
+A typical session that adds one Python dependency emits exactly one `container.snapshot` entry (the new `pip` line), which then survives compaction the same way other observability entries do — see [Crew Journal — `container.snapshot`](/guides/crew-journal#container-snapshot--container-actuals) for the payload schema.
+
+Operators can use these entries to diff intent vs reality:
+
+- "What did this agent install last week?" — query `entry_type=container.snapshot` on the crew, sort by `ts`.
+- "What's drift between today's container and the cached image?" — compare the latest snapshot against the manifest baked at provision time.
+
+The probes always execute as the agent UID (1001), so they reflect what the agent could see — not what root could see. This is the right boundary for "what does the agent's environment actually look like".
+
+## Variable expansion in mounts and env
+
+PR #225 extends the devcontainer expansion vocabulary the spec defines:
+
+- `${devcontainerId}` — resolves to the cached image hash for this crew. Useful for binding host paths that are unique per provisioning run.
+- `${VAR}` — resolved against the **base image's environment** (everything in the image's `ENV` directives), not the host's. So referencing `${HOME}` resolves to whatever the image set it to (e.g. `/home/agent`), not the operator's home directory.
+
+These expansions apply in `mounts[*].source`, `containerEnv`, and `forwardPorts` strings. Unknown variables fail provisioning loudly rather than silently expanding to empty — `${TYPO}` will surface as an error in the provisioning log instead of producing a busted mount.
 
 ## Runtime bind-mount semantics
 
