@@ -66,8 +66,14 @@ func New(
 		cfg.DefaultCPUs = 2.0
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	// Use a single parser for both AddFunc registration and updateTimestamps
+	// re-parse. Without this, the cron.New() default parser accepts descriptor
+	// expressions like "@monthly" while the explicit parser below rejects them,
+	// which would let a schedule register but then trip the "unparsable cron"
+	// branch in updateTimestamps and clear schedule_next_run on every refresh.
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	return &Scheduler{
-		c:         cron.New(),
+		c:         cron.New(cron.WithParser(parser)),
 		db:        db,
 		resolver:  resolver,
 		orch:      orch,
@@ -76,7 +82,7 @@ func New(
 		convStore: convStore,
 		logger:    logger,
 		cfg:       cfg,
-		parser:    cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		parser:    parser,
 		ctx:       ctx,
 		cancel:    cancel,
 		entryMap:  make(map[string]cron.EntryID),
