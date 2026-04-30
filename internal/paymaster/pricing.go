@@ -47,9 +47,10 @@ var priceTable = map[string]modelPrice{
 	"openai/gpt-5-mini": {InputPerM: 0.75, OutputPerM: 4.50, CachedInputPerM: 0.075, CacheWritePerM: 0.75},
 	"openai/gpt-5-nano": {InputPerM: 0.10, OutputPerM: 0.40, CachedInputPerM: 0.01, CacheWritePerM: 0.10},
 
-	// Google Gemini. Pro is tiered by context size (>200K kontext zdvojnásobí
-	// rates); we use the upper tier as default to mírně overestimate rather
-	// than under. Refactor Estimate signature later if precision matters.
+	// Google Gemini. Pro is tiered by context size (>200K context doubles
+	// rates); we use the upper tier as default to slightly overestimate
+	// rather than under. Refactor Estimate signature later if precision
+	// matters.
 	"google/gemini-2.5-pro":        {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},
 	"google/gemini-2.5-flash":      {InputPerM: 0.10, OutputPerM: 0.40, CachedInputPerM: 0.025, CacheWritePerM: 0.10},
 	"google/gemini-2.5-flash-lite": {InputPerM: 0.05, OutputPerM: 0.20, CachedInputPerM: 0.0125, CacheWritePerM: 0.05},

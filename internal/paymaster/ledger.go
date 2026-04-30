@@ -175,7 +175,12 @@ func emitLLMCall(ctx context.Context, j journal.Emitter, c Call, rec CostRecord)
 	if c.SubscriptionPlan != "" {
 		payload["subscription_plan"] = c.SubscriptionPlan
 	}
-	if c.QuotaRemainingPct > 0 {
+	// QuotaWindow is the canonical "did we get a rate-limit signal?"
+	// sentinel — same gate used in the SQL write path, in the sidecar
+	// observer, and in the API quota-enforce branch. RemainingPct can
+	// legitimately be 0 (exhausted-quota signal) so guarding on it
+	// would silently drop the case EnforceQuota cares about most.
+	if c.QuotaWindow != "" {
 		payload["quota_remaining_pct"] = c.QuotaRemainingPct
 		payload["quota_window"] = string(c.QuotaWindow)
 	}
