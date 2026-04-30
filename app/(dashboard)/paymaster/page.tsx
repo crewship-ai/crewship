@@ -333,6 +333,8 @@ export default function PaymasterPage() {
               <SubscriptionsPanel
                 rows={subscriptionRows}
                 loading={subscriptions.loading && subscriptionRows.length === 0}
+                error={subscriptions.error}
+                notConfigured={subscriptions.notConfigured}
               />
             </section>
           </div>

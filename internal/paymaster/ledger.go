@@ -81,6 +81,16 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 		 cost_confidence)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
+	// Quota window is the sentinel for "did we get a rate-limit signal?".
+	// When window is empty, both quota_window and quota_remaining_pct land
+	// as NULL; once window is set, remaining_pct rides through verbatim
+	// even if it's 0.0 — that's the exhausted-quota case EnforceQuota
+	// surfaces and we'd lose it by collapsing to NULL.
+	var quotaPct any
+	if c.QuotaWindow != "" {
+		quotaPct = c.QuotaRemainingPct
+	}
+
 	_, err = db.ExecContext(ctx, insertSQL,
 		id,
 		c.Scope.WorkspaceID,
@@ -97,13 +107,17 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 		c.CostUSD,
 		tagsJSON,
 		string(c.BillingMode),
-		nullableFloat(c.QuotaRemainingPct),
+		quotaPct,
 		nullableQuota(c.QuotaWindow),
 		nullable(c.SubscriptionPlan),
-		nullableFloat(rate.InputPerM),
-		nullableFloat(rate.OutputPerM),
-		nullableFloat(rate.CachedInputPerM),
-		nullableFloat(rate.CacheWritePerM),
+		// Rate snapshot: always write the actual lookup result. Zero is
+		// honest for ollama/local (free) and for unknown-provider lookups
+		// (we couldn't price); NULL would erase that distinction. Per
+		// CodeRabbit on this column being a Langfuse-pattern audit field.
+		rate.InputPerM,
+		rate.OutputPerM,
+		rate.CachedInputPerM,
+		rate.CacheWritePerM,
 		string(c.Confidence),
 	)
 	if err != nil {
@@ -225,18 +239,6 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
-}
-
-// nullableFloat is the float64 sibling of nullable. Zero floats persist as
-// NULL on the v60-added rate / quota columns so dashboards can distinguish
-// "no signal recorded" from "signal said zero" — the difference between
-// "we didn't see a header" and "the user has no remaining quota" matters
-// for alerting.
-func nullableFloat(f float64) any {
-	if f == 0 {
-		return nil
-	}
-	return f
 }
 
 // nullableQuota mirrors nullable for the typed QuotaWindow enum.

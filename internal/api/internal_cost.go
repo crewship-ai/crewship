@@ -80,7 +80,7 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	mode := paymaster.BillingMetered
+	var mode paymaster.BillingMode
 	switch strings.ToLower(strings.TrimSpace(body.BillingMode)) {
 	case "flat_rate":
 		mode = paymaster.BillingFlatRate

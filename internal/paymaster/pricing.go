@@ -78,12 +78,12 @@ var priceTable = map[string]modelPrice{
 // keeps the system functional when a new model rolls out before the table is
 // updated — better to over-estimate than to silently bill $0.
 var providerFallback = map[string]modelPrice{
-	"anthropic": {InputPerM: 3.00, OutputPerM: 15.00, CachedInputPerM: 0.30, CacheWritePerM: 3.75},   // Sonnet-equivalent
-	"openai":    {InputPerM: 4.00, OutputPerM: 24.00, CachedInputPerM: 0.40, CacheWritePerM: 4.00},   // gpt-5.5-equivalent
-	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},  // gemini-2.5-pro upper tier
-	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // grok-4-equivalent
+	"anthropic": {InputPerM: 3.00, OutputPerM: 15.00, CachedInputPerM: 0.30, CacheWritePerM: 3.75},     // Sonnet-equivalent
+	"openai":    {InputPerM: 4.00, OutputPerM: 24.00, CachedInputPerM: 0.40, CacheWritePerM: 4.00},     // gpt-5.5-equivalent
+	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},    // gemini-2.5-pro upper tier
+	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},      // grok-4-equivalent
 	"deepseek":  {InputPerM: 0.252, OutputPerM: 0.378, CachedInputPerM: 0.0252, CacheWritePerM: 0.252}, // V3-equivalent
-	"mistral":   {InputPerM: 0.30, OutputPerM: 0.90, CachedInputPerM: 0.30, CacheWritePerM: 0.30},    // codestral-equivalent
+	"mistral":   {InputPerM: 0.30, OutputPerM: 0.90, CachedInputPerM: 0.30, CacheWritePerM: 0.30},      // codestral-equivalent
 	"ollama":    {},
 	"local":     {},
 }

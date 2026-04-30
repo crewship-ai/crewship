@@ -120,16 +120,27 @@ func BuildCLICommand(req AgentRunRequest) []string {
 
 	case "FACTORY_DROID":
 		// Factory's `droid exec` is the headless single-shot mode of Droid.
-		// Tiered autonomy via --auto: low (read-only, default), medium (can
-		// edit files within scope), high (autonomous). We keep low as the
-		// default and bump to medium when the agent's tool profile signals
-		// it expects to write code. `high` is intentionally not exposed
-		// because Factory's docs warn it can do destructive things without
-		// further confirmation — Crewship operators should opt in via a
-		// dedicated tool profile if they want it.
-		autonomy := "low"
-		if req.ToolProfile == "CODING" {
-			autonomy = "medium"
+		// Tiered autonomy via --auto:
+		//   low    — read-only (no file mutations)
+		//   medium — can edit files within scope
+		//   high   — fully autonomous (Factory's docs warn it can do
+		//            destructive things without further confirmation,
+		//            so we never opt in here; future profile if a
+		//            customer needs it)
+		//
+		// Default policy: medium. CODING is the API default (see
+		// internal/api/agents_create.go normalising empty ToolProfile to
+		// "CODING") so almost every agent reaches BuildCLICommand with
+		// CODING set, and these agents are expected to write code —
+		// medium is the closest match. MINIMAL / CONSULTATIVE profiles
+		// downgrade to low because those signals are explicit "this agent
+		// should not mutate anything". This inversion (default-medium,
+		// explicit-low) is honest about production behaviour where the
+		// previous default-low was a comment that production never hit.
+		autonomy := "medium"
+		switch req.ToolProfile {
+		case "MINIMAL", "CONSULTATIVE":
+			autonomy = "low"
 		}
 		cmd := []string{"droid", "exec", "--auto", autonomy}
 		if req.LLMModel != "" {

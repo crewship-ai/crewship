@@ -9,6 +9,16 @@ import type { SubscriptionUsageRow } from "@/lib/types/paymaster"
 interface SubscriptionsPanelProps {
   rows: SubscriptionUsageRow[]
   loading: boolean
+  /**
+   * Surface fetch / parse failures explicitly rather than silently
+   * collapsing to the empty state. Per CodeRabbit review: a
+   * transport error or backend skew that produces zero rows is NOT the
+   * same signal as "no subscription credentials are in use" — operators
+   * looking at billing data need to know when the answer is "we don't
+   * know" vs "there's nothing to know".
+   */
+  error?: string | null
+  notConfigured?: boolean
 }
 
 /**
@@ -23,7 +33,18 @@ interface SubscriptionsPanelProps {
  * the trust label is the most honest possible: "no per-call cost tracking,
  * flat-rate plan covers it".
  */
-export function SubscriptionsPanel({ rows, loading }: SubscriptionsPanelProps) {
+export function SubscriptionsPanel({
+  rows,
+  loading,
+  error,
+  notConfigured,
+}: SubscriptionsPanelProps) {
+  // Order matters: error → notConfigured → loading → empty → data.
+  // Loading wins over data only when we have no rows yet so a refetch
+  // doesn't clear an already-rendered list.
+  const showError = !!error && !loading
+  const showNotConfigured = !!notConfigured && !loading
+
   return (
     <Card className="py-3">
       <CardHeader className="px-4 pb-2">
@@ -36,7 +57,18 @@ export function SubscriptionsPanel({ rows, loading }: SubscriptionsPanelProps) {
         </CardTitle>
       </CardHeader>
       <CardContent className="px-3">
-        {loading && rows.length === 0 ? (
+        {showError ? (
+          <div className="rounded-md border border-red-500/40 bg-red-500/5 px-3 py-3 text-[11px] text-red-300">
+            Couldn&apos;t load subscription usage ({error}). The list below is
+            unavailable; metered totals above are unaffected.
+          </div>
+        ) : showNotConfigured ? (
+          <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-3 text-[11px] text-muted-foreground">
+            Subscription tracking endpoint isn&apos;t available on this
+            backend yet. Upgrade crewshipd to surface flat-rate credential
+            usage here.
+          </div>
+        ) : loading && rows.length === 0 ? (
           <div className="h-[120px] flex items-center justify-center text-[11px] text-muted-foreground">
             Loading…
           </div>

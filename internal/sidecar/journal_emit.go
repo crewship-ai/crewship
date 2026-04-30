@@ -84,11 +84,19 @@ func (s *Server) buildLLMCallObserver() LLMCallObserver {
 			return
 		}
 		// Drop totally-empty events: nothing to record, nothing to enforce.
-		// Distinct from the !=0-token-counts heuristic in the API handler —
-		// here we just skip the IPC round-trip when the upstream returned
-		// neither usage nor a rate-limit signal (e.g. plain GET to /v1/models).
-		hasUsage := usage.InputTokens != 0 || usage.OutputTokens != 0
-		hasQuota := quota.RemainingPct > 0 || quota.HadStatus429
+		// We need to be careful with two edge cases CodeRabbit flagged:
+		//   1. cache-only observations — InputTokens/OutputTokens can be 0
+		//      while CachedInputTokens / CacheCreationTokens are non-zero
+		//      (e.g. a small completion mostly served from prompt cache).
+		//      Dropping these would erase a real billing event.
+		//   2. RemainingPct == 0 — that's the exhausted-quota signal we
+		//      explicitly want to surface so EnforceQuota can fire 429s.
+		//      "No signal" is window=="" instead.
+		hasUsage := usage.InputTokens != 0 ||
+			usage.OutputTokens != 0 ||
+			usage.CachedInputTokens != 0 ||
+			usage.CacheCreationTokens != 0
+		hasQuota := quota.HadStatus429 || quota.Window != ""
 		if !hasUsage && !hasQuota {
 			return
 		}
@@ -173,7 +181,18 @@ func (s *Server) postCostRecord(ctx context.Context, usage LLMUsage, quota Quota
 		s.logger.Debug("cost record IPC failed", "err", err, "provider", usage.Provider)
 		return
 	}
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
+	// 2xx is the only outcome that means crewshipd accepted the row. A
+	// 4xx (auth drift, schema regression) or 5xx (server panic) silently
+	// drops the ledger entry; logging at debug means the failure is
+	// recoverable from journalctl during incident response without
+	// drowning normal operation in noise.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.logger.Debug("cost record IPC rejected",
+			"status", resp.StatusCode,
+			"provider", usage.Provider,
+			"model", usage.Model)
+	}
 }
 
 // emitJournal posts a single journal entry to crewshipd over IPC. The
