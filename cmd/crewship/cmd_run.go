@@ -32,10 +32,13 @@ Examples:
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		estimate, _ := cmd.Flags().GetBool("estimate")
+		offline := dryRun || estimate
 
-		// Auth/workspace are skipped in dry-run mode so the user can preview
-		// the prompt offline. We still need them for actual runs.
-		if !dryRun {
+		// Auth/workspace + agent resolution are skipped for offline modes
+		// (--dry-run / --estimate) so users can preview prompts and token
+		// counts without a login or server.
+		if !offline {
 			if err := requireAuth(); err != nil {
 				return err
 			}
@@ -47,7 +50,7 @@ Examples:
 		agentSlug := args[0]
 		var client *cli.Client
 		var agentID string
-		if !dryRun {
+		if !offline {
 			client = newAPIClient()
 			id, err := resolveAgentID(client, agentSlug)
 			if err != nil {
@@ -101,6 +104,11 @@ Examples:
 			if !strings.HasSuffix(prompt, "\n") {
 				fmt.Println()
 			}
+			return nil
+		}
+
+		if estimate {
+			fmt.Print(cli.FormatEstimate(prompt))
 			return nil
 		}
 
@@ -179,25 +187,29 @@ func resolveMarkdownFromCmd(cmd *cobra.Command) *cli.MarkdownRenderer {
 	return nil
 }
 
-// openSaveFile reads the --save flag and opens a writable file for tee'ing
+// openSaveFile reads the --save flag and opens an atomic file for tee'ing
 // agent text. Returns (nil, nil) when the flag is unset.
 //
-// Files are truncated on open — `--save` is "save this run's output", not
-// "append to a log". Append behaviour is one level of magic the user can
-// trivially get with `crewship run ... | tee -a log` if they really want it.
-func openSaveFile(cmd *cobra.Command) (*os.File, error) {
+// Atomic = a tempfile in the target's directory; the caller must call
+// Commit() on the success path. A crash mid-stream leaves the previous
+// file (or no file) intact rather than a half-written replacement.
+//
+// Files are truncated on commit — `--save` is "save this run's output",
+// not "append to a log". Append behaviour is trivially available via
+// shell `tee -a` if the user really wants it.
+func openSaveFile(cmd *cobra.Command) (*cli.AtomicFile, error) {
 	path, _ := cmd.Flags().GetString("save")
 	if path == "" {
 		return nil, nil
 	}
-	f, err := os.Create(path)
+	f, err := cli.NewAtomicFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("open save file: %w", err)
 	}
 	return f, nil
 }
 
-func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
+func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -231,7 +243,7 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 	return streamEvents(ws, quiet, md, save)
 }
 
-func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
+func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -287,6 +299,13 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 			if !strings.HasSuffix(text, "\n") {
 				_, _ = save.WriteString("\n")
 			}
+			// Commit only on a clean stream — error/missing-done branches below
+			// fall through without committing so the tempfile is discarded.
+			if streamErr == "" && gotDone {
+				if err := save.Commit(); err != nil {
+					fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
+				}
+			}
 		}
 		toPrint := text
 		if md != nil {
@@ -320,7 +339,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	return nil
 }
 
-func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
+func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -384,7 +403,7 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 	}
 }
 
-func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
+func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	flush := func() {
 		if md != nil {
 			fmt.Print(md.Flush())
@@ -439,10 +458,17 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			}
 		case "error":
 			flush()
+			// Don't commit save — defer Close in the caller discards the
+			// tempfile so an aborted run never overwrites a previous artefact.
 			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
 			return nil
 		case "done":
 			flush()
+			if save != nil {
+				if err := save.Commit(); err != nil {
+					fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
+				}
+			}
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "\n%s[done]%s\n", cli.Green, cli.Reset)
 			}
@@ -527,6 +553,7 @@ func init() {
 	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
 	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	runCmd.Flags().Bool("dry-run", false, "Print the assembled prompt (with all context) and exit without running")
+	runCmd.Flags().Bool("estimate", false, "Print token count + cost estimate for the prompt and exit (no run)")
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	runCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")

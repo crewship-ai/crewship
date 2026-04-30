@@ -22,7 +22,7 @@ import (
 //   - First-failure does NOT abort the others. A common use case is "ask 3
 //     agents, see who got it right" — losing 2 responses because 1 errored
 //     would defeat the purpose. Failures are reported in their own slot.
-func runFanout(server, wsToken string, agentsByID map[string]string, prompt string, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
+func runFanout(server, wsToken string, agentsByID map[string]string, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	if len(agentsByID) == 0 {
 		return fmt.Errorf("no agents")
 	}
@@ -102,6 +102,14 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 		fmt.Print(toPrint)
 		if !strings.HasSuffix(toPrint, "\n") {
 			fmt.Println()
+		}
+	}
+	// All agents iterated — commit the save file. Even if individual agents
+	// errored, the saved artefact captures every header + (partial) text we
+	// printed, which is what the user just saw on screen.
+	if save != nil {
+		if err := save.Commit(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
 		}
 	}
 	return nil

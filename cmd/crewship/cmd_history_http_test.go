@@ -107,6 +107,59 @@ func TestFetchRun_NotFound(t *testing.T) {
 	}
 }
 
+func TestFetchPromptsParallel_FillsAllInOrder(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Path: /api/v1/chats/{chatId}/messages
+		parts := strings.Split(r.URL.Path, "/")
+		// parts: ["", "api", "v1", "chats", "<id>", "messages"]
+		if len(parts) < 6 {
+			t.Errorf("bad path: %s", r.URL.Path)
+		}
+		chatID := parts[4]
+		_, _ = w.Write([]byte(`{"messages":[{"role":"user","content":"prompt-for-` + chatID + `"}]}`))
+	}))
+	defer srv.Close()
+
+	c := cli.NewClient(srv.URL, "t", "")
+	refs := []runChatRef{
+		{RunID: "r1", ChatID: "c1"},
+		{RunID: "r2", ChatID: "c2"},
+		{RunID: "r3", ChatID: "c3"},
+		{RunID: "r4", ChatID: "c4"},
+		{RunID: "r5", ChatID: "c5"},
+	}
+	got := fetchPromptsParallel(c, refs, 3)
+	if len(got) != 5 {
+		t.Errorf("expected 5 results, got %d: %v", len(got), got)
+	}
+	for _, r := range refs {
+		want := "prompt-for-" + r.ChatID
+		if got[r.RunID] != want {
+			t.Errorf("run %s: got %q, want %q", r.RunID, got[r.RunID], want)
+		}
+	}
+}
+
+func TestFetchPromptsParallel_EmptyInput(t *testing.T) {
+	got := fetchPromptsParallel(nil, nil, 4)
+	if len(got) != 0 {
+		t.Errorf("expected empty map, got %v", got)
+	}
+}
+
+func TestFetchPromptsParallel_ZeroWorkersClampsToOne(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"messages":[{"role":"user","content":"x"}]}`))
+	}))
+	defer srv.Close()
+
+	got := fetchPromptsParallel(cli.NewClient(srv.URL, "t", ""),
+		[]runChatRef{{RunID: "r", ChatID: "c"}}, 0)
+	if got["r"] != "x" {
+		t.Errorf("zero workers should be clamped to 1 and still produce results: %v", got)
+	}
+}
+
 func TestFetchRun_HandlesNullChatId(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"r1","agent_id":"a1","agent_slug":"v","chat_id":null}]}`))

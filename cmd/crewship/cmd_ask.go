@@ -41,10 +41,12 @@ Examples:
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		estimate, _ := cmd.Flags().GetBool("estimate")
+		offline := dryRun || estimate
 
-		// Skip auth + agent resolution in dry-run so users can compose and
-		// inspect prompts offline (no server, no login required).
-		if !dryRun {
+		// Skip auth + agent resolution for offline modes so users can compose
+		// and inspect prompts (or token estimates) without a login or server.
+		if !offline {
 			if err := requireAuth(); err != nil {
 				return err
 			}
@@ -60,15 +62,15 @@ Examples:
 		}
 
 		var client *cli.Client
-		if !dryRun {
+		if !offline {
 			client = newAPIClient()
 		}
 
 		// No default agent: open an interactive picker on a TTY, error in
 		// non-TTY mode (CI / scripts can't satisfy a prompt). Saves the
 		// pick as the default if the user opts in, so the next run is
-		// frictionless. Skipped entirely in dry-run.
-		if !dryRun && agentSlug == "" {
+		// frictionless. Skipped entirely in offline modes (dry-run/estimate).
+		if !offline && agentSlug == "" {
 			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stderr.Fd())) {
 				return fmt.Errorf("no default agent set. Use --agent <slug> or run 'crewship config set default-agent <slug>'")
 			}
@@ -87,7 +89,7 @@ Examples:
 		}
 
 		var agentID string
-		if !dryRun {
+		if !offline {
 			id, err := resolveAgentID(client, agentSlug)
 			if err != nil {
 				return err
@@ -128,6 +130,11 @@ Examples:
 			if !strings.HasSuffix(prompt, "\n") {
 				fmt.Println()
 			}
+			return nil
+		}
+
+		if estimate {
+			fmt.Print(cli.FormatEstimate(prompt))
 			return nil
 		}
 
@@ -276,6 +283,7 @@ func init() {
 	askCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
 	askCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	askCmd.Flags().Bool("dry-run", false, "Print the assembled prompt and exit (no auth, no agent, no run)")
+	askCmd.Flags().Bool("estimate", false, "Print token count + cost estimate and exit (no run)")
 	askCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	askCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	askCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")

@@ -76,6 +76,7 @@ func init() {
 	rootCmd.AddCommand(historyCmd)
 	rootCmd.AddCommand(journalCmd)
 	rootCmd.AddCommand(recallCmd)
+	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(paymasterCmd)
 	rootCmd.AddCommand(costCmd)
 	rootCmd.AddCommand(approvalsCmd)

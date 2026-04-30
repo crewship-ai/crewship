@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -119,20 +120,21 @@ Examples:
 			return nil
 		}
 
-		// Optional prompt preview pass — sequential to avoid hammering the
-		// chat API. Bounded by the page (limit ≤ 100) so total fetches are
-		// predictable. Failures are silent — a missing preview is better
-		// than a broken history listing.
+		// Optional prompt preview pass — N parallel GETs to /chats/{id}/messages
+		// with bounded concurrency. Sequential was tolerable for ~20 runs but
+		// became visibly slow past 50; 4-way concurrency gives a 4× speedup
+		// without flooding the chat API. Failures are silent — a missing
+		// preview is better than a broken history listing.
 		previews := map[string]string{}
 		if withPrompts {
+			pairs := make([]runChatRef, 0, len(filtered))
 			for _, r := range filtered {
 				if r.ChatID == nil || *r.ChatID == "" {
 					continue
 				}
-				if p := fetchFirstUserPrompt(client, *r.ChatID); p != "" {
-					previews[r.ID] = p
-				}
+				pairs = append(pairs, runChatRef{RunID: r.ID, ChatID: *r.ChatID})
 			}
+			previews = fetchPromptsParallel(client, pairs, 4)
 		}
 
 		for _, r := range filtered {
@@ -169,6 +171,65 @@ Examples:
 		}
 		return nil
 	},
+}
+
+// runChatRef is the (run, chat) pair fetchPromptsParallel needs to fetch
+// a prompt preview. Used so the worker pool can stay typed without leaking
+// the anonymous-struct slice from the runs API.
+type runChatRef struct {
+	RunID  string
+	ChatID string
+}
+
+// fetchPromptsParallel concurrently fetches the first user prompt for each
+// run, returning a map keyed on RunID. Concurrency is bounded by `workers`
+// to avoid overwhelming the chat API on workspaces with hundreds of runs.
+//
+// Why goroutines + buffered channel rather than errgroup or an external
+// pool: zero new dependencies, ~30 lines of obvious code, and the work
+// items here are I/O-bound HTTP GETs where the simplest worker pattern
+// is also the most predictable to debug.
+func fetchPromptsParallel(client *cli.Client, refs []runChatRef, workers int) map[string]string {
+	if workers < 1 {
+		workers = 1
+	}
+	if len(refs) == 0 {
+		return map[string]string{}
+	}
+
+	type result struct {
+		runID, prompt string
+	}
+	jobs := make(chan runChatRef, len(refs))
+	results := make(chan result, len(refs))
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				p := fetchFirstUserPrompt(client, j.ChatID)
+				results <- result{runID: j.RunID, prompt: p}
+			}
+		}()
+	}
+	for _, r := range refs {
+		jobs <- r
+	}
+	close(jobs)
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	out := map[string]string{}
+	for r := range results {
+		if r.prompt != "" {
+			out[r.runID] = r.prompt
+		}
+	}
+	return out
 }
 
 // firstLine returns the first non-empty line of `s` with leading/trailing
