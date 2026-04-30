@@ -221,15 +221,24 @@ func TestRefresh_RevokedSessionRejected(t *testing.T) {
 
 func TestRefresh_ExpiredSessionRejected(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	store := sessions.NewDBStore(db)
 	store.SetClock(func() time.Time { return time.Now().Add(-2 * auth.RefreshTokenTTL) })
 
 	uid := seedTestUser(t, db)
-	sess, _ := store.Create(context.Background(), uid, "", "", auth.RefreshTokenTTL)
+	sess, err := store.Create(context.Background(), uid, "", "", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
 	store.SetClock(time.Now) // restore real clock — the row's expires_at is now in the past
-	refresh, _ := v.IssueRefreshToken(uid, sess.ID)
+	refresh, err := v.IssueRefreshToken(uid, sess.ID)
+	if err != nil {
+		t.Fatalf("issue refresh: %v", err)
+	}
 
 	h := NewNextAuthHandler(db, logger, v, store)
 	req := httptest.NewRequest("POST", "http://test.local/api/auth/token/refresh", nil)

@@ -206,9 +206,11 @@ func TestRevokeAllForUser(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
 
-	store.Create(ctx, "u1", "", "", time.Hour)
-	store.Create(ctx, "u1", "", "", time.Hour)
-	store.Create(ctx, "u1", "", "", time.Hour)
+	for i := 0; i < 3; i++ {
+		if _, err := store.Create(ctx, "u1", "", "", time.Hour); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
 
 	n, err := store.RevokeAllForUser(ctx, "u1", ReasonPasswordChange)
 	if err != nil {
@@ -263,7 +265,10 @@ func TestTouchLastUsedThrottled(t *testing.T) {
 		t.Fatalf("third touch: %v", err)
 	}
 
-	got, _ = store.Get(ctx, sess.ID)
+	got, err = store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get after third touch: %v", err)
+	}
 	if !got.LastUsedAt.Equal(third.UTC().Truncate(time.Second)) {
 		t.Errorf("LastUsedAt: got %v, want %v (third touch should have written)",
 			got.LastUsedAt, third)
