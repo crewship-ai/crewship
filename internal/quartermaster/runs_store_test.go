@@ -302,14 +302,21 @@ func TestListRuns_OrderedDescending(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Use deterministic created_at timestamps rather than time.Sleep —
+	// the latter is flaky under CI timer-granularity differences.
+	// Each row gets a fixed seconds-spaced timestamp so ListRuns'
+	// "newest first" ORDER BY has unambiguous input.
+	base := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
 		id := "r" + itoaQM(i)
 		if err := InsertReplayRun(context.Background(), db,
 			RunRecord{ID: id, WorkspaceID: "ws_test", MissionID: "m1"}); err != nil {
 			t.Fatal(err)
 		}
-		// Tiny sleep so created_at has measurable ordering.
-		time.Sleep(time.Millisecond)
+		ts := base.Add(time.Duration(i) * time.Second).Format(time.RFC3339Nano)
+		if _, err := db.Exec(`UPDATE eval_runs SET created_at = ? WHERE id = ?`, ts, id); err != nil {
+			t.Fatalf("set created_at on %s: %v", id, err)
+		}
 	}
 
 	got, err := ListRuns(context.Background(), db, "ws_test", 10)

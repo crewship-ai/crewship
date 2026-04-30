@@ -79,9 +79,20 @@ describe("ApprovalCard — status styling", () => {
     },
   )
 
-  it("uppercase status falls back to muted styling without crash (case-insensitive lookup)", () => {
-    render(<ApprovalCard row={row({ status: "PENDING" })} active={false} onSelect={() => {}} />)
-    expect(screen.getByText("PENDING")).toBeInTheDocument()
+  it("uppercase status maps via case-insensitive lookup (PENDING → pending styling)", () => {
+    // Component does STATUS_CLASS[row.status.toLowerCase()], so "PENDING"
+    // hits the same amber 'pending' style as the lowercase form. The
+    // visible text is still rendered as the caller provided it (no
+    // forced lowercase), but the colour class matches lowercase.
+    render(
+      <ApprovalCard row={row({ status: "PENDING" })} active={false} onSelect={() => {}} />,
+    )
+    // The status badge text is rendered as authored, and its container
+    // carries the amber 'pending' colour class via case-insensitive
+    // lookup. We assert by querying the badge element and its class.
+    const badge = screen.getByText("PENDING")
+    expect(badge).toBeInTheDocument()
+    expect(badge.className).toContain("text-amber-300")
   })
 
   it("unknown status falls back to muted styling", () => {
