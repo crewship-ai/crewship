@@ -34,8 +34,16 @@ import (
 // internal/paymaster/middleware.go.
 var enforceLocks sync.Map // scopeKey → *sync.Mutex
 
+// enforceLockFor keys by workspace_id only. CodeRabbit caught this in PR #236
+// review: an earlier {workspace|crew|mission|agent} key let two requests in
+// the same workspace but different agents take different mutexes and race
+// against the same shared workspace/crew/mission budgets. Workspace-level
+// keying serializes more aggressively than strictly necessary for purely
+// agent-scoped budgets, but workspace is the broadest enforcement domain
+// and "occasionally serialize a check" is cheap; "let two checks see the
+// same pre-decision snapshot for a shared budget" is the bug we care about.
 func enforceLockFor(scope Scope) *sync.Mutex {
-	key := scope.WorkspaceID + "|" + scope.CrewID + "|" + scope.MissionID + "|" + scope.AgentID
+	key := scope.WorkspaceID
 	if m, ok := enforceLocks.Load(key); ok {
 		return m.(*sync.Mutex)
 	}
