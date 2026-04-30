@@ -356,7 +356,7 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -368,25 +368,32 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 		// silently degrade if the wrapping format ever changed.
 		switch {
 		case errors.Is(err, ErrProvisionerUnavailable):
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			writeProblem(w, r, http.StatusServiceUnavailable, err.Error())
 		case errors.Is(err, ErrCrewNotFound):
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			writeProblem(w, r, http.StatusNotFound, err.Error())
 		case errors.Is(err, ErrCrewNoDevcontainer):
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeProblem(w, r, http.StatusBadRequest, err.Error())
 		case errors.Is(err, ErrInvalidCrewID):
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeProblem(w, r, http.StatusBadRequest, err.Error())
 		case errors.Is(err, ErrRateLimited):
-			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+			writeProblem(w, r, http.StatusTooManyRequests, err.Error())
 		default:
 			h.logger.Error("provision trigger", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		}
 		return
 	}
 	if res.AlreadyRunning {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error":  "provisioning already in progress",
-			"status": res.Status,
+		// 409 carries the existing job's status as an RFC 7807 extension
+		// member so callers can decide whether to wait or surface the state
+		// without re-fetching status separately.
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"type":       "about:blank",
+			"title":      http.StatusText(http.StatusConflict),
+			"status":     http.StatusConflict,
+			"detail":     "provisioning already in progress",
+			"instance":   r.URL.Path,
+			"job_status": res.Status,
 		})
 		return
 	}
