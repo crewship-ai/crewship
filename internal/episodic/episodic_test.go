@@ -3,11 +3,16 @@ package episodic
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	_ "modernc.org/sqlite"
@@ -294,6 +299,44 @@ func TestVectorRoundtrip(t *testing.T) {
 		if in[i] != out[i] {
 			t.Errorf("idx %d: in=%f out=%f", i, in[i], out[i])
 		}
+	}
+}
+
+// TestEmbedTruncatesAtRuneBoundary ensures the 4096-char input cap doesn't
+// split a multi-byte UTF-8 rune. Without rune-aware truncation, the
+// resulting prompt is invalid UTF-8 — Ollama either returns garbage or
+// rejects the request, and the surviving JSON body contains a U+FFFD
+// replacement at the cut site.
+func TestEmbedTruncatesAtRuneBoundary(t *testing.T) {
+	var seenPrompt string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Prompt string `json:"prompt"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		seenPrompt = body.Prompt
+		_ = json.NewEncoder(w).Encode(map[string]any{"embedding": []float64{0.1, 0.2}})
+	}))
+	defer srv.Close()
+
+	// Japanese "日" is 3 bytes in UTF-8. 4096 % 3 == 1, so cutting at byte
+	// 4096 lands one byte INTO a rune — exactly the case the byte-slice
+	// truncation breaks. With 2-byte runes (e.g. Czech "ř") 4096 is a
+	// rune boundary by accident, hiding the bug.
+	in := strings.Repeat("日", 2000)
+	emb := NewOllamaEmbedder(srv.URL)
+	if _, err := emb.Embed(context.Background(), in); err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+
+	if !utf8.ValidString(seenPrompt) {
+		t.Errorf("server received invalid UTF-8 prompt — truncation cut mid-rune")
+	}
+	if strings.ContainsRune(seenPrompt, '�') {
+		t.Errorf("prompt contains U+FFFD replacement char — truncation cut mid-rune")
+	}
+	if seenPrompt == "" {
+		t.Errorf("expected non-empty prompt")
 	}
 }
 
