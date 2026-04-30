@@ -1,19 +1,53 @@
 # Security Policy
 
+## Supported versions
+
+Crewship is pre-1.0; we patch security issues on the most recent tagged
+release and on `main`. Older tags are not backported. If you are
+self-hosting and not tracking `main`, plan to upgrade to the latest tag
+when an advisory lands.
+
+| Version           | Security fixes |
+|-------------------|----------------|
+| `main` (HEAD)     | Yes — patched directly |
+| Latest tag        | Yes — patched + new tag cut |
+| Older tags        | No — please upgrade |
+| `release` branch  | Yes — fast-forwarded from main after fix lands |
+
+We use [GitHub Security Advisories](https://github.com/crewship-ai/crewship/security/advisories)
+to coordinate disclosure. Subscribe to the repository's "Security alerts"
+notification setting to be told when one is published.
+
 ## Reporting a vulnerability
 
 Please do **not** open a public GitHub issue for security problems.
 
-Email **security@unify.cz** with:
+Preferred channel: open a private vulnerability report via
+[GitHub Security Advisories](https://github.com/crewship-ai/crewship/security/advisories/new).
+This gives both sides a private discussion thread tied to the repo.
+
+Alternative: email **security@unify.cz**. For sensitive reports you may
+encrypt the message with our PGP key:
+
+```
+PGP fingerprint: TBD — placeholder until the key is published.
+```
+
+(If the fingerprint above still reads `TBD` when you find this, please
+email us first and we will provide the current key out-of-band.)
+
+Either way, include:
 
 - A description of the issue and its impact.
-- Steps to reproduce (a minimal proof-of-concept is ideal).
+- Steps to reproduce — a minimal proof-of-concept is ideal.
 - The affected version / commit SHA.
 - Any suggested fix or mitigation.
 
-You will get an acknowledgement within 3 business days. We aim to
-provide an initial assessment within 7 days and a fix or coordinated
-disclosure plan within 30 days for confirmed issues.
+You will get an acknowledgement within **3 business days**. We aim to
+provide an initial assessment within **7 days** and a fix or coordinated
+disclosure plan within **30 days** for confirmed issues. If we cannot
+hit those windows we will say so explicitly and propose a revised
+timeline rather than going silent.
 
 ## Scope
 
