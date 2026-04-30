@@ -10,9 +10,17 @@
 package paymaster
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
+
+// ErrInvalidRequest wraps every validation error the paymaster surfaces
+// so HTTP handlers can map to 400 via errors.Is without coupling to the
+// exact message format. Adopted after CodeRabbit flagged that string-
+// prefix matching on "paymaster:" misclassified DB errors (which also
+// carry the prefix) as user-input failures.
+var ErrInvalidRequest = errors.New("invalid request")
 
 // ScopeKind enumerates the four levels at which a budget can apply. Order
 // matters: workspace is broadest, agent is narrowest. Enforcement walks the
@@ -58,6 +66,63 @@ const (
 	WindowMission BudgetWindow = "mission"
 )
 
+// BillingMode discriminates how a Call should be costed. Set on the request
+// path from credential type — every workspace credential is either a metered
+// API key (pay-per-token) or a flat-rate subscription token (Anthropic Max,
+// Cursor Pro, ChatGPT+Codex, Google AI Pro, etc). Default is metered so any
+// caller that forgets to set it still produces a costed row.
+type BillingMode string
+
+const (
+	// BillingMetered is the historical path: provider returns usage, we
+	// price it via the rate card, write a $ row to the ledger, and enforce
+	// $ budgets. Applies to API-key credentials.
+	BillingMetered BillingMode = "metered"
+
+	// BillingFlatRate marks a call covered by a flat-fee subscription.
+	// CostUSD is forced to 0 and Confidence to Unknown — the user already
+	// paid the subscription, the marginal cost per token is structurally
+	// zero from our perspective. $ budgets do NOT apply; quota signals
+	// (rate-limit headers, 429s) drive enforcement instead.
+	BillingFlatRate BillingMode = "flat_rate"
+)
+
+// CostConfidence is the provenance of the CostUSD field. Adopted from the
+// Helicone observability pattern: never display a number without a badge
+// telling the operator how trustworthy it is.
+type CostConfidence string
+
+const (
+	// ConfidencePrecise means token counts came from the provider's response
+	// usage block (Anthropic message_stop, OpenAI usage, Gemini usageMetadata)
+	// and the rate card was applied at write time.
+	ConfidencePrecise CostConfidence = "precise"
+
+	// ConfidenceEstimate means we approximated tokens from request body
+	// length or model defaults — typical for streaming responses where the
+	// usage block isn't surfaced before the body is closed.
+	ConfidenceEstimate CostConfidence = "estimate"
+
+	// ConfidenceUnknown marks rows where no cost can be assigned at all.
+	// Always paired with BillingFlatRate. Quota fields may still carry
+	// signal even when cost cannot be computed.
+	ConfidenceUnknown CostConfidence = "unknown"
+)
+
+// QuotaWindow names the rate-limit dimension reported by the upstream
+// provider. Mirrors the four-axis structure Anthropic and OpenAI both use
+// (requests + tokens, with tokens further split into input vs output).
+// Empty means the response carried no rate-limit headers (Google, OAuth
+// CONNECT tunnels, errors before headers were written).
+type QuotaWindow string
+
+const (
+	QuotaRequestsPerMin     QuotaWindow = "requests_per_min"
+	QuotaTokensPerMin       QuotaWindow = "tokens_per_min"
+	QuotaInputTokensPerMin  QuotaWindow = "input_tokens_per_min"
+	QuotaOutputTokensPerMin QuotaWindow = "output_tokens_per_min"
+)
+
 // BudgetState is the coarse traffic-light over a budget. Computed from
 // SpentUSD/LimitUSD by deriveState; callers should not invent their own
 // thresholds so the warn boundary stays consistent across UI and engine.
@@ -88,6 +153,11 @@ type Scope struct {
 // fields mirror cost_ledger columns one-to-one so the writer doesn't need to
 // reshape anything. Tags is freeform and persisted as JSON; expected uses are
 // {"feature":"summary"} or {"retry":2}.
+//
+// Subscription fields (BillingMode through Confidence) are populated by the
+// sidecar / middleware that knows whether the credential was an API key or
+// an OAuth subscription token. Leaving them zero produces a metered row
+// with confidence=estimate — the historical default before migration v62.
 type Call struct {
 	Scope               Scope
 	Provider            string
@@ -99,6 +169,31 @@ type Call struct {
 	CostUSD             float64
 	Tags                map[string]any
 	TS                  time.Time // zero ⇒ time.Now()
+
+	// BillingMode discriminates metered vs flat-rate. Empty defaults to
+	// BillingMetered for backwards-compat with pre-v62 callers.
+	BillingMode BillingMode
+
+	// Confidence labels the trustworthiness of CostUSD. Empty defaults to
+	// ConfidenceEstimate. Record forces ConfidenceUnknown when BillingMode
+	// is BillingFlatRate and zeroes CostUSD on the way to disk.
+	Confidence CostConfidence
+
+	// SubscriptionPlan is a free-form display label persisted on flat-rate
+	// rows so the UI can show "Anthropic Max 20×" / "Cursor Ultra" without
+	// joining back to the credentials table. Ignored for metered rows.
+	SubscriptionPlan string
+
+	// QuotaRemainingPct (0.0–1.0) is the live remaining-quota signal pulled
+	// from the upstream's rate-limit headers (anthropic-ratelimit-* /
+	// x-ratelimit-*). Zero when no signal was carried. Optional; populated
+	// for metered API-key calls when the sidecar saw a header.
+	QuotaRemainingPct float64
+
+	// QuotaWindow names which rate-limit axis QuotaRemainingPct refers to
+	// (requests-per-min, tokens-per-min, input/output tokens). Empty when
+	// no header was returned.
+	QuotaWindow QuotaWindow
 }
 
 // CostRecord is what Record returns: the assigned ledger ID plus the call

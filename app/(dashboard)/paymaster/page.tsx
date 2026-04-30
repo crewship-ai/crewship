@@ -9,7 +9,13 @@ import { PaymasterKpiCard } from "@/components/features/paymaster/kpi-card"
 import { SpendChart, type SpendDatum } from "@/components/features/paymaster/spend-chart"
 import { TopSpendersTable } from "@/components/features/paymaster/top-spenders-table"
 import { TimeRangePicker } from "@/components/features/paymaster/time-range-picker"
-import { useAgentSpend, useCrewSpend, useTopSpenders } from "@/hooks/use-paymaster"
+import { SubscriptionsPanel } from "@/components/features/paymaster/subscriptions-panel"
+import {
+  useAgentSpend,
+  useCrewSpend,
+  useSubscriptionUsage,
+  useTopSpenders,
+} from "@/hooks/use-paymaster"
 import type { PaymasterRange } from "@/lib/types/paymaster"
 import { cn } from "@/lib/utils"
 
@@ -41,6 +47,7 @@ export default function PaymasterPage() {
   const crewSpend = useCrewSpend(range, true, reloadKey)
   const agentSpend = useAgentSpend(selectedCrewId, range, reloadKey)
   const topSpenders = useTopSpenders(range, 10, reloadKey)
+  const subscriptions = useSubscriptionUsage(range, reloadKey)
 
   // If either endpoint 404s we still want the "not configured" fallback
   // rather than showing half a dashboard with confusing empty cards —
@@ -55,6 +62,10 @@ export default function PaymasterPage() {
   const crewRows = useMemo(() => crewSpend.data?.rows ?? [], [crewSpend.data])
   const agentRows = useMemo(() => agentSpend.data?.rows ?? [], [agentSpend.data])
   const topRows = useMemo(() => topSpenders.data?.rows ?? [], [topSpenders.data])
+  const subscriptionRows = useMemo(
+    () => subscriptions.data?.rows ?? [],
+    [subscriptions.data],
+  )
 
   const totals = useMemo(() => {
     let totalCost = 0
@@ -212,9 +223,19 @@ export default function PaymasterPage() {
               </div>
             )}
 
+            <div className="rounded-md border border-border/40 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground/90 leading-relaxed">
+              <span className="font-medium text-foreground/80">$ figures
+              below cover metered API-key calls only.</span>
+              {" "}
+              Subscription credentials (Anthropic Max, Cursor Pro, Codex via
+              ChatGPT, Google AI Pro/Ultra, Copilot Pro+, Factory Droid) are
+              flat-rate — no marginal token cost — and are surfaced
+              separately below.
+            </div>
+
             <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <PaymasterKpiCard
-                label="Total spend"
+                label="Metered spend"
                 value={`$${totals.totalCost.toFixed(2)}`}
                 subtitle={`range ${range}`}
               />
@@ -299,13 +320,22 @@ export default function PaymasterPage() {
               <Card className="py-3">
                 <CardHeader className="px-4 pb-2">
                   <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Top spenders
+                    Top spenders (metered)
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="px-3">
                   <TopSpendersTable rows={topRows} loading={topSpenders.loading && topRows.length === 0} />
                 </CardContent>
               </Card>
+            </section>
+
+            <section>
+              <SubscriptionsPanel
+                rows={subscriptionRows}
+                loading={subscriptions.loading && subscriptionRows.length === 0}
+                error={subscriptions.error}
+                notConfigured={subscriptions.notConfigured}
+              />
             </section>
           </div>
         </main>

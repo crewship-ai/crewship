@@ -198,4 +198,3 @@ const migrationAddAvatarStyle = `
 ALTER TABLE agents ADD COLUMN avatar_style TEXT;
 ALTER TABLE crews ADD COLUMN avatar_style TEXT;
 `
-
