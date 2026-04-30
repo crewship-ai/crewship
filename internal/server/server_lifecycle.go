@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/presence"
 )
 
@@ -246,6 +247,25 @@ func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, l
 func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Snapshot the orphaned runs first so we can mirror per-run cancel
+	// entries into the journal after the UPDATE. We're inside startup,
+	// so contention is minimal — any run that's RUNNING here was
+	// definitely orphaned by the previous process.
+	type orphan struct {
+		id, agentID, workspaceID string
+	}
+	var orphans []orphan
+	if rows, err := s.db.QueryContext(ctx,
+		`SELECT id, agent_id, workspace_id FROM agent_runs WHERE status = 'RUNNING'`); err == nil {
+		for rows.Next() {
+			var o orphan
+			if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID); scanErr == nil {
+				orphans = append(orphans, o)
+			}
+		}
+		_ = rows.Close()
+	}
+
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE agent_runs SET status = 'CANCELLED', finished_at = ?
 		WHERE status = 'RUNNING'`, now)
@@ -263,6 +283,24 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	}
 
 	s.logger.Info("recovered orphaned runs", "count", affected)
+
+	// Mirror each cancellation into the journal so the Runs view (which
+	// will be journal-backed after Phase E) matches reality. Severity is
+	// 'notice' because this is a routine recovery, not an actual failure.
+	if s.journalWriter != nil {
+		for _, o := range orphans {
+			_, _ = s.journalWriter.Emit(ctx, journal.Entry{
+				WorkspaceID: o.workspaceID,
+				AgentID:     o.agentID,
+				Type:        journal.EntryRunCancelled,
+				Severity:    journal.SeverityNotice,
+				ActorType:   journal.ActorSystem,
+				Summary:     "run cancelled — server restart recovery",
+				Payload:     map[string]any{"reason": "server_restart"},
+				TraceID:     o.id,
+			})
+		}
+	}
 
 	// Reset agents that no longer have active runs to IDLE
 	if _, err := s.db.ExecContext(ctx, `

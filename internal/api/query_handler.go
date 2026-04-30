@@ -198,6 +198,27 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		runID = "" // prevent finishQuery from updating a non-existent record
 	}
 
+	// Mirror into journal (dual-write — Phase J drops agent_runs).
+	if runID != "" {
+		_, _ = h.journal.Emit(r.Context(), journal.Entry{
+			WorkspaceID: body.WorkspaceID,
+			AgentID:     target.ID,
+			Type:        journal.EntryRunStarted,
+			Severity:    journal.SeverityInfo,
+			ActorType:   journal.ActorAgent,
+			Summary:     fmt.Sprintf("run %s started (peer query)", shortRunID(runID)),
+			Payload: map[string]any{
+				"trigger_type":  "PEER_QUERY",
+				"chat_id":       body.ChatID,
+				"peer_query_id": convID,
+				"from_slug":     body.FromSlug,
+				"target_slug":   body.TargetSlug,
+			},
+			Refs:    map[string]any{"peer_query_id": convID, "chat_id": body.ChatID},
+			TraceID: runID,
+		})
+	}
+
 	// Broadcast event
 	broadcastChannelEvent(h.hub, "session", body.ChatID, "peer_query_running",
 		map[string]string{
@@ -389,6 +410,35 @@ func (h *QueryHandler) finishQuery(
 		if _, err := h.db.ExecContext(ctx, runQuery, runArgs...); err != nil {
 			h.logger.Error("update run record for query", "error", err, "run_id", runID)
 		}
+
+		// Mirror terminal state into journal (dual-write).
+		entryType := terminalEntryType(runStatus)
+		runSeverity := journal.SeverityInfo
+		if runStatus == "FAILED" {
+			runSeverity = journal.SeverityError
+		}
+		runPayload := map[string]any{
+			"peer_query_id": convID,
+			"duration_ms":   durationMs,
+		}
+		if errMsg != "" {
+			runPayload["error_message"] = errMsg
+		}
+		if runStatus == "COMPLETED" {
+			runPayload["exit_code"] = 0
+		}
+		_, _ = h.journal.Emit(ctx, journal.Entry{
+			WorkspaceID: workspaceID,
+			CrewID:      crewID,
+			AgentID:     targetAgentID,
+			Type:        entryType,
+			Severity:    runSeverity,
+			ActorType:   journal.ActorAgent,
+			Summary:     fmt.Sprintf("run %s %s (peer query)", shortRunID(runID), entryType[len("run."):]),
+			Payload:     runPayload,
+			Refs:        map[string]any{"peer_query_id": convID, "chat_id": chatID},
+			TraceID:     runID,
+		})
 	}
 
 	// Broadcast completion

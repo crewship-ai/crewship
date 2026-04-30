@@ -570,6 +570,7 @@ func (r *Router) registerRoutes() {
 	if r.keeperConfig != nil && r.keeperConfig.Enabled {
 		internal.SetKeeperEnabled(true)
 	}
+	internal.SetJournal(r.Journal())
 	internalAuth := internal.requireInternal
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
@@ -600,6 +601,7 @@ func (r *Router) registerRoutes() {
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	assign.SetJournal(r.Journal())
 	if r.missionCallback != nil {
 		assign.SetMissionCallback(r.missionCallback)
 		// Wire AssignmentHandler as the TaskDispatcher so the MissionEngine

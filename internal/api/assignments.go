@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -30,6 +31,7 @@ type AssignmentHandler struct {
 	logger          *slog.Logger
 	internalToken   string
 	missionCallback MissionCallback
+	journal         journal.Emitter
 }
 
 // NewAssignmentHandler creates an AssignmentHandler with the given orchestrator, WebSocket hub, and internal token.
@@ -41,6 +43,7 @@ func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.H
 		hub:           hub,
 		logger:        logger,
 		internalToken: internalToken,
+		journal:       noopEmitter{},
 	}
 }
 
@@ -48,6 +51,16 @@ func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.H
 
 func (h *AssignmentHandler) SetMissionCallback(cb MissionCallback) {
 	h.missionCallback = cb
+}
+
+// SetJournal wires a journal emitter for run lifecycle events. nil maps
+// to the no-op so callers don't have to branch.
+func (h *AssignmentHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 type targetAgentInfo struct {

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -233,6 +234,26 @@ func (h *AssignmentHandler) runAssignment(
 		runID = "" // prevent finishAssignment from updating a non-existent record
 	}
 
+	// Mirror into journal (dual-write — Phase J drops agent_runs).
+	if runID != "" {
+		_, _ = h.journal.Emit(ctx, journal.Entry{
+			WorkspaceID: body.WorkspaceID,
+			AgentID:     target.ID,
+			Type:        journal.EntryRunStarted,
+			Severity:    journal.SeverityInfo,
+			ActorType:   journal.ActorOrchestrator,
+			Summary:     fmt.Sprintf("run %s started (assignment)", shortRunID(runID)),
+			Payload: map[string]any{
+				"trigger_type":  "ASSIGNMENT",
+				"chat_id":       body.ChatID,
+				"assignment_id": assignmentID,
+				"target_slug":   body.TargetSlug,
+			},
+			Refs:    map[string]any{"assignment_id": assignmentID},
+			TraceID: runID,
+		})
+	}
+
 	// Mark assignment as RUNNING
 	if _, err := h.db.ExecContext(ctx,
 		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
@@ -382,6 +403,30 @@ func (h *AssignmentHandler) finishAssignment(
 		if _, err := h.db.ExecContext(ctx, runQuery, runArgs...); err != nil {
 			h.logger.Error("update run record for assignment", "error", err, "run_id", runID)
 		}
+
+		// Mirror terminal state into journal (dual-write).
+		entryType := terminalEntryType(status)
+		severity := journal.SeverityInfo
+		if status == "FAILED" {
+			severity = journal.SeverityError
+		}
+		payload := map[string]any{}
+		if errMsg != "" {
+			payload["error_message"] = errMsg
+		}
+		if status == "COMPLETED" {
+			payload["exit_code"] = 0
+		}
+		_, _ = h.journal.Emit(ctx, journal.Entry{
+			WorkspaceID: workspaceID,
+			Type:        entryType,
+			Severity:    severity,
+			ActorType:   journal.ActorOrchestrator,
+			Summary:     fmt.Sprintf("run %s %s (assignment)", shortRunID(runID), entryType[len("run."):]),
+			Payload:     payload,
+			Refs:        map[string]any{"assignment_id": assignmentID},
+			TraceID:     runID,
+		})
 	}
 
 	// Notify MissionEngine first — must run regardless of websocket availability
