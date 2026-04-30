@@ -56,11 +56,21 @@ func Recall(ctx context.Context, db *sql.DB, emb Embedder, q Query) ([]Hit, erro
 		return nil, fmt.Errorf("episodic: unknown scope %q", q.Scope)
 	}
 
+	// Cap the candidate set the cosine pass scans in Go. The package
+	// docstring assumes "a few thousand rows per agent" but workspace-
+	// shared scopes have no upper bound — without a LIMIT, a long-lived
+	// workspace can OOM Recall by scanning every embedding ever indexed.
+	// 5000 is well above the typical working set and ORDER BY ts DESC
+	// keeps recency bias intact when the cap kicks in (older relevant
+	// entries can still be promoted by reinforcement / importance).
+	const recallCandidateLimit = 5000
 	query := `SELECT em.entry_id, em.dim, em.vector, em.importance_score,
 		        e.entry_type, e.summary, e.agent_id, e.payload, e.ts
 		   FROM journal_embeddings em
 		   JOIN journal_entries e ON e.id = em.entry_id
-		  WHERE ` + strings.Join(conds, " AND ")
+		  WHERE ` + strings.Join(conds, " AND ") +
+		` ORDER BY e.ts DESC LIMIT ?`
+	args = append(args, recallCandidateLimit)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("episodic: candidate query: %w", err)
