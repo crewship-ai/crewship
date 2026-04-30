@@ -78,21 +78,48 @@ type ChatInfo struct {
 	WorkspaceMemPath   string // Deprecated: COORDINATOR-only; see orchestrator.BuildCoordinatorContext.
 }
 
+// ProvisioningEnqueueResult mirrors api.EnqueueResult shape locally so the
+// chatbridge interface doesn't import the api package — api depends on
+// chatbridge (ChatHandler), which would create a cycle.
+type ProvisioningEnqueueResult struct {
+	Started        bool
+	AlreadyRunning bool
+	Status         string
+}
+
+// ProvisioningEnqueuer kicks off an asynchronous provisioning job for a crew
+// whose devcontainer image hasn't been built yet. Wired in by the server so
+// the bridge can auto-trigger a build when a user's first message lands on
+// an unprovisioned crew, instead of erroring with "run `crewship crew
+// provision …` first" — the GUI has no terminal context for that hint.
+type ProvisioningEnqueuer interface {
+	EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (ProvisioningEnqueueResult, error)
+}
+
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
 // sessions, managing containers, persisting conversations, and streaming events.
 type Bridge struct {
-	orch      *orchestrator.Orchestrator
-	container provider.ContainerProvider
-	convStore *conversation.Store
-	logWriter *logcollector.Writer
-	resolver  ChatResolver
-	cfg       BridgeConfig
-	logger    *slog.Logger
+	orch         *orchestrator.Orchestrator
+	container    provider.ContainerProvider
+	convStore    *conversation.Store
+	logWriter    *logcollector.Writer
+	resolver     ChatResolver
+	provisioning ProvisioningEnqueuer // optional; nil means auto-provision is disabled
+	cfg          BridgeConfig
+	logger       *slog.Logger
 
 	// containerCache maps crewID → containerID so subsequent messages
 	// skip the "Starting container..." status events (container is warm).
 	containerMu    sync.RWMutex
 	containerCache map[string]string
+}
+
+// SetProvisioningEnqueuer wires the auto-provision trigger after Bridge
+// construction. Done as a setter (not a constructor argument) because the
+// api.ProvisioningHandler is built later in the server boot sequence and
+// needs the Bridge already initialised for its WS handler hookup.
+func (b *Bridge) SetProvisioningEnqueuer(p ProvisioningEnqueuer) {
+	b.provisioning = p
 }
 
 // BridgeConfig holds default resource limits for containers created by the bridge.
@@ -205,17 +232,53 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		info.CrewSlug = "coordinator"
 	}
 
-	// Fail-fast: if the crew has a devcontainer config that actually needs
-	// provisioning (features / postCreateCommand / mise) but no cached image
-	// has been built, block start with a helpful message. Configs that are
-	// no-ops at provision time (e.g. only containerEnv) launch directly
-	// from runtime_image.
+	// If the crew has a devcontainer config that actually needs provisioning
+	// (features / postCreateCommand / mise) but no cached image has been
+	// built, auto-trigger the build instead of erroring out — the GUI has
+	// no terminal in front of the user to run `crewship crew provision …`,
+	// and the toolbar progress popover (plus the chat-side build card the
+	// frontend renders off this event) lets the user watch the build land.
+	// Configs that are no-ops at provision time (e.g. only containerEnv)
+	// launch directly from runtime_image.
 	if info.DevcontainerConfig != "" && info.CachedImage == "" && devcontainerNeedsProvision(info.DevcontainerConfig, info.MiseConfig) {
-		msg := fmt.Sprintf("Crew %q has devcontainer configuration but no provisioned image. Run `crewship crew provision %s` first.", info.CrewSlug, info.CrewSlug)
-		b.logger.Error("agent start blocked: devcontainer not provisioned",
+		b.logger.Info("agent start auto-triggering devcontainer build",
 			"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
-		streamFn(ws.ChatEvent{Type: "error", Content: msg})
-		return fmt.Errorf("%s", msg)
+		var status string
+		if b.provisioning != nil {
+			res, enqErr := b.provisioning.EnqueueForCrew(ctx, info.CrewID, info.WorkspaceID)
+			if enqErr != nil {
+				// Surface the enqueue error to the UI but keep the typed
+				// crew_provisioning event so the chat can still render a
+				// useful state instead of a stray red toast.
+				b.logger.Warn("auto-provision enqueue failed",
+					"crew_slug", info.CrewSlug, "error", enqErr)
+				status = "error: " + enqErr.Error()
+			} else if res.AlreadyRunning {
+				status = "running"
+			} else if res.Started {
+				status = "pending"
+			}
+		} else {
+			// No provisioner wired (e.g. server started without Docker).
+			// Fall back to the original "run the CLI" hint so the user has
+			// something to act on.
+			msg := fmt.Sprintf("Crew %q has devcontainer configuration but no provisioned image. Run `crewship crew provision %s`.", info.CrewSlug, info.CrewSlug)
+			streamFn(ws.ChatEvent{Type: "error", Content: msg})
+			return fmt.Errorf("%s", msg)
+		}
+		// Emit a structured event the chat surface renders as a build-in-
+		// progress card (subscribes to the existing provision.* WS hub
+		// stream by crew_id for live updates).
+		streamFn(ws.ChatEvent{
+			Type:    "crew_provisioning",
+			Content: fmt.Sprintf("Building %s — your message will run once the image is ready.", info.CrewSlug),
+			Metadata: map[string]any{
+				"crew_id":   info.CrewID,
+				"crew_slug": info.CrewSlug,
+				"status":    status,
+			},
+		})
+		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
 	}
 
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{

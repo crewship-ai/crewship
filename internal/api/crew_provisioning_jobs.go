@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -246,6 +247,80 @@ func (h *ProvisioningHandler) ProvisionStatus(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// EnqueueResult captures the outcome of EnqueueForCrew so callers can tell
+// "started a fresh build" from "build was already running" without having to
+// double-check the in-memory jobs map.
+type EnqueueResult struct {
+	Started        bool   // true when a new goroutine was spawned
+	AlreadyRunning bool   // true when a job for this crew was pending/running
+	Status         string // existing job status when AlreadyRunning is true
+}
+
+// ErrProvisionerUnavailable is returned by EnqueueForCrew when the handler
+// has no Docker client wired up. ErrCrewNotFound and ErrCrewNoDevcontainer
+// signal load-time issues; ErrRateLimited surfaces the per-workspace cap.
+var (
+	ErrProvisionerUnavailable = fmt.Errorf("provisioner not available (Docker client not configured)")
+	ErrCrewNotFound           = fmt.Errorf("crew not found")
+	ErrCrewNoDevcontainer     = fmt.Errorf("crew has no devcontainer_config to provision")
+)
+
+// EnqueueForCrew kicks off an asynchronous provisioning job for the given
+// crew. Idempotent: when a job is already pending or running for the same
+// crew, returns AlreadyRunning=true with that job's status instead of
+// starting a duplicate. Used both by the HTTP handler and by chatbridge so
+// "send first message" can auto-provision a crew whose devcontainer hasn't
+// been built yet — without the bridge needing to round-trip through HTTP.
+func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, workspaceID string) (EnqueueResult, error) {
+	if h.provisioner == nil {
+		return EnqueueResult{}, ErrProvisionerUnavailable
+	}
+	if crewID == "" {
+		return EnqueueResult{}, fmt.Errorf("crew ID is required")
+	}
+
+	var devcontainerCfg, miseCfg, runtimeImage sql.NullString
+	err := h.db.QueryRowContext(ctx,
+		`SELECT devcontainer_config, mise_config, runtime_image
+		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		crewID, workspaceID,
+	).Scan(&devcontainerCfg, &miseCfg, &runtimeImage)
+	if err == sql.ErrNoRows {
+		return EnqueueResult{}, ErrCrewNotFound
+	}
+	if err != nil {
+		return EnqueueResult{}, fmt.Errorf("query crew: %w", err)
+	}
+	if !devcontainerCfg.Valid || devcontainerCfg.String == "" {
+		return EnqueueResult{}, ErrCrewNoDevcontainer
+	}
+
+	h.mu.Lock()
+	if existing, ok := h.jobs[crewID]; ok && (existing.Status == "pending" || existing.Status == "running") {
+		status := existing.Status
+		h.mu.Unlock()
+		return EnqueueResult{AlreadyRunning: true, Status: status}, nil
+	}
+	job := &ProvisionJob{
+		CrewID:    crewID,
+		Status:    "pending",
+		StartedAt: time.Now(),
+	}
+	h.jobs[crewID] = job
+	h.mu.Unlock()
+
+	if err := h.rateLimiter.tryAcquire(workspaceID); err != nil {
+		h.mu.Lock()
+		delete(h.jobs, crewID)
+		h.mu.Unlock()
+		return EnqueueResult{}, err
+	}
+
+	go h.runProvisioning(crewID, workspaceID, devcontainerCfg.String, miseCfg.String, runtimeImage.String, job)
+	h.logger.Info("provisioning triggered", "crew_id", crewID)
+	return EnqueueResult{Started: true}, nil
+}
+
 // ProvisionTrigger starts an asynchronous provisioning job for the given crew.
 // Returns 202 immediately; the caller polls ProvisionStatus for progress.
 // Returns 503 if the Docker client is not configured, 409 if a job is already
@@ -259,81 +334,34 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if h.provisioner == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error": "provisioning not available (Docker client not configured)",
-		})
-		return
-	}
-
 	crewID := r.PathValue("crewId")
-	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew ID is required"})
-		return
-	}
-
-	// Load the crew's devcontainer configuration from the DB.
-	var devcontainerCfg, miseCfg, runtimeImage sql.NullString
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT devcontainer_config, mise_config, runtime_image
-		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		crewID, workspaceID,
-	).Scan(&devcontainerCfg, &miseCfg, &runtimeImage)
-
-	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
-		return
-	}
+	res, err := h.EnqueueForCrew(r.Context(), crewID, workspaceID)
 	if err != nil {
-		h.logger.Error("query crew for provisioning", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		switch {
+		case err == ErrProvisionerUnavailable:
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		case err == ErrCrewNotFound:
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		case err == ErrCrewNoDevcontainer:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		default:
+			// Rate-limit failures from the limiter come through here.
+			if strings.Contains(err.Error(), "rate limited") {
+				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+				return
+			}
+			h.logger.Error("provision trigger", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		}
 		return
 	}
-
-	if !devcontainerCfg.Valid || devcontainerCfg.String == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "crew has no devcontainer_config to provision",
-		})
-		return
-	}
-
-	// Reject if a job is already running/pending for this crew.
-	h.mu.Lock()
-	if existing, ok := h.jobs[crewID]; ok && (existing.Status == "pending" || existing.Status == "running") {
-		status := existing.Status
-		h.mu.Unlock()
+	if res.AlreadyRunning {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error":  "provisioning already in progress",
-			"status": status,
+			"status": res.Status,
 		})
 		return
 	}
-	job := &ProvisionJob{
-		CrewID:    crewID,
-		Status:    "pending",
-		StartedAt: time.Now(),
-	}
-	h.jobs[crewID] = job
-	h.mu.Unlock()
-
-	// Rate limit per workspace. Acquired here (after the per-crew dedupe
-	// check) so the limit reflects actual provisioning starts, not rejected
-	// duplicates. runProvisioning must release the slot on every exit path.
-	if err := h.rateLimiter.tryAcquire(workspaceID); err != nil {
-		h.mu.Lock()
-		delete(h.jobs, crewID)
-		h.mu.Unlock()
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	// Kick off async provisioning. Never block the HTTP handler.
-	go h.runProvisioning(crewID, workspaceID, devcontainerCfg.String, miseCfg.String, runtimeImage.String, job)
-
-	h.logger.Info("provisioning triggered", "crew_id", crewID)
-
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"status":  "started",
 		"message": "Provisioning started. Monitor with 'crewship crew provision status <slug>'.",

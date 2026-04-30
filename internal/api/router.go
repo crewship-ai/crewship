@@ -79,6 +79,14 @@ type Router struct {
 	journal               journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator          *consolidate.Consolidator
 	consolidateMemoryRoot string
+	provisioning          *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
+}
+
+// Provisioning returns the registered ProvisioningHandler so wiring code (e.g.
+// cmd_start) can hand it to chatbridge as a ProvisioningEnqueuer. Returns nil
+// when registerRoutes hasn't run yet (e.g. tests that build a Router by hand).
+func (r *Router) Provisioning() *ProvisioningHandler {
+	return r.provisioning
 }
 
 // Journal returns the journal emitter or a no-op if unset. Handlers should

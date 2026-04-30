@@ -18,7 +18,17 @@ function uuid(): string {
 // --- Turn-based model types ---
 
 /** Discriminator for the content type of a turn part (text, tool call, thinking, etc.). */
-export type TurnPartType = "text" | "thinking" | "tool_call" | "tool_result" | "status" | "error" | "result" | "system_init" | "image"
+export type TurnPartType =
+  | "text"
+  | "thinking"
+  | "tool_call"
+  | "tool_result"
+  | "status"
+  | "error"
+  | "result"
+  | "system_init"
+  | "image"
+  | "crew_provisioning"
 
 /** A single content block within a chat turn (e.g. a text fragment, tool call, or thinking block). */
 export interface TurnPart {
@@ -45,7 +55,18 @@ export interface ChatTurn {
 export type MessageRole = "user" | "assistant" | "system" | "tool"
 
 /** @deprecated Legacy stream event type; use TurnPartType for new code. */
-export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" | "status" | "done" | "error" | "system" | "result" | "image"
+export type StreamEventType =
+  | "text"
+  | "tool_call"
+  | "tool_result"
+  | "thinking"
+  | "status"
+  | "done"
+  | "error"
+  | "system"
+  | "result"
+  | "image"
+  | "crew_provisioning"
 
 /** WebSocket event types for agent-to-agent task assignment lifecycle. */
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
@@ -568,6 +589,32 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           })
           textBufferRef.current = ""
           thinkingBufferRef.current = ""
+          setIsStreaming(false)
+          break
+
+        case "crew_provisioning":
+          // Auto-provision kicked off by chatbridge — render a system turn
+          // carrying the crew_id so the chat surface can render the same
+          // build progress card the toolbar popover shows. Replaces the
+          // legacy red "Run `crewship crew provision …` first" error.
+          setTurns((prev) => [
+            ...prev,
+            {
+              id: uuid(),
+              role: "system",
+              parts: [
+                {
+                  id: uuid(),
+                  type: "crew_provisioning",
+                  content: content || "Building crew image…",
+                  metadata,
+                  timestamp: new Date(),
+                },
+              ],
+              isStreaming: false,
+              timestamp: new Date(),
+            },
+          ])
           setIsStreaming(false)
           break
 

@@ -16,6 +16,7 @@ import { arrival } from "@/lib/motion"
 import type { ChatTurn } from "@/hooks/use-chat"
 import { AssistantTurn } from "./assistant-turn"
 import { EditableUserMessage } from "./messages/editable-user-message"
+import { CrewProvisioningCard } from "./crew-provisioning-card"
 
 function formatTimestamp(date: Date): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
@@ -81,6 +82,24 @@ export const TurnRenderer = React.memo(function TurnRenderer({ turn, onCopy, onF
     const content = part?.content ?? ""
     const isError = part?.type === "error"
     const isInit = part?.type === "system_init"
+    const isCrewProvisioning = part?.type === "crew_provisioning"
+
+    if (isCrewProvisioning) {
+      const meta = part?.metadata ?? {}
+      const crewId = meta.crew_id as string | undefined
+      const crewSlug = meta.crew_slug as string | undefined
+      return (
+        <motion.div
+          initial={initialAnim}
+          animate={arrival.animate}
+          transition={transition}
+          data-turn-id={turn.id}
+          className="px-4 py-2"
+        >
+          <CrewProvisioningCard crewId={crewId} crewSlug={crewSlug} message={content} />
+        </motion.div>
+      )
+    }
 
     if (isInit) {
       const meta = part?.metadata ?? {}
