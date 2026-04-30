@@ -687,6 +687,9 @@ func (panickingSubagent) Run(_ context.Context, _ Hook, _ EventContext) (Result,
 // deadline before the shell command had a chance to run. The cap fires
 // before the multiplication so `true` completes normally.
 func TestShellHandlerTimeoutOverflowGuarded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell handler requires sh")
+	}
 	res, err := shellHandler(context.Background(), Hook{
 		HandlerKind: HandlerKindShell,
 		HandlerConfig: map[string]any{

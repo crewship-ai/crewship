@@ -433,12 +433,15 @@ func TestForkRemapsTaskDependencies(t *testing.T) {
 		}
 		forkTasks = append(forkTasks, ft)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate fork tasks: %v", err)
+	}
 	if len(forkTasks) != 2 {
 		t.Fatalf("want 2 fork tasks, got %d", len(forkTasks))
 	}
 
-	planForkID := forkTasks[0].id   // fork-side mt_p1 (Plan)
-	execForkID := forkTasks[1].id   // fork-side mt_p2 (Execute)
+	planForkID := forkTasks[0].id // fork-side mt_p1 (Plan)
+	execForkID := forkTasks[1].id // fork-side mt_p2 (Execute)
 	execDeps := forkTasks[1].dependsOn
 
 	// Sanity: the fork's task IDs are NEW (not the parent's).
