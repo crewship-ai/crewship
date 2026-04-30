@@ -122,8 +122,17 @@ func (l *License) LoadFromBytes(data []byte) error {
 		return fmt.Errorf("parse license claims: %w", err)
 	}
 
-	if claims.ExpiresAt > 0 && time.Now().Unix() > claims.ExpiresAt {
+	now := time.Now().Unix()
+	if claims.ExpiresAt > 0 && now > claims.ExpiresAt {
 		return fmt.Errorf("license expired on %s", time.Unix(claims.ExpiresAt, 0).Format(time.RFC3339))
+	}
+	// Reject licenses claiming to be issued in the future. A 1-hour
+	// tolerance covers benign clock skew between the signing host and
+	// this machine; anything beyond is either forged or wildly
+	// misconfigured.
+	const issuedAtSkewSec = 3600
+	if claims.IssuedAt > now+issuedAtSkewSec {
+		return fmt.Errorf("license issued_at %s is in the future", time.Unix(claims.IssuedAt, 0).Format(time.RFC3339))
 	}
 
 	l.mu.Lock()
