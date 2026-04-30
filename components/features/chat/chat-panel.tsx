@@ -138,7 +138,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   useEffect(() => {
     if (!sessionId) return
     let cancelled = false
-    fetch(`/api/v1/chats/${sessionId}/messages`, { credentials: "include" })
+    apiFetch(`/api/v1/chats/${sessionId}/messages`)
       .then(async (r) => {
         // 404 means the chat row doesn't exist yet — it's a brand-new
         // session. Don't mark it ready; ensureSession() must still run
@@ -181,7 +181,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const ensureSession = useCallback(async () => {
     if (sessionReady || !workspaceId || !sessionId) return
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, origin: "UI" }) },
       )
@@ -193,7 +193,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const filesVisible = drawer.open && drawer.activeTab === "files"
   useEffect(() => {
     if (!workspaceId || !filesVisible || !sessionId) return
-    fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
+    apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data: FileEntry[] | null) => setFiles(data ?? []))
       .catch(() => {})

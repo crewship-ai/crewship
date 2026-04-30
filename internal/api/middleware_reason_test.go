@@ -27,7 +27,10 @@ import (
 func newMwRig(t *testing.T) (*AuthMiddleware, sessions.Store, *auth.JWTValidator, string, string) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	store := sessions.NewDBStore(db)
 	uid := seedTestUser(t, db)
@@ -70,7 +73,10 @@ func TestMiddleware_NoCredentials(t *testing.T) {
 
 func TestMiddleware_SessionRevoked(t *testing.T) {
 	mw, store, v, uid, sid := newMwRig(t)
-	tok, _ := v.IssueAccessToken(uid, sid, "", "")
+	tok, err := v.IssueAccessToken(uid, sid, "", "")
+	if err != nil {
+		t.Fatalf("issue access: %v", err)
+	}
 
 	// Revoke before the request hits.
 	if err := store.Revoke(context.Background(), sid, sessions.ReasonLogout); err != nil {
@@ -105,7 +111,10 @@ func TestMiddleware_SessionRowMissing(t *testing.T) {
 	// row outright via FK CASCADE so this test actually hits the
 	// ErrNotFound path.
 	mw, _, v, uid, sid := newMwRig(t)
-	tok, _ := v.IssueAccessToken(uid, sid, "", "")
+	tok, err := v.IssueAccessToken(uid, sid, "", "")
+	if err != nil {
+		t.Fatalf("issue access: %v", err)
+	}
 
 	// Delete the user → FK CASCADE deletes the user_sessions row.
 	if _, err := mw.db.Exec(`DELETE FROM users WHERE id = ?`, uid); err != nil {
@@ -184,7 +193,10 @@ func TestMiddleware_RefreshTokenSmuggledIntoBearerHeader(t *testing.T) {
 	// validator's per-kind salt makes this fail at decrypt → maps to
 	// session_invalid.
 	mw, _, v, uid, sid := newMwRig(t)
-	refresh, _ := v.IssueRefreshToken(uid, sid)
+	refresh, err := v.IssueRefreshToken(uid, sid)
+	if err != nil {
+		t.Fatalf("issue refresh: %v", err)
+	}
 
 	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Fatal("refresh-as-access must be rejected")
@@ -204,7 +216,10 @@ func TestMiddleware_RefreshTokenSmuggledIntoBearerHeader(t *testing.T) {
 
 func TestMiddleware_HappyPathPopulatesUserAndSessionID(t *testing.T) {
 	mw, _, v, uid, sid := newMwRig(t)
-	tok, _ := v.IssueAccessToken(uid, sid, "Tester", "test@example.com")
+	tok, err := v.IssueAccessToken(uid, sid, "Tester", "test@example.com")
+	if err != nil {
+		t.Fatalf("issue access: %v", err)
+	}
 
 	var seen *AuthUser
 	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +247,10 @@ func TestMiddleware_HappyPathPopulatesUserAndSessionID(t *testing.T) {
 
 func TestMiddleware_SessionLastUsedTouched(t *testing.T) {
 	mw, store, v, uid, sid := newMwRig(t)
-	tok, _ := v.IssueAccessToken(uid, sid, "", "")
+	tok, err := v.IssueAccessToken(uid, sid, "", "")
+	if err != nil {
+		t.Fatalf("issue access: %v", err)
+	}
 
 	// Snapshot last_used_at from the store. Because Create just ran,
 	// last_used_at == created_at to the second.
@@ -257,7 +275,10 @@ func TestMiddleware_SessionLastUsedTouched(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	post, _ := store.Get(context.Background(), sid)
+	post, gErr := store.Get(context.Background(), sid)
+	if gErr != nil {
+		t.Fatalf("get post-touch: %v", gErr)
+	}
 	if !post.LastUsedAt.After(pre.LastUsedAt) {
 		t.Errorf("last_used_at not advanced; pre=%v post=%v", pre.LastUsedAt, post.LastUsedAt)
 	}

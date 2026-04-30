@@ -23,7 +23,7 @@ func TestRotateRefreshJti_HappyPath(t *testing.T) {
 	// anything (we use an empty string here mirroring how the very
 	// first refresh-cookie issued at signin has its jti only on the
 	// token, not yet in the row).
-	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-1"); err != nil {
+	if err := store.RotateRefreshJti(ctx, sess.ID, "signin-jti", "jti-1"); err != nil {
 		t.Fatalf("first rotation: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestRotateRefreshJti_ReplayDetected(t *testing.T) {
 	}
 
 	// Legitimate rotation moves the jti from NULL → jti-1.
-	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-1"); err != nil {
+	if err := store.RotateRefreshJti(ctx, sess.ID, "signin-jti", "jti-1"); err != nil {
 		t.Fatalf("rotate 1: %v", err)
 	}
 	if err := store.RotateRefreshJti(ctx, sess.ID, "jti-1", "jti-2"); err != nil {
@@ -98,7 +98,7 @@ func TestRotateRefreshJti_RevokedSession(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-1"); err != nil {
+	if err := store.RotateRefreshJti(ctx, sess.ID, "signin-jti", "jti-1"); err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 	if err := store.Revoke(ctx, sess.ID, ReasonAdminForce); err != nil {
@@ -117,9 +117,25 @@ func TestRotateRefreshJti_RevokedSession(t *testing.T) {
 // is theft.
 func TestRotateRefreshJti_UnknownSession(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
-	err := store.RotateRefreshJti(context.Background(), "s_does-not-exist", "", "jti-1")
+	err := store.RotateRefreshJti(context.Background(), "s_does-not-exist", "stale-jti", "jti-1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("got %v, want ErrNotFound", err)
+	}
+}
+
+// Empty expectedJti is rejected at validation — every legitimate
+// refresh request carries a JTI from the inbound refresh token, so
+// blank input is a malformed caller and rejecting it shrinks the
+// attack surface around the rotation gate.
+func TestRotateRefreshJti_EmptyExpectedRejected(t *testing.T) {
+	store := NewDBStore(newTestDB(t))
+	ctx := context.Background()
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-1"); err == nil {
+		t.Error("empty expectedJti should be rejected, got nil error")
 	}
 }
 
@@ -134,7 +150,7 @@ func TestRotateRefreshJti_ConcurrentSafety(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-0"); err != nil {
+	if err := store.RotateRefreshJti(ctx, sess.ID, "signin-jti", "jti-0"); err != nil {
 		t.Fatalf("seed jti: %v", err)
 	}
 

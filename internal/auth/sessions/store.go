@@ -297,8 +297,17 @@ func (s *DBStore) TouchLastUsed(ctx context.Context, id string) error {
 // signIn — Create() leaves current_refresh_jti=NULL). On mismatch we
 // return ErrJTIMismatch and the caller revokes the whole session.
 func (s *DBStore) RotateRefreshJti(ctx context.Context, sessionID, expectedJti, newJti string) error {
-	if sessionID == "" || newJti == "" {
-		return errors.New("session id and newJti required")
+	// expectedJti MUST be non-empty: every legitimate refresh request
+	// carries a JTI from the inbound refresh token (IssueRefreshToken
+	// never produces empty), and the previous "empty also passes via
+	// IS NULL" code path was a defense-in-depth gap — an attacker
+	// sending an empty-jti refresh token shouldn't get a free pass on
+	// the very first rotation just because the row hasn't been
+	// stamped yet. The IS NULL branch in the SQL still handles the
+	// signin-time first-rotation case, but only when the caller
+	// supplies a real JTI to compare against.
+	if sessionID == "" || expectedJti == "" || newJti == "" {
+		return errors.New("session id, expectedJti, and newJti required")
 	}
 	const q = `UPDATE user_sessions
 		SET current_refresh_jti = ?
