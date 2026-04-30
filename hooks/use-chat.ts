@@ -678,7 +678,15 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     setIsStreaming(false)
     setTurns((prev) =>
       prev.map((t) =>
-        t.role === "assistant" && t.isStreaming ? { ...t, isStreaming: false } : t,
+        t.role === "assistant" && t.isStreaming
+          ? {
+              ...t,
+              isStreaming: false,
+              parts: t.parts.map((p) =>
+                p.isStreaming ? { ...p, isStreaming: false } : p,
+              ),
+            }
+          : t,
       ),
     )
   }, [send, sessionId])
