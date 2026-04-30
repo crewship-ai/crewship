@@ -112,6 +112,8 @@ jobs:
     name: Go Lint
     runs-on: [self-hosted, macos-arm64]
     timeout-minutes: 10
+    env:
+      GOLANGCI_VERSION: v2.1.6
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -119,16 +121,32 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      # Cache the golangci-lint binary itself — `go install` from source
+      # adds ~30s per run and the resulting binary is fully determined by
+      # (runner OS, Go version, golangci-lint version). Cache miss falls
+      # through to the install step below.
+      - name: Resolve GOPATH/bin
+        id: gopath
+        shell: bash
+        run: echo "bin=$(go env GOPATH)/bin" >> "$GITHUB_OUTPUT"
+
+      - name: Cache golangci-lint binary
+        id: lint-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.gopath.outputs.bin }}/golangci-lint
+          key: golangci-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ env.GOLANGCI_VERSION }}
+
       # Build golangci-lint from source with Go 1.26. Pre-built releases (up
       # to v2.1.6) ship with Go ≤1.24 and refuse to analyze code targeting a
-      # newer language version. Costs ~30s; removable once an upstream
-      # release is built with Go 1.26+.
+      # newer language version. Costs ~30s on cache miss; removable once an
+      # upstream release is built with Go 1.26+.
       - name: Install golangci-lint from source
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
+        if: steps.lint-cache.outputs.cache-hit != 'true'
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
 
       - name: Run golangci-lint
-        run: |
-          "$(go env GOPATH)/bin/golangci-lint" run --timeout=5m ./...
+        run: ${{ steps.gopath.outputs.bin }}/golangci-lint run --timeout=5m ./...
 
   # ── Full binary build (push to main only — verifies embed works) ──
   #
