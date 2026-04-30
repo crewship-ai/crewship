@@ -63,6 +63,56 @@ CREATE TABLE journal_embeddings (
 
 Vectors are stored as little-endian float32 BLOBs -- native Go slice serialisation. SQLite has no `pgvector`, so recall is a **brute-force cosine scan** over the scope-filtered rows. For the expected scale (~1% of entries embedded, low thousands per agent) the scan finishes in low milliseconds. If this outgrows SQLite the right move is an external vector store, not a SQLite extension -- so storage sits behind an interface.
 
+### Migration 55 additions
+
+Added in PR #212 alongside the memory uplift:
+
+```sql
+-- FTS5 contentless mirror of journal_entries.summary + payload.
+-- Insert/update/delete triggers keep it in lockstep with the base table.
+-- Powers the ?q= parameter on /api/v1/journal and the BM25 leg of HybridRecall.
+CREATE VIRTUAL TABLE journal_entries_fts USING fts5(
+  summary, payload, content='journal_entries', content_rowid='rowid'
+);
+
+-- Compaction sink. Aged rows from journal_entries land here with payload
+-- truncated to 400 chars before being deleted from the base table.
+CREATE TABLE journal_entries_archived (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  ts           TEXT NOT NULL,
+  entry_type   TEXT NOT NULL,
+  severity     TEXT NOT NULL,
+  summary      TEXT NOT NULL,
+  payload      TEXT NOT NULL,                 -- 400-char truncation
+  archived_at  TEXT NOT NULL
+);
+
+-- A-Mem-style edge graph: similarity edges linking related embeddings.
+CREATE TABLE memory_relations (
+  src_entry_id TEXT NOT NULL,
+  dst_entry_id TEXT NOT NULL,
+  relation     TEXT NOT NULL,                 -- 'similar' | 'supports' | 'contradicts'
+  weight       REAL NOT NULL DEFAULT 0.0,     -- cosine for 'similar', 1.0 for hand-asserted
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (src_entry_id, dst_entry_id, relation)
+);
+
+-- Daily 5-metric health score per workspace (and optionally per crew).
+CREATE TABLE memory_health_snapshots (
+  workspace_id   TEXT NOT NULL,
+  crew_id        TEXT,                        -- NULL = workspace-aggregate
+  snapshot_date  TEXT NOT NULL,               -- YYYY-MM-DD UTC
+  freshness      REAL NOT NULL,
+  coverage       REAL NOT NULL,
+  coherence      REAL NOT NULL,
+  efficiency     REAL NOT NULL,
+  reachability   REAL NOT NULL,
+  score          REAL NOT NULL,               -- weighted sum (see below)
+  PRIMARY KEY (workspace_id, crew_id, snapshot_date)
+);
+```
+
 ## Scopes
 
 ```go
@@ -82,6 +132,41 @@ const (
 | `COORDINATOR` | `crew_shared` |
 
 **Workspace isolation is always enforced** at the query boundary -- a cross-workspace recall is impossible even with a misconfigured scope.
+
+## Hybrid retrieval
+
+Pure cosine recall misses entries that are lexically obvious — searching for `"OOM in checkout"` does not necessarily match an entry whose summary literally says `OOM`, because `nomic-embed-text` clusters by semantics, not surface form. PR #212 adds **hybrid retrieval**: dense (cosine) and sparse (BM25 over the FTS5 index) results fused via Reciprocal Rank Fusion.
+
+```go
+hits, err := episodic.HybridRecall(ctx, db, embedder, episodic.Query{
+    WorkspaceID: ws,
+    AgentID:     agent,
+    Scope:       episodic.ScopeOwn,
+    QueryText:   "OOM in checkout",
+    K:           5,
+})
+```
+
+The fusion formula:
+
+```
+RRF_score(entry) = Σ over rankings r of:  1 / (k_RRF + rank_r(entry))
+```
+
+with `k_RRF = 60` (the value used in the original RRF paper; further tuning had marginal returns). Each ranking contributes the inverse of the entry's position; entries ranked highly in either leg float to the top, while entries that appear in both pump up most. There is no weighting parameter — both legs are treated equal, and the constant 60 dominates ranking noise at low ranks where it matters most.
+
+`HybridRecall` is the recommended entry point for new code. The pure-cosine `Recall` is preserved for the orchestrator's prompt-injection path (where rank stability across small query perturbations matters more than recall on lexical hits) and for tests that want a deterministic similarity score.
+
+## Memory relations (A-Mem-style edges)
+
+Embeddings live in isolation by default; `memory_relations` lets us treat them as a graph. Two relation types are populated automatically:
+
+- **`similar`** — `LinkSimilarOnIndex` runs at insert time: for the freshly-indexed entry, query the existing embedding pool, take the **top-3 cosine matches above 0.80**, write `(src=new, dst=match, relation='similar', weight=cosine)` rows. Edges are unidirectional (the new entry points to its predecessors); the inverse direction is implied at read time.
+- **`supports`** — `LinkSupports` is called by the consolidator when it derives a rule from one or more journal entries. The rule entry points to every supporting evidence entry: `relation='supports', weight=1.0`. This is what makes consolidated rules traceable back to their evidence.
+
+A future `contradicts` relation is reserved in the schema but not populated today.
+
+Read-side use: when injecting recalled hits into a prompt, the orchestrator can optionally walk one hop along `similar` edges to deepen context without paying for another embedding round-trip. Disabled by default; enable per-agent by setting `agent.memory_walk_depth = 1`.
 
 ## Recall API
 
@@ -189,6 +274,47 @@ type Embedder interface {
 Production wiring uses the Ollama adapter (`embedder.go`) against `nomic-embed-text`. The adapter follows the `OLLAMA_HOST` env var and falls back to `http://host.docker.internal:11434`.
 
 If the embedder is nil (Ollama unreachable at startup), `Recall` returns an empty slice silently -- agent runs don't fail on embedding outages. This is configured in `server/orchestrator_adapters.go:newEpisodicRecallAdapter`.
+
+## Health scoring
+
+`memory_health_snapshots` captures one row per workspace per day (and optionally per crew). The score is a weighted sum of five metrics, each in `[0, 100]`:
+
+| Metric | Weight | Question it answers |
+|---|---|---|
+| **Freshness** | 25% | How recent is the indexed content? Decays with median entry age. |
+| **Coverage** | 25% | What fraction of *embeddable* journal entries are actually indexed? |
+| **Coherence** | 20% | How tight is the embedding cluster structure? Higher = entries cleanly group around shared themes. |
+| **Efficiency** | 15% | Average cosine of the top-K hit distribution — high means recalls return distinct, relevant entries; low means the index returns noise. |
+| **Reachability** | 15% | Fraction of embeddings reachable via at least one `memory_relations` edge. |
+
+The composite `score` is reported with three colour bands:
+
+| Band | Range | Meaning |
+|---|---|---|
+| Red | `< 50` | Memory is degraded; likely missing recent entries, low embedding count, or weak clustering. Operator action: trigger consolidation, check Ollama health. |
+| Yellow | `50–75` | Functional but with at least one weak metric. Watch the dashboard. |
+| Green | `≥ 75` | All metrics in healthy range. |
+
+Health is computed by `internal/episodic/health.go`'s `ComputeSnapshot`. The daily consolidator job calls it after `IndexNew`; operators can call it on demand via:
+
+- HTTP — `GET /api/v1/memory/health[?crew_id=<slug>]`. See [Memory API](/api-reference/memory).
+- CLI — `crewship memory health [--crew <slug>]`. See [`crewship memory health`](/cli/memory#health).
+
+The endpoint returns the **latest snapshot** in the table — it does not recompute on read. Use `crewship memory health --recompute` (or POST the equivalent) to force a fresh score.
+
+## In-session memory nudge
+
+When an agent run accumulates **30 or more new journal entries** since its last `memory.updated` entry, the orchestrator injects a short reminder into the next system prompt:
+
+> You have 47 new journal entries since your last memory update. Consider summarising what you've learned with `summary.generated` so future sessions can recall it.
+
+The threshold is fixed at 30 because that's roughly when an agent's working context starts evicting its own short-term memory. The nudge only fires once per session — once the agent emits a new `summary.generated`, the counter resets.
+
+A second nudge fires opportunistically when daily cost exceeds \$1 (default; configurable per workspace):
+
+> Last 24h: 142 calls, 3.4M tokens, \$8.71. Watch for runaway loops — the consolidator will summarise this batch on the next tick.
+
+Both nudges are advisory — agents can ignore them, and they are stripped from the context before the LLM call records its response payload.
 
 ## Indexer
 

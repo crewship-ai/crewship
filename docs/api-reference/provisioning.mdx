@@ -1,0 +1,214 @@
+---
+title: "Provisioning"
+description: "Devcontainer features and runtimes catalog, crew provision lifecycle, and the cache image registry."
+icon: "package"
+---
+
+# Provisioning
+
+Endpoints that drive the [Devcontainers](/guides/devcontainers) pipeline: discover available features and runtimes, trigger or rebuild a crew's cached image, and inspect the local cache. All routes require auth and are workspace-scoped where they touch crew rows.
+
+Implementation lives in `internal/api/provisioning_handler.go`; the underlying provisioner is in `internal/devcontainer/`.
+
+---
+
+## Catalogs
+
+### Feature catalog
+
+```
+GET /api/v1/features/catalog?search=…
+```
+
+Lists devcontainer features Crewship can install. The dynamic fetcher pulls from upstream registries (`ghcr.io/devcontainers/features/*`, `ghcr.io/devcontainers-extra/features/*`, `ghcr.io/crewship-ai/features/*`); when that fails, the handler falls back to `internal/devcontainer.FallbackCatalog` so the UI is never empty.
+
+`?search=` filters by name, description, or category (server-side substring).
+
+**Response:** `200 OK`
+
+```json
+{
+  "features": [
+    {
+      "ref": "ghcr.io/devcontainers/features/python:1",
+      "name": "Python",
+      "description": "Installs the specified Python version, pip, and pipx. Supports virtual environments.",
+      "category": "languages",
+      "icon": "code",
+      "size_hint": "~80 MB"
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `ref` | OCI reference — what you put in `devcontainer_config.features`. |
+| `category` | One of `languages`, `tools`, `cloud`, `databases`. |
+| `icon` | Lucide icon name for UI rendering. |
+| `size_hint` | Approximate installed-size delta (`~80 MB`). |
+
+Unknown publishers (anything outside the three allowlisted prefixes) are rejected at provisioning time even if they appear in a custom catalog — see `internal/devcontainer/features.go`.
+
+### Runtime catalog
+
+```
+GET /api/v1/runtimes/catalog?search=…
+```
+
+Lists the mise-managed runtimes (Node, Python, Go, Terraform, kubectl, …) the workspace can pin in `devcontainer_config.mise`. **Not** a base-image catalog — that is `crewship features base-images` (also under `/api/v1/features/catalog`). Falls back to `FallbackRuntimeCatalog` when the dynamic fetcher fails.
+
+**Response:** `200 OK`
+
+```json
+{
+  "runtimes": [
+    {
+      "name": "Node.js",
+      "tool": "node",
+      "description": "JavaScript runtime.",
+      "category": "languages",
+      "icon": "hexagon",
+      "versions": ["22", "20", "18"],
+      "default_version": "22",
+      "backends": ["asdf"]
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `tool` | Mise tool ID — what you put in `mise.json`. |
+| `category` | Same set as the feature catalog: `languages`, `tools`, `cloud`, `databases`. |
+| `versions` | Available versions, ordered newest-first. May be empty when mise resolves dynamically. |
+| `default_version` | What Crewship picks when the crew config does not pin one. |
+| `backends` | Mise install backends (`asdf`, `cargo`, `npm`, `pipx`, `github`). Empty → mise default. |
+
+---
+
+## Crew provisioning lifecycle
+
+### Provision status
+
+```
+GET /api/v1/crews/{crewId}/provision
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "running",
+  "has_config": true,
+  "cached_image": null,
+  "config_hash": "a1b2c3d4e5f6…",
+  "started_at": "2026-04-30T11:01:18Z",
+  "step": "installing-features",
+  "step_index": 3,
+  "step_total": 6
+}
+```
+
+`status` is one of:
+
+| Value | Meaning |
+|---|---|
+| `idle` | No config, nothing to do. |
+| `pending` | Job enqueued, not yet picked up. |
+| `running` | Provisioner is mid-pipeline. |
+| `success` | Cached image exists at `cached_image`. |
+| `failed` | See `error` field for the failure reason. |
+
+When `status=running`, `step` and `step_index` track sub-progress so the UI's `CrewProvisioningCard` can render a checklist.
+
+### Trigger provision
+
+```
+POST /api/v1/crews/{crewId}/provision
+```
+
+Idempotent: if a job is already running for this crew, returns the existing job ID rather than starting a duplicate.
+
+**Response:** `202 Accepted`
+
+```json
+{ "job_id": "prov_a1b2", "status": "pending" }
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 404 | Crew not in workspace. |
+| 409 | Crew has no `devcontainer_config` (nothing to provision). |
+| 429 | Per-workspace rate limit exceeded (RFC 7807 Problem Details body with `type` / `detail`). |
+
+### Rebuild
+
+```
+POST /api/v1/crews/{crewId}/rebuild
+```
+
+Clears the cached image marker on the crew row and triggers a fresh provision. Use when upstream features publish breaking updates under the same tag.
+
+**Response:** `202 Accepted` — same shape as Trigger.
+
+### Restart agents
+
+```
+POST /api/v1/crews/{crewId}/restart-agents
+```
+
+Stops and re-execs every agent in the crew without rebuilding the container. Used when an env-var change should take effect without the cost of a new image. Returns `200 OK` with `{ restarted: <count> }`.
+
+---
+
+## Cache image registry
+
+### List cached images
+
+```
+GET /api/v1/cache/images
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "images": [
+    {
+      "tag": "crewship-cache:a1b2c3d4e5f6",
+      "config_hash": "a1b2c3d4e5f6…",
+      "created_at": "2026-04-29T18:22:01Z",
+      "size_bytes": 824_191_022,
+      "referenced_by_crew_ids": ["crw_backend"]
+    }
+  ]
+}
+```
+
+Images orphaned from any crew (i.e. `referenced_by_crew_ids` is empty) are eligible for the GC sweeper. See [`CREWSHIP_CACHE_GC_AUTODELETE`](/configuration/environment#devcontainer-cache-gc).
+
+### Delete cached image
+
+```
+DELETE /api/v1/cache/images/{tag}
+```
+
+Removes a cached image. Refuses to delete an image still referenced by a crew (returns 409 with the offending `crew_id`s). For force-delete, clear the crew's `cached_image` first via `POST /api/v1/crews/{crewId}/rebuild`.
+
+**Response:** `204 No Content` on success, `409 Conflict` if referenced.
+
+---
+
+## Tenancy
+
+- `crewId` and any `tag` referenced by a crew row are validated via `crewBelongsToWorkspace`. Cross-tenant lookups return `404`.
+- The cache image registry is **per-host, not per-workspace** — operators sharing a Docker daemon will see each other's tags. The `referenced_by_crew_ids` field is workspace-scoped, however, so leakage stops at the tag level.
+
+## Related
+
+- [Devcontainers guide](/guides/devcontainers) — full provisioning pipeline.
+- [`crewship features`](/cli/features), [`crewship runtimes`](/cli/runtimes) — CLI wrappers.
+- [Configuration — Devcontainer Cache GC](/configuration/environment#devcontainer-cache-gc) — `CREWSHIP_CACHE_GC_AUTODELETE`.

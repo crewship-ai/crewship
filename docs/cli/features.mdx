@@ -1,0 +1,93 @@
+---
+title: "crewship features"
+description: "Browse the devcontainer features catalog the workspace can install on crew runtime images."
+icon: "puzzle-piece"
+---
+
+# crewship features
+
+Lists devcontainer features Crewship can install on a crew's runtime image, and the curated set of recommended base images. Useful when authoring a `devcontainer_config` for a crew — you can browse the catalog without leaving the terminal.
+
+```bash
+crewship features <subcommand> [flags]
+```
+
+Backed by [`GET /api/v1/features/catalog`](/api-reference/provisioning#feature-catalog) (24-hour server-side cache). Requires authentication.
+
+## Subcommands
+
+### list
+
+```bash
+crewship features list [flags]
+```
+
+**Flags:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `--search` | `string` | Filter features by name, description, or category. Passed through to the server as `?search=`. |
+
+**Example:**
+
+```bash
+crewship features list --search node
+# NAME                CATEGORY  SIZE  REF
+# Node.js             runtime   ~50M  ghcr.io/devcontainers/features/node:1
+# pnpm                runtime    ~5M  ghcr.io/devcontainers-extra/features/pnpm:2
+```
+
+Columns: `NAME`, `CATEGORY` (`runtime`, `tool`, `language`, ...), `SIZE` (rough on-disk impact), `REF` (the OCI ref to paste into `devcontainer_config.features`).
+
+### info
+
+```bash
+crewship features info <ref>
+```
+
+Show full details for a specific feature including its install options schema.
+
+**Example:**
+
+```bash
+crewship features info ghcr.io/devcontainers/features/python:1
+# Name        : Python
+# Ref         : ghcr.io/devcontainers/features/python:1
+# Category    : languages
+# Description : Installs the specified Python version, pip, and pipx. Supports virtual environments.
+# Icon        : code
+# Size Hint   : ~80 MB
+```
+
+Categories are one of `languages`, `tools`, `cloud`, `databases`. Size hints are approximate installed deltas. The `info` view does **not** surface the feature's option schema — for that, read the upstream `devcontainer-feature.json` in the feature's source repo (the `Ref` is an OCI reference; the source is usually linked from the same GitHub org).
+
+### base-images
+
+```bash
+crewship features base-images
+```
+
+Lists the curated base images recommended by Crewship for crew runtimes. Same set as [`crewship runtimes`](/cli/runtimes) returns for the underlying mise-managed tool versions, but specifically the **container base** layer.
+
+**Example:**
+
+```bash
+crewship features base-images
+# IMAGE                                                LABEL                          DESCRIPTION
+# debian:bookworm-slim                                 Debian 12 (slim) [RECOMMENDED] Small glibc-based base, broad compatibility.
+# ubuntu:24.04                                         Ubuntu 24.04 LTS               Familiar, large package archive.
+# mcr.microsoft.com/devcontainers/base:bookworm        MS devcontainer base           Pre-baked dev tooling, larger.
+```
+
+The `[RECOMMENDED]` tag is appended to the label of the curated default(s); there is no separate "default" column. Operators are not restricted to this list — any glibc-based Linux image works. The catalog is what the UI offers in the runtime picker, and the source of truth lives in `cmd/crewship/cmd_features.go` (`baseImagesCatalog`).
+
+## Notes
+
+- All three subcommands hit the running server (require `crewship login`). The 24-hour cache means a freshly published feature in the upstream registry can take up to 24h to appear here.
+- Output respects the global `--format` flag (`table`, `json`, `yaml`).
+
+## Related
+
+- [Devcontainers guide](/guides/devcontainers) — how features land in a crew config.
+- [Provisioning API](/api-reference/provisioning) — endpoints behind these commands.
+- [`crewship runtimes`](/cli/runtimes) — sister command for mise-managed runtimes (Node, Python, Go versions).

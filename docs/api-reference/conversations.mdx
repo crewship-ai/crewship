@@ -1,0 +1,145 @@
+---
+title: "Conversations"
+description: "Message reactions and chat attachments — the read/write surface around chat sessions beyond the basic message list."
+icon: "messages-square"
+---
+
+# Conversations
+
+Endpoints for the chat surface beyond the basic message list: emoji reactions on assistant messages and file attachments uploaded for an agent. See the [Chat & Sessions guide](/guides/chat-sessions) for the user-facing model.
+
+All endpoints require an authenticated session. Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
+
+---
+
+## Message reactions
+
+Reactions are scoped per `(chat, message, emoji, user)` — `UNIQUE(chat_id, message_id, emoji, user_id)` — so a user cannot double-react with the same emoji.
+
+The List endpoint returns **aggregated counts**, not a per-user list. Each row carries the emoji, the total count from any user, and `mine` (a boolean for the authenticated caller). This lets the FE render `👍 3 (you)` without a second join.
+
+### List reactions
+
+```
+GET /api/v1/chats/{chatId}/messages/{messageId}/reactions
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "reactions": [
+    { "emoji": "👍", "count": 3, "mine": true },
+    { "emoji": "🚀", "count": 1, "mine": false }
+  ]
+}
+```
+
+Sorted by `count` descending then `emoji` ascending. Workspace tenancy is enforced **inside the handler** — the route does not run through the `wsCtx` middleware because `chatId` is the only path parameter; the handler joins `chats.workspace_id → workspace_members.role` to confirm the calling user has access.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | Not authenticated. |
+| 404 | Chat not found, or not in a workspace the caller is a member of (same shape as "not found"). |
+
+### Add reaction
+
+```
+POST /api/v1/chats/{chatId}/messages/{messageId}/reactions
+Content-Type: application/json
+```
+
+**Request body:**
+
+```json
+{ "emoji": "👍" }
+```
+
+**Response:** `201 Created` — `{ ok: true }`. Idempotent: posting the same `(user, message, emoji)` twice succeeds the second time without creating a duplicate row, thanks to the UNIQUE constraint.
+
+**Errors:** `400` invalid emoji or empty body; `401` not authenticated; `404` chat not in workspace.
+
+### Remove reaction
+
+```
+DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}
+```
+
+The emoji is **a path segment**, not a query parameter. URL-encode if it contains characters that need escaping (`👍` is multi-byte UTF-8 and works in modern HTTP clients without further encoding, but a safe-belt `encodeURIComponent` doesn't hurt).
+
+**Response:** `204 No Content` on success. Idempotent: removing a non-existent reaction returns `204`, not `404`.
+
+---
+
+## Chat attachments
+
+Files attached by an operator to a chat session. Stored in `chat_attachments` (the per-chat link row) with the binary written to the storage provider; the agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`.
+
+### Upload attachment
+
+```
+POST /api/v1/agents/{agentId}/chats/{chatId}/attachments
+Content-Type: multipart/form-data
+```
+
+The path is **agent-and-chat scoped**, not just chat-scoped — the handler verifies the chat belongs to the agent so a stray `chatId` cannot land files in another agent's namespace. The role check requires the `create` permission (OWNER, ADMIN, MANAGER); MEMBER and VIEWER are 403.
+
+**Form fields:**
+
+| Field | Required | Description |
+|---|---|---|
+| `file` | yes | Binary file part. Filename and content-type from the multipart envelope. |
+
+**Cap:** 25 MB per upload. Multipart spill files are deferred-cleaned to keep `os.TempDir()` from filling under repeated uploads.
+
+**Response:** `201 Created`
+
+```json
+{
+  "filename": "report.pdf",
+  "size": 482311,
+  "path": "attachments/cht_xyz/report.pdf"
+}
+```
+
+The `path` is relative — the agent reads it from `/output/<agentSlug>/<path>`.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Missing `file`, invalid multipart, or file > 25 MB. |
+| 403 | Insufficient role (need `create`). |
+| 404 | Agent or chat not in workspace, or chat not scoped to the agent. |
+
+---
+
+## Crew messaging (sidecar IPC)
+
+Peer-to-peer messages between agents in the same crew live on the **internal IPC plane**, not the public API. There is no equivalent public surface — operators see crew messages via the [Crew Journal](/guides/crew-journal) (entry types `peer.conversation` and `peer.escalation`).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST` | `/api/v1/internal/crew-messages` | `X-Internal-Token` | Send a peer message. Emits `peer.escalation` (for `kind=escalation`) or `peer.conversation` otherwise. |
+| `GET` | `/api/v1/internal/crew-messages` | `X-Internal-Token` | List peer messages for the calling agent's crew. |
+| `GET` | `/api/v1/internal/crew-files/{crewId}` | `X-Internal-Token` | Read a file in the crew's shared volume. |
+| `POST` | `/api/v1/internal/crew-files/{crewId}` | `X-Internal-Token` | Write a file in the crew's shared volume. |
+
+See [Internal IPC API — Crew messaging and files](/api-reference/internal#crew-messaging-and-files) for the full request/response shape.
+
+---
+
+## Tenancy
+
+- Reactions: handler joins `chats.workspace_id → workspace_members.role`. No workspace_id in path or body. Cross-workspace returns 404.
+- Attachments: agent-and-chat both validated against the session's workspace. Cross-workspace returns 404; chat-not-on-agent returns 403.
+- Crew messaging is internal-only; the sidecar's `IPCConfig` carries the scope.
+
+## Related
+
+- [Chat & Sessions guide](/guides/chat-sessions).
+- [Crews API](/api-reference/crews).
+- [Crew Journal](/guides/crew-journal) — `peer.escalation`, `peer.conversation`.
+- [User Preferences](/api-reference/preferences) — UI/composer settings.

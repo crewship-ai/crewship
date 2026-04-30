@@ -116,6 +116,36 @@ POST /api/v1/approvals/{id}/decide
 | 404 | Request not found. |
 | 409 | Request already decided (status != `pending`). |
 
+---
+
+## Reset auto-tuning
+
+```
+POST /api/v1/approvals/reset-auto-tuning
+```
+
+Harbor Master observes operator decisions over time and auto-tunes its rule confidences (a denied request that would have auto-approved next time is a calibration signal). This endpoint resets that learned state to defaults — useful after a major change in policy or after a misconfiguration polluted the auto-tuning model.
+
+**Auth:** `OWNER` or `ADMIN` only.
+
+**Request body:** none, or `{}`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "ok": true,
+  "reset_at": "2026-04-30T11:42:18Z",
+  "rules_reset": 14
+}
+```
+
+`rules_reset` is the number of rule rows whose tuning state was cleared. Idempotent — calling twice in a row returns `rules_reset: 0` on the second call.
+
+**Errors:** `401` not authenticated; `403` wrong role; `500` DB error.
+
+This does **not** affect already-decided approval rows, journal history, or the rule definitions themselves — only the per-rule confidence that drives auto-mode (`async`/`sync`/`required`) selection.
+
 ## Journal side-effects
 
 Every write emits a journal entry:

@@ -1,0 +1,77 @@
+---
+title: "crewship runtimes"
+description: "Browse the mise-managed runtime/tool catalog (Node, Python, Go, Terraform, ...) for pinning versions in a crew config."
+icon: "layer-group"
+---
+
+# crewship runtimes
+
+Lists the runtime/tool entries that mise can install in a crew container. mise (formerly rtx) reads a `mise.json` block in the crew's `devcontainer_config` and installs each `(tool, version)` pair during provisioning.
+
+```bash
+crewship runtimes <subcommand> [flags]
+```
+
+Backed by [`GET /api/v1/runtimes/catalog`](/api-reference/provisioning#runtime-catalog). Requires authentication.
+
+## Subcommands
+
+### list
+
+```bash
+crewship runtimes list [flags]
+```
+
+**Flags:**
+
+| Flag | Type | Description |
+|---|---|---|
+| `--search` | `string` | Filter by name, tool, description, or category (server-side substring). |
+| `--category` | `string` | Filter by category (case-insensitive exact match). Common values: `languages`, `tools`, `cloud`, `databases`. |
+
+**Example:**
+
+```bash
+crewship runtimes list --category languages
+# TOOL       NAME       CATEGORY    VERSIONS                    DEFAULT
+# node       Node.js    languages   18, 20, 22, 24              22
+# python     Python     languages   3.10, 3.11, 3.12, 3.13      3.12
+# go         Go         languages   1.21, 1.22, 1.23, 1.24      1.23
+# ruby       Ruby       languages   3.2, 3.3, 3.4               3.3
+```
+
+Columns: `TOOL` (the mise tool ID — what you put in `mise.json`), `NAME` (display label), `CATEGORY`, `VERSIONS` (available versions), `DEFAULT` (the version Crewship picks when the crew config doesn't pin one).
+
+### info
+
+```bash
+crewship runtimes info <tool>
+```
+
+**Example:**
+
+```bash
+crewship runtimes info terraform
+# Tool        : terraform
+# Name        : Terraform
+# Category    : cloud
+# Description : Infrastructure as code.
+# Icon        : blocks
+# Versions    : 1.9, 1.8
+# Default     : 1.9
+# Backends    : asdf
+```
+
+The `info` view echoes whatever the catalog row carries. `Backends` lists the mise install backends mise can use for this tool (`asdf`, `cargo`, `npm`, `pipx`, `github`); when empty the catalog leaves it to mise's default.
+
+## Notes
+
+- Search and category filters are client-side, so combining them is cheap.
+- The default version is the one mise reports for the catalog; pin a specific version in `devcontainer_config.mise` if you need reproducibility across upstream catalog updates.
+- Output respects the global `--format` flag (`table`, `json`, `yaml`).
+
+## Related
+
+- [Devcontainers guide — mise tools](/guides/devcontainers) — how mise versions are declared.
+- [Provisioning API](/api-reference/provisioning) — `/runtimes/catalog` endpoint.
+- [`crewship features`](/cli/features) — sister command for devcontainer features (the OCI-based install path).

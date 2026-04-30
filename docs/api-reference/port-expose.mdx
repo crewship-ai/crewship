@@ -1,0 +1,140 @@
+---
+title: "Port Expose"
+description: "Capability URLs for exposing in-container ports to the operator's browser without modifying the agent's environment."
+icon: "globe"
+---
+
+# Port Expose
+
+When an agent runs `npm run dev` or starts a service inside its container, the operator wants a clickable URL to open it. Port expose creates a **capability URL** — `https://<host>/exposed/<token>` — that reverse-proxies to the in-container port. The token is the auth: anyone with the URL gets through, anyone without it gets a 404.
+
+This is the right shape for ephemeral dev URLs: short-lived, easy to share with a teammate via Slack, no JWT plumbing needed. For long-lived or sensitive surfaces, do not use this — set up a proper authenticating proxy.
+
+Implementation: `internal/api/port_expose_handler.go`. Capability URLs hit Go 1.22+ `ServeMux` with `/exposed/{token}` and `/exposed/{token}/` (trailing slash and bare-token forms both routed to the same handler).
+
+---
+
+## Capability URL — reverse proxy
+
+```
+ANY /exposed/{token}
+ANY /exposed/{token}/
+```
+
+**No auth header.** The token IS the auth; presenting a valid, non-revoked, non-expired token yields proxied traffic to the registered in-container port. All HTTP verbs are forwarded (GET / POST / PUT / DELETE / PATCH / HEAD / OPTIONS) so static sites, REST APIs, and WebSocket upgrades all work.
+
+WebSocket upgrades **are** supported — the proxy detects the `Upgrade: websocket` header and switches to bidirectional pipe mode.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 404 | Token unknown, expired, or revoked. (Same shape so existence isn't leaked.) |
+| 502 | Upstream (in-container) port not reachable. |
+| 504 | Upstream timeout. |
+
+There is no rate limit on the capability URL — it forwards as fast as the underlying TCP connection allows.
+
+---
+
+## Sidecar request
+
+```
+POST /api/v1/internal/port-expose
+```
+
+**Internal only — `X-Internal-Token` required.** The agent asks the sidecar (e.g. via a tool call), the sidecar asks the server. Agents cannot reach this endpoint directly.
+
+**Request body:**
+
+```json
+{
+  "container_port": 3000,
+  "label": "next-dev",
+  "ttl_seconds": 3600
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `container_port` | integer | Port number inside the crew container. |
+| `label` | string | Operator-facing name; surfaced in the audit list. |
+| `ttl_seconds` | integer | Lifetime in seconds. Server clamps to a max of 24 hours. |
+
+**Response:** `201 Created`
+
+```json
+{
+  "id": "pe_a1b2",
+  "token": "tk_…",
+  "url": "https://crewship.example.com/exposed/tk_…",
+  "expires_at": "2026-04-30T15:42:18Z"
+}
+```
+
+The sidecar surfaces the URL back to the agent, which can include it in its tool result. The operator sees it in the chat and clicks through.
+
+---
+
+## User-facing audit + revocation
+
+### List
+
+```
+GET /api/v1/crews/{crewId}/port-expose
+```
+
+Lists every active port-expose for a crew. Workspace-scoped.
+
+**Response:** `200 OK`
+
+```json
+{
+  "exposes": [
+    {
+      "id": "pe_a1b2",
+      "agent_id": "agt_viktor",
+      "container_port": 3000,
+      "label": "next-dev",
+      "url": "https://crewship.example.com/exposed/tk_…",
+      "created_at": "2026-04-30T11:42:18Z",
+      "expires_at": "2026-04-30T15:42:18Z",
+      "revoked": false,
+      "request_count": 47,
+      "last_request_at": "2026-04-30T11:55:01Z"
+    }
+  ]
+}
+```
+
+The `request_count` is incremented by the reverse proxy on every successful forward, so operators can spot which exposes are actually being hit. Use this to find the dead expose left over from yesterday's debugging.
+
+### Revoke
+
+```
+POST /api/v1/crews/{crewId}/port-expose/{id}/revoke
+```
+
+Marks the expose as revoked; the next request to its capability URL returns 404. Idempotent.
+
+**Response:** `204 No Content`.
+
+---
+
+## Tenancy and policy
+
+- `crewId` is validated via `crewBelongsToWorkspace`.
+- An `AllowAllPolicy` runs on every capability-URL request (currently always returns allow). Custom policies can be wired by replacing the policy object — useful for restricting expose to specific IP ranges or to authenticated browser sessions.
+- The capability URL itself has **no workspace context** (it's a public URL). The token-to-port lookup happens server-side and is workspace-isolated by construction.
+
+## Security notes
+
+- **Tokens are 256 bits of `crypto/rand`.** Brute-forcing a valid token via the 404 oracle is not feasible.
+- **Tokens land in URL paths**, which means they end up in HTTP server logs and browser history. Do not paste a capability URL into a public chat or screenshot it without thinking.
+- **TLS termination** is the operator's responsibility — Crewship does not currently terminate HTTPS for `/exposed/`. Run behind nginx / Caddy / a cloud load balancer that does.
+- **Revocation is fast** but not transactional with in-flight requests. A request that is mid-stream when revoke fires completes; subsequent requests fail.
+
+## Related
+
+- [Devcontainers — Container actuals](/guides/devcontainers#container-actuals) — pairs with port expose for "this agent installed Node and started a server".
+- [Architecture — Sidecar Proxy](/architecture#sidecar-proxy) — the surrounding sidecar surface.

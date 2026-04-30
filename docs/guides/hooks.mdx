@@ -26,8 +26,8 @@ Defined in `internal/hooks/types.go` (15 events currently):
 
 **Currently dispatched** (call sites wired):
 
-- `pre_agent_start`, `post_agent_stop` -- orchestrator agent lifecycle.
-- `on_approval_requested` -- emitted by `harbormaster.Enqueue` when a new request lands in the queue.
+- `pre_agent_start`, `post_agent_stop` -- orchestrator agent lifecycle. **Both payloads carry `mission_id` since PR #210** so a hook can scope its action to the running mission without a separate join.
+- `on_approval_requested` -- fires when [Harbor Master](/guides/harbormaster)'s `Gate` returns `Required=true`, before the request lands in the approvals queue. The hook receives the same scope (`workspace_id`, `crew_id`, `agent_id`, `mission_id`), the credential ID, and the `intent` string. Use this to forward HITL notifications to Slack / PagerDuty / your own pager-of-choice. PR #210 finally wired this dispatch site — earlier docs claimed it fired but the call site was missing.
 
 **Defined but not yet dispatched** (add a `hooks.Dispatch` call at the relevant point when the corresponding platform path wires through):
 

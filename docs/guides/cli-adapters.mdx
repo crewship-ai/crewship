@@ -1,0 +1,92 @@
+---
+title: "CLI Adapters"
+description: "How Crewship invokes vendor coding CLIs (Claude Code, Codex, Gemini, OpenCode, Cursor, Factory Droid) and the reasoning behind which ones are supported."
+icon: "terminal"
+---
+
+# CLI Adapters
+
+Crewship runs each agent as a subprocess of a vendor coding CLI inside the crew container. The agent record's `cli_adapter` column picks which binary and which command line; the orchestrator's `BuildCLICommand` (`internal/orchestrator/exec.go`) is the one place that knows the per-vendor flag conventions.
+
+Six adapters are supported as of 2026-04. Adding another adapter is a single new `case` in `BuildCLICommand` plus a normalisation rule in `agents_create.go` for the default tool profile.
+
+## Supported adapters
+
+| Adapter | Binary | System prompt | Output | Notes |
+|---|---|---|---|---|
+| `CLAUDE_CODE` | `claude --print --output-format stream-json --include-partial-messages --dangerously-skip-permissions --verbose` | `--system-prompt` flag | stream-JSON on stdout | Supports `--model`, `--tools`, `--mcp-config <path>`. Default. |
+| `CODEX_CLI` | `codex --quiet` | (none — CLI reads `AGENTS.md`) | text | `--sandbox` enabled when `tool_profile=CODING`. |
+| `GEMINI_CLI` | `gemini -p <message>` | `--system-instruction` flag | text | Uses `-p` for the user message. |
+| `OPENCODE` | `opencode run <message>` | `AGENTS.md` written into CWD before exec | text | sst.dev's BYOK CLI; works with any provider. |
+| `CURSOR_CLI` | `cursor-agent -p --output-format stream-json` | `.cursor/rules/`, `AGENTS.md`, `CLAUDE.md` written into CWD | stream-JSON on stdout (same shape as Claude Code) | Added 2026-04. `-m <model>` for model override. |
+| `FACTORY_DROID` | `droid exec --auto {low\|medium}` | (CLI infers from CWD) | text | Added 2026-04. Tiered autonomy — see below. |
+
+The default fallback when `cli_adapter` is empty or unknown is `claude --print <message>` — minimal flags, no streaming, lowest-risk degradation.
+
+## Cursor (`CURSOR_CLI`)
+
+`cursor-agent -p` is Cursor's headless mode. `-p` (print) prevents the interactive TUI from spawning; `--output-format stream-json` aligns the JSONL stream with the format the chat-bridge already parses for Claude Code, so the same reader handles both.
+
+Cursor reads its system instructions from files in the working directory: `.cursor/rules/`, `AGENTS.md`, and `CLAUDE.md`. `setupSystemPromptFiles()` writes those before exec, so there is no `--system-prompt` flag on the command line. If you customise the agent's persona in the UI, the file content changes — not the command line.
+
+`--mode=plan` and `--mode=ask` are valid Cursor flags (added 2026-01-16) but are not exposed today; the default `agent` mode is what `BuildCLICommand` emits. If a tool profile needs read-only browsing, extend the `CURSOR_CLI` case to map `tool_profile=CONSULTATIVE` to `--mode=ask`.
+
+## Factory Droid (`FACTORY_DROID`)
+
+`droid exec` is Factory's headless single-shot mode. The `--auto` flag picks the autonomy tier:
+
+| `--auto` value | Behaviour | When |
+|---|---|---|
+| `low` | Read-only — agent inspects but does not mutate files. | `tool_profile` is `MINIMAL` or `CONSULTATIVE`. |
+| `medium` | Can edit files within scope. | Default — `tool_profile` is `CODING` or unset. |
+| `high` | Fully autonomous. **Not exposed by Crewship.** | Factory's docs warn it can perform destructive operations without further confirmation. |
+
+The default is `medium` because the API normalises an empty `ToolProfile` to `CODING` (see `internal/api/agents_create.go`), and `CODING` agents are expected to write code. The previous "default = low" choice was theoretical; in production almost every agent would be told to write code anyway. The current inversion (default-medium, explicit-low) is honest about production behaviour.
+
+If a customer genuinely needs `--auto high`, add a new `tool_profile` value (e.g. `AUTONOMOUS`) and gate it behind a Harbor Master approval. Do not flip the default.
+
+## Adapters that are deliberately NOT supported
+
+`BuildCLICommand` skips several CLIs that would superficially fit. The reasoning:
+
+| CLI | Why skipped |
+|---|---|
+| **Aider** | Pair-programming UX — designed around interactive turns, not single-shot exec. Wrapping it as headless drops most of what makes it good. |
+| **GitHub Copilot CLI** | Microsoft removed the `--stdio` flag without deprecation on 2026-01-14, breaking every wrapper. Waiting for the surface to stabilise. |
+| **Cody CLI** | IDE-tied — Sourcegraph deprecates the standalone CLI in favour of the editor extension. |
+| **Replit Agent** | Browser-only; no headless binary. |
+
+Adding any of these is a one-line change once the upstream surface is stable. Track the conversation in the project's GitHub issues before opening a PR.
+
+## How the adapter signals the sidecar
+
+The orchestrator sets two environment variables on the agent process so the [Paymaster](/guides/paymaster) sidecar knows how to attribute every cost-ledger row:
+
+- `CREWSHIP_BILLING_MODE` — `metered` for API-key credentials, `flat_rate` for subscription credentials (Claude Max, ChatGPT Plus, Cursor, Copilot).
+- `CREWSHIP_SUBSCRIPTION_PLAN` — display label like `"Anthropic Max 20×"` (only for `flat_rate`).
+
+The sidecar reads these once at startup and includes them on every `POST /api/v1/internal/cost/record` call. The agent itself never sees these variables — they are scoped to the orchestrator-to-sidecar handoff.
+
+See [Environment Variables](/configuration/environment#paymaster-billing-modes) for the operator-facing reference and [Paymaster billing modes](/guides/paymaster#billing-modes) for the full rationale.
+
+## Picking an adapter for an agent
+
+Set `cli_adapter` on the agent (UI: agent canvas → "Runtime" panel; CLI: `crewship agent update <slug> --cli-adapter CURSOR_CLI`; API: `PUT /api/v1/agents/{id}` with `cli_adapter` in the body). The string must match one of the constants above exactly.
+
+Pick by what the credential supports:
+
+- **Anthropic API key or Claude Max OAuth** → `CLAUDE_CODE`.
+- **OpenAI API key or ChatGPT Plus** → `CODEX_CLI`.
+- **Google AI key or Pro/Ultra** → `GEMINI_CLI`.
+- **Cursor subscription** → `CURSOR_CLI`.
+- **Factory account** → `FACTORY_DROID`.
+- **Anything else (BYOK)** → `OPENCODE`.
+
+Switching adapters is hot — the next exec uses the new value. The container does not need to be rebuilt unless the new adapter's binary is missing from the image (verify with `crewship runtimes info <runtime>`).
+
+## Related
+
+- [Paymaster](/guides/paymaster) — billing modes, quota enforcement, sidecar usage parsing.
+- [Environment Variables](/configuration/environment#paymaster-billing-modes) — `CREWSHIP_BILLING_MODE`, `CREWSHIP_SUBSCRIPTION_PLAN`.
+- [Architecture — CLI Adapters](/architecture#cli-adapters) — output processing and stream-JSON shape.
+- [Orchestration](/guides/orchestration) — agent lifecycle around the CLI exec.
