@@ -20,7 +20,7 @@ export async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit & { retries?: number; baseDelayMs?: number },
 ): Promise<Response> {
-  const requestedRetries = init?.retries ?? 2
+  const requestedRetries = normalizeRetries(init?.retries, 2)
   // ReadableStream bodies can't be re-read after the first fetch consumes
   // them. Silently retrying would either throw "body stream already read"
   // or send an empty body to the second attempt — both worse than
@@ -66,6 +66,16 @@ export function bodyIsReplayable(body: BodyInit | null | undefined): boolean {
     return false
   }
   return true
+}
+
+// normalizeRetries clamps the caller-supplied retry count to a non-negative
+// integer. Without this, NaN/negative values from a typo or runtime coercion
+// would skip the loop entirely (because `attempt <= retries` is false for
+// NaN/negative on first iteration) and the function would throw the
+// exhaustion error before the initial fetch was ever attempted.
+function normalizeRetries(value: number | undefined, fallback: number): number {
+  if (value == null || !Number.isFinite(value)) return fallback
+  return Math.max(0, Math.trunc(value))
 }
 
 function sleep(ms: number): Promise<void> {
