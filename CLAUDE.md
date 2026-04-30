@@ -80,6 +80,7 @@ Package layout:
 - `internal/presence/` — agent Watch Roster (online/busy/blocked/offline). Upsert emits `agent.status_change` only on actual transition.
 - `internal/consolidate/` — daily workers: Consolidator extracts semantic rules from journal → `.memory/topics/learned-YYYY-MM-DD.md`; Compactor kompaktuje low-signal entries older than 30 days, emits `system.compaction`.
 - `internal/telemetry/` — OTel GenAI spans with W3C trace context propagation. `RegisterJournalResolver()` wires `journal.SetTraceResolver` so every entry carries trace_id/span_id.
+- `internal/containerstate/` — captures the *actual* installed-package state of crew containers (apt + pip + npm + os-release) via short Exec probes. Orchestrator calls `recordContainerSnapshot` after every successful agent run; hash-based dedup means a quiet session writes nothing. Emits `container.snapshot` entries — devcontainer.json is declared intent, this is what the container actually has after agents ran apt-get / pip install during a session.
 - `internal/llm/middleware.go` — unified stack: `telemetry → paymaster → lookout → raw provider`. Compose via `llm.Middleware(base, j, db)`.
 
 **Write path order is load-bearing.** paymaster outside lookout so a blocked call still records a partial ledger row (attempted-but-blocked audit). lookout outside raw so bad inputs never reach the LLM.

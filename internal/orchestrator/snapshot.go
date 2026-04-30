@@ -3,9 +3,20 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/containerstate"
 )
+
+// snapshotProbeTimeout bounds the four exec calls that capture the
+// container's actual installed-package state. Three execs of dpkg-query
+// / pip / npm against a healthy container finish in well under a
+// second; capping at 30s means a hung probe (broken binary, frozen
+// container) can't block the run-completion path indefinitely.
+//
+// `var` not `const` so a test can override it with a sub-second value
+// to exercise the hang-resilience path without adding 30s to the suite.
+var snapshotProbeTimeout = 30 * time.Second
 
 // recordContainerSnapshot probes the container's actual installed package
 // state (apt + pip + npm + os-release) and emits a container.snapshot
@@ -28,7 +39,14 @@ func (o *Orchestrator) recordContainerSnapshot(ctx context.Context, req AgentRun
 		}
 	}()
 
-	snap, err := containerstate.Capture(ctx, o.container, containerID)
+	// Decouple from the request ctx so a user cancelling chat right at
+	// run-end doesn't cancel the snapshot probe (snapshot survives the
+	// "I clicked Stop" case). The probe still has a hard upper bound so
+	// a hung dpkg-query / npm ls can't wedge run completion.
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), snapshotProbeTimeout)
+	defer cancel()
+
+	snap, err := containerstate.Capture(probeCtx, o.container, containerID)
 	if err != nil {
 		o.logger.Debug("container snapshot capture failed", "container_id", containerID, "error", err)
 		return
