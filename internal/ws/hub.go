@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -257,6 +259,15 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 			// Host header's hostname. This prevents cross-site WebSocket
 			// hijacking while allowing dev proxies and SSH tunnels (which
 			// typically don't set Origin or set it to the same host).
+			//
+			// Audit L1: the localhost / 127.0.0.1 bypass is harmless in
+			// dev (browsers running on the same machine as the binary
+			// legitimately have Origin=http://localhost:PORT) but is a
+			// loosening in production where every real client is on the
+			// public hostname. We gate the bypass on CREWSHIP_ENV so a
+			// prod deployment refuses Origin=localhost regardless of
+			// what the request looks like.
+			isProduction := strings.EqualFold(os.Getenv("CREWSHIP_ENV"), "production")
 			origin := req.Header.Get("Origin")
 			if origin != "" {
 				u, err := url.Parse(origin)
@@ -270,8 +281,10 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 					host = h
 				}
 				originHost := u.Hostname()
-				if originHost != host && originHost != "localhost" && originHost != "127.0.0.1" {
-					return fmt.Errorf("origin %q not allowed for host %q", origin, req.Host)
+				if originHost != host {
+					if isProduction || (originHost != "localhost" && originHost != "127.0.0.1") {
+						return fmt.Errorf("origin %q not allowed for host %q", origin, req.Host)
+					}
 				}
 			}
 			return nil

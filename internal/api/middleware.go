@@ -44,7 +44,11 @@ func RoleFromContext(ctx context.Context) string {
 }
 
 // SecurityHeaders is middleware that sets standard security response headers.
-// It does NOT set HSTS (the binary may run on plain HTTP) or CSP (needs separate analysis).
+// It does NOT set HSTS (the binary may run on plain HTTP). CSP is the strict
+// "default-src 'none'" policy because every route this middleware fronts
+// returns JSON / SSE / WebSocket — no UI is ever served from the API
+// router, so a Content-Type slip-up shouldn't be able to render HTML.
+// The SPA paths get a separate, looser CSP from server.securityHeadersMiddleware.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -53,6 +57,8 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-XSS-Protection", "0")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		h.Set("Content-Security-Policy",
+			"default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
 		next.ServeHTTP(w, r)
 	})
 }

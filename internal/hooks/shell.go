@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+// maxShellPayloadBytes caps CREWSHIP_PAYLOAD env var size. ARG_MAX on
+// Linux is ~128 KiB total for the whole environment + argv block, so an
+// over-sized payload would fail at execve anyway — capping here gives
+// the operator a useful diagnostic instead of a cryptic "argument list
+// too long" error.
+const maxShellPayloadBytes = 64 * 1024
+
 // shellHandler executes handler_config.command as a shell script via
 // `sh -c`. The command runs with:
 //
@@ -25,6 +32,16 @@ import (
 // Exit code 0 produces OutcomePass. Non-zero produces OutcomeBlock so the
 // dispatcher's blocking logic can short-circuit; non-blocking hooks
 // degrade OutcomeBlock to a logged warning upstream.
+//
+// SECURITY (audit H6): hook scripts MUST quote every env-var reference.
+// CREWSHIP_PAYLOAD is JSON encoded from agent-controlled fields, and an
+// unquoted reference like `echo $CREWSHIP_PAYLOAD` lets an attacker
+// embed shell metacharacters via the payload. Always write
+// `"$CREWSHIP_PAYLOAD"` and pipe to `jq` (or equivalent) for parsing.
+// To bound the blast radius further, CREWSHIP_PAYLOAD is hard-capped
+// at maxShellPayloadBytes — anything larger is replaced with a marker
+// so a misbehaving event can't generate a multi-MB env var that hangs
+// the shell or leaks via /proc.
 //
 // NOTE: This is dockerless. On Linux we would layer seccomp / cgroup / uid
 // isolation; today we rely on the hook being OWNER-only and on the caller
@@ -75,6 +92,11 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 	configureProcessGroup(cmd)
 
 	payloadJSON, _ := json.Marshal(ec.Payload)
+	if len(payloadJSON) > maxShellPayloadBytes {
+		payloadJSON = []byte(fmt.Sprintf(
+			`{"_truncated":true,"_original_bytes":%d,"_note":"payload exceeded %d-byte cap; consult journal entry for full body"}`,
+			len(payloadJSON), maxShellPayloadBytes))
+	}
 	cmd.Env = []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"CREWSHIP_EVENT=" + string(ec.Event),

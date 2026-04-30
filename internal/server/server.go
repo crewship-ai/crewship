@@ -489,13 +489,49 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 }
 
 // securityHeadersMiddleware adds standard security headers to all HTTP responses.
-
+// CSP is set per-path: the SPA needs 'unsafe-inline' / 'unsafe-eval' for the
+// Next.js runtime, but every other surface (API, /exposed/ proxies, health
+// endpoints) gets the strict default-src 'none' policy. Static assets shipped
+// from the embed FS already match the SPA frame, so the looser policy is
+// scoped to UI paths only — keeps API JSON responses from being rendered as
+// HTML even if a future bug returns Content-Type: text/html.
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+
+		// Audit M5: Content-Security-Policy. The SPA bundle from Next.js
+		// uses inline runtime hydration ('unsafe-inline' style, plus an
+		// inline boot script), so the UI policy is permissive on those
+		// axes but tight on script-src/connect-src — we only let the page
+		// reach 'self' and the WebSocket on the same origin. Anything
+		// non-UI (API JSON, /exposed/ proxies, health probes) gets a
+		// "default-src 'none'" lockdown so a Content-Type mishap can't
+		// turn into an XSS.
+		path := r.URL.Path
+		isUI := !strings.HasPrefix(path, "/api/") &&
+			!strings.HasPrefix(path, "/exposed/") &&
+			path != "/healthz" && path != "/readyz" &&
+			path != "/metrics" && path != "/ws" && path != "/ws/terminal"
+		if isUI {
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'self'; "+
+					"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+					"style-src 'self' 'unsafe-inline'; "+
+					"img-src 'self' data: blob:; "+
+					"font-src 'self' data:; "+
+					"connect-src 'self' ws: wss:; "+
+					"frame-ancestors 'none'; "+
+					"base-uri 'self'; "+
+					"form-action 'self'")
+		} else {
+			w.Header().Set("Content-Security-Policy",
+				"default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }

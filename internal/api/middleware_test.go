@@ -26,8 +26,12 @@ func TestSecurityHeaders(t *testing.T) {
 
 	// Verify HSTS is NOT set (binary may run on HTTP)
 	assert.Empty(t, rec.Header().Get("Strict-Transport-Security"))
-	// Verify CSP is NOT set (needs separate analysis)
-	assert.Empty(t, rec.Header().Get("Content-Security-Policy"))
+	// Audit M5: API router fronts only JSON/SSE/WS responses, so the strict
+	// default-src 'none' policy is the right baseline. The SPA gets a
+	// looser CSP from server.securityHeadersMiddleware.
+	assert.Equal(t,
+		"default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+		rec.Header().Get("Content-Security-Policy"))
 }
 
 func TestSecurityHeaders_PreservesBody(t *testing.T) {
