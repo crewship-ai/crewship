@@ -28,10 +28,12 @@ type Ollama struct {
 // generation at 5 min. The streaming client still bounds dial/header time
 // via the transport, leaving body read to caller ctx cancellation.
 func NewOllama(baseURL, model string) *Ollama {
-	streamTransport := &http.Transport{
-		ResponseHeaderTimeout: 60 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
-	}
+	// Clone DefaultTransport so remote deployments behind HTTP_PROXY / HTTPS_PROXY
+	// keep working and TLS/dial defaults (TLSHandshakeTimeout, ExpectContinueTimeout)
+	// aren't dropped — a zero-value http.Transport silently disables all of those.
+	streamTransport := http.DefaultTransport.(*http.Transport).Clone()
+	streamTransport.ResponseHeaderTimeout = 60 * time.Second
+	streamTransport.IdleConnTimeout = 90 * time.Second
 	return &Ollama{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
