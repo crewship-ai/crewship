@@ -31,20 +31,29 @@ Examples:
   crewship run viktor --chat <chatId> "follow-up question"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		if err := requireWorkspace(); err != nil {
-			return err
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		// Auth/workspace are skipped in dry-run mode so the user can preview
+		// the prompt offline. We still need them for actual runs.
+		if !dryRun {
+			if err := requireAuth(); err != nil {
+				return err
+			}
+			if err := requireWorkspace(); err != nil {
+				return err
+			}
 		}
 
 		agentSlug := args[0]
-		client := newAPIClient()
-
-		// Resolve agent
-		agentID, err := resolveAgentID(client, agentSlug)
-		if err != nil {
-			return err
+		var client *cli.Client
+		var agentID string
+		if !dryRun {
+			client = newAPIClient()
+			id, err := resolveAgentID(client, agentSlug)
+			if err != nil {
+				return err
+			}
+			agentID = id
 		}
 
 		flagPrompt, _ := cmd.Flags().GetString("prompt")
@@ -85,6 +94,14 @@ Examples:
 
 		if !interactive && prompt == "" {
 			return fmt.Errorf("prompt is required (provide as argument, --prompt flag, or use --interactive)")
+		}
+
+		if dryRun {
+			fmt.Print(prompt)
+			if !strings.HasSuffix(prompt, "\n") {
+				fmt.Println()
+			}
+			return nil
 		}
 
 		if timeoutSecs > 0 {
@@ -509,6 +526,7 @@ func init() {
 	runCmd.Flags().StringSlice("with-file", nil, "Append file content(s) as context (repeatable)")
 	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
 	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
+	runCmd.Flags().Bool("dry-run", false, "Print the assembled prompt (with all context) and exit without running")
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	runCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")

@@ -40,25 +40,35 @@ Examples:
   crewship ask --prompt @-                 # full prompt from stdin`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		if err := requireWorkspace(); err != nil {
-			return err
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+
+		// Skip auth + agent resolution in dry-run so users can compose and
+		// inspect prompts offline (no server, no login required).
+		if !dryRun {
+			if err := requireAuth(); err != nil {
+				return err
+			}
+			if err := requireWorkspace(); err != nil {
+				return err
+			}
 		}
 
 		agentSlug, _ := cmd.Flags().GetString("agent")
+		fanoutAgents, _ := cmd.Flags().GetStringSlice("agents")
 		if agentSlug == "" && cliCfg != nil {
 			agentSlug = cliCfg.DefaultAgent
 		}
 
-		client := newAPIClient()
+		var client *cli.Client
+		if !dryRun {
+			client = newAPIClient()
+		}
 
 		// No default agent: open an interactive picker on a TTY, error in
 		// non-TTY mode (CI / scripts can't satisfy a prompt). Saves the
 		// pick as the default if the user opts in, so the next run is
-		// frictionless.
-		if agentSlug == "" {
+		// frictionless. Skipped entirely in dry-run.
+		if !dryRun && agentSlug == "" {
 			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stderr.Fd())) {
 				return fmt.Errorf("no default agent set. Use --agent <slug> or run 'crewship config set default-agent <slug>'")
 			}
@@ -76,9 +86,13 @@ Examples:
 			}
 		}
 
-		agentID, err := resolveAgentID(client, agentSlug)
-		if err != nil {
-			return err
+		var agentID string
+		if !dryRun {
+			id, err := resolveAgentID(client, agentSlug)
+			if err != nil {
+				return err
+			}
+			agentID = id
 		}
 
 		flagPrompt, _ := cmd.Flags().GetString("prompt")
@@ -109,7 +123,45 @@ Examples:
 			return fmt.Errorf("prompt is required (positional, --prompt, stdin pipe, or --with-* flag)")
 		}
 
+		if dryRun {
+			fmt.Print(prompt)
+			if !strings.HasSuffix(prompt, "\n") {
+				fmt.Println()
+			}
+			return nil
+		}
+
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		md := resolveMarkdownFromCmd(cmd)
+		saveFile, err := openSaveFile(cmd)
+		if err != nil {
+			return err
+		}
+		if saveFile != nil {
+			defer saveFile.Close()
+		}
+
+		// Fan-out path: --agents takes precedence over --agent / default-agent.
+		if len(fanoutAgents) > 0 {
+			agentsByID := map[string]string{}
+			for _, slug := range fanoutAgents {
+				slug = strings.TrimSpace(slug)
+				if slug == "" {
+					continue
+				}
+				id, err := resolveAgentID(client, slug)
+				if err != nil {
+					return fmt.Errorf("resolve %q: %w", slug, err)
+				}
+				agentsByID[id] = slug
+			}
+			wsToken, err := cli.WSTokenFromServer(client)
+			if err != nil {
+				return fmt.Errorf("get WS token: %w", err)
+			}
+			server := cli.ResolveServer(flagServer, cliCfg)
+			return runFanout(server, wsToken, agentsByID, prompt, quiet, md, saveFile)
+		}
 		noStream, _ := cmd.Flags().GetBool("no-stream")
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
 		if timeoutSecs > 0 {
@@ -139,15 +191,6 @@ Examples:
 			return fmt.Errorf("get WS token: %w", err)
 		}
 		server := cli.ResolveServer(flagServer, cliCfg)
-
-		md := resolveMarkdownFromCmd(cmd)
-		saveFile, err := openSaveFile(cmd)
-		if err != nil {
-			return err
-		}
-		if saveFile != nil {
-			defer saveFile.Close()
-		}
 
 		if noStream {
 			return runNoStream(server, wsToken, agentID, chatResult.ID, prompt, quiet, md, saveFile)
@@ -220,6 +263,7 @@ func pickAgentInteractive(client *cli.Client) (string, bool, error) {
 
 func init() {
 	askCmd.Flags().String("agent", "", "Agent slug or ID (overrides default-agent config)")
+	askCmd.Flags().StringSlice("agents", nil, "Comma-separated list of agents for fan-out (overrides --agent; runs in parallel)")
 	askCmd.Flags().StringP("prompt", "p", "", "Prompt text, @file, or @- for stdin")
 	askCmd.Flags().BoolP("quiet", "q", false, "Only output text, no meta info")
 	askCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
@@ -231,6 +275,7 @@ func init() {
 	askCmd.Flags().StringSlice("with-file", nil, "Append file content(s) as context (repeatable)")
 	askCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
 	askCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
+	askCmd.Flags().Bool("dry-run", false, "Print the assembled prompt and exit (no auth, no agent, no run)")
 	askCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	askCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	askCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")

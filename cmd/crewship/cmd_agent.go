@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -237,12 +238,29 @@ func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
 		return "", err
 	}
 
+	available := make([]string, 0, len(agents))
 	for _, a := range agents {
 		if a.Slug == slugOrID {
 			return a.ID, nil
 		}
+		if a.Slug != "" {
+			available = append(available, a.Slug)
+		}
 	}
-	return "", fmt.Errorf("agent not found: %s", slugOrID)
+	// Suggest near-matches when the user almost certainly mistyped a slug.
+	// Without this, "crewship run vitkor" gives a flat "not found" with no
+	// hint that "viktor" exists. With ~10-30 agents per workspace the cost
+	// of computing Levenshtein over all candidates is negligible.
+	if len(available) == 0 {
+		return "", fmt.Errorf("agent not found: %s (no agents in this workspace)", slugOrID)
+	}
+	suggestions := nearestSlugs(slugOrID, available, 3)
+	if len(suggestions) > 0 {
+		return "", fmt.Errorf("agent not found: %s. Did you mean: %s?",
+			slugOrID, strings.Join(suggestions, ", "))
+	}
+	return "", fmt.Errorf("agent not found: %s. Available: %s",
+		slugOrID, strings.Join(truncateList(available, 8), ", "))
 }
 
 func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
