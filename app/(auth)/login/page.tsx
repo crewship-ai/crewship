@@ -17,6 +17,16 @@ export default function LoginPage() {
   )
 }
 
+/** Whitelist for the post-login redirect target. Only allow same-origin
+ *  relative paths — block protocol-relative (`//evil`), absolute URLs,
+ *  and `/login` itself (which would just bounce back here). */
+function safeRedirectPath(raw: string | null): string {
+  if (!raw) return "/"
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/"
+  if (raw === "/login" || raw.startsWith("/login?") || raw.startsWith("/login/")) return "/"
+  return raw
+}
+
 function LoginForm() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -25,6 +35,8 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const registered = searchParams.get("registered") === "true"
+  const expired = searchParams.get("reason") === "expired"
+  const redirectTarget = safeRedirectPath(searchParams.get("redirect"))
   const { signIn } = useAuth()
   // Track the status discovery as its own state so we can distinguish
   // "configured and disabled" from "network hiccup" — the previous boolean
@@ -66,7 +78,7 @@ function LoginForm() {
       return
     }
 
-    router.push("/")
+    router.push(redirectTarget)
   }
 
   return (
@@ -86,6 +98,11 @@ function LoginForm() {
             {registered && (
               <p className="text-sm text-center text-emerald-600 dark:text-emerald-400">
                 Account created! Please sign in.
+              </p>
+            )}
+            {expired && !error && (
+              <p className="text-sm text-center text-amber-600 dark:text-amber-400" role="status" aria-live="polite">
+                Your session expired. Please sign in again.
               </p>
             )}
             {error && (

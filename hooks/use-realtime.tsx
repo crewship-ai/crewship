@@ -7,10 +7,10 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from "react"
 import { useWebSocket, type WSMessage, type WSStatus } from "@/hooks/use-websocket"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 
 /** All supported real-time event types broadcast over the workspace WebSocket channel. */
 export type RealtimeEventType =
@@ -80,23 +80,30 @@ function getWsUrl(): string {
 /**
  * Context provider that manages a single WebSocket connection for real-time events.
  * Auto-subscribes to the workspace channel and re-subscribes component channels after reconnect.
+ *
+ * The previous version cached the WS ticket in state and silently swallowed
+ * a 401 from /ws-token (`.catch(() => {})`), which is exactly the failure
+ * mode the user hit: backend restart → token state stays null → useWebSocket
+ * skips connect → ReconnectBanner cycles "Reconnecting…" forever. We now
+ * pass a `getToken` callback that re-fetches per (re)connect attempt and
+ * lets apiFetch propagate auth failures upward — a 401 emits the global
+ * session-expired event, which the AuthProvider turns into a hard redirect.
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const { workspaceId } = useWorkspace()
-  const [token, setToken] = useState<string | null>(null)
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
   const activeChannelsRef = useRef<Set<string>>(new Set())
   const statusRef = useRef<string>("disconnected")
 
-  useEffect(() => {
-    let cancelled = false
-    fetch("/api/v1/ws-token", { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled && data?.token) setToken(data.token)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
+  const getToken = useCallback(async (): Promise<string | null> => {
+    const res = await apiFetch("/api/v1/ws-token")
+    if (!res.ok) return null
+    try {
+      const data = await res.json()
+      return typeof data?.token === "string" ? data.token : null
+    } catch {
+      return null
+    }
   }, [])
 
   const handleMessage = useCallback(
@@ -122,7 +129,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
 
   const { status, send } = useWebSocket({
     url: getWsUrl(),
-    token,
+    getToken,
     onMessage: handleMessage,
   })
 

@@ -36,11 +36,15 @@ export async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(input, init)
+      // Lazy import keeps this module free of a `lib/api-fetch` cycle
+      // (api-fetch reuses bodyIsReplayable/inputIsReplayable below).
+      const { apiFetch } = await import("./api-fetch")
+      const res = await apiFetch(input, init)
       if (res.ok) return res
       // Only retry true gateway flaps. 429 means "stop calling me" —
       // honor that, return immediately, let the caller surface the
       // error or simply leave the panel empty until next user action.
+      // 401s are owned by apiFetch (refresh + redirect) — don't loop.
       if (![502, 503, 504].includes(res.status) || attempt === retries) {
         return res
       }

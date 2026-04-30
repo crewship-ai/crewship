@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import {
   Bot,
-  AlertCircle,
   Wifi,
   WifiOff,
   Loader2,
@@ -43,6 +42,7 @@ import { ReconnectBanner } from "./messages/reconnect-banner"
 import type { FileEntry } from "./chat-tree-row"
 import { useComposerStore } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
+import { apiFetch } from "@/lib/api-fetch"
 
 function getWsUrl(): string {
   if (typeof window === "undefined") return ""
@@ -81,8 +81,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
-  const [token, setToken] = useState<string | null>(null)
-  const [authError, setAuthError] = useState(false)
   const [input, setInput] = useState(initialInput ?? "")
   const [sessionReady, setSessionReady] = useState(false)
 
@@ -109,21 +107,23 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [files, setFiles] = useState<FileEntry[]>([])
   const drawer = useDrawerStore()
 
-  useEffect(() => {
-    fetch("/api/v1/ws-token", { credentials: "include" })
-      .then((r) => {
-        if (r.status === 401) { setAuthError(true); return null }
-        return r.json()
-      })
-      .then((data: { token?: string } | null) => {
-        if (data?.token) setToken(data.token)
-      })
-      .catch(() => {})
+  // Per-(re)connect ticket fetch. apiFetch promotes the 401 path —
+  // either via silent refresh or the global session-expired event —
+  // so this hook no longer needs its own authError state.
+  const getWsToken = useCallback(async (): Promise<string | null> => {
+    const res = await apiFetch("/api/v1/ws-token")
+    if (!res.ok) return null
+    try {
+      const data = await res.json()
+      return typeof data?.token === "string" ? data.token : null
+    } catch {
+      return null
+    }
   }, [])
 
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
-    token,
+    getToken: getWsToken,
     sessionId,
   })
 
@@ -269,40 +269,36 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           </span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {authError ? (
-            <AuthErrorState />
-          ) : (
-            <Conversation>
-              <ConversationContent className="mx-auto w-full max-w-3xl">
-                {turns.length === 0 && !historyLoading && (
-                  <ConversationEmptyState
-                    icon={<Bot className="h-12 w-12" />}
-                    title="Start a conversation"
-                    description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+          <Conversation>
+            <ConversationContent className="mx-auto w-full max-w-3xl">
+              {turns.length === 0 && !historyLoading && (
+                <ConversationEmptyState
+                  icon={<Bot className="h-12 w-12" />}
+                  title="Start a conversation"
+                  description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+                />
+              )}
+              <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+                {turns.map((turn, idx) => (
+                  <TurnRenderer
+                    key={turn.id}
+                    turn={turn}
+                    onCopy={handleCopy}
+                    onFileClick={noopFileClick}
+                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
+                    animateAfter={animateAfter}
+                    agentId={agentId}
                   />
-                )}
-                <AnimatePresence key={sessionId} initial={false} mode="popLayout">
-                  {turns.map((turn, idx) => (
-                    <TurnRenderer
-                      key={turn.id}
-                      turn={turn}
-                      onCopy={handleCopy}
-                      onFileClick={noopFileClick}
-                      isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                      onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                      onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                      animateAfter={animateAfter}
-                      agentId={agentId}
-                    />
-                  ))}
-                </AnimatePresence>
-                <StreamingIndicator isStreaming={isStreaming} turns={turns} />
-              </ConversationContent>
-              <ConversationScrollButton />
-            </Conversation>
-          )}
+                ))}
+              </AnimatePresence>
+              <StreamingIndicator isStreaming={isStreaming} turns={turns} />
+            </ConversationContent>
+            <ConversationScrollButton />
+          </Conversation>
         </div>
-        {turns.length === 0 && !authError && !historyLoading && (
+        {turns.length === 0 && !historyLoading && (
           <div className="px-4 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
@@ -345,40 +341,36 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           </span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          {authError ? (
-            <AuthErrorState />
-          ) : (
-            <Conversation>
-              <ConversationContent className="mx-auto w-full max-w-3xl">
-                {turns.length === 0 && !historyLoading && (
-                  <ConversationEmptyState
-                    icon={<Bot className="h-12 w-12" />}
-                    title="Start a conversation"
-                    description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+          <Conversation>
+            <ConversationContent className="mx-auto w-full max-w-3xl">
+              {turns.length === 0 && !historyLoading && (
+                <ConversationEmptyState
+                  icon={<Bot className="h-12 w-12" />}
+                  title="Start a conversation"
+                  description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
+                />
+              )}
+              <AnimatePresence key={sessionId} initial={false} mode="popLayout">
+                {turns.map((turn, idx) => (
+                  <TurnRenderer
+                    key={turn.id}
+                    turn={turn}
+                    onCopy={handleCopy}
+                    onFileClick={noopFileClick}
+                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                    onEditUserMessage={!isStreaming ? editAndResend : undefined}
+                    animateAfter={animateAfter}
+                    agentId={agentId}
                   />
-                )}
-                <AnimatePresence key={sessionId} initial={false} mode="popLayout">
-                  {turns.map((turn, idx) => (
-                    <TurnRenderer
-                      key={turn.id}
-                      turn={turn}
-                      onCopy={handleCopy}
-                      onFileClick={noopFileClick}
-                      isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-                      onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
-                      onEditUserMessage={!isStreaming ? editAndResend : undefined}
-                      animateAfter={animateAfter}
-                      agentId={agentId}
-                    />
-                  ))}
-                </AnimatePresence>
-                <StreamingIndicator isStreaming={isStreaming} turns={turns} />
-              </ConversationContent>
-              <ConversationScrollButton />
-            </Conversation>
-          )}
+                ))}
+              </AnimatePresence>
+              <StreamingIndicator isStreaming={isStreaming} turns={turns} />
+            </ConversationContent>
+            <ConversationScrollButton />
+          </Conversation>
         </div>
-        {turns.length === 0 && !authError && !historyLoading && (
+        {turns.length === 0 && !historyLoading && (
           <div className="mx-auto w-full max-w-3xl px-4 md:px-6 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
@@ -483,15 +475,6 @@ function OriginChip({ origin }: { origin?: string | null }) {
     <span className={cn("text-[10px] px-1.5 py-0.5 rounded font-medium", tag.className)}>
       {tag.label}
     </span>
-  )
-}
-
-function AuthErrorState() {
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-      <AlertCircle className="h-12 w-12 mb-3 opacity-30" />
-      <p className="text-body">Session expired. Please log in again.</p>
-    </div>
   )
 }
 

@@ -491,6 +491,13 @@ func (r *Router) registerRoutes() {
 		writeJSON(w, http.StatusOK, map[string]bool{"enabled": googleAuth.Enabled()})
 	})
 
+	// Active sessions (auth required) — backs the Settings → Sessions
+	// UI. List shows the caller's own; revoke flips revoked_at on a
+	// session owned by the caller (or 404 to avoid enumeration).
+	sessionsH := NewSessionsHandler(r.db, r.logger, r.sessionsStore)
+	r.mux.Handle("GET /api/v1/auth/sessions", authed(http.HandlerFunc(sessionsH.List)))
+	r.mux.Handle("POST /api/v1/auth/sessions/{id}/revoke", authed(http.HandlerFunc(sessionsH.Revoke)))
+
 	// CLI token management (auth required)
 	cliTokenH := NewCLITokenHandler(r.db, r.logger)
 	r.mux.Handle("POST /api/v1/auth/cli-token", authed(http.HandlerFunc(cliTokenH.Create)))

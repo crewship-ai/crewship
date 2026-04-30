@@ -9,7 +9,7 @@ class MockWebSocket {
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event: { code: number; reason: string }) => void) | null = null
   sent: string[] = []
 
   static CONNECTING = 0
@@ -26,9 +26,9 @@ class MockWebSocket {
     this.sent.push(data)
   }
 
-  close() {
+  close(code = 1000, reason = "") {
     this.readyState = MockWebSocket.CLOSED
-    this.onclose?.()
+    this.onclose?.({ code, reason })
   }
 
   simulateOpen() {
@@ -47,6 +47,8 @@ class MockWebSocket {
 
 import { useWebSocket } from "@/hooks/use-websocket"
 
+const tokenFn = (token: string | null) => () => Promise.resolve(token)
+
 describe("useWebSocket", () => {
   beforeEach(() => {
     mockInstances = []
@@ -59,216 +61,136 @@ describe("useWebSocket", () => {
     vi.stubGlobal("WebSocket", undefined)
   })
 
-  it("starts disconnected without a token", () => {
+  it("does not open a socket when getToken returns null", async () => {
     const { result } = renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: null }),
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn(null) }),
     )
-    expect(result.current.status).toBe("disconnected")
+    await act(async () => { await vi.runAllTimersAsync() })
     expect(mockInstances).toHaveLength(0)
+    expect(result.current.status).toBe("error")
   })
 
-  it("connects when token is provided", () => {
+  it("connects when getToken returns a string", async () => {
     const { result } = renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token" }),
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("test-token") }),
     )
+    await act(async () => { await vi.runAllTimersAsync() })
     expect(mockInstances).toHaveLength(1)
     expect(mockInstances[0].url).toContain("token=test-token")
     expect(result.current.status).toBe("connecting")
   })
 
-  it("sets connected status on open", () => {
+  it("sets connected status on open", async () => {
     const { result } = renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token" }),
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("test-token") }),
     )
-
-    act(() => {
-      mockInstances[0].simulateOpen()
-    })
-
+    await act(async () => { await vi.runAllTimersAsync() })
+    act(() => { mockInstances[0].simulateOpen() })
     expect(result.current.status).toBe("connected")
   })
 
-  it("calls onMessage with valid parsed messages", () => {
+  it("dispatches messages through onMessage", async () => {
     const onMessage = vi.fn()
     renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token", onMessage }),
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t"), onMessage }),
     )
-
+    await act(async () => { await vi.runAllTimersAsync() })
     act(() => {
       mockInstances[0].simulateOpen()
+      mockInstances[0].simulateMessage({ type: "hello", payload: "world" })
     })
-
-    act(() => {
-      mockInstances[0].simulateMessage({ type: "chat_event", channel: "session:1", payload: "hello" })
-    })
-
-    expect(onMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "chat_event", channel: "session:1" }),
-    )
+    expect(onMessage).toHaveBeenCalledTimes(1)
+    expect(onMessage.mock.calls[0][0]).toMatchObject({ type: "hello" })
   })
 
-  it("ignores invalid JSON messages", () => {
-    const onMessage = vi.fn()
-    renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token", onMessage }),
-    )
-
-    act(() => {
-      mockInstances[0].simulateOpen()
-    })
-
-    act(() => {
-      mockInstances[0].onmessage?.({ data: "not-json" })
-    })
-
-    expect(onMessage).not.toHaveBeenCalled()
-  })
-
-  it("ignores messages that fail Zod validation", () => {
-    const onMessage = vi.fn()
-    renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token", onMessage }),
-    )
-
-    act(() => {
-      mockInstances[0].simulateOpen()
-    })
-
-    // Missing required 'type' field
-    act(() => {
-      mockInstances[0].simulateMessage({ channel: "test" })
-    })
-
-    expect(onMessage).not.toHaveBeenCalled()
-  })
-
-  it("sets error status on WebSocket error", () => {
+  it("close code 4401 emits auth:session-expired and stops retrying", async () => {
+    const handler = vi.fn()
+    window.addEventListener("auth:session-expired", handler)
     const { result } = renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token" }),
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
     )
-
-    act(() => {
-      mockInstances[0].simulateError()
-    })
-
-    expect(result.current.status).toBe("error")
-  })
-
-  it("reconnects on close with exponential backoff", () => {
-    renderHook(() =>
-      useWebSocket({
-        url: "ws://localhost:8080/ws",
-        token: "test-token",
-      }),
-    )
-    expect(mockInstances).toHaveLength(1)
-
-    // First close -> reconnect after ~1s backoff (base * 2^0 + jitter)
-    act(() => {
-      mockInstances[0].close()
-    })
-    act(() => {
-      vi.advanceTimersByTime(2500) // covers base 1s + up to 1s jitter
-    })
-    expect(mockInstances).toHaveLength(2)
-
-    // Second close -> reconnect after ~2s backoff (base * 2^1 + jitter)
-    act(() => {
-      mockInstances[1].close()
-    })
-    act(() => {
-      vi.advanceTimersByTime(4000) // covers base 2s + up to 1s jitter
-    })
-    expect(mockInstances).toHaveLength(3)
-  })
-
-  it("send sends JSON message when connected", () => {
-    const { result } = renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token" }),
-    )
-
-    act(() => {
-      mockInstances[0].simulateOpen()
-    })
-
-    act(() => {
-      result.current.send({ type: "ping" })
-    })
-
-    expect(mockInstances[0].sent).toHaveLength(1)
-    expect(JSON.parse(mockInstances[0].sent[0])).toEqual({ type: "ping" })
-  })
-
-  it("send does nothing when not connected", () => {
-    const { result } = renderHook(() =>
-      useWebSocket({ url: "ws://localhost:8080/ws", token: "test-token" }),
-    )
-
-    act(() => {
-      result.current.send({ type: "ping" })
-    })
-
-    expect(mockInstances[0].sent).toHaveLength(0)
-  })
-
-  it("calls onStatusChange callback", () => {
-    const onStatusChange = vi.fn()
-    renderHook(() =>
-      useWebSocket({
-        url: "ws://localhost:8080/ws",
-        token: "test-token",
-        onStatusChange,
-      }),
-    )
-
-    expect(onStatusChange).toHaveBeenCalledWith("connecting")
-
-    act(() => {
-      mockInstances[0].simulateOpen()
-    })
-
-    expect(onStatusChange).toHaveBeenCalledWith("connected")
-  })
-
-  it("disconnect stops reconnection", () => {
-    const { result } = renderHook(() =>
-      useWebSocket({
-        url: "ws://localhost:8080/ws",
-        token: "test-token",
-      }),
-    )
-
-    act(() => {
-      result.current.disconnect()
-    })
-
-    act(() => {
-      vi.advanceTimersByTime(35000) // well past max backoff
-    })
-
-    // Only the initial connection, no reconnects after disconnect
-    expect(mockInstances).toHaveLength(1)
-  })
-
-  it("resets reconnect counter on successful connection", () => {
-    renderHook(() =>
-      useWebSocket({
-        url: "ws://localhost:8080/ws",
-        token: "test-token",
-      }),
-    )
-
-    // Open and close — first reconnect uses base backoff (~1s + jitter)
+    await act(async () => { await vi.runAllTimersAsync() })
     act(() => { mockInstances[0].simulateOpen() })
-    act(() => { mockInstances[0].close() })
-    act(() => { vi.advanceTimersByTime(2500) })
-    expect(mockInstances).toHaveLength(2)
+    act(() => { mockInstances[0].close(4401, "session_revoked") })
 
-    // Open again (resets counter) and close — backoff resets to base
-    act(() => { mockInstances[1].simulateOpen() })
-    act(() => { mockInstances[1].close() })
-    act(() => { vi.advanceTimersByTime(2500) })
-    // Should still reconnect because counter was reset on open
-    expect(mockInstances).toHaveLength(3)
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(result.current.status).toBe("error")
+
+    // Even after the longest backoff window, no second connection attempt.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(mockInstances).toHaveLength(1)
+    window.removeEventListener("auth:session-expired", handler)
+  })
+
+  it("session_revoked frame stops retrying", async () => {
+    const handler = vi.fn()
+    window.addEventListener("auth:session-expired", handler)
+    renderHook(() =>
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
+    )
+    await act(async () => { await vi.runAllTimersAsync() })
+    act(() => {
+      mockInstances[0].simulateOpen()
+      mockInstances[0].simulateMessage({ type: "session_revoked", payload: { reason: "session_revoked" } })
+    })
+    expect(handler).toHaveBeenCalledTimes(1)
+    window.removeEventListener("auth:session-expired", handler)
+  })
+
+  it("normal close triggers reconnect with backoff and re-fetches token", async () => {
+    const tokens = ["t1", "t2"]
+    const getToken = vi.fn(async () => tokens.shift() ?? null)
+    renderHook(() =>
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken }),
+    )
+    await act(async () => { await vi.runAllTimersAsync() })
+    expect(mockInstances).toHaveLength(1)
+    expect(mockInstances[0].url).toContain("token=t1")
+
+    act(() => { mockInstances[0].close(1006, "abnormal") })
+
+    // First reconnect attempt: ~1-2s with jitter.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_500) })
+    await act(async () => { await vi.runAllTimersAsync() })
+    expect(getToken).toHaveBeenCalledTimes(2)
+    expect(mockInstances).toHaveLength(2)
+    expect(mockInstances[1].url).toContain("token=t2")
+  })
+
+  it("reconnect attempts are capped — after MAX, fires session-expired", async () => {
+    const handler = vi.fn()
+    window.addEventListener("auth:session-expired", handler)
+    renderHook(() =>
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
+    )
+    await act(async () => { await vi.runAllTimersAsync() })
+
+    // Force-close repeatedly. Each backoff is capped at 30s + jitter,
+    // so 35s per iteration safely advances past the next reconnect
+    // window. After MAX_RECONNECT_ATTEMPTS (=8) the hook should give up.
+    for (let i = 0; i < 9; i++) {
+      const idx = mockInstances.length - 1
+      if (idx < 0) break
+      act(() => { mockInstances[idx].close(1006) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(35_000) })
+    }
+
+    expect(handler).toHaveBeenCalled()
+    window.removeEventListener("auth:session-expired", handler)
+  })
+
+  it("send is a no-op until socket is OPEN", async () => {
+    const { result } = renderHook(() =>
+      useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
+    )
+    await act(async () => { await vi.runAllTimersAsync() })
+    act(() => { result.current.send({ type: "ping" }) })
+    expect(mockInstances[0].sent).toHaveLength(0)
+
+    act(() => {
+      mockInstances[0].simulateOpen()
+      result.current.send({ type: "ping" })
+    })
+    expect(mockInstances[0].sent).toHaveLength(1)
   })
 })

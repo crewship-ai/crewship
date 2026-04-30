@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react"
 import { z } from "zod"
+import { AUTH_EVENT, AUTH_CHANNEL, broadcastSignOut } from "@/lib/api-fetch"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -80,6 +81,54 @@ export function AuthProvider({ children }: AuthProviderProps) {
     refresh()
   }, [refresh])
 
+  // Hard-redirect to /login when apiFetch detects a terminal auth state
+  // (refresh failed, session_revoked, etc). The BroadcastChannel echo
+  // covers other tabs in the same browser. The redirect carries the
+  // current path as ?redirect= so post-login can return the user to
+  // where they were instead of dumping them on /.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    let redirected = false
+    const goLoginExpired = () => {
+      if (redirected) return
+      redirected = true
+      const currentPath = window.location.pathname + window.location.search
+      const params = new URLSearchParams({ reason: "expired" })
+      // Don't append ?redirect for /login itself or unsafe absolute URLs.
+      if (currentPath !== "/login" && currentPath.startsWith("/") && !currentPath.startsWith("//")) {
+        params.set("redirect", currentPath)
+      }
+      window.location.replace(`/login?${params.toString()}`)
+    }
+    const goLoginSignedOutElsewhere = () => {
+      if (redirected) return
+      redirected = true
+      window.location.replace("/login")
+    }
+
+    const expiredHandler = () => goLoginExpired()
+    window.addEventListener(AUTH_EVENT, expiredHandler)
+
+    let channel: BroadcastChannel | null = null
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        channel = new BroadcastChannel(AUTH_CHANNEL)
+        channel.onmessage = (ev) => {
+          if (ev.data?.type === "session-expired") goLoginExpired()
+          else if (ev.data?.type === "signout") goLoginSignedOutElsewhere()
+        }
+      } catch {
+        channel = null
+      }
+    }
+
+    return () => {
+      window.removeEventListener(AUTH_EVENT, expiredHandler)
+      channel?.close()
+    }
+  }, [])
+
   const signIn = useCallback(async (email: string, password: string) => {
     const csrfToken = await fetchCsrfToken()
     if (!csrfToken) {
@@ -115,12 +164,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       await fetch("/api/auth/signout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
       })
     } catch {
       // ignore
     }
     setSession(null)
     setStatus("unauthenticated")
+    // Tell other tabs in this browser to drop their session UI too.
+    broadcastSignOut()
   }, [])
 
   return (
