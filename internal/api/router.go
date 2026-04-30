@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -44,6 +46,7 @@ type Router struct {
 	db               *sql.DB
 	logger           *slog.Logger
 	authMw           *AuthMiddleware
+	sessionsStore    sessions.Store
 	socketPath       string
 	internalToken    string
 	internalBaseURL  string
@@ -136,18 +139,30 @@ func (noopEmitter) Emit(_ context.Context, e journal.Entry) (string, error) {
 func (noopEmitter) Flush(_ context.Context) error { return nil }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
-	validator, err := auth.NewJWTValidator(jwtSecret, "")
+	// db is non-optional. NewAuthMiddleware joins to user_sessions on
+	// every authed request, and the workspace-membership middleware
+	// runs queries before any handler is reached. The previous code
+	// accepted nil here and the failure mode was the first authed
+	// request panicking with a nil-pointer dereference — fail at
+	// construction so deployment-wiring bugs surface in startup logs
+	// instead of production traffic.
+	if db == nil {
+		return nil, fmt.Errorf("new router: db is required")
+	}
+	validator, err := auth.NewJWTValidator(jwtSecret)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new router: create JWT validator: %w", err)
 	}
 
-	authMw := NewAuthMiddleware(validator, db, logger)
+	sessionsStore := sessions.NewDBStore(db)
+	authMw := NewAuthMiddleware(validator, sessionsStore, db, logger)
 
 	r := &Router{
-		mux:    http.NewServeMux(),
-		db:     db,
-		logger: logger,
-		authMw: authMw,
+		mux:           http.NewServeMux(),
+		db:            db,
+		logger:        logger,
+		authMw:        authMw,
+		sessionsStore: sessionsStore,
 	}
 
 	// Apply options before registering routes so that internalToken,

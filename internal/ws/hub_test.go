@@ -11,7 +11,7 @@ import (
 
 func TestHubConnectionCount(t *testing.T) {
 	logger := logging.New("error", "json", nil)
-	hub := NewHub(logger, nil)
+	hub := NewHub(logger, nil, NopValidatorForTests, NopSessionsForTests)
 
 	if hub.ConnectionCount() != 0 {
 		t.Errorf("expected 0 connections, got %d", hub.ConnectionCount())
@@ -20,7 +20,7 @@ func TestHubConnectionCount(t *testing.T) {
 
 func TestHubRunAndStop(t *testing.T) {
 	logger := logging.New("error", "json", nil)
-	hub := NewHub(logger, nil)
+	hub := NewHub(logger, nil, NopValidatorForTests, NopSessionsForTests)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -69,7 +69,7 @@ func TestServerMessageMarshal(t *testing.T) {
 
 func TestBroadcast(t *testing.T) {
 	logger := logging.New("error", "json", nil)
-	hub := NewHub(logger, nil)
+	hub := NewHub(logger, nil, NopValidatorForTests, NopSessionsForTests)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -111,7 +111,12 @@ export interface ChatMessage {
 
 interface UseChatOptions {
   wsUrl: string
-  token: string | null
+  /** Async callback that fetches the current WS ticket. Replaces the
+   *  previous `token: string | null` pre-fetched once at mount; the
+   *  hook now re-fetches on every (re)connect so a stale ticket from
+   *  before a backend restart can't trap the connection in an infinite
+   *  retry loop. */
+  getToken: () => Promise<string | null>
   sessionId: string
 }
 
@@ -175,7 +180,7 @@ function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const textBufferRef = useRef("")
@@ -699,7 +704,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
 
   const { status, send } = useWebSocket({
     url: wsUrl,
-    token,
+    getToken,
     onMessage: handleMessage,
   })
 

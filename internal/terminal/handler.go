@@ -117,7 +117,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := h.validator.Validate(authPayload.Token)
+	// Terminal WS uses the same kind=ws ticket as the chat hub. CLI
+	// tokens go through here too (their tickets carry empty sid).
+	claims, err := h.validator.ValidateWS(authPayload.Token)
 	if err != nil {
 		h.logger.Warn("terminal auth failed", "error", err)
 		h.writeError(ws, "invalid token")

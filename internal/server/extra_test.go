@@ -63,7 +63,14 @@ func hexEncode(b []byte) string {
 }
 
 // silentCfg returns a fresh Default() config.
-func silentCfg() *config.Config { return config.Default() }
+func silentCfg() *config.Config {
+	c := config.Default()
+	// Server.New now panics if NEXTAUTH_SECRET is unset. Every test
+	// using silentCfg gets a fixed test secret so the panic-on-missing
+	// guard doesn't torpedo unrelated assertions.
+	c.Auth.JWTSecret = "test-secret-for-server-extra-test-32c"
+	return c
+}
 
 // --- routes wiring ---------------------------------------------------------
 
@@ -158,7 +165,7 @@ func TestCombinedHandler_RoutesAPIPathsToMux(t *testing.T) {
 	t.Parallel()
 	cfg := silentCfg()
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, nil)
+	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	s.spaHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -272,7 +279,7 @@ func newServerWithStorage(t *testing.T) (*Server, string) {
 	if err != nil {
 		t.Fatalf("localfs: %v", err)
 	}
-	s := New(cfg, logger, &Deps{Storage: stor})
+	s := New(cfg, logger, &Deps{Storage: stor, DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
 		if s.fileWatcher != nil {
@@ -460,7 +467,7 @@ func TestHandleCrewStats_WithRegisteredContainer(t *testing.T) {
 	t.Parallel()
 	cfg := silentCfg()
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, &Deps{Container: &mockContainer{}})
+	s := New(cfg, logger, &Deps{Container: &mockContainer{}, DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	t.Cleanup(func() {
 		if s.fileWatcher != nil {
@@ -625,7 +632,7 @@ func TestStartIPC_BindsAndCleansUpStaleSocket(t *testing.T) {
 	cfg := silentCfg()
 	cfg.IPC.SocketPath = sockPath
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, nil)
+	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
 
 	errCh := make(chan error, 1)
