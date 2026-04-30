@@ -98,7 +98,7 @@ func Upsert(ctx context.Context, db *sql.DB, j journal.Emitter, s Snapshot) erro
 		return fmt.Errorf("presence: upsert: %w", err)
 	}
 
-	if !prev.Valid || prev.String != string(s.Status) {
+	if j != nil && (!prev.Valid || prev.String != string(s.Status)) {
 		summary := fmt.Sprintf("agent %s: %s", s.AgentID, s.Status)
 		if prev.Valid {
 			summary = fmt.Sprintf("agent %s: %s → %s", s.AgentID, prev.String, s.Status)
