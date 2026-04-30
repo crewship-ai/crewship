@@ -158,13 +158,17 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	SecurityHeaders(http.HandlerFunc(r.routeWithRateLimiting)).ServeHTTP(w, req)
 }
 
-// Shutdown releases background resources the router owns — currently the
-// port-expose registry's TTL purge goroutine. Safe to call multiple times.
-// The server's shutdown path invokes this after the HTTP listener stops
-// accepting new connections but before process exit, so the purge loop
-// doesn't keep a hanging reference to the DB handle.
+// Shutdown releases background resources the router owns — the port-expose
+// registry's TTL purge goroutine and the provisioning handler's
+// cleanup/GC loops. Safe to call multiple times. The server's shutdown
+// path invokes this after the HTTP listener stops accepting new
+// connections but before process exit, so neither loop keeps a hanging
+// reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.provisioning != nil {
+		r.provisioning.Stop()
+	}
 	if r.portExposeRegistry != nil {
 		r.portExposeRegistry.Shutdown()
 	}
