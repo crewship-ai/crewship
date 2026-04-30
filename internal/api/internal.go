@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync/atomic"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -25,16 +26,29 @@ type InternalHandler struct {
 	internalToken string
 	keeperEnabled atomic.Bool
 	hub           *ws.Hub
+	journal       journal.Emitter
 }
 
 // NewInternalHandler creates an InternalHandler with the given database, internal token, and logger.
+// Callers that want journal emits wire them after construction with SetJournal;
+// the default is a no-op so tests stay simple.
 func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
-	return &InternalHandler{db: db, internalToken: internalToken, logger: logger}
+	return &InternalHandler{db: db, internalToken: internalToken, logger: logger, journal: noopEmitter{}}
 }
 
 // SetHub attaches a WebSocket hub for broadcasting events from internal endpoints.
 func (h *InternalHandler) SetHub(hub *ws.Hub) {
 	h.hub = hub
+}
+
+// SetJournal wires a journal emitter. nil maps to the no-op so callers
+// don't have to branch on whether the server wired one.
+func (h *InternalHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // SetKeeperEnabled toggles whether Keeper is advertised as enabled in the agent config.

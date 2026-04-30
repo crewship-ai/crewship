@@ -1,12 +1,16 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // RunHandler provides endpoints for listing and querying agent execution runs.
@@ -60,6 +64,10 @@ type pagination struct {
 
 // List returns a paginated list of agent runs in the workspace with stats and optional filters.
 // GET /api/v1/runs
+//
+// Reads exclusively from journal_entries (grouped by trace_id) — agent_runs
+// is being phased out (Phase J of unified-journal). Response shape is
+// preserved 1:1 so frontend consumers don't see a contract change.
 func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -73,105 +81,29 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * limit
 
-	status := r.URL.Query().Get("status")
-	agentID := r.URL.Query().Get("agent_id")
-	trigger := r.URL.Query().Get("trigger")
-
-	tag := r.URL.Query().Get("tag")
-
-	query := `
-		SELECT r.id, r.agent_id, r.chat_id, r.workspace_id, r.triggered_by,
-			r.trigger_type, r.status, r.started_at, r.finished_at,
-			r.error_message, r.exit_code, r.metadata, r.created_at,
-			a.name, a.slug,
-			c.name
-		FROM agent_runs r
-		LEFT JOIN agents a ON a.id = r.agent_id
-		LEFT JOIN crews c ON c.id = a.crew_id
-		WHERE r.workspace_id = ?`
-	countQuery := `SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ?`
-	args := []interface{}{workspaceID}
-	countArgs := []interface{}{workspaceID}
-
-	if status != "" {
-		query += " AND r.status = ?"
-		countQuery += " AND status = ?"
-		args = append(args, status)
-		countArgs = append(countArgs, status)
-	}
-	if agentID != "" {
-		query += " AND r.agent_id = ?"
-		countQuery += " AND agent_id = ?"
-		args = append(args, agentID)
-		countArgs = append(countArgs, agentID)
-	}
-	if trigger != "" {
-		query += " AND r.trigger_type = ?"
-		countQuery += " AND trigger_type = ?"
-		args = append(args, trigger)
-		countArgs = append(countArgs, trigger)
-	}
-	if tag != "" {
-		// Use json_each to match exact tag values in the tags array
-		query += " AND EXISTS (SELECT 1 FROM json_each(r.metadata, '$.tags') j WHERE j.value = ?)"
-		countQuery += " AND EXISTS (SELECT 1 FROM json_each(metadata, '$.tags') j WHERE j.value = ?)"
-		args = append(args, tag)
-		countArgs = append(countArgs, tag)
+	q := journal.RunsQuery{
+		WorkspaceID: workspaceID,
+		Status:      journal.RunStatus(r.URL.Query().Get("status")),
+		AgentID:     r.URL.Query().Get("agent_id"),
+		TriggerType: r.URL.Query().Get("trigger"),
+		Tag:         r.URL.Query().Get("tag"),
+		Limit:       limit,
+		Offset:      offset,
 	}
 
-	query += " ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
-
-	rows, err := h.db.QueryContext(r.Context(), query, args...)
+	aggregated, total, err := journal.ListRuns(r.Context(), h.db, q)
 	if err != nil {
 		h.logger.Error("list runs", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	defer rows.Close()
 
-	var runs []runResponse
-	for rows.Next() {
-		var run runResponse
-		var metadataStr sql.NullString
-		if err := rows.Scan(&run.ID, &run.AgentID, &run.ChatID, &run.WorkspaceID,
-			&run.TriggeredBy, &run.TriggerType, &run.Status,
-			&run.StartedAt, &run.FinishedAt, &run.ErrorMessage, &run.ExitCode,
-			&metadataStr, &run.CreatedAt, &run.AgentName, &run.AgentSlug, &run.CrewName); err != nil {
-			h.logger.Error("scan run", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-			return
-		}
-		if metadataStr.Valid {
-			run.Metadata = json.RawMessage(metadataStr.String)
-		}
-		runs = append(runs, run)
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (runs)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if runs == nil {
-		runs = []runResponse{}
-	}
+	// Enrich the page with agent name/slug and crew name in one query.
+	// Bounded by limit (max 100), so the SQL `IN (?...)` stays small.
+	runs := h.enrichRuns(r.Context(), workspaceID, aggregated)
 
-	var total int
-	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total); err != nil {
-		h.logger.Error("count runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	var running, today, failed int
-	// COALESCE(..., 0) is required: when the workspace has no rows at all,
-	// SUM(CASE ...) returns NULL and Scan into int would fail.
-	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT
-			COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN date(created_at) = date('now') THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status = 'FAILED' AND date(created_at) = date('now') THEN 1 ELSE 0 END), 0)
-		FROM agent_runs WHERE workspace_id = ?`, workspaceID).Scan(&running, &today, &failed); err != nil {
+	stats, err := journal.RunStats(r.Context(), h.db, workspaceID)
+	if err != nil {
 		h.logger.Error("count run stats", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
@@ -179,7 +111,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, runListResponse{
 		Data:  runs,
-		Stats: runStats{Running: running, Today: today, Failed: failed},
+		Stats: runStats{Running: stats.Running, Today: stats.Today, Failed: stats.FailedToday},
 		Pagination: pagination{
 			Page:       page,
 			Limit:      limit,
@@ -187,4 +119,136 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 			TotalPages: int(math.Ceil(float64(total) / float64(limit))),
 		},
 	})
+}
+
+// enrichRuns maps RunAggregated to runResponse and fills in agent name/slug
+// and crew name with one extra SELECT keyed on the page's agent_ids.
+// Errors during enrichment are logged and result in nil names — the runs
+// themselves still render.
+//
+// The lookup is workspace-scoped so an agent_id collision across
+// workspaces (test fixtures, manual SQL, restored backups) cannot
+// attach a different workspace's agent/crew names to this page.
+func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggregated []journal.RunAggregated) []runResponse {
+	if aggregated == nil {
+		return []runResponse{}
+	}
+	// Collect unique agent_ids from the page so the lookup is bounded.
+	agentIDs := make([]any, 0, len(aggregated))
+	seen := map[string]struct{}{}
+	for _, r := range aggregated {
+		if r.AgentID == "" {
+			continue
+		}
+		if _, ok := seen[r.AgentID]; ok {
+			continue
+		}
+		seen[r.AgentID] = struct{}{}
+		agentIDs = append(agentIDs, r.AgentID)
+	}
+
+	type lookup struct {
+		name, slug, crewName sql.NullString
+	}
+	enriched := make(map[string]lookup, len(agentIDs))
+	if len(agentIDs) > 0 {
+		// Build IN (?,?,?...) placeholder list.
+		ph := "?"
+		for i := 1; i < len(agentIDs); i++ {
+			ph += ",?"
+		}
+		query := `SELECT a.id, a.name, a.slug, c.name
+			FROM agents a
+			LEFT JOIN crews c ON c.id = a.crew_id
+			WHERE a.workspace_id = ? AND a.id IN (` + ph + `)`
+		args := make([]any, 0, len(agentIDs)+1)
+		args = append(args, workspaceID)
+		args = append(args, agentIDs...)
+		rows, err := h.db.QueryContext(ctx, query, args...)
+		if err == nil {
+			for rows.Next() {
+				var id string
+				var l lookup
+				if err := rows.Scan(&id, &l.name, &l.slug, &l.crewName); err == nil {
+					enriched[id] = l
+				}
+			}
+			_ = rows.Close()
+		} else {
+			h.logger.Warn("enrich runs lookup failed", "error", err)
+		}
+	}
+
+	out := make([]runResponse, 0, len(aggregated))
+	for _, r := range aggregated {
+		resp := runResponse{
+			ID:           r.ID,
+			AgentID:      r.AgentID,
+			WorkspaceID:  r.WorkspaceID,
+			TriggerType:  r.TriggerType,
+			Status:       string(r.Status),
+			ErrorMessage: stringPtrOrNil(r.ErrorMessage),
+			ExitCode:     r.ExitCode,
+			CreatedAt:    formatRFC3339(r.CreatedAt),
+		}
+		if r.ChatID != "" {
+			c := r.ChatID
+			resp.ChatID = &c
+		}
+		if r.TriggeredBy != "" {
+			t := r.TriggeredBy
+			resp.TriggeredBy = &t
+		}
+		if !r.StartedAt.IsZero() {
+			s := formatRFC3339(r.StartedAt)
+			resp.StartedAt = &s
+		}
+		if r.FinishedAt != nil && !r.FinishedAt.IsZero() {
+			f := formatRFC3339(*r.FinishedAt)
+			resp.FinishedAt = &f
+		}
+		if r.Metadata != nil {
+			if b, err := json.Marshal(r.Metadata); err == nil {
+				resp.Metadata = b
+			}
+		}
+		if l, ok := enriched[r.AgentID]; ok {
+			if l.name.Valid {
+				n := l.name.String
+				resp.AgentName = &n
+			}
+			if l.slug.Valid {
+				s := l.slug.String
+				resp.AgentSlug = &s
+			}
+			if l.crewName.Valid {
+				c := l.crewName.String
+				resp.CrewName = &c
+			}
+		}
+		out = append(out, resp)
+	}
+	return out
+}
+
+// stringPtrOrNil returns a pointer to s when non-empty, else nil —
+// matches the legacy *string convention in runResponse so the JSON
+// keeps the field as null when empty rather than serialising "".
+// (Distinct from nullStringPtr in crew_provisioning.go which takes a
+// sql.NullString.)
+func stringPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// formatRFC3339 returns the RFC3339 string used by the legacy agent_runs
+// columns. Zero time becomes empty string — caller decides whether to
+// emit nil or the string.
+func formatRFC3339(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }

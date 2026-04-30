@@ -25,6 +25,28 @@ type Query struct {
 	Until       time.Time
 	Cursor      string // opaque — set from a prior page's last entry ID+TS
 	Limit       int
+
+	// FTSQuery is a free-text search applied via the journal_entries_fts
+	// virtual table (migration 55). When non-empty, List joins the FTS5
+	// shadow table and adds a MATCH predicate. The string is treated as
+	// a single FTS5 phrase — special operators (NEAR, *, OR, etc.) are
+	// neutralised by wrapping in double quotes. Empty string → no FTS
+	// constraint, regular indexed lookup.
+	FTSQuery string
+}
+
+// fts5Phrase wraps the user's free-text search in FTS5 phrase quotes so
+// operators like NEAR / OR / * inside the input don't change the
+// query's meaning. Internal double quotes are doubled to escape them
+// per the FTS5 grammar. Returns empty when the input is whitespace.
+func fts5Phrase(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	// Replace each `"` with `""` to escape it inside the phrase literal.
+	escaped := strings.ReplaceAll(s, `"`, `""`)
+	return `"` + escaped + `"`
 }
 
 // List returns a page of entries matching q, newest first. Pagination is
@@ -101,11 +123,30 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 		args = append(args, cTS, cTS, cID)
 	}
 
-	query := `SELECT id, workspace_id, crew_id, agent_id, mission_id, ts, entry_type,
-		severity, priority, actor_type, actor_id, summary, payload, refs, trace_id, span_id, expires_at
-		FROM journal_entries
+	// FTS5 free-text. We JOIN the shadow table on rowid (external-content
+	// FTS5 — see migration 55) and add a MATCH predicate. The phrase
+	// quoting in fts5Phrase neutralises special operators so an end-user
+	// typing `db OR foo*` doesn't unexpectedly broaden the search.
+	//
+	// `journal_entries` is qualified in SELECT because the FTS shadow
+	// table also has `summary` and `payload` columns; everything else
+	// the WHERE clause touches (workspace_id, crew_id, ts, …) lives
+	// only on the base table so bare references stay unambiguous.
+	from := "FROM journal_entries"
+	if phrase := fts5Phrase(q.FTSQuery); phrase != "" {
+		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
+		conds = append(conds, "journal_entries_fts MATCH ?")
+		args = append(args, phrase)
+	}
+
+	query := `SELECT journal_entries.id, journal_entries.workspace_id, journal_entries.crew_id,
+		journal_entries.agent_id, journal_entries.mission_id, journal_entries.ts, journal_entries.entry_type,
+		journal_entries.severity, journal_entries.priority, journal_entries.actor_type, journal_entries.actor_id,
+		journal_entries.summary, journal_entries.payload, journal_entries.refs,
+		journal_entries.trace_id, journal_entries.span_id, journal_entries.expires_at
+		` + from + `
 		WHERE ` + strings.Join(conds, " AND ") + `
-		ORDER BY ts DESC, id DESC
+		ORDER BY journal_entries.ts DESC, journal_entries.id DESC
 		LIMIT ?`
 	args = append(args, q.Limit)
 
@@ -295,7 +336,16 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 		conds = append(conds, "ts <= ?")
 		args = append(args, q.Until.UTC().Format(time.RFC3339Nano))
 	}
-	query := `SELECT COUNT(*) FROM journal_entries WHERE ` + strings.Join(conds, " AND ")
+	// Mirror List's FTS5 join so Count returns the same N as the
+	// paginated list — otherwise the badge contradicts what the user
+	// can scroll through.
+	from := "FROM journal_entries"
+	if phrase := fts5Phrase(q.FTSQuery); phrase != "" {
+		from = "FROM journal_entries JOIN journal_entries_fts fts ON fts.rowid = journal_entries.rowid"
+		conds = append(conds, "journal_entries_fts MATCH ?")
+		args = append(args, phrase)
+	}
+	query := `SELECT COUNT(*) ` + from + ` WHERE ` + strings.Join(conds, " AND ")
 	var n int64
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
 		return 0, err

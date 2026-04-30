@@ -170,15 +170,20 @@ export function JournalFilters({ workspaceId, value, onChange }: JournalFiltersP
         )}
       </div>
 
-      {/* Search */}
+      {/* Search — full-text via FTS5 over summary + payload (Phase I
+          of unified-journal). Debounced 300 ms in the parent before
+          firing the server query. */}
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
         <Input
           value={searchLocal}
           onChange={(e) => setSearchLocal(e.target.value)}
-          placeholder="Search summary…"
+          placeholder="Search summary + payload…"
           className="h-8 pl-7 text-xs"
         />
+        <p className="mt-1 text-[10px] text-muted-foreground/70">
+          Searches across all entries server-side
+        </p>
       </div>
 
       {/* Time range */}

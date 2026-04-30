@@ -231,6 +231,92 @@ func TestTraceResolver(t *testing.T) {
 	}
 }
 
+// WithRunID sets trace_id == runID for entries emitted under that ctx.
+// When OTel resolver is also active, run-id wins for trace_id but OTel
+// still populates span_id so span hierarchy is preserved.
+func TestWithRunID_WinsOverOTelTrace(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	SetTraceResolver(func(ctx context.Context) (string, string, bool) {
+		return "otel-trace", "otel-span", true
+	})
+	defer SetTraceResolver(nil)
+
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	ctx := WithRunID(context.Background(), "run-abc")
+	_, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		Type:        EntryRunStarted,
+		ActorType:   ActorSidecar,
+		Summary:     "run abc started",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Flush(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	entries, _, _ := List(ctx, db, Query{WorkspaceID: "ws_test"})
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].TraceID != "run-abc" {
+		t.Errorf("trace_id should be run-id, got %q", entries[0].TraceID)
+	}
+	if entries[0].SpanID != "otel-span" {
+		t.Errorf("span_id should still come from OTel resolver, got %q", entries[0].SpanID)
+	}
+}
+
+// Explicit Entry.TraceID set by caller wins over both WithRunID and OTel.
+func TestWithRunID_ExplicitEntryTraceWins(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	defer SetTraceResolver(nil)
+	SetTraceResolver(func(ctx context.Context) (string, string, bool) {
+		return "otel-trace", "otel-span", true
+	})
+
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
+	defer w.Close()
+
+	ctx := WithRunID(context.Background(), "run-abc")
+	_, err := w.Emit(ctx, Entry{
+		WorkspaceID: "ws_test",
+		Type:        EntryRunStarted,
+		ActorType:   ActorSidecar,
+		Summary:     "explicit trace",
+		TraceID:     "explicit-trace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Flush(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	entries, _, _ := List(ctx, db, Query{WorkspaceID: "ws_test"})
+	if len(entries) != 1 || entries[0].TraceID != "explicit-trace" {
+		t.Errorf("explicit trace lost: %+v", entries)
+	}
+}
+
+// Empty runID is a no-op — ctx unchanged, OTel resolver still works.
+func TestWithRunID_EmptyIsNoop(t *testing.T) {
+	ctx := context.Background()
+	if WithRunID(ctx, "") != ctx {
+		t.Error("WithRunID with empty string should return ctx unchanged")
+	}
+	if RunIDFromContext(ctx) != "" {
+		t.Error("RunIDFromContext on plain ctx should return empty")
+	}
+	if RunIDFromContext(nil) != "" { //nolint:staticcheck
+		t.Error("RunIDFromContext on nil ctx should return empty")
+	}
+}
+
 func TestPagination(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

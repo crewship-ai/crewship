@@ -97,10 +97,24 @@ func (w *Writer) Emit(ctx context.Context, e Entry) (string, error) {
 	if e.TS.IsZero() {
 		e.TS = time.Now().UTC()
 	}
-	// Extract trace context if caller didn't set it explicitly.
+	// Extract trace context if caller didn't set it explicitly. Run-id
+	// (set via WithRunID) wins over OTel trace context: a journal entry
+	// belonging to an agent run must share trace_id == run.id so the
+	// Runs aggregation view (GROUP BY trace_id) finds it. We still let
+	// OTel populate the SpanID so span hierarchy survives.
 	if e.TraceID == "" {
+		if rid := RunIDFromContext(ctx); rid != "" {
+			e.TraceID = rid
+		}
+	}
+	if e.TraceID == "" || e.SpanID == "" {
 		if t, s, ok := traceFromContext(ctx); ok {
-			e.TraceID, e.SpanID = t, s
+			if e.TraceID == "" {
+				e.TraceID = t
+			}
+			if e.SpanID == "" {
+				e.SpanID = s
+			}
 		}
 	}
 
@@ -374,6 +388,41 @@ func newID() string {
 		panic("crypto/rand unavailable: " + err.Error())
 	}
 	return "j_" + hex.EncodeToString(b[:])
+}
+
+// runIDCtxKey is a private type used as the ctx.WithValue key so callers
+// can't accidentally collide with us. Using an unexported zero-size type
+// is the standard Go pattern for context keys.
+type runIDCtxKey struct{}
+
+// WithRunID stamps runID on ctx so any subsequent journal.Emit call that
+// inherits the same context inherits trace_id == runID. Used to thread
+// the run identity through goroutines that emit run-scoped entries (LLM
+// calls, exec commands, network egress, etc.) without every Emit call
+// site having to set Entry.TraceID manually.
+//
+// Empty runID is a no-op (returns ctx unchanged) so callers can pass
+// through optionally-set values without branching.
+//
+// Run-id beats OTel trace context in Emit — see the comment there.
+func WithRunID(ctx context.Context, runID string) context.Context {
+	if runID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, runIDCtxKey{}, runID)
+}
+
+// RunIDFromContext returns the runID stamped on ctx via WithRunID, or
+// "" if none was set.
+func RunIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	v := ctx.Value(runIDCtxKey{})
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // traceFromContext is a thin shim so the journal package doesn't import

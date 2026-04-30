@@ -9,7 +9,6 @@ import {
   Zap,
   Settings,
   Workflow,
-  Activity,
   Shield,
   Store,
   ShieldCheck,
@@ -70,7 +69,6 @@ const navSections = [
   {
     label: "Monitor",
     items: [
-      { title: "Runs", href: "/runs", icon: Activity },
       { title: "Journal", href: "/journal", icon: BookOpen },
       { title: "Crow's Nest", href: "/crows-nest", icon: Binoculars },
       { title: "Paymaster", href: "/paymaster", icon: DollarSign },

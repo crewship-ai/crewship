@@ -564,6 +564,117 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id
 ALTER TABLE chats ADD COLUMN origin TEXT;
 CREATE INDEX IF NOT EXISTS idx_chats_origin ON chats(origin) WHERE origin IS NOT NULL;
 `},
+	// Phase D of unified-journal: composite index for the Runs aggregation
+	// view. journal.ListRuns groups by trace_id within a workspace; the
+	// existing idx_journal_trace is global and forces SQLite to scan the
+	// whole table when narrowing to one workspace. The (workspace_id,
+	// trace_id) partial index lets the query planner do an index-only
+	// range scan keyed on the workspace.
+	{version: 60, name: "add_journal_ws_trace_index", sql: `
+CREATE INDEX IF NOT EXISTS idx_journal_ws_trace
+    ON journal_entries(workspace_id, trace_id)
+    WHERE trace_id IS NOT NULL;
+`},
+	// Phase J of unified-journal: backfill agent_runs into journal_entries
+	// (idempotent — skips runs that Phase C already mirrored during the
+	// dual-write window), preserve the data in agent_runs_archive, then
+	// drop the original table. After this migration, the journal is the
+	// single source of truth for runs.
+	//
+	// The backfill is keyed on trace_id == agent_runs.id so the
+	// run.started entry uses the same trace_id the live emit path uses.
+	// The NOT EXISTS guard makes this safe to re-run if the migration
+	// is replayed (e.g. partial restore).
+	{version: 61, name: "drop_agent_runs", sql: `
+-- 1) Backfill run.started for every agent_run that doesn't already
+--    have a matching journal entry. Use lower(hex(randomblob(8))) for
+--    the entry id — collision-free in practice (64 bits) and no
+--    extension needed.
+INSERT INTO journal_entries
+  (id, workspace_id, agent_id, ts, entry_type, severity, actor_type, actor_id,
+   summary, payload, refs, trace_id, span_id, expires_at, priority)
+SELECT
+  'j_' || lower(hex(randomblob(8))),
+  r.workspace_id,
+  r.agent_id,
+  COALESCE(r.started_at, r.created_at),
+  'run.started',
+  'info',
+  CASE WHEN r.triggered_by IS NOT NULL THEN 'user' ELSE 'sidecar' END,
+  r.triggered_by,
+  'run ' || substr(r.id, 1, 8) || ' started',
+  json_object(
+    'trigger_type', COALESCE(r.trigger_type, 'USER'),
+    'chat_id',      r.chat_id,
+    'metadata',     CASE WHEN r.metadata IS NOT NULL AND r.metadata != ''
+                         THEN json(r.metadata) ELSE NULL END
+  ),
+  '{}',
+  r.id,
+  NULL,
+  NULL,
+  'normal'
+FROM agent_runs r
+WHERE NOT EXISTS (
+  SELECT 1 FROM journal_entries je
+  WHERE je.trace_id = r.id AND je.entry_type = 'run.started'
+);
+
+-- 2) Backfill terminal entries for runs that have already finished.
+INSERT INTO journal_entries
+  (id, workspace_id, agent_id, ts, entry_type, severity, actor_type, actor_id,
+   summary, payload, refs, trace_id, span_id, expires_at, priority)
+SELECT
+  'j_' || lower(hex(randomblob(8))),
+  r.workspace_id,
+  r.agent_id,
+  r.finished_at,
+  CASE r.status
+    WHEN 'COMPLETED' THEN 'run.completed'
+    WHEN 'FAILED'    THEN 'run.failed'
+    WHEN 'CANCELLED' THEN 'run.cancelled'
+    WHEN 'TIMEOUT'   THEN 'run.timeout'
+  END,
+  CASE WHEN r.status IN ('FAILED','TIMEOUT') THEN 'error' ELSE 'info' END,
+  'sidecar',
+  NULL,
+  'run ' || substr(r.id, 1, 8) || ' ' || lower(r.status),
+  json_object(
+    'exit_code',     r.exit_code,
+    'error_message', r.error_message
+  ),
+  '{}',
+  r.id,
+  NULL,
+  NULL,
+  'normal'
+FROM agent_runs r
+WHERE r.status IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT')
+  AND r.finished_at IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM journal_entries je
+    WHERE je.trace_id = r.id
+      AND je.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+  );
+
+-- 3) Snapshot to archive. Idempotent: only insert rows from agent_runs
+--    that aren't already in the archive (by id), so re-running the
+--    migration via restore replay can't duplicate the snapshot. We
+--    don't add a PK here because pre-existing archive rows from a
+--    failed previous attempt may already exist with the same ids.
+CREATE TABLE IF NOT EXISTS agent_runs_archive AS SELECT * FROM agent_runs WHERE 0;
+INSERT INTO agent_runs_archive
+  SELECT r.* FROM agent_runs r
+  WHERE NOT EXISTS (SELECT 1 FROM agent_runs_archive a WHERE a.id = r.id);
+
+-- 4) Drop the live table and its indexes.
+DROP INDEX IF EXISTS idx_run_agent_time;
+DROP INDEX IF EXISTS idx_run_workspace;
+DROP INDEX IF EXISTS idx_run_status;
+DROP INDEX IF EXISTS idx_run_chat;
+DROP INDEX IF EXISTS idx_run_triggered_by;
+DROP TABLE agent_runs;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
