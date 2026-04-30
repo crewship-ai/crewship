@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(crewCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(askCmd)
+	rootCmd.AddCommand(retryCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(credentialCmd)

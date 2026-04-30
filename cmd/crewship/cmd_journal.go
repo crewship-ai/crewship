@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -76,7 +81,7 @@ Examples:
 		}
 
 		if follow {
-			return fmt.Errorf("--follow requires SSE client support; use the web UI /journal for live view until the CLI SSE tail lands")
+			return followJournal(client, q)
 		}
 
 		path := "/api/v1/journal?" + q.Encode()
@@ -230,9 +235,117 @@ func init() {
 	journalCmd.Flags().String("type", "", "Comma-separated entry types (peer.conversation,keeper.decision,...)")
 	journalCmd.Flags().String("severity", "", "Comma-separated severities (info,notice,warn,error)")
 	journalCmd.Flags().String("since", "", "Time window (1h, 24h, 7d, or RFC3339)")
-	journalCmd.Flags().Bool("follow", false, "Live tail via SSE (not yet implemented in CLI — use web UI)")
+	journalCmd.Flags().Bool("follow", false, "Live tail via SSE — Ctrl-C to exit")
 
 	journalPriorityCmd.Flags().String("mark", "", "Priority marker: permanent | high | pin | normal (required)")
 	journalPriorityCmd.Flags().String("reason", "", "Short reason recorded alongside the change (shows up in logs)")
 	journalCmd.AddCommand(journalPriorityCmd)
+}
+
+// followJournal opens the SSE stream and prints entries as they arrive,
+// reconnecting on transient failure with bounded backoff. Returns when the
+// user hits Ctrl-C.
+//
+// Last-Event-ID is threaded across reconnects so a brief disconnect resumes
+// without dropping or duplicating entries — the server replays from the
+// last seen ID. Backoff caps at 30 s; permanent errors (auth, 4xx) bail
+// out instead of retrying forever.
+func followJournal(client *cli.Client, q url.Values) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	path := "/api/v1/journal/stream?" + q.Encode()
+	lastID := ""
+	backoff := 1 * time.Second
+	const maxBackoff = 30 * time.Second
+
+	for {
+		err := client.WithContext(ctx).StreamSSE(ctx, path, lastID, func(e cli.SSEEvent) error {
+			if e.Comment != "" && e.Data == "" {
+				// Heartbeat — ignore.
+				return nil
+			}
+			if e.ID != "" {
+				lastID = e.ID
+			}
+			if e.Data == "" {
+				return nil
+			}
+			var entry map[string]any
+			if err := json.Unmarshal([]byte(e.Data), &entry); err != nil {
+				return nil // skip malformed
+			}
+			printJournalEntry(entry)
+			return nil
+		})
+
+		if ctx.Err() != nil {
+			return nil // user-initiated exit
+		}
+		if err == nil {
+			// Server closed cleanly — try to resume.
+			err = fmt.Errorf("stream closed")
+		}
+		if isPermanentSSEError(err) {
+			return err
+		}
+
+		fmt.Fprintf(os.Stderr, "%s[reconnecting in %s — %v]%s\n",
+			cli.Dim, backoff, err, cli.Reset)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return nil
+		}
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+}
+
+// isPermanentSSEError returns true for errors that won't be fixed by
+// reconnecting (auth failure, 4xx responses, malformed URL) — distinguishing
+// these from transient network blips matters because retrying them in a
+// hot loop spams the server log with noise.
+func isPermanentSSEError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "status 401") ||
+		strings.Contains(msg, "status 403") ||
+		strings.Contains(msg, "status 404") ||
+		strings.Contains(msg, "parse URL")
+}
+
+// printJournalEntry renders one SSE-delivered entry using the same format
+// as the non-follow listing so users can intermix the two without visual
+// drift.
+func printJournalEntry(e map[string]any) {
+	ts, _ := e["ts"].(string)
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		ts = t.Format("2006-01-02 15:04:05")
+	}
+	entryType, _ := e["entry_type"].(string)
+	severity, _ := e["severity"].(string)
+	summary, _ := e["summary"].(string)
+	actor, _ := e["actor_type"].(string)
+
+	color := cli.Gray
+	switch severity {
+	case "warn":
+		color = cli.Yellow
+	case "error":
+		color = cli.Red
+	case "notice":
+		color = cli.Cyan
+	}
+
+	fmt.Printf("%s%s%s  %s[%-8s]%s  %s%-22s%s  %s%-10s%s  %s\n",
+		cli.Dim, ts, cli.Reset,
+		color, severity, cli.Reset,
+		cli.Bold, truncateString(entryType, 22), cli.Reset,
+		cli.Dim, truncateString(actor, 10), cli.Reset,
+		summary)
 }
