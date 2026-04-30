@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Per-account brute-force lockout. Layered on TOP of the per-IP rate
@@ -101,6 +103,16 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 	}
 
 	if compareErr := bcryptCompareHashAndPassword(hashedPw, password); compareErr != nil {
+		// Distinguish "wrong password" from "the bcrypt comparison
+		// itself failed" (corrupt hash, malformed prefix, hash too
+		// short to be valid bcrypt). Only the first kind should
+		// advance the lockout counter — locking a user out because
+		// their stored hash got truncated by a botched DB migration
+		// is a denial-of-service against the legitimate owner.
+		if !errors.Is(compareErr, bcrypt.ErrMismatchedHashAndPassword) {
+			return "", "", fmt.Errorf("lockout: bcrypt compare: %w", compareErr)
+		}
+
 		// Wrong password. Update the counter atomically — the previous
 		// read-modify-write was racy: two concurrent bad-password
 		// attempts could both read failedCount=N, both write N+1, and

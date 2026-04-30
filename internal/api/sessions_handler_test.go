@@ -80,20 +80,15 @@ func TestSessionsList_HappyPath(t *testing.T) {
 func TestSessionsList_OnlyOwnSessions(t *testing.T) {
 	h, store, uid, currentSid := newSessionsRig(t)
 
-	// Add a session belonging to a DIFFERENT user.
-	_, err := store.Create(context.Background(), "other-user-id", "evil", "9.9.9.9", auth.RefreshTokenTTL)
+	// Make sure the foreign user exists (FK on user_sessions). Insert
+	// before Create so the happy path doesn't depend on Create failing
+	// first like the original sequence did.
+	if _, err := h.db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, 'other@x.com', 'Other')`, "other-user-id"); err != nil {
+		t.Fatalf("insert other user: %v", err)
+	}
+	otherSess, err := store.Create(context.Background(), "other-user-id", "iOS", "9.9.9.9", auth.RefreshTokenTTL)
 	if err != nil {
-		// other-user-id has no users row → FK fails. Insert one.
-		// (the seedTestUser helper hardcodes test-user-id; we need a
-		// second user for this case.)
-		_, err2 := h.db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, 'other@x.com', 'Other')`, "other-user-id")
-		if err2 != nil {
-			t.Fatalf("insert other user: %v", err2)
-		}
-		_, err = store.Create(context.Background(), "other-user-id", "evil", "9.9.9.9", auth.RefreshTokenTTL)
-		if err != nil {
-			t.Fatalf("create other session: %v", err)
-		}
+		t.Fatalf("create other session: %v", err)
 	}
 
 	req := requestWithUser("GET", "/api/v1/auth/sessions", uid, currentSid)
@@ -102,12 +97,14 @@ func TestSessionsList_OnlyOwnSessions(t *testing.T) {
 
 	var rows []map[string]any
 	json.Unmarshal(rr.Body.Bytes(), &rows)
+	// Assert by session ID, not by user_agent. A future PR that
+	// normalises or redacts user_agent (e.g. UA-Parser, masking,
+	// truncation) would silently let this test pass even if the
+	// handler started returning foreign rows. Capturing the actual
+	// row id pins the invariant we care about.
 	for _, r := range rows {
-		// Verify no foreign session leaked. Since List doesn't echo
-		// user_id, we check that none of the returned UA strings is
-		// the foreign one.
-		if r["user_agent"] == "evil" {
-			t.Errorf("foreign session leaked into list: %v", r)
+		if r["id"] == otherSess.ID {
+			t.Errorf("foreign session %s leaked into caller's list: %v", otherSess.ID, r)
 		}
 	}
 }

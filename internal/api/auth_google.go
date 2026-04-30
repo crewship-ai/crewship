@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -171,15 +172,25 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+	// If either Issue* call fails after Create, revoke the row so we
+	// don't leave a ghost session the client never got cookies for.
+	// Mirror the same pattern that NextAuthHandler.issueSession uses.
+	revokeGhost := func(reason string) {
+		if rerr := h.sessions.Revoke(r.Context(), sess.ID, sessions.ReasonAdminForce); rerr != nil && !errors.Is(rerr, sessions.ErrNotFound) {
+			h.logger.Warn("revoke ghost google-oauth session", "sid", sess.ID, "error", rerr, "after", reason)
+		}
+	}
 	accessTok, err := h.validator.IssueAccessToken(userID, sess.ID, userInfo.Name, userInfo.Email)
 	if err != nil {
 		h.logger.Error("issue access", "error", err)
+		revokeGhost("issue access failure")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 	refreshTok, err := h.validator.IssueRefreshToken(userID, sess.ID)
 	if err != nil {
 		h.logger.Error("issue refresh", "error", err)
+		revokeGhost("issue refresh failure")
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}

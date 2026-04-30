@@ -526,6 +526,15 @@ func (h *NextAuthHandler) sameOriginRefresh(r *http.Request) bool {
 // callbacks, and the signup handler. It writes the user_sessions row
 // and produces both tokens; the caller is responsible for setting
 // the cookies on the response.
+//
+// If token issuance fails after the row has been created, we revoke
+// the row before returning the error. Without this rollback, every
+// validator failure (e.g. a transient JWE encrypt error) would leave
+// an active row that the user never received cookies for — a ghost
+// "device" in the Active sessions UI and a slow leak that pollutes
+// audit and policy state. Revoke errors are logged and swallowed
+// because we're already on a failure path; the original mint error
+// is what we want to surface.
 func (h *NextAuthHandler) issueSession(r *http.Request, userID, name, email string) (*sessions.Session, string, string, error) {
 	if h.sessions == nil {
 		return nil, "", "", errors.New("sessions store not configured")
@@ -536,10 +545,16 @@ func (h *NextAuthHandler) issueSession(r *http.Request, userID, name, email stri
 	}
 	access, err := h.validator.IssueAccessToken(userID, sess.ID, name, email)
 	if err != nil {
+		if rerr := h.sessions.Revoke(r.Context(), sess.ID, sessions.ReasonAdminForce); rerr != nil && !errors.Is(rerr, sessions.ErrNotFound) {
+			h.logger.Warn("revoke ghost session after issue access failure", "sid", sess.ID, "error", rerr)
+		}
 		return nil, "", "", fmt.Errorf("issue access: %w", err)
 	}
 	refresh, err := h.validator.IssueRefreshToken(userID, sess.ID)
 	if err != nil {
+		if rerr := h.sessions.Revoke(r.Context(), sess.ID, sessions.ReasonAdminForce); rerr != nil && !errors.Is(rerr, sessions.ErrNotFound) {
+			h.logger.Warn("revoke ghost session after issue refresh failure", "sid", sess.ID, "error", rerr)
+		}
 		return nil, "", "", fmt.Errorf("issue refresh: %w", err)
 	}
 	return sess, access, refresh, nil

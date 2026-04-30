@@ -118,7 +118,10 @@ func TestServeHTTP_ShellSession_DataFlow(t *testing.T) {
 	}
 	h := New(mock, v, db.DB, silentLogger())
 
-	tok, _ := v.IssueWSTicket("u1", "test-session", "", "")
+	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
+	if err != nil {
+		t.Fatalf("issue ws ticket: %v", err)
+	}
 	conn := dialTerminal(t, h)
 
 	authMsg, _ := json.Marshal(map[string]string{"type": "auth", "token": tok})
@@ -216,7 +219,10 @@ func TestServeHTTP_ContainerStartFailure(t *testing.T) {
 	mock := startFailMock{mockContainer: &mockContainer{state: "stopped"}}
 	h := New(mock, v, db.DB, silentLogger())
 
-	tok, _ := v.IssueWSTicket("u1", "test-session", "", "")
+	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
+	if err != nil {
+		t.Fatalf("issue ws ticket: %v", err)
+	}
 	conn := dialTerminal(t, h)
 	authMsg, _ := json.Marshal(map[string]string{"type": "auth", "token": tok})
 	conn.WriteMessage(websocket.TextMessage, authMsg)
@@ -265,7 +271,10 @@ func TestServeHTTP_DBLookupFailureFailsClosed(t *testing.T) {
 
 	h := New(&closableInteractiveMock{mockContainer: &mockContainer{state: "running"}, conn: newPipeConn()}, v, db.DB, silentLogger())
 
-	tok, _ := v.IssueWSTicket("u1", "test-session", "", "")
+	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
+	if err != nil {
+		t.Fatalf("issue ws ticket: %v", err)
+	}
 	conn := dialTerminal(t, h)
 	authMsg, _ := json.Marshal(map[string]string{"type": "auth", "token": tok})
 	conn.WriteMessage(websocket.TextMessage, authMsg)

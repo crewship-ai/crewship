@@ -69,10 +69,32 @@ func newRefreshRig(t *testing.T) *refreshTestRig {
 // requires before calling the handler.
 func (r *refreshTestRig) post(t *testing.T) (*http.Request, *httptest.ResponseRecorder) {
 	t.Helper()
-	req := httptest.NewRequest("POST", "http://"+r.hostName+"/api/auth/token/refresh", nil)
+	return r.postWithScheme(t, "http", "authjs.refresh-token")
+}
+
+// postSecure builds the same request as post() but flagged as TLS so
+// the handler picks the __Secure- cookie names. Used to cover the
+// HTTPS branch of cookie naming/path logic — the handler does
+// different work on each scheme and the test suite needs to exercise
+// both.
+func (r *refreshTestRig) postSecure(t *testing.T) (*http.Request, *httptest.ResponseRecorder) {
+	t.Helper()
+	return r.postWithScheme(t, "https", "__Secure-authjs.refresh-token")
+}
+
+func (r *refreshTestRig) postWithScheme(t *testing.T, scheme, refreshCookieName string) (*http.Request, *httptest.ResponseRecorder) {
+	t.Helper()
+	req := httptest.NewRequest("POST", scheme+"://"+r.hostName+"/api/auth/token/refresh", nil)
 	req.Host = r.hostName
-	req.Header.Set("Origin", "http://"+r.hostName)
-	req.AddCookie(&http.Cookie{Name: "authjs.refresh-token", Value: r.refresh})
+	req.Header.Set("Origin", scheme+"://"+r.hostName)
+	if scheme == "https" {
+		// httptest.NewRequest doesn't set r.TLS by itself; the handler
+		// reads X-Forwarded-Proto OR r.TLS, so we set the header to
+		// flag this request as TLS-terminated upstream — same path
+		// production reverse proxies (Caddy, nginx) take.
+		req.Header.Set("X-Forwarded-Proto", "https")
+	}
+	req.AddCookie(&http.Cookie{Name: refreshCookieName, Value: r.refresh})
 	return req, httptest.NewRecorder()
 }
 
@@ -96,6 +118,33 @@ func TestRefresh_HappyPath_RotatesBothTokens(t *testing.T) {
 	}
 	if cookies["authjs.refresh-token"] == rig.refresh {
 		t.Error("refresh cookie not actually rotated — server returned the same JWE")
+	}
+}
+
+// HTTPS branch — the handler reads __Secure-authjs.refresh-token on
+// TLS connections and writes back __Secure- cookies. A regression in
+// either direction (e.g. someone hardcodes the non-secure name in the
+// production path) would slip past the rest of the suite, which is
+// HTTP-only.
+func TestRefresh_HappyPath_HTTPS(t *testing.T) {
+	rig := newRefreshRig(t)
+	req, rr := rig.postSecure(t)
+	rig.h.RefreshToken(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HTTPS refresh status = %d (body: %s), want 200", rr.Code, rr.Body.String())
+	}
+	cookies := parseSetCookies(rr.Result().Cookies())
+	if cookies["__Secure-authjs.session-token"] == "" {
+		t.Error("HTTPS branch must set __Secure- access cookie name")
+	}
+	if cookies["__Secure-authjs.refresh-token"] == "" {
+		t.Error("HTTPS branch must set __Secure- refresh cookie name")
+	}
+	for _, c := range rr.Result().Cookies() {
+		if strings.HasPrefix(c.Name, "__Secure-") && !c.Secure {
+			t.Errorf("__Secure- cookie %q must have Secure=true", c.Name)
+		}
 	}
 }
 

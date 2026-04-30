@@ -261,7 +261,10 @@ func TestServeHTTP_AccessDeniedForNonMember(t *testing.T) {
 
 	h := New(&mockContainer{state: "running"}, v, db.DB, silentLogger())
 
-	tok, _ := v.IssueWSTicket("uX", "test-session", "", "")
+	tok, err := v.IssueWSTicket("uX", "test-session", "", "")
+	if err != nil {
+		t.Fatalf("issue ws ticket: %v", err)
+	}
 	conn := dialTerminal(t, h)
 	authMsg, _ := json.Marshal(map[string]string{"type": "auth", "token": tok})
 	conn.WriteMessage(websocket.TextMessage, authMsg)

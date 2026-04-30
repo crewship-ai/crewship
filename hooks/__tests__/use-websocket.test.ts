@@ -122,7 +122,12 @@ describe("useWebSocket", () => {
     window.removeEventListener("auth:session-expired", handler)
   })
 
-  it("session_revoked frame stops retrying", async () => {
+  it("session_revoked frame fires expiry AND stops retrying", async () => {
+    // Two assertions matter here, and the older "stops retrying" name
+    // overstated what was checked: just verifying the auth event fires
+    // would still pass if the hook silently kept reconnecting after
+    // session_revoked. Now we also advance well past the next backoff
+    // window and assert no second WebSocket instance gets created.
     const handler = vi.fn()
     window.addEventListener("auth:session-expired", handler)
     renderHook(() =>
@@ -134,6 +139,14 @@ describe("useWebSocket", () => {
       mockInstances[0].simulateMessage({ type: "session_revoked", payload: { reason: "session_revoked" } })
     })
     expect(handler).toHaveBeenCalledTimes(1)
+
+    // Drive the clock forward past the maximum backoff window. Any
+    // attempted reconnect would push another mock instance into
+    // mockInstances; if the hook is correctly terminated, the count
+    // stays at 1.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(mockInstances).toHaveLength(1)
+
     window.removeEventListener("auth:session-expired", handler)
   })
 

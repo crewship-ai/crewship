@@ -64,7 +64,15 @@ describe("apiFetch", () => {
     expect(res.status).toBe(200)
     expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock.mock.calls[1][0]).toBe("/api/auth/token/refresh")
-    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: "POST" })
+    // The refresh POST MUST go out with credentials: include — the
+    // path-scoped refresh cookie won't reach the server otherwise,
+    // and the browser would silently see auth_failed on every
+    // rotation. Mocks would still pass, real users would be locked
+    // out — exactly the regression CodeRabbit flagged.
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "POST",
+      credentials: "include",
+    })
   })
 
   it("on session_revoked emits session-expired and does NOT call refresh", async () => {
