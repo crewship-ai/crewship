@@ -80,6 +80,10 @@ func newTestServerWithDeps() *Server {
 	deps := &Deps{
 		Container: &mockContainer{},
 		State:     newMockState(),
+		// DB is required since CR review on PR #233 — server.New()
+		// panics without one because the WS hub's sessions store
+		// can no longer fall back to the test stub.
+		DB: openTestDB(nil),
 	}
 	s := New(cfg, logger, deps)
 	s.startedAt = time.Now()
@@ -180,7 +184,7 @@ func TestSessionMessagesWithStore(t *testing.T) {
 	cfg.Storage.BasePath = dir
 	cfg.Auth.JWTSecret = "test-secret-for-server-routes-test-32"
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, nil)
+	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
 
 	store := conversation.NewStore(dir, logger)

@@ -83,7 +83,10 @@ func TestGetNotFound(t *testing.T) {
 func TestRevoke(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	if err := store.Revoke(ctx, sess.ID, ReasonLogout); err != nil {
 		t.Fatalf("revoke: %v", err)
@@ -107,7 +110,10 @@ func TestRevoke(t *testing.T) {
 func TestRevokeIdempotent(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	if err := store.Revoke(ctx, sess.ID, ReasonLogout); err != nil {
 		t.Fatalf("first revoke: %v", err)
@@ -115,7 +121,10 @@ func TestRevokeIdempotent(t *testing.T) {
 	if err := store.Revoke(ctx, sess.ID, ReasonAdminForce); err != nil {
 		t.Fatalf("second revoke: %v", err)
 	}
-	got, _ := store.Get(ctx, sess.ID)
+	got, err := store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if got.RevokedReason != ReasonAdminForce {
 		t.Errorf("expected reason to update on second revoke, got %q", got.RevokedReason)
 	}
@@ -136,11 +145,17 @@ func TestExpiredSessionNotActive(t *testing.T) {
 	// Set the clock back so the row's expires_at is in the past.
 	past := time.Now().Add(-2 * time.Hour)
 	store.SetClock(func() time.Time { return past })
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	// Restore real clock; the session should now be expired.
 	store.SetClock(time.Now)
-	got, _ := store.Get(ctx, sess.ID)
+	got, err := store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if got.Active(time.Now()) {
 		t.Error("expired session should not be Active")
 	}
@@ -150,9 +165,18 @@ func TestListActiveForUser(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
 
-	a, _ := store.Create(ctx, "u1", "iOS", "", time.Hour)
-	b, _ := store.Create(ctx, "u1", "Android", "", time.Hour)
-	c, _ := store.Create(ctx, "u1", "Web", "", time.Hour)
+	a, err := store.Create(ctx, "u1", "iOS", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	b, err := store.Create(ctx, "u1", "Android", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	c, err := store.Create(ctx, "u1", "Web", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	// Revoke b so only a + c are active.
 	if err := store.Revoke(ctx, b.ID, ReasonLogout); err != nil {
@@ -193,7 +217,10 @@ func TestRevokeAllForUser(t *testing.T) {
 	if n != 3 {
 		t.Errorf("revoked %d, want 3", n)
 	}
-	list, _ := store.ListActiveForUser(ctx, "u1")
+	list, err := store.ListActiveForUser(ctx, "u1")
+	if err != nil {
+		t.Fatalf("ListActiveForUser: %v", err)
+	}
 	if len(list) != 0 {
 		t.Errorf("expected 0 active after revoke-all, got %d", len(list))
 	}
@@ -202,7 +229,10 @@ func TestRevokeAllForUser(t *testing.T) {
 func TestTouchLastUsedThrottled(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
 
 	// First touch goes through.
 	first := time.Now().Add(time.Hour) // pretend "now" is 1h after create
@@ -217,7 +247,10 @@ func TestTouchLastUsedThrottled(t *testing.T) {
 		t.Fatalf("second touch: %v", err)
 	}
 
-	got, _ := store.Get(ctx, sess.ID)
+	got, err := store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if !got.LastUsedAt.Equal(first.UTC().Truncate(time.Second)) {
 		t.Errorf("LastUsedAt: got %v, want %v (second touch should have been throttled)",
 			got.LastUsedAt, first)
@@ -240,8 +273,14 @@ func TestTouchLastUsedThrottled(t *testing.T) {
 func TestTouchLastUsedSkipsRevoked(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
-	originalLastUsed, _ := store.Get(ctx, sess.ID)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	originalLastUsed, err := store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 
 	if err := store.Revoke(ctx, sess.ID, ReasonLogout); err != nil {
 		t.Fatalf("revoke: %v", err)
@@ -253,7 +292,10 @@ func TestTouchLastUsedSkipsRevoked(t *testing.T) {
 	if err := store.TouchLastUsed(ctx, sess.ID); err != nil {
 		t.Fatalf("touch: %v", err)
 	}
-	got, _ := store.Get(ctx, sess.ID)
+	got, err := store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if !got.LastUsedAt.Equal(originalLastUsed.LastUsedAt) {
 		t.Errorf("LastUsedAt advanced on revoked session: %v -> %v",
 			originalLastUsed.LastUsedAt, got.LastUsedAt)

@@ -1,22 +1,90 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
 )
 
+// openTestDB returns a freshly-migrated SQLite DB in a temp dir. The
+// auth-lifecycle work made server.New() panic when deps.DB is nil, so
+// every test that exercises the constructor needs a real DB to back
+// the WS hub's sessions store. File-backed (not :memory:) so multiple
+// goroutines see the same schema without `cache=shared` gymnastics.
+//
+// When called with a non-nil *testing.T the cleanup is registered;
+// the bare-package newTestServer() helper passes nil, which is fine
+// for unit tests that exit immediately.
+func openTestDB(t *testing.T) *sql.DB {
+	dir, err := func() (string, error) {
+		if t != nil {
+			return t.TempDir(), nil
+		}
+		return ".", nil
+	}()
+	if err != nil {
+		panic(err)
+	}
+	if t == nil {
+		// Use the OS temp dir when no test is supplied so leftover
+		// files end up out of sight rather than next to the source.
+		dir = ""
+	}
+	path := filepath.Join(dir, "test-auth-lifecycle.db")
+	if t == nil {
+		path = "/tmp/test-auth-lifecycle.db"
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL")
+	if err != nil {
+		if t != nil {
+			t.Fatalf("open: %v", err)
+		}
+		panic(err)
+	}
+	if t != nil {
+		t.Cleanup(func() { db.Close() })
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := database.Migrate(context.Background(), db, logger); err != nil {
+		if t != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+		panic(err)
+	}
+	return db
+}
+
 func newTestServer() *Server {
+	return newTestServerForT(nil)
+}
+
+// newTestServerForT builds a Server with a freshly-migrated in-memory
+// SQLite so the WS hub gets a real sessions store. server.New() now
+// panics without one (see CodeRabbit comment on PR #233 — the previous
+// code silently fell back to ws.NopSessionsForTests, which downgraded
+// production startup to "no revocation" if deps.DB was ever forgotten).
+//
+// Tests that don't pass a *testing.T (the package-level newTestServer
+// returning *Server with no t.Cleanup hook) still get a working DB —
+// it just leaks until the process exits, which for unit tests means
+// "until t.Cleanup wraps everything anyway".
+func newTestServerForT(t *testing.T) *Server {
 	cfg := config.Default()
 	cfg.Auth.JWTSecret = "test-secret-for-server-test-32chars-1"
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, nil)
+	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	return s
 }

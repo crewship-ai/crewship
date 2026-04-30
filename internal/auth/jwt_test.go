@@ -131,9 +131,23 @@ func TestKindCrossUseRejected(t *testing.T) {
 		t.Fatalf("new validator: %v", err)
 	}
 
-	access, _ := v.IssueAccessToken("u1", "s1", "", "")
-	refresh, _ := v.IssueRefreshToken("u1", "s1")
-	ws, _ := v.IssueWSTicket("u1", "s1", "", "")
+	// Check setup errors before entering the matrix. Without these,
+	// a regression that breaks Issue*Token would have the test still
+	// pass — Validate*("") also returns ErrInvalidToken, so an empty
+	// token from a failed mint would coincidentally hit the same
+	// negative-path assertion the matrix is testing for.
+	access, err := v.IssueAccessToken("u1", "s1", "", "")
+	if err != nil {
+		t.Fatalf("issue access: %v", err)
+	}
+	refresh, err := v.IssueRefreshToken("u1", "s1")
+	if err != nil {
+		t.Fatalf("issue refresh: %v", err)
+	}
+	ws, err := v.IssueWSTicket("u1", "s1", "", "")
+	if err != nil {
+		t.Fatalf("issue ws: %v", err)
+	}
 
 	// Each validator must refuse the other kinds. The salts are
 	// different so decryption itself fails before we even reach the

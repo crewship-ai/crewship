@@ -67,7 +67,7 @@ func TestHandleFileList_RecursiveAndSubdir(t *testing.T) {
 	cfg.Storage.BasePath = dir
 	logger := logging.New("error", "json", nil)
 	stor, _ := localfs.New(dir)
-	s := New(cfg, logger, &Deps{Storage: stor})
+	s := New(cfg, logger, &Deps{Storage: stor, DB: openTestDB(t)})
 	s.startedAt = time.Now()
 
 	// Seed files: crewA/agentX/notes.txt, crewA/root.txt
@@ -310,7 +310,7 @@ func TestHandleFileSave_StorageWriteFailure(t *testing.T) {
 	cfg.Auth.JWTSecret = "test-secret-for-routes-more-test-32ch"
 	cfg.Storage.BasePath = t.TempDir()
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, nil)
+	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	s.storage = failingStorage{}
 	t.Cleanup(func() {

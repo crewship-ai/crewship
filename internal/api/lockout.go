@@ -50,6 +50,26 @@ var ErrAccountLocked = errors.New("account locked")
 // signin handler can react without leaking which one it was.
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
+// dummyBcryptHash equalises the cost of "email doesn't exist" with
+// "email exists, wrong password". Without this, an attacker can walk a
+// list of email guesses and clock the response time: rows that don't
+// exist return immediately, rows that do return after the bcrypt
+// compare (~250ms at cost=12), exposing which addresses have accounts.
+//
+// The hash itself is the bcrypt of an arbitrary string the production
+// signin path will never produce; cost is 12 to match the real hashes
+// in users.hashed_password. Generated once at package init so the
+// timing of that one-shot generation doesn't bleed into request time.
+var dummyBcryptHash = mustGenerateDummyBcryptHash()
+
+func mustGenerateDummyBcryptHash() string {
+	h, err := bcrypt.GenerateFromPassword([]byte("crewship-timing-equalizer-not-a-real-credential"), 12)
+	if err != nil {
+		panic("lockout: pre-generate dummy bcrypt hash: " + err.Error())
+	}
+	return string(h)
+}
+
 // checkAndLockoutOnFail consolidates the "look up user, verify password,
 // update lockout counters" flow into one function so signin can call
 // it without spreading those concerns across the handler.
@@ -76,9 +96,13 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 			// any counter (no row to advance, and storing per-
 			// email-string failure counts for non-existing emails
 			// would let an attacker learn email enumeration data
-			// just by attempting the same string twice). Just
-			// return the generic invalid-credentials error and
-			// let the per-IP rate limiter slow them down.
+			// just by attempting the same string twice). But we
+			// DO burn one bcrypt comparison against a precomputed
+			// dummy hash so the response timing is indistinguishable
+			// from "exists, wrong password". Without this, the
+			// generic "CredentialsSignin" error message is useless
+			// — the latency leaks the answer.
+			_ = bcryptCompareHashAndPassword(dummyBcryptHash, password)
 			return "", "", ErrInvalidCredentials
 		}
 		return "", "", fmt.Errorf("lockout: query user: %w", err)
@@ -146,18 +170,25 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 		return "", "", ErrInvalidCredentials
 	}
 
-	// Successful login: zero the counter if it was non-zero. Skip the
-	// write when it was already zero (most logins) to keep the happy
-	// path write-free.
-	if failedCount > 0 {
-		if _, re := db.ExecContext(ctx,
-			`UPDATE users
-			    SET failed_login_count = 0,
-			        locked_until = NULL
-			  WHERE id = ?`, userID,
-		); re != nil {
-			return "", "", fmt.Errorf("lockout: reset: %w", re)
-		}
+	// Successful login: clear failed_login_count and locked_until.
+	// The branch deliberately does NOT key off the pre-bcrypt
+	// `failedCount` snapshot: a concurrent bad-password attempt could
+	// have bumped the row between SELECT and now, and gating the
+	// reset on a stale 0 would leave the counter intact across a
+	// success.
+	//
+	// The WHERE clause keeps the happy path write-free (no row matches
+	// when count is already 0 and lock is NULL), so the cost of being
+	// concurrent-safe is one extra UPDATE per login that follows a
+	// race-window failure. Cheap.
+	if _, re := db.ExecContext(ctx,
+		`UPDATE users
+		    SET failed_login_count = 0,
+		        locked_until = NULL
+		  WHERE id = ?
+		    AND (failed_login_count <> 0 OR locked_until IS NOT NULL)`, userID,
+	); re != nil {
+		return "", "", fmt.Errorf("lockout: reset: %w", re)
 	}
 	return userID, fullName, nil
 }

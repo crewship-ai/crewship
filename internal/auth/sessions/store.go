@@ -1,5 +1,5 @@
 // Package sessions backs the auth lifecycle with a row per active
-// refresh-token chain in user_sessions (migration v60). Every API and
+// refresh-token chain in user_sessions (migrations v62 + v63). Every API and
 // WebSocket request flows through Get(sid) — if the row is missing or
 // has revoked_at != NULL, auth fails with session_revoked. signOut,
 // password-change, admin force-logout, and refresh rotation all flip
@@ -70,7 +70,7 @@ func (s *Session) Active(now time.Time) bool {
 }
 
 // Store is the persistence interface. Implemented by *DBStore against
-// the migration v60 schema; tests can plug in MemStore for isolation.
+// the migrations v62/v63 schema; tests can plug in MemStore for isolation.
 type Store interface {
 	Create(ctx context.Context, userID, userAgent, ip string, ttl time.Duration) (*Session, error)
 	Get(ctx context.Context, id string) (*Session, error)

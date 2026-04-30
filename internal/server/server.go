@@ -175,17 +175,22 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 	logger.Info("JWT validator configured for WebSocket auth")
 
-	// Tests construct Server with nil deps to exercise routing/auth
-	// helpers in isolation; in that mode there's no DB to back a real
-	// sessions store. Use the package-level test stub so ws.NewHub's
-	// "store required" assertion is satisfied without forcing every
-	// test to spin up a SQLite. Production callers always pass deps.
-	var sessionsStore sessions.Store
-	if deps != nil && deps.DB != nil {
-		sessionsStore = sessions.NewDBStore(deps.DB)
-	} else {
-		sessionsStore = ws.NopSessionsForTests
+	// Production startup MUST have a real DB-backed sessions store so
+	// the WS hub enforces revocation on upgrade. The previous code
+	// silently fell back to ws.NopSessionsForTests when deps.DB was
+	// nil, which let CodeRabbit notice that an unconfigured server
+	// would still happily upgrade WS connections without revocation
+	// checks — the inverse of what the session-lifecycle work is for.
+	//
+	// Tests that exercise Server.New() without a real DB (handlers in
+	// isolation, etc.) can either pass deps with an in-memory SQLite
+	// or replace the resulting hub themselves; baking the bypass into
+	// production startup wasn't worth saving them three lines.
+	if deps == nil || deps.DB == nil {
+		logger.Error("server.New: deps.DB is required (sessions store backing the WS hub)")
+		panic("deps.DB not set — refusing to start a server without revocable sessions")
 	}
+	sessionsStore := sessions.NewDBStore(deps.DB)
 	wsHub := ws.NewHub(logger, nil, jwtValidator, sessionsStore)
 
 	// File watcher broadcasts real-time file events to WebSocket clients
