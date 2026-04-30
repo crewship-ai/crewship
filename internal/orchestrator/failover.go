@@ -42,13 +42,20 @@ func (cm *CooldownManager) IsInCooldown(credID string) bool {
 	if time.Now().After(until) {
 		// Upgrade to a write lock just long enough to evict.
 		cm.mu.Lock()
+		defer cm.mu.Unlock()
 		// Re-check under write lock so a concurrent MarkCooldown that
-		// raced past the read can't be clobbered.
-		if cur, stillThere := cm.cooldowns[credID]; stillThere && time.Now().After(cur) {
-			delete(cm.cooldowns, credID)
+		// raced past the read isn't clobbered. If the entry was refreshed
+		// to a future time between the RLock release and Lock acquire,
+		// honor the refresh and report the credential as still in cooldown.
+		cur, stillThere := cm.cooldowns[credID]
+		if !stillThere {
+			return false
 		}
-		cm.mu.Unlock()
-		return false
+		if time.Now().After(cur) {
+			delete(cm.cooldowns, credID)
+			return false
+		}
+		return true
 	}
 	return true
 }

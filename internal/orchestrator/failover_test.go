@@ -41,8 +41,9 @@ func TestCooldownExpired(t *testing.T) {
 // every rate-limit ever recorded leaked one map entry forever.
 func TestIsInCooldownPrunesExpired(t *testing.T) {
 	cm := NewCooldownManager()
-	cm.MarkCooldown("cred-1", 1*time.Millisecond)
-	time.Sleep(5 * time.Millisecond)
+	// Use a negative duration so the cooldown is expired the moment it lands —
+	// deterministic, no sleep, no flake under CI load.
+	cm.MarkCooldown("cred-1", -1*time.Millisecond)
 
 	// First read sees it's expired and prunes it.
 	if cm.IsInCooldown("cred-1") {
@@ -53,6 +54,37 @@ func TestIsInCooldownPrunesExpired(t *testing.T) {
 	defer cm.mu.RUnlock()
 	if _, stillThere := cm.cooldowns["cred-1"]; stillThere {
 		t.Fatal("expected expired entry to be pruned from the map after IsInCooldown")
+	}
+}
+
+// TestIsInCooldownHonorsConcurrentRefresh verifies that if a concurrent
+// MarkCooldown refreshes an entry to a future time between the RLock release
+// and the write Lock acquire in IsInCooldown, the function returns true (the
+// credential is still in cooldown) rather than reporting it expired.
+//
+// Regression: previously the re-check branch returned false unconditionally,
+// even when the rechecked timestamp was now in the future, which could
+// trigger premature failover.
+func TestIsInCooldownHonorsConcurrentRefresh(t *testing.T) {
+	cm := NewCooldownManager()
+	// Seed an already-expired entry — the "until" read at the top of
+	// IsInCooldown will see this and decide to enter the prune branch.
+	cm.MarkCooldown("cred-1", -1*time.Millisecond)
+
+	// Simulate the concurrent MarkCooldown that races past the RLock release
+	// by overwriting the entry to a future time before we call IsInCooldown.
+	cm.mu.Lock()
+	cm.cooldowns["cred-1"] = time.Now().Add(1 * time.Hour)
+	cm.mu.Unlock()
+
+	if !cm.IsInCooldown("cred-1") {
+		t.Fatal("expected refreshed cooldown to be reported as in-cooldown")
+	}
+
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if _, stillThere := cm.cooldowns["cred-1"]; !stillThere {
+		t.Fatal("refreshed entry was incorrectly pruned despite future expiry")
 	}
 }
 
