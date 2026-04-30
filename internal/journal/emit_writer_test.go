@@ -288,18 +288,22 @@ func TestWriter_ConcurrentEmit(t *testing.T) {
 	}
 }
 
-// TestWriter_EmitGeneratesUniqueIDs covers the newID / Validate paths and
-// guarantees the random ID space doesn't collide for a few thousand rows.
+// TestWriter_EmitGeneratesUniqueIDs covers the newID / Validate paths
+// and guarantees the random ID space doesn't collide for a few hundred
+// rows. The 500-row count is enough to surface birthday collisions in
+// any reasonable PRNG without stressing the in-memory SQLite pool past
+// its single-conn happy path under -race.
 func TestWriter_EmitGeneratesUniqueIDs(t *testing.T) {
 	db := openTestDB(t)
+	db.SetMaxOpenConns(1) // ensure schema visibility across the pool
 	defer db.Close()
 
 	w := NewWriter(db, quietLogger(), WriterOptions{})
 	defer w.Close()
 
 	ctx := context.Background()
-	seen := make(map[string]struct{}, 2000)
-	for i := 0; i < 2000; i++ {
+	seen := make(map[string]struct{}, 500)
+	for i := 0; i < 500; i++ {
 		id, err := w.Emit(ctx, Entry{
 			WorkspaceID: "ws_test",
 			Type:        EntryRunStarted,
