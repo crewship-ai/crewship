@@ -10,14 +10,15 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
 	// Collect env var names referenced in crew/agent MCP configs
 	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
 
-	// Also collect from table-based MCPServers (after JSON blob migration)
+	// Also collect from table-based MCPServers (after JSON blob migration).
+	// Only add the var name when the value is an explicit ${VAR}
+	// reference. A literal value like Env: {"GH_TOKEN": "abc123"} is the
+	// caller's authoritative choice; we must not silently shadow it with
+	// a same-named credential below.
 	for _, srv := range req.MCPServers {
-		for k, v := range srv.Env {
+		for _, v := range srv.Env {
 			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
 				mcpEnvRefs[v[2:len(v)-1]] = true
-			} else if k != "" {
-				// Env key itself might be the var name needed
-				mcpEnvRefs[k] = true
 			}
 		}
 	}

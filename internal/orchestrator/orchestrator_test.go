@@ -585,3 +585,46 @@ func TestRunAgentCancelledContext(t *testing.T) {
 		}
 	}
 }
+
+// TestInjectMCPCredentialEnvVarsRespectsLiteralValues verifies that an
+// MCP server config carrying a *literal* env value (not a ${VAR}
+// reference) is treated as the caller's authoritative choice. A
+// matching credential by name must NOT silently shadow the literal —
+// the previous behavior added the env key to the "needed refs" set,
+// which made any same-named credential overwrite the literal at exec
+// time.
+func TestInjectMCPCredentialEnvVarsRespectsLiteralValues(t *testing.T) {
+	req := AgentRunRequest{
+		MCPServers: []MCPServerConfig{{
+			ID:        "github",
+			Transport: "stdio",
+			Env: map[string]string{
+				"GH_TOKEN": "literal-from-yaml",
+				"GH_HOST":  "${GH_HOST}", // genuine reference — should resolve
+			},
+		}},
+		Credentials: []Credential{
+			{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "credential-secret", Priority: 0},
+			{ID: "c2", EnvVarName: "GH_HOST", PlainValue: "github.example.com", Priority: 0},
+		},
+	}
+
+	got := injectMCPCredentialEnvVars(req, nil)
+
+	var sawLiteralOverride bool
+	var sawHostInjected bool
+	for _, e := range got {
+		if e == "GH_TOKEN=credential-secret" {
+			sawLiteralOverride = true
+		}
+		if e == "GH_HOST=github.example.com" {
+			sawHostInjected = true
+		}
+	}
+	if sawLiteralOverride {
+		t.Errorf("credential silently overrode literal Env value: env=%v", got)
+	}
+	if !sawHostInjected {
+		t.Errorf("explicit ${GH_HOST} reference should still resolve from credentials: env=%v", got)
+	}
+}
