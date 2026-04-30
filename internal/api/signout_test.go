@@ -16,11 +16,17 @@ import (
 func newSignOutRig(t *testing.T) (*NextAuthHandler, *auth.JWTValidator, sessions.Store, string, string) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	store := sessions.NewDBStore(db)
 	uid := seedTestUser(t, db)
-	sess, _ := store.Create(context.Background(), uid, "ua", "ip", auth.RefreshTokenTTL)
+	sess, cErr := store.Create(context.Background(), uid, "ua", "ip", auth.RefreshTokenTTL)
+	if cErr != nil {
+		t.Fatalf("create session: %v", cErr)
+	}
 	h := NewNextAuthHandler(db, logger, v, store)
 	return h, v, store, uid, sess.ID
 }

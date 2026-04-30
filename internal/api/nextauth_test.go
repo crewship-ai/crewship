@@ -223,7 +223,10 @@ func TestNextAuth_CallbackCredentials_InvalidPassword(t *testing.T) {
 	// Get DB through internal call: we need to insert a user with a hashed password.
 	// Instead, use a new handler with our own db handle.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("realpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'login@example.com', 'Login', ?)`, string(hashed)); err != nil {
@@ -249,7 +252,10 @@ func TestNextAuth_CallbackCredentials_InvalidPassword(t *testing.T) {
 func TestNextAuth_CallbackCredentials_Success_FormRedirect(t *testing.T) {
 	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("rightpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'good@example.com', 'Good', ?)`, string(hashed)); err != nil {
@@ -274,7 +280,10 @@ func TestNextAuth_CallbackCredentials_Success_FormRedirect(t *testing.T) {
 func TestNextAuth_CallbackCredentials_Success_OpenRedirectBlocked(t *testing.T) {
 	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("rightpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'r@example.com', 'R', ?)`, string(hashed)); err != nil {
@@ -309,7 +318,10 @@ func TestNextAuth_CallbackCredentials_Success_OpenRedirectBlocked(t *testing.T) 
 func TestNextAuth_CallbackCredentials_JSONResponse(t *testing.T) {
 	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("rightpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'j@example.com', 'J', ?)`, string(hashed)); err != nil {

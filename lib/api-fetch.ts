@@ -29,7 +29,13 @@ const REFRESH_PATH = "/api/auth/token/refresh"
 const EVENT_SESSION_EXPIRED = "auth:session-expired"
 const CHANNEL_NAME = "crewship.auth"
 
-export interface ApiFetchInit extends RequestInit {
+/** ApiFetchInit deliberately omits `credentials` from the public type:
+ *  the wrapper's whole point is that auth cookies always travel with
+ *  the request, and a caller-supplied `credentials: "omit"` would
+ *  silently disable the refresh-on-401 cycle and the path-scoped
+ *  refresh cookie. The TypeScript Omit makes that misuse a compile
+ *  error rather than a silent runtime bug. */
+export interface ApiFetchInit extends Omit<RequestInit, "credentials"> {
   /** Skip the 401 → refresh path. Used internally by tryRefresh to
    *  avoid infinite recursion if the refresh endpoint itself 401s. */
   skipRefresh?: boolean
@@ -37,7 +43,10 @@ export interface ApiFetchInit extends RequestInit {
 
 /** Centralised fetch with refresh-on-401-once + session-expired event. */
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
-  const initWithCreds: RequestInit = { credentials: "include", ...init }
+  // credentials goes AFTER the spread so callers can't override —
+  // {credentials: "include", ...init} would let init.credentials win
+  // and silently disable cookie auth.
+  const initWithCreds: RequestInit = { ...init, credentials: "include" }
   // Strip our internal-only flag before handing to fetch — `RequestInit`
   // would tolerate the extra field at runtime but it's cleaner not to
   // ship it across the wire.

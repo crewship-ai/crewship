@@ -942,11 +942,15 @@ func TestPingProducesPongReply(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	tok, _ := v.IssueWSTicket("user-1", "", "", "")
+	tok, err := v.IssueWSTicket("user-1", "", "", "")
+	if err != nil {
+		t.Fatalf("issue ws ticket: %v", err)
+	}
 	u, _ := url.Parse(srv.URL)
 	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
 
-	conn, err := websocket.Dial(wsURL, "", srv.URL)
+	var conn *websocket.Conn
+	conn, err = websocket.Dial(wsURL, "", srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

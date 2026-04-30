@@ -55,7 +55,10 @@ func TestRequireAuth_NoToken(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
 	called := false
@@ -79,7 +82,10 @@ func TestRequireAuth_BadJWT(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
 	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +107,10 @@ func TestRequireAuth_ValidJWT(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	store := sessions.NewDBStore(db)
 
 	// Mint a real session row so the middleware's revoke-check passes.
@@ -139,7 +148,10 @@ func TestRequireAuth_CLIToken(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	// Insert a CLI token whose hash matches a known plaintext
 	plaintext := "crewship_cli_aabbccdd11223344556677889900"
@@ -172,7 +184,10 @@ func TestRequireAuth_BadCLIToken(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
 	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +206,10 @@ func TestRequireWorkspace_NoUser(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
 	handler := mw.RequireWorkspace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +228,10 @@ func TestRequireWorkspace_MissingID(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
 	handler := mw.RequireWorkspace(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,7 +251,10 @@ func TestRequireWorkspace_NotMember(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	// Insert workspace WITHOUT membership
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-orphan', 'Other', 'other')`); err != nil {
@@ -256,7 +280,10 @@ func TestRequireWorkspace_OK(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 
 	mw := NewAuthMiddleware(v, sessions.NewDBStore(db), db, logger)
 	var gotRole, gotWS string

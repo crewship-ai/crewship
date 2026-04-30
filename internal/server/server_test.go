@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,23 +31,20 @@ import (
 // the bare-package newTestServer() helper passes nil, which is fine
 // for unit tests that exit immediately.
 func openTestDB(t *testing.T) *sql.DB {
-	dir, err := func() (string, error) {
-		if t != nil {
-			return t.TempDir(), nil
-		}
-		return ".", nil
-	}()
-	if err != nil {
-		panic(err)
-	}
-	if t == nil {
-		// Use the OS temp dir when no test is supplied so leftover
-		// files end up out of sight rather than next to the source.
-		dir = ""
-	}
-	path := filepath.Join(dir, "test-auth-lifecycle.db")
-	if t == nil {
-		path = "/tmp/test-auth-lifecycle.db"
+	// File-backed SQLite per call so multiple goroutines see a stable
+	// schema. Each invocation gets a unique path — the helper is
+	// called from many parallel tests and the previous shared
+	// `/tmp/test-auth-lifecycle.db` made them stomp each other when
+	// run with `-count=1`.
+	var path string
+	if t != nil {
+		path = filepath.Join(t.TempDir(), "test-auth-lifecycle.db")
+	} else {
+		// No t.Cleanup hook is available — use a process-unique name
+		// in the OS temp dir so collisions between bare newTestServer()
+		// callers can't happen. Files are tiny and the OS reaps temp
+		// on shutdown anyway.
+		path = filepath.Join(os.TempDir(), fmt.Sprintf("test-auth-lifecycle-%d-%d.db", os.Getpid(), atomic.AddInt64(&testDBCounter, 1)))
 	}
 	db, err := sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL")
 	if err != nil {
@@ -65,6 +65,11 @@ func openTestDB(t *testing.T) *sql.DB {
 	}
 	return db
 }
+
+// testDBCounter is the per-process counter that gives each bare
+// (no-*testing.T) openTestDB call a unique filename. Incremented
+// atomically so concurrent table-driven tests don't collide.
+var testDBCounter int64
 
 func newTestServer() *Server {
 	return newTestServerForT(nil)

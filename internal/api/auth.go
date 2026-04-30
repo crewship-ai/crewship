@@ -37,11 +37,21 @@ func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidato
 // matching access + refresh cookies. Used by signup; the credentials
 // callback in nextauth.go has its own copy because it needs to share
 // the cookie-name helpers with the rest of the NextAuth surface.
-func (h *AuthHandler) setSessionCookies(w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
+//
+// IMPORTANT: ctx must NOT be tied to the request lifetime when called
+// after a database commit. If the client disconnects between
+// tx.Commit() and sessions.Create(), an r.Context() here would surface
+// as context.Canceled, the caller's err-path runs cleanupOrphanedSignup,
+// and the freshly-committed user/workspace gets deleted right after
+// signup. Pass a background-derived context with a short timeout
+// instead — the signup is already on disk, the only thing we still
+// owe the client is the cookie write, and nothing useful comes from
+// abandoning that work just because the TCP connection went away.
+func (h *AuthHandler) setSessionCookies(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
 	if h.sessions == nil {
 		return errSessionsStoreUnconfigured
 	}
-	sess, err := h.sessions.Create(r.Context(), userID, r.UserAgent(), clientIP(r), auth.RefreshTokenTTL)
+	sess, err := h.sessions.Create(ctx, userID, r.UserAgent(), clientIP(r), auth.RefreshTokenTTL)
 	if err != nil {
 		return err
 	}
@@ -205,10 +215,18 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	// are signed up and signed in". If it fails (validator down,
 	// sessions store unreachable), tell the client and roll the
 	// account back so we don't leave an orphan that can never log in
-	// because of a cleanup we forgot. The cleanup runs in its own
-	// short-lived context so a request-cancellation doesn't strand
-	// the orphan rows.
-	if err := h.setSessionCookies(w, r, userID, req.FullName, req.Email); err != nil {
+	// because of a cleanup we forgot.
+	//
+	// We use a fresh background context with a short timeout instead
+	// of r.Context() because the user has already been committed.
+	// If the client disconnects between tx.Commit and sessions.Create,
+	// r.Context() goes Canceled — and we'd then delete a perfectly
+	// valid user. Background-derived context decouples the post-commit
+	// auth setup from the transport: the user gets created either way;
+	// the cookie just doesn't reach them and they re-login normally.
+	authCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h.setSessionCookies(authCtx, w, r, userID, req.FullName, req.Email); err != nil {
 		h.logger.Error("set session cookies after signup — rolling back", "error", err)
 		h.cleanupOrphanedSignup(userID, workspaceID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to establish session — please try again"})
