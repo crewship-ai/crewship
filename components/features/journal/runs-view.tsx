@@ -142,7 +142,12 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
     setPage(1)
   }, [statusFilter, triggerFilter])
 
-  // Real-time refetch on run events
+  // Real-time refetch on run events. Backend collapses every terminal
+  // status into one of two WS event types: COMPLETED → "run.completed",
+  // and FAILED / CANCELLED / TIMEOUT → "run.failed" (see
+  // internal_runs.go broadcastWorkspaceEvent). So subscribing to these
+  // three covers the full lifecycle — there's no separate
+  // "run.cancelled" or "run.timeout" event to subscribe to today.
   const silentRefetch = useCallback(() => {
     fetchRuns({ silent: true })
   }, [fetchRuns])
@@ -243,9 +248,6 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
             </SelectItem>
             <SelectItem value="TIMEOUT" className="text-xs">
               Timeout
-            </SelectItem>
-            <SelectItem value="PENDING" className="text-xs">
-              Pending
             </SelectItem>
           </SelectContent>
         </Select>

@@ -35,6 +35,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "approval.granted",
   "approval.denied",
   "approval.timeout",
+  "approval.cancelled",
   // Cost
   "llm.call",
   "llm.cache_hit",
@@ -53,6 +54,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "network.egress",
   "file.written",
   "container.metrics",
+  "container.snapshot",
   // Presence
   "agent.status_change",
   // Checkpointing
@@ -69,6 +71,9 @@ export const JOURNAL_ENTRY_TYPES = [
   // System
   "system.compaction",
   "system.migration",
+  "system.hook_toggled",
+  "system.consolidation_triggered",
+  "system.consolidation_completed",
 ] as const
 
 export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number]

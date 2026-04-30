@@ -42,12 +42,20 @@ export function statusLabel(status: string): string {
 /**
  * Format a duration between two ISO timestamps as a compact "Xs / Xm Ys
  * / Xh Ym" string. When end is null/missing we measure to "now".
+ *
+ * Returns the same em-dash placeholder as the other helpers when
+ * either timestamp is unparseable or the pair is inverted (end before
+ * start). Without this guard a malformed row renders as "NaNs" or a
+ * negative duration.
  */
 export function formatDuration(start: string | null, end: string | null): string {
   if (!start) return "—"
-  const startDate = new Date(start)
-  const endDate = end ? new Date(end) : new Date()
-  const seconds = Math.floor((endDate.getTime() - startDate.getTime()) / 1000)
+  const startMs = new Date(start).getTime()
+  if (isNaN(startMs)) return "—"
+  const endMs = end ? new Date(end).getTime() : Date.now()
+  if (isNaN(endMs)) return "—"
+  const seconds = Math.floor((endMs - startMs) / 1000)
+  if (seconds < 0) return "—"
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -35,17 +36,11 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Update agent status to RUNNING. The run lifecycle itself is
-	// recorded as a run.started journal entry below — agent_runs was
-	// dropped in migration v61.
-	if _, err := h.db.ExecContext(r.Context(),
-		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ?", now, body.AgentID); err != nil {
-		h.logger.Debug("update agent status on run create", "error", err, "agent_id", body.AgentID)
-	}
-
-	// Emit run.started — the source of truth for runs. trace_id == run.id
-	// so subsequent in-run journal entries (LLM call, exec, etc.) group
-	// under the same trace via journal.WithRunID.
+	// Emit run.started FIRST — this is the source of truth for runs
+	// (post-J migration). If we flip the agent to RUNNING before the
+	// journal entry is durable and the emit then fails, the agent is
+	// stuck in RUNNING with no trace anywhere; nothing in the recovery
+	// loop knows about it.
 	{
 		payload := map[string]any{"trigger_type": body.TriggerType}
 		if body.ChatID != "" {
@@ -71,6 +66,13 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
+	}
+
+	// Now flip the agent to RUNNING. Failure is debug-only because the
+	// run trace already exists — recoverOrphanedRuns will clean up.
+	if _, err := h.db.ExecContext(r.Context(),
+		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ?", now, body.AgentID); err != nil {
+		h.logger.Debug("update agent status on run create", "error", err, "agent_id", body.AgentID)
 	}
 
 	// Broadcast real-time events
@@ -156,6 +158,29 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Idempotency guard: if a terminal run.* entry already exists for this
+	// trace, treat the call as a no-op success. Sidecar retries (network
+	// blip, 503 retry) would otherwise append duplicate run.completed/
+	// run.failed/... rows, polluting the timeline and double-counting the
+	// run in KPIs.
+	var existingTerminal sql.NullString
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT entry_type FROM journal_entries
+		 WHERE trace_id = ? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+		 LIMIT 1`, runID,
+	).Scan(&existingTerminal); err == nil && existingTerminal.Valid {
+		// Already terminal — acknowledge with the already-recorded status
+		// rather than the new one, so retries don't appear to "succeed"
+		// at flipping a finished run.
+		statusFromEntry := strings.ToUpper(strings.TrimPrefix(existingTerminal.String, "run."))
+		writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": statusFromEntry})
+		return
+	} else if err != nil && err != sql.ErrNoRows {
+		h.logger.Error("update run: terminal-exists check", "error", err, "run_id", runID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
 	// Emit the terminal journal entry. This is the source-of-truth write.
 	entryType := terminalEntryType(body.Status)
 	severity := journal.SeverityInfo
@@ -206,18 +231,20 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 				WHEN (
 					SELECT COUNT(DISTINCT je1.trace_id)
 					FROM journal_entries je1
-					WHERE je1.agent_id = ?
+					WHERE je1.workspace_id = ?
+					  AND je1.agent_id = ?
 					  AND je1.entry_type = 'run.started'
 					  AND je1.trace_id != ?
 					  AND NOT EXISTS (
 					    SELECT 1 FROM journal_entries je2
-					    WHERE je2.trace_id = je1.trace_id
+					    WHERE je2.workspace_id = je1.workspace_id
+					      AND je2.trace_id = je1.trace_id
 					      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
 					  )
 				) > 0 THEN 'RUNNING'
 				ELSE ?
 			END, updated_at = ? WHERE id = ?`,
-			agentID, runID, failedStatus, now, agentID); err != nil {
+			workspaceID, agentID, runID, failedStatus, now, agentID); err != nil {
 			h.logger.Debug("update agent status on run completion", "error", err, "agent_id", agentID)
 		}
 		var readBack string

@@ -100,7 +100,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Enrich the page with agent name/slug and crew name in one query.
 	// Bounded by limit (max 100), so the SQL `IN (?...)` stays small.
-	runs := h.enrichRuns(r.Context(), aggregated)
+	runs := h.enrichRuns(r.Context(), workspaceID, aggregated)
 
 	stats, err := journal.RunStats(r.Context(), h.db, workspaceID)
 	if err != nil {
@@ -125,7 +125,11 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 // and crew name with one extra SELECT keyed on the page's agent_ids.
 // Errors during enrichment are logged and result in nil names — the runs
 // themselves still render.
-func (h *RunHandler) enrichRuns(ctx context.Context, aggregated []journal.RunAggregated) []runResponse {
+//
+// The lookup is workspace-scoped so an agent_id collision across
+// workspaces (test fixtures, manual SQL, restored backups) cannot
+// attach a different workspace's agent/crew names to this page.
+func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggregated []journal.RunAggregated) []runResponse {
 	if aggregated == nil {
 		return []runResponse{}
 	}
@@ -156,8 +160,11 @@ func (h *RunHandler) enrichRuns(ctx context.Context, aggregated []journal.RunAgg
 		query := `SELECT a.id, a.name, a.slug, c.name
 			FROM agents a
 			LEFT JOIN crews c ON c.id = a.crew_id
-			WHERE a.id IN (` + ph + `)`
-		rows, err := h.db.QueryContext(ctx, query, agentIDs...)
+			WHERE a.workspace_id = ? AND a.id IN (` + ph + `)`
+		args := make([]any, 0, len(agentIDs)+1)
+		args = append(args, workspaceID)
+		args = append(args, agentIDs...)
+		rows, err := h.db.QueryContext(ctx, query, args...)
 		if err == nil {
 			for rows.Next() {
 				var id string

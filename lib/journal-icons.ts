@@ -88,6 +88,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "approval.granted": CheckCircle,
   "approval.denied": XCircle,
   "approval.timeout": Clock,
+  "approval.cancelled": Ban,
 
   // Cost
   "llm.call": Sparkles,
@@ -109,6 +110,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "network.egress": Globe,
   "file.written": PackageOpen,
   "container.metrics": Activity,
+  "container.snapshot": ClipboardCheck,
 
   // Presence
   "agent.status_change": Network,
@@ -130,6 +132,9 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // System
   "system.compaction": RotateCcw,
   "system.migration": Database,
+  "system.hook_toggled": Zap,
+  "system.consolidation_triggered": Wand2,
+  "system.consolidation_completed": CheckCircle,
 }
 
 /**

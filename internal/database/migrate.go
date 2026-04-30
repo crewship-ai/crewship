@@ -657,10 +657,15 @@ WHERE r.status IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT')
       AND je.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
   );
 
--- 3) Snapshot to archive. Even with the journal mirror, keeping the
---    raw row around for one release cycle is a cheap insurance policy.
+-- 3) Snapshot to archive. Idempotent: only insert rows from agent_runs
+--    that aren't already in the archive (by id), so re-running the
+--    migration via restore replay can't duplicate the snapshot. We
+--    don't add a PK here because pre-existing archive rows from a
+--    failed previous attempt may already exist with the same ids.
 CREATE TABLE IF NOT EXISTS agent_runs_archive AS SELECT * FROM agent_runs WHERE 0;
-INSERT INTO agent_runs_archive SELECT * FROM agent_runs;
+INSERT INTO agent_runs_archive
+  SELECT r.* FROM agent_runs r
+  WHERE NOT EXISTS (SELECT 1 FROM agent_runs_archive a WHERE a.id = r.id);
 
 -- 4) Drop the live table and its indexes.
 DROP INDEX IF EXISTS idx_run_agent_time;

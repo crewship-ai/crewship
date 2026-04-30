@@ -261,16 +261,23 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 	type orphan struct {
 		id, agentID, workspaceID string
 	}
+	// GROUP BY trace_id + workspace_id deduplicates the result set when
+	// a retried CreateRun wrote multiple run.started entries for the
+	// same logical run. Without it, recovery would emit one
+	// run.cancelled per duplicate row and pollute the timeline.
+	// MIN(rowid) just picks one canonical row to read agent_id off.
 	var orphans []orphan
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT je1.trace_id, je1.agent_id, je1.workspace_id
+		SELECT je1.trace_id, MAX(je1.agent_id), je1.workspace_id
 		FROM journal_entries je1
 		WHERE je1.entry_type = 'run.started'
 		  AND NOT EXISTS (
 		    SELECT 1 FROM journal_entries je2
-		    WHERE je2.trace_id = je1.trace_id
+		    WHERE je2.workspace_id = je1.workspace_id
+		      AND je2.trace_id = je1.trace_id
 		      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
-		  )`)
+		  )
+		GROUP BY je1.workspace_id, je1.trace_id`)
 	if err != nil {
 		s.logger.Error("recover orphaned runs: scan", "error", err)
 		return
@@ -312,7 +319,9 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		}
 	}
 
-	// Reset agents to IDLE if no live run remains for them.
+	// Reset agents to IDLE if no live run remains for them. The je2
+	// subquery is workspace-scoped so a terminal entry that happens to
+	// share a trace_id across workspaces can't suppress this query.
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET status = 'IDLE', updated_at = ?
@@ -324,7 +333,8 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			  AND je1.agent_id IS NOT NULL
 			  AND NOT EXISTS (
 			    SELECT 1 FROM journal_entries je2
-			    WHERE je2.trace_id = je1.trace_id
+			    WHERE je2.workspace_id = je1.workspace_id
+			      AND je2.trace_id = je1.trace_id
 			      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
 			  )
 		)`, now); err != nil {

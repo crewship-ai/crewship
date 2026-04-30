@@ -205,6 +205,13 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		runID = "" // prevent finishQuery from emitting a terminal entry
 	}
 
+	// Thread runID into ctx (for the synchronous part of this handler)
+	// AND override r's request context so downstream journal emits
+	// during the orchestrator call group under the same trace.
+	if runID != "" {
+		r = r.WithContext(journal.WithRunID(r.Context(), runID))
+	}
+
 	// Broadcast event
 	broadcastChannelEvent(h.hub, "session", body.ChatID, "peer_query_running",
 		map[string]string{

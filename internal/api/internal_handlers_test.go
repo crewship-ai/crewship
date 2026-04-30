@@ -508,6 +508,7 @@ func TestInternalCreateRun(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('ch1', 'ag1', ?, 'CHAT', 'ACTIVE')`, wsID)
 
 	h := NewInternalHandler(db, "tok", testLogger())
+	wireTestJournalForHandler(t, db, h)
 
 	t.Run("happy", func(t *testing.T) {
 		body := `{"id":"r1","agent_id":"ag1","chat_id":"ch1","workspace_id":"` + wsID + `","trigger_type":"USER","metadata":{"k":"v"}}`

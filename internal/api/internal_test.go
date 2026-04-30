@@ -541,11 +541,13 @@ func TestCreateRun_UpdatesAgentStatus(t *testing.T) {
 	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
+	jw := wireTestJournalForHandler(t, db, handler)
 	// Hub is nil — broadcasts are skipped, but DB updates still happen
 	body := strings.NewReader(`{"id":"run1","agent_id":"a1","chat_id":"c1","workspace_id":"` + wsID + `","trigger_type":"USER"}`)
 	req := httptest.NewRequest("POST", "/api/v1/internal/runs", body)
 	rr := httptest.NewRecorder()
 	handler.CreateRun(rr, req)
+	_ = jw.Flush(req.Context())
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusCreated, rr.Body.String())

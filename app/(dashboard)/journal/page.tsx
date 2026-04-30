@@ -102,8 +102,14 @@ export default function JournalPage() {
     }
   }, [filters])
 
+  // Only the Timeline tab consumes the journal list + SSE stream. Runs
+  // and Stats render from their own data sources, so disabling these
+  // hooks elsewhere avoids a redundant fetch + open SSE connection on
+  // every page load that lands on a non-Timeline tab (deeplinks from
+  // /runs go straight to ?tab=runs).
+  const timelineEnabled = !wsLoading && activeTab === "timeline"
   const { entries, nextCursor, loading, loadingMore, error, refresh, loadMore, prependLive } =
-    useJournalList({ workspaceId, params: queryParams, enabled: !wsLoading })
+    useJournalList({ workspaceId, params: queryParams, enabled: timelineEnabled })
 
   // SSE prepend — the hook dedupes by id, so re-firing is safe.
   const handleLive = useCallback(
@@ -115,7 +121,7 @@ export default function JournalPage() {
   const { status: streamStatus } = useJournalStream({
     workspaceId,
     params: queryParams,
-    enabled: !wsLoading,
+    enabled: timelineEnabled,
     onEntry: handleLive,
   })
 

@@ -19,6 +19,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -82,8 +83,23 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
   const [missions, setMissions] = useState<Map<string, MissionLookup>>(new Map())
   const [loading, setLoading] = useState(false)
 
+  // requestSeq guards against out-of-order responses: a slow fetch for
+  // workspace A can land after a fresh fetch for workspace B has
+  // already populated the maps. We bump on every fetch and only commit
+  // results when the response's seq still matches the latest.
+  const requestSeq = useRef(0)
+  // Track the workspaceId active when the request was started so a
+  // late response from the previous workspace can't overwrite the
+  // current one's data even if seq counters happen to align.
+  const activeWorkspaceRef = useRef<string | null>(workspaceId)
+  useEffect(() => {
+    activeWorkspaceRef.current = workspaceId
+  }, [workspaceId])
+
   const fetchLookup = useCallback(async () => {
     if (!workspaceId) return
+    const mySeq = ++requestSeq.current
+    const myWorkspace = workspaceId
     setLoading(true)
     try {
       const res = await fetch(`/api/v1/journal/lookup?workspace_id=${encodeURIComponent(workspaceId)}`)
@@ -93,6 +109,11 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
         agents: AgentLookup[]
         missions: MissionLookup[]
       }
+      // Stale-response guard: discard if a newer fetch has been kicked
+      // off, or if the active workspace has changed since this request
+      // started.
+      if (mySeq !== requestSeq.current) return
+      if (myWorkspace !== activeWorkspaceRef.current) return
       setCrews(new Map(data.crews.map((c) => [c.id, c])))
       setAgents(new Map(data.agents.map((a) => [a.id, a])))
       setMissions(new Map(data.missions.map((m) => [m.id, m])))
@@ -101,11 +122,18 @@ export function JournalLookupProvider({ workspaceId, children }: ProviderProps) 
       // throwing so the journal still renders with whatever cached
       // names existed before the hiccup.
     } finally {
-      setLoading(false)
+      // Only the latest in-flight request flips loading off so
+      // sequential fetches don't briefly show "loaded" between them.
+      if (mySeq === requestSeq.current) setLoading(false)
     }
   }, [workspaceId])
 
+  // Clear maps the moment workspace switches so we don't render the
+  // previous workspace's chips while the new fetch is in flight.
   useEffect(() => {
+    setCrews(new Map())
+    setAgents(new Map())
+    setMissions(new Map())
     fetchLookup()
   }, [fetchLookup])
 

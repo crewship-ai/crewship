@@ -45,12 +45,15 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		{"SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ?", []any{wsID}, &s.Users},
 		{"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", []any{wsID}, &s.Agents},
 		// Running = traces with run.started but no terminal entry yet.
-		// Replaces a JOIN over agent_runs (Phase E of unified-journal).
+		// The NOT EXISTS subquery is workspace-scoped so a terminal
+		// emitted in another workspace can't suppress this workspace's
+		// running count if trace_ids ever collide.
 		{`SELECT COUNT(DISTINCT trace_id) FROM journal_entries je1
 			WHERE je1.workspace_id = ? AND je1.entry_type = 'run.started'
 			AND NOT EXISTS (
 				SELECT 1 FROM journal_entries je2
-				WHERE je2.trace_id = je1.trace_id
+				WHERE je2.workspace_id = je1.workspace_id
+				AND je2.trace_id = je1.trace_id
 				AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
 			)`, []any{wsID}, &s.Running},
 	}

@@ -323,7 +323,11 @@ func RunStats(ctx context.Context, db *sql.DB, workspaceID string) (RunStatsResu
 		return RunStatsResult{}, fmt.Errorf("journal: RunStats requires workspace_id")
 	}
 	var res RunStatsResult
-	// Running = traces with run.started and no terminal in the same trace
+	// Running = traces with run.started and no terminal in the same
+	// trace AND workspace. The je2 subquery must repeat workspace_id —
+	// without it a terminal entry that happens to share trace_id with
+	// another workspace (test fixtures, restored backups, future cross-
+	// tenant constructs) would suppress this workspace's running count.
 	if err := db.QueryRowContext(ctx, `
 SELECT COUNT(DISTINCT trace_id)
 FROM journal_entries je1
@@ -331,7 +335,8 @@ WHERE je1.workspace_id = ?
   AND je1.entry_type = 'run.started'
   AND NOT EXISTS (
       SELECT 1 FROM journal_entries je2
-      WHERE je2.trace_id = je1.trace_id
+      WHERE je2.workspace_id = je1.workspace_id
+        AND je2.trace_id = je1.trace_id
         AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
   )`, workspaceID).Scan(&res.Running); err != nil {
 		return res, fmt.Errorf("journal: run stats running: %w", err)

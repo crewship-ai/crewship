@@ -66,6 +66,18 @@ describe("formatDuration", () => {
     const result = formatDuration(start, null)
     expect(result).toMatch(/^\d+s$|^\d+m \d+s$|^\d+h \d+m$/)
   })
+
+  it("returns em-dash for unparseable start timestamp", () => {
+    expect(formatDuration("garbage", "2026-01-01T00:00:00Z")).toBe("—")
+  })
+
+  it("returns em-dash for unparseable end timestamp", () => {
+    expect(formatDuration("2026-01-01T00:00:00Z", "garbage")).toBe("—")
+  })
+
+  it("returns em-dash when end is before start (inverted pair)", () => {
+    expect(formatDuration("2026-01-01T01:00:00Z", "2026-01-01T00:00:00Z")).toBe("—")
+  })
 })
 
 describe("formatRelativeShort", () => {

@@ -237,6 +237,13 @@ func (h *AssignmentHandler) runAssignment(
 		runID = "" // prevent finishAssignment from emitting a terminal entry
 	}
 
+	// Stamp the run id onto ctx so downstream journal emits inside this
+	// assignment (LLM calls, exec, network egress, etc.) inherit the
+	// same trace_id without each callsite having to pass runID by hand.
+	if runID != "" {
+		ctx = journal.WithRunID(ctx, runID)
+	}
+
 	// Mark assignment as RUNNING
 	if _, err := h.db.ExecContext(ctx,
 		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
