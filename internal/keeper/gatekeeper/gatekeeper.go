@@ -11,10 +11,36 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
+
+// llmCallTimeout caps how long we wait on the Keeper LLM provider before
+// failing closed (deny). Without a timeout, an unresponsive Ollama (the
+// default local provider) would block the keeper request goroutine
+// indefinitely — audit M4. 5s matches the budget operators expect for
+// a credential check; tune via SetLLMTimeout if a slower model is wired.
+const llmCallTimeout = 5 * time.Second
+
+// hasMinDistinctChars reports whether s contains at least min unique
+// non-whitespace runes. Used by the L1 intent check below — `len >= 10`
+// alone accepted "aaaaaaaaaa" as a valid stated intent, which let the
+// auto-allow shortcut be used as a free-pass for any L1 credential.
+func hasMinDistinctChars(s string, min int) bool {
+	seen := make(map[rune]struct{}, min)
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			continue
+		}
+		seen[r] = struct{}{}
+		if len(seen) >= min {
+			return true
+		}
+	}
+	return false
+}
 
 // Evaluator decides whether a credential request should be allowed.
 type Evaluator interface {
@@ -60,14 +86,18 @@ const minIntentLength = 10
 // Evaluate submits the request to the Keeper LLM and returns a structured decision.
 // For L1 credentials with a sufficiently descriptive intent, it short-circuits to ALLOW.
 func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.GatekeeperResponse, error) {
-	// L1 credentials with a meaningful intent (≥10 chars): allow automatically (fast path).
-	// Single-char or whitespace-only intents are rejected to prevent trivial bypasses.
+	// L1 credentials with a meaningful intent (≥10 chars AND ≥3 distinct
+	// non-whitespace chars): allow automatically (fast path). Single-char or
+	// whitespace-only intents are rejected to prevent trivial bypasses, and
+	// the distinct-char check (audit M3) blocks "aaaaaaaaaa" -style filler.
 	// SECURITY: L1 auto-allow NEVER applies to /execute requests (Command != "").
 	// The command must always be evaluated by the LLM to prevent exfiltration attacks
 	// like "echo $TOKEN | base64" that bypass output scrubbing.
+	intent := strings.TrimSpace(req.Request.Intent)
 	if req.Command == "" &&
 		req.SecurityLevel == keeper.SecurityLevelL1 &&
-		len(strings.TrimSpace(req.Request.Intent)) >= minIntentLength {
+		len(intent) >= minIntentLength &&
+		hasMinDistinctChars(intent, 3) {
 		g.logger.Info("keeper: L1 auto-allow",
 			"agent", req.AgentName, "credential", req.CredentialName)
 		return keeper.GatekeeperResponse{
@@ -90,7 +120,13 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	prompt := g.buildPrompt(req)
 	g.logger.Debug("keeper: LLM prompt", "prompt_len", len(prompt))
 
-	respLLM, err := g.provider.Complete(ctx, llm.Request{
+	// Audit M4: bound the upstream call so an unresponsive provider can't
+	// pin a keeper goroutine. Caller's deadline (if any) still wins via
+	// the ctx tree; we just ensure we never wait longer than llmCallTimeout.
+	callCtx, cancelCall := context.WithTimeout(ctx, llmCallTimeout)
+	defer cancelCall()
+
+	respLLM, err := g.provider.Complete(callCtx, llm.Request{
 		Model:       g.model,
 		Messages:    []llm.Message{{Role: llm.RoleUser, Content: prompt}},
 		Temperature: ptr(0.1),

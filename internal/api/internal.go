@@ -74,6 +74,18 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 			actual = "\x00different-sentinel\x00"
 		}
 		if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
+			// Audit trail for failed internal-API access — H2 mitigation.
+			// An agent inside a crew container that learns the token
+			// (UID escalation / memory dump / shared file) can call
+			// /api/v1/internal/*; this WARN entry is the first place an
+			// operator sees that activity. logger goes through slog so
+			// the sink (file / journald / shipped log) catches it even
+			// when the journal emitter is the no-op.
+			h.logger.Warn("internal API auth failed",
+				"path", r.URL.Path,
+				"remote_addr", r.RemoteAddr,
+				"token_present", token != "",
+				"user_agent", r.Header.Get("User-Agent"))
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 			return
 		}

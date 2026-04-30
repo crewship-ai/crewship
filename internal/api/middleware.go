@@ -44,7 +44,18 @@ func RoleFromContext(ctx context.Context) string {
 }
 
 // SecurityHeaders is middleware that sets standard security response headers.
-// It does NOT set HSTS (the binary may run on plain HTTP) or CSP (needs separate analysis).
+// It does NOT set HSTS (the binary may run on plain HTTP). CSP defaults to
+// the strict "default-src 'none'" policy because every API route returns
+// JSON / SSE / WebSocket — no UI is ever served from the API router, so a
+// Content-Type slip-up shouldn't be able to render HTML. The SPA paths get
+// a separate, looser CSP from server.securityHeadersMiddleware.
+//
+// Exception: /exposed/ is mounted on the API router (mux.Handle("/exposed/",
+// apiRouter) in internal/server/server.go) and reverse-proxies arbitrary
+// upstream apps. We MUST NOT stamp our lockdown CSP on those responses or
+// any HTML upstream will break. The skip mirrors the one in the server-
+// level middleware — both layers must agree, which is why this CSP rule
+// appears twice across two packages.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -53,6 +64,10 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h.Set("X-XSS-Protection", "0")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if !strings.HasPrefix(r.URL.Path, "/exposed/") {
+			h.Set("Content-Security-Policy",
+				"default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -414,6 +415,11 @@ func TestShellHandlerTimeout(t *testing.T) {
 // ---------------------------------------------------------------------
 
 func TestHTTPHandlerPass(t *testing.T) {
+	// httptest binds 127.0.0.1, which the SSRF guard blocks by default.
+	// Tests opt in to that destination class via the same env var an
+	// operator would use for an internal LAN webhook receiver.
+	t.Setenv(allowPrivateEnvVar, "true")
+
 	called := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -448,6 +454,8 @@ func TestHTTPHandlerPass(t *testing.T) {
 }
 
 func TestHTTPHandlerBlockOn5xx(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
+
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(503)
 		_, _ = w.Write([]byte(`service down`))
@@ -467,11 +475,90 @@ func TestHTTPHandlerBlockOn5xx(t *testing.T) {
 	}
 }
 
+// TestHTTPHandlerSSRFGuard is the regression test for C1 in the security
+// audit: a hook URL pointing at loopback / link-local IMDS / RFC1918
+// must be refused without the env opt-in. Each subtest verifies one
+// destination class.
+func TestHTTPHandlerSSRFGuard(t *testing.T) {
+	cases := []struct {
+		name       string
+		url        string
+		allowEnv   string
+		wantBlock  bool
+		wantReason string
+	}{
+		{
+			name:       "loopback v4 blocked by default",
+			url:        "http://127.0.0.1:1/notify",
+			wantBlock:  true,
+			wantReason: "loopback",
+		},
+		{
+			name:       "loopback v6 blocked by default",
+			url:        "http://[::1]:1/notify",
+			wantBlock:  true,
+			wantReason: "loopback",
+		},
+		{
+			name:       "link-local IMDS always blocked",
+			url:        "http://169.254.169.254/latest/meta-data",
+			allowEnv:   "true",
+			wantBlock:  true,
+			wantReason: "link-local",
+		},
+		{
+			name:       "RFC1918 blocked by default",
+			url:        "http://10.0.0.1/notify",
+			wantBlock:  true,
+			wantReason: "private",
+		},
+		{
+			name:       "scheme file:// rejected",
+			url:        "file:///etc/passwd",
+			wantBlock:  true,
+			wantReason: "scheme",
+		},
+		{
+			name:       "scheme gopher:// rejected",
+			url:        "gopher://127.0.0.1/_request",
+			wantBlock:  true,
+			wantReason: "scheme",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.allowEnv != "" {
+				t.Setenv(allowPrivateEnvVar, tc.allowEnv)
+			} else {
+				t.Setenv(allowPrivateEnvVar, "")
+			}
+			h := Hook{
+				HandlerKind:   HandlerKindHTTP,
+				HandlerConfig: map[string]any{"url": tc.url},
+			}
+			res, err := httpHandler(context.Background(), h, EventContext{WorkspaceID: "ws_test"})
+			if !tc.wantBlock {
+				if err != nil {
+					t.Fatalf("expected pass, got err: %v", err)
+				}
+				return
+			}
+			if res.Outcome != OutcomeBlock {
+				t.Fatalf("outcome=%s, expected Block (err=%v, msg=%s)", res.Outcome, err, res.Message)
+			}
+			if tc.wantReason != "" && !strings.Contains(strings.ToLower(res.Message), tc.wantReason) {
+				t.Fatalf("message %q missing reason %q", res.Message, tc.wantReason)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------
 // Dispatcher: blocking short-circuit, non-blocking fire-and-forget
 // ---------------------------------------------------------------------
 
 func TestDispatcherBlockingShortCircuit(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
@@ -555,6 +642,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 }
 
 func TestDispatcherNonBlockingDoesNotBlockCaller(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
@@ -592,6 +680,7 @@ func TestDispatcherNonBlockingDoesNotBlockCaller(t *testing.T) {
 }
 
 func TestDispatcherMatcherFilter(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
