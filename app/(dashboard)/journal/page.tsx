@@ -1,9 +1,9 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import {
+  Activity,
   BarChart3,
   BookOpen,
   Clock,
@@ -11,7 +11,6 @@ import {
   Radio,
   RadioTower,
   RefreshCw,
-  ShieldCheck,
   Zap,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -27,6 +26,7 @@ import {
   type JournalFilterValue,
 } from "@/components/features/journal/journal-filters"
 import { JournalTimeline } from "@/components/features/journal/journal-timeline"
+import { RunsView } from "@/components/features/journal/runs-view"
 
 /** Convert the UI `timeRange` selection into an RFC3339 `since` string. */
 function sinceFromRange(range: JournalFilterValue["timeRange"]): string | undefined {
@@ -40,12 +40,12 @@ function sinceFromRange(range: JournalFilterValue["timeRange"]): string | undefi
   }
 }
 
-type JournalTab = "timeline" | "stats" | "audit"
+type JournalTab = "timeline" | "runs" | "stats"
 
 const JOURNAL_TABS: Array<{ id: JournalTab; label: string; icon: typeof ListOrdered }> = [
   { id: "timeline", label: "Timeline", icon: ListOrdered },
+  { id: "runs", label: "Runs", icon: Activity },
   { id: "stats", label: "Stats", icon: BarChart3 },
-  { id: "audit", label: "Audit", icon: ShieldCheck },
 ]
 
 /**
@@ -76,7 +76,15 @@ export default function JournalPage() {
   }, [])
 
   const [filters, setFilters] = useState<JournalFilterValue>(initialFilters)
-  const [activeTab, setActiveTab] = useState<JournalTab>("timeline")
+  // Initial tab from `?tab=runs` (deeplink target for the legacy /runs
+  // redirect — Phase F of unified-journal). Unknown values fall back to
+  // timeline so a stale bookmark can never break the page.
+  const initialTab = useMemo<JournalTab>(() => {
+    const t = searchParams.get("tab")
+    return t === "runs" || t === "stats" ? t : "timeline"
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const [activeTab, setActiveTab] = useState<JournalTab>(initialTab)
 
   // Apply UI filters to backend query params. The backend accepts CSV for
   // list-shaped filters (entry_type, severity).
@@ -186,6 +194,10 @@ export default function JournalPage() {
           />
         )}
 
+        {activeTab === "runs" && (
+          <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
+        )}
+
         {activeTab === "stats" && (
           <Card>
             <CardHeader>
@@ -206,34 +218,14 @@ export default function JournalPage() {
             </CardContent>
           </Card>
         )}
-
-        {activeTab === "audit" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Audit trail
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
-                <ShieldCheck className="h-4 w-4 text-muted-foreground/60" />
-              </div>
-              <div className="text-sm font-medium text-foreground/80">Audit lives in its own section</div>
-              <div className="text-[11px] text-muted-foreground max-w-sm">
-                Security-relevant actions (login, credential use, permission changes) are
-                tracked separately with stricter retention.
-              </div>
-              <Button asChild variant="outline" size="sm" className="h-7 px-2.5 text-xs mt-1">
-                <Link href="/audit">Open Audit</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
       </div>
 
-      {/* Filter rail */}
-      <JournalFilters workspaceId={workspaceId} value={filters} onChange={setFilters} />
+      {/* Filter rail — only meaningful for the Timeline tab. The Runs
+          tab brings its own filters (status / trigger), and Stats has
+          no filterable surface yet. */}
+      {activeTab === "timeline" && (
+        <JournalFilters workspaceId={workspaceId} value={filters} onChange={setFilters} />
+      )}
     </div>
   )
 }
