@@ -50,24 +50,34 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 			return fmt.Errorf("begin migration %d (%s): %w", m.version, m.name, err)
 		}
 
+		// rollback attempts to undo the migration's tx and surfaces any
+		// rollback failure (e.g. driver-level connection drop) on the
+		// logger. Without this, a Rollback failure that masks the real
+		// migration error went completely unlogged.
+		rollback := func() {
+			if rbErr := tx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
+				logger.Warn("migration rollback failed", "version", m.version, "name", m.name, "error", rbErr)
+			}
+		}
+
 		// Migrations are either a static SQL string or a Go function — not
 		// both. SQL migrations cover the vast majority; fn migrations exist
 		// for the rare case where we need to discover schema state at apply
 		// time (e.g. iterate pragma_table_info to find legacy columns).
 		if m.fn != nil {
 			if err := m.fn(ctx, tx, logger); err != nil {
-				tx.Rollback()
+				rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
 			}
 		} else {
 			if _, err := tx.ExecContext(ctx, m.sql); err != nil {
-				tx.Rollback()
+				rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
 			}
 		}
 
 		if _, err := tx.ExecContext(ctx, "INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
-			tx.Rollback()
+			rollback()
 			return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
 		}
 

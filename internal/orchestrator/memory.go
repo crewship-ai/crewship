@@ -408,8 +408,11 @@ func (o *Orchestrator) readContainerFile(ctx context.Context, containerID, fileP
 	content := strings.TrimSpace(buf.String())
 
 	// "cat" on a non-existent file writes to stderr, stdout is empty.
-	// Also filter out common shell error messages.
-	if content == "" || strings.HasPrefix(content, "cat:") {
+	// Match the literal cat error shape — "cat: <filePath>:" — so a
+	// legitimate memory file whose first non-whitespace line happens to
+	// start with the substring "cat:" (notes mentioning the command) is
+	// not silently treated as missing.
+	if content == "" || strings.HasPrefix(content, "cat: "+filePath+":") {
 		return "", nil
 	}
 

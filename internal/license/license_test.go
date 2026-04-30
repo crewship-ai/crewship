@@ -107,6 +107,75 @@ func TestLoadValidLicense(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsFutureIssuedAt verifies a license whose IssuedAt is
+// well beyond a benign clock-skew tolerance is rejected. Without this
+// check, a forger could backdate ExpiresAt indefinitely just by setting
+// IssuedAt + ExpiresAt both in the year 2099.
+func TestLoadRejectsFutureIssuedAt(t *testing.T) {
+	pub, priv := generateTestKeypair(t)
+	setPublicKey(base64.StdEncoding.EncodeToString(pub))
+	defer setPublicKey("")
+
+	future := time.Now().Add(48 * time.Hour).Unix()
+	claims := Claims{
+		LicenseID:  "future-issued",
+		Edition:    EditionEnterprise,
+		MaxCrews:   1,
+		MaxAgents:  1,
+		MaxMembers: 1,
+		IssuedAt:   future,
+		ExpiresAt:  future + 365*24*3600,
+	}
+	data := signClaims(t, priv, claims)
+
+	l := New()
+	if err := l.LoadFromBytes(data); err == nil {
+		t.Fatalf("expected LoadFromBytes to reject future IssuedAt")
+	}
+}
+
+// TestClaimsDeepCopiesFeatures verifies a caller mutating the Features
+// slice on a returned Claims doesn't corrupt the live license state.
+// Without the deep-copy, the value-copy of Claims still shared its
+// underlying array — a downstream caller flipping Features[0] = "X"
+// silently rewrote what HasFeature() returned.
+func TestClaimsDeepCopiesFeatures(t *testing.T) {
+	pub, priv := generateTestKeypair(t)
+	setPublicKey(base64.StdEncoding.EncodeToString(pub))
+	defer setPublicKey("")
+
+	claims := Claims{
+		LicenseID:  "deep-copy-test",
+		Edition:    EditionEnterprise,
+		MaxCrews:   1,
+		MaxAgents:  1,
+		MaxMembers: 1,
+		Features:   []string{"sso", "audit_export"},
+		IssuedAt:   time.Now().Unix(),
+		ExpiresAt:  time.Now().Add(time.Hour).Unix(),
+	}
+	data := signClaims(t, priv, claims)
+	l := New()
+	if err := l.LoadFromBytes(data); err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+
+	c := l.Claims()
+	if len(c.Features) != 2 {
+		t.Fatalf("expected 2 features, got %d", len(c.Features))
+	}
+	c.Features[0] = "POISONED"
+
+	// HasFeature must still see the original value — a caller's mutation
+	// of the returned slice is not allowed to mutate live state.
+	if !l.HasFeature("sso") {
+		t.Errorf("Claims().Features mutation poisoned live state — expected 'sso' to still be present")
+	}
+	if l.HasFeature("POISONED") {
+		t.Errorf("'POISONED' leaked into live state via shared slice backing")
+	}
+}
+
 func TestLoadExpiredLicense(t *testing.T) {
 	pub, priv := generateTestKeypair(t)
 	setPublicKey(base64.StdEncoding.EncodeToString(pub))

@@ -3,6 +3,7 @@ package cartographer
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -373,6 +374,97 @@ func TestRestoreMissingCursor(t *testing.T) {
 	_, err = Restore(ctx, db, nil, "ws_test", id)
 	if err == nil {
 		t.Fatal("expected error for missing cursor")
+	}
+}
+
+// TestForkRemapsTaskDependencies verifies that depends_on references on
+// copied tasks are rewritten to point at the FORK's task IDs rather than
+// the parent's. Without remapping, blocked tasks on the fork wait
+// forever for parent task IDs that don't exist there.
+func TestForkRemapsTaskDependencies(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	// Parent: mt_p1 (root) and mt_p2 which depends on mt_p1.
+	if _, err := db.Exec(`INSERT INTO mission_tasks
+		(id, mission_id, title, status, task_order, depends_on)
+		VALUES ('mt_p1', 'mis_1', 'Plan', 'COMPLETED', 0, '[]')`); err != nil {
+		t.Fatalf("seed mt_p1: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO mission_tasks
+		(id, mission_id, title, status, task_order, depends_on)
+		VALUES ('mt_p2', 'mis_1', 'Execute', 'PENDING', 1, '["mt_p1"]')`); err != nil {
+		t.Fatalf("seed mt_p2: %v", err)
+	}
+	emitJournalEntry(t, db, "j_seed", "mis_1", time.Now().UTC())
+
+	srcID, err := Create(ctx, db, nil, Checkpoint{
+		WorkspaceID:   "ws_test",
+		CrewID:        "crew_a",
+		MissionID:     "mis_1",
+		JournalCursor: "j_seed",
+		Label:         "pre-fork",
+		CreatedBy:     "user_x",
+	})
+	if err != nil {
+		t.Fatalf("create src: %v", err)
+	}
+
+	newMission, _, err := Fork(ctx, db, nil, "ws_test", srcID, "branch", "user_x")
+	if err != nil {
+		t.Fatalf("fork: %v", err)
+	}
+
+	// Find the two fork tasks by title and read their depends_on.
+	type forkTask struct {
+		id, title, dependsOn string
+	}
+	rows, err := db.Query(`SELECT id, title, depends_on FROM mission_tasks WHERE mission_id = ? ORDER BY task_order`, newMission)
+	if err != nil {
+		t.Fatalf("query fork tasks: %v", err)
+	}
+	defer rows.Close()
+	var forkTasks []forkTask
+	for rows.Next() {
+		var ft forkTask
+		if err := rows.Scan(&ft.id, &ft.title, &ft.dependsOn); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		forkTasks = append(forkTasks, ft)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate fork tasks: %v", err)
+	}
+	if len(forkTasks) != 2 {
+		t.Fatalf("want 2 fork tasks, got %d", len(forkTasks))
+	}
+
+	planForkID := forkTasks[0].id // fork-side mt_p1 (Plan)
+	execForkID := forkTasks[1].id // fork-side mt_p2 (Execute)
+	execDeps := forkTasks[1].dependsOn
+
+	// Sanity: the fork's task IDs are NEW (not the parent's).
+	if planForkID == "mt_p1" || execForkID == "mt_p2" {
+		t.Fatalf("fork tasks reused parent ids: %+v", forkTasks)
+	}
+
+	// Bug repro: the Execute task's depends_on must reference the fork's
+	// own Plan task ID — not the parent's "mt_p1". Stale references mean
+	// blocked-task gating on the fork waits for an ID that doesn't exist
+	// on this mission.
+	var got []string
+	if err := json.Unmarshal([]byte(execDeps), &got); err != nil {
+		t.Fatalf("unmarshal depends_on %q: %v", execDeps, err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 dependency, got %v", got)
+	}
+	if got[0] == "mt_p1" {
+		t.Errorf("fork retained parent task id in depends_on: %v (must remap to fork's %q)", got, planForkID)
+	}
+	if got[0] != planForkID {
+		t.Errorf("depends_on must point at fork's plan task %q, got %q", planForkID, got[0])
 	}
 }
 

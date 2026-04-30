@@ -191,6 +191,67 @@ func TestOllamaComplete(t *testing.T) {
 	}
 }
 
+// TestOllamaStreamClientHasNoTotalDeadline guards the streaming path
+// against the http.Client.Timeout regression: that timeout covers body
+// read, so applying it to NDJSON streaming silently kills generations
+// that exceed it. The non-streaming Complete() client keeps its 5-minute
+// safety net; only Stream() must run unbounded.
+func TestOllamaStreamClientHasNoTotalDeadline(t *testing.T) {
+	p := NewOllama("http://example.invalid", "llama3")
+	if p.stream == nil {
+		t.Fatal("stream client must be initialized")
+	}
+	if p.stream.Timeout != 0 {
+		t.Errorf("stream client must not set total Timeout; got %s — kills long generations", p.stream.Timeout)
+	}
+	if p.client.Timeout == 0 {
+		t.Errorf("non-streaming client should retain a Timeout safety net")
+	}
+}
+
+// TestOllamaCapsUnboundedGeneration verifies an unset MaxTokens produces a
+// finite num_predict in the request body. Without a cap, Ollama defaults
+// to -1 (run until natural EOS) which can spin local models for tens of
+// thousands of tokens and inflate cost/latency for callers that didn't
+// explicitly opt into long generations.
+func TestOllamaCapsUnboundedGeneration(t *testing.T) {
+	var seen map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&seen)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message":           map[string]string{"role": "assistant", "content": "ok"},
+			"done":              true,
+			"prompt_eval_count": 1,
+			"eval_count":        1,
+		})
+	}))
+	defer srv.Close()
+
+	p := NewOllama(srv.URL, "llama3")
+	if _, err := p.Complete(context.Background(), Request{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	opts, ok := seen["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected options block carrying num_predict, got body=%v", seen)
+	}
+	np, ok := opts["num_predict"]
+	if !ok {
+		t.Fatalf("expected num_predict to be set when MaxTokens=0; options=%v", opts)
+	}
+	switch v := np.(type) {
+	case float64:
+		if v <= 0 {
+			t.Errorf("num_predict must be positive, got %v", v)
+		}
+	default:
+		t.Errorf("num_predict has unexpected type %T (%v)", np, np)
+	}
+}
+
 func TestOllamaToolUse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{

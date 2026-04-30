@@ -2,9 +2,11 @@ package logging
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 )
 
 type ctxKey struct{}
@@ -42,15 +44,24 @@ func FromContext(ctx context.Context) *slog.Logger {
 	return slog.Default()
 }
 
+// parseLevel resolves the configured log level. It accepts case variants
+// ("DEBUG", "Debug") and the common synonyms "warning" and "fatal" so a
+// typo like CREWSHIP_LOG_LEVEL=warning doesn't silently fall through to
+// info-and-quiet. Truly unknown strings still default to info but emit a
+// stderr notice — the logger isn't constructed yet so we can't go via
+// slog itself.
 func parseLevel(s string) slog.Level {
-	switch s {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "info":
+		return slog.LevelInfo
 	case "debug":
 		return slog.LevelDebug
-	case "warn":
+	case "warn", "warning":
 		return slog.LevelWarn
-	case "error":
+	case "error", "fatal":
 		return slog.LevelError
 	default:
+		fmt.Fprintf(os.Stderr, "logging: unknown level %q, defaulting to info\n", s)
 		return slog.LevelInfo
 	}
 }

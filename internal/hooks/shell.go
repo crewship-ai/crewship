@@ -42,11 +42,23 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 		}, fmt.Errorf("shell: empty command")
 	}
 
+	// time.Duration is int64 nanoseconds; multiplying any value > ~9.2e9
+	// by time.Second wraps to a negative duration and instantly fires the
+	// context deadline. Cap any caller-supplied seconds at a defensible
+	// upper bound (24 hours) so misconfigured hooks fail at parse time
+	// instead of producing the surprising "immediate timeout" symptom.
+	const maxTimeoutSecs = 24 * 60 * 60
 	timeout := 30 * time.Second
 	if t, ok := h.HandlerConfig["timeout_secs"].(float64); ok && t > 0 {
+		if t > maxTimeoutSecs {
+			t = maxTimeoutSecs
+		}
 		timeout = time.Duration(t) * time.Second
 	}
 	if t, ok := h.HandlerConfig["timeout_secs"].(int); ok && t > 0 {
+		if t > maxTimeoutSecs {
+			t = maxTimeoutSecs
+		}
 		timeout = time.Duration(t) * time.Second
 	}
 

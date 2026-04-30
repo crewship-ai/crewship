@@ -78,7 +78,7 @@ func TestCredentialMonitor_OnChange(t *testing.T) {
 		t.Errorf("MarkStatus should not fire onChange on its own; got %d changes: %v", gotChanges, changes)
 	}
 
-	if monitor.onChange == nil {
+	if monitor.onChange.Load() == nil {
 		t.Error("onChange callback should be set")
 	}
 }

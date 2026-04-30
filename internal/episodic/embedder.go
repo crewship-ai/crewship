@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Embedder turns text into a fixed-dimension float32 vector. The
@@ -49,11 +50,13 @@ func NewOllamaEmbedder(baseURL string) *OllamaEmbedder {
 }
 
 // Embed sends text to Ollama and returns the vector. We cap input length
-// at 4096 chars because nomic-embed-text's context window is 2K tokens
+// at 4096 bytes because nomic-embed-text's context window is 2K tokens
 // and longer inputs silently truncate on the server with no indication.
+// The cut happens on a rune boundary so multi-byte UTF-8 (Czech, CJK,
+// emoji) doesn't hand the embedder a U+FFFD-poisoned prompt.
 func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	if len(text) > 4096 {
-		text = text[:4096]
+		text = truncateAtRune(text, 4096)
 	}
 	body, _ := json.Marshal(map[string]any{
 		"model":  e.ModelName,
@@ -102,6 +105,21 @@ func (e *OllamaEmbedder) Dim() int {
 
 func (e *OllamaEmbedder) Model() string {
 	return e.ModelName
+}
+
+// truncateAtRune returns at most maxBytes bytes of s, walking back from
+// maxBytes to the most recent rune boundary so a multi-byte UTF-8 rune
+// is never split. utf8.RuneStart catches the start byte; up to 3 bytes
+// of walkback covers any valid 1–4-byte sequence.
+func truncateAtRune(s string, maxBytes int) string {
+	if maxBytes <= 0 || maxBytes >= len(s) {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // EncodeVector packs a float32 slice into little-endian bytes for BLOB

@@ -120,6 +120,34 @@ server:
 	}
 }
 
+// TestEnvBoolAcceptsCommonVariants verifies boolean env overrides treat
+// "yes" / "on" / "TRUE" / "y" the same as "true". The previous strict
+// match silently coerced any non-"true"/"1" value to false, so an
+// operator who set KEEPER_ENABLED=yes ended up with the keeper disabled
+// and no signal that their intent was lost.
+func TestEnvBoolAcceptsCommonVariants(t *testing.T) {
+	for _, raw := range []string{"true", "1", "yes", "YES", "on", "ON", "TRUE", "y", "True"} {
+		t.Setenv("KEEPER_ENABLED", raw)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatalf("load with KEEPER_ENABLED=%q: %v", raw, err)
+		}
+		if !cfg.Keeper.Enabled {
+			t.Errorf("KEEPER_ENABLED=%q should enable keeper, got disabled", raw)
+		}
+	}
+	for _, raw := range []string{"false", "0", "no", "off", "FALSE", "n"} {
+		t.Setenv("KEEPER_ENABLED", raw)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatalf("load with KEEPER_ENABLED=%q: %v", raw, err)
+		}
+		if cfg.Keeper.Enabled {
+			t.Errorf("KEEPER_ENABLED=%q should disable keeper, got enabled", raw)
+		}
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	_, err := Load("/nonexistent/config.yml")
 	if err == nil {

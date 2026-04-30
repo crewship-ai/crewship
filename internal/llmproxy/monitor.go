@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -18,6 +19,12 @@ type StatusUpdate struct {
 	LastError *string          `json:"last_error"`
 }
 
+// onChangeFunc captures the registered status-change callback so we can
+// store/load it atomically — a plain function field would race between
+// the goroutine running Run() and any caller invoking SetOnChange after
+// monitoring starts.
+type onChangeFunc func(connID string, oldStatus, newStatus ConnectionStatus)
+
 // CredentialMonitor periodically validates provider credentials.
 type CredentialMonitor struct {
 	pool          *TokenPool
@@ -26,7 +33,7 @@ type CredentialMonitor struct {
 	interval      time.Duration
 	client        *http.Client
 	logger        *slog.Logger
-	onChange      func(connID string, oldStatus, newStatus ConnectionStatus)
+	onChange      atomic.Pointer[onChangeFunc]
 }
 
 // NewCredentialMonitor creates a monitor that periodically validates provider
@@ -48,8 +55,14 @@ func NewCredentialMonitor(
 }
 
 // SetOnChange registers a callback invoked when a credential's status changes.
+// Safe to call before or after Run() has started; the swap is atomic.
 func (cm *CredentialMonitor) SetOnChange(fn func(connID string, oldStatus, newStatus ConnectionStatus)) {
-	cm.onChange = fn
+	if fn == nil {
+		cm.onChange.Store(nil)
+		return
+	}
+	wrapped := onChangeFunc(fn)
+	cm.onChange.Store(&wrapped)
 }
 
 // Run starts the credential validation loop, blocking until ctx is cancelled.
@@ -111,8 +124,8 @@ func (cm *CredentialMonitor) checkOne(ctx context.Context, conn ProviderConnecti
 
 	cm.persistStatus(ctx, conn.ID, newStatus, errMsg)
 
-	if cm.onChange != nil {
-		cm.onChange(conn.ID, oldStatus, newStatus)
+	if cb := cm.onChange.Load(); cb != nil {
+		(*cb)(conn.ID, oldStatus, newStatus)
 	}
 }
 

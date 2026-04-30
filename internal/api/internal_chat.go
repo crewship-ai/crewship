@@ -84,12 +84,26 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid delta"})
 		return
 	}
-	_, err := h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		"UPDATE chats SET message_count = message_count + ? WHERE id = ?",
 		body.Delta, chatID)
 	if err != nil {
 		h.logger.Error("increment message count", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	// A non-existent chat ID still returned 200 OK — silent no-op masking
+	// caller bugs (typo'd ID, race against deletion). Surface it as 404
+	// so the caller can either retry resolution or log the broken
+	// reference instead of trusting a phantom success.
+	n, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("increment message count rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if n == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": chatID})
@@ -114,7 +128,12 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("update chat title rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	if n == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found or already titled"})
 		return
