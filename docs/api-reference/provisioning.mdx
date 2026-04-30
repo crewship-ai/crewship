@@ -97,18 +97,21 @@ Lists the mise-managed runtimes (Node, Python, Go, Terraform, kubectl, …) the 
 GET /api/v1/crews/{crewId}/provision
 ```
 
-**Response:** `200 OK`
+**Response:** `200 OK`. Always-present fields come from the `crews` row; the `step` / `total` / `message` / `steps` / `log_tail` / `started_at` / `completed_at` / `error` fields appear **only** when an in-memory job is currently running or recently finished for this crew.
 
 ```json
 {
   "status": "running",
-  "has_config": true,
+  "devcontainer_config": "{\"image\":\"…\",\"features\":{…}}",
   "cached_image": null,
   "config_hash": "a1b2c3d4e5f6…",
-  "started_at": "2026-04-30T11:01:18Z",
-  "step": "installing-features",
-  "step_index": 3,
-  "step_total": 6
+  "agents_pending_restart": 0,
+  "step": 3,
+  "total": 6,
+  "message": "installing devcontainer features",
+  "steps": ["validate", "pull-base", "install-features", "install-mise", "snapshot", "tag"],
+  "log_tail": ["Feature python installed", "Feature node installed"],
+  "started_at": "2026-04-30T11:01:18Z"
 }
 ```
 
@@ -116,13 +119,25 @@ GET /api/v1/crews/{crewId}/provision
 
 | Value | Meaning |
 |---|---|
-| `idle` | No config, nothing to do. |
+| `idle` | No active job and no `cached_image` — crew has nothing built or in flight. |
 | `pending` | Job enqueued, not yet picked up. |
 | `running` | Provisioner is mid-pipeline. |
-| `success` | Cached image exists at `cached_image`. |
-| `failed` | See `error` field for the failure reason. |
+| `completed` | Cached image exists at `cached_image` (no active job). |
+| `failed` | Job ended in failure. `error` carries the reason. |
 
-When `status=running`, `step` and `step_index` track sub-progress so the UI's `CrewProvisioningCard` can render a checklist.
+| Field | When present | Meaning |
+|---|---|---|
+| `devcontainer_config` | always | Raw JSON blob pulled from `crews.devcontainer_config` (or null). |
+| `cached_image` | always | Last successfully committed cache tag, or null. |
+| `config_hash` | always | SHA-256 of (base, devcontainer, mise) used as the cache key. |
+| `agents_pending_restart` | always | Count of crew agents whose live container is on a stale image. |
+| `step` / `total` | active job | Numeric progress (e.g. `3 / 6`). The UI's `CrewProvisioningCard` renders a checklist from this pair. |
+| `message` | active job | Free-form short message for the current step. |
+| `steps` | active job | Ordered list of step labels for the whole pipeline. |
+| `log_tail` | active job | Trailing log lines (bounded) for inline display. |
+| `started_at` | active job | RFC3339 start time. |
+| `completed_at` | finished job | RFC3339 end time (only after `completed`/`failed`). |
+| `error` | failed job | Human-readable failure reason. |
 
 ### Trigger provision
 
@@ -130,21 +145,28 @@ When `status=running`, `step` and `step_index` track sub-progress so the UI's `C
 POST /api/v1/crews/{crewId}/provision
 ```
 
-Idempotent: if a job is already running for this crew, returns the existing job ID rather than starting a duplicate.
+Requires the `create` role action (OWNER, ADMIN, MANAGER). Returns 202 immediately and runs the pipeline in a background goroutine; poll the status endpoint for progress.
 
 **Response:** `202 Accepted`
 
 ```json
-{ "job_id": "prov_a1b2", "status": "pending" }
+{
+  "status": "started",
+  "message": "Provisioning started. Monitor with 'crewship crew provision status <slug>'."
+}
 ```
 
-**Errors:**
+**Errors** (RFC 7807 Problem Details on every 4xx/5xx — `type`, `title`, `status`, `detail`, `instance`):
 
 | Status | Condition |
 |---|---|
+| 400 | Invalid crew ID, **or** crew has no `devcontainer_config`. |
+| 403 | Caller lacks `create` permission. |
 | 404 | Crew not in workspace. |
-| 409 | Crew has no `devcontainer_config` (nothing to provision). |
-| 429 | Per-workspace rate limit exceeded (RFC 7807 Problem Details body with `type` / `detail`). |
+| 409 | A provisioning job is already in progress for this crew. The 409 body extends Problem Details with `job_status` (the existing job's state) so callers can decide whether to wait or fall through. **Not** idempotent — the second caller is told to back off, not silently joined to the running job. |
+| 429 | Per-workspace rate limit exceeded. |
+| 500 | Unexpected server-side error (panic-recovered). |
+| 503 | Provisioner not configured (no Docker client wired). |
 
 ### Rebuild
 

@@ -25,16 +25,17 @@ The state of which tab is open in the right panel, which message is being edited
 
 ## Sessions
 
-A "session" is a `chats` row. Sessions persist across page reloads, browser sessions, and operators (any user with read access to the agent can see its history). Migration v59 added the `chats.origin` column so the UI can distinguish:
+A "session" is a `chats` row. Sessions persist across page reloads, browser sessions, and operators (any user with read access to the agent can see its history). Migration v59 added the `chats.origin` column (DB-side; the Prisma TypeScript schema is intentionally not regenerated for this column — Prisma is types-only in this project, see CLAUDE.md). The Go handler at `POST /api/v1/agents/{agentId}/chats` accepts an `origin` field on the body and whitelists these values:
 
 | `origin` value | When written |
 |---|---|
-| `web` | Created via the UI composer. |
-| `cli` | Created via `crewship agent run` or programmatic API. |
-| `webhook` | Created by a webhook trigger (see [Webhooks](/api-reference/webhooks)). |
-| `crew` | Created by a peer agent escalating to this one. |
+| `UI` | Created via the chat page in the browser. |
+| `CLI` | Created via `crewship run` or other programmatic CLI use. |
+| `WEBHOOK` | Created by a webhook trigger (see [Webhooks](/api-reference/webhooks)). |
+| `CRON` | Created by a scheduled trigger. |
+| `AGENT` | Created by a peer agent (agent-to-agent assignment). |
 
-The Sessions sidebar groups by `origin` so an operator scanning history can quickly tell apart human chats from automated ones. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
+Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The Sessions sidebar renders a colored chip per origin — NULL rows show no chip. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
 
 ## Composer
 
