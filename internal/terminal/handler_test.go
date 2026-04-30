@@ -79,7 +79,7 @@ func silentLogger() *slog.Logger {
 
 func newTestValidator(t *testing.T) *auth.JWTValidator {
 	t.Helper()
-	v, err := auth.NewJWTValidator("supersecretkeythatisatleast32chars!!", "authjs.session-token")
+	v, err := auth.NewJWTValidator("supersecretkeythatisatleast32chars!!")
 	if err != nil {
 		t.Fatalf("validator: %v", err)
 	}
@@ -169,12 +169,7 @@ func TestServeHTTP_InitMissingFields(t *testing.T) {
 	v := newTestValidator(t)
 	h := New(&mockContainer{state: "running"}, v, nil, silentLogger())
 
-	tok, err := v.CreateToken(&auth.Claims{
-		ID:    "u1",
-		Email: "u1@example.com",
-		Exp:   time.Now().Add(time.Hour).Unix(),
-		Iat:   time.Now().Unix(),
-	})
+	tok, err := v.IssueWSTicket("u1", "test-session", "", "u1@example.com")
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -220,9 +215,7 @@ func TestServeHTTP_InvalidAgentSlugRejected(t *testing.T) {
 
 	h := New(&interactiveMock{mockContainer: &mockContainer{state: "running"}}, v, db.DB, silentLogger())
 
-	tok, err := v.CreateToken(&auth.Claims{
-		ID: "u1", Exp: time.Now().Add(time.Hour).Unix(), Iat: time.Now().Unix(),
-	})
+	tok, err := v.IssueWSTicket("u1", "test-session", "", "")
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -268,9 +261,7 @@ func TestServeHTTP_AccessDeniedForNonMember(t *testing.T) {
 
 	h := New(&mockContainer{state: "running"}, v, db.DB, silentLogger())
 
-	tok, _ := v.CreateToken(&auth.Claims{
-		ID: "uX", Exp: time.Now().Add(time.Hour).Unix(), Iat: time.Now().Unix(),
-	})
+	tok, _ := v.IssueWSTicket("uX", "test-session", "", "")
 	conn := dialTerminal(t, h)
 	authMsg, _ := json.Marshal(map[string]string{"type": "auth", "token": tok})
 	conn.WriteMessage(websocket.TextMessage, authMsg)

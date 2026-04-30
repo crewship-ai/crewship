@@ -157,7 +157,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	var jwtValidator *auth.JWTValidator
 	if cfg.Auth.JWTSecret != "" {
 		var err error
-		jwtValidator, err = auth.NewJWTValidator(cfg.Auth.JWTSecret, "authjs.session-token")
+		jwtValidator, err = auth.NewJWTValidator(cfg.Auth.JWTSecret)
 		if err != nil {
 			logger.Error("failed to create JWT validator", "error", err)
 		} else {

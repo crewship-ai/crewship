@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"golang.org/x/net/websocket"
 )
 
@@ -37,6 +39,7 @@ type Hub struct {
 	logger       *slog.Logger
 	chatHandler  ChatHandler
 	jwtValidator *auth.JWTValidator
+	sessions     sessions.Store
 	clients      map[*Client]bool
 	channels     map[string]map[*Client]bool
 	register     chan *Client
@@ -50,16 +53,21 @@ type Hub struct {
 }
 
 // Client represents a single authenticated WebSocket connection with its
-// channel subscriptions and outbound message buffer.
+// channel subscriptions and outbound message buffer. authSessionID is
+// the user_sessions row that authorized this connection (empty for
+// CLI-token-derived tickets); the per-connection revoke watcher uses
+// it to detect server-side logout and force-close with the
+// session_revoked frame.
 type Client struct {
-	conn     *websocket.Conn
-	hub      *Hub
-	userID   string
-	channels map[string]bool
-	send     chan []byte
-	ctx      context.Context
-	cancel   context.CancelFunc
-	mu       sync.Mutex // protects channels map
+	conn          *websocket.Conn
+	hub           *Hub
+	userID        string
+	authSessionID string
+	channels      map[string]bool
+	send          chan []byte
+	ctx           context.Context
+	cancel        context.CancelFunc
+	mu            sync.Mutex // protects channels map
 }
 
 // ClientMessage is a JSON message received from a WebSocket client.
@@ -111,8 +119,11 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *
 		cancelFns:   make(map[string]context.CancelFunc),
 	}
 	for _, d := range deps {
-		if v, ok := d.(*auth.JWTValidator); ok {
+		switch v := d.(type) {
+		case *auth.JWTValidator:
 			h.jwtValidator = v
+		case sessions.Store:
+			h.sessions = v
 		}
 	}
 	return h
@@ -243,13 +254,35 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := h.jwtValidator.Validate(token)
+	claims, err := h.jwtValidator.ValidateWS(token)
 	if err != nil {
 		h.logger.Warn("ws auth failed", "error", err)
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
 	}
 	userID := claims.ID
+	authSessionID := claims.Sid
+
+	// Browser tickets carry a sid that joins to user_sessions; refuse
+	// the upgrade if the row is gone or already revoked. CLI-derived
+	// tickets have no sid (their CLI token is the auth artifact, with
+	// its own revocation table) — those skip this check.
+	if authSessionID != "" && h.sessions != nil {
+		sess, sErr := h.sessions.Get(r.Context(), authSessionID)
+		if sErr != nil {
+			if errors.Is(sErr, sessions.ErrNotFound) {
+				http.Error(w, "session_revoked", http.StatusUnauthorized)
+				return
+			}
+			h.logger.Error("ws session lookup", "error", sErr)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !sess.Active(time.Now()) {
+			http.Error(w, "session_revoked", http.StatusUnauthorized)
+			return
+		}
+	}
 
 	wsServer := websocket.Server{
 		Handshake: func(config *websocket.Config, req *http.Request) error {
@@ -279,18 +312,22 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		Handler: func(conn *websocket.Conn) {
 			ctx, cancel := context.WithCancel(context.Background())
 			client := &Client{
-				conn:     conn,
-				hub:      h,
-				userID:   userID,
-				channels: make(map[string]bool),
-				send:     make(chan []byte, 64),
-				ctx:      ctx,
-				cancel:   cancel,
+				conn:          conn,
+				hub:           h,
+				userID:        userID,
+				authSessionID: authSessionID,
+				channels:      make(map[string]bool),
+				send:          make(chan []byte, 64),
+				ctx:           ctx,
+				cancel:        cancel,
 			}
 
 			h.register <- client
 
 			go client.writePump()
+			if authSessionID != "" && h.sessions != nil {
+				go client.watchSessionRevocation()
+			}
 			client.readPump()
 		},
 	}
@@ -350,6 +387,49 @@ func (c *Client) writePump() {
 			}
 		case <-ticker.C:
 			if _, err := c.conn.Write(pingMessageBytes); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// watchSessionRevocation polls user_sessions every 30s and force-closes
+// the connection when the row goes revoked or expires. The frontend's
+// use-websocket hook treats a "session_revoked" frame as terminal —
+// stops retrying and emits the auth:session-expired event so the page
+// hard-redirects to /login.
+//
+// Periodic-poll (rather than push) keeps the implementation independent
+// of where the revocation came from (signOut on the same node, admin
+// force-logout from a different process, password change, etc). The 30s
+// cadence is the documented worst-case "how long until a revoked token
+// stops working over WS"; tighten only if you find that's too lax.
+func (c *Client) watchSessionRevocation() {
+	if c.authSessionID == "" || c.hub == nil || c.hub.sessions == nil {
+		return
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+			sess, err := c.hub.sessions.Get(ctx, c.authSessionID)
+			cancel()
+			if err != nil || sess == nil || !sess.Active(time.Now()) {
+				// Send the terminal frame, then close. safeSend
+				// dropping is fine — readPump's defer will tear
+				// the connection down on the next read failure.
+				revokedFrame, _ := json.Marshal(ServerMessage{
+					Type:    "session_revoked",
+					Payload: map[string]string{"reason": "session_revoked"},
+				})
+				c.safeSend(revokedFrame)
+				time.Sleep(50 * time.Millisecond) // give writePump a chance to flush
+				c.conn.Close()
 				return
 			}
 		}

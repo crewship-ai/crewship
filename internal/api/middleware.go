@@ -3,12 +3,21 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
+
+// timeNow is wrapped so tests can advance the middleware's clock — for
+// example to verify a session is rejected at exactly the expires_at
+// boundary. Production code never reassigns it.
+var timeNow = time.Now
 
 type contextKey string
 
@@ -18,11 +27,26 @@ const (
 	ctxRole        contextKey = "role"
 )
 
+// Reason codes returned in 401 bodies and WWW-Authenticate. The
+// frontend's apiFetch wrapper inspects the body to decide between
+// "try refresh" (session_expired) and "give up" (session_revoked /
+// session_invalid). Don't add new values without updating that branch.
+const (
+	reasonSessionExpired = "session_expired"
+	reasonSessionRevoked = "session_revoked"
+	reasonSessionInvalid = "session_invalid"
+	reasonNoCredentials  = "no_credentials"
+)
+
 // AuthUser represents an authenticated user extracted from a JWT or CLI token.
+// SessionID is empty for CLI-token auth (those don't have user_sessions rows)
+// and populated for JWT auth — handlers that need to revoke or rotate the
+// caller's session (signOut, refresh) read it from here.
 type AuthUser struct {
-	ID    string
-	Email string
-	Name  string
+	ID        string
+	Email     string
+	Name      string
+	SessionID string
 }
 
 // UserFromContext returns the authenticated user stored in the request context, or nil if not set.
@@ -58,15 +82,21 @@ func SecurityHeaders(next http.Handler) http.Handler {
 }
 
 // AuthMiddleware provides HTTP middleware for JWT and CLI token authentication.
+// The sessions store is consulted on every JWT-auth request to enforce
+// server-side revocation; pass a no-op store only in tests that exercise
+// pure CLI-token paths.
 type AuthMiddleware struct {
 	validator *auth.JWTValidator
+	sessions  sessions.Store
 	db        *sql.DB
 	logger    *slog.Logger
 }
 
-// NewAuthMiddleware creates an AuthMiddleware with the given JWT validator and database connection.
-func NewAuthMiddleware(validator *auth.JWTValidator, db *sql.DB, logger *slog.Logger) *AuthMiddleware {
-	return &AuthMiddleware{validator: validator, db: db, logger: logger}
+// NewAuthMiddleware creates an AuthMiddleware. sessionsStore must back
+// the user_sessions table (migration v60); pass *sessions.DBStore in
+// production.
+func NewAuthMiddleware(validator *auth.JWTValidator, sessionsStore sessions.Store, db *sql.DB, logger *slog.Logger) *AuthMiddleware {
+	return &AuthMiddleware{validator: validator, sessions: sessionsStore, db: db, logger: logger}
 }
 
 // RequireAuth returns middleware that validates the request's Bearer token or CLI token
@@ -75,29 +105,67 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := extractToken(r)
 		if token == "" {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+			writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
 			return
 		}
 
 		var user *AuthUser
 
-		// Check if this is a CLI token (crewship_cli_xxx)
 		if IsCLIToken(token) {
 			userID, email, name, err := ValidateCLIToken(m.db, token)
 			if err != nil {
 				m.logger.Debug("CLI token auth failed", "error", err)
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
 				return
 			}
 			user = &AuthUser{ID: userID, Email: email, Name: name}
 		} else {
-			claims, err := m.validator.Validate(token)
+			claims, err := m.validator.ValidateAccess(token)
 			if err != nil {
 				m.logger.Debug("auth failed", "error", err)
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+				writeAuthError(w, http.StatusUnauthorized, reasonForJWTErr(err))
 				return
 			}
-			user = &AuthUser{ID: claims.ID, Email: claims.Email, Name: claims.Name}
+
+			// JWT signed by us and not yet expired — but the session
+			// may have been revoked since this token was minted.
+			// user_sessions is the source of truth for "is this
+			// session still valid"; the JWT exp is just an upper
+			// bound on revocation latency.
+			if m.sessions != nil && claims.Sid != "" {
+				sess, err := m.sessions.Get(r.Context(), claims.Sid)
+				if err != nil {
+					if errors.Is(err, sessions.ErrNotFound) {
+						writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
+						return
+					}
+					m.logger.Error("session lookup failed", "error", err)
+					writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+					return
+				}
+				if !sess.Active(timeNow()) {
+					reason := reasonSessionRevoked
+					if sess.RevokedAt == nil {
+						reason = reasonSessionExpired
+					}
+					writeAuthError(w, http.StatusUnauthorized, reason)
+					return
+				}
+				// Best-effort touch — failures here are logged but
+				// don't block the request. The whole point of the
+				// throttle is that a transient SQLite error on one
+				// touch shouldn't 500 a happy-path API call.
+				if err := m.sessions.TouchLastUsed(r.Context(), claims.Sid); err != nil {
+					m.logger.Debug("touch last_used failed", "error", err)
+				}
+			}
+
+			user = &AuthUser{
+				ID:        claims.ID,
+				Email:     claims.Email,
+				Name:      claims.Name,
+				SessionID: claims.Sid,
+			}
 		}
 
 		ctx := context.WithValue(r.Context(), ctxUser, user)
@@ -111,7 +179,7 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := UserFromContext(r.Context())
 		if user == nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+			writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
 			return
 		}
 
@@ -152,6 +220,27 @@ func extractToken(r *http.Request) string {
 	}
 
 	return ""
+}
+
+// writeAuthError writes a 401 JSON body together with a WWW-Authenticate
+// header carrying the same reason code, so XHR clients can read it from
+// either side. The header form follows RFC 6750 §3.
+func writeAuthError(w http.ResponseWriter, status int, reason string) {
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="%s"`, reason))
+	writeJSON(w, status, map[string]string{"error": reason})
+}
+
+// reasonForJWTErr maps a JWT validator error into the wire reason code
+// the frontend's apiFetch wrapper expects.
+func reasonForJWTErr(err error) string {
+	switch {
+	case errors.Is(err, auth.ErrTokenExpired):
+		return reasonSessionExpired
+	case errors.Is(err, auth.ErrInvalidToken), errors.Is(err, auth.ErrWrongKind):
+		return reasonSessionInvalid
+	default:
+		return reasonSessionInvalid
+	}
 }
 
 // internalWsCtx extracts workspace_id from query params and sets it in context.

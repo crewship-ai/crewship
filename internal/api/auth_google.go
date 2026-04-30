@@ -15,6 +15,7 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // GoogleAuthHandler handles Google OAuth2 sign-in for users.
@@ -22,14 +23,16 @@ type GoogleAuthHandler struct {
 	db        *sql.DB
 	logger    *slog.Logger
 	validator *auth.JWTValidator
+	sessions  sessions.Store
 	oauthCfg  *oauth2.Config
 }
 
-func NewGoogleAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, clientID, clientSecret, baseURL string) *GoogleAuthHandler {
+func NewGoogleAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, sessionsStore sessions.Store, clientID, clientSecret, baseURL string) *GoogleAuthHandler {
 	return &GoogleAuthHandler{
 		db:        db,
 		logger:    logger,
 		validator: validator,
+		sessions:  sessionsStore,
 		oauthCfg: &oauth2.Config{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
@@ -154,33 +157,57 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set session cookie
-	sessToken, err := h.validator.CreateToken(&auth.Claims{
-		ID:    userID,
-		Name:  userInfo.Name,
-		Email: userInfo.Email,
-	})
+	// Mint a fresh user_sessions row + access/refresh cookies, mirroring
+	// the credentials path. OAuth callers get the same revocable lifecycle
+	// as password sign-in.
+	if h.sessions == nil {
+		h.logger.Error("google oauth: sessions store not configured")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	sess, err := h.sessions.Create(r.Context(), userID, r.UserAgent(), clientIP(r), auth.RefreshTokenTTL)
 	if err != nil {
-		h.logger.Error("create session token", "error", err)
+		h.logger.Error("create session row", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	accessTok, err := h.validator.IssueAccessToken(userID, sess.ID, userInfo.Name, userInfo.Email)
+	if err != nil {
+		h.logger.Error("issue access", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	refreshTok, err := h.validator.IssueRefreshToken(userID, sess.ID)
+	if err != nil {
+		h.logger.Error("issue refresh", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
-	cookieName := "authjs.session-token"
-	isSecure := false
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		cookieName = "__Secure-authjs.session-token"
-		isSecure = true
+	secure := isHTTPS(r)
+	accessName := "authjs.session-token"
+	refreshName := "authjs.refresh-token"
+	if secure {
+		accessName = "__Secure-authjs.session-token"
+		refreshName = "__Secure-authjs.refresh-token"
 	}
-
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    sessToken,
+		Name:     accessName,
+		Value:    accessTok,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   30 * 24 * 60 * 60,
+		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshName,
+		Value:    refreshTok,
+		Path:     refreshCookiePath,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
 	})
 
 	// Redirect to dashboard (validate again as defense-in-depth)

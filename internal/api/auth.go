@@ -14,6 +14,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
@@ -21,42 +22,74 @@ type AuthHandler struct {
 	db          *sql.DB
 	logger      *slog.Logger
 	validator   *auth.JWTValidator
+	sessions    sessions.Store
 	allowSignup bool
 }
 
 // NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
-func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, allowSignup bool) *AuthHandler {
-	return &AuthHandler{db: db, logger: logger, validator: validator, allowSignup: allowSignup}
+// sessionsStore must back user_sessions (migration v60).
+func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, sessionsStore sessions.Store, allowSignup bool) *AuthHandler {
+	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
 }
 
-func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
-	token, err := h.validator.CreateToken(&auth.Claims{
-		ID:    userID,
-		Name:  fullName,
-		Email: email,
-	})
+// setSessionCookies creates a fresh user_sessions row and writes the
+// matching access + refresh cookies. Used by signup; the credentials
+// callback in nextauth.go has its own copy because it needs to share
+// the cookie-name helpers with the rest of the NextAuth surface.
+func (h *AuthHandler) setSessionCookies(w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
+	if h.sessions == nil {
+		return errSessionsStoreUnconfigured
+	}
+	sess, err := h.sessions.Create(r.Context(), userID, r.UserAgent(), clientIP(r), auth.RefreshTokenTTL)
+	if err != nil {
+		return err
+	}
+	access, err := h.validator.IssueAccessToken(userID, sess.ID, fullName, email)
+	if err != nil {
+		return err
+	}
+	refresh, err := h.validator.IssueRefreshToken(userID, sess.ID)
 	if err != nil {
 		return err
 	}
 
-	cookieName := "authjs.session-token"
-	isSecure := false
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		cookieName = "__Secure-authjs.session-token"
-		isSecure = true
+	secure := isHTTPS(r)
+	accessName := "authjs.session-token"
+	refreshName := "authjs.refresh-token"
+	if secure {
+		accessName = "__Secure-authjs.session-token"
+		refreshName = "__Secure-authjs.refresh-token"
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    token,
+		Name:     accessName,
+		Value:    access,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   30 * 24 * 60 * 60,
+		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshName,
+		Value:    refresh,
+		Path:     refreshCookiePath,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
 	})
 	return nil
 }
+
+// errSessionsStoreUnconfigured signals that an auth path was reached
+// without the sessions store wired in. Production main() always wires
+// it; only test fixtures that go around NewRouter can hit this.
+var errSessionsStoreUnconfigured = stringError("sessions store not configured")
+
+type stringError string
+
+func (e stringError) Error() string { return string(e) }
 
 type signupRequest struct {
 	FullName string `json:"full_name"`
@@ -167,8 +200,8 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.setSessionCookie(w, r, userID, req.FullName, req.Email); err != nil {
-		h.logger.Error("set session cookie after signup", "error", err)
+	if err := h.setSessionCookies(w, r, userID, req.FullName, req.Email); err != nil {
+		h.logger.Error("set session cookies after signup", "error", err)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": userID, "email": req.Email})
@@ -295,43 +328,28 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// WsToken generates a short-lived JWT for authenticating WebSocket connections.
+// WsToken generates a short-lived JWE for authenticating WebSocket connections.
 // POST /api/v1/auth/ws-token — works with both session cookies and CLI tokens.
+//
+// For browser auth: ticket carries user.SessionID so the WS hub can
+// enforce server-side revocation (close 4401 if the session gets
+// revoked while the WS is up).
+//
+// For CLI auth: ticket is issued without a session id. The WS hub's
+// validator allows empty sid for kind=ws because CLI tokens have their
+// own revocation table (cli_tokens) that the hub does not consult mid-
+// stream — the trade-off is that revoking a CLI token does not kick
+// already-open WS connections; users should disconnect them manually.
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
 		return
 	}
 
-	// If auth came from a CLI token (no session cookie), generate a short-lived JWE.
-	token := extractToken(r)
-	if IsCLIToken(token) {
-		jweToken, err := h.validator.CreateToken(&auth.Claims{
-			ID:    user.ID,
-			Name:  user.Name,
-			Email: user.Email,
-			Exp:   time.Now().Add(15 * time.Minute).Unix(),
-		})
-		if err != nil {
-			h.logger.Error("create WS token for CLI", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"token": jweToken})
-		return
-	}
-
-	// V-11: Always generate a short-lived JWE for WebSocket auth,
-	// instead of exposing the long-lived session cookie in query params.
-	jweToken, err := h.validator.CreateToken(&auth.Claims{
-		ID:    user.ID,
-		Name:  user.Name,
-		Email: user.Email,
-		Exp:   time.Now().Add(15 * time.Minute).Unix(),
-	})
+	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
 	if err != nil {
-		h.logger.Error("create WS token for browser session", "error", err)
+		h.logger.Error("issue ws ticket", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}

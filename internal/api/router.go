@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -44,6 +45,7 @@ type Router struct {
 	db               *sql.DB
 	logger           *slog.Logger
 	authMw           *AuthMiddleware
+	sessionsStore    sessions.Store
 	socketPath       string
 	internalToken    string
 	internalBaseURL  string
@@ -114,18 +116,20 @@ func (noopEmitter) Emit(_ context.Context, e journal.Entry) (string, error) {
 func (noopEmitter) Flush(_ context.Context) error { return nil }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
-	validator, err := auth.NewJWTValidator(jwtSecret, "")
+	validator, err := auth.NewJWTValidator(jwtSecret)
 	if err != nil {
 		return nil, err
 	}
 
-	authMw := NewAuthMiddleware(validator, db, logger)
+	sessionsStore := sessions.NewDBStore(db)
+	authMw := NewAuthMiddleware(validator, sessionsStore, db, logger)
 
 	r := &Router{
-		mux:    http.NewServeMux(),
-		db:     db,
-		logger: logger,
-		authMw: authMw,
+		mux:           http.NewServeMux(),
+		db:            db,
+		logger:        logger,
+		authMw:        authMw,
+		sessionsStore: sessionsStore,
 	}
 
 	// Apply options before registering routes so that internalToken,

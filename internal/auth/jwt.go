@@ -176,7 +176,12 @@ func (v *JWTValidator) issue(key []byte, kind string, ttl time.Duration, userID,
 	if userID == "" {
 		return "", errors.New("user id required")
 	}
-	if sessionID == "" {
+	// Access and refresh tokens MUST carry a session id — that's what
+	// makes them revocable. WS tickets issued from CLI-token auth are
+	// the deliberate exception (CLI tokens have their own revocation
+	// table); the WS hub validator only consults sessions when sid is
+	// non-empty.
+	if sessionID == "" && kind != KindWS {
 		return "", errors.New("session id required")
 	}
 	now := time.Now()

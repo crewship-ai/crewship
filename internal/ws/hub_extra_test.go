@@ -771,7 +771,7 @@ func TestHandleUpgradeNoValidator(t *testing.T) {
 
 func TestHandleUpgradeInvalidToken(t *testing.T) {
 	t.Parallel()
-	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length", "")
+	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -794,7 +794,7 @@ func TestHandleUpgradeInvalidToken(t *testing.T) {
 // Broadcast, and ping/pong serialization on the client message side.
 func TestHandleUpgradeAndBroadcastEndToEnd(t *testing.T) {
 	t.Parallel()
-	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length", "")
+	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,7 +804,7 @@ func TestHandleUpgradeAndBroadcastEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	tok, err := v.CreateToken(&auth.Claims{ID: "user-1"})
+	tok, err := v.IssueWSTicket("user-1", "test-session", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -855,7 +855,7 @@ func TestHandleUpgradeAndBroadcastEndToEnd(t *testing.T) {
 // ping → pong reply path through the websocket loop.
 func TestPingProducesPongReply(t *testing.T) {
 	t.Parallel()
-	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length", "")
+	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -864,7 +864,7 @@ func TestPingProducesPongReply(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	tok, _ := v.CreateToken(&auth.Claims{ID: "user-1"})
+	tok, _ := v.IssueWSTicket("user-1", "test-session", "", "")
 	u, _ := url.Parse(srv.URL)
 	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
 
