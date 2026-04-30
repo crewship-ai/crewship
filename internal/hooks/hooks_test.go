@@ -558,6 +558,7 @@ func TestHTTPHandlerSSRFGuard(t *testing.T) {
 // ---------------------------------------------------------------------
 
 func TestDispatcherBlockingShortCircuit(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
@@ -641,6 +642,7 @@ func TestDispatcherBlockingShortCircuit(t *testing.T) {
 }
 
 func TestDispatcherNonBlockingDoesNotBlockCaller(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
@@ -678,6 +680,7 @@ func TestDispatcherNonBlockingDoesNotBlockCaller(t *testing.T) {
 }
 
 func TestDispatcherMatcherFilter(t *testing.T) {
+	t.Setenv(allowPrivateEnvVar, "true")
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
