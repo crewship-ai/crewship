@@ -670,6 +670,17 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
       type: "cancel_message",
       payload: JSON.stringify({ session_id: sessionId }),
     })
+    // Flip local streaming state immediately so the UI returns to the
+    // input-ready state even if the WS is dropped before the server's
+    // cancel ack arrives. Closing assistant turns mark them no longer
+    // streaming so the typing indicator stops; arriving deltas after
+    // this point will be ignored by the server's cancel.
+    setIsStreaming(false)
+    setTurns((prev) =>
+      prev.map((t) =>
+        t.role === "assistant" && t.isStreaming ? { ...t, isStreaming: false } : t,
+      ),
+    )
   }, [send, sessionId])
 
   // Regenerate the last assistant response by re-sending the last user message.
