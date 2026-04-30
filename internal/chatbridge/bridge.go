@@ -495,7 +495,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
 
-	// Build compact tool summary for conversation context (max 5 entries).
+	// Build compact tool summary for conversation context (cap at 10 entries
+	// — keep the comment honest with the slice bound below to avoid future
+	// edits "fixing" the wrong side).
 	var toolSummary string
 	if len(toolSummaries) > 10 {
 		toolSummary = strings.Join(toolSummaries[:10], "\n") + fmt.Sprintf("\n...and %d more", len(toolSummaries)-10)
