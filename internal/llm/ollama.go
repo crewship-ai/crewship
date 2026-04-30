@@ -112,12 +112,18 @@ func (o *Ollama) buildRequestBody(req Request, stream bool) ([]byte, error) {
 	if req.Temperature != nil {
 		opts["temperature"] = *req.Temperature
 	}
-	if req.MaxTokens > 0 {
-		opts["num_predict"] = req.MaxTokens
+	// Always pin num_predict. Ollama's default is -1 (generate until the
+	// model emits a natural EOS) which routinely produces multi-thousand-
+	// token replies for callers that just forgot to set MaxTokens. Mirror
+	// the Anthropic provider's 4096 default so cost and latency stay
+	// bounded by default; explicit opt-in still works because any caller
+	// who sets MaxTokens themselves wins.
+	maxToks := req.MaxTokens
+	if maxToks <= 0 {
+		maxToks = 4096
 	}
-	if len(opts) > 0 {
-		body["options"] = opts
-	}
+	opts["num_predict"] = maxToks
+	body["options"] = opts
 
 	if len(req.Tools) > 0 {
 		body["tools"] = toOllamaTools(req.Tools)
