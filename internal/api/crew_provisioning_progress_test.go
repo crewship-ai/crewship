@@ -23,6 +23,7 @@ func TestProvisionStatus_ProgressPayload(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -104,6 +105,7 @@ func TestProvisionStatus_LogTailRingBufferCap(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -127,10 +129,10 @@ func TestProvisionStatus_LogTailRingBufferCap(t *testing.T) {
 		CrewID:    crewID,
 		Status:    "running",
 		StartedAt: time.Now(),
-		Step:     50,
-		Total:    50,
-		Message:  "Committing image",
-		LogTail:  tail,
+		Step:      50,
+		Total:     50,
+		Message:   "Committing image",
+		LogTail:   tail,
 	}
 	h.mu.Unlock()
 

@@ -272,35 +272,51 @@ function ProvisioningChecklist({
     if (messageIdx >= 0) activeIdx = messageIdx
   }
 
+  // Render order: active first, completed steps stacking below it
+  // (most recently completed nearest the active row), then pending
+  // steps. Earlier the order was plan-sequence which pushed the
+  // currently-installing line below a long list of green checkmarks
+  // — by the time PHP was building, the user had to scroll past nine
+  // completed rows to see what was actually happening.
+  type Row = { label: string; planIdx: number; state: "active" | "done" | "pending" }
+  const rows: Row[] = steps.map((label, i) => ({
+    label,
+    planIdx: i,
+    state: i < activeIdx ? "done" : i === activeIdx ? "active" : "pending",
+  }))
+  const ordered: Row[] = [
+    ...rows.filter((r) => r.state === "active"),
+    // Most recently completed first so the eye lands on the freshest
+    // result without scanning the whole green stack.
+    ...rows.filter((r) => r.state === "done").slice().reverse(),
+    ...rows.filter((r) => r.state === "pending"),
+  ]
+
   return (
     <ol className="ml-1 mt-1 space-y-1 max-h-[180px] overflow-y-auto">
-      {steps.map((label, i) => {
-        const state: "done" | "active" | "pending" =
-          i < activeIdx ? "done" : i === activeIdx ? "active" : "pending"
-        return (
-          <li
-            key={i}
-            className={`flex items-center gap-2 text-[11px] ${
-              state === "done"
-                ? "text-muted-foreground/70"
-                : state === "active"
-                  ? "text-foreground font-medium"
-                  : "text-muted-foreground/50"
-            }`}
-          >
-            <span className="w-3 h-3 shrink-0 flex items-center justify-center">
-              {state === "done" ? (
-                <Check className="h-3 w-3 text-emerald-400" />
-              ) : state === "active" ? (
-                <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
-              ) : (
-                <Circle className="h-2 w-2 text-muted-foreground/40" />
-              )}
-            </span>
-            <span className="truncate">{label}</span>
-          </li>
-        )
-      })}
+      {ordered.map((row) => (
+        <li
+          key={row.planIdx}
+          className={`flex items-center gap-2 text-[11px] ${
+            row.state === "done"
+              ? "text-muted-foreground/70"
+              : row.state === "active"
+                ? "text-foreground font-medium"
+                : "text-muted-foreground/50"
+          }`}
+        >
+          <span className="w-3 h-3 shrink-0 flex items-center justify-center">
+            {row.state === "done" ? (
+              <Check className="h-3 w-3 text-emerald-400" />
+            ) : row.state === "active" ? (
+              <Loader2 className="h-3 w-3 animate-spin text-blue-400" />
+            ) : (
+              <Circle className="h-2 w-2 text-muted-foreground/40" />
+            )}
+          </span>
+          <span className="truncate">{row.label}</span>
+        </li>
+      ))}
     </ol>
   )
 }

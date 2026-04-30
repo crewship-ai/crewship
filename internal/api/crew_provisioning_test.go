@@ -1,19 +1,29 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
 	t.Helper()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	// NewProvisioningHandler spawns a 10-min cleanup ticker on construction;
+	// without Stop() each test call leaks one goroutine that lives for the
+	// rest of the suite. t.Cleanup runs even on test failure.
+	t.Cleanup(h.Stop)
+	return h
 }
 
 func TestCatalogList(t *testing.T) {
@@ -90,6 +100,7 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	// docker client == nil -> provisioner is nil -> trigger returns 503.
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -114,21 +125,166 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
 	}
+	// ProvisionTrigger emits RFC 7807 Problem Details now — `detail` carries
+	// the human-readable error rather than a flat `error` field.
 	var resp struct {
-		Error string `json:"error"`
+		Type   string `json:"type"`
+		Title  string `json:"title"`
+		Status int    `json:"status"`
+		Detail string `json:"detail"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Error == "" {
-		t.Error("expected non-empty error message in 503 response")
+	if resp.Status != http.StatusServiceUnavailable {
+		t.Errorf("expected status=503 in problem body, got %d", resp.Status)
 	}
+	if resp.Detail == "" {
+		t.Error("expected non-empty detail in 503 problem response")
+	}
+}
+
+// TestProvisionTrigger_AlreadyRunningReturnsProblemDetails pins the 409
+// shape introduced when ProvisionTrigger switched to RFC 7807 Problem
+// Details. The interesting bit beyond "is it problem-shaped" is the
+// `job_status` extension member: clients (CLI, UI) read this directly
+// to decide whether to wait or surface "build is already running" — if
+// it ever drifts back into a free-form detail string, callers parsing
+// JSON would silently lose that signal.
+func TestProvisionTrigger_AlreadyRunningReturnsProblemDetails(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := newProvisioningHandlerForRateLimitTest(t, db, logger)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	crewID := "crew-already-running"
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, name, slug, devcontainer_config)
+		 VALUES (?, ?, 'Devs', 'devs', ?)`,
+		crewID, wsID, `{"image":"ubuntu:22.04","features":{"ghcr.io/devcontainers/features/go:1":{}}}`,
+	); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+
+	// Seed an in-flight job directly so the trigger short-circuits to 409.
+	h.mu.Lock()
+	h.jobs[crewID] = &ProvisionJob{CrewID: crewID, Status: "running"}
+	h.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/crews/{crewId}/provision", h.ProvisionTrigger)
+
+	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/provision", nil)
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusConflict, rr.Body.String())
+	}
+	var resp struct {
+		Type      string `json:"type"`
+		Title     string `json:"title"`
+		Status    int    `json:"status"`
+		Detail    string `json:"detail"`
+		Instance  string `json:"instance"`
+		JobStatus string `json:"job_status"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != http.StatusConflict {
+		t.Errorf("problem.status = %d, want %d", resp.Status, http.StatusConflict)
+	}
+	if resp.JobStatus != "running" {
+		t.Errorf("job_status extension = %q, want %q", resp.JobStatus, "running")
+	}
+	if resp.Detail == "" {
+		t.Error("problem.detail must be non-empty")
+	}
+	if resp.Type != "about:blank" {
+		t.Errorf("problem.type = %q, want %q", resp.Type, "about:blank")
+	}
+}
+
+// TestEnqueueForCrew_RateLimitDoesNotPublishGhostJob verifies the
+// TOCTOU window between "publish pending job" and "acquire rate-limit
+// slot" is closed. Previously a caller rejected by the limiter would
+// leave a transient pending row visible to a concurrent caller, who
+// would falsely report AlreadyRunning for a build that never started.
+// After the fix, the rejected caller never published a row and a
+// follow-up call sees a clean slate.
+func TestEnqueueForCrew_RateLimitDoesNotPublishGhostJob(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	// We need a non-nil provisioner; pass a synthetic one and don't
+	// actually run any builds — the test exits before runProvisioning
+	// would touch Docker because tryAcquire pre-empts it.
+	h := newProvisioningHandlerForRateLimitTest(t, db, logger)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	crewID := "crew-ghost"
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, name, slug, devcontainer_config)
+		 VALUES (?, ?, 'Devs', 'devs', ?)`,
+		crewID, wsID, `{"image":"ubuntu:22.04","features":{"ghcr.io/devcontainers/features/go:1":{}}}`,
+	); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+
+	// Saturate the "starts in last minute" budget. Acquire and immediately
+	// release so the running-count budget (maxConcurrentProvisionsPerWorkspace,
+	// hit first when all slots stay live) doesn't trigger before we've
+	// recorded enough recent-start timestamps to fail the per-minute check.
+	for i := 0; i < maxProvisionStartsPerMinute; i++ {
+		if err := h.rateLimiter.tryAcquire(wsID); err != nil {
+			t.Fatalf("seed rate-limiter slot %d: %v", i, err)
+		}
+		h.rateLimiter.release(wsID)
+	}
+
+	// First call must hit the limiter and bail. Crucially it must NOT
+	// leave a "pending" row in h.jobs.
+	_, err := h.EnqueueForCrew(context.Background(), crewID, wsID)
+	if err == nil {
+		t.Fatal("expected ErrRateLimited, got nil")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("expected ErrRateLimited, got %v", err)
+	}
+
+	h.mu.Lock()
+	job, ok := h.jobs[crewID]
+	h.mu.Unlock()
+	if ok {
+		t.Errorf("rejected caller leaked a pending job into h.jobs: %+v", job)
+	}
+}
+
+// newProvisioningHandlerForRateLimitTest builds a handler with a
+// non-nil provisioner so EnqueueForCrew advances past the
+// ErrProvisionerUnavailable guard. The test bails before runProvisioning
+// would actually use it, so the provisioner's deps can be nil.
+func newProvisioningHandlerForRateLimitTest(t *testing.T, db *sql.DB, logger *slog.Logger) *ProvisioningHandler {
+	t.Helper()
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	// NewProvisioningHandler spawns a background cleanup ticker — without
+	// Stop() each test invocation leaks one goroutine for the rest of the
+	// suite. t.Cleanup runs on success and failure alike.
+	t.Cleanup(h.Stop)
+	h.provisioner = devcontainer.NewProvisioner(nil, nil, nil, logger)
+	return h
 }
 
 func TestProvisionStatus_NoCrew(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)

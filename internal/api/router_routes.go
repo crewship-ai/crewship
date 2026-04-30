@@ -520,8 +520,11 @@ func (r *Router) registerRoutes() {
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
-	// Devcontainer feature catalog (auth required, no workspace context needed)
+	// Devcontainer feature catalog (auth required, no workspace context needed).
+	// Stash the handler on the router so cmd_start can wire it into chatbridge
+	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.featureCacheDir, r.hub)
+	r.provisioning = provisioning
 	r.mux.Handle("GET /api/v1/features/catalog", authed(http.HandlerFunc(provisioning.CatalogList)))
 	r.mux.Handle("GET /api/v1/runtimes/catalog", authed(http.HandlerFunc(provisioning.RuntimeCatalogList)))
 
