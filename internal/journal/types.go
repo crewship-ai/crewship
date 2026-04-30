@@ -70,8 +70,9 @@ const (
 	EntryNetworkPortOpen  EntryType = "network.port_opened"
 	EntryNetworkPortClose EntryType = "network.port_closed"
 	EntryNetworkEgress    EntryType = "network.egress"
-	EntryFileWritten      EntryType = "file.written"
-	EntryContainerMetrics EntryType = "container.metrics"
+	EntryFileWritten       EntryType = "file.written"
+	EntryContainerMetrics  EntryType = "container.metrics"
+	EntryContainerSnapshot EntryType = "container.snapshot"
 
 	// Presence
 	EntryAgentStatus EntryType = "agent.status_change"
