@@ -31,7 +31,17 @@ CREATE TABLE cost_ledger (
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
-    tags TEXT NOT NULL DEFAULT '{}'
+    tags TEXT NOT NULL DEFAULT '{}',
+    -- v60 billing-mode columns. Mirror migrate_consts_v60_billing_mode.go.
+    billing_mode TEXT NOT NULL DEFAULT 'metered',
+    quota_remaining_pct REAL,
+    quota_window TEXT,
+    subscription_plan TEXT,
+    rate_input_per_m REAL,
+    rate_output_per_m REAL,
+    rate_cached_in_per_m REAL,
+    rate_cache_write_per_m REAL,
+    cost_confidence TEXT NOT NULL DEFAULT 'estimate'
 );
 CREATE TABLE budget_limits (
     id TEXT PRIMARY KEY,
