@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Wireframe: Spec Mode + Agent Inbox</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f7f7f8;
+    color: #1f2937;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ─── Header ──────────────────────────────────── */
+  header {
+    background: white;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .logo { font-weight: 700; font-size: 16px; }
+  .workspace { color: #6b7280; font-size: 13px; }
+  .tabs { margin-left: auto; display: flex; gap: 4px; }
+  .tab {
+    padding: 8px 16px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #6b7280;
+    font-family: inherit;
+  }
+  .tab:hover { background: #f3f4f6; }
+  .tab.active {
+    background: #eff6ff;
+    color: #3b82f6;
+    font-weight: 600;
+  }
+
+  /* ─── Main layout ─────────────────────────────── */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 16px;
+    padding: 16px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .content {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 24px 28px;
+    min-height: 600px;
+  }
+
+  /* ─── Mission header ──────────────────────────── */
+  .mission-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .mission-meta {
+    color: #6b7280;
+    font-size: 12px;
+    margin-bottom: 28px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  /* ─── Phase progress bar ──────────────────────── */
+  .phase-bar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 28px;
+    padding: 16px 8px;
+    background: #f9fafb;
+    border-radius: 8px;
+  }
+  .phase { display: flex; align-items: center; gap: 10px; }
+  .phase-circle {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .phase.done .phase-circle { background: #10b981; color: white; }
+  .phase.active .phase-circle {
+    background: #3b82f6;
+    color: white;
+    box-shadow: 0 0 0 4px rgba(59,130,246,0.18);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .phase.pending .phase-circle {
+    background: white;
+    color: #9ca3af;
+    border: 1px solid #e5e7eb;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(59,130,246,0.18); }
+    50%      { box-shadow: 0 0 0 8px rgba(59,130,246,0.08); }
+  }
+  .phase-label { font-size: 13px; font-weight: 500; white-space: nowrap; }
+  .phase.done .phase-label    { color: #10b981; }
+  .phase.active .phase-label  { color: #3b82f6; font-weight: 600; }
+  .phase.pending .phase-label { color: #9ca3af; }
+  .phase-connector {
+    flex: 1;
+    height: 2px;
+    background: #e5e7eb;
+    margin: 0 12px;
+    min-width: 20px;
+  }
+  .phase-connector.done { background: #10b981; }
+
+  /* ─── Phase section cards ─────────────────────── */
+  .phase-section {
+    margin-bottom: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .phase-section-header {
+    padding: 14px 16px;
+    background: #f9fafb;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .phase-section-header:hover { background: #f3f4f6; }
+  .phase-section-header .chevron {
+    margin-left: auto;
+    color: #9ca3af;
+    font-size: 12px;
+  }
+  .phase-section.collapsed .phase-section-body { display: none; }
+  .phase-section.collapsed .chevron { transform: rotate(-90deg); }
+  .phase-section-body {
+    padding: 16px 20px;
+    font-size: 13px;
+    background: white;
+  }
+  .phase-section-body p { margin-bottom: 8px; color: #4b5563; }
+  .phase-section-body ul { margin: 8px 0 8px 20px; color: #4b5563; }
+  .phase-section-body li { margin-bottom: 4px; }
+  .phase-section-body .approved {
+    margin-top: 12px;
+    color: #10b981;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  .phase-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .phase-dot.done    { background: #10b981; }
+  .phase-dot.active  { background: #3b82f6; }
+  .phase-dot.pending { background: #d1d5db; }
+  .phase-section-title {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  /* ─── Task list ───────────────────────────────── */
+  .task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .task {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: white;
+  }
+  .task-status-icon {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+  .task.running  .task-status-icon { background: #eff6ff; }
+  .task.done     .task-status-icon { background: #ecfdf5; }
+  .task.waiting  .task-status-icon { background: #fffbeb; }
+  .task.blocked  .task-status-icon { background: #f9fafb; }
+
+  .task-body { flex: 1; min-width: 0; }
+  .task-title {
+    font-weight: 500;
+    font-size: 13px;
+    color: #1f2937;
+    margin-bottom: 4px;
+  }
+  .task.blocked .task-title { color: #9ca3af; }
+  .task.done    .task-title { color: #6b7280; text-decoration: line-through; text-decoration-color: #d1d5db; }
+  .task-meta {
+    display: flex;
+    gap: 6px;
+    font-size: 11px;
+    color: #6b7280;
+    flex-wrap: wrap;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: #f3f4f6;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #4b5563;
+  }
+  .chip.agent { font-family: ui-monospace, SFMono-Regular, monospace; font-weight: 600; color: #3b82f6; background: #eff6ff; }
+  .chip.dep   { color: #f59e0b; background: #fffbeb; }
+  .chip.done  { color: #10b981; background: #ecfdf5; }
+
+  /* ─── Implement placeholder ───────────────────── */
+  .implement-placeholder {
+    padding: 40px 24px;
+    text-align: center;
+    color: #9ca3af;
+    font-style: italic;
+    background: #f9fafb;
+    border: 1px dashed #e5e7eb;
+    border-radius: 8px;
+  }
+
+  /* ─── Sidebar ─────────────────────────────────── */
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: sticky;
+    top: 16px;
+    align-self: start;
+  }
+  .sidebar-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .sidebar-header {
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .inbox-badge {
+    background: #ef4444;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  /* ─── Inbox items ─────────────────────────────── */
+  .inbox-item {
+    padding: 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: #fcfcfd;
+  }
+  .inbox-item:last-child { margin-bottom: 0; }
+  .inbox-item.approval { border-left: 3px solid #f59e0b; }
+  .inbox-item.question { border-left: 3px solid #3b82f6; }
+  .inbox-item.result   { border-left: 3px solid #10b981; }
+  .inbox-item-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .inbox-item.approval .inbox-item-head { color: #f59e0b; }
+  .inbox-item.question .inbox-item-head { color: #3b82f6; }
+  .inbox-item.result   .inbox-item-head { color: #10b981; }
+  .inbox-item-agent {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: #6b7280;
+    font-weight: 600;
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .inbox-item-body {
+    font-size: 12px;
+    color: #4b5563;
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+  .inbox-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .inbox-btn {
+    padding: 5px 10px;
+    font-size: 11px;
+    border-radius: 5px;
+    border: 1px solid #e5e7eb;
+    background: white;
+    cursor: pointer;
+    font-weight: 600;
+    color: #4b5563;
+    font-family: inherit;
+  }
+  .inbox-btn:hover { background: #f9fafb; }
+  .inbox-btn.primary {
+    background: #10b981;
+    color: white;
+    border-color: #10b981;
+  }
+  .inbox-btn.primary:hover { background: #059669; }
+
+  /* ─── Capability strip ────────────────────────── */
+  .cap-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 12px;
+  }
+  .cap-row:last-child { border-bottom: none; }
+  .cap-agent {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-weight: 600;
+    color: #3b82f6;
+    min-width: 100px;
+  }
+  .cap-tools {
+    color: #6b7280;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .cap-tool {
+    padding: 1px 6px;
+    background: #f3f4f6;
+    border-radius: 4px;
+    font-size: 10px;
+  }
+
+  /* ─── Document view ───────────────────────────── */
+  .doc-view {
+    max-width: 680px;
+    margin: 0 auto;
+    font-family: 'Charter', 'Iowan Old Style', Georgia, serif;
+    line-height: 1.7;
+  }
+  .doc-view h1 {
+    font-size: 30px;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  .doc-view .doc-meta {
+    font-family: -apple-system, sans-serif;
+    color: #9ca3af;
+    font-size: 12px;
+    margin-bottom: 24px;
+  }
+  .doc-view h2 {
+    font-size: 20px;
+    margin-top: 28px;
+    margin-bottom: 12px;
+    color: #111827;
+    border-bottom: 1px solid #f3f4f6;
+    padding-bottom: 6px;
+  }
+  .doc-view p {
+    margin-bottom: 14px;
+    color: #374151;
+    font-size: 15px;
+  }
+  .doc-view .agent-mention {
+    color: #3b82f6;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-weight: 700;
+    font-size: 13px;
+    background: #eff6ff;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  .doc-view .inline-task {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: #f3f4f6;
+    border-radius: 4px;
+    font-family: -apple-system, sans-serif;
+    font-size: 12px;
+    color: #4b5563;
+  }
+  .doc-view .inline-task.done    { background: #ecfdf5; color: #10b981; }
+  .doc-view .inline-task.waiting { background: #fffbeb; color: #d97706; }
+  .doc-view .inline-task.running { background: #eff6ff; color: #3b82f6; }
+  .doc-view table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: -apple-system, sans-serif;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .doc-view th, .doc-view td {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .doc-view th {
+    background: #f9fafb;
+    font-weight: 600;
+    color: #374151;
+  }
+  .doc-view td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .doc-view .total td { font-weight: 700; border-top: 2px solid #e5e7eb; }
+
+  /* ─── Graph view ──────────────────────────────── */
+  .graph-view {
+    position: relative;
+    padding: 20px 0;
+    min-height: 460px;
+  }
+  .graph-legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: #6b7280;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .legend-item { display: inline-flex; align-items: center; gap: 4px; }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    border: 2px solid;
+  }
+  .legend-dot.running { border-color: #3b82f6; background: #eff6ff; }
+  .legend-dot.done    { border-color: #10b981; background: #ecfdf5; }
+  .legend-dot.waiting { border-color: #f59e0b; background: #fffbeb; }
+  .legend-dot.blocked { border-color: #d1d5db; background: #f9fafb; }
+
+  .graph-canvas {
+    position: relative;
+    height: 440px;
+    width: 100%;
+  }
+  .graph-canvas svg {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+  .graph-node {
+    position: absolute;
+    width: 180px;
+    padding: 10px 12px;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    background: white;
+    font-size: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .graph-node.running  { border-color: #3b82f6; background: #eff6ff; }
+  .graph-node.done     { border-color: #10b981; background: #ecfdf5; }
+  .graph-node.waiting  { border-color: #f59e0b; background: #fffbeb; }
+  .graph-node.blocked  { border-color: #d1d5db; background: #f9fafb; }
+  .graph-node-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #1f2937;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .graph-node.blocked .graph-node-title { color: #9ca3af; }
+  .graph-node-agent {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 10px;
+    color: #6b7280;
+  }
+
+  /* ─── View toggle ─────────────────────────────── */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ─── Footer note ─────────────────────────────── */
+  .footer-note {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 8px 24px 24px;
+    font-size: 11px;
+    color: #9ca3af;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⚓ Crewship</div>
+  <div class="workspace">🏡 Rodinné úkoly / Oslavy</div>
+  <div class="tabs">
+    <button class="tab active" data-view="spec"  onclick="switchView(this)">📋 Spec Mode</button>
+    <button class="tab"        data-view="doc"   onclick="switchView(this)">📄 Document</button>
+    <button class="tab"        data-view="graph" onclick="switchView(this)">🔀 Graph</button>
+  </div>
+</header>
+
+<main>
+  <div class="content">
+
+    <div class="mission-title">🎂 Tomovy 7. narozeniny</div>
+    <div class="mission-meta">
+      <span>📅 Sobota 11. dubna, 14:00–17:00</span>
+      <span>👶 10 dětí</span>
+      <span>💰 3000 Kč</span>
+      <span>🏷️ Harry Potter</span>
+      <span>⚙️ Pattern: Spec</span>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SPEC MODE VIEW                                            -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="view active" id="view-spec">
+
+      <div class="phase-bar">
+        <div class="phase done">
+          <div class="phase-circle">✓</div>
+          <div class="phase-label">Specify</div>
+        </div>
+        <div class="phase-connector done"></div>
+        <div class="phase done">
+          <div class="phase-circle">✓</div>
+          <div class="phase-label">Plan</div>
+        </div>
+        <div class="phase-connector done"></div>
+        <div class="phase active">
+          <div class="phase-circle">3</div>
+          <div class="phase-label">Tasks</div>
+        </div>
+        <div class="phase-connector"></div>
+        <div class="phase pending">
+          <div class="phase-circle">4</div>
+          <div class="phase-label">Implement</div>
+        </div>
+      </div>
+
+      <!-- SPECIFY -->
+      <div class="phase-section collapsed" onclick="togglePhase(this)">
+        <div class="phase-section-header">
+          <span class="phase-dot done"></span>
+          <span class="phase-section-title">1. Specify — co a proč</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="phase-section-body">
+          <p>Chci oslavit Tomovy 7. narozeniny v sobotu 11. dubna. Kluk miluje Harry Pottera, tak by to mělo být tematické.</p>
+          <ul>
+            <li>Pozvat 8–10 dětí ze třídy + 2 kamarády z oddílu</li>
+            <li>Rodiče jsou zváni taky (káva / čaj v koutě)</li>
+            <li>Místo: ideálně nějaký sál v okolí, doma to nebude</li>
+            <li>Rozpočet: maximálně 3000 Kč</li>
+            <li>Musí tam být kouzelník nebo něco interaktivního</li>
+          </ul>
+          <div class="approved">✓ Schváleno 3. dubna</div>
+        </div>
+      </div>
+
+      <!-- PLAN -->
+      <div class="phase-section collapsed" onclick="togglePhase(this)">
+        <div class="phase-section-header">
+          <span class="phase-dot done"></span>
+          <span class="phase-section-title">2. Plan — jak na to (navrhl @planner)</span>
+          <span class="chevron">▼</span>
+        </div>
+        <div class="phase-section-body">
+          <p>Navrhovaný postup s rozpadem rozpočtu:</p>
+          <ul>
+            <li>Pronájem sálu ZŠ Komenského (14:00–17:00) — <b>500 Kč</b></li>
+            <li>Kouzelnické vystoupení 45 min (p. Novák) — <b>1200 Kč</b></li>
+            <li>Tematický dort Bradavice pro 10 dětí — <b>800 Kč</b></li>
+            <li>Výzdoba (balónky, plakáty, party hats) — <b>300 Kč</b></li>
+            <li>Odměny pro děti (malé dárečky) — <b>200 Kč</b></li>
+          </ul>
+          <p style="margin-top: 12px; font-weight: 600;">Celkem: 3000 Kč ✓ (přesně v rozpočtu)</p>
+          <div class="approved">✓ Schváleno 4. dubna</div>
+        </div>
+      </div>
+
+      <!-- TASKS -->
+      <div class="phase-section" onclick="event.stopPropagation();">
+        <div class="phase-section-header">
+          <span class="phase-dot active"></span>
+          <span class="phase-section-title">3. Tasks — běží</span>
+          <span style="margin-left: auto; font-size: 11px; color: #6b7280; font-weight: 500;">1 ⏳ · 1 ✅ · 1 ⏸️ · 3 🔒</span>
+        </div>
+        <div class="phase-section-body">
+          <div class="task-list">
+
+            <div class="task running">
+              <div class="task-status-icon">⏳</div>
+              <div class="task-body">
+                <div class="task-title">1. Rezervace sálu ZŠ Komenského</div>
+                <div class="task-meta">
+                  <span class="chip agent">@planner</span>
+                  <span class="chip">~2K tokens</span>
+                  <span class="chip">běží 3 min</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task blocked">
+              <div class="task-status-icon">🔒</div>
+              <div class="task-body">
+                <div class="task-title">2. Kontaktovat kouzelníka p. Nováka</div>
+                <div class="task-meta">
+                  <span class="chip agent">@planner</span>
+                  <span class="chip dep">čeká na #1</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task done">
+              <div class="task-status-icon">✅</div>
+              <div class="task-body">
+                <div class="task-title">3. Odeslat pozvánky dětem a rodičům</div>
+                <div class="task-meta">
+                  <span class="chip agent">@email-helper</span>
+                  <span class="chip done">7/10 potvrzeno</span>
+                  <span class="chip">1.8K tokens · 0,04 $</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task waiting">
+              <div class="task-status-icon">⏸️</div>
+              <div class="task-body">
+                <div class="task-title">4. Objednat Harry Potter dort</div>
+                <div class="task-meta">
+                  <span class="chip agent">@shopper</span>
+                  <span class="chip dep">čeká na tvé schválení →</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task blocked">
+              <div class="task-status-icon">🔒</div>
+              <div class="task-body">
+                <div class="task-title">5. Nakoupit výzdobu (balónky, plakáty)</div>
+                <div class="task-meta">
+                  <span class="chip agent">@shopper</span>
+                  <span class="chip dep">čeká na #1</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task blocked">
+              <div class="task-status-icon">🔒</div>
+              <div class="task-body">
+                <div class="task-title">6. Připravit 3 HP soutěže pro děti</div>
+                <div class="task-meta">
+                  <span class="chip agent">@planner</span>
+                  <span class="chip dep">čeká na #1, #2</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- IMPLEMENT -->
+      <div class="phase-section" onclick="event.stopPropagation();">
+        <div class="phase-section-header">
+          <span class="phase-dot pending"></span>
+          <span class="phase-section-title">4. Implement</span>
+        </div>
+        <div class="phase-section-body">
+          <div class="implement-placeholder">
+            ⏸ Čeká — spustí se, až dokončíš Tasks fázi
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- DOCUMENT MODE VIEW                                        -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="view" id="view-doc">
+      <div class="doc-view">
+
+        <h1>🎂 Tomovy 7. narozeniny</h1>
+        <div class="doc-meta">Poslední úprava: @planner · před 12 minutami</div>
+
+        <h2>Proč to děláme</h2>
+        <p>
+          V sobotu <b>11. dubna od 14:00 do 17:00</b> oslavíme Tomovy 7. narozeniny.
+          Téma je <b>Harry Potter</b>, protože Tom je z něj teď úplně unesený.
+          Pozváno bude <b>10 dětí</b> (8 spolužáků + 2 kamarádi z oddílu) a jejich rodiče.
+          Rozpočet máme <b>3000 Kč</b>.
+        </p>
+
+        <h2>Kdo co dělá</h2>
+        <p>
+          Místo a program domlouvá <span class="agent-mention">@planner</span>.
+          Zamluvil sál ZŠ Komenského a kontaktuje kouzelníka p. Nováka.
+          <span class="inline-task running">⏳ Rezervace sálu · běží</span>
+        </p>
+        <p>
+          Pozvánky rozesílá <span class="agent-mention">@email-helper</span> přes Gmail.
+          <span class="inline-task done">✅ Odesláno 10 · 7 potvrzeno</span>
+          Dvě rodiny ještě neodpověděly, jedna se omluvila (nemoc).
+        </p>
+        <p>
+          Dort a výzdobu kupuje <span class="agent-mention">@shopper</span>.
+          Našel Harry Potter dort v Pekárně U Jirky za 820 Kč a potřebuje tvé schválení.
+          <span class="inline-task waiting">⏸️ Čeká na approval · dort 820 Kč</span>
+          Výzdoba se pořeší, až bude potvrzený sál (kvůli rozměrům).
+        </p>
+
+        <h2>Rozpočet</h2>
+        <table>
+          <thead>
+            <tr><th>Položka</th><th>Kdo řeší</th><th class="num">Kč</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Pronájem sálu ZŠ Komenského</td><td>@planner</td><td class="num">500</td></tr>
+            <tr><td>Kouzelník (45 min)</td><td>@planner</td><td class="num">1 200</td></tr>
+            <tr><td>Tematický dort Bradavice</td><td>@shopper</td><td class="num">800</td></tr>
+            <tr><td>Výzdoba, balónky</td><td>@shopper</td><td class="num">300</td></tr>
+            <tr><td>Odměny pro děti</td><td>@planner</td><td class="num">200</td></tr>
+            <tr class="total"><td colspan="2">Celkem</td><td class="num">3 000</td></tr>
+          </tbody>
+        </table>
+
+        <p style="margin-top: 24px; font-size: 12px; color: #9ca3af; font-style: italic;">
+          Poznámka: toto je stejná mission jako ve Spec Mode — jen jiný pohled.
+          Změny v dokumentu se propisují zpět do tasků a naopak.
+        </p>
+
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- GRAPH MODE VIEW                                           -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div class="view" id="view-graph">
+
+      <div class="graph-legend">
+        <span class="legend-item"><span class="legend-dot running"></span> běží</span>
+        <span class="legend-item"><span class="legend-dot done"></span> hotovo</span>
+        <span class="legend-item"><span class="legend-dot waiting"></span> čeká na approval</span>
+        <span class="legend-item"><span class="legend-dot blocked"></span> blokováno (čeká na dep)</span>
+      </div>
+
+      <div class="graph-canvas">
+        <svg viewBox="0 0 800 440" preserveAspectRatio="none">
+          <defs>
+            <marker id="arrow-gray" viewBox="0 -5 10 10" refX="9" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,-5L10,0L0,5" fill="#9ca3af"/>
+            </marker>
+            <marker id="arrow-blue" viewBox="0 -5 10 10" refX="9" refY="0" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,-5L10,0L0,5" fill="#3b82f6"/>
+            </marker>
+          </defs>
+          <!-- #1 Rezervace sálu (running) → #2 Kouzelník (blocked) -->
+          <line x1="200" y1="160" x2="290" y2="60"  stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+          <!-- #1 → #5 Výzdoba -->
+          <line x1="200" y1="190" x2="290" y2="190" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+          <!-- #1 → #6 Soutěže (through) -->
+          <line x1="200" y1="220" x2="560" y2="160" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow-blue)"/>
+          <!-- #2 → #6 Soutěže -->
+          <line x1="470" y1="75"  x2="560" y2="140" stroke="#9ca3af" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrow-gray)"/>
+        </svg>
+
+        <!-- Column 1: no deps -->
+        <div class="graph-node done" style="left: 10px; top: 20px;">
+          <div class="graph-node-title">✅ #3 Pozvánky</div>
+          <div class="graph-node-agent">@email-helper · 7/10 OK</div>
+        </div>
+        <div class="graph-node running" style="left: 10px; top: 160px;">
+          <div class="graph-node-title">⏳ #1 Rezervace sálu</div>
+          <div class="graph-node-agent">@planner · běží 3 min</div>
+        </div>
+        <div class="graph-node waiting" style="left: 10px; top: 310px;">
+          <div class="graph-node-title">⏸️ #4 Dort 820 Kč</div>
+          <div class="graph-node-agent">@shopper · čeká approval</div>
+        </div>
+
+        <!-- Column 2: blocked by #1 -->
+        <div class="graph-node blocked" style="left: 290px; top: 20px;">
+          <div class="graph-node-title">🔒 #2 Kouzelník</div>
+          <div class="graph-node-agent">@planner · dep: #1</div>
+        </div>
+        <div class="graph-node blocked" style="left: 290px; top: 160px;">
+          <div class="graph-node-title">🔒 #5 Výzdoba</div>
+          <div class="graph-node-agent">@shopper · dep: #1</div>
+        </div>
+
+        <!-- Column 3: blocked by #1, #2 -->
+        <div class="graph-node blocked" style="left: 560px; top: 120px;">
+          <div class="graph-node-title">🔒 #6 HP soutěže</div>
+          <div class="graph-node-agent">@planner · dep: #1, #2</div>
+        </div>
+      </div>
+
+      <p style="font-size: 12px; color: #9ca3af; font-style: italic; text-align: center; margin-top: 16px;">
+        Stejná data jako Spec Mode a Document — jen vizualizace závislostí jako graf.
+      </p>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <!-- SIDEBAR — Agent Inbox + Capability Strip                  -->
+  <!-- ═══════════════════════════════════════════════════════ -->
+  <aside class="sidebar">
+
+    <div class="sidebar-card">
+      <div class="sidebar-header">
+        🔔 Agent Inbox
+        <span class="inbox-badge">3</span>
+      </div>
+
+      <!-- Approval needed -->
+      <div class="inbox-item approval">
+        <div class="inbox-item-head">
+          ⚠️ Approval <span class="inbox-item-agent">@shopper</span>
+        </div>
+        <div class="inbox-item-body">
+          Mohu objednat Harry Potter dort od <b>Pekárny U Jirky</b> za <b>820 Kč</b>?
+          3patrový pro 10 dětí, motiv Bradavic. Vyzvednutí sobota 13:00.
+        </div>
+        <div class="inbox-actions">
+          <button class="inbox-btn primary">✓ Schválit</button>
+          <button class="inbox-btn">✏️ Upravit</button>
+          <button class="inbox-btn">✗ Zrušit</button>
+        </div>
+      </div>
+
+      <!-- Question -->
+      <div class="inbox-item question">
+        <div class="inbox-item-head">
+          💬 Question <span class="inbox-item-agent">@planner</span>
+        </div>
+        <div class="inbox-item-body">
+          P. Novák nabízí sál ZŠ Komenského sobotu <b>14:00–17:00</b>.
+          Alternativně 10:00–13:00. Co preferuješ?
+        </div>
+        <div class="inbox-actions">
+          <button class="inbox-btn primary">14:00</button>
+          <button class="inbox-btn">10:00</button>
+          <button class="inbox-btn">Jiný čas</button>
+        </div>
+      </div>
+
+      <!-- Result ready -->
+      <div class="inbox-item result">
+        <div class="inbox-item-head">
+          ✅ Result <span class="inbox-item-agent">@email-helper</span>
+        </div>
+        <div class="inbox-item-body">
+          Odesláno 10 pozvánek. RSVP: <b>7× potvrzeno</b>, 2× bez odpovědi, 1× omluva (nemoc).
+        </div>
+        <div class="inbox-actions">
+          <button class="inbox-btn">👁 Detail</button>
+          <button class="inbox-btn primary">✓ OK</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-card">
+      <div class="sidebar-header">
+        🔐 Capability Map
+      </div>
+
+      <div class="cap-row">
+        <span class="cap-agent">@planner</span>
+        <span class="cap-tools">
+          <span class="cap-tool">📅 Calendar</span>
+          <span class="cap-tool">🗺️ Maps</span>
+          <span class="cap-tool">📧 Email</span>
+        </span>
+      </div>
+      <div class="cap-row">
+        <span class="cap-agent">@shopper</span>
+        <span class="cap-tools">
+          <span class="cap-tool">💳 Stripe</span>
+          <span class="cap-tool">📧 Email</span>
+        </span>
+      </div>
+      <div class="cap-row">
+        <span class="cap-agent">@email-helper</span>
+        <span class="cap-tools">
+          <span class="cap-tool">✉️ Gmail</span>
+        </span>
+      </div>
+
+      <p style="font-size: 11px; color: #9ca3af; margin-top: 12px; line-height: 1.5;">
+        Každý agent vidí jen své nástroje. <b>@email-helper</b> nemá přístup ke Stripe,
+        <b>@shopper</b> nemůže do Gmail — striktní izolace.
+      </p>
+    </div>
+
+  </aside>
+</main>
+
+<div class="footer-note">
+  Wireframe · Crewship Spec Mode + Agent Inbox · draft
+</div>
+
+<script>
+  function switchView(btn) {
+    const viewName = btn.dataset.view;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + viewName).classList.add('active');
+  }
+
+  function togglePhase(section) {
+    section.classList.toggle('collapsed');
+  }
+</script>
+
+</body>
+</html>
