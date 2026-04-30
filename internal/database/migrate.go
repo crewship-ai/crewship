@@ -683,6 +683,63 @@ DROP TABLE agent_runs;
 	// Renumbered from v60 to v62 after PR #234 took 60+61 for the unified
 	// journal Phase D + drop_agent_runs migrations.
 	{version: 62, name: "add_paymaster_billing_modes", sql: migrationAddPaymasterBillingModes},
+	// Server-side session evidence backing the access/refresh token
+	// model (see internal/auth/jwt.go). A row exists for every issued
+	// refresh-token chain; the access token's `sid` claim joins to it
+	// on every authenticated request. revoked_at is the kill-switch:
+	// signOut, password change, admin force-logout, or refresh rotation
+	// flip it and the next request gets 401 session_revoked. Without
+	// this table the legacy 30-day JWT was unrevokable until expiry.
+	//
+	// last_used_at is updated by the auth middleware throttled to
+	// at-most-once-per-60-seconds (in-memory cache, not per-request)
+	// so the table doesn't take a write hammering on hot endpoints.
+	//
+	// Originally landed at v60 in the session-lifecycle PR, renumbered
+	// to v62 after unified-journal landed v60+v61, then to v63 after
+	// the paymaster billing-modes migration took v62 on main. The
+	// runner only checks version (not name) — see the migration-version-
+	// conflicts pitfall in CLAUDE.md.
+	{version: 63, name: "add_user_sessions", sql: `
+CREATE TABLE IF NOT EXISTS user_sessions (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
+	revoked_at TEXT,
+	revoked_reason TEXT,
+	user_agent TEXT,
+	ip TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_active ON user_sessions(user_id) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
+`},
+	// Refresh-token rotation with reuse detection (OWASP ASVS 3.7.4).
+	// current_refresh_jti pins the *one* refresh token currently
+	// authoritative for the chain. On rotation we mint a new jti and
+	// CAS-update this column; if a request comes in carrying an older
+	// jti, that's a token-theft signal and the entire session is
+	// revoked. failed_login_count + locked_until back the per-account
+	// brute-force lockout (E.3 in the security audit) — separate from
+	// the per-IP rate limiter so a distributed attacker can't dodge
+	// the slow-down by rotating IPs.
+	//
+	// The partial UNIQUE INDEX on current_refresh_jti enforces the
+	// "one live JTI per chain" invariant at the schema layer too, not
+	// just in application code (per CodeRabbit review on PR #233):
+	// any direct INSERT/UPDATE that tries to point two rows at the
+	// same JTI fails at the DB, which keeps a future bug or migration
+	// script from silently breaking rotation/reuse detection.
+	{version: 64, name: "add_session_rotation_and_lockout", sql: `
+ALTER TABLE user_sessions ADD COLUMN current_refresh_jti TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sessions_current_refresh_jti
+  ON user_sessions(current_refresh_jti)
+  WHERE current_refresh_jti IS NOT NULL;
+ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN locked_until TEXT;
+ALTER TABLE users ADD COLUMN last_failed_login_at TEXT;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

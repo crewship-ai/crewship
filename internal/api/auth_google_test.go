@@ -13,14 +13,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 func newTestGoogleHandler(t *testing.T, db *sql.DB) *GoogleAuthHandler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	validator, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!", "")
+	validator, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
 	require.NoError(t, err)
-	return NewGoogleAuthHandler(db, logger, validator, "test-client-id", "test-secret", "http://localhost:8080")
+	return NewGoogleAuthHandler(db, logger, validator, sessions.NewDBStore(db), "test-client-id", "test-secret", "http://localhost:8080")
 }
 
 func TestGoogleOAuth_StateIsStoredAndConsumed(t *testing.T) {

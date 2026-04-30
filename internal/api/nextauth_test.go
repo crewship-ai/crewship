@@ -14,17 +14,25 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 func newNextAuthHandler(t *testing.T) (*NextAuthHandler, *auth.JWTValidator) {
 	t.Helper()
+	h, v, _ := newNextAuthHandlerWithStore(t)
+	return h, v
+}
+
+func newNextAuthHandlerWithStore(t *testing.T) (*NextAuthHandler, *auth.JWTValidator, sessions.Store) {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!", "")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
 	if err != nil {
 		t.Fatalf("validator: %v", err)
 	}
 	db := setupTestDB(t)
-	return NewNextAuthHandler(db, logger, v), v
+	store := sessions.NewDBStore(db)
+	return NewNextAuthHandler(db, logger, v, store), v, store
 }
 
 func TestNextAuth_CSRF(t *testing.T) {
@@ -129,9 +137,24 @@ func TestNextAuth_Session_BadCookie(t *testing.T) {
 
 func TestNextAuth_Session_ValidCookie(t *testing.T) {
 	t.Parallel()
-	h, v := newNextAuthHandler(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+	db := setupTestDB(t)
+	store := sessions.NewDBStore(db)
+	h := NewNextAuthHandler(db, logger, v, store)
 
-	tok, err := v.CreateToken(&auth.Claims{ID: "u1", Email: "a@b.com", Name: "Alice"})
+	// Seed user + session row so the Session handler's revoke-check
+	// passes and returns the user payload. Without these the handler
+	// (correctly) treats the cookie as stale and returns empty {}.
+	userID := seedTestUser(t, db)
+	sess, err := store.Create(t.Context(), userID, "test", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	tok, err := v.IssueAccessToken(userID, sess.ID, "Alice", "a@b.com")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -200,13 +223,16 @@ func TestNextAuth_CallbackCredentials_InvalidPassword(t *testing.T) {
 	// Get DB through internal call: we need to insert a user with a hashed password.
 	// Instead, use a new handler with our own db handle.
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!", "")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("realpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'login@example.com', 'Login', ?)`, string(hashed)); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	h2 := NewNextAuthHandler(db, logger, v)
+	h2 := NewNextAuthHandler(db, logger, v, sessions.NewDBStore(db))
 	_ = h
 
 	body := url.Values{"email": {"login@example.com"}, "password": {"wrong-pass"}, "csrfToken": {"csrf-x"}, "json": {"true"}}.Encode()
@@ -226,13 +252,16 @@ func TestNextAuth_CallbackCredentials_InvalidPassword(t *testing.T) {
 func TestNextAuth_CallbackCredentials_Success_FormRedirect(t *testing.T) {
 	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!", "")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("rightpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'good@example.com', 'Good', ?)`, string(hashed)); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	h := NewNextAuthHandler(db, logger, v)
+	h := NewNextAuthHandler(db, logger, v, sessions.NewDBStore(db))
 
 	body := url.Values{"email": {"good@example.com"}, "password": {"rightpassword"}, "csrfToken": {"csrf-x"}, "callbackUrl": {"/dashboard"}}.Encode()
 	req := httptest.NewRequest("POST", "/api/auth/callback/credentials", strings.NewReader(body))
@@ -251,13 +280,16 @@ func TestNextAuth_CallbackCredentials_Success_FormRedirect(t *testing.T) {
 func TestNextAuth_CallbackCredentials_Success_OpenRedirectBlocked(t *testing.T) {
 	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!", "")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("rightpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'r@example.com', 'R', ?)`, string(hashed)); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	h := NewNextAuthHandler(db, logger, v)
+	h := NewNextAuthHandler(db, logger, v, sessions.NewDBStore(db))
 
 	tests := []struct {
 		name        string
@@ -286,13 +318,16 @@ func TestNextAuth_CallbackCredentials_Success_OpenRedirectBlocked(t *testing.T) 
 func TestNextAuth_CallbackCredentials_JSONResponse(t *testing.T) {
 	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	v, _ := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!", "")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
 	db := setupTestDB(t)
 	hashed, _ := bcrypt.GenerateFromPassword([]byte("rightpassword"), 4)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password) VALUES ('u1', 'j@example.com', 'J', ?)`, string(hashed)); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	h := NewNextAuthHandler(db, logger, v)
+	h := NewNextAuthHandler(db, logger, v, sessions.NewDBStore(db))
 
 	jsonBody, _ := json.Marshal(map[string]string{
 		"email":     "j@example.com",

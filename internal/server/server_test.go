@@ -1,21 +1,95 @@
 package server
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
 )
 
+// openTestDB returns a freshly-migrated SQLite DB in a temp dir. The
+// auth-lifecycle work made server.New() panic when deps.DB is nil, so
+// every test that exercises the constructor needs a real DB to back
+// the WS hub's sessions store. File-backed (not :memory:) so multiple
+// goroutines see the same schema without `cache=shared` gymnastics.
+//
+// When called with a non-nil *testing.T the cleanup is registered;
+// the bare-package newTestServer() helper passes nil, which is fine
+// for unit tests that exit immediately.
+func openTestDB(t *testing.T) *sql.DB {
+	// File-backed SQLite per call so multiple goroutines see a stable
+	// schema. Each invocation gets a unique path — the helper is
+	// called from many parallel tests and the previous shared
+	// `/tmp/test-auth-lifecycle.db` made them stomp each other when
+	// run with `-count=1`.
+	var path string
+	if t != nil {
+		path = filepath.Join(t.TempDir(), "test-auth-lifecycle.db")
+	} else {
+		// No t.Cleanup hook is available — use a process-unique name
+		// in the OS temp dir so collisions between bare newTestServer()
+		// callers can't happen. Files are tiny and the OS reaps temp
+		// on shutdown anyway.
+		path = filepath.Join(os.TempDir(), fmt.Sprintf("test-auth-lifecycle-%d-%d.db", os.Getpid(), atomic.AddInt64(&testDBCounter, 1)))
+	}
+	db, err := sql.Open("sqlite", "file:"+path+"?_foreign_keys=on&_journal=WAL")
+	if err != nil {
+		if t != nil {
+			t.Fatalf("open: %v", err)
+		}
+		panic(err)
+	}
+	if t != nil {
+		t.Cleanup(func() { db.Close() })
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := database.Migrate(context.Background(), db, logger); err != nil {
+		if t != nil {
+			t.Fatalf("migrate: %v", err)
+		}
+		panic(err)
+	}
+	return db
+}
+
+// testDBCounter is the per-process counter that gives each bare
+// (no-*testing.T) openTestDB call a unique filename. Incremented
+// atomically so concurrent table-driven tests don't collide.
+var testDBCounter int64
+
 func newTestServer() *Server {
+	return newTestServerForT(nil)
+}
+
+// newTestServerForT builds a Server with a freshly-migrated in-memory
+// SQLite so the WS hub gets a real sessions store. server.New() now
+// panics without one (see CodeRabbit comment on PR #233 — the previous
+// code silently fell back to ws.NopSessionsForTests, which downgraded
+// production startup to "no revocation" if deps.DB was ever forgotten).
+//
+// Tests that don't pass a *testing.T (the package-level newTestServer
+// returning *Server with no t.Cleanup hook) still get a working DB —
+// it just leaks until the process exits, which for unit tests means
+// "until t.Cleanup wraps everything anyway".
+func newTestServerForT(t *testing.T) *Server {
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-server-test-32chars-1"
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, nil)
+	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	return s
 }

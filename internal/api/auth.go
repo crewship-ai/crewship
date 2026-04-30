@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -14,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
@@ -21,42 +23,84 @@ type AuthHandler struct {
 	db          *sql.DB
 	logger      *slog.Logger
 	validator   *auth.JWTValidator
+	sessions    sessions.Store
 	allowSignup bool
 }
 
 // NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
-func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, allowSignup bool) *AuthHandler {
-	return &AuthHandler{db: db, logger: logger, validator: validator, allowSignup: allowSignup}
+// sessionsStore must back user_sessions (migration v63).
+func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, sessionsStore sessions.Store, allowSignup bool) *AuthHandler {
+	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
 }
 
-func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
-	token, err := h.validator.CreateToken(&auth.Claims{
-		ID:    userID,
-		Name:  fullName,
-		Email: email,
-	})
+// setSessionCookies creates a fresh user_sessions row and writes the
+// matching access + refresh cookies. Used by signup; the credentials
+// callback in nextauth.go has its own copy because it needs to share
+// the cookie-name helpers with the rest of the NextAuth surface.
+//
+// IMPORTANT: ctx must NOT be tied to the request lifetime when called
+// after a database commit. If the client disconnects between
+// tx.Commit() and sessions.Create(), an r.Context() here would surface
+// as context.Canceled, the caller's err-path runs cleanupOrphanedSignup,
+// and the freshly-committed user/workspace gets deleted right after
+// signup. Pass a background-derived context with a short timeout
+// instead — the signup is already on disk, the only thing we still
+// owe the client is the cookie write, and nothing useful comes from
+// abandoning that work just because the TCP connection went away.
+func (h *AuthHandler) setSessionCookies(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
+	if h.sessions == nil {
+		return errSessionsStoreUnconfigured
+	}
+	sess, err := h.sessions.Create(ctx, userID, r.UserAgent(), clientIP(r), auth.RefreshTokenTTL)
+	if err != nil {
+		return err
+	}
+	access, err := h.validator.IssueAccessToken(userID, sess.ID, fullName, email)
+	if err != nil {
+		return err
+	}
+	refresh, err := h.validator.IssueRefreshToken(userID, sess.ID)
 	if err != nil {
 		return err
 	}
 
-	cookieName := "authjs.session-token"
-	isSecure := false
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		cookieName = "__Secure-authjs.session-token"
-		isSecure = true
+	secure := isHTTPS(r)
+	accessName := "authjs.session-token"
+	refreshName := "authjs.refresh-token"
+	if secure {
+		accessName = "__Secure-authjs.session-token"
+		refreshName = "__Secure-authjs.refresh-token"
 	}
 
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    token,
+		Name:     accessName,
+		Value:    access,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   isSecure,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   30 * 24 * 60 * 60,
+		MaxAge:   int(auth.AccessTokenTTL.Seconds()),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshName,
+		Value:    refresh,
+		Path:     refreshCookiePath,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(auth.RefreshTokenTTL.Seconds()),
 	})
 	return nil
 }
+
+// errSessionsStoreUnconfigured signals that an auth path was reached
+// without the sessions store wired in. Production main() always wires
+// it; only test fixtures that go around NewRouter can hit this.
+var errSessionsStoreUnconfigured = stringError("sessions store not configured")
+
+type stringError string
+
+func (e stringError) Error() string { return string(e) }
 
 type signupRequest struct {
 	FullName string `json:"full_name"`
@@ -167,11 +211,46 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.setSessionCookie(w, r, userID, req.FullName, req.Email); err != nil {
-		h.logger.Error("set session cookie after signup", "error", err)
+	// Cookie-set must succeed for the response to honestly mean "you
+	// are signed up and signed in". If it fails (validator down,
+	// sessions store unreachable), tell the client and roll the
+	// account back so we don't leave an orphan that can never log in
+	// because of a cleanup we forgot.
+	//
+	// We use a fresh background context with a short timeout instead
+	// of r.Context() because the user has already been committed.
+	// If the client disconnects between tx.Commit and sessions.Create,
+	// r.Context() goes Canceled — and we'd then delete a perfectly
+	// valid user. Background-derived context decouples the post-commit
+	// auth setup from the transport: the user gets created either way;
+	// the cookie just doesn't reach them and they re-login normally.
+	authCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h.setSessionCookies(authCtx, w, r, userID, req.FullName, req.Email); err != nil {
+		h.logger.Error("set session cookies after signup — rolling back", "error", err)
+		h.cleanupOrphanedSignup(userID, workspaceID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to establish session — please try again"})
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": userID, "email": req.Email})
+}
+
+// cleanupOrphanedSignup removes the user + workspace + membership rows
+// created by a Signup that committed but couldn't establish a session.
+// Best-effort — we already logged the original failure, so any error
+// here just means a manual sweep later. FK CASCADE on user delete
+// handles workspace_members; we still nuke the workspace explicitly
+// because it has no inbound FK from users.
+func (h *AuthHandler) cleanupOrphanedSignup(userID, workspaceID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := h.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+		h.logger.Error("cleanup orphan user", "error", err, "user_id", userID)
+	}
+	if _, err := h.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, workspaceID); err != nil {
+		h.logger.Error("cleanup orphan workspace", "error", err, "workspace_id", workspaceID)
+	}
 }
 
 // Bootstrap creates the first admin user on an empty database.
@@ -295,12 +374,22 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// WsToken generates a short-lived JWT for authenticating WebSocket connections.
+// WsToken generates a short-lived JWE for authenticating WebSocket connections.
 // POST /api/v1/auth/ws-token — works with both session cookies and CLI tokens.
+//
+// For browser auth: ticket carries user.SessionID so the WS hub can
+// enforce server-side revocation (close 4401 if the session gets
+// revoked while the WS is up).
+//
+// For CLI auth: ticket is issued without a session id. The WS hub's
+// validator allows empty sid for kind=ws because CLI tokens have their
+// own revocation table (cli_tokens) that the hub does not consult mid-
+// stream — the trade-off is that revoking a CLI token does not kick
+// already-open WS connections; users should disconnect them manually.
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
 		return
 	}
 	// Audit H7: defensive nil check. The router only mounts AuthHandler
@@ -313,34 +402,9 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If auth came from a CLI token (no session cookie), generate a short-lived JWE.
-	token := extractToken(r)
-	if IsCLIToken(token) {
-		jweToken, err := h.validator.CreateToken(&auth.Claims{
-			ID:    user.ID,
-			Name:  user.Name,
-			Email: user.Email,
-			Exp:   time.Now().Add(15 * time.Minute).Unix(),
-		})
-		if err != nil {
-			h.logger.Error("create WS token for CLI", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"token": jweToken})
-		return
-	}
-
-	// V-11: Always generate a short-lived JWE for WebSocket auth,
-	// instead of exposing the long-lived session cookie in query params.
-	jweToken, err := h.validator.CreateToken(&auth.Claims{
-		ID:    user.ID,
-		Name:  user.Name,
-		Email: user.Email,
-		Exp:   time.Now().Add(15 * time.Minute).Unix(),
-	})
+	jweToken, err := h.validator.IssueWSTicket(user.ID, user.SessionID, user.Name, user.Email)
 	if err != nil {
-		h.logger.Error("create WS token for browser session", "error", err)
+		h.logger.Error("issue ws ticket", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}

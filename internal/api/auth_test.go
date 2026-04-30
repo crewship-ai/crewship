@@ -11,11 +11,12 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 func newTestJWTValidator(t *testing.T) *auth.JWTValidator {
 	t.Helper()
-	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!", "")
+	v, err := auth.NewJWTValidator("test-secret-for-jwt-signing-32chars!!")
 	if err != nil {
 		t.Fatalf("create validator: %v", err)
 	}
@@ -29,7 +30,7 @@ func TestAuthSignup_DisabledByDefault(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, false)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
 	body := bytes.NewBufferString(`{"full_name":"User","email":"u@e.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/signup", body)
@@ -45,7 +46,7 @@ func TestAuthSignup_Validation(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	tests := []struct {
 		name string
@@ -74,7 +75,7 @@ func TestAuthSignup_Success(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	body := bytes.NewBufferString(`{"full_name":"Alice Doe","email":"alice@example.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/signup", body)
@@ -120,7 +121,7 @@ func TestAuthSignup_DuplicateEmail(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	// Insert existing user
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('u1', 'taken@example.com', 'Existing')`); err != nil {
@@ -143,7 +144,7 @@ func TestAuthBootstrap_Success(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, false)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
 	body := bytes.NewBufferString(`{"full_name":"Admin User","email":"admin@example.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
@@ -169,7 +170,7 @@ func TestAuthBootstrap_AlreadyInitialized(t *testing.T) {
 	seedTestUser(t, db) // user exists already
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, false)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
 	body := bytes.NewBufferString(`{"full_name":"Admin","email":"admin@example.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
@@ -185,7 +186,7 @@ func TestAuthBootstrap_Validation(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, false)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
 
 	tests := []struct {
 		name string
@@ -216,7 +217,7 @@ func TestAuthWsToken_Unauthorized(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	req := httptest.NewRequest("POST", "/api/v1/auth/ws-token", nil)
 	rr := httptest.NewRecorder()
@@ -232,7 +233,7 @@ func TestAuthWsToken_BrowserSession(t *testing.T) {
 	userID := seedTestUser(t, db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	req := httptest.NewRequest("POST", "/api/v1/auth/ws-token", nil)
 	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID, Email: "test@example.com", Name: "Test"}))
@@ -247,8 +248,8 @@ func TestAuthWsToken_BrowserSession(t *testing.T) {
 	if resp["token"] == "" {
 		t.Error("token should be set")
 	}
-	// Validate generated JWT
-	claims, err := v.Validate(resp["token"])
+	// Validate generated WS ticket (kind=ws)
+	claims, err := v.ValidateWS(resp["token"])
 	if err != nil {
 		t.Fatalf("validate WS token: %v", err)
 	}
@@ -263,7 +264,7 @@ func TestAuthWsToken_CLIToken(t *testing.T) {
 	userID := seedTestUser(t, db)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	req := httptest.NewRequest("POST", "/api/v1/auth/ws-token", nil)
 	req.Header.Set("Authorization", "Bearer crewship_cli_someplaintext")
@@ -282,7 +283,7 @@ func TestAuthSignup_SecureCookieOnHTTPS(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	v := newTestJWTValidator(t)
-	h := NewAuthHandler(db, logger, v, true)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), true)
 
 	body := bytes.NewBufferString(`{"full_name":"Bob","email":"bob@example.com","password":"longenough"}`)
 	req := httptest.NewRequest("POST", "/api/v1/auth/signup", body)

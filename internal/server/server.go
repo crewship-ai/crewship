@@ -14,6 +14,7 @@ import (
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -154,20 +155,43 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	orch.SetConversationStore(convStore)
 
-	var jwtValidator *auth.JWTValidator
-	if cfg.Auth.JWTSecret != "" {
-		var err error
-		jwtValidator, err = auth.NewJWTValidator(cfg.Auth.JWTSecret, "authjs.session-token")
-		if err != nil {
-			logger.Error("failed to create JWT validator", "error", err)
-		} else {
-			logger.Info("JWT validator configured for WebSocket auth")
-		}
-	} else {
-		logger.Warn("NEXTAUTH_SECRET not set, WebSocket auth disabled")
+	// Auth is non-optional. Previously a missing NEXTAUTH_SECRET would
+	// silently skip JWT validator construction, which then bubbled up
+	// as a Hub running without auth (revoke checks no-op'd, every
+	// upgrade accepted). The NEXTAUTH_SECRET-MUST-be-set rule is
+	// already documented in CLAUDE.md after the prod misfire — make
+	// it enforced at startup instead of leaving it for the user to
+	// notice via 404'd routes. ws.NewHub panics on nil validator, so
+	// missing secret takes the process down at startup with a clear
+	// "jwtValidator required" message.
+	if cfg.Auth.JWTSecret == "" {
+		logger.Error("NEXTAUTH_SECRET is required: cannot start server without JWT validator")
+		panic("NEXTAUTH_SECRET not set — refusing to start an unauthenticated server")
 	}
+	jwtValidator, err := auth.NewJWTValidator(cfg.Auth.JWTSecret)
+	if err != nil {
+		logger.Error("create JWT validator", "error", err)
+		panic(fmt.Sprintf("create JWT validator: %v", err))
+	}
+	logger.Info("JWT validator configured for WebSocket auth")
 
-	wsHub := ws.NewHub(logger, nil, jwtValidator)
+	// Production startup MUST have a real DB-backed sessions store so
+	// the WS hub enforces revocation on upgrade. The previous code
+	// silently fell back to ws.NopSessionsForTests when deps.DB was
+	// nil, which let CodeRabbit notice that an unconfigured server
+	// would still happily upgrade WS connections without revocation
+	// checks — the inverse of what the session-lifecycle work is for.
+	//
+	// Tests that exercise Server.New() without a real DB (handlers in
+	// isolation, etc.) can either pass deps with an in-memory SQLite
+	// or replace the resulting hub themselves; baking the bypass into
+	// production startup wasn't worth saving them three lines.
+	if deps == nil || deps.DB == nil {
+		logger.Error("server.New: deps.DB is required (sessions store backing the WS hub)")
+		panic("deps.DB not set — refusing to start a server without revocable sessions")
+	}
+	sessionsStore := sessions.NewDBStore(deps.DB)
+	wsHub := ws.NewHub(logger, nil, jwtValidator, sessionsStore)
 
 	// File watcher broadcasts real-time file events to WebSocket clients
 	// on the crew:{crewID} channel.

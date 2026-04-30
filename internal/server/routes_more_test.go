@@ -24,7 +24,7 @@ import (
 
 func TestHandleAgentStop_RunningInState(t *testing.T) {
 	t.Parallel()
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 
 	// Pre-load a "running" run.
 	stateData := `{"agent_id":"a1","status":"running","started_at":"2026-04-01T00:00:00Z"}`
@@ -50,7 +50,7 @@ func TestHandleAgentStop_RunningInState(t *testing.T) {
 
 func TestHandleAgentStart_InvalidJSON(t *testing.T) {
 	t.Parallel()
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 	req := httptest.NewRequest("POST", "/agents/a1/start", strings.NewReader("not json"))
 	rec := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(rec, req)
@@ -62,11 +62,12 @@ func TestHandleAgentStart_InvalidJSON(t *testing.T) {
 func TestHandleFileList_RecursiveAndSubdir(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-routes-more-test-32ch"
 	dir := t.TempDir()
 	cfg.Storage.BasePath = dir
 	logger := logging.New("error", "json", nil)
 	stor, _ := localfs.New(dir)
-	s := New(cfg, logger, &Deps{Storage: stor})
+	s := New(cfg, logger, &Deps{Storage: stor, DB: openTestDB(t)})
 	s.startedAt = time.Now()
 
 	// Seed files: crewA/agentX/notes.txt, crewA/root.txt
@@ -156,6 +157,7 @@ func TestRecoverOrphanedRuns_MarksRunningCancelled(t *testing.T) {
 		        'run.started','info','sidecar','run r1 started','{"trigger_type":"USER"}','{}','r1','normal')`)
 
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-routes-more-test-32ch"
 	s := New(cfg, logger, &Deps{DB: db.DB})
 	s.startedAt = time.Now()
 	// recoverOrphanedRuns needs a journal writer to emit cancel entries;
@@ -305,9 +307,10 @@ func (failingStorage) Write(_ context.Context, _ string, _ io.Reader) error {
 func TestHandleFileSave_StorageWriteFailure(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-routes-more-test-32ch"
 	cfg.Storage.BasePath = t.TempDir()
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger, nil)
+	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
 	s.startedAt = time.Now()
 	s.storage = failingStorage{}
 	t.Cleanup(func() {

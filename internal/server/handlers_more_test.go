@@ -55,6 +55,7 @@ func TestHandleContainerFileList_ParsesFindOutput(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-x',?,?)`, now, now)
 
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-server-tests-32-chars"
 	logger := logging.New("error", "json", nil)
 	mock := &execMockContainer{
 		mockContainer: &mockContainer{},
@@ -98,6 +99,7 @@ func TestHandleContainerFileList_InvalidSubdir(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-x',?,?)`, now, now)
 
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-server-tests-32-chars"
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{Container: &mockContainer{}, DB: db.DB})
 	s.startedAt = time.Now()
@@ -131,6 +133,7 @@ func TestHandleContainerGitLog_ParsesCommits(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES ('c1','w1','C','crew-x',?,?)`, now, now)
 
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-server-tests-32-chars"
 	logger := logging.New("error", "json", nil)
 	mock := &execMockContainer{
 		mockContainer: &mockContainer{},

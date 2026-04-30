@@ -16,9 +16,51 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"golang.org/x/net/websocket"
 )
+
+// nopSessionsStore satisfies the sessions.Store interface for tests
+// that don't care about session lookup. Get returns ErrNotFound for
+// any non-empty id (so the upgrade path treats every WS ticket as
+// "no session row" and falls through to CLI semantics — no revoke
+// checks). This keeps the existing WS tests behavior-preserving:
+// they pass tickets with empty sid via IssueWSTicket("u","",...) and
+// the hub skips the session lookup entirely. For tests that want the
+// lookup branch, build a real *sessions.DBStore.
+type nopSessionsStore struct{}
+
+func (*nopSessionsStore) Create(ctx context.Context, userID, ua, ip string, ttl time.Duration) (*sessions.Session, error) {
+	return nil, errors.New("nop store: Create not supported")
+}
+func (*nopSessionsStore) Get(ctx context.Context, id string) (*sessions.Session, error) {
+	return nil, sessions.ErrNotFound
+}
+func (*nopSessionsStore) ListActiveForUser(ctx context.Context, userID string) ([]*sessions.Session, error) {
+	return nil, nil
+}
+func (*nopSessionsStore) Revoke(ctx context.Context, id, reason string) error { return nil }
+func (*nopSessionsStore) RevokeAllForUser(ctx context.Context, userID, reason string) (int64, error) {
+	return 0, nil
+}
+func (*nopSessionsStore) TouchLastUsed(ctx context.Context, id string) error { return nil }
+func (*nopSessionsStore) RotateRefreshJti(ctx context.Context, id, expected, next string) error {
+	return nil
+}
+func (*nopSessionsStore) SetClock(fn func() time.Time) {}
+
+// defaultTestValidator returns a JWT validator initialised with a
+// known test secret. Tests that need to forge tokens against the
+// same key reach for this.
+func defaultTestValidator(t *testing.T) *auth.JWTValidator {
+	t.Helper()
+	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+	return v
+}
 
 // ---------- Helpers ----------
 
@@ -75,11 +117,35 @@ func (s *stubChatHandler) HandleChatMessage(ctx context.Context, _, _, _ string,
 	return err
 }
 
+// hubOpts lets a test swap in a custom validator or sessions store.
+// Default: a fresh validator with the canonical test secret + a memory-
+// backed sessions stub. Callers use withValidator(...) / withSessions(...)
+// to override.
+type hubOpts struct {
+	validator *auth.JWTValidator
+	sessions  sessions.Store
+}
+
+func withValidator(v *auth.JWTValidator) func(*hubOpts) {
+	return func(o *hubOpts) { o.validator = v }
+}
+
 // newRunningHub starts a hub.Run in a goroutine and registers t.Cleanup to stop it.
-func newRunningHub(t *testing.T, deps ...interface{}) *Hub {
+// Tests get a working JWT validator + sessions store by default; both are now
+// required positional parameters of NewHub. Callers that need to swap in
+// custom dependencies do so via withValidator / withSessions options — there
+// is no longer a variadic deps bag to abuse.
+func newRunningHub(t *testing.T, opts ...func(*hubOpts)) *Hub {
 	t.Helper()
 	logger := logging.New("error", "json", io.Discard)
-	hub := NewHub(logger, nil, deps...)
+	o := &hubOpts{
+		validator: defaultTestValidator(t),
+		sessions:  &nopSessionsStore{},
+	}
+	for _, fn := range opts {
+		fn(o)
+	}
+	hub := NewHub(logger, nil, o.validator, o.sessions)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -753,29 +819,41 @@ func TestHandleUpgradeMissingToken(t *testing.T) {
 	}
 }
 
-func TestHandleUpgradeNoValidator(t *testing.T) {
+// TestNewHubPanicsWithoutValidator replaces the old "no validator → 503"
+// test. NewHub now requires a typed validator at construction time, so
+// the misconfiguration trips the panic at startup rather than letting
+// the hub run accepting every WS upgrade.
+func TestNewHubPanicsWithoutValidator(t *testing.T) {
 	t.Parallel()
-	hub := newRunningHub(t)
-	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
-	t.Cleanup(srv.Close)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected NewHub to panic when given a nil JWT validator")
+		}
+	}()
+	logger := logging.New("error", "json", io.Discard)
+	NewHub(logger, nil, nil, &nopSessionsStore{})
+}
 
-	resp, err := http.Get(srv.URL + "/?token=anything")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", resp.StatusCode)
-	}
+// TestNewHubPanicsWithoutSessions covers the parallel guard for the
+// sessions store: also required, also rejected at construction.
+func TestNewHubPanicsWithoutSessions(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected NewHub to panic when given a nil sessions store")
+		}
+	}()
+	logger := logging.New("error", "json", io.Discard)
+	NewHub(logger, nil, defaultTestValidator(t), nil)
 }
 
 func TestHandleUpgradeInvalidToken(t *testing.T) {
 	t.Parallel()
-	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length", "")
+	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub := newRunningHub(t, v)
+	hub := newRunningHub(t, withValidator(v))
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
@@ -794,17 +872,17 @@ func TestHandleUpgradeInvalidToken(t *testing.T) {
 // Broadcast, and ping/pong serialization on the client message side.
 func TestHandleUpgradeAndBroadcastEndToEnd(t *testing.T) {
 	t.Parallel()
-	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length", "")
+	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub := newRunningHub(t, v)
+	hub := newRunningHub(t, withValidator(v))
 	hub.SetChannelAuthorizer(allowAllAuthorizer{})
 
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	tok, err := v.CreateToken(&auth.Claims{ID: "user-1"})
+	tok, err := v.IssueWSTicket("user-1", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -855,20 +933,24 @@ func TestHandleUpgradeAndBroadcastEndToEnd(t *testing.T) {
 // ping → pong reply path through the websocket loop.
 func TestPingProducesPongReply(t *testing.T) {
 	t.Parallel()
-	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length", "")
+	v, err := auth.NewJWTValidator("test-secret-of-sufficient-length")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hub := newRunningHub(t, v)
+	hub := newRunningHub(t, withValidator(v))
 	hub.SetChannelAuthorizer(allowAllAuthorizer{})
 	srv := httptest.NewServer(http.HandlerFunc(hub.HandleUpgrade))
 	t.Cleanup(srv.Close)
 
-	tok, _ := v.CreateToken(&auth.Claims{ID: "user-1"})
+	tok, err := v.IssueWSTicket("user-1", "", "", "")
+	if err != nil {
+		t.Fatalf("issue ws ticket: %v", err)
+	}
 	u, _ := url.Parse(srv.URL)
 	wsURL := fmt.Sprintf("ws://%s/?token=%s", u.Host, url.QueryEscape(tok))
 
-	conn, err := websocket.Dial(wsURL, "", srv.URL)
+	var conn *websocket.Conn
+	conn, err = websocket.Dial(wsURL, "", srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}

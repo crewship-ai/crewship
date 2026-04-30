@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react"
 import { z } from "zod"
+import { AUTH_EVENT, AUTH_CHANNEL, broadcastSignOut } from "@/lib/api-fetch"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -80,6 +81,59 @@ export function AuthProvider({ children }: AuthProviderProps) {
     refresh()
   }, [refresh])
 
+  // Hard-redirect to /login when apiFetch detects a terminal auth state
+  // (refresh failed, session_revoked, etc). The BroadcastChannel echo
+  // covers other tabs in the same browser. The redirect carries the
+  // current path as ?redirect= so post-login can return the user to
+  // where they were instead of dumping them on /.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    let redirected = false
+    const goLoginExpired = () => {
+      if (redirected) return
+      redirected = true
+      const { pathname, search } = window.location
+      const currentPath = pathname + search
+      const params = new URLSearchParams({ reason: "expired" })
+      // Don't append ?redirect for /login itself or unsafe absolute URLs.
+      // The check uses pathname (not pathname+search) so /login?reason=expired
+      // — the URL we're about to redirect TO — is recognised as the
+      // login page even when it carries query params. Without this,
+      // the user could end up bouncing /login → /login?redirect=/login?...
+      if (pathname !== "/login" && currentPath.startsWith("/") && !currentPath.startsWith("//")) {
+        params.set("redirect", currentPath)
+      }
+      window.location.replace(`/login?${params.toString()}`)
+    }
+    const goLoginSignedOutElsewhere = () => {
+      if (redirected) return
+      redirected = true
+      window.location.replace("/login")
+    }
+
+    const expiredHandler = () => goLoginExpired()
+    window.addEventListener(AUTH_EVENT, expiredHandler)
+
+    let channel: BroadcastChannel | null = null
+    if (typeof BroadcastChannel !== "undefined") {
+      try {
+        channel = new BroadcastChannel(AUTH_CHANNEL)
+        channel.onmessage = (ev) => {
+          if (ev.data?.type === "session-expired") goLoginExpired()
+          else if (ev.data?.type === "signout") goLoginSignedOutElsewhere()
+        }
+      } catch {
+        channel = null
+      }
+    }
+
+    return () => {
+      window.removeEventListener(AUTH_EVENT, expiredHandler)
+      channel?.close()
+    }
+  }, [])
+
   const signIn = useCallback(async (email: string, password: string) => {
     const csrfToken = await fetchCsrfToken()
     if (!csrfToken) {
@@ -111,16 +165,35 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [refresh])
 
   const signOut = useCallback(async () => {
+    // Gate the local reset on a successful (or already-expired) server
+    // response. With revocation now enforced server-side, fanning out
+    // "signed out" while the refresh chain is still active server-side
+    // would leave every other tab thinking they're logged out while the
+    // session keeps refreshing in the background. CodeRabbit flagged
+    // this on PR #233.
+    let serverAcknowledged = false
     try {
-      await fetch("/api/auth/signout", {
+      const res = await fetch("/api/auth/signout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
       })
+      // 401 means the access cookie was already expired/revoked when
+      // the request landed — treat that as an effective sign-out so a
+      // user with a stale tab can still log back out.
+      serverAcknowledged = res.ok || res.status === 401
     } catch {
-      // ignore
+      // Network error — leave local state intact so a transient outage
+      // doesn't desync this tab from the still-active server session.
+      return
+    }
+    if (!serverAcknowledged) {
+      return
     }
     setSession(null)
     setStatus("unauthenticated")
+    // Tell other tabs in this browser to drop their session UI too.
+    broadcastSignOut()
   }, [])
 
   return (

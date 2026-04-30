@@ -579,7 +579,11 @@ func TestUpdateRun_UpdatesAgentStatusOnCompletion(t *testing.T) {
 	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	// Use real hub for broadcast testing. ws.NewHub now requires a typed
+	// JWT validator + sessions store (see security pass on PR #233);
+	// the package exports test-only sentinels for callers that don't
+	// exercise the upgrade path.
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 	jw := wireTestJournalForHandler(t, db, handler)
 
@@ -625,7 +629,7 @@ func TestUpdateRun_FailedSetsAgentError(t *testing.T) {
 	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 	jw := wireTestJournalForHandler(t, db, handler)
 
@@ -668,7 +672,7 @@ func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
 	seedRunFixture(t, db, "run2", "a1", wsID, "", "ASSIGNMENT", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 	jw := wireTestJournalForHandler(t, db, handler)
 
@@ -712,7 +716,7 @@ func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
 	seedRunFixture(t, db, "run2", "a1", wsID, "", "ASSIGNMENT", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 	jw := wireTestJournalForHandler(t, db, handler)
 
@@ -753,7 +757,7 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 	jw := wireTestJournalForHandler(t, db, handler)
 

@@ -34,13 +34,32 @@ export async function fetchWithRetry(
   const baseDelay = init?.baseDelayMs ?? 250
   let lastError: unknown
 
+  // For non-replayable bodies (ReadableStream / Request with body) we
+  // skip apiFetch entirely. apiFetch owns the 401-refresh-and-retry
+  // path; even though it has its own replayability gate, the round trip
+  // through tryRefresh changes the failure semantics — caller gets a
+  // 401 after a refresh succeeded, which looks like "session invalid"
+  // when in fact the session is fine and the only problem is that the
+  // body was already consumed. Plain fetch surfaces the original 401
+  // unchanged so the caller can handle the consumed-stream case
+  // explicitly. CodeRabbit flagged this on PR #233.
+  const replayable = bodyIsReplayable(init?.body) && inputIsReplayable(input)
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(input, init)
+      let res: Response
+      if (replayable) {
+        // Lazy import keeps this module free of a `lib/api-fetch` cycle
+        // (api-fetch reuses bodyIsReplayable/inputIsReplayable below).
+        const { apiFetch } = await import("./api-fetch")
+        res = await apiFetch(input, init)
+      } else {
+        res = await fetch(input, init)
+      }
       if (res.ok) return res
       // Only retry true gateway flaps. 429 means "stop calling me" —
       // honor that, return immediately, let the caller surface the
       // error or simply leave the panel empty until next user action.
+      // 401s are owned by apiFetch (refresh + redirect) — don't loop.
       if (![502, 503, 504].includes(res.status) || attempt === retries) {
         return res
       }
