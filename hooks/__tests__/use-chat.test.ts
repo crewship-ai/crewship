@@ -349,6 +349,82 @@ describe("useChat", () => {
     )
   })
 
+  it("stopGeneration clears part-level isStreaming flags on the open turn", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    // Open an assistant turn with a streaming text part.
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "text", content: "Hello" },
+      })
+    })
+    expect(result.current.turns[0].isStreaming).toBe(true)
+    expect(result.current.turns[0].parts[0].isStreaming).toBe(true)
+
+    act(() => {
+      result.current.stopGeneration()
+    })
+
+    // Turn AND every streaming part are flipped off in one update.
+    expect(result.current.turns[0].isStreaming).toBe(false)
+    expect(result.current.turns[0].parts[0].isStreaming).toBe(false)
+  })
+
+  it("stopGeneration drops late deltas so cancelled stream cannot resurrect", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    // Open an assistant turn.
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "text", content: "Hello" },
+      })
+    })
+
+    act(() => {
+      result.current.stopGeneration()
+    })
+
+    // After cancel, late deltas race against the server's cancel ack.
+    // They must NOT extend the cancelled turn or create a new one.
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "text", content: " — late delta" },
+      })
+    })
+
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].parts).toHaveLength(1)
+    expect(result.current.turns[0].parts[0].content).toBe("Hello")
+    expect(result.current.turns[0].isStreaming).toBe(false)
+
+    // sendMessage clears the cancelled gate so the next stream flows again.
+    act(() => {
+      result.current.sendMessage("again")
+    })
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "text", content: "fresh reply" },
+      })
+    })
+    const lastTurn = result.current.turns[result.current.turns.length - 1]
+    expect(lastTurn.role).toBe("assistant")
+    expect(lastTurn.parts[0].content).toBe("fresh reply")
+  })
+
   it("loadHistory converts flat messages to turns", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
