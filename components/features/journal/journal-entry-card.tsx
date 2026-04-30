@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { formatRelativeTime } from "@/lib/time"
+import { iconForEntryType } from "@/lib/journal-icons"
 import type { JournalEntry } from "@/lib/types/journal"
 
 /** Maps severity → stripe colour. Stripe is the 2-px accent on the left edge. */
@@ -61,13 +62,15 @@ export function JournalEntryCard({ entry }: JournalEntryCardProps) {
 
   const isExec = entry.entry_type === "exec.command"
   const hasPayload = entry.payload && Object.keys(entry.payload).length > 0
+  const TypeIcon = iconForEntryType(entry.entry_type)
 
   return (
     <div className={cn("relative rounded-lg border bg-card overflow-hidden transition-colors", borderClass, "hover:border-border")}>
       <div className={cn("absolute inset-y-0 left-0 w-[3px]", stripe)} aria-hidden />
       <div className="pl-4 pr-3 py-2.5">
         <div className="flex items-start gap-2 flex-wrap">
-          <Badge variant="outline" className="text-[10px] font-mono uppercase tracking-wide border-border/60">
+          <Badge variant="outline" className="gap-1 text-[10px] font-mono uppercase tracking-wide border-border/60">
+            <TypeIcon className="h-3 w-3 opacity-80" />
             {entry.entry_type}
           </Badge>
           <Badge variant="outline" className={cn("text-[10px] border", severityPill)}>
