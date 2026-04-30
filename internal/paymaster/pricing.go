@@ -87,12 +87,12 @@ var priceTable = map[string]modelPrice{
 // alternative (median tier) silently undercharges for top-tier models,
 // which defeats the warn/exceed signal exactly when operators need it.
 var providerFallback = map[string]modelPrice{
-	"anthropic": {InputPerM: 5.00, OutputPerM: 25.00, CachedInputPerM: 0.50, CacheWritePerM: 6.25},     // Opus-tier (reasoning ceiling)
-	"openai":    {InputPerM: 20.00, OutputPerM: 80.00, CachedInputPerM: 5.00, CacheWritePerM: 20.00},   // o3-pro tier (reasoning ceiling)
-	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},    // gemini-2.5-pro upper tier
-	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},      // grok-4-equivalent
-	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},      // reasoner tier (ceiling)
-	"mistral":   {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},      // mistral-large estimate (ceiling above codestral)
+	"anthropic": {InputPerM: 5.00, OutputPerM: 25.00, CachedInputPerM: 0.50, CacheWritePerM: 6.25},   // Opus-tier (reasoning ceiling)
+	"openai":    {InputPerM: 20.00, OutputPerM: 80.00, CachedInputPerM: 5.00, CacheWritePerM: 20.00}, // o3-pro tier (reasoning ceiling)
+	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},  // gemini-2.5-pro upper tier
+	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // grok-4-equivalent
+	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},    // reasoner tier (ceiling)
+	"mistral":   {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},    // mistral-large estimate (ceiling above codestral)
 	"ollama":    {},
 	"local":     {},
 }
