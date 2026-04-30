@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
+import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
 import {
   JournalFilters,
   DEFAULT_JOURNAL_FILTERS,
@@ -131,6 +132,7 @@ export default function JournalPage() {
   }, [entries, filters.search])
 
   return (
+    <JournalLookupProvider workspaceId={workspaceId}>
     <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 bg-background min-h-[calc(100vh-48px)]">
       {/* Main column — header + tab strip + content */}
       <div className="flex-1 min-w-0 space-y-4">
@@ -227,6 +229,7 @@ export default function JournalPage() {
         <JournalFilters workspaceId={workspaceId} value={filters} onChange={setFilters} />
       )}
     </div>
+    </JournalLookupProvider>
   )
 }
 
