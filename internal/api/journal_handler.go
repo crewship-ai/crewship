@@ -222,6 +222,19 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 		}
 		q.Limit = n
 	}
+	// Free-text search via FTS5 (?q=…). Trimmed and rejected with 400
+	// when over 200 chars rather than silently truncated — silent
+	// truncation can drop the meaningful tail of the query and surprise
+	// the caller with seemingly unrelated matches. The phrase-quoting
+	// in journal.fts5Phrase neutralises operators inside the input.
+	if v := qs.Get("q"); v != "" {
+		v = strings.TrimSpace(v)
+		const maxFTSQuery = 200
+		if len(v) > maxFTSQuery {
+			return q, fmt.Errorf("q parameter exceeds %d characters", maxFTSQuery)
+		}
+		q.FTSQuery = v
+	}
 	return q, nil
 }
 

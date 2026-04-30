@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -146,26 +147,45 @@ func TestRecoverOrphanedRuns_MarksRunningCancelled(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES ('w1','W','w',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO agents (id, workspace_id, name, slug, status, created_at, updated_at) VALUES ('a1','w1','A','a','RUNNING',?,?)`, now, now)
 	mustExec(t, db.DB, `INSERT INTO chats (id, workspace_id, agent_id, created_at, updated_at) VALUES ('c1','w1','a1',?,?)`, now, now)
-	mustExec(t, db.DB, `INSERT INTO agent_runs (id, agent_id, workspace_id, chat_id, status, started_at) VALUES ('r1','a1','w1','c1','RUNNING',?)`, now)
+	// Post Phase J: a "running" run is a journal trace with run.started
+	// and no terminal entry. recoverOrphanedRuns emits run.cancelled and
+	// flips the agent back to IDLE.
+	mustExec(t, db.DB, `INSERT INTO journal_entries
+		(id, workspace_id, agent_id, ts, entry_type, severity, actor_type, summary, payload, refs, trace_id, priority)
+		VALUES ('je1','w1','a1', strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		        'run.started','info','sidecar','run r1 started','{"trigger_type":"USER"}','{}','r1','normal')`)
 
 	cfg := config.Default()
 	s := New(cfg, logger, &Deps{DB: db.DB})
 	s.startedAt = time.Now()
+	// recoverOrphanedRuns needs a journal writer to emit cancel entries;
+	// without one it logs and falls through, and the agent reset still
+	// runs. Wire the production writer so the full path executes.
+	s.journalWriter = journal.NewWriter(db.DB, logger, journal.WriterOptions{FlushSize: 1})
+	defer s.journalWriter.Close()
 
 	s.recoverOrphanedRuns(context.Background())
+	_ = s.journalWriter.Flush(context.Background())
+	time.Sleep(50 * time.Millisecond)
 
+	// Agent must be IDLE after recovery.
 	var status string
-	if err := db.QueryRow("SELECT status FROM agent_runs WHERE id='r1'").Scan(&status); err != nil {
-		t.Fatal(err)
-	}
-	if status != "CANCELLED" {
-		t.Errorf("expected CANCELLED, got %q", status)
-	}
 	if err := db.QueryRow("SELECT status FROM agents WHERE id='a1'").Scan(&status); err != nil {
 		t.Fatal(err)
 	}
 	if status != "IDLE" {
 		t.Errorf("agent status = %q, want IDLE", status)
+	}
+
+	// The trace must now have a run.cancelled terminal entry.
+	var terminal string
+	if err := db.QueryRow(`SELECT entry_type FROM journal_entries
+		WHERE trace_id = 'r1' AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+		LIMIT 1`).Scan(&terminal); err != nil {
+		t.Fatalf("expected terminal run entry: %v", err)
+	}
+	if terminal != "run.cancelled" {
+		t.Errorf("terminal entry = %q, want run.cancelled", terminal)
 	}
 }
 
