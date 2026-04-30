@@ -67,9 +67,10 @@ var agentListCmd = &cobra.Command{
 }
 
 var agentGetCmd = &cobra.Command{
-	Use:   "get <slug-or-id>",
-	Short: "Show agent details",
-	Args:  cobra.ExactArgs(1),
+	Use:               "get <slug-or-id>",
+	Short:             "Show agent details",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeAgentSlug,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err

@@ -115,11 +115,18 @@ Examples:
 		server := cli.ResolveServer(flagServer, cliCfg)
 
 		md := resolveMarkdownFromCmd(cmd)
+		saveFile, err := openSaveFile(cmd)
+		if err != nil {
+			return err
+		}
+		if saveFile != nil {
+			defer saveFile.Close()
+		}
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatResult.ID, prompt, quiet, md)
+			return runNoStream(server, wsToken, agentID, chatResult.ID, prompt, quiet, md, saveFile)
 		}
-		return runStream(server, wsToken, agentID, agentSlug, chatResult.ID, prompt, quiet, md)
+		return runStream(server, wsToken, agentID, agentSlug, chatResult.ID, prompt, quiet, md, saveFile)
 	},
 }
 
@@ -137,4 +144,5 @@ func init() {
 	askCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
 	askCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	askCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
+	askCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")
 }

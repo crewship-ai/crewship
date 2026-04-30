@@ -16,8 +16,9 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run <agent-slug> [prompt]",
-	Short: "Run an agent with a prompt",
+	Use:               "run <agent-slug> [prompt]",
+	Short:             "Run an agent with a prompt",
+	ValidArgsFunction: completeAgentSlug,
 	Long: `Run an agent with a prompt and stream output to the terminal.
 
 Examples:
@@ -123,16 +124,23 @@ Examples:
 		server := cli.ResolveServer(flagServer, cliCfg)
 
 		md := resolveMarkdownFromCmd(cmd)
+		saveFile, err := openSaveFile(cmd)
+		if err != nil {
+			return err
+		}
+		if saveFile != nil {
+			defer saveFile.Close()
+		}
 
 		if interactive {
-			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md)
+			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile)
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md)
+			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile)
 		}
 
-		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md)
+		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile)
 	},
 }
 
@@ -152,7 +160,25 @@ func resolveMarkdownFromCmd(cmd *cobra.Command) *cli.MarkdownRenderer {
 	return nil
 }
 
-func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer) error {
+// openSaveFile reads the --save flag and opens a writable file for tee'ing
+// agent text. Returns (nil, nil) when the flag is unset.
+//
+// Files are truncated on open — `--save` is "save this run's output", not
+// "append to a log". Append behaviour is one level of magic the user can
+// trivially get with `crewship run ... | tee -a log` if they really want it.
+func openSaveFile(cmd *cobra.Command) (*os.File, error) {
+	path, _ := cmd.Flags().GetString("save")
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, fmt.Errorf("open save file: %w", err)
+	}
+	return f, nil
+}
+
+func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -183,10 +209,10 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 		return fmt.Errorf("send message: %w", err)
 	}
 
-	return streamEvents(ws, quiet, md)
+	return streamEvents(ws, quiet, md, save)
 }
 
-func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer) error {
+func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -235,6 +261,14 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 
 	text := fullText.String()
 	if text != "" {
+		// Save raw (un-styled) text to file so the saved artefact is plain
+		// markdown — useful for piping into tools or committing.
+		if save != nil {
+			_, _ = save.WriteString(text)
+			if !strings.HasSuffix(text, "\n") {
+				_, _ = save.WriteString("\n")
+			}
+		}
 		toPrint := text
 		if md != nil {
 			toPrint = md.Render(text)
@@ -267,7 +301,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	return nil
 }
 
-func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer) error {
+func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -300,7 +334,7 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 		if err := ws.SendMessage(agentChannel, chatID, initialPrompt); err != nil {
 			return fmt.Errorf("send message: %w", err)
 		}
-		if err := streamEvents(ws, quiet, md); err != nil {
+		if err := streamEvents(ws, quiet, md, save); err != nil {
 			return err
 		}
 	}
@@ -325,19 +359,25 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 			return fmt.Errorf("send message: %w", err)
 		}
 
-		if err := streamEvents(ws, quiet, md); err != nil {
+		if err := streamEvents(ws, quiet, md, save); err != nil {
 			return err
 		}
 	}
 }
 
-func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer) error {
+func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *os.File) error {
 	flush := func() {
 		if md != nil {
 			fmt.Print(md.Flush())
 		}
 	}
 	emitText := func(s string) {
+		// Always write raw text to the save file before any markdown
+		// styling — saved files should be plain markdown the user can
+		// re-process, not a screencast of ANSI codes.
+		if save != nil {
+			_, _ = save.WriteString(s)
+		}
 		if md != nil {
 			fmt.Print(md.Write(s))
 		} else {
@@ -468,6 +508,7 @@ func init() {
 	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
+	runCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")
 
 	runCmd.AddCommand(runListCmd)
 }

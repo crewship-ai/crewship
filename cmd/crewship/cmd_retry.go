@@ -68,6 +68,13 @@ Examples:
 		noStream, _ := cmd.Flags().GetBool("no-stream")
 		continueChat, _ := cmd.Flags().GetBool("continue")
 		md := resolveMarkdownFromCmd(cmd)
+		saveFile, err := openSaveFile(cmd)
+		if err != nil {
+			return err
+		}
+		if saveFile != nil {
+			defer saveFile.Close()
+		}
 
 		chatID := ""
 		if continueChat {
@@ -113,9 +120,9 @@ Examples:
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, runMeta.AgentID, chatID, prompt, quiet, md)
+			return runNoStream(server, wsToken, runMeta.AgentID, chatID, prompt, quiet, md, saveFile)
 		}
-		return runStream(server, wsToken, runMeta.AgentID, agentSlug, chatID, prompt, quiet, md)
+		return runStream(server, wsToken, runMeta.AgentID, agentSlug, chatID, prompt, quiet, md, saveFile)
 	},
 }
 
@@ -176,4 +183,5 @@ func init() {
 	retryCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
 	retryCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	retryCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
+	retryCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")
 }
