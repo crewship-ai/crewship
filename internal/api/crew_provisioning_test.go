@@ -207,6 +207,10 @@ func TestEnqueueForCrew_RateLimitDoesNotPublishGhostJob(t *testing.T) {
 func newProvisioningHandlerForRateLimitTest(t *testing.T, db *sql.DB, logger *slog.Logger) *ProvisioningHandler {
 	t.Helper()
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	// NewProvisioningHandler spawns a background cleanup ticker — without
+	// Stop() each test invocation leaks one goroutine for the rest of the
+	// suite. t.Cleanup runs on success and failure alike.
+	t.Cleanup(h.Stop)
 	h.provisioner = devcontainer.NewProvisioner(nil, nil, nil, logger)
 	return h
 }
