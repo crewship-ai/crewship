@@ -23,7 +23,18 @@ export default function LoginPage() {
 function safeRedirectPath(raw: string | null): string {
   if (!raw) return "/"
   if (!raw.startsWith("/") || raw.startsWith("//")) return "/"
-  if (raw === "/login" || raw.startsWith("/login?") || raw.startsWith("/login/")) return "/"
+  // Block every shape that would bounce the user back to /login —
+  // bare /login, /login?…, /login/…, AND /login#hash. The fragment
+  // form was the missing branch: a fragment-only redirect would
+  // otherwise satisfy the !startsWith("/login?") test.
+  if (
+    raw === "/login" ||
+    raw.startsWith("/login?") ||
+    raw.startsWith("/login/") ||
+    raw.startsWith("/login#")
+  ) {
+    return "/"
+  }
   return raw
 }
 

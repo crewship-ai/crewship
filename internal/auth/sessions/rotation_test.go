@@ -3,6 +3,7 @@ package sessions
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -143,6 +144,23 @@ func TestRotateRefreshJti_EmptyExpectedRejected(t *testing.T) {
 // Without atomicity an attacker racing the user could cause both to
 // believe their JTI is current. The CAS in RotateRefreshJti has to
 // be linearizable.
+//
+// Three outcomes are acceptable per goroutine:
+//   - nil: this goroutine WON the CAS race.
+//   - ErrJTIMismatch: this goroutine LOST — another rotation moved
+//     current_refresh_jti past 'jti-0' before our UPDATE landed.
+//   - SQLITE_BUSY: this goroutine never got to attempt the UPDATE
+//     because SQLite's writer lock was held by another connection.
+//     That's still the correct serialisation — production callers
+//     would retry or surface a transient error; from the test's
+//     perspective it counts as "did not advance the JTI", which is
+//     what we care about for the linearisation invariant.
+//
+// The store helper in newTestDB now configures multiple connections
+// + WAL + busy_timeout so this test exercises real DB-level CAS
+// contention, not a fake serial-on-one-Go-conn pass that the
+// previous SetMaxOpenConns(1) would have accepted even for a
+// non-atomic SELECT-then-UPDATE implementation.
 func TestRotateRefreshJti_ConcurrentSafety(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
@@ -168,15 +186,27 @@ func TestRotateRefreshJti_ConcurrentSafety(t *testing.T) {
 
 	successes := 0
 	for _, e := range results {
-		if e == nil {
+		switch {
+		case e == nil:
 			successes++
-		} else if !errors.Is(e, ErrJTIMismatch) {
+		case errors.Is(e, ErrJTIMismatch):
+			// expected loser
+		case isSQLiteBusy(e):
+			// expected loser, locked out before reaching the CAS
+		default:
 			t.Errorf("unexpected error: %v", e)
 		}
 	}
 	if successes != 1 {
 		t.Fatalf("expected exactly 1 successful rotation, got %d", successes)
 	}
+}
+
+// isSQLiteBusy detects modernc.org/sqlite's "database is locked"
+// error so the concurrency test can distinguish "lost the writer
+// lock race" (acceptable) from any other failure (test bug).
+func isSQLiteBusy(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "database is locked")
 }
 
 // First-rotation must work regardless of whether the caller passes

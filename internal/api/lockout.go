@@ -110,7 +110,14 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 
 	if lockedUntilNS.Valid && lockedUntilNS.String != "" {
 		lockedUntil, perr := time.Parse(time.RFC3339, lockedUntilNS.String)
-		if perr == nil && now.Before(lockedUntil) {
+		if perr != nil {
+			// Malformed timestamp in users.locked_until is row corruption,
+			// not a benign zero-time. Failing closed prevents an attacker
+			// who can write garbage into that column (or a buggy migration
+			// that produces it) from turning the lockout into a bypass.
+			return "", "", fmt.Errorf("lockout: parse locked_until %q: %w", lockedUntilNS.String, perr)
+		}
+		if now.Before(lockedUntil) {
 			return "", "", ErrAccountLocked
 		}
 		// Lock window has expired; clear the lock and the counter so

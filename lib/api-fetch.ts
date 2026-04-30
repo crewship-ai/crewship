@@ -150,14 +150,26 @@ let refreshInflight: Promise<RefreshResult> | null = null
  *  awaiting a fresh tryRefresh, leaving it observing a stale promise.
  *  Synchronous cleanup is fine — racers awaiting `refreshInflight`
  *  resolved their await before the finally block runs. */
+/** REFRESH_TIMEOUT_MS bounds the shared refresh round-trip. Without it,
+ *  every concurrent 401 awaits the same `refreshInflight` promise — if
+ *  /api/auth/token/refresh hangs (proxy buffering, half-open TCP, …),
+ *  the entire app stalls behind that single hung request. AbortController
+ *  + setTimeout downgrades a stuck refresh into a retryable failure
+ *  (which surfaces as the synthesized 503 in apiFetch), letting callers
+ *  see a transport error instead of an indefinite spinner. */
+const REFRESH_TIMEOUT_MS = 10_000
+
 export async function tryRefresh(): Promise<RefreshResult> {
   if (refreshInflight) return refreshInflight
   const promise = (async (): Promise<RefreshResult> => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
     try {
       const r = await fetch(REFRESH_PATH, {
         method: "POST",
         credentials: "include",
         headers: { Accept: "application/json" },
+        signal: controller.signal,
       })
       if (r.ok) return "ok"
       // Only a 401 from the refresh endpoint is "your session is gone".
@@ -167,10 +179,12 @@ export async function tryRefresh(): Promise<RefreshResult> {
       if (r.status === 401) return "auth_failed"
       return "retryable_failed"
     } catch {
-      // Network rejection / abort / DNS / etc. — definitely transient
-      // from our perspective, even if the underlying cause is permanent
-      // (the user is offline, our server is down). Treat as retryable.
+      // Network rejection / abort (timeout) / DNS / etc. — transient.
+      // Includes the abort our own setTimeout fires when the backend
+      // hangs past REFRESH_TIMEOUT_MS.
       return "retryable_failed"
+    } finally {
+      clearTimeout(timer)
     }
   })()
   refreshInflight = promise

@@ -26,11 +26,15 @@ func newTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	// Single-writer SQLite + WAL mode + busy-timeout is the safe combo
-	// for parallel-goroutine tests. Without these, two goroutines
-	// trying to UPDATE the same row simultaneously race for the file
-	// lock and the loser sees SQLITE_BUSY before the timeout kicks in.
-	db.SetMaxOpenConns(1)
+	// WAL mode + 5s busy-timeout lets multiple connections attempt
+	// concurrent UPDATEs and serialise at the SQLite layer rather
+	// than collapsing onto one Go connection. The previous
+	// SetMaxOpenConns(1) effectively serialised RotateRefreshJti
+	// at the Go layer, which made TestRotateRefreshJti_ConcurrentSafety
+	// pass even for a non-atomic SELECT-then-UPDATE implementation.
+	// Several connections + WAL forces real DB-level CAS contention.
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
 	t.Cleanup(func() { db.Close() })
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := database.Migrate(context.Background(), db, logger); err != nil {

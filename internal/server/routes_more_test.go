@@ -24,7 +24,7 @@ import (
 
 func TestHandleAgentStop_RunningInState(t *testing.T) {
 	t.Parallel()
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 
 	// Pre-load a "running" run.
 	stateData := `{"agent_id":"a1","status":"running","started_at":"2026-04-01T00:00:00Z"}`
@@ -50,7 +50,7 @@ func TestHandleAgentStop_RunningInState(t *testing.T) {
 
 func TestHandleAgentStart_InvalidJSON(t *testing.T) {
 	t.Parallel()
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 	req := httptest.NewRequest("POST", "/agents/a1/start", strings.NewReader("not json"))
 	rec := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(rec, req)

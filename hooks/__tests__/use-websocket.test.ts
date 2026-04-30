@@ -49,14 +49,31 @@ import { useWebSocket } from "@/hooks/use-websocket"
 
 const tokenFn = (token: string | null) => () => Promise.resolve(token)
 
+// authEventListeners tracks every auth:session-expired listener a test
+// adds via addAuthHandler so afterEach can guarantee removal even when
+// an assertion failed before the test reached its own cleanup line.
+// Without this, a leaked listener carries vi.fn() call counts into the
+// next test and produces phantom "called 2 times" failures.
+let authEventListeners: EventListener[] = []
+function addAuthHandler(handler: EventListener) {
+  window.addEventListener("auth:session-expired", handler)
+  authEventListeners.push(handler)
+  return handler
+}
+
 describe("useWebSocket", () => {
   beforeEach(() => {
     mockInstances = []
+    authEventListeners = []
     vi.useFakeTimers()
     vi.stubGlobal("WebSocket", MockWebSocket)
   })
 
   afterEach(() => {
+    for (const h of authEventListeners) {
+      window.removeEventListener("auth:session-expired", h)
+    }
+    authEventListeners = []
     vi.useRealTimers()
     vi.stubGlobal("WebSocket", undefined)
   })
@@ -105,7 +122,7 @@ describe("useWebSocket", () => {
 
   it("close code 4401 emits auth:session-expired and stops retrying", async () => {
     const handler = vi.fn()
-    window.addEventListener("auth:session-expired", handler)
+    addAuthHandler(handler)
     const { result } = renderHook(() =>
       useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
     )
@@ -119,7 +136,6 @@ describe("useWebSocket", () => {
     // Even after the longest backoff window, no second connection attempt.
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(mockInstances).toHaveLength(1)
-    window.removeEventListener("auth:session-expired", handler)
   })
 
   it("session_revoked frame fires expiry AND stops retrying", async () => {
@@ -129,7 +145,7 @@ describe("useWebSocket", () => {
     // session_revoked. Now we also advance well past the next backoff
     // window and assert no second WebSocket instance gets created.
     const handler = vi.fn()
-    window.addEventListener("auth:session-expired", handler)
+    addAuthHandler(handler)
     renderHook(() =>
       useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
     )
@@ -146,8 +162,6 @@ describe("useWebSocket", () => {
     // stays at 1.
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
     expect(mockInstances).toHaveLength(1)
-
-    window.removeEventListener("auth:session-expired", handler)
   })
 
   it("normal close triggers reconnect with backoff and re-fetches token", async () => {
@@ -176,7 +190,7 @@ describe("useWebSocket", () => {
     // every restart-induced outage); status flips to "error" and we
     // stop retrying.
     const authHandler = vi.fn()
-    window.addEventListener("auth:session-expired", authHandler)
+    addAuthHandler(authHandler)
 
     const { result } = renderHook(() =>
       useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
@@ -193,7 +207,6 @@ describe("useWebSocket", () => {
 
     expect(authHandler).not.toHaveBeenCalled()
     expect(result.current.status).toBe("error")
-    window.removeEventListener("auth:session-expired", authHandler)
   })
 
   it("getToken rejection schedules backoff retry, not termination", async () => {
@@ -203,7 +216,7 @@ describe("useWebSocket", () => {
     // close. A previous version let the rejection escape unhandled
     // and silently break the reconnect loop forever.
     const handler = vi.fn()
-    window.addEventListener("auth:session-expired", handler)
+    addAuthHandler(handler)
     let throwOnce = true
     const getToken = vi.fn(async () => {
       if (throwOnce) {
@@ -226,8 +239,6 @@ describe("useWebSocket", () => {
     expect(handler).not.toHaveBeenCalled()
     expect(getToken.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(mockInstances.length).toBeGreaterThanOrEqual(1)
-
-    window.removeEventListener("auth:session-expired", handler)
   })
 
   it("send is a no-op until socket is OPEN", async () => {

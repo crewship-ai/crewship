@@ -70,7 +70,13 @@ func (m *mockContainer) CopyToContainer(_ context.Context, _ string, _ string, _
 	return nil
 }
 
-func newTestServerWithDeps() *Server {
+// newTestServerWithDeps wires a Server with mock container/state and
+// a freshly-migrated SQLite via openTestDB. *testing.T is required
+// since the helper now propagates it down to openTestDB so cleanup
+// hooks register correctly — the previous nil-T variant produced
+// orphaned DB files that survived test runs.
+func newTestServerWithDeps(t *testing.T) *Server {
+	t.Helper()
 	cfg := config.Default()
 	// JWT validator is required by ws.NewHub since the security
 	// hardening pass — provide a fixed test secret instead of
@@ -83,7 +89,7 @@ func newTestServerWithDeps() *Server {
 		// DB is required since CR review on PR #233 — server.New()
 		// panics without one because the WS hub's sessions store
 		// can no longer fall back to the test stub.
-		DB: openTestDB(nil),
+		DB: openTestDB(t),
 	}
 	s := New(cfg, logger, deps)
 	s.startedAt = time.Now()
@@ -91,7 +97,7 @@ func newTestServerWithDeps() *Server {
 }
 
 func TestAgentStatusWithState(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 
 	stateData := `{"agent_id":"a1","status":"running","started_at":"2026-01-01T00:00:00Z"}`
 	s.state.Set(context.Background(), "agent_runs", "a1", []byte(stateData))
@@ -112,7 +118,7 @@ func TestAgentStatusWithState(t *testing.T) {
 }
 
 func TestAgentStatusInvalidJSON(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 	s.state.Set(context.Background(), "agent_runs", "a1", []byte("not json"))
 
 	req := httptest.NewRequest("GET", "/agents/a1/status", nil)
@@ -131,7 +137,7 @@ func TestAgentStatusInvalidJSON(t *testing.T) {
 }
 
 func TestContainerStatusWithProvider(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 
 	req := httptest.NewRequest("GET", "/crews/crew-1/container/status", nil)
 	w := httptest.NewRecorder()
@@ -149,7 +155,7 @@ func TestContainerStatusWithProvider(t *testing.T) {
 }
 
 func TestContainerStartWithProvider(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 
 	req := httptest.NewRequest("POST", "/crews/crew-1/container/start", nil)
 	w := httptest.NewRecorder()
@@ -167,7 +173,7 @@ func TestContainerStartWithProvider(t *testing.T) {
 }
 
 func TestContainerStopWithProvider(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 
 	req := httptest.NewRequest("POST", "/crews/crew-1/container/stop", nil)
 	w := httptest.NewRecorder()
@@ -213,7 +219,7 @@ func TestSessionMessagesWithStore(t *testing.T) {
 }
 
 func TestDebugInfoEndpoint(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 
 	req := httptest.NewRequest("GET", "/debug/info", nil)
 	w := httptest.NewRecorder()
@@ -258,7 +264,7 @@ func TestDebugInfoEndpoint(t *testing.T) {
 }
 
 func TestDebugLogsEmpty(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 	// s.debugLogs is nil -- no ring buffer
 
 	req := httptest.NewRequest("GET", "/debug/logs", nil)
@@ -278,7 +284,7 @@ func TestDebugLogsEmpty(t *testing.T) {
 }
 
 func TestDebugLogsWithBuffer(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 	rb := logging.NewRingBuffer(100)
 	s.debugLogs = rb
 
@@ -306,7 +312,7 @@ func TestDebugLogsWithBuffer(t *testing.T) {
 }
 
 func TestDebugLogsFiltering(t *testing.T) {
-	s := newTestServerWithDeps()
+	s := newTestServerWithDeps(t)
 	rb := logging.NewRingBuffer(100)
 	s.debugLogs = rb
 

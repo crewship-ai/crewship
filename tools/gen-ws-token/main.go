@@ -27,9 +27,17 @@ func main() {
 		os.Exit(2)
 	}
 
+	// USER_ID and SESSION_ID must agree — the WS hub validates the
+	// ticket's claims.id matches user_sessions.user_id for the
+	// claims.sid row. Falling back to a hardcoded seed user can
+	// produce a token whose subject and session belong to different
+	// users; that gets rejected on first use, but it makes "why
+	// is my dev WS not connecting" a confusing debugging trail.
+	// Require both explicitly.
 	userID := os.Getenv("USER_ID")
 	if userID == "" {
-		userID = "cmluyurk80000wnsrclcs3w40" // demo@crewship.ai from seed
+		fmt.Fprintln(os.Stderr, "USER_ID required — must match the user_id of the SESSION_ID row in user_sessions")
+		os.Exit(2)
 	}
 
 	sessionID := os.Getenv("SESSION_ID")
