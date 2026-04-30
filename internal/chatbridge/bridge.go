@@ -243,18 +243,21 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if info.DevcontainerConfig != "" && info.CachedImage == "" && devcontainerNeedsProvision(info.DevcontainerConfig, info.MiseConfig) {
 		b.logger.Info("agent start auto-triggering devcontainer build",
 			"crew_slug", info.CrewSlug, "crew_id", info.CrewID)
-		var status string
+		var (
+			status     string
+			enqErr     error
+			alreadyJob bool
+		)
 		if b.provisioning != nil {
-			res, enqErr := b.provisioning.EnqueueForCrew(ctx, info.CrewID, info.WorkspaceID)
+			res, e := b.provisioning.EnqueueForCrew(ctx, info.CrewID, info.WorkspaceID)
+			enqErr = e
 			if enqErr != nil {
-				// Surface the enqueue error to the UI but keep the typed
-				// crew_provisioning event so the chat can still render a
-				// useful state instead of a stray red toast.
 				b.logger.Warn("auto-provision enqueue failed",
 					"crew_slug", info.CrewSlug, "error", enqErr)
-				status = "error: " + enqErr.Error()
+				status = "failed"
 			} else if res.AlreadyRunning {
 				status = "running"
+				alreadyJob = true
 			} else if res.Started {
 				status = "pending"
 			}
@@ -266,18 +269,40 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			streamFn(ws.ChatEvent{Type: "error", Content: msg})
 			return fmt.Errorf("%s", msg)
 		}
-		// Emit a structured event the chat surface renders as a build-in-
-		// progress card (subscribes to the existing provision.* WS hub
-		// stream by crew_id for live updates).
+
+		// Emit a structured event the chat surface renders as a build card.
+		// On enqueue failure the event MUST carry status="failed" + error so
+		// the UI can render a real error state instead of an indefinite
+		// spinner — the WS hub will never emit provision.* events for a job
+		// that never started.
+		evtMeta := map[string]any{
+			"crew_id":   info.CrewID,
+			"crew_slug": info.CrewSlug,
+			"status":    status,
+		}
+		var evtContent string
+		if enqErr != nil {
+			evtMeta["error"] = enqErr.Error()
+			evtContent = fmt.Sprintf("Could not start build for %s: %s", info.CrewSlug, enqErr.Error())
+		} else {
+			evtContent = fmt.Sprintf("Building %s — your message will run once the image is ready.", info.CrewSlug)
+		}
 		streamFn(ws.ChatEvent{
-			Type:    "crew_provisioning",
-			Content: fmt.Sprintf("Building %s — your message will run once the image is ready.", info.CrewSlug),
-			Metadata: map[string]any{
-				"crew_id":   info.CrewID,
-				"crew_slug": info.CrewSlug,
-				"status":    status,
-			},
+			Type:     "crew_provisioning",
+			Content:  evtContent,
+			Metadata: evtMeta,
 		})
+
+		// Tell the caller the message did NOT actually run. When enqueue
+		// failed, propagate the underlying error so callers/log handlers
+		// can distinguish "build kicked off, retry later" from "build
+		// never started, you need to act on this". `errors.Is` against
+		// api.ErrRateLimited / ErrProvisionerUnavailable still works
+		// because the API wraps with %w.
+		if enqErr != nil {
+			return fmt.Errorf("auto-provision enqueue failed for crew %q: %w", info.CrewSlug, enqErr)
+		}
+		_ = alreadyJob
 		return fmt.Errorf("crew %q provisioning kicked off; resend after build completes", info.CrewSlug)
 	}
 
