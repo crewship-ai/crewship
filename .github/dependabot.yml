@@ -51,11 +51,19 @@ updates:
       prefix: "chore(deps)"
 
   # GitHub Actions
+  # Weekly cadence (not monthly): every action in .github/workflows/ and
+  # .github/actions/ is SHA-pinned for supply-chain hardening (see CRE-122).
+  # SHA pins don't auto-receive security patches the way version pins do,
+  # so this ecosystem needs the same weekly velocity as npm/gomod or
+  # patches sit for up to 4 weeks before reaching main.
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "main"
     schedule:
-      interval: "monthly"
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "ci/cd"
