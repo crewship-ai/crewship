@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -134,7 +135,13 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 		Tags:                map[string]any{"source": "sidecar"},
 	})
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "paymaster:") {
+		// errors.Is replaced an earlier strings.HasPrefix check that
+		// caught all "paymaster:" errors as 400, including legitimate
+		// 5xx (DB unreachable, scan failure) — those carry the same
+		// prefix from fmt.Errorf wrapping. ErrInvalidRequest is the
+		// sentinel paymaster wraps validation faults with, so we get
+		// a precise validation-vs-infra split.
+		if errors.Is(err, paymaster.ErrInvalidRequest) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
@@ -149,7 +156,13 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 	// runs, so blocking would just delay the next call without changing
 	// the outcome of this one. The journal entry it emits is the actual
 	// payload the operator cares about.
-	if body.HadStatus429 || body.QuotaRemainingPct > 0 {
+	//
+	// The signal sentinel mirrors the sidecar's hasQuota check
+	// (journal_emit.go) — a non-empty window is what marks "we got rate-
+	// limit headers from upstream", regardless of whether remaining_pct
+	// landed at 0 (exhausted) or 0.7 (plenty). Using `> 0` here would
+	// silently drop the exhausted-quota case before EnforceQuota sees it.
+	if body.HadStatus429 || body.QuotaWindow != "" {
 		_ = paymaster.EnforceQuota(req.Context(), r.Journal(), scope,
 			body.QuotaRemainingPct, paymaster.QuotaWindow(body.QuotaWindow), body.HadStatus429)
 	}

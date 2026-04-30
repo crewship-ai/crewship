@@ -38,13 +38,15 @@ const tsLayout = "2006-01-02T15:04:05.000Z"
 //     CostUSD is zero on input, Estimate fills it from the same snapshot.
 func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRecord, error) {
 	if db == nil {
+		// nil db is an infrastructure bug, not a user-input fault — keep it
+		// outside ErrInvalidRequest so handlers map it to 500.
 		return CostRecord{}, fmt.Errorf("paymaster: nil db")
 	}
 	if c.Scope.WorkspaceID == "" {
-		return CostRecord{}, fmt.Errorf("paymaster: workspace_id required")
+		return CostRecord{}, fmt.Errorf("%w: workspace_id required", ErrInvalidRequest)
 	}
 	if c.Provider == "" || c.Model == "" {
-		return CostRecord{}, fmt.Errorf("paymaster: provider and model required")
+		return CostRecord{}, fmt.Errorf("%w: provider and model required", ErrInvalidRequest)
 	}
 
 	if c.TS.IsZero() {

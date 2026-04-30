@@ -10,9 +10,17 @@
 package paymaster
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
+
+// ErrInvalidRequest wraps every validation error the paymaster surfaces
+// so HTTP handlers can map to 400 via errors.Is without coupling to the
+// exact message format. Adopted after CodeRabbit flagged that string-
+// prefix matching on "paymaster:" misclassified DB errors (which also
+// carry the prefix) as user-input failures.
+var ErrInvalidRequest = errors.New("invalid request")
 
 // ScopeKind enumerates the four levels at which a budget can apply. Order
 // matters: workspace is broadest, agent is narrowest. Enforcement walks the

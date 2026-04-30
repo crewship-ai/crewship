@@ -77,13 +77,21 @@ var priceTable = map[string]modelPrice{
 // providerFallback is consulted when (provider, model) misses the table. It
 // keeps the system functional when a new model rolls out before the table is
 // updated — better to over-estimate than to silently bill $0.
+//
+// Each entry deliberately tracks the most-expensive known tier for that
+// provider, not the median. When an unknown model name shows up, we don't
+// know whether it's a budget Haiku or a flagship reasoning model — picking
+// the upper tier means budgets warn / exceed correctly even on premium
+// reasoning models, at the cost of mild overestimate for cheap ones. The
+// alternative (median tier) silently undercharges for top-tier models,
+// which defeats the warn/exceed signal exactly when operators need it.
 var providerFallback = map[string]modelPrice{
-	"anthropic": {InputPerM: 3.00, OutputPerM: 15.00, CachedInputPerM: 0.30, CacheWritePerM: 3.75},     // Sonnet-equivalent
-	"openai":    {InputPerM: 4.00, OutputPerM: 24.00, CachedInputPerM: 0.40, CacheWritePerM: 4.00},     // gpt-5.5-equivalent
+	"anthropic": {InputPerM: 5.00, OutputPerM: 25.00, CachedInputPerM: 0.50, CacheWritePerM: 6.25},     // Opus-tier (reasoning ceiling)
+	"openai":    {InputPerM: 20.00, OutputPerM: 80.00, CachedInputPerM: 5.00, CacheWritePerM: 20.00},   // o3-pro tier (reasoning ceiling)
 	"google":    {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},    // gemini-2.5-pro upper tier
 	"xai":       {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},      // grok-4-equivalent
-	"deepseek":  {InputPerM: 0.252, OutputPerM: 0.378, CachedInputPerM: 0.0252, CacheWritePerM: 0.252}, // V3-equivalent
-	"mistral":   {InputPerM: 0.30, OutputPerM: 0.90, CachedInputPerM: 0.30, CacheWritePerM: 0.30},      // codestral-equivalent
+	"deepseek":  {InputPerM: 0.70, OutputPerM: 2.50, CachedInputPerM: 0.07, CacheWritePerM: 0.70},      // reasoner tier (ceiling)
+	"mistral":   {InputPerM: 2.00, OutputPerM: 6.00, CachedInputPerM: 2.00, CacheWritePerM: 2.00},      // mistral-large estimate (ceiling above codestral)
 	"ollama":    {},
 	"local":     {},
 }

@@ -196,15 +196,30 @@ func TestEstimate(t *testing.T) {
 			name:     "anthropic fallback for unknown model",
 			provider: "anthropic", model: "claude-future-99",
 			in: 1000, out: 500,
-			// falls back to sonnet rate (3/15)
-			want: 0.003 + 0.0075,
+			// Conservative fallback: Opus-tier ($5/$25 per 1M).
+			// 1000 * 5/1e6 + 500 * 25/1e6 = 0.005 + 0.0125
+			want: 0.005 + 0.0125,
 		},
 		{
 			name:     "google fallback for unknown model",
 			provider: "google", model: "gemini-future-99",
 			in: 1000, out: 500,
-			// fallback equals gemini-2.5-pro rate
+			// fallback equals gemini-2.5-pro rate (upper tier)
 			want: 0.0025 + 0.0075,
+		},
+		{
+			name:     "openai fallback for unknown model",
+			provider: "openai", model: "gpt-future-99",
+			in: 1000, out: 500,
+			// Conservative fallback: o3-pro tier ($20/$80 per 1M).
+			want: 0.02 + 0.04,
+		},
+		{
+			name:     "deepseek fallback for unknown model",
+			provider: "deepseek", model: "deepseek-future-99",
+			in: 1000, out: 500,
+			// Conservative fallback: reasoner tier ($0.70/$2.50 per 1M).
+			want: 0.0007 + 0.00125,
 		},
 		{
 			name:     "negative tokens treated as zero",
