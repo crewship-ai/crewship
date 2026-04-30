@@ -112,8 +112,20 @@ func Fork(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, fromC
 	}
 	_ = taskRows.Close()
 
+	// Two-pass copy. First pass mints a fresh id for every parent task and
+	// records the parent→fork id mapping. Second pass inserts the rows with
+	// depends_on remapped onto fork-side ids — without this remap, blocked
+	// tasks on the fork wait forever for parent ids that don't exist here.
+	idMap := make(map[string]string, len(parentTasks))
 	for _, tr := range parentTasks {
-		newTaskID := newRandID("mt_")
+		idMap[tr.id.String] = newRandID("mt_")
+	}
+	for _, tr := range parentTasks {
+		newTaskID := idMap[tr.id.String]
+		remappedDeps, remapErr := remapDepends(tr.dependsOn.String, idMap)
+		if remapErr != nil {
+			return "", "", fmt.Errorf("cartographer: remap deps for task %s: %w", tr.id.String, remapErr)
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO mission_tasks
 			(id, mission_id, assigned_agent_id, title, description, status, task_order, depends_on)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -121,7 +133,7 @@ func Fork(ctx context.Context, db *sql.DB, j journal.Emitter, workspaceID, fromC
 			nullableSQL(tr.assignedAgent),
 			tr.title.String, nullableSQL(tr.description),
 			defaultStatus(tr.status.String), tr.taskOrder.Int64,
-			defaultDepends(tr.dependsOn.String))
+			remappedDeps)
 		if err != nil {
 			return "", "", fmt.Errorf("cartographer: copy task %s: %w", tr.id.String, err)
 		}
@@ -213,6 +225,35 @@ func defaultDepends(s string) string {
 		return "[]"
 	}
 	return s
+}
+
+// remapDepends parses a depends_on JSON array of task ids, replaces each
+// id with its fork-side counterpart from idMap, and re-marshals the
+// result. Ids missing from the map (e.g. references to tasks deleted
+// before the fork or external ids) are dropped — keeping a stale id
+// would re-introduce the original "wait forever" bug.
+func remapDepends(raw string, idMap map[string]string) (string, error) {
+	if raw == "" {
+		return "[]", nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "[]", nil
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if mapped, ok := idMap[id]; ok {
+			out = append(out, mapped)
+		}
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // cloneMeta duplicates the map so the fork's snapshot can be mutated

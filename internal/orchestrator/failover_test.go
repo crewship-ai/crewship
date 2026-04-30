@@ -34,6 +34,60 @@ func TestCooldownExpired(t *testing.T) {
 	}
 }
 
+// TestIsInCooldownPrunesExpired verifies the self-prune path: once an
+// entry is observed expired by a reader, it should be evicted from the
+// internal map so cooldowns can't grow without bound over the process
+// lifetime. Without this, ClearExpired had no production caller and
+// every rate-limit ever recorded leaked one map entry forever.
+func TestIsInCooldownPrunesExpired(t *testing.T) {
+	cm := NewCooldownManager()
+	// Use a negative duration so the cooldown is expired the moment it lands —
+	// deterministic, no sleep, no flake under CI load.
+	cm.MarkCooldown("cred-1", -1*time.Millisecond)
+
+	// First read sees it's expired and prunes it.
+	if cm.IsInCooldown("cred-1") {
+		t.Fatal("expected expired cooldown to read as not-in-cooldown")
+	}
+
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if _, stillThere := cm.cooldowns["cred-1"]; stillThere {
+		t.Fatal("expected expired entry to be pruned from the map after IsInCooldown")
+	}
+}
+
+// TestIsInCooldownHonorsConcurrentRefresh verifies that if a concurrent
+// MarkCooldown refreshes an entry to a future time between the RLock release
+// and the write Lock acquire in IsInCooldown, the function returns true (the
+// credential is still in cooldown) rather than reporting it expired.
+//
+// Regression: previously the re-check branch returned false unconditionally,
+// even when the rechecked timestamp was now in the future, which could
+// trigger premature failover.
+func TestIsInCooldownHonorsConcurrentRefresh(t *testing.T) {
+	cm := NewCooldownManager()
+	// Seed an already-expired entry — the "until" read at the top of
+	// IsInCooldown will see this and decide to enter the prune branch.
+	cm.MarkCooldown("cred-1", -1*time.Millisecond)
+
+	// Simulate the concurrent MarkCooldown that races past the RLock release
+	// by overwriting the entry to a future time before we call IsInCooldown.
+	cm.mu.Lock()
+	cm.cooldowns["cred-1"] = time.Now().Add(1 * time.Hour)
+	cm.mu.Unlock()
+
+	if !cm.IsInCooldown("cred-1") {
+		t.Fatal("expected refreshed cooldown to be reported as in-cooldown")
+	}
+
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if _, stillThere := cm.cooldowns["cred-1"]; !stillThere {
+		t.Fatal("refreshed entry was incorrectly pruned despite future expiry")
+	}
+}
+
 func TestClearExpired(t *testing.T) {
 	cm := NewCooldownManager()
 	cm.MarkCooldown("cred-1", 1*time.Millisecond)
@@ -65,7 +119,13 @@ func TestIsRateLimitError(t *testing.T) {
 		{"billing limit", 1, "billing_hard_limit reached", true},
 		{"normal error", 1, "Error: file not found", false},
 		{"success exit code", 0, "rate limit", false},
-		{"exit code 2", 2, "rate limit", false},
+		// Real-world CLI exits for 429s vary; previously only exit 1 was
+		// accepted. Now any non-zero exit code with a matching stderr
+		// pattern triggers cooldown, so the rate-limit failover engages
+		// after a SIGKILL (137) or usage error (2) too.
+		{"exit code 2 with rate limit stderr", 2, "rate limit", true},
+		{"timeout exit code 124", 124, "Error: HTTP 429", true},
+		{"OOM exit code 137", 137, "rate_limit reached", true},
 		{"empty stderr", 1, "", false},
 		{"case insensitive", 1, "RATE_LIMIT exceeded", true},
 	}

@@ -72,6 +72,27 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// TestUpsertNilEmitterDoesNotPanic verifies callers that don't care about
+// the journal can pass a nil Emitter without crashing the process. The
+// previous code dereferenced j.Emit unconditionally on every status
+// transition, mirroring the nil-tolerant contract paymaster.Enforce
+// already follows.
+func TestUpsertNilEmitterDoesNotPanic(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	// First Upsert is always a transition (no prior row), which forces
+	// the j.Emit code path. Without the nil-check this panics.
+	err := Upsert(context.Background(), db, nil, Snapshot{
+		AgentID:     "agent_1",
+		WorkspaceID: "ws_test",
+		Status:      StatusOnline,
+	})
+	if err != nil {
+		t.Fatalf("upsert with nil emitter: %v", err)
+	}
+}
+
 func TestUpsertEmitsOnTransitionOnly(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()

@@ -87,6 +87,20 @@ func Dispatch(ctx context.Context, db *sql.DB, emitter journal.Emitter, event Ev
 		h := h
 		go func() {
 			bgCtx := context.Background()
+			// A panic in a buggy handler must not take down crewshipd.
+			// Recover, surface the panic in the journal as a warn-level
+			// hook.fired entry, and let the dispatcher live on.
+			defer func() {
+				r := recover()
+				if r == nil {
+					return
+				}
+				panicErr := fmt.Errorf("hook handler panic: %v", r)
+				emitFired(bgCtx, emitter, h, ec, Result{
+					Outcome: OutcomeError,
+					Message: panicErr.Error(),
+				}, panicErr)
+			}()
 			res, runErr := runHandler(bgCtx, h, ec)
 			emitFired(bgCtx, emitter, h, ec, res, runErr)
 			if runErr == nil && res.Outcome == OutcomeBlock {

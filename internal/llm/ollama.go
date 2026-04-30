@@ -17,15 +17,28 @@ import (
 type Ollama struct {
 	baseURL string // e.g. "http://localhost:11434"
 	model   string
-	client  *http.Client
+	client  *http.Client // bounded by Client.Timeout — used for Complete()
+	stream  *http.Client // no total deadline — used for Stream()
 }
 
 // NewOllama creates a provider that calls a local or remote Ollama instance.
+// The streaming path uses a separate http.Client with no total deadline:
+// http.Client.Timeout cancels the entire request including body read, so
+// applying it to a long-running NDJSON stream silently truncates a 10-min
+// generation at 5 min. The streaming client still bounds dial/header time
+// via the transport, leaving body read to caller ctx cancellation.
 func NewOllama(baseURL, model string) *Ollama {
+	// Clone DefaultTransport so remote deployments behind HTTP_PROXY / HTTPS_PROXY
+	// keep working and TLS/dial defaults (TLSHandshakeTimeout, ExpectContinueTimeout)
+	// aren't dropped — a zero-value http.Transport silently disables all of those.
+	streamTransport := http.DefaultTransport.(*http.Transport).Clone()
+	streamTransport.ResponseHeaderTimeout = 60 * time.Second
+	streamTransport.IdleConnTimeout = 90 * time.Second
 	return &Ollama{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
 		client:  &http.Client{Timeout: 300 * time.Second},
+		stream:  &http.Client{Transport: streamTransport},
 	}
 }
 
@@ -74,7 +87,7 @@ func (o *Ollama) Stream(ctx context.Context, req Request, handler func(StreamEve
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.client.Do(httpReq)
+	resp, err := o.stream.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("ollama http: %w", err)
 	}
@@ -112,12 +125,18 @@ func (o *Ollama) buildRequestBody(req Request, stream bool) ([]byte, error) {
 	if req.Temperature != nil {
 		opts["temperature"] = *req.Temperature
 	}
-	if req.MaxTokens > 0 {
-		opts["num_predict"] = req.MaxTokens
+	// Always pin num_predict. Ollama's default is -1 (generate until the
+	// model emits a natural EOS) which routinely produces multi-thousand-
+	// token replies for callers that just forgot to set MaxTokens. Mirror
+	// the Anthropic provider's 4096 default so cost and latency stay
+	// bounded by default; explicit opt-in still works because any caller
+	// who sets MaxTokens themselves wins.
+	maxToks := req.MaxTokens
+	if maxToks <= 0 {
+		maxToks = 4096
 	}
-	if len(opts) > 0 {
-		body["options"] = opts
-	}
+	opts["num_predict"] = maxToks
+	body["options"] = opts
 
 	if len(req.Tools) > 0 {
 		body["tools"] = toOllamaTools(req.Tools)

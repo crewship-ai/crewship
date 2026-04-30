@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -50,10 +49,10 @@ func NewWriter(basePath string, logger *slog.Logger) *Writer {
 }
 
 func validateID(s string) error {
-	if s == "" || strings.ContainsAny(s, "/\\") || strings.Contains(s, "..") {
-		return fmt.Errorf("invalid ID: %q", s)
-	}
-	return nil
+	// Delegates to the shared path-segment validator so writer and reader
+	// reject the same set of dangerous inputs (null bytes, control chars,
+	// whitespace, traversal segments).
+	return validatePathSegment(s)
 }
 
 // Append writes a log entry to the JSONL file for the given crew and agent,

@@ -66,8 +66,14 @@ func New(
 		cfg.DefaultCPUs = 2.0
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	// Use a single parser for both AddFunc registration and updateTimestamps
+	// re-parse. Without this, the cron.New() default parser accepts descriptor
+	// expressions like "@monthly" while the explicit parser below rejects them,
+	// which would let a schedule register but then trip the "unparsable cron"
+	// branch in updateTimestamps and clear schedule_next_run on every refresh.
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 	return &Scheduler{
-		c:         cron.New(),
+		c:         cron.New(cron.WithParser(parser)),
 		db:        db,
 		resolver:  resolver,
 		orch:      orch,
@@ -76,7 +82,7 @@ func New(
 		convStore: convStore,
 		logger:    logger,
 		cfg:       cfg,
-		parser:    cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		parser:    parser,
 		ctx:       ctx,
 		cancel:    cancel,
 		entryMap:  make(map[string]cron.EntryID),
@@ -396,11 +402,29 @@ func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 	if sched, err := s.parser.Parse(cronExpr); err == nil {
 		next := sched.Next(time.Now()).UTC().Format(time.RFC3339)
 		nextRun = &next
+	} else {
+		// A failed parse here means the cron stored on the agent row no
+		// longer parses (stored row was corrupted, validator drift, etc.).
+		// Without an explicit signal, schedule_next_run silently freezes
+		// at its stale value. Log loudly and clear next_run so the UI
+		// reflects the real state instead of pointing at a long-past
+		// timestamp.
+		s.logger.Warn("schedule cron unparsable; clearing schedule_next_run",
+			"agent_id", agentID, "cron", cronExpr, "error", err)
+		if _, err := s.db.ExecContext(s.ctx,
+			"UPDATE agents SET schedule_next_run = NULL WHERE id = ?", agentID); err != nil {
+			s.logger.Warn("clear schedule_next_run", "agent_id", agentID, "error", err)
+		}
 	}
 
+	// Use the scheduler's lifecycle ctx for all timestamp DB writes so a
+	// Stop() during shutdown short-circuits in-flight UPDATEs cleanly
+	// instead of racing the DB pool close. context.Background here meant
+	// shutdown could log "use of closed connection" warnings even on a
+	// graceful stop.
 	if errorOnly {
 		if nextRun != nil {
-			if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_next_run = ? WHERE id = ?", *nextRun, agentID); err != nil {
+			if _, err := s.db.ExecContext(s.ctx, "UPDATE agents SET schedule_next_run = ? WHERE id = ?", *nextRun, agentID); err != nil {
 				s.logger.Warn("update schedule_next_run", "agent_id", agentID, "error", err)
 			}
 		}
@@ -408,12 +432,12 @@ func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 	}
 
 	if nextRun != nil {
-		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_last_run = ?, schedule_next_run = ? WHERE id = ?",
+		if _, err := s.db.ExecContext(s.ctx, "UPDATE agents SET schedule_last_run = ?, schedule_next_run = ? WHERE id = ?",
 			now, *nextRun, agentID); err != nil {
 			s.logger.Warn("update schedule timestamps", "agent_id", agentID, "error", err)
 		}
 	} else {
-		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_last_run = ? WHERE id = ?", now, agentID); err != nil {
+		if _, err := s.db.ExecContext(s.ctx, "UPDATE agents SET schedule_last_run = ? WHERE id = ?", now, agentID); err != nil {
 			s.logger.Warn("update schedule_last_run", "agent_id", agentID, "error", err)
 		}
 	}

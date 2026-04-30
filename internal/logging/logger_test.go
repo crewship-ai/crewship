@@ -72,3 +72,31 @@ func TestFromContextDefault(t *testing.T) {
 		t.Error("expected slog.Default()")
 	}
 }
+
+// TestParseLevelAccepts verifies common case/spelling variants resolve to
+// the level the operator obviously meant. Without this, CREWSHIP_LOG_LEVEL
+// values like "WARN", "warning", or "fatal" silently downgrade to info,
+// producing a much noisier log than expected.
+func TestParseLevelAccepts(t *testing.T) {
+	cases := []struct {
+		in   string
+		want slog.Level
+	}{
+		{"DEBUG", slog.LevelDebug},
+		{"Debug", slog.LevelDebug},
+		{"info", slog.LevelInfo},
+		{"INFO", slog.LevelInfo},
+		{"warn", slog.LevelWarn},
+		{"WARN", slog.LevelWarn},
+		{"warning", slog.LevelWarn},
+		{"error", slog.LevelError},
+		{"ERROR", slog.LevelError},
+		{"fatal", slog.LevelError},
+	}
+	for _, tc := range cases {
+		got := parseLevel(tc.in)
+		if got != tc.want {
+			t.Errorf("parseLevel(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

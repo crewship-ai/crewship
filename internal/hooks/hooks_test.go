@@ -671,6 +671,105 @@ func (s *stubSubagent) Run(_ context.Context, _ Hook, _ EventContext) (Result, e
 	return Result{Outcome: OutcomePass, Message: "ok"}, nil
 }
 
+// panickingSubagent simulates a buggy handler that panics during Run. A
+// panic inside a non-blocking dispatch goroutine without a recover guard
+// terminates the entire crewshipd process — the regression test below
+// asserts the dispatcher contains the blast radius.
+type panickingSubagent struct{}
+
+func (panickingSubagent) Run(_ context.Context, _ Hook, _ EventContext) (Result, error) {
+	panic("simulated handler panic")
+}
+
+// TestShellHandlerTimeoutOverflowGuarded verifies a timeout_secs value
+// past the int64-nanoseconds boundary (~9.22e9 sec) doesn't wrap to a
+// negative time.Duration, which would silently fire the context
+// deadline before the shell command had a chance to run. The cap fires
+// before the multiplication so `true` completes normally.
+func TestShellHandlerTimeoutOverflowGuarded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell handler requires sh")
+	}
+	res, err := shellHandler(context.Background(), Hook{
+		HandlerKind: HandlerKindShell,
+		HandlerConfig: map[string]any{
+			"command":      "true",
+			"timeout_secs": int(1e10), // past int64 ns capacity → negative duration without cap
+		},
+	}, EventContext{})
+	if err != nil {
+		t.Fatalf("shellHandler returned err: %v", err)
+	}
+	if res.Outcome != OutcomePass {
+		t.Errorf("expected OutcomePass for trivial command with capped timeout, got %s (msg=%q)", res.Outcome, res.Message)
+	}
+}
+
+// TestDispatcherNonBlockingHandlerPanicRecovered verifies that a panic
+// inside a non-blocking hook goroutine does NOT crash the process. Without
+// the recover guard, the goroutine's panic propagates to the runtime and
+// the test binary exits non-zero before the test can complete.
+func TestDispatcherNonBlockingHandlerPanicRecovered(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+
+	SetSubagentHandler(panickingSubagent{})
+	defer SetSubagentHandler(nil)
+
+	_, err := Register(ctx, db, Hook{
+		WorkspaceID:   "ws_test",
+		Event:         EventPostToolCall,
+		HandlerKind:   HandlerKindSubagent,
+		HandlerConfig: map[string]any{},
+		Blocking:      false,
+		Enabled:       true,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &recordingEmitter{}
+	if err := Dispatch(ctx, db, rec, EventPostToolCall, EventContext{
+		WorkspaceID: "ws_test",
+	}); err != nil {
+		t.Fatalf("dispatch returned error: %v", err)
+	}
+
+	// Wait long enough for the goroutine to fire and either panic-and-crash
+	// (no recover) or panic-and-be-handled (recover present). Polling for
+	// the journal entry instead of a fixed sleep keeps the test snappy on
+	// fast hosts and reliable on slow CI.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		rec.mu.Lock()
+		n := len(rec.entries)
+		rec.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		runtime.Gosched()
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.entries) == 0 {
+		t.Fatalf("expected journal entry from recovered panic, got none")
+	}
+	// Recovered panic must be visible in the journal as a hook.fired entry
+	// with warn severity carrying an error payload.
+	var sawWarn bool
+	for _, e := range rec.entries {
+		if e.Type == journal.EntryHookFired && e.Severity == journal.SeverityWarn {
+			sawWarn = true
+		}
+	}
+	if !sawWarn {
+		t.Errorf("expected hook.fired with warn severity after recovered panic; entries=%v", rec.typesSeen())
+	}
+}
+
 func TestSubagentHandlerConfigured(t *testing.T) {
 	stub := &stubSubagent{}
 	SetSubagentHandler(stub)

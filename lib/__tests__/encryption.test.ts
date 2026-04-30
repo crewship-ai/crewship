@@ -19,6 +19,15 @@ describe("encryption", () => {
     return await import("@/lib/encryption")
   }
 
+  it("decrypt rejects short ciphertext with a clear error", async () => {
+    // Without the up-front length guard, decrypt threw an opaque
+    // ERR_CRYPTO_INVALID_IV from inside createDecipheriv when the
+    // base64 payload was shorter than 32 bytes (16 IV + 16 AuthTag).
+    const { decrypt } = await loadEncryption()
+    expect(() => decrypt("v1:abc")).toThrow(/too short/i)
+    expect(() => decrypt("v1:")).toThrow()
+  })
+
   it("encrypt returns string starting with 'v1:'", async () => {
     const { encrypt } = await loadEncryption()
     const result = encrypt("hello")

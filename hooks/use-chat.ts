@@ -50,6 +50,32 @@ export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" 
 /** WebSocket event types for agent-to-agent task assignment lifecycle. */
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
 
+/** Safely render an assignment-event payload field as a string. The
+ *  backend has historically sent both `target: "viktor"` and
+ *  `target: { slug: "viktor" }`, and naive template-literal interpolation
+ *  of the latter renders "[object Object]" in the chat. Prefer a
+ *  human-shaped field, fall back to empty.
+ *
+ *  We intentionally do NOT serialize the whole object: the result lands in
+ *  user-visible chat messages, and a backend payload may carry tokens,
+ *  emails, or other PII. If none of slug/name/id is present the safer
+ *  move is to render nothing rather than dump the object.
+ *  Exported for unit tests.
+ */
+export function assignmentField(v: unknown): string {
+  if (v == null) return ""
+  if (typeof v === "string") return v
+  if (typeof v === "number" || typeof v === "boolean") return String(v)
+  if (typeof v === "object") {
+    const obj = v as Record<string, unknown>
+    if (typeof obj.slug === "string") return obj.slug
+    if (typeof obj.name === "string") return obj.name
+    if (typeof obj.id === "string") return obj.id
+    return ""
+  }
+  return String(v)
+}
+
 /** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
   id: string
@@ -133,6 +159,14 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
   const [isStreaming, setIsStreaming] = useState(false)
   const textBufferRef = useRef("")
   const thinkingBufferRef = useRef("")
+  // True between stopGeneration() and the next sendMessage/regenerate/edit.
+  // Used to drop chat_event deltas that arrive after a local cancel — the
+  // server's cancel ack races against in-flight packets, and without this
+  // gate the late deltas re-create the cancelled assistant turn and the
+  // typing indicator reappears. Only blocks AFTER an explicit cancel so
+  // unsolicited stream events (multi-tab observation, history replay)
+  // still flow through.
+  const cancelledRef = useRef(false)
 
   // Reset stream-side state when session changes. We deliberately do NOT
   // reset turns here — that would cause a blank-canvas flash between the
@@ -143,6 +177,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     setIsStreaming(false)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
+    cancelledRef.current = false
   }, [sessionId])
 
   const handleMessage = useCallback(
@@ -156,19 +191,23 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           ? msg.payload as Record<string, unknown>
           : {}
         let content = ""
+        const target = assignmentField(payload.target)
+        const task = assignmentField(payload.task)
+        const result = assignmentField(payload.result)
+        const errMsg = assignmentField(payload.error)
         switch (msg.type as AssignmentEventType) {
           case "assignment_created":
-            content = `[Assignment] Assigning task to @${payload.target}: ${payload.task}`
+            content = `[Assignment] Assigning task to @${target}: ${task}`
             break
           case "assignment_running":
-            content = `[Assignment] @${payload.target} is working on the task...`
+            content = `[Assignment] @${target} is working on the task...`
             break
           case "assignment_completed":
-            content = `[Assignment] @${payload.target} completed the task.`
-            if (payload.result) content += `\nResult: ${payload.result}`
+            content = `[Assignment] @${target} completed the task.`
+            if (result) content += `\nResult: ${result}`
             break
           case "assignment_failed":
-            content = `[Assignment] @${payload.target} failed: ${payload.error}`
+            content = `[Assignment] @${target} failed: ${errMsg}`
             break
         }
         setTurns((prev) => [
@@ -185,6 +224,11 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
       }
 
       if (msg.type !== "chat_event") return
+      // Drop deltas arriving after a local cancel so the cancelled stream
+      // can't resurrect itself. The server's cancel ack races against
+      // in-flight packets — without this gate, those late deltas re-open
+      // the just-closed assistant turn.
+      if (cancelledRef.current) return
 
       const payload = (typeof msg.payload === "object" && msg.payload !== null)
         ? msg.payload as Record<string, unknown>
@@ -628,6 +672,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
       setIsStreaming(true)
       textBufferRef.current = ""
       thinkingBufferRef.current = ""
+      cancelledRef.current = false
 
       send({
         type: "send_message",
@@ -645,6 +690,27 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
       type: "cancel_message",
       payload: JSON.stringify({ session_id: sessionId }),
     })
+    // Flip local streaming state immediately so the UI returns to the
+    // input-ready state even if the WS is dropped before the server's
+    // cancel ack arrives. Closing assistant turns mark them no longer
+    // streaming so the typing indicator stops. The cancelled flag blocks
+    // any deltas already in flight from re-opening the cancelled turn
+    // or appending parts to it; cleared by the next sendMessage.
+    setIsStreaming(false)
+    cancelledRef.current = true
+    setTurns((prev) =>
+      prev.map((t) =>
+        t.role === "assistant" && t.isStreaming
+          ? {
+              ...t,
+              isStreaming: false,
+              parts: t.parts.map((p) =>
+                p.isStreaming ? { ...p, isStreaming: false } : p,
+              ),
+            }
+          : t,
+      ),
+    )
   }, [send, sessionId])
 
   // Regenerate the last assistant response by re-sending the last user message.
@@ -661,6 +727,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     setIsStreaming(true)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
+    cancelledRef.current = false
 
     send({
       type: "send_message",
@@ -687,6 +754,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
       setIsStreaming(true)
       textBufferRef.current = ""
       thinkingBufferRef.current = ""
+      cancelledRef.current = false
 
       send({
         type: "send_message",

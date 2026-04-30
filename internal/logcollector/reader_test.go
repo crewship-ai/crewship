@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -112,6 +113,24 @@ func TestValidatePathSegment(t *testing.T) {
 		{"with backslash", "team\\bad", false},
 		{"with dotdot", "team..bad", false},
 		{"just dotdot", "..", false},
+		// New defenses against control / whitespace / oversize input.
+		// Null byte truncates paths in some FS layers; control chars and
+		// whitespace produce surprising filenames; 1KB segments fail
+		// every reasonable identifier shape.
+		{"with null byte", "ok\x00bad", false},
+		{"with newline", "ok\nbad", false},
+		{"with space", "ok bad", false},
+		{"with del char", "ok\x7fbad", false},
+		{"oversize", strings.Repeat("a", 1024), false},
+		// 0xFF 0xFE is not a valid UTF-8 sequence; without an explicit
+		// utf8.ValidString gate, the rune iteration would decode it to
+		// U+FFFD (the replacement char) which is both printable and
+		// non-space and would leak through.
+		{"invalid utf-8", "ok\xff\xfebad", false},
+		// Boundary: 256 bytes of ASCII is the documented max length and
+		// must be accepted; one more must not.
+		{"max length 256", strings.Repeat("a", 256), true},
+		{"max length plus one", strings.Repeat("a", 257), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

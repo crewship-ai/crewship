@@ -1,11 +1,22 @@
+// Stable placeholder returned for any formatter when its input doesn't
+// parse to a real date. Beats "NaNd ago" / "Invalid Date" leaking into
+// the UI when the backend returns a stale or empty timestamp.
+const INVALID_DATE_PLACEHOLDER = "—"
+
+function parseDate(dateStr: string): number | null {
+  if (!dateStr) return null
+  const t = new Date(dateStr).getTime()
+  return Number.isFinite(t) ? t : null
+}
+
 /**
  * Format a date string as a human-readable relative time
  * (e.g. "5m ago", "2h ago", "yesterday", "2d ago").
  */
 export function timeAgo(dateStr: string): string {
-  const now = Date.now()
-  const then = new Date(dateStr).getTime()
-  const diff = now - then
+  const then = parseDate(dateStr)
+  if (then === null) return INVALID_DATE_PLACEHOLDER
+  const diff = Date.now() - then
   const mins = Math.floor(diff / 60000)
   if (mins < 1) return "just now"
   if (mins < 60) return `${mins}m ago`
@@ -37,7 +48,9 @@ export function formatTimeout(seconds: number): string {
 
 /** Formats a date string as "Mon D, YYYY" using the user's locale. */
 export function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, {
+  const t = parseDate(dateStr)
+  if (t === null) return INVALID_DATE_PLACEHOLDER
+  return new Date(t).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -46,7 +59,9 @@ export function formatDate(dateStr: string): string {
 
 /** Formats a date string as "Mon D" without the year. */
 export function formatShortDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, {
+  const t = parseDate(dateStr)
+  if (t === null) return INVALID_DATE_PLACEHOLDER
+  return new Date(t).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
   })
@@ -54,8 +69,9 @@ export function formatShortDate(dateStr: string): string {
 
 /** Formats a date string as "Mon D, YYYY, H:MM AM/PM". */
 export function formatDateTime(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString(undefined, {
+  const t = parseDate(dateStr)
+  if (t === null) return INVALID_DATE_PLACEHOLDER
+  return new Date(t).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -66,9 +82,12 @@ export function formatDateTime(dateStr: string): string {
 
 /** Formats a date as relative time with second-level precision (e.g., "45s ago"). */
 export function formatRelativeTime(dateStr: string): string {
-  const now = Date.now()
-  const date = new Date(dateStr).getTime()
-  const diffMs = now - date
+  const date = parseDate(dateStr)
+  if (date === null) return INVALID_DATE_PLACEHOLDER
+  // Clock skew or future-dated timestamps would otherwise emit "-12s ago",
+  // which renders as nonsense in the UI. Clamp the diff so the formatter
+  // collapses anything in the future to "0s ago" rather than negatives.
+  const diffMs = Math.max(0, Date.now() - date)
 
   const seconds = Math.floor(diffMs / 1000)
   if (seconds < 60) return `${seconds}s ago`
@@ -82,14 +101,14 @@ export function formatRelativeTime(dateStr: string): string {
 
 /** Formats a comment timestamp: relative for recent, absolute date after 7 days. */
 export function formatCommentTime(dateStr: string): string {
-  const now = Date.now()
-  const date = new Date(dateStr).getTime()
-  const diffMin = Math.floor((now - date) / 60000)
+  const date = parseDate(dateStr)
+  if (date === null) return INVALID_DATE_PLACEHOLDER
+  const diffMin = Math.floor((Date.now() - date) / 60000)
   if (diffMin < 1) return "just now"
   if (diffMin < 60) return `${diffMin}m ago`
   const diffHours = Math.floor(diffMin / 60)
   if (diffHours < 24) return `${diffHours}h ago`
   const diffDays = Math.floor(diffHours / 24)
   if (diffDays < 7) return `${diffDays}d ago`
-  return new Date(dateStr).toLocaleDateString()
+  return new Date(date).toLocaleDateString()
 }

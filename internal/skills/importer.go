@@ -240,24 +240,17 @@ func nullableStr(s string) interface{} {
 }
 
 // generateSkillID produces a short random hex ID with a "sk_" prefix.
+// crypto/rand failure is exceptional on any production system (means
+// /dev/urandom isn't available or the entropy pool is broken). The
+// previous fallback wrote two nearly-identical UnixNano timestamps into
+// the bytes, producing highly predictable IDs and easy collisions on
+// rapid imports — strictly worse than failing loudly. Panic instead so
+// callers learn about the underlying problem rather than later
+// debugging duplicate "sk_" rows.
 func generateSkillID() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback: use timestamp-based entropy to fill all 12 bytes
-		ts := time.Now().UnixNano()
-		b[0] = byte(ts >> 56)
-		b[1] = byte(ts >> 48)
-		b[2] = byte(ts >> 40)
-		b[3] = byte(ts >> 32)
-		b[4] = byte(ts >> 24)
-		b[5] = byte(ts >> 16)
-		b[6] = byte(ts >> 8)
-		b[7] = byte(ts)
-		ts2 := time.Now().UnixNano()
-		b[8] = byte(ts2 >> 24)
-		b[9] = byte(ts2 >> 16)
-		b[10] = byte(ts2 >> 8)
-		b[11] = byte(ts2)
+		panic("skills: crypto/rand unavailable: " + err.Error())
 	}
 	return "sk_" + hex.EncodeToString(b)
 }

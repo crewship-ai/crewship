@@ -27,16 +27,35 @@ func (cm *CooldownManager) MarkCooldown(credID string, duration time.Duration) {
 	cm.cooldowns[credID] = time.Now().Add(duration)
 }
 
-// IsInCooldown reports whether the credential is currently in a cooldown period.
+// IsInCooldown reports whether the credential is currently in a cooldown
+// period. Stale entries are pruned inline so the map can't grow unbounded
+// over the process lifetime — without this self-prune, ClearExpired had
+// no production caller and the map leaked one entry per rate-limited
+// credential forever.
 func (cm *CooldownManager) IsInCooldown(credID string) bool {
 	cm.mu.RLock()
-	defer cm.mu.RUnlock()
 	until, ok := cm.cooldowns[credID]
+	cm.mu.RUnlock()
 	if !ok {
 		return false
 	}
 	if time.Now().After(until) {
-		return false
+		// Upgrade to a write lock just long enough to evict.
+		cm.mu.Lock()
+		defer cm.mu.Unlock()
+		// Re-check under write lock so a concurrent MarkCooldown that
+		// raced past the read isn't clobbered. If the entry was refreshed
+		// to a future time between the RLock release and Lock acquire,
+		// honor the refresh and report the credential as still in cooldown.
+		cur, stillThere := cm.cooldowns[credID]
+		if !stillThere {
+			return false
+		}
+		if time.Now().After(cur) {
+			delete(cm.cooldowns, credID)
+			return false
+		}
+		return true
 	}
 	return true
 }
@@ -64,9 +83,13 @@ var rateLimitPatterns = []string{
 }
 
 // IsRateLimitError checks whether the agent exit code and stderr indicate a
-// rate limit or quota error from the LLM provider.
+// rate limit or quota error from the LLM provider. Real-world CLI exits
+// for a 429 vary by tool: 1 (generic error), 2 (usage), 124 (timeout
+// after a long-running rate-limit retry), 137 (SIGKILL after the OOM
+// killer kicked in on a stuck process). Any non-zero exit is acceptable
+// as long as stderr carries one of the recognised rate-limit signals.
 func IsRateLimitError(exitCode int, stderr string) bool {
-	if exitCode != 1 {
+	if exitCode == 0 {
 		return false
 	}
 	lower := strings.ToLower(stderr)

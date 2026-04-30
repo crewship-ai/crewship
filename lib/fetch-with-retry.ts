@@ -9,12 +9,28 @@
  * Use this only on calls where a transient flap matters (the
  * crew/agent detail loaders). Plain `fetch` is fine for everything
  * else.
+ *
+ * A request body that's a ReadableStream is consumed by the first
+ * dispatch, so a retry with the same body would either error or send
+ * an empty payload. Such requests are intentionally NOT retried —
+ * callers that need retry semantics for streaming uploads must buffer
+ * the payload themselves (e.g. await response.arrayBuffer()).
  */
 export async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit & { retries?: number; baseDelayMs?: number },
 ): Promise<Response> {
-  const retries = init?.retries ?? 2
+  const requestedRetries = normalizeRetries(init?.retries, 2)
+  // ReadableStream bodies can't be re-read after the first fetch consumes
+  // them. Silently retrying would either throw "body stream already read"
+  // or send an empty body to the second attempt — both worse than
+  // surfacing the original failure to the caller. Check both the explicit
+  // init.body AND any body attached to a Request passed as `input`, since
+  // either path can deliver a stream.
+  const retries =
+    bodyIsReplayable(init?.body) && inputIsReplayable(input)
+      ? requestedRetries
+      : 0
   const baseDelay = init?.baseDelayMs ?? 250
   let lastError: unknown
 
@@ -42,6 +58,40 @@ export async function fetchWithRetry(
     }
   }
   throw lastError instanceof Error ? lastError : new Error("fetchWithRetry exhausted")
+}
+
+// bodyIsReplayable returns false for body shapes that get consumed on
+// first dispatch (currently just ReadableStream). Strings, Blob,
+// ArrayBuffer, Uint8Array, FormData, and URLSearchParams can all be
+// fetched repeatedly because the runtime re-reads from their backing
+// memory on each call.
+export function bodyIsReplayable(body: BodyInit | null | undefined): boolean {
+  if (body == null) return true
+  if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
+    return false
+  }
+  return true
+}
+
+// inputIsReplayable mirrors bodyIsReplayable but for the `input` argument:
+// when callers pass `new Request(url, { body: stream })` the stream lives on
+// the Request object and isn't visible via init.body. Treat any Request
+// carrying a non-null body as not safely replayable.
+export function inputIsReplayable(input: RequestInfo | URL): boolean {
+  if (typeof Request !== "undefined" && input instanceof Request) {
+    return input.body == null
+  }
+  return true
+}
+
+// normalizeRetries clamps the caller-supplied retry count to a non-negative
+// integer. Without this, NaN/negative values from a typo or runtime coercion
+// would skip the loop entirely (because `attempt <= retries` is false for
+// NaN/negative on first iteration) and the function would throw the
+// exhaustion error before the initial fetch was ever attempted.
+function normalizeRetries(value: number | undefined, fallback: number): number {
+  if (value == null || !Number.isFinite(value)) return fallback
+  return Math.max(0, Math.trunc(value))
 }
 
 function sleep(ms: number): Promise<void> {
