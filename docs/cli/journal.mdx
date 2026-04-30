@@ -12,7 +12,7 @@ Read the [Crew Journal](/guides/crew-journal) -- the canonical append-only event
 crewship journal [flags]
 ```
 
-There are no subcommands -- the top-level command is the list view. Live tail (`--follow`) will require SSE client support and is not yet implemented; use the web UI `/journal` page for live view.
+There are no subcommands -- the top-level command is the list view. `--follow` opens an SSE connection to `/api/v1/journal/stream` and prints entries as they arrive (Ctrl-C to exit). The CLI auto-reconnects on transient failure with bounded exponential backoff (1 s → 30 s) and threads `Last-Event-ID` so a brief disconnect resumes without dropping or duplicating entries. For pretty in-browser viewing, the web UI `/journal` page is also available.
 
 ## Flags
 
@@ -26,7 +26,7 @@ There are no subcommands -- the top-level command is the list view. Live tail (`
 | `--severity` | `string` | | Comma-separated severities (`info`, `notice`, `warn`, `error`). |
 | `--since` | `string` | | Time window (`1h`, `24h`, `7d`, or RFC3339). |
 | `--query` / `-q` | `string` | | Server-side FTS5 search across `summary` + `payload`. PR #234 wired the query path; the underlying virtual table comes from migration 55 (the memory-uplift PR #212, which also indexed memory). |
-| `--follow` | `bool` | `false` | Live tail via SSE (not yet implemented; use the web UI). |
+| `--follow` | `bool` | `false` | Live tail via SSE — Ctrl-C to exit, reconnects on transient failure. |
 
 Global output flags apply: `--format table|json|yaml` (default table).
 
@@ -51,7 +51,16 @@ crewship journal --mission MIS-42 --format json
 # Full-text search across summary + payload
 crewship journal --query "OOM" --since 24h
 crewship journal -q "ratelimit" --severity warn,error
+
+# Live tail — print entries as they arrive (Ctrl-C to exit)
+crewship journal --follow
+crewship journal --follow --severity warn,error
+crewship journal --follow --crew backend-team
 ```
+
+For free-text "did we discuss this before?" lookups across the journal,
+prefer `crewship recall <query>` — same backing endpoint, snippet-card
+rendering optimised for question-answering.
 
 ## Sample output
 
