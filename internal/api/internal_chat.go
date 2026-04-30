@@ -96,7 +96,12 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 	// caller bugs (typo'd ID, race against deletion). Surface it as 404
 	// so the caller can either retry resolution or log the broken
 	// reference instead of trusting a phantom success.
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("increment message count rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	if n == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
 		return
@@ -123,7 +128,12 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("update chat title rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	if n == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found or already titled"})
 		return
