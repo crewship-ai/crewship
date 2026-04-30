@@ -9,10 +9,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime/debug"
-	"strings"
 	"sync"
 	"time"
 
@@ -92,12 +92,12 @@ func (r *provisionRateLimiter) tryAcquire(workspaceID string) error {
 	r.recentStarts[workspaceID] = fresh
 
 	if r.running[workspaceID] >= maxConcurrentProvisionsPerWorkspace {
-		return fmt.Errorf("rate limited: %d concurrent provisions already running (max %d)",
-			r.running[workspaceID], maxConcurrentProvisionsPerWorkspace)
+		return fmt.Errorf("%w: %d concurrent provisions already running (max %d)",
+			ErrRateLimited, r.running[workspaceID], maxConcurrentProvisionsPerWorkspace)
 	}
 	if len(fresh) >= maxProvisionStartsPerMinute {
-		return fmt.Errorf("rate limited: %d provisions started in last minute (max %d)",
-			len(fresh), maxProvisionStartsPerMinute)
+		return fmt.Errorf("%w: %d provisions started in last minute (max %d)",
+			ErrRateLimited, len(fresh), maxProvisionStartsPerMinute)
 	}
 
 	r.running[workspaceID]++
@@ -258,11 +258,16 @@ type EnqueueResult struct {
 
 // ErrProvisionerUnavailable is returned by EnqueueForCrew when the handler
 // has no Docker client wired up. ErrCrewNotFound and ErrCrewNoDevcontainer
-// signal load-time issues; ErrRateLimited surfaces the per-workspace cap.
+// signal load-time issues; ErrRateLimited surfaces the per-workspace cap;
+// ErrInvalidCrewID covers caller-side argument validation. Callers MUST
+// use errors.Is for matching — the rate-limit case wraps the sentinel with
+// fmt.Errorf("%w: ...", ...) so the message can carry the actual counts.
 var (
 	ErrProvisionerUnavailable = fmt.Errorf("provisioner not available (Docker client not configured)")
 	ErrCrewNotFound           = fmt.Errorf("crew not found")
 	ErrCrewNoDevcontainer     = fmt.Errorf("crew has no devcontainer_config to provision")
+	ErrRateLimited            = fmt.Errorf("rate limited")
+	ErrInvalidCrewID          = fmt.Errorf("invalid crew ID")
 )
 
 // EnqueueForCrew kicks off an asynchronous provisioning job for the given
@@ -276,7 +281,7 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 		return EnqueueResult{}, ErrProvisionerUnavailable
 	}
 	if crewID == "" {
-		return EnqueueResult{}, fmt.Errorf("crew ID is required")
+		return EnqueueResult{}, ErrInvalidCrewID
 	}
 
 	var devcontainerCfg, miseCfg, runtimeImage sql.NullString
@@ -337,19 +342,21 @@ func (h *ProvisioningHandler) ProvisionTrigger(w http.ResponseWriter, r *http.Re
 	crewID := r.PathValue("crewId")
 	res, err := h.EnqueueForCrew(r.Context(), crewID, workspaceID)
 	if err != nil {
+		// Match by typed sentinel — message strings drift; an HTTP contract
+		// keyed off strings.Contains(err.Error(), "rate limited") would
+		// silently degrade if the wrapping format ever changed.
 		switch {
-		case err == ErrProvisionerUnavailable:
+		case errors.Is(err, ErrProvisionerUnavailable):
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
-		case err == ErrCrewNotFound:
+		case errors.Is(err, ErrCrewNotFound):
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
-		case err == ErrCrewNoDevcontainer:
+		case errors.Is(err, ErrCrewNoDevcontainer):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrInvalidCrewID):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		case errors.Is(err, ErrRateLimited):
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
 		default:
-			// Rate-limit failures from the limiter come through here.
-			if strings.Contains(err.Error(), "rate limited") {
-				writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
-				return
-			}
 			h.logger.Error("provision trigger", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		}
