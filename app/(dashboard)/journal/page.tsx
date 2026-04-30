@@ -88,7 +88,8 @@ export default function JournalPage() {
   const [activeTab, setActiveTab] = useState<JournalTab>(initialTab)
 
   // Apply UI filters to backend query params. The backend accepts CSV for
-  // list-shaped filters (entry_type, severity).
+  // list-shaped filters (entry_type, severity). The `q` param hits FTS5
+  // across summary + payload — server-side, not client-side filtering.
   const queryParams = useMemo<Record<string, string | undefined>>(() => {
     const since = sinceFromRange(filters.timeRange)
     return {
@@ -96,6 +97,7 @@ export default function JournalPage() {
       agent_id: filters.agentId || undefined,
       entry_type: filters.types.length ? filters.types.join(",") : undefined,
       severity: filters.severities.length ? filters.severities.join(",") : undefined,
+      q: filters.search.trim() || undefined,
       since,
     }
   }, [filters])
@@ -117,19 +119,10 @@ export default function JournalPage() {
     onEntry: handleLive,
   })
 
-  // Client-side search filter — the backend doesn't yet support free text, so
-  // we scope it to the already-fetched slice. Reasonable since we cap at
-  // ~100 entries per page.
-  const visibleEntries = useMemo(() => {
-    if (!filters.search.trim()) return entries
-    const needle = filters.search.toLowerCase()
-    return entries.filter(
-      (e) =>
-        e.summary.toLowerCase().includes(needle) ||
-        e.entry_type.toLowerCase().includes(needle) ||
-        (e.actor_id?.toLowerCase().includes(needle) ?? false),
-    )
-  }, [entries, filters.search])
+  // Search is now server-side via FTS5 (?q= maps to MATCH on
+  // journal_entries_fts). Entries returned from the API already
+  // reflect the search term, so no extra client filtering needed.
+  const visibleEntries = entries
 
   return (
     <JournalLookupProvider workspaceId={workspaceId}>
