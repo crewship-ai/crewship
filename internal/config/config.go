@@ -369,8 +369,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("KEEPER_OLLAMA_URL"); v != "" {
 		cfg.Keeper.OllamaURL = v
-		// Auto-enable when URL is set, unless explicitly disabled
-		if os.Getenv("KEEPER_ENABLED") == "" {
+		// Auto-enable when URL is set, unless explicitly disabled. Use the
+		// same envBool gate as the assignment above so an invalid value like
+		// "KEEPER_ENABLED=maybe" doesn't silently suppress auto-enable —
+		// `os.Getenv("KEEPER_ENABLED") == ""` would treat any non-empty
+		// string as "explicitly set" even when envBool ignored it.
+		if _, ok := envBool("KEEPER_ENABLED"); !ok {
 			cfg.Keeper.Enabled = true
 		}
 	}
