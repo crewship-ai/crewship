@@ -13,15 +13,24 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// newTestDB returns a fully migrated SQLite DB backed by an in-memory
-// store. Mirrors the helper used elsewhere in the repo so the schema
-// matches what production runs.
+// newTestDB returns a fully migrated SQLite DB backed by a file in
+// t.TempDir(). The previous in-memory shape (`:memory:`) gave each
+// pool connection a private schema, which broke any test that ran
+// goroutines against the same store — reads on the second connection
+// found "no such table". File-backed survives connection rotation
+// without requiring `cache=shared` query-string gymnastics.
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", ":memory:?_foreign_keys=on")
+	dir := t.TempDir()
+	db, err := sql.Open("sqlite", "file:"+dir+"/sessions.db?_foreign_keys=on&_journal=WAL&_busy_timeout=5000")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// Single-writer SQLite + WAL mode + busy-timeout is the safe combo
+	// for parallel-goroutine tests. Without these, two goroutines
+	// trying to UPDATE the same row simultaneously race for the file
+	// lock and the loser sees SQLITE_BUSY before the timeout kicks in.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := database.Migrate(context.Background(), db, logger); err != nil {

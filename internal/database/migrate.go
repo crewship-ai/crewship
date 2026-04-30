@@ -590,6 +590,21 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user_active ON user_sessions(user_id) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
 `},
+	// Refresh-token rotation with reuse detection (OWASP ASVS 3.7.4).
+	// current_refresh_jti pins the *one* refresh token currently
+	// authoritative for the chain. On rotation we mint a new jti and
+	// CAS-update this column; if a request comes in carrying an older
+	// jti, that's a token-theft signal and the entire session is
+	// revoked. failed_login_count + locked_until back the per-account
+	// brute-force lockout (E.3 in the security audit) — separate from
+	// the per-IP rate limiter so a distributed attacker can't dodge
+	// the slow-down by rotating IPs.
+	{version: 61, name: "add_session_rotation_and_lockout", sql: `
+ALTER TABLE user_sessions ADD COLUMN current_refresh_jti TEXT;
+ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN locked_until TEXT;
+ALTER TABLE users ADD COLUMN last_failed_login_at TEXT;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // Path-scope on the refresh cookie keeps the long-lived token out of
@@ -197,11 +197,19 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var userID, fullName, hashedPw string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT id, full_name, hashed_password FROM users WHERE email = ?", email,
-	).Scan(&userID, &fullName, &hashedPw)
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(hashedPw), []byte(password)) != nil {
+	// Lockout-aware credentials check. Distinguishes locked-account
+	// from invalid-credentials internally for logging, but the wire
+	// response is the same generic CredentialsSignin so an attacker
+	// can't use the response to enumerate which emails exist or
+	// which are currently locked.
+	userID, fullName, err := checkAndLockoutOnFail(r.Context(), h.db, email, password, time.Now())
+	if err != nil {
+		if errors.Is(err, ErrAccountLocked) {
+			h.logger.Warn("login blocked by lockout",
+				"email", email, "ip", clientIP(r))
+		} else if !errors.Is(err, ErrInvalidCredentials) {
+			h.logger.Error("login lockout check", "error", err, "email", email)
+		}
 		h.respondCredentialsError(w, r, wantJSON)
 		return
 	}
@@ -242,12 +250,19 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 // row server-side AND clears both cookies — once a logged-out cookie
 // is somehow replayed it'll fail at the middleware's session lookup
 // with reasonSessionRevoked, not just be absent.
+//
+// Looks at BOTH the access and refresh cookie to find the session id:
+// if the access token has already expired (15 min default), the user
+// can still hit signOut (browsers send refresh cookie too — the path
+// scope only restricts where it's sent, /api/auth covers the refresh
+// AND signout endpoint paths). Without the refresh-fallback, a tab
+// that idled past access expiry would clear cookies but leave a stale
+// active row in user_sessions, polluting the "Active sessions" list.
 func (h *NextAuthHandler) SignOut(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(h.sessionCookieName(r)); err == nil && cookie.Value != "" {
-		if claims, vErr := h.validator.ValidateAccess(cookie.Value); vErr == nil && claims.Sid != "" && h.sessions != nil {
-			if err := h.sessions.Revoke(r.Context(), claims.Sid, sessions.ReasonLogout); err != nil && !errors.Is(err, sessions.ErrNotFound) {
-				h.logger.Warn("signout revoke failed", "sid", claims.Sid, "error", err)
-			}
+	sid := h.findSessionID(r)
+	if sid != "" && h.sessions != nil {
+		if err := h.sessions.Revoke(r.Context(), sid, sessions.ReasonLogout); err != nil && !errors.Is(err, sessions.ErrNotFound) {
+			h.logger.Warn("signout revoke failed", "sid", sid, "error", err)
 		}
 	}
 
@@ -288,18 +303,33 @@ func (h *NextAuthHandler) Error(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"error": errType, "message": msg})
 }
 
-// RefreshToken handles POST /api/auth/token/refresh. The browser is
-// the only legitimate caller — Path-scoped refresh cookie + SameSite=Lax
-// is the CSRF defense. We additionally require the request to be a POST
-// so a CSRF GET embed can't trigger a rotation.
+// RefreshToken handles POST /api/auth/token/refresh.
 //
-// On success: rotate the refresh token (old one is revoked via session
-// rotation, new one minted) and re-issue access. On failure: clear both
-// cookies and respond 401 session_expired so the client redirects.
+// CSRF defense (layered):
+//   - Path-scoped refresh cookie + SameSite=Lax — cross-site POST
+//     never sends the cookie at all (browser policy).
+//   - POST-only — GET-embed CSRF can't reach this handler.
+//   - Origin/Referer same-origin check below — defence-in-depth.
+//
+// Token-theft defense — refresh-token rotation with reuse detection
+// (OWASP ASVS V7.4.4 / V3.7.4):
+//   - Each refresh token has a unique JTI.
+//   - The session row tracks current_refresh_jti.
+//   - Successful refresh CAS-rotates: old jti → new jti.
+//   - A request carrying an old jti (i.e. one we've already rotated
+//     past) is the theft signal: revoke the entire session and 401.
+//
+// On any failure both cookies are cleared so the client doesn't keep
+// resending dead tokens.
 func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+
+	if !h.sameOriginRefresh(r) {
+		writeAuthError(w, http.StatusForbidden, reasonSessionInvalid)
 		return
 	}
 
@@ -353,6 +383,10 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mint the new tokens FIRST so we have the new refresh JTI to
+	// CAS-rotate against. If anything below fails after this point we
+	// have not yet committed the rotation, so the original cookie is
+	// still valid and the client can simply retry.
 	access, err := h.validator.IssueAccessToken(claims.ID, claims.Sid, fullName, email)
 	if err != nil {
 		h.logger.Error("issue access on refresh", "error", err)
@@ -365,12 +399,91 @@ func (h *NextAuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+	newClaims, err := h.validator.ValidateRefresh(refresh)
+	if err != nil {
+		h.logger.Error("validate freshly-issued refresh", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// CAS rotate. Mismatch == replay attempt — somebody else used a
+	// previous refresh in this chain and we already rotated past
+	// claims.Jti. Revoke the entire session: the rightful client is
+	// going to find their next request 401'd, which is correct given
+	// we cannot tell rightful from impostor at this point.
+	if err := h.sessions.RotateRefreshJti(r.Context(), claims.Sid, claims.Jti, newClaims.Jti); err != nil {
+		h.clearAuthCookies(w, r)
+		if errors.Is(err, sessions.ErrJTIMismatch) {
+			h.logger.Warn("refresh token replay detected — revoking session",
+				"sid", claims.Sid, "user_id", claims.ID, "ip", clientIP(r))
+			_ = h.sessions.Revoke(r.Context(), claims.Sid, sessions.ReasonAdminForce)
+			writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
+			return
+		}
+		if errors.Is(err, sessions.ErrNotFound) {
+			writeAuthError(w, http.StatusUnauthorized, reasonSessionExpired)
+			return
+		}
+		h.logger.Error("rotate refresh jti", "error", err, "sid", claims.Sid)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	h.setAuthCookies(w, r, access, refresh)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":      true,
 		"expires": time.Now().Add(auth.AccessTokenTTL).UTC().Format(time.RFC3339),
 	})
+}
+
+// sameOriginRefresh enforces that POST /api/auth/token/refresh comes
+// from a page hosted on the same origin as the request. Fetch always
+// sends an Origin header on cross-origin requests; same-origin POSTs
+// either omit Origin (older Safari) or set it to the page origin.
+// We require either no Origin, or Origin matching the request Host.
+//
+// Defense-in-depth on top of the SameSite=Lax cookie + Path-scope.
+// Returns true if the request looks legitimate or if both Origin and
+// Referer are absent (curl, mobile native clients) — those still need
+// the refresh cookie which they wouldn't have unless they obtained it
+// through a same-origin signIn.
+func (h *NextAuthHandler) sameOriginRefresh(r *http.Request) bool {
+	host := r.Host
+	if host == "" {
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		// Strip port for comparison; dev-server proxies and SSH
+		// tunnels frequently swap the port.
+		oh := u.Hostname()
+		rh := host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			rh = h
+		}
+		return oh == rh
+	}
+	// No Origin header: also accept Referer same-host. Some Safari
+	// versions strip Origin on same-origin same-method POSTs.
+	if ref := r.Header.Get("Referer"); ref != "" {
+		u, err := url.Parse(ref)
+		if err != nil {
+			return false
+		}
+		oh := u.Hostname()
+		rh := host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			rh = h
+		}
+		return oh == rh
+	}
+	// Neither header present — accept; the cookie still has to be
+	// valid which is the harder gate.
+	return true
 }
 
 // issueSession is the shared signin path used by credentials, OAuth
@@ -461,6 +574,31 @@ func (h *NextAuthHandler) respondCredentialsError(w http.ResponseWriter, r *http
 	} else {
 		http.Redirect(w, r, "/login?error=CredentialsSignin", http.StatusFound)
 	}
+}
+
+// findSessionID returns the user_sessions.id derivable from whichever
+// cookie the client still has. Tries access first (cheaper, no DB look-
+// ahead needed by callers), then refresh as a fallback. Returns "" when
+// neither cookie is present, decoded successfully, or carried a sid.
+//
+// Used by signOut, but suitable for any handler that needs to operate
+// on "the caller's session" without depending on access-cookie freshness.
+func (h *NextAuthHandler) findSessionID(r *http.Request) string {
+	if cookie, err := r.Cookie(h.sessionCookieName(r)); err == nil && cookie.Value != "" {
+		if claims, err := h.validator.ValidateAccess(cookie.Value); err == nil && claims.Sid != "" {
+			return claims.Sid
+		}
+	}
+	// Try both the secure and non-secure name; we may get either at
+	// signout time (HTTPS upgrade, proxy quirks, downgrade attacks).
+	for _, name := range []string{h.refreshCookieName(r), "authjs.refresh-token", "__Secure-authjs.refresh-token"} {
+		if cookie, err := r.Cookie(name); err == nil && cookie.Value != "" {
+			if claims, err := h.validator.ValidateRefresh(cookie.Value); err == nil && claims.Sid != "" {
+				return claims.Sid
+			}
+		}
+	}
+	return ""
 }
 
 // clientIP extracts a best-effort caller IP. X-Forwarded-For wins when

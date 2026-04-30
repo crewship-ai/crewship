@@ -46,15 +46,16 @@ var ErrNotFound = errors.New("session not found")
 
 // Session mirrors a single user_sessions row.
 type Session struct {
-	ID            string
-	UserID        string
-	CreatedAt     time.Time
-	ExpiresAt     time.Time
-	LastUsedAt    time.Time
-	RevokedAt     *time.Time
-	RevokedReason string
-	UserAgent     string
-	IP            string
+	ID                string
+	UserID            string
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+	LastUsedAt        time.Time
+	RevokedAt         *time.Time
+	RevokedReason     string
+	UserAgent         string
+	IP                string
+	CurrentRefreshJti string // empty until first refresh rotation
 }
 
 // Active is true iff the session has not been revoked AND has not
@@ -77,7 +78,33 @@ type Store interface {
 	Revoke(ctx context.Context, id, reason string) error
 	RevokeAllForUser(ctx context.Context, userID, reason string) (int64, error)
 	TouchLastUsed(ctx context.Context, id string) error
+
+	// RotateRefreshJti is the CAS step at the heart of the refresh-
+	// token-reuse detection (OWASP ASVS 3.7.4). The caller passes the
+	// JTI it received in the inbound refresh token; we update only if
+	// it matches the row's current_refresh_jti (or the row has none
+	// yet, allowing the very first rotation). Returns ErrJTIMismatch
+	// if the inbound JTI doesn't match — that's the theft signal and
+	// the caller MUST revoke the entire session.
+	RotateRefreshJti(ctx context.Context, sessionID, expectedJti, newJti string) error
+
+	// SetClock overrides the time source. Production code never calls
+	// this; tests use it to control created_at / expires_at /
+	// last_used_at without sleeping. On the interface so handler-
+	// level tests don't need to type-assert to *DBStore just to
+	// reach the override.
+	SetClock(fn func() time.Time)
 }
+
+// ErrJTIMismatch fires when a refresh request carries a JTI that does
+// not match the session's current_refresh_jti. Either:
+//   (a) the rightful client already rotated and the attacker is using
+//       the old token (theft), or
+//   (b) the attacker rotated first and the rightful client is now
+//       presenting a since-superseded token (still theft, just from
+//       the other side).
+// In both cases the response is to revoke the whole session.
+var ErrJTIMismatch = errors.New("refresh jti mismatch")
 
 // DBStore is the production implementation backed by SQLite via
 // database/sql. Pass the same *sql.DB the rest of the API uses — the
@@ -149,7 +176,7 @@ func (s *DBStore) Create(ctx context.Context, userID, userAgent, ip string, ttl 
 // 401 response code.
 func (s *DBStore) Get(ctx context.Context, id string) (*Session, error) {
 	const q = `SELECT id, user_id, created_at, expires_at, last_used_at,
-		revoked_at, revoked_reason, user_agent, ip
+		revoked_at, revoked_reason, user_agent, ip, current_refresh_jti
 		FROM user_sessions WHERE id = ?`
 	row := s.db.QueryRowContext(ctx, q, id)
 	return scanSession(row)
@@ -161,7 +188,7 @@ func (s *DBStore) Get(ctx context.Context, id string) (*Session, error) {
 func (s *DBStore) ListActiveForUser(ctx context.Context, userID string) ([]*Session, error) {
 	now := s.clock().UTC().Format(time.RFC3339)
 	const q = `SELECT id, user_id, created_at, expires_at, last_used_at,
-		revoked_at, revoked_reason, user_agent, ip
+		revoked_at, revoked_reason, user_agent, ip, current_refresh_jti
 		FROM user_sessions
 		WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?
 		ORDER BY last_used_at DESC`
@@ -263,6 +290,51 @@ func (s *DBStore) TouchLastUsed(ctx context.Context, id string) error {
 	return nil
 }
 
+// RotateRefreshJti enforces single-use refresh tokens by atomically
+// swapping current_refresh_jti from expectedJti to newJti. The query
+// requires expectedJti to match the stored value OR the stored value
+// to be NULL (which only happens on the very first rotation after
+// signIn — Create() leaves current_refresh_jti=NULL). On mismatch we
+// return ErrJTIMismatch and the caller revokes the whole session.
+func (s *DBStore) RotateRefreshJti(ctx context.Context, sessionID, expectedJti, newJti string) error {
+	if sessionID == "" || newJti == "" {
+		return errors.New("session id and newJti required")
+	}
+	const q = `UPDATE user_sessions
+		SET current_refresh_jti = ?
+		WHERE id = ?
+		  AND revoked_at IS NULL
+		  AND (current_refresh_jti IS NULL OR current_refresh_jti = ?)`
+	res, err := s.db.ExecContext(ctx, q, newJti, sessionID, expectedJti)
+	if err != nil {
+		return fmt.Errorf("rotate jti: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		// Disambiguate: maybe the row exists but jti didn't match
+		// (theft), maybe the row is gone or revoked (legitimate
+		// expiry / explicit signOut). Theft is the more dangerous
+		// signal so we raise ErrJTIMismatch — the caller decides
+		// whether to revoke (we don't auto-revoke from inside the
+		// store so its responsibilities stay narrow).
+		var revokedAt sql.NullString
+		err := s.db.QueryRowContext(ctx,
+			`SELECT revoked_at FROM user_sessions WHERE id = ?`, sessionID,
+		).Scan(&revokedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("rotate jti diagnose: %w", err)
+		}
+		if revokedAt.Valid {
+			return ErrNotFound
+		}
+		return ErrJTIMismatch
+	}
+	return nil
+}
+
 // rowScanner abstracts *sql.Row and *sql.Rows so scanSession can be
 // shared between Get (single row) and ListActiveForUser (many rows).
 type rowScanner interface {
@@ -273,12 +345,12 @@ func scanSession(r rowScanner) (*Session, error) {
 	var sess Session
 	var createdAt, expiresAt, lastUsedAt string
 	var revokedAt sql.NullString
-	var revokedReason, userAgent, ip sql.NullString
+	var revokedReason, userAgent, ip, currentRefreshJti sql.NullString
 
 	err := r.Scan(
 		&sess.ID, &sess.UserID,
 		&createdAt, &expiresAt, &lastUsedAt,
-		&revokedAt, &revokedReason, &userAgent, &ip,
+		&revokedAt, &revokedReason, &userAgent, &ip, &currentRefreshJti,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -304,6 +376,9 @@ func scanSession(r rowScanner) (*Session, error) {
 	}
 	if ip.Valid {
 		sess.IP = ip.String
+	}
+	if currentRefreshJti.Valid {
+		sess.CurrentRefreshJti = currentRefreshJti.String
 	}
 	return &sess, nil
 }

@@ -83,10 +83,17 @@ let refreshInflight: Promise<boolean> | null = null
 /** tryRefresh dedupes concurrent refresh attempts. The first call wins
  *  the network round-trip; followers await its result without firing
  *  their own POST. After settle the promise is cleared so the next
- *  401 (e.g. 15 minutes later) starts fresh. */
+ *  401 (e.g. 15 minutes later) starts fresh.
+ *
+ *  Cleanup happens synchronously inside the finally block. The earlier
+ *  queueMicrotask version was racy under fake-timer test environments:
+ *  the microtask could fire AFTER the next test had already started
+ *  awaiting a fresh tryRefresh, leaving it observing a stale promise.
+ *  Synchronous cleanup is fine — racers awaiting `refreshInflight`
+ *  resolved their await before the finally block runs. */
 export async function tryRefresh(): Promise<boolean> {
   if (refreshInflight) return refreshInflight
-  refreshInflight = (async () => {
+  const promise = (async () => {
     try {
       const r = await fetch(REFRESH_PATH, {
         method: "POST",
@@ -96,16 +103,20 @@ export async function tryRefresh(): Promise<boolean> {
       return r.ok
     } catch {
       return false
-    } finally {
-      // Clear in a microtask, not synchronously: any racers awaiting
-      // the same promise should still observe its resolution before
-      // a new round starts.
-      queueMicrotask(() => {
-        refreshInflight = null
-      })
     }
   })()
-  return refreshInflight
+  refreshInflight = promise
+  promise.finally(() => {
+    if (refreshInflight === promise) refreshInflight = null
+  })
+  return promise
+}
+
+/** _resetRefreshInflightForTesting is exported only for vitest; production
+ *  code must never call it. Clears the in-flight cache between test
+ *  cases so a previous test's resolution doesn't pollute the next. */
+export function _resetRefreshInflightForTesting(): void {
+  refreshInflight = null
 }
 
 let authChannel: BroadcastChannel | null = null
