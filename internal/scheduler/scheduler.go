@@ -405,15 +405,20 @@ func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 		// timestamp.
 		s.logger.Warn("schedule cron unparsable; clearing schedule_next_run",
 			"agent_id", agentID, "cron", cronExpr, "error", err)
-		if _, err := s.db.ExecContext(context.Background(),
+		if _, err := s.db.ExecContext(s.ctx,
 			"UPDATE agents SET schedule_next_run = NULL WHERE id = ?", agentID); err != nil {
 			s.logger.Warn("clear schedule_next_run", "agent_id", agentID, "error", err)
 		}
 	}
 
+	// Use the scheduler's lifecycle ctx for all timestamp DB writes so a
+	// Stop() during shutdown short-circuits in-flight UPDATEs cleanly
+	// instead of racing the DB pool close. context.Background here meant
+	// shutdown could log "use of closed connection" warnings even on a
+	// graceful stop.
 	if errorOnly {
 		if nextRun != nil {
-			if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_next_run = ? WHERE id = ?", *nextRun, agentID); err != nil {
+			if _, err := s.db.ExecContext(s.ctx, "UPDATE agents SET schedule_next_run = ? WHERE id = ?", *nextRun, agentID); err != nil {
 				s.logger.Warn("update schedule_next_run", "agent_id", agentID, "error", err)
 			}
 		}
@@ -421,12 +426,12 @@ func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 	}
 
 	if nextRun != nil {
-		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_last_run = ?, schedule_next_run = ? WHERE id = ?",
+		if _, err := s.db.ExecContext(s.ctx, "UPDATE agents SET schedule_last_run = ?, schedule_next_run = ? WHERE id = ?",
 			now, *nextRun, agentID); err != nil {
 			s.logger.Warn("update schedule timestamps", "agent_id", agentID, "error", err)
 		}
 	} else {
-		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_last_run = ? WHERE id = ?", now, agentID); err != nil {
+		if _, err := s.db.ExecContext(s.ctx, "UPDATE agents SET schedule_last_run = ? WHERE id = ?", now, agentID); err != nil {
 			s.logger.Warn("update schedule_last_run", "agent_id", agentID, "error", err)
 		}
 	}
