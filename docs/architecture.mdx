@@ -194,6 +194,88 @@ The sidecar exposes a comprehensive local API on port 9119:
 | **Other** | `/crew-connections`, `/proposal`, `/proposals`, `/manifest`, `/report-confidence` |
 | **Health** | `/health`, `/healthz` |
 
+## Keeper Request Lifecycle
+
+The agent never holds a credential directly. Anything sensitive goes through one of two endpoints on the sidecar:
+
+| Endpoint | What the agent gets back | When to use |
+|----------|--------------------------|-------------|
+| `POST /keeper/request` | The credential value, in cleartext | Tools that genuinely need the value (e.g. an SDK constructor that takes an API key) |
+| `POST /keeper/execute` | Stdout / stderr from a command, scrubbed | Anything that can be expressed as a shell command — preferred, because the agent never sees the value |
+
+### Decision flow
+
+The sidecar forwards both endpoints over `/tmp/crewship.sock` to crewshipd, which calls into `internal/keeper/gatekeeper`:
+
+1. **L1 fast-path** — for `request` only (never `execute`), an L1 credential plus an intent at least ten meaningful characters long is auto-allowed without an LLM round-trip. Single-character or whitespace-only intents are rejected.
+2. **LLM evaluation** — every other request is scored by `Gatekeeper.Evaluate`, which prompts a local Ollama model with the request, the agent's recent conversation, and the credential's `SecurityLevel`. The model returns a structured `{ decision, reason, risk }` JSON object.
+3. **Fail-closed default** — if no LLM provider is configured, the Gatekeeper returns `DENY`. The same applies if the LLM response cannot be parsed as JSON.
+4. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. The credential value never crosses back into UID 1001.
+
+### Sequence diagram
+
+```mermaid
+sequenceDiagram
+    participant Agent as Agent (UID 1001)
+    participant Side as Sidecar (UID 1002)
+    participant Cd as crewshipd
+    participant GK as Gatekeeper
+    participant LLM as Ollama (Keeper LLM)
+    participant Tool as Tool / upstream API
+
+    Agent->>Side: POST /keeper/execute<br/>{credential_name, intent, command}
+    Side->>Cd: POST /api/v1/internal/keeper/execute<br/>(over /tmp/crewship.sock)
+    Cd->>GK: Evaluate(EvalRequest)
+    alt L1 request, no command, intent ≥ 10 chars
+        GK-->>Cd: ALLOW (fast-path)
+    else otherwise
+        GK->>LLM: prompt with intent + history + risk
+        LLM-->>GK: { decision, reason, risk }
+        GK-->>Cd: ALLOW / DENY / ESCALATE
+    end
+    alt ALLOW
+        Cd->>Cd: docker exec inside crew container<br/>credential injected as env var
+        Cd->>Tool: command runs with credential
+        Tool-->>Cd: stdout + stderr
+        Cd->>Cd: scrubber.Scrub(output)
+        Cd-->>Side: ExecuteResult (scrubbed)
+        Side-->>Agent: 200 { decision, output, exit_code }
+    else DENY / ESCALATE
+        Cd-->>Side: ExecuteResult (decision, reason)
+        Side-->>Agent: 200 { decision, reason }
+    end
+```
+
+## Permission Scope
+
+The trust boundary lives in the crew container, not in a per-call session token. Three components define what an agent can do, and all three are tied to the container's lifetime:
+
+| Component | Lifetime | Mutable at runtime? |
+|-----------|----------|---------------------|
+| `DomainAllowlist` | Container | Yes — `s.Allowlist().Add(domain)` (used by the MCP gateway when it discovers a new server URL) |
+| `CredStore` | Container | Loaded once at sidecar start; an agent can only read credentials its `agent_id` was granted |
+| Keeper decision (per request) | Single request | Not memoized — a previous `ALLOW` does not count toward the next |
+
+The crew journal is the audit trail and is persisted across container restarts: every keeper decision, allowlist change, and command execution emits a typed entry scoped to `(workspace_id, crew_id, agent_id, mission_id)`. Tearing down the container resets the in-memory components above; the journal record survives.
+
+## Threat Model
+
+### What Crewship protects against
+
+- **Agent leaking a credential into chat or logs.** `/keeper/execute` runs the command in crewshipd, scrubs stdout/stderr, and only the redacted result reaches UID 1001.
+- **Unauthorised egress in restricted network mode.** The proxy refuses non-allowlisted hosts. Unknown network modes default to `restricted` (fail-closed) rather than `free`, so a misconfigured workspace cannot accidentally open up egress.
+- **Credential dump from the agent process.** Credentials are held in crewshipd's process memory; UID 1001 can talk to UID 1002 over loopback but cannot read the sidecar's process memory or files. Filesystem credentials at `/secrets/{slug}/` are mounted read-only.
+- **Prompt injection in tool output.** `internal/lookout` scans inputs and outputs; on a finding it either sanitises (default for secret-shaped output) or blocks (default for input). Every action is logged to the journal.
+- **Trivial fast-path bypasses.** L1 auto-allow is gated to `request` only — an attacker cannot smuggle a command through the L1 path because `execute` always pays the LLM round-trip. Empty or whitespace-only intents are rejected before they reach the LLM.
+
+### What Crewship does NOT protect against
+
+- **A compromised host.** Docker is the bottom of the trust stack. If the host kernel, Docker daemon, or root account is compromised, every credential and every journal entry is exposed. Run crewshipd on a hardened host; do not expose port 8080 publicly without an authenticating reverse proxy.
+- **A malicious or misconfigured Keeper LLM.** If the Ollama model used by the Gatekeeper has been swapped for an adversarial one, `ALLOW` decisions cannot be trusted. Pin model digests, audit the model out-of-band, and treat the Keeper as a defense-in-depth layer rather than a primary control.
+- **Side channels in scrubbed output.** The scrubber redacts known credential shapes. A sufficiently creative agent can still leak partial information through timing, exit codes, or format-string tricks. Treat `/keeper/request` as a weaker contract than `/keeper/execute` for genuinely sensitive secrets.
+- **Cross-tenant isolation on shared infrastructure.** A single crewshipd process serves a single workspace database at a time. Hosting multiple tenants requires separate crewshipd instances with separate `ENCRYPTION_KEY`s and separate Docker daemons (or namespaces).
+- **Supply-chain compromise of the agent CLIs.** Crewship invokes `claude`, `opencode`, `codex`, and similar binaries as-is. Pin their versions in any Dockerfile you control, and review their changelogs before bumping.
+
 ## CLI Adapters
 
 Crewship supports multiple AI coding CLIs, configured per agent:

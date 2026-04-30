@@ -9,8 +9,16 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/crewship-ai/crewship/actions/workflows/ci.yml"><img src="https://github.com/crewship-ai/crewship/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="https://github.com/crewship-ai/crewship/actions/workflows/security.yml"><img src="https://github.com/crewship-ai/crewship/actions/workflows/security.yml/badge.svg?branch=main" alt="Security" /></a>
   <a href="https://github.com/crewship-ai/crewship/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
+  <a href="https://golang.org/doc/devel/release.html"><img src="https://img.shields.io/badge/go-1.26-00ADD8.svg?logo=go" alt="Go 1.26" /></a>
+  <a href="https://pkg.go.dev/github.com/crewship-ai/crewship"><img src="https://pkg.go.dev/badge/github.com/crewship-ai/crewship.svg" alt="Go Reference" /></a>
 </p>
+
+> **Project status:** active development. Public APIs and data models may
+> change before the first tagged release. Self-host at your own risk and
+> pin a commit SHA if you ship to production.
 
 ---
 
@@ -86,11 +94,13 @@ cmd/crewship-sidecar/  Sidecar process that runs inside crew containers
 internal/api/          HTTP / WebSocket handlers
 internal/database/     SQLite schema + Go-side migrations (DO NOT use Prisma)
 internal/orchestrator/ Agent run loop, lead-mode coordination
+internal/sidecar/      Per-agent in-container HTTP server (UID 1002 boundary)
 internal/journal/      Append-only event stream (the canonical source of truth)
 internal/paymaster/    LLM cost tracking + budget enforcement
 internal/lookout/      Guardrails (prompt-injection, schema validation, redaction)
 internal/harbormaster/ Human-in-the-loop approval queue
 internal/keeper/       Credential gatekeeping (Ollama-backed)
+internal/scrubber/     Outbound-text secret redaction
 internal/provider/     Pluggable container / storage / state providers
 
 dev.sh                 Local dev orchestration (SQLite + go run + next dev)
