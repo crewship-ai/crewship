@@ -34,6 +34,28 @@ func TestCooldownExpired(t *testing.T) {
 	}
 }
 
+// TestIsInCooldownPrunesExpired verifies the self-prune path: once an
+// entry is observed expired by a reader, it should be evicted from the
+// internal map so cooldowns can't grow without bound over the process
+// lifetime. Without this, ClearExpired had no production caller and
+// every rate-limit ever recorded leaked one map entry forever.
+func TestIsInCooldownPrunesExpired(t *testing.T) {
+	cm := NewCooldownManager()
+	cm.MarkCooldown("cred-1", 1*time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+
+	// First read sees it's expired and prunes it.
+	if cm.IsInCooldown("cred-1") {
+		t.Fatal("expected expired cooldown to read as not-in-cooldown")
+	}
+
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if _, stillThere := cm.cooldowns["cred-1"]; stillThere {
+		t.Fatal("expected expired entry to be pruned from the map after IsInCooldown")
+	}
+}
+
 func TestClearExpired(t *testing.T) {
 	cm := NewCooldownManager()
 	cm.MarkCooldown("cred-1", 1*time.Millisecond)

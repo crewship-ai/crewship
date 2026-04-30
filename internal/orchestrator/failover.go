@@ -27,15 +27,27 @@ func (cm *CooldownManager) MarkCooldown(credID string, duration time.Duration) {
 	cm.cooldowns[credID] = time.Now().Add(duration)
 }
 
-// IsInCooldown reports whether the credential is currently in a cooldown period.
+// IsInCooldown reports whether the credential is currently in a cooldown
+// period. Stale entries are pruned inline so the map can't grow unbounded
+// over the process lifetime — without this self-prune, ClearExpired had
+// no production caller and the map leaked one entry per rate-limited
+// credential forever.
 func (cm *CooldownManager) IsInCooldown(credID string) bool {
 	cm.mu.RLock()
-	defer cm.mu.RUnlock()
 	until, ok := cm.cooldowns[credID]
+	cm.mu.RUnlock()
 	if !ok {
 		return false
 	}
 	if time.Now().After(until) {
+		// Upgrade to a write lock just long enough to evict.
+		cm.mu.Lock()
+		// Re-check under write lock so a concurrent MarkCooldown that
+		// raced past the read can't be clobbered.
+		if cur, stillThere := cm.cooldowns[credID]; stillThere && time.Now().After(cur) {
+			delete(cm.cooldowns, credID)
+		}
+		cm.mu.Unlock()
 		return false
 	}
 	return true
