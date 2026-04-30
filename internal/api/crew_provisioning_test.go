@@ -18,7 +18,12 @@ func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
 	t.Helper()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	return NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	// NewProvisioningHandler spawns a 10-min cleanup ticker on construction;
+	// without Stop() each test call leaks one goroutine that lives for the
+	// rest of the suite. t.Cleanup runs even on test failure.
+	t.Cleanup(h.Stop)
+	return h
 }
 
 func TestCatalogList(t *testing.T) {
@@ -95,6 +100,7 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	// docker client == nil -> provisioner is nil -> trigger returns 503.
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
@@ -119,14 +125,22 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusServiceUnavailable, rr.Body.String())
 	}
+	// ProvisionTrigger emits RFC 7807 Problem Details now — `detail` carries
+	// the human-readable error rather than a flat `error` field.
 	var resp struct {
-		Error string `json:"error"`
+		Type   string `json:"type"`
+		Title  string `json:"title"`
+		Status int    `json:"status"`
+		Detail string `json:"detail"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Error == "" {
-		t.Error("expected non-empty error message in 503 response")
+	if resp.Status != http.StatusServiceUnavailable {
+		t.Errorf("expected status=503 in problem body, got %d", resp.Status)
+	}
+	if resp.Detail == "" {
+		t.Error("expected non-empty detail in 503 problem response")
 	}
 }
 
@@ -201,6 +215,7 @@ func TestProvisionStatus_NoCrew(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	t.Cleanup(h.Stop)
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
