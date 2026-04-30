@@ -188,6 +188,18 @@ func (v *JWTValidator) validate(key []byte, expectedKind, tokenStr string) (*Cla
 	if claims.Kind != expectedKind {
 		return nil, fmt.Errorf("%w: got %q want %q", ErrWrongKind, claims.Kind, expectedKind)
 	}
+	// Enforce sid/jti presence at the validation boundary, not only at
+	// issuance. A token that decrypts cleanly but is missing the
+	// revocation/rotation invariants would otherwise pass through and
+	// surface as a downstream "session not found" or empty-jti CAS that
+	// looks like a logic bug rather than a tampered token. CodeRabbit
+	// flagged this on PR #233.
+	if claims.Jti == "" {
+		return nil, fmt.Errorf("%w: missing jti", ErrInvalidToken)
+	}
+	if (expectedKind == KindAccess || expectedKind == KindRefresh) && claims.Sid == "" {
+		return nil, fmt.Errorf("%w: missing session id", ErrInvalidToken)
+	}
 	return &claims, nil
 }
 

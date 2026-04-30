@@ -165,14 +165,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [refresh])
 
   const signOut = useCallback(async () => {
+    // Gate the local reset on a successful (or already-expired) server
+    // response. With revocation now enforced server-side, fanning out
+    // "signed out" while the refresh chain is still active server-side
+    // would leave every other tab thinking they're logged out while the
+    // session keeps refreshing in the background. CodeRabbit flagged
+    // this on PR #233.
+    let serverAcknowledged = false
     try {
-      await fetch("/api/auth/signout", {
+      const res = await fetch("/api/auth/signout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
       })
+      // 401 means the access cookie was already expired/revoked when
+      // the request landed — treat that as an effective sign-out so a
+      // user with a stale tab can still log back out.
+      serverAcknowledged = res.ok || res.status === 401
     } catch {
-      // ignore
+      // Network error — leave local state intact so a transient outage
+      // doesn't desync this tab from the still-active server session.
+      return
+    }
+    if (!serverAcknowledged) {
+      return
     }
     setSession(null)
     setStatus("unauthenticated")

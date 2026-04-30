@@ -166,7 +166,14 @@ function LoginForm() {
                       : "Google sign-in is temporarily unavailable"
               }
               onClick={() => {
-                window.location.href = "/api/v1/auth/google/redirect"
+                // Carry the sanitized redirect through Google sign-in so a
+                // session-expired user lands back on the page they were on
+                // (matching the credentials flow). CodeRabbit flagged the
+                // missing case on PR #233.
+                const target = redirectTarget && redirectTarget !== "/"
+                  ? `/api/v1/auth/google/redirect?redirect=${encodeURIComponent(redirectTarget)}`
+                  : "/api/v1/auth/google/redirect"
+                window.location.href = target
               }}
             >
               Sign in with Google

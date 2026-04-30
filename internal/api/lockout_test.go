@@ -63,7 +63,9 @@ func TestLockout_WrongPasswordReturnsInvalidCredentials(t *testing.T) {
 
 	// Counter advanced
 	var count int
-	db.QueryRow(`SELECT failed_login_count FROM users WHERE email = ?`, "lock1@example.com").Scan(&count)
+	if err := db.QueryRow(`SELECT failed_login_count FROM users WHERE email = ?`, "lock1@example.com").Scan(&count); err != nil {
+		t.Fatalf("read failed_login_count: %v", err)
+	}
 	if count != 1 {
 		t.Errorf("failed_login_count: got %d want 1", count)
 	}
@@ -83,12 +85,16 @@ func TestLockout_UnknownEmailNoCounterAdvance(t *testing.T) {
 	// We must NOT advance any counter on the existing user, AND we
 	// must not have created a new row for the ghost email.
 	var rowCount int
-	db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = ?`, "ghost@example.com").Scan(&rowCount)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = ?`, "ghost@example.com").Scan(&rowCount); err != nil {
+		t.Fatalf("count ghost rows: %v", err)
+	}
 	if rowCount != 0 {
 		t.Errorf("expected 0 rows for unknown email, got %d", rowCount)
 	}
 	var realCount int
-	db.QueryRow(`SELECT failed_login_count FROM users WHERE email = ?`, "real@example.com").Scan(&realCount)
+	if err := db.QueryRow(`SELECT failed_login_count FROM users WHERE email = ?`, "real@example.com").Scan(&realCount); err != nil {
+		t.Fatalf("read real failed_login_count: %v", err)
+	}
 	if realCount != 0 {
 		t.Errorf("real user counter should not advance on ghost-email attempt; got %d", realCount)
 	}
@@ -143,8 +149,10 @@ func TestLockout_ExpiredLockClearsAndAcceptsCorrectPassword(t *testing.T) {
 	}
 	var count int
 	var locked sql.NullString
-	db.QueryRow(`SELECT failed_login_count, locked_until FROM users WHERE email = ?`, "hostage@example.com").
-		Scan(&count, &locked)
+	if err := db.QueryRow(`SELECT failed_login_count, locked_until FROM users WHERE email = ?`, "hostage@example.com").
+		Scan(&count, &locked); err != nil {
+		t.Fatalf("read hostage row: %v", err)
+	}
 	if count != 0 {
 		t.Errorf("counter not reset after success: got %d", count)
 	}
@@ -212,8 +220,10 @@ func TestLockout_ConcurrentBadPasswordsAdvanceCounter(t *testing.T) {
 	// clobbered each other; anything more means we double-counted.
 	var count int
 	var lockedUntil sql.NullString
-	db.QueryRow(`SELECT failed_login_count, locked_until FROM users WHERE email = ?`, "race@example.com").
-		Scan(&count, &lockedUntil)
+	if err := db.QueryRow(`SELECT failed_login_count, locked_until FROM users WHERE email = ?`, "race@example.com").
+		Scan(&count, &lockedUntil); err != nil {
+		t.Fatalf("read race row: %v", err)
+	}
 	wantCount := invalid + locked
 	if count != wantCount {
 		t.Errorf("failed_login_count: got %d, want %d (invalid=%d locked=%d busy=%d) — race condition or double-count",
@@ -276,7 +286,9 @@ func TestLockout_SuccessResetsCounter(t *testing.T) {
 	}
 
 	var count int
-	db.QueryRow(`SELECT failed_login_count FROM users WHERE email = ?`, "fatfinger@example.com").Scan(&count)
+	if err := db.QueryRow(`SELECT failed_login_count FROM users WHERE email = ?`, "fatfinger@example.com").Scan(&count); err != nil {
+		t.Fatalf("read fatfinger row: %v", err)
+	}
 	if count != 0 {
 		t.Errorf("counter should reset to 0 after success, got %d", count)
 	}
