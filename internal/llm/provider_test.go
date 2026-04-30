@@ -191,6 +191,24 @@ func TestOllamaComplete(t *testing.T) {
 	}
 }
 
+// TestOllamaStreamClientHasNoTotalDeadline guards the streaming path
+// against the http.Client.Timeout regression: that timeout covers body
+// read, so applying it to NDJSON streaming silently kills generations
+// that exceed it. The non-streaming Complete() client keeps its 5-minute
+// safety net; only Stream() must run unbounded.
+func TestOllamaStreamClientHasNoTotalDeadline(t *testing.T) {
+	p := NewOllama("http://example.invalid", "llama3")
+	if p.stream == nil {
+		t.Fatal("stream client must be initialized")
+	}
+	if p.stream.Timeout != 0 {
+		t.Errorf("stream client must not set total Timeout; got %s — kills long generations", p.stream.Timeout)
+	}
+	if p.client.Timeout == 0 {
+		t.Errorf("non-streaming client should retain a Timeout safety net")
+	}
+}
+
 // TestOllamaCapsUnboundedGeneration verifies an unset MaxTokens produces a
 // finite num_predict in the request body. Without a cap, Ollama defaults
 // to -1 (run until natural EOS) which can spin local models for tens of

@@ -17,15 +17,26 @@ import (
 type Ollama struct {
 	baseURL string // e.g. "http://localhost:11434"
 	model   string
-	client  *http.Client
+	client  *http.Client // bounded by Client.Timeout — used for Complete()
+	stream  *http.Client // no total deadline — used for Stream()
 }
 
 // NewOllama creates a provider that calls a local or remote Ollama instance.
+// The streaming path uses a separate http.Client with no total deadline:
+// http.Client.Timeout cancels the entire request including body read, so
+// applying it to a long-running NDJSON stream silently truncates a 10-min
+// generation at 5 min. The streaming client still bounds dial/header time
+// via the transport, leaving body read to caller ctx cancellation.
 func NewOllama(baseURL, model string) *Ollama {
+	streamTransport := &http.Transport{
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	}
 	return &Ollama{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
 		client:  &http.Client{Timeout: 300 * time.Second},
+		stream:  &http.Client{Transport: streamTransport},
 	}
 }
 
@@ -74,7 +85,7 @@ func (o *Ollama) Stream(ctx context.Context, req Request, handler func(StreamEve
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := o.client.Do(httpReq)
+	resp, err := o.stream.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("ollama http: %w", err)
 	}
