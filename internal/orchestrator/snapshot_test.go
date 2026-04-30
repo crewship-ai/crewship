@@ -41,6 +41,39 @@ func (c *ctxAwareStubContainer) Exec(ctx context.Context, cfg provider.ExecConfi
 	return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader(c.snapshotStubContainer.reply(cfg)))}, nil
 }
 
+// failingEmitter is a JournalEmitter whose Emit fails when fail=true.
+// Lets a test exercise the dedup-cache-on-failure path without spinning
+// up a real journal writer.
+type failingEmitter struct {
+	mu        sync.Mutex
+	fail      bool
+	attempted int
+	succeeded int
+}
+
+func (f *failingEmitter) Emit(_ context.Context, _ JournalEntry) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attempted++
+	if f.fail {
+		return "", errors.New("simulated journal failure")
+	}
+	f.succeeded++
+	return "id", nil
+}
+
+func (f *failingEmitter) attempts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.attempted
+}
+
+func (f *failingEmitter) successes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.succeeded
+}
+
 // hangingContainer.Exec blocks on ctx.Done() so the test can verify the
 // snapshot probe respects snapshotProbeTimeout instead of wedging the
 // agent-run completion path forever.
@@ -363,6 +396,59 @@ func TestRecordContainerSnapshot_PayloadShape(t *testing.T) {
 	// the UI can correlate snapshots with the run that produced them.
 	if last.Refs["chat_id"] != "chat" || last.Refs["container_id"] != "ctr-1" {
 		t.Errorf("refs missing chat/container correlation: %+v", last.Refs)
+	}
+}
+
+// TestRecordContainerSnapshot_FailedEmitDoesNotPoisonCache verifies the
+// dedup cache is only updated on a *successful* journal write. If Emit
+// fails, the next snapshot of identical state must retry the emit
+// instead of being short-circuited by a stale cache entry — otherwise
+// a transient journal-writer hiccup permanently blackholes one
+// container's snapshots until something installs.
+func TestRecordContainerSnapshot_FailedEmitDoesNotPoisonCache(t *testing.T) {
+	t.Parallel()
+	stub := &snapshotStubContainer{
+		apt: "git\t2.43.0-1\n",
+		os:  "Ubuntu 24.04 LTS",
+	}
+	o := New(stub, newMemState(), slog.Default())
+	rec := &failingEmitter{}
+	o.SetJournal(rec)
+
+	req := AgentRunRequest{
+		WorkspaceID: "ws", CrewID: "c1", CrewSlug: "team",
+		ChatID: "chat", ContainerID: "ctr-1",
+	}
+
+	// First call — emit fails. Cache must NOT be updated.
+	rec.fail = true
+	o.recordContainerSnapshot(context.Background(), req, "ctr-1")
+	if got := rec.attempts(); got != 1 {
+		t.Fatalf("first call should have attempted one emit, got %d", got)
+	}
+	o.snapshotHashMu.Lock()
+	if _, cached := o.snapshotHashCache["ctr-1"]; cached {
+		o.snapshotHashMu.Unlock()
+		t.Fatal("failed emit must not populate dedup cache")
+	}
+	o.snapshotHashMu.Unlock()
+
+	// Second call — same state, but emitter has recovered. Because the
+	// cache wasn't poisoned by the previous failure, this must retry
+	// the emit (and now succeed).
+	rec.fail = false
+	o.recordContainerSnapshot(context.Background(), req, "ctr-1")
+	if got := rec.attempts(); got != 2 {
+		t.Errorf("second call must retry emit after prior failure, total attempts: want 2, got %d", got)
+	}
+	if got := rec.successes(); got != 1 {
+		t.Errorf("second call should have one successful emit, got %d", got)
+	}
+
+	// Third call — identical state, this time cache IS warm. Must skip.
+	o.recordContainerSnapshot(context.Background(), req, "ctr-1")
+	if got := rec.attempts(); got != 2 {
+		t.Errorf("third call with warm cache must skip emit, total attempts: want 2, got %d", got)
 	}
 }
 

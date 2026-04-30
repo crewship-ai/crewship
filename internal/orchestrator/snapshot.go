@@ -55,20 +55,18 @@ func (o *Orchestrator) recordContainerSnapshot(ctx context.Context, req AgentRun
 	hash := snap.Hash()
 	o.snapshotHashMu.Lock()
 	prev, seen := o.snapshotHashCache[containerID]
+	o.snapshotHashMu.Unlock()
 	if seen && prev == hash {
-		o.snapshotHashMu.Unlock()
 		return
 	}
-	o.snapshotHashCache[containerID] = hash
-	o.snapshotHashMu.Unlock()
 
 	payload := map[string]any{
-		"hash":          hash,
-		"apt":           snap.APT,
-		"pip":           snap.Pip,
-		"npm":           snap.Npm,
-		"os":            snap.OS,
-		"errs":          snap.Errs,
+		"hash": hash,
+		"apt":  snap.APT,
+		"pip":  snap.Pip,
+		"npm":  snap.Npm,
+		"os":   snap.OS,
+		"errs": snap.Errs,
 		"counts": map[string]int{
 			"apt": len(snap.APT),
 			"pip": len(snap.Pip),
@@ -78,7 +76,14 @@ func (o *Orchestrator) recordContainerSnapshot(ctx context.Context, req AgentRun
 	summary := fmt.Sprintf("crew %s container snapshot: %d apt + %d pip + %d npm",
 		req.CrewSlug, len(snap.APT), len(snap.Pip), len(snap.Npm))
 
-	_, _ = o.getJournal().Emit(ctx, JournalEntry{
+	// Emit with the same uncancelled bounded ctx as the probe — a caller
+	// cancelling chat at end-of-run must not stop the journal write
+	// either, otherwise the next agent run finds a stale prev-hash and
+	// re-attempts the same emit.
+	emitCtx, emitCancel := context.WithTimeout(context.WithoutCancel(ctx), snapshotProbeTimeout)
+	defer emitCancel()
+
+	if _, err := o.getJournal().Emit(emitCtx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,
@@ -90,5 +95,19 @@ func (o *Orchestrator) recordContainerSnapshot(ctx context.Context, req AgentRun
 		Summary:     summary,
 		Payload:     payload,
 		Refs:        map[string]any{"chat_id": req.ChatID, "container_id": containerID},
-	})
+	}); err != nil {
+		// Don't poison the dedup cache: leaving prev (or absence) intact
+		// means the next run with the same state retries the emit. A
+		// successful write is the only signal that this snapshot really
+		// reached the journal.
+		o.logger.Debug("container snapshot emit failed",
+			"container_id", containerID, "error", err)
+		return
+	}
+
+	// Emit succeeded — now safe to record the hash so subsequent runs
+	// with identical state can short-circuit.
+	o.snapshotHashMu.Lock()
+	o.snapshotHashCache[containerID] = hash
+	o.snapshotHashMu.Unlock()
 }

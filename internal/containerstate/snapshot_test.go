@@ -64,6 +64,7 @@ const npmScript = `command -v npm >/dev/null 2>&1 && npm ls -g --depth=0 --json 
 const osScript = `. /etc/os-release 2>/dev/null && printf '%s' "$PRETTY_NAME" || true`
 
 func TestCapture_HappyPath(t *testing.T) {
+	t.Parallel()
 	c := &stubContainer{
 		scripted: map[string]string{
 			aptScript: "git\t2.43.0-1\nphp\t8.3.1\nzlib1g\t1:1.3.dfsg-3.1ubuntu2\n",
@@ -98,6 +99,7 @@ func TestCapture_HappyPath(t *testing.T) {
 }
 
 func TestCapture_MissingProbesAreEmptyNotErrors(t *testing.T) {
+	t.Parallel()
 	// Only OS probe answers; the package managers are absent (alpine /
 	// distroless style image). Capture must succeed because at least one
 	// probe came back with content.
@@ -119,6 +121,7 @@ func TestCapture_MissingProbesAreEmptyNotErrors(t *testing.T) {
 }
 
 func TestCapture_AllSilentIsStillSuccess(t *testing.T) {
+	t.Parallel()
 	// Every probe shell-script ran but emitted nothing — that's the
 	// "scratch" / minimal image case. Capture treats empty stdout as a
 	// successful probe, so it returns no error.
@@ -133,6 +136,7 @@ func TestCapture_AllSilentIsStillSuccess(t *testing.T) {
 }
 
 func TestHash_StableUnderPermutation(t *testing.T) {
+	t.Parallel()
 	a := Snapshot{
 		APT: []Package{{Name: "git", Version: "1"}, {Name: "php", Version: "2"}},
 	}
@@ -145,6 +149,7 @@ func TestHash_StableUnderPermutation(t *testing.T) {
 }
 
 func TestHash_ChangesOnVersionBump(t *testing.T) {
+	t.Parallel()
 	a := Snapshot{APT: []Package{{Name: "git", Version: "1"}}}
 	b := Snapshot{APT: []Package{{Name: "git", Version: "2"}}}
 	if a.Hash() == b.Hash() {
@@ -153,6 +158,7 @@ func TestHash_ChangesOnVersionBump(t *testing.T) {
 }
 
 func TestPipParsesEditableInstall(t *testing.T) {
+	t.Parallel()
 	c := &stubContainer{
 		scripted: map[string]string{
 			pipScript: "-e git+https://example.com/foo.git@abc#egg=foo\nrequests==2.31.0\n",
@@ -173,5 +179,27 @@ func TestPipParsesEditableInstall(t *testing.T) {
 	}
 	if !sawFoo {
 		t.Errorf("editable install dropped: %+v", snap.Pip)
+	}
+}
+
+// pip's editable-install form sometimes carries fragment params after
+// the egg= value (subdirectory=, &something=). Only the package name
+// belongs in the snapshot.
+func TestPipEditableInstallTrimsFragmentParams(t *testing.T) {
+	t.Parallel()
+	c := &stubContainer{
+		scripted: map[string]string{
+			pipScript: "-e git+https://example.com/foo.git@abc#egg=foo&subdirectory=src\n",
+		},
+	}
+	snap, err := Capture(context.Background(), c, "ctr-1")
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if len(snap.Pip) != 1 {
+		t.Fatalf("want 1 pip entry, got %d (%+v)", len(snap.Pip), snap.Pip)
+	}
+	if snap.Pip[0].Name != "foo" {
+		t.Errorf("want package name %q (fragment params trimmed), got %q", "foo", snap.Pip[0].Name)
 	}
 }

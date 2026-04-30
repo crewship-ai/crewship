@@ -164,9 +164,18 @@ func capturePip(ctx context.Context, c provider.ContainerProvider, containerID s
 		// pip freeze can emit `-e git+…#egg=name` lines for editable
 		// installs. Use the egg= name as the package name and leave
 		// the version empty so the snapshot still records its presence.
+		// pip can append fragment params after the egg= value
+		// (e.g. `#egg=foo&subdirectory=src`) — keep only the package
+		// name by trimming at the first `&`.
 		if strings.HasPrefix(line, "-e ") {
 			if idx := strings.Index(line, "#egg="); idx >= 0 {
-				pkgs = append(pkgs, Package{Name: strings.TrimSpace(line[idx+5:])})
+				name := strings.TrimSpace(line[idx+5:])
+				if amp := strings.Index(name, "&"); amp >= 0 {
+					name = name[:amp]
+				}
+				if name != "" {
+					pkgs = append(pkgs, Package{Name: name})
+				}
 			}
 			continue
 		}
