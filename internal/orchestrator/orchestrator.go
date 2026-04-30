@@ -150,6 +150,14 @@ type Orchestrator struct {
 	tmuxCacheMu sync.RWMutex
 	tmuxCache   map[string]bool
 
+	// snapshotHashCache stores the most recent container.snapshot hash
+	// per container so the post-run probe can skip emitting a fresh
+	// journal entry when nothing actually changed. Stale entries (after
+	// container recreation) are harmless — a new container ID gets a
+	// fresh slot and the first snapshot lands as expected.
+	snapshotHashMu    sync.Mutex
+	snapshotHashCache map[string]string
+
 	// journal is the Crew Journal emitter. Nil-safe: SetJournal replaces it
 	// with a no-op. Used by Crow's Nest emit points (exec.command,
 	// container.metrics) so live visibility into containers flows through
@@ -487,8 +495,9 @@ func New(
 		logger:    logger,
 		cooldown:  NewCooldownManager(),
 		accepting: true,
-		crews:     make(map[string]*crewState),
-		tmuxCache: make(map[string]bool),
+		crews:             make(map[string]*crewState),
+		tmuxCache:         make(map[string]bool),
+		snapshotHashCache: make(map[string]string),
 	}
 }
 
