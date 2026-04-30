@@ -46,17 +46,26 @@ func containsDangerousShellChars(cmd string) bool {
 }
 
 // keeperRequestBody is what the agent sends to /keeper/request.
+//
+// agent_slug is intentionally NOT honoured for identity resolution — the
+// sidecar attributes every keeper call to s.ipc.AgentID (the canonical
+// identity for this sidecar). The field stays in the struct so older
+// clients don't get a 400 when they include it, but its value is logged
+// at WARN if it disagrees with the canonical slug. Slug-based identity
+// was the C2 spoofing primitive in the security audit: any agent in the
+// crew container could pass agent_slug=<peer> and the sidecar would
+// forward that as requesting_agent_id, breaking non-repudiation.
 type keeperRequestBody struct {
 	CredentialID   string `json:"credential_id"`
 	CredentialName string `json:"credential_name"`
 	Intent         string `json:"intent"`
 	TaskID         string `json:"task_id,omitempty"`
-	AgentSlug      string `json:"agent_slug,omitempty"`
+	AgentSlug      string `json:"agent_slug,omitempty"` // ignored; see comment above
 }
 
 // keeperExecuteBody is what the agent sends to /keeper/execute.
 // The sidecar sets container_id and requesting_agent_id from IPC config — agents
-// cannot override these fields.
+// cannot override these fields. Same agent_slug rule as keeperRequestBody.
 type keeperExecuteBody struct {
 	CredentialID   string `json:"credential_id"`
 	CredentialName string `json:"credential_name"`
@@ -64,7 +73,7 @@ type keeperExecuteBody struct {
 	Command        string `json:"command"`
 	EnvVar         string `json:"env_var,omitempty"`
 	TaskID         string `json:"task_id,omitempty"`
-	AgentSlug      string `json:"agent_slug,omitempty"`
+	AgentSlug      string `json:"agent_slug,omitempty"` // ignored; see keeperRequestBody comment
 }
 
 // handleKeeperRequest handles POST /keeper/request from agents (UID 1001).
@@ -126,14 +135,13 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve agent identity: if agent_slug provided, look up the real agent ID
-	// from the crew members list. Falls back to the IPC default (first agent that started sidecar).
-	agentID := s.ipc.AgentID
-	if slug := strings.TrimSpace(req.AgentSlug); slug != "" {
-		if resolved := s.resolveAgentBySlug(slug); resolved != "" {
-			agentID = resolved
-		}
+	// Identity is the canonical sidecar AgentID — ignore any slug the
+	// caller provided. See keeperRequestBody comment for the why.
+	if slug := strings.TrimSpace(req.AgentSlug); slug != "" && slug != s.ipc.AgentSlug {
+		s.logger.Warn("keeper bridge: ignoring agent_slug in request body",
+			"received_slug", slug, "canonical_slug", s.ipc.AgentSlug)
 	}
+	agentID := s.ipc.AgentID
 
 	// Build the internal keeper request payload
 	ipcPayload := map[string]string{
@@ -259,13 +267,13 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve agent identity from slug if provided
-	execAgentID := s.ipc.AgentID
-	if slug := strings.TrimSpace(req.AgentSlug); slug != "" {
-		if resolved := s.resolveAgentBySlug(slug); resolved != "" {
-			execAgentID = resolved
-		}
+	// Identity is the canonical sidecar AgentID — ignore any slug the
+	// caller provided. See keeperRequestBody comment for the why.
+	if slug := strings.TrimSpace(req.AgentSlug); slug != "" && slug != s.ipc.AgentSlug {
+		s.logger.Warn("keeper bridge: ignoring agent_slug in execute body",
+			"received_slug", slug, "canonical_slug", s.ipc.AgentSlug)
 	}
+	execAgentID := s.ipc.AgentID
 
 	// Build the IPC payload. Critically:
 	// - requesting_agent_id resolved from crew members or IPC default (not the request body)

@@ -303,6 +303,15 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
+	// Audit H7: defensive nil check. The router only mounts AuthHandler
+	// when JWTSecret is configured (so validator is non-nil at startup),
+	// but a misconfigured deployment that wires the handler without a
+	// validator would panic on the next line. Fail closed instead.
+	if h.validator == nil {
+		h.logger.Error("WsToken called without configured JWT validator")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	// If auth came from a CLI token (no session cookie), generate a short-lived JWE.
 	token := extractToken(r)
