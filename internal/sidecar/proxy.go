@@ -44,16 +44,35 @@ var hopByHopHeaders = []string{
 // from "agent fetched generic HTTPS".
 type EgressObserver func(host, method, provider string, statusCode int)
 
+// LLMCallObserver fires after a known LLM provider call returns, with the
+// parsed token usage and rate-limit signal. Wired by ServerConfig at
+// startup; the typical implementation HTTP-POSTs to crewshipd which then
+// calls paymaster.Record. nil = no observer = no cost-ledger writes from
+// CLI traffic (agents in metered mode still produce direct-API ledger
+// rows via the Go middleware path).
+//
+// `mode` and `plan` carry the values of CREWSHIP_BILLING_MODE and
+// CREWSHIP_SUBSCRIPTION_PLAN env vars set by the orchestrator at exec
+// time, so the observer can tag the row correctly without re-deriving
+// credential type. Empty mode is treated as "metered" by the recorder.
+//
+// Implementations MUST return quickly — the call runs on the proxy
+// goroutine, blocking the response to the agent.
+type LLMCallObserver func(usage LLMUsage, quota QuotaInfo, mode, plan string)
+
 // Proxy is an HTTP forward proxy that intercepts agent outbound requests,
 // injects LLM API credentials, and blocks non-allowed domains.
 type Proxy struct {
-	credStore *CredStore
-	allowlist *DomainAllowlist
-	scrubber  *scrubber.Scrubber
-	logger    *slog.Logger
-	transport http.RoundTripper
-	freeMode  bool
-	onEgress  EgressObserver
+	credStore   *CredStore
+	allowlist   *DomainAllowlist
+	scrubber    *scrubber.Scrubber
+	logger      *slog.Logger
+	transport   http.RoundTripper
+	freeMode    bool
+	onEgress    EgressObserver
+	onLLMCall   LLMCallObserver
+	billingMode string // "metered" | "flat_rate" | "" — set from env at startup
+	subPlan     string // human label for flat-rate (e.g. "Anthropic Max 20×")
 }
 
 // ProxyConfig configures the sidecar proxy.
@@ -69,17 +88,29 @@ type ProxyConfig struct {
 	// requires rebuilding the Proxy; for the sidecar's lifecycle that
 	// happens at startup only, which keeps this lock-free on the hot path.
 	OnEgress EgressObserver
+	// OnLLMCall is invoked after a successful LLM-provider call, with the
+	// parsed usage and quota signal. Optional. See LLMCallObserver.
+	OnLLMCall LLMCallObserver
+	// BillingMode and SubscriptionPlan come from the agent container's
+	// CREWSHIP_BILLING_MODE / CREWSHIP_SUBSCRIPTION_PLAN env vars (set by
+	// orchestrator/exec_env.go based on credential type). Pass-through
+	// values that the LLMCallObserver receives for ledger row tagging.
+	BillingMode      string
+	SubscriptionPlan string
 }
 
 // NewProxy creates a forward proxy with credential injection.
 func NewProxy(cfg ProxyConfig) *Proxy {
 	return &Proxy{
-		credStore: cfg.CredStore,
-		allowlist: cfg.Allowlist,
-		scrubber:  cfg.Scrubber,
-		logger:    cfg.Logger,
-		freeMode:  cfg.FreeMode,
-		onEgress:  cfg.OnEgress,
+		credStore:   cfg.CredStore,
+		allowlist:   cfg.Allowlist,
+		scrubber:    cfg.Scrubber,
+		logger:      cfg.Logger,
+		freeMode:    cfg.FreeMode,
+		onEgress:    cfg.OnEgress,
+		onLLMCall:   cfg.OnLLMCall,
+		billingMode: cfg.BillingMode,
+		subPlan:     cfg.SubscriptionPlan,
 		transport: &http.Transport{
 			DialContext: (&net.Dialer{
 				Timeout:   10 * time.Second,
@@ -190,7 +221,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	p.copyAndObserveLLM(w, resp, string(provider))
 }
 
 // handleConnect handles HTTPS CONNECT tunnel requests.
@@ -322,8 +353,83 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	p.copyAndObserveLLM(w, resp, string(ProviderAnthropic))
 }
+
+// copyAndObserveLLM streams the upstream response body to the client and,
+// when the upstream is a known LLM provider returning a non-streaming JSON
+// body, also parses usage / quota and fires the OnLLMCall observer.
+//
+// Streaming responses (text/event-stream) and non-LLM hosts skip the buffer
+// path and pass through unmodified — buffering an SSE stream would defeat
+// its low-latency UX, and we don't want to pay the buffer cost on generic
+// HTTPS traffic that has nothing to do with billing.
+//
+// Body buffering is bounded by maxRequestBodyBytes (10 MB) — the same cap
+// that protects the request path, applied here to the response so a
+// pathological upstream can't OOM the sidecar.
+func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, provider string) {
+	// Bail out fast for non-LLM traffic or when nobody's listening for usage.
+	if provider == "" || p.onLLMCall == nil {
+		_, _ = io.Copy(w, resp.Body)
+		return
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if !isJSONResponse(contentType) {
+		// Streaming (SSE) or unknown shape — pass through, only fire quota
+		// signal from headers so EnforceQuota still gets the most-restrictive
+		// reading even when we can't see the body.
+		_, _ = io.Copy(w, resp.Body)
+		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
+		if quota.RemainingPct > 0 || quota.HadStatus429 {
+			p.onLLMCall(LLMUsage{Provider: provider}, quota, p.billingMode, p.subPlan)
+		}
+		return
+	}
+
+	// Non-streaming JSON: tee through a bounded buffer so we keep streaming
+	// to the client while accumulating bytes for the parser. Using
+	// io.MultiWriter with a bytes.Buffer would buffer fully before flushing,
+	// which surfaces as latency to the agent — io.TeeReader is the right
+	// shape: read once, write twice.
+	limited := http.MaxBytesReader(w, resp.Body, maxRequestBodyBytes)
+	buf := &boundedBuffer{cap: maxRequestBodyBytes}
+	tee := io.TeeReader(limited, buf)
+	if _, err := io.Copy(w, tee); err != nil {
+		// Client disconnected or upstream cut off mid-stream. We still try
+		// to parse whatever we've got — partial JSON returns zero usage,
+		// which is fine.
+		p.logger.Debug("response copy interrupted", "provider", provider, "error", err)
+	}
+
+	usage := parseLLMUsage(provider, buf.String())
+	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
+	p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
+}
+
+// boundedBuffer is a Write target that drops bytes once it hits cap. We use
+// it for the response-body tee so a pathological multi-megabyte response
+// can't blow past the size guard while we're parsing for usage.
+type boundedBuffer struct {
+	buf []byte
+	cap int
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	room := b.cap - len(b.buf)
+	if room <= 0 {
+		return len(p), nil // accept the write but discard
+	}
+	if len(p) > room {
+		b.buf = append(b.buf, p[:room]...)
+		return len(p), nil
+	}
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string { return string(b.buf) }
 
 // injectCredential adds the appropriate authentication header for the LLM provider.
 func injectCredential(r *http.Request, provider ProviderType, token string) {

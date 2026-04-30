@@ -69,6 +69,113 @@ type journalEmitRequest struct {
 	Refs        map[string]any `json:"refs,omitempty"`
 }
 
+// buildLLMCallObserver returns the proxy-side hook that forwards parsed
+// LLM usage + quota signal to crewshipd's /internal/cost/record endpoint.
+// Mirrors buildEgressObserver in shape: fire-and-forget goroutine, drop
+// when IPC is unconfigured, no back-pressure on the proxy hot path.
+//
+// Authoritative scope (workspace/crew/agent IDs) comes from s.ipc — the
+// sidecar learns those at boot via crewshipd-stamped IPCConfig — so an
+// agent cannot spoof a row attributed to a different scope by fiddling
+// with response bodies.
+func (s *Server) buildLLMCallObserver() LLMCallObserver {
+	return func(usage LLMUsage, quota QuotaInfo, mode, plan string) {
+		if s == nil || s.ipc == nil || s.ipc.BaseURL == "" || s.ipc.WorkspaceID == "" {
+			return
+		}
+		// Drop totally-empty events: nothing to record, nothing to enforce.
+		// Distinct from the !=0-token-counts heuristic in the API handler —
+		// here we just skip the IPC round-trip when the upstream returned
+		// neither usage nor a rate-limit signal (e.g. plain GET to /v1/models).
+		hasUsage := usage.InputTokens != 0 || usage.OutputTokens != 0
+		hasQuota := quota.RemainingPct > 0 || quota.HadStatus429
+		if !hasUsage && !hasQuota {
+			return
+		}
+
+		go func(usage LLMUsage, quota QuotaInfo, mode, plan string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			s.postCostRecord(ctx, usage, quota, mode, plan)
+		}(usage, quota, mode, plan)
+	}
+}
+
+// sidecarCostRecord matches the wire format declared in
+// internal/api/internal_cost.go. Kept as a private struct so a breaking
+// change on either side surfaces as a compile error during build instead
+// of silent serialization drift at runtime.
+type sidecarCostRecord struct {
+	WorkspaceID string `json:"workspace_id"`
+	CrewID      string `json:"crew_id"`
+	AgentID     string `json:"agent_id"`
+	MissionID   string `json:"mission_id,omitempty"`
+
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+
+	InputTokens         int64 `json:"input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+	CachedInputTokens   int64 `json:"cached_input_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_tokens"`
+
+	BillingMode       string  `json:"billing_mode"`
+	SubscriptionPlan  string  `json:"subscription_plan,omitempty"`
+	QuotaRemainingPct float64 `json:"quota_remaining_pct,omitempty"`
+	QuotaWindow       string  `json:"quota_window,omitempty"`
+	HadStatus429      bool    `json:"had_status_429,omitempty"`
+}
+
+// postCostRecord serialises one cost record and POSTs it to crewshipd.
+// All transport / encoding errors are logged at debug level — same
+// philosophy as emitJournal: observability fail closed against the proxy
+// hot path is worse than missing rows in the ledger.
+func (s *Server) postCostRecord(ctx context.Context, usage LLMUsage, quota QuotaInfo, mode, plan string) {
+	if usage.Provider == "" {
+		// Caller passed only a quota signal with no provider tag — we have
+		// nowhere to attribute the row, so skip rather than write garbage.
+		return
+	}
+	body, err := json.Marshal(sidecarCostRecord{
+		WorkspaceID:         s.ipc.WorkspaceID,
+		CrewID:              s.ipc.CrewID,
+		AgentID:             s.ipc.AgentID,
+		Provider:            usage.Provider,
+		Model:               usage.Model,
+		InputTokens:         usage.InputTokens,
+		OutputTokens:        usage.OutputTokens,
+		CachedInputTokens:   usage.CachedInputTokens,
+		CacheCreationTokens: usage.CacheCreationTokens,
+		BillingMode:         mode,
+		SubscriptionPlan:    plan,
+		QuotaRemainingPct:   quota.RemainingPct,
+		QuotaWindow:         quota.Window,
+		HadStatus429:        quota.HadStatus429,
+	})
+	if err != nil {
+		s.logger.Debug("cost record marshal failed", "err", err, "provider", usage.Provider)
+		return
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
+		s.ipc.BaseURL+"/api/v1/internal/cost/record", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
+
+	resp, err := ipcClient.Do(httpReq)
+	if err != nil {
+		s.logger.Debug("cost record IPC failed", "err", err, "provider", usage.Provider)
+		return
+	}
+	_ = resp.Body.Close()
+}
+
 // emitJournal posts a single journal entry to crewshipd over IPC. The
 // sidecar itself has no DB access (security boundary: sidecar runs
 // agent-adjacent, DB writes must go through the trusted plane), so every

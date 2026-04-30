@@ -590,6 +590,11 @@ func (r *Router) registerRoutes() {
 	// Handler enforces a strict entry-type allowlist so agents can't fabricate
 	// assignment.completed / approval.granted rows via the sidecar.
 	r.mux.Handle("POST /api/v1/internal/journal/emit", internalAuth(http.HandlerFunc(r.handleSidecarEmit)))
+	// Sidecar-emitted cost ledger rows. Sidecar parses LLM provider responses
+	// (Anthropic/OpenAI/Google) for token usage + rate-limit headers, then
+	// POSTs here so paymaster.Record can write the row + emit llm.call /
+	// cost.incurred / budget.* journal entries on the trusted plane.
+	r.mux.Handle("POST /api/v1/internal/cost/record", internalAuth(http.HandlerFunc(r.handleSidecarCostRecord)))
 
 	// Cross-crew messaging and file sharing (called by sidecar)
 	crewMsg := NewCrewMessagingHandler(r.db, r.storagePath, r.logger)
