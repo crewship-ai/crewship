@@ -564,6 +564,32 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id
 ALTER TABLE chats ADD COLUMN origin TEXT;
 CREATE INDEX IF NOT EXISTS idx_chats_origin ON chats(origin) WHERE origin IS NOT NULL;
 `},
+	// Server-side session evidence backing the access/refresh token
+	// model (see internal/auth/jwt.go). A row exists for every issued
+	// refresh-token chain; the access token's `sid` claim joins to it
+	// on every authenticated request. revoked_at is the kill-switch:
+	// signOut, password change, admin force-logout, or refresh rotation
+	// flip it and the next request gets 401 session_revoked. Without
+	// this table the legacy 30-day JWT was unrevokable until expiry.
+	//
+	// last_used_at is updated by the auth middleware throttled to
+	// at-most-once-per-60-seconds (in-memory cache, not per-request)
+	// so the table doesn't take a write hammering on hot endpoints.
+	{version: 60, name: "add_user_sessions", sql: `
+CREATE TABLE IF NOT EXISTS user_sessions (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
+	revoked_at TEXT,
+	revoked_reason TEXT,
+	user_agent TEXT,
+	ip TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user_active ON user_sessions(user_id) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
