@@ -4,10 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   agentSpendResponseSchema,
   crewSpendResponseSchema,
+  subscriptionUsageResponseSchema,
   topSpendersResponseSchema,
   type AgentSpendResponse,
   type CrewSpendResponse,
   type PaymasterRange,
+  type SubscriptionUsageResponse,
   type TopSpendersResponse,
 } from "@/lib/types/paymaster"
 
@@ -158,6 +160,58 @@ export function useTopSpenders(range: PaymasterRange, limit = 10, reloadKey = 0)
   useEffect(() => {
     fetcher()
   }, [fetcher, reloadKey])
+
+  return state
+}
+
+/**
+ * Subscription plan usage — flat-rate credentials grouped by plan label.
+ * Returned rows have NO $ figure (subscription = flat fee covered the
+ * call). UI uses CallCount + LastTS to surface "Anthropic Max — 47 calls,
+ * last used 14m ago" alongside the metered $ totals.
+ */
+export function useSubscriptionUsage(
+  range: PaymasterRange,
+  reloadKey = 0,
+): FetchState<SubscriptionUsageResponse> {
+  const [state, setState] = useState<FetchState<SubscriptionUsageResponse>>(
+    { ...INITIAL } as FetchState<SubscriptionUsageResponse>,
+  )
+  const reqIdRef = useRef(0)
+
+  useEffect(() => {
+    const reqId = ++reqIdRef.current
+    setState((s) => ({ ...s, loading: true, error: null }))
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/v1/paymaster/subscriptions?range=${range}`)
+        if (reqIdRef.current !== reqId) return
+        if (res.status === 404) {
+          setState({ data: null, loading: false, error: null, notConfigured: true })
+          return
+        }
+        if (!res.ok) {
+          setState({ data: null, loading: false, error: `HTTP ${res.status}`, notConfigured: false })
+          return
+        }
+        const json = await res.json()
+        const parsed = subscriptionUsageResponseSchema.safeParse(json)
+        if (reqIdRef.current !== reqId) return
+        if (!parsed.success) {
+          // Empty rows is the right fallback for a malformed response —
+          // showing the panel with "no data" beats a hard error for what
+          // is, in the worst case, a backend-old / new-frontend skew.
+          setState({ data: { rows: [] }, loading: false, error: null, notConfigured: false })
+          return
+        }
+        setState({ data: parsed.data, loading: false, error: null, notConfigured: false })
+      } catch {
+        if (reqIdRef.current === reqId) {
+          setState({ data: null, loading: false, error: "Network error", notConfigured: false })
+        }
+      }
+    })()
+  }, [range, reloadKey])
 
   return state
 }

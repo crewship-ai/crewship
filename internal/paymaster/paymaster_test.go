@@ -586,6 +586,190 @@ func TestMiddlewareBlocksOnHardBudget(t *testing.T) {
 	}
 }
 
+// TestRecordFlatRateNullsCost asserts the v60 flat-rate invariant: even if
+// the caller hands in a non-zero CostUSD, the row lands with cost=0 and
+// confidence=unknown. Pricing for subscription calls is structurally
+// nonsense, so we never persist a number that would imply otherwise.
+func TestRecordFlatRateNullsCost(t *testing.T) {
+	db := openTestDB(t)
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	rec, err := Record(ctx, db, em, Call{
+		Scope:            Scope{WorkspaceID: "ws1", CrewID: "crew1"},
+		Provider:         "anthropic",
+		Model:            "claude-opus-4-7",
+		InputTokens:      1000,
+		OutputTokens:     500,
+		CostUSD:          99.99, // would be ignored
+		BillingMode:      BillingFlatRate,
+		SubscriptionPlan: "Anthropic Max",
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	var (
+		cost       float64
+		mode       string
+		confidence string
+		plan       sql.NullString
+	)
+	err = db.QueryRowContext(ctx,
+		`SELECT cost_usd, billing_mode, cost_confidence, subscription_plan
+		 FROM cost_ledger WHERE id = ?`, rec.ID).
+		Scan(&cost, &mode, &confidence, &plan)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if cost != 0 {
+		t.Errorf("flat-rate cost should be 0, got %v", cost)
+	}
+	if mode != "flat_rate" {
+		t.Errorf("billing_mode: %q want flat_rate", mode)
+	}
+	if confidence != "unknown" {
+		t.Errorf("confidence: %q want unknown", confidence)
+	}
+	if !plan.Valid || plan.String != "Anthropic Max" {
+		t.Errorf("plan: %+v want Anthropic Max", plan)
+	}
+
+	// Flat-rate must NOT fire cost.incurred — no $ was incurred.
+	if got := len(em.byType(journal.EntryCostIncurred)); got != 0 {
+		t.Errorf("flat-rate should not emit cost.incurred, got %d", got)
+	}
+	if got := len(em.byType(journal.EntryLLMCall)); got != 1 {
+		t.Errorf("expected 1 llm.call entry, got %d", got)
+	}
+}
+
+// TestRecordMeteredSnapshotsRateCard is the Langfuse-pattern check: the
+// v60 ratecard columns are populated at write time so a future pricing.go
+// change can't retroactively rewrite history.
+func TestRecordMeteredSnapshotsRateCard(t *testing.T) {
+	db := openTestDB(t)
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	rec, err := Record(ctx, db, em, Call{
+		Scope:        Scope{WorkspaceID: "ws1"},
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4-6",
+		InputTokens:  100,
+		OutputTokens: 200,
+		CostUSD:      0.01,
+		BillingMode:  BillingMetered,
+		Confidence:   ConfidencePrecise,
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	var inRate, outRate sql.NullFloat64
+	err = db.QueryRowContext(ctx,
+		`SELECT rate_input_per_m, rate_output_per_m FROM cost_ledger WHERE id = ?`, rec.ID).
+		Scan(&inRate, &outRate)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if !inRate.Valid || !nearly(inRate.Float64, 3.00, 1e-9) {
+		t.Errorf("rate_input_per_m: %+v want 3.00", inRate)
+	}
+	if !outRate.Valid || !nearly(outRate.Float64, 15.00, 1e-9) {
+		t.Errorf("rate_output_per_m: %+v want 15.00", outRate)
+	}
+}
+
+// TestEnforceQuotaWarnAtLowRemaining asserts a budget.warning fires when
+// remaining quota drops below 20% — without blocking. Mirrors the soft /
+// tiered $-budget warn behaviour for the rate-limit-header signal.
+func TestEnforceQuotaWarnAtLowRemaining(t *testing.T) {
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	if err := EnforceQuota(ctx, em, Scope{WorkspaceID: "ws1"}, 0.10, QuotaTokensPerMin, false); err != nil {
+		t.Fatalf("low remaining should not block: %v", err)
+	}
+	if got := len(em.byType(journal.EntryBudgetWarning)); got != 1 {
+		t.Errorf("expected 1 warning, got %d", got)
+	}
+}
+
+// TestEnforceQuota429Blocks asserts the upstream's authoritative "you're
+// out" signal returns BudgetExceededError so the caller can surface a
+// quota_exhausted error consistently with the $-budget enforcement path.
+func TestEnforceQuota429Blocks(t *testing.T) {
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	err := EnforceQuota(ctx, em, Scope{WorkspaceID: "ws1"}, 0, QuotaTokensPerMin, true)
+	if err == nil {
+		t.Fatal("expected BudgetExceededError on 429")
+	}
+	var bx *BudgetExceededError
+	if !errors.As(err, &bx) {
+		t.Errorf("want BudgetExceededError, got %T", err)
+	}
+	if got := len(em.byType(journal.EntryBudgetExceed)); got != 1 {
+		t.Errorf("expected 1 budget.exceeded entry, got %d", got)
+	}
+}
+
+// TestEnforceQuotaPlentyOfRoom is the no-op path: above 20% remaining, no
+// signal, no error. The journal stays clean and the proxy hot path
+// doesn't pay for an unnecessary entry.
+func TestEnforceQuotaPlentyOfRoom(t *testing.T) {
+	em := &fakeEmitter{}
+	ctx := context.Background()
+	if err := EnforceQuota(ctx, em, Scope{WorkspaceID: "ws1"}, 0.85, QuotaTokensPerMin, false); err != nil {
+		t.Fatalf("85%% remaining should be no-op: %v", err)
+	}
+	if got := len(em.byType(journal.EntryBudgetWarning)) + len(em.byType(journal.EntryBudgetExceed)); got != 0 {
+		t.Errorf("plenty-of-room path should not emit, got %d entries", got)
+	}
+}
+
+// TestSubscriptionUsageByPlan exercises the new flat-rate rollup helper.
+// Mixed metered + flat-rate ledger rows are seeded; the rollup must return
+// only flat-rate aggregates grouped by (plan, provider).
+func TestSubscriptionUsageByPlan(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Format(tsLayout)
+
+	// 2 flat-rate Anthropic Max rows + 1 metered row + 1 different plan row.
+	mustExec(t, db, `INSERT INTO cost_ledger
+	    (id, workspace_id, ts, provider, model, input_tokens, output_tokens,
+	     cost_usd, billing_mode, subscription_plan, cost_confidence) VALUES
+	    ('s1', 'ws1', ?, 'anthropic', 'claude-opus-4-7', 100, 200, 0, 'flat_rate', 'Anthropic Max', 'unknown'),
+	    ('s2', 'ws1', ?, 'anthropic', 'claude-opus-4-7', 50,  100, 0, 'flat_rate', 'Anthropic Max', 'unknown'),
+	    ('s3', 'ws1', ?, 'anthropic', 'claude-opus-4-7', 10,  20,  0.05, 'metered',  NULL, 'precise'),
+	    ('s4', 'ws1', ?, 'openai',    'gpt-5.5',         30,  40,  0, 'flat_rate', 'Cursor Ultra', 'unknown')`,
+		now, now, now, now)
+
+	rows, err := SubscriptionUsageByPlan(ctx, db, "ws1", time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("SubscriptionUsageByPlan: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 plan-provider groups, got %d: %+v", len(rows), rows)
+	}
+
+	gotByPlan := map[string]SubscriptionUsage{}
+	for _, r := range rows {
+		gotByPlan[r.SubscriptionPlan] = r
+	}
+	max := gotByPlan["Anthropic Max"]
+	if max.CallCount != 2 || max.InTokens != 150 || max.OutTokens != 300 {
+		t.Errorf("Anthropic Max rollup wrong: %+v", max)
+	}
+	cursor := gotByPlan["Cursor Ultra"]
+	if cursor.CallCount != 1 || cursor.Provider != "openai" {
+		t.Errorf("Cursor Ultra row wrong: %+v", cursor)
+	}
+}
+
 // TestDeriveState locks the state-machine boundaries so any future change to
 // the warn threshold triggers an explicit test update.
 func TestDeriveState(t *testing.T) {

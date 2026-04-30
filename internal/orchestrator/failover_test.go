@@ -182,6 +182,31 @@ func TestBuildCLICommand(t *testing.T) {
 			[]string{"opencode", "run", "hello"},
 		},
 		{
+			"cursor cli default",
+			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--", "hello"},
+		},
+		{
+			"cursor cli with model override",
+			AgentRunRequest{CLIAdapter: "CURSOR_CLI", LLMModel: "gpt-5.5", UserMessage: "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "-m", "gpt-5.5", "--", "hello"},
+		},
+		{
+			"factory droid default low autonomy",
+			AgentRunRequest{CLIAdapter: "FACTORY_DROID", UserMessage: "fix the bug"},
+			[]string{"droid", "exec", "--auto", "low", "fix the bug"},
+		},
+		{
+			"factory droid coding profile bumps to medium",
+			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CODING", UserMessage: "ship the feature"},
+			[]string{"droid", "exec", "--auto", "medium", "ship the feature"},
+		},
+		{
+			"factory droid with model",
+			AgentRunRequest{CLIAdapter: "FACTORY_DROID", LLMModel: "claude-sonnet-4-6", UserMessage: "review"},
+			[]string{"droid", "exec", "--auto", "low", "--model", "claude-sonnet-4-6", "review"},
+		},
+		{
 			"unknown defaults to claude",
 			AgentRunRequest{CLIAdapter: "UNKNOWN", UserMessage: "hello"},
 			[]string{"claude", "--print", "hello"},
