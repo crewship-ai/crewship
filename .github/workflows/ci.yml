@@ -33,6 +33,20 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
+      # Cache Next.js incremental build artifacts. actions/checkout cleans
+      # the workspace each run (clean: true is the default), so .next/cache
+      # would otherwise be cold every time and Turbopack would re-parse the
+      # entire app — typically 60-90s wasted per push. Restore-keys fall
+      # back to the most recent build with the same lockfile, which Next
+      # then upgrades incrementally based on changed source files.
+      - name: Cache .next build artifacts
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ github.workspace }}/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+
       - name: Lint
         run: pnpm lint
 
