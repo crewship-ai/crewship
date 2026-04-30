@@ -65,7 +65,13 @@ func TestIsRateLimitError(t *testing.T) {
 		{"billing limit", 1, "billing_hard_limit reached", true},
 		{"normal error", 1, "Error: file not found", false},
 		{"success exit code", 0, "rate limit", false},
-		{"exit code 2", 2, "rate limit", false},
+		// Real-world CLI exits for 429s vary; previously only exit 1 was
+		// accepted. Now any non-zero exit code with a matching stderr
+		// pattern triggers cooldown, so the rate-limit failover engages
+		// after a SIGKILL (137) or usage error (2) too.
+		{"exit code 2 with rate limit stderr", 2, "rate limit", true},
+		{"timeout exit code 124", 124, "Error: HTTP 429", true},
+		{"OOM exit code 137", 137, "rate_limit reached", true},
 		{"empty stderr", 1, "", false},
 		{"case insensitive", 1, "RATE_LIMIT exceeded", true},
 	}

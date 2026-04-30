@@ -64,9 +64,13 @@ var rateLimitPatterns = []string{
 }
 
 // IsRateLimitError checks whether the agent exit code and stderr indicate a
-// rate limit or quota error from the LLM provider.
+// rate limit or quota error from the LLM provider. Real-world CLI exits
+// for a 429 vary by tool: 1 (generic error), 2 (usage), 124 (timeout
+// after a long-running rate-limit retry), 137 (SIGKILL after the OOM
+// killer kicked in on a stuck process). Any non-zero exit is acceptable
+// as long as stderr carries one of the recognised rate-limit signals.
 func IsRateLimitError(exitCode int, stderr string) bool {
-	if exitCode != 1 {
+	if exitCode == 0 {
 		return false
 	}
 	lower := strings.ToLower(stderr)
