@@ -12,9 +12,16 @@ inputs:
 runs:
   using: composite
   steps:
+    # cache: true enables actions/setup-go's built-in module + build cache,
+    # keyed on the platform and go.sum hash. On the self-hosted MBA runner
+    # (where Go-touching jobs land) a cold module graph adds ~30-45s per
+    # job; with cache restored the same step finishes in <2s. The cache
+    # also covers the build cache, so `go vet` / `go test` reuse compiled
+    # archives across jobs sharing the same go.sum.
     - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
       with:
         go-version: ${{ inputs.go-version }}
+        cache: true
 
     - shell: bash
       run: |
