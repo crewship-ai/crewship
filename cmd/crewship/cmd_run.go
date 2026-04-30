@@ -23,6 +23,9 @@ var runCmd = &cobra.Command{
 Examples:
   crewship run viktor "Create a REST API"
   crewship run viktor --prompt @task.txt
+  crewship run viktor --prompt @-           # read from stdin
+  cat issue.md | crewship run viktor "fix"  # stdin auto-appended as context
+  git diff | crewship run viktor "review" --with-git-status
   crewship run viktor --interactive
   crewship run viktor --chat <chatId> "follow-up question"`,
 	Args: cobra.MinimumNArgs(1),
@@ -43,21 +46,32 @@ Examples:
 			return err
 		}
 
-		// Get prompt
-		prompt := ""
+		flagPrompt, _ := cmd.Flags().GetString("prompt")
+		withGitDiff, _ := cmd.Flags().GetBool("with-git-diff")
+		withGitDiffStaged, _ := cmd.Flags().GetBool("with-git-staged")
+		withGitLog, _ := cmd.Flags().GetBool("with-git-log")
+		withGitStatus, _ := cmd.Flags().GetBool("with-git-status")
+		withFiles, _ := cmd.Flags().GetStringSlice("with-file")
+		withCmds, _ := cmd.Flags().GetStringSlice("with-cmd")
+
+		var positional []string
 		if len(args) > 1 {
-			prompt = strings.Join(args[1:], " ")
+			positional = args[1:]
 		}
-		if p, _ := cmd.Flags().GetString("prompt"); p != "" {
-			if strings.HasPrefix(p, "@") {
-				data, err := os.ReadFile(p[1:])
-				if err != nil {
-					return fmt.Errorf("read prompt file: %w", err)
-				}
-				prompt = string(data)
-			} else {
-				prompt = p
-			}
+
+		prompt, err := cli.BuildPrompt(cli.PromptOptions{
+			Positional:        positional,
+			PromptFlag:        flagPrompt,
+			AutoStdin:         true,
+			WithGitDiff:       withGitDiff,
+			WithGitDiffStaged: withGitDiffStaged,
+			WithGitLog:        withGitLog,
+			WithGitStatus:     withGitStatus,
+			WithFiles:         withFiles,
+			WithCmds:          withCmds,
+		})
+		if err != nil {
+			return err
 		}
 
 		interactive, _ := cmd.Flags().GetBool("interactive")
@@ -108,19 +122,37 @@ Examples:
 
 		server := cli.ResolveServer(flagServer, cliCfg)
 
+		md := resolveMarkdownFromCmd(cmd)
+
 		if interactive {
-			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet)
+			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md)
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet)
+			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md)
 		}
 
-		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet)
+		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md)
 	},
 }
 
-func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool) error {
+// resolveMarkdownFromCmd reads --markdown / --no-markdown and returns a renderer
+// (or nil if rendering is disabled). Callers pass the result through to
+// streaming/no-stream printers.
+func resolveMarkdownFromCmd(cmd *cobra.Command) *cli.MarkdownRenderer {
+	on, _ := cmd.Flags().GetBool("markdown")
+	off, _ := cmd.Flags().GetBool("no-markdown")
+	setting := ""
+	if cliCfg != nil {
+		setting = cliCfg.Markdown
+	}
+	if cli.ResolveMarkdown(setting, on, off, flagNoColor) {
+		return cli.NewMarkdownRenderer()
+	}
+	return nil
+}
+
+func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -151,10 +183,10 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 		return fmt.Errorf("send message: %w", err)
 	}
 
-	return streamEvents(ws, quiet)
+	return streamEvents(ws, quiet, md)
 }
 
-func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool) error {
+func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -203,8 +235,12 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool)
 
 	text := fullText.String()
 	if text != "" {
-		fmt.Print(text)
-		if !strings.HasSuffix(text, "\n") {
+		toPrint := text
+		if md != nil {
+			toPrint = md.Render(text)
+		}
+		fmt.Print(toPrint)
+		if !strings.HasSuffix(toPrint, "\n") {
 			fmt.Println()
 		}
 	}
@@ -231,7 +267,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool)
 	return nil
 }
 
-func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool) error {
+func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -264,7 +300,7 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 		if err := ws.SendMessage(agentChannel, chatID, initialPrompt); err != nil {
 			return fmt.Errorf("send message: %w", err)
 		}
-		if err := streamEvents(ws, quiet); err != nil {
+		if err := streamEvents(ws, quiet, md); err != nil {
 			return err
 		}
 	}
@@ -289,16 +325,29 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 			return fmt.Errorf("send message: %w", err)
 		}
 
-		if err := streamEvents(ws, quiet); err != nil {
+		if err := streamEvents(ws, quiet, md); err != nil {
 			return err
 		}
 	}
 }
 
-func streamEvents(ws *cli.WSClient, quiet bool) error {
+func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer) error {
+	flush := func() {
+		if md != nil {
+			fmt.Print(md.Flush())
+		}
+	}
+	emitText := func(s string) {
+		if md != nil {
+			fmt.Print(md.Write(s))
+		} else {
+			fmt.Print(s)
+		}
+	}
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
+			flush()
 			return nil
 		}
 
@@ -312,7 +361,7 @@ func streamEvents(ws *cli.WSClient, quiet bool) error {
 
 		switch event.Type {
 		case "text":
-			fmt.Print(event.Content)
+			emitText(event.Content)
 		case "thinking":
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "%s[thinking]%s %s\n", cli.Gray, cli.Reset, truncate(event.Content, 100))
@@ -330,9 +379,11 @@ func streamEvents(ws *cli.WSClient, quiet bool) error {
 				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, event.Content)
 			}
 		case "error":
+			flush()
 			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
 			return nil
 		case "done":
+			flush()
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "\n%s[done]%s\n", cli.Green, cli.Reset)
 			}
@@ -403,12 +454,20 @@ var runListCmd = &cobra.Command{
 }
 
 func init() {
-	runCmd.Flags().StringP("prompt", "p", "", "Prompt text or @file.txt")
+	runCmd.Flags().StringP("prompt", "p", "", "Prompt text, @file, or @- for stdin")
 	runCmd.Flags().Bool("interactive", false, "Interactive chat mode")
 	runCmd.Flags().String("chat", "", "Continue existing chat (chat ID)")
 	runCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
 	runCmd.Flags().BoolP("quiet", "q", false, "Only output text, no meta info")
 	runCmd.Flags().Int("timeout", 0, "Timeout in seconds (0 = no timeout)")
+	runCmd.Flags().Bool("with-git-diff", false, "Append `git diff` as context")
+	runCmd.Flags().Bool("with-git-staged", false, "Append `git diff --staged` as context")
+	runCmd.Flags().Bool("with-git-log", false, "Append last 20 commits as context")
+	runCmd.Flags().Bool("with-git-status", false, "Append `git status -s` as context")
+	runCmd.Flags().StringSlice("with-file", nil, "Append file content(s) as context (repeatable)")
+	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
+	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
+	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 
 	runCmd.AddCommand(runListCmd)
 }

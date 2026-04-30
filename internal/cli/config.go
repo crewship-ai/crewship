@@ -11,10 +11,15 @@ import (
 // CLIConfig holds persisted CLI settings including server URL, workspace,
 // auth token, and output format.
 type CLIConfig struct {
-	Server    string `yaml:"server,omitempty"`
-	Workspace string `yaml:"workspace,omitempty"`
-	Token     string `yaml:"token,omitempty"`
-	Format    string `yaml:"format,omitempty"`
+	Server       string `yaml:"server,omitempty"`
+	Workspace    string `yaml:"workspace,omitempty"`
+	Token        string `yaml:"token,omitempty"`
+	Format       string `yaml:"format,omitempty"`
+	DefaultAgent string `yaml:"default_agent,omitempty"`
+	// Markdown enables ANSI markdown rendering for streamed agent text.
+	// "auto" (default) renders only when stdout is a TTY; "on" forces;
+	// "off" disables. Overridden by --no-markdown / --markdown flags.
+	Markdown string `yaml:"markdown,omitempty"`
 }
 
 // DefaultConfigDir returns the path to ~/.crewship.
