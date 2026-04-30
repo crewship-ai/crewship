@@ -66,10 +66,10 @@ func TestExpandVarRefs_MultipleTokens(t *testing.T) {
 func TestExpandContainerEnv_SmokeTest(t *testing.T) {
 	imageEnv := map[string]string{"PATH": "/usr/bin:/bin"}
 	in := []string{
-		"CREWSHIP_CREW_ID=abc",                  // no expansion needed
-		"PATH=/usr/local/cargo/bin:${PATH}",     // primary fix scenario
-		"NODE_VERSION=22.22.2",                  // unrelated
-		"BAD=${UNDEFINED}",                      // unknown — preserved
+		"CREWSHIP_CREW_ID=abc",              // no expansion needed
+		"PATH=/usr/local/cargo/bin:${PATH}", // primary fix scenario
+		"NODE_VERSION=22.22.2",              // unrelated
+		"BAD=${UNDEFINED}",                  // unknown — preserved
 	}
 	out := expandContainerEnv(in, imageEnv)
 	wantPath := "PATH=/usr/local/cargo/bin:/usr/bin:/bin"

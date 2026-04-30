@@ -65,11 +65,11 @@ const (
 	EntrySummaryGenerated   EntryType = "summary.generated"
 
 	// Observability (Crow's Nest)
-	EntryExecCommand      EntryType = "exec.command"
-	EntryExecOutputChunk  EntryType = "exec.output_chunk"
-	EntryNetworkPortOpen  EntryType = "network.port_opened"
-	EntryNetworkPortClose EntryType = "network.port_closed"
-	EntryNetworkEgress    EntryType = "network.egress"
+	EntryExecCommand       EntryType = "exec.command"
+	EntryExecOutputChunk   EntryType = "exec.output_chunk"
+	EntryNetworkPortOpen   EntryType = "network.port_opened"
+	EntryNetworkPortClose  EntryType = "network.port_closed"
+	EntryNetworkEgress     EntryType = "network.egress"
 	EntryFileWritten       EntryType = "file.written"
 	EntryContainerMetrics  EntryType = "container.metrics"
 	EntryContainerSnapshot EntryType = "container.snapshot"

@@ -52,7 +52,7 @@ func TestProvisioner_Progress_RealDocker(t *testing.T) {
 		Image: "mcr.microsoft.com/devcontainers/base:bookworm",
 		Features: map[string]map[string]any{
 			"ghcr.io/devcontainers/features/common-utils:2": {
-				"installZsh": false,
+				"installZsh":     false,
 				"installOhMyZsh": false,
 			},
 		},

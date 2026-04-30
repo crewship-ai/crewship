@@ -489,12 +489,12 @@ func New(
 	logger *slog.Logger,
 ) *Orchestrator {
 	return &Orchestrator{
-		container: container,
-		state:     state,
-		scrubber:  scrubber.New(),
-		logger:    logger,
-		cooldown:  NewCooldownManager(),
-		accepting: true,
+		container:         container,
+		state:             state,
+		scrubber:          scrubber.New(),
+		logger:            logger,
+		cooldown:          NewCooldownManager(),
+		accepting:         true,
 		crews:             make(map[string]*crewState),
 		tmuxCache:         make(map[string]bool),
 		snapshotHashCache: make(map[string]string),
