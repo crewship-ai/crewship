@@ -83,6 +83,80 @@ func seedAgentRow(t *testing.T, db *sql.DB, id, wsID, crewID, name, slug, role s
 	return id
 }
 
+// seedRunFixture writes one agent_runs row AND the equivalent run.*
+// journal entries so tests stay green regardless of which side the
+// handler reads. status="" means "leave running" (no terminal entry).
+// metadata is a JSON string or "" for none.
+//
+// This mirrors what the live dual-write handlers do (Phase C); Phase J
+// of unified-journal will drop agent_runs and tests can switch to
+// journal-only seeding then.
+func seedRunFixture(t *testing.T, db *sql.DB, runID, agentID, wsID, status, trigger, metadata string) {
+	t.Helper()
+	if trigger == "" {
+		trigger = "USER"
+	}
+	dbStatus := status
+	if status == "" {
+		dbStatus = "RUNNING"
+	}
+	var metaArg interface{}
+	if metadata != "" {
+		metaArg = metadata
+	}
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, status, trigger_type, metadata, started_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		runID, agentID, wsID, dbStatus, trigger, metaArg); err != nil {
+		t.Fatalf("seed agent_runs %s: %v", runID, err)
+	}
+
+	// run.started journal entry — payload mirrors what CreateRun emits.
+	startedPayload := `{"trigger_type":"` + trigger + `"`
+	if metadata != "" {
+		startedPayload += `,"metadata":` + metadata
+	}
+	startedPayload += `}`
+	if _, err := db.Exec(`INSERT INTO journal_entries
+		(id, workspace_id, agent_id, ts, entry_type, severity, actor_type, actor_id,
+		 summary, payload, refs, trace_id, span_id, expires_at, priority)
+		VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'run.started', 'info', 'sidecar', NULL,
+		        ?, ?, '{}', ?, NULL, NULL, 'normal')`,
+		"je-start-"+runID, wsID, agentID, "run "+runID+" started", startedPayload, runID); err != nil {
+		t.Fatalf("seed journal run.started %s: %v", runID, err)
+	}
+
+	// Optional terminal entry.
+	if status == "" || status == "RUNNING" {
+		return
+	}
+	var entryType, severity string
+	switch status {
+	case "COMPLETED":
+		entryType, severity = "run.completed", "info"
+	case "FAILED":
+		entryType, severity = "run.failed", "error"
+	case "CANCELLED":
+		entryType, severity = "run.cancelled", "info"
+	case "TIMEOUT":
+		entryType, severity = "run.timeout", "error"
+	default:
+		t.Fatalf("seedRunFixture: unknown status %q", status)
+	}
+	terminalPayload := "{}"
+	if status == "COMPLETED" {
+		terminalPayload = `{"exit_code":0}`
+	}
+	if _, err := db.Exec(`INSERT INTO journal_entries
+		(id, workspace_id, agent_id, ts, entry_type, severity, actor_type, actor_id,
+		 summary, payload, refs, trace_id, span_id, expires_at, priority)
+		VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?, ?, 'sidecar', NULL,
+		        ?, ?, '{}', ?, NULL, NULL, 'normal')`,
+		"je-end-"+runID, wsID, agentID, entryType, severity,
+		"run "+runID+" "+status, terminalPayload, runID); err != nil {
+		t.Fatalf("seed journal terminal %s: %v", runID, err)
+	}
+}
+
 // withWorkspaceUser merges user + workspace context.
 func withWorkspaceUser(req *http.Request, userID, wsID, role string) *http.Request {
 	ctx := withUser(req.Context(), &AuthUser{ID: userID, Email: userID + "@example.com"})
@@ -1848,12 +1922,8 @@ func TestAgentChats_ListRunsOnAgent(t *testing.T) {
 		t.Errorf("empty len = %d, want 0", len(runs))
 	}
 
-	// Seed one run
-	_, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, status, trigger_type, metadata, created_at)
-		VALUES ('run-1', 'agent-r', ?, 'COMPLETED', 'USER', '{"k":"v"}', datetime('now'))`, wsID)
-	if err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	// Seed one run (writes both agent_runs and the equivalent journal entries).
+	seedRunFixture(t, db, "run-1", "agent-r", wsID, "COMPLETED", "USER", `{"k":"v"}`)
 
 	rr2 := httptest.NewRecorder()
 	h.ListRuns(rr2, req)
@@ -2250,15 +2320,10 @@ func TestRunHandler_List(t *testing.T) {
 		t.Errorf("unexpected empty resp: %+v", emptyResp)
 	}
 
-	// Seed a few runs
-	_, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, status, trigger_type, metadata, created_at)
-		VALUES ('r-1', 'agent-rh', ?, 'RUNNING', 'USER', '{"tags":["x"]}', datetime('now')),
-		       ('r-2', 'agent-rh', ?, 'COMPLETED', 'WEBHOOK', NULL, datetime('now')),
-		       ('r-3', 'agent-rh', ?, 'FAILED', 'SCHEDULE', NULL, datetime('now'))`,
-		wsID, wsID, wsID)
-	if err != nil {
-		t.Fatalf("seed runs: %v", err)
-	}
+	// Seed a few runs (dual-write helper keeps both tables in sync).
+	seedRunFixture(t, db, "r-1", "agent-rh", wsID, "", "USER", `{"tags":["x"]}`) // RUNNING
+	seedRunFixture(t, db, "r-2", "agent-rh", wsID, "COMPLETED", "WEBHOOK", "")
+	seedRunFixture(t, db, "r-3", "agent-rh", wsID, "FAILED", "SCHEDULE", "")
 
 	rr2 := httptest.NewRecorder()
 	h.List(rr2, withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/runs", nil), userID, wsID, "OWNER"))
