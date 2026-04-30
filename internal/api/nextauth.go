@@ -656,6 +656,14 @@ func (h *NextAuthHandler) findSessionID(r *http.Request) string {
 // present (we trust it because the only proxies in the path are our
 // own dev-server and the production Go binary), falling back to the
 // raw RemoteAddr. Used only for the audit column user_sessions.ip.
+//
+// IPv6 quirk: r.RemoteAddr is "[::1]:8080" and the previous LastIndexByte
+// approach truncated to "[::1" — the audit row would then have a
+// malformed address and a future "show me sessions from this IP" query
+// wouldn't match. net.SplitHostPort handles bracketed IPv6 correctly;
+// when it errors (no port present, malformed input), we return the
+// original string rather than empty so a misformatted address is
+// preserved rather than silently dropped.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.IndexByte(xff, ','); i >= 0 {
@@ -666,8 +674,9 @@ func clientIP(r *http.Request) string {
 	if r.RemoteAddr == "" {
 		return ""
 	}
-	if i := strings.LastIndexByte(r.RemoteAddr, ':'); i >= 0 {
-		return r.RemoteAddr[:i]
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
-	return r.RemoteAddr
+	return host
 }
