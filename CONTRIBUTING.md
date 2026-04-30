@@ -52,7 +52,39 @@ The full set with rationale is in [CLAUDE.md](CLAUDE.md). Highlights:
 - **No `Co-Authored-By` lines in commits.**
 - **Never amend after a pre-commit hook failure** — make a new commit.
 
+## Commit messages
+
+We use [Conventional Commits](https://www.conventionalcommits.org/). The
+type and scope drive changelog and release tooling, so they are checked
+at review time.
+
+```
+<type>(<scope>): <imperative summary, ≤70 chars>
+
+<body — what and why; wrap at 80 chars>
+
+<footer — issue refs, breaking-change notes>
+```
+
+Common types: `feat`, `fix`, `docs`, `refactor`, `chore`, `test`, `ci`,
+`perf`. Scopes mirror top-level package or feature names — `api`,
+`keeper`, `sidecar`, `lookout`, `journal`, `orchestrator`, `cli`,
+`crews`, `chat`, `memory`, `deps`, `claude.md`. Skim `git log` to see
+the in-flight conventions before introducing a new scope.
+
+Examples from the actual log:
+
+- `feat(keeper): add L1 fast-path for low-risk credential requests`
+- `fix(api): canRole was silently 403-ing on update + delete actions`
+- `docs(claude.md): document prod VM, NEXTAUTH_SECRET trap`
+
+Avoid: `update stuff`, `WIP`, `fix typo`. Squash fixups before pushing.
+
 ## Pull requests
+
+GitHub auto-fills the body from
+[`.github/pull_request_template.md`](.github/pull_request_template.md);
+tick the boxes that apply and remove rows that don't.
 
 - Keep PR titles under 70 characters; put the why in the body.
 - Reference the issue in the PR body (`Fixes #123`, `Refs #123`).
@@ -60,14 +92,41 @@ The full set with rationale is in [CLAUDE.md](CLAUDE.md). Highlights:
 - Update `CLAUDE.md` (and this file) when you change something a
   future contributor would otherwise have to re-discover.
 
-## Security issues
+CI (`ci.yml`) runs `pnpm lint && pnpm build` and
+`go test ./... && go vet ./...` on every PR against `main`. The
+security workflow runs gitleaks and the dependency audit on the same
+trigger. Both must be green for review.
 
-Please don't open public issues for security problems. See
-[SECURITY.md](SECURITY.md).
+## Issues
 
-## License
+Use one of the templates in
+[`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE):
 
-By submitting a contribution you agree to license it under
-[Apache-2.0](LICENSE), the project's primary license. If your change
-touches the `ee/` directory it is governed by the enterprise license
-in that subtree.
+- **Bug report** — include a minimal repro, the version
+  (`crewship --version`), and the relevant `journalctl` /
+  `./dev.sh logs` excerpt.
+- **Feature request** — describe the user-facing problem first, then
+  the proposed solution. Implementation details can come in the PR.
+
+Security issues are handled separately — see
+[SECURITY.md](SECURITY.md). Please don't open public issues for them.
+
+## License and contributor terms
+
+The project ships under [Apache License 2.0](LICENSE). Contributions are
+accepted under the same terms — by opening a PR you agree that:
+
+- Your contribution is your own original work, or you have explicit
+  permission to submit it under Apache-2.0.
+- You grant the project's users a perpetual, worldwide, royalty-free
+  license to use, modify, and redistribute the contribution, including
+  the patent grant in section 3 of the license.
+- You retain copyright on your contribution; the license is what
+  governs use.
+
+If your change touches the `ee/` directory it is governed by the
+enterprise license in that subtree — open an issue first if you are
+not sure which side a change belongs on.
+
+We do not currently require a CLA or DCO sign-off. If that changes,
+we will say so here and in the PR template.
