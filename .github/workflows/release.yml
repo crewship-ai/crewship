@@ -51,9 +51,13 @@ jobs:
         run: rm -rf web/out && cp -r out web/out
 
       # -- GoReleaser --
+      # cache: true reuses module + build cache across releases keyed on
+      # go.sum; on the ubuntu-latest hosted runner this cuts setup-go from
+      # ~45s (cold module download for ~80 modules) to <2s.
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       # Install syft for SBOM generation (CRE-122).
       # Pin to a specific tag so release artifacts are reproducible across runs.
