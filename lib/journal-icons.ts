@@ -126,6 +126,10 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "eval.run_started": Microscope,
   "eval.metric": Activity,
   "eval.regression_detected": TrendingDown,
+
+  // System
+  "system.compaction": RotateCcw,
+  "system.migration": Database,
 }
 
 /**
