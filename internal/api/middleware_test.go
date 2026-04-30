@@ -49,3 +49,25 @@ func TestSecurityHeaders_PreservesBody(t *testing.T) {
 	assert.Equal(t, `{"status":"ok"}`, rec.Body.String())
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 }
+
+// TestSecurityHeaders_ExposedPathSkipsCSP regresses the CodeRabbit round 2
+// finding on PR #236: /exposed/ is mounted on the API router but reverse-
+// proxies arbitrary upstream apps. The strict default-src 'none' would
+// break any HTML UI served through the proxy, so SecurityHeaders MUST
+// skip the CSP header on those paths while still applying every other
+// hardening header.
+func TestSecurityHeaders_ExposedPathSkipsCSP(t *testing.T) {
+	handler := SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/exposed/abc123/index.html", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Empty(t, rec.Header().Get("Content-Security-Policy"),
+		"CSP must not be stamped on /exposed/ responses — upstream owns its policy")
+	// Other hardening headers still apply.
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+}

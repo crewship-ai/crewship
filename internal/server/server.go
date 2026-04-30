@@ -489,12 +489,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 }
 
 // securityHeadersMiddleware adds standard security headers to all HTTP responses.
-// CSP is set per-path: the SPA needs 'unsafe-inline' / 'unsafe-eval' for the
-// Next.js runtime, but every other surface (API, /exposed/ proxies, health
-// endpoints) gets the strict default-src 'none' policy. Static assets shipped
-// from the embed FS already match the SPA frame, so the looser policy is
-// scoped to UI paths only — keeps API JSON responses from being rendered as
-// HTML even if a future bug returns Content-Type: text/html.
+// CSP is path-aware:
+//   - SPA UI: looser policy with 'unsafe-inline' / 'unsafe-eval' for the Next.js
+//     runtime; connect-src 'self' covers same-origin WebSocket.
+//   - API / health endpoints: strict default-src 'none'. Same baseline is
+//     reapplied by api.SecurityHeaders inside the API router so the policy
+//     survives if any future surface is reached without going through this
+//     wrapper.
+//   - /exposed/: NO CSP header. That route is the reverse proxy for port-
+//     exposed user apps — the upstream owns its own policy. api.SecurityHeaders
+//     also matches this path and skips CSP so the API router doesn't re-stamp
+//     the lockdown after this middleware bowed out.
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
