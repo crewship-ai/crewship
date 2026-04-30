@@ -95,8 +95,13 @@ func TestSessionsList_OnlyOwnSessions(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.List(rr, req)
 
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
 	var rows []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &rows)
+	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("unmarshal: %v (body=%s)", err, rr.Body.String())
+	}
 	// Assert by session ID, not by user_agent. A future PR that
 	// normalises or redacts user_agent (e.g. UA-Parser, masking,
 	// truncation) would silently let this test pass even if the
@@ -127,8 +132,13 @@ func TestSessionsList_ExcludesRevoked(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.List(rr, req)
 
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
 	var rows []map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &rows)
+	if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("unmarshal: %v (body=%s)", err, rr.Body.String())
+	}
 	if len(rows) != 1 {
 		t.Errorf("expected 1 active after revoke, got %d", len(rows))
 	}
@@ -159,7 +169,9 @@ func TestSessionsRevoke_OwnSession(t *testing.T) {
 	}
 
 	var resp map[string]any
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v (body=%s)", err, rr.Body.String())
+	}
 	if resp["is_current"] != true {
 		t.Error("is_current should be true when revoking own session")
 	}

@@ -96,29 +96,24 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const statusRef = useRef<string>("disconnected")
 
   const getToken = useCallback(async (): Promise<string | null> => {
-    // Two error paths here, deliberately handled differently:
-    //   - apiFetch throws (network rejection, abort, …): we re-throw
-    //     so use-websocket's connect() sees a transient failure and
-    //     schedules a backoff retry instead of terminating.
-    //   - apiFetch returns non-ok: a 401 means apiFetch already
-    //     emitted session-expired; return null so the WS hook
-    //     stops trying. Anything else (5xx, 429) we treat as a
-    //     transient failure too — throw to drive the same retry
-    //     path the network-rejection branch hits.
-    // apiFetch throws on network rejection / abort. Re-throw so
-    // use-websocket's connect() sees a transient failure and
-    // schedules a backoff retry instead of terminating.
+    // Two error paths, deliberately handled differently:
+    //   - 401 / 403: real auth death. Return null; useWebSocket
+    //     stops trying (apiFetch already emitted session-expired
+    //     globally for the 401 case).
+    //   - apiFetch throws (network rejection, abort) OR non-2xx
+    //     non-auth status (5xx, 429) OR malformed JSON: transient.
+    //     Throw; useWebSocket's catch path schedules the next
+    //     backoff attempt instead of terminating.
     const res = await apiFetch("/api/v1/ws-token")
+    if (res.status === 401 || res.status === 403) return null
     if (!res.ok) {
-      if (res.status === 401) return null
       throw new Error(`/api/v1/ws-token returned ${res.status}`)
     }
-    try {
-      const data = await res.json()
-      return typeof data?.token === "string" ? data.token : null
-    } catch {
-      return null
+    const data = await res.json() // throws on malformed JSON — also transient
+    if (typeof data?.token !== "string") {
+      throw new Error("/api/v1/ws-token response missing token field")
     }
+    return data.token
   }, [])
 
   const handleMessage = useCallback(

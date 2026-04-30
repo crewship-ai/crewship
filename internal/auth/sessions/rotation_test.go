@@ -39,7 +39,10 @@ func TestRotateRefreshJti_HappyPath(t *testing.T) {
 	if err := store.RotateRefreshJti(ctx, sess.ID, "jti-1", "jti-2"); err != nil {
 		t.Fatalf("second rotation: %v", err)
 	}
-	got, _ = store.Get(ctx, sess.ID)
+	got, err = store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("get after second rotation: %v", err)
+	}
 	if got.CurrentRefreshJti != "jti-2" {
 		t.Errorf("CurrentRefreshJti: got %q want jti-2", got.CurrentRefreshJti)
 	}
@@ -53,7 +56,10 @@ func TestRotateRefreshJti_HappyPath(t *testing.T) {
 func TestRotateRefreshJti_ReplayDetected(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	// Legitimate rotation moves the jti from NULL → jti-1.
 	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-1"); err != nil {
@@ -65,7 +71,7 @@ func TestRotateRefreshJti_ReplayDetected(t *testing.T) {
 
 	// Attacker now arrives with the old jti-1 (or anything other
 	// than jti-2). Must be flagged.
-	err := store.RotateRefreshJti(ctx, sess.ID, "jti-1", "attacker-new-jti")
+	err = store.RotateRefreshJti(ctx, sess.ID, "jti-1", "attacker-new-jti")
 	if !errors.Is(err, ErrJTIMismatch) {
 		t.Fatalf("got %v, want ErrJTIMismatch", err)
 	}
@@ -73,7 +79,10 @@ func TestRotateRefreshJti_ReplayDetected(t *testing.T) {
 	// The store leaves the row alone — caller is responsible for
 	// revoking. Verify current_refresh_jti is still jti-2 (the
 	// legitimate state), not the attacker's jti.
-	got, _ := store.Get(ctx, sess.ID)
+	got, err := store.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
 	if got.CurrentRefreshJti != "jti-2" {
 		t.Errorf("attacker's call shouldn't have advanced the jti; got %q want jti-2", got.CurrentRefreshJti)
 	}
@@ -84,7 +93,10 @@ func TestRotateRefreshJti_ReplayDetected(t *testing.T) {
 func TestRotateRefreshJti_RevokedSession(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-1"); err != nil {
 		t.Fatalf("rotate: %v", err)
@@ -93,7 +105,7 @@ func TestRotateRefreshJti_RevokedSession(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	err := store.RotateRefreshJti(ctx, sess.ID, "jti-1", "jti-2")
+	err = store.RotateRefreshJti(ctx, sess.ID, "jti-1", "jti-2")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("rotate on revoked session: got %v, want ErrNotFound", err)
 	}
@@ -118,7 +130,10 @@ func TestRotateRefreshJti_UnknownSession(t *testing.T) {
 func TestRotateRefreshJti_ConcurrentSafety(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 	if err := store.RotateRefreshJti(ctx, sess.ID, "", "jti-0"); err != nil {
 		t.Fatalf("seed jti: %v", err)
 	}
@@ -156,7 +171,10 @@ func TestRotateRefreshJti_ConcurrentSafety(t *testing.T) {
 func TestRotateRefreshJti_FirstRotationAnyExpected(t *testing.T) {
 	store := NewDBStore(newTestDB(t))
 	ctx := context.Background()
-	sess, _ := store.Create(ctx, "u1", "", "", time.Hour)
+	sess, err := store.Create(ctx, "u1", "", "", time.Hour)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
 
 	if err := store.RotateRefreshJti(ctx, sess.ID, "anything-at-all", "jti-1"); err != nil {
 		t.Errorf("first rotation should accept any expectedJti when row has NULL: %v", err)

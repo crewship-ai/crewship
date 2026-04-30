@@ -110,15 +110,23 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // Per-(re)connect ticket fetch. apiFetch promotes the 401 path —
   // either via silent refresh or the global session-expired event —
   // so this hook no longer needs its own authError state.
+  //
+  // Two distinct failure modes here, deliberately treated differently:
+  //   - 401/403: real auth death. Return null; useWebSocket terminates.
+  //   - 5xx / network throw / malformed JSON: transient. Throw; the
+  //     WS hook's catch path treats it as a transport error and
+  //     schedules the next backoff retry instead of evicting the user.
+  // Conflating these two used to bounce users to /login on any
+  // ws-token 5xx during a backend hiccup.
   const getWsToken = useCallback(async (): Promise<string | null> => {
     const res = await apiFetch("/api/v1/ws-token")
-    if (!res.ok) return null
-    try {
-      const data = await res.json()
-      return typeof data?.token === "string" ? data.token : null
-    } catch {
-      return null
+    if (res.status === 401 || res.status === 403) return null
+    if (!res.ok) throw new Error(`ws-token fetch failed: ${res.status}`)
+    const data = await res.json() // throws on malformed JSON — also transient
+    if (typeof data?.token !== "string") {
+      throw new Error("ws-token response missing token field")
     }
+    return data.token
   }, [])
 
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
