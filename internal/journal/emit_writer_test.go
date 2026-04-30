@@ -199,7 +199,6 @@ func TestWriter_PersistBatch_RollbackOnPartialFailure(t *testing.T) {
 		FlushSize:     3,
 		FlushInterval: 1 * time.Hour,
 	})
-	defer w.Close()
 
 	ctx := context.Background()
 	// Two valid rows, one with a workspace_id that violates the CHECK.
@@ -215,8 +214,14 @@ func TestWriter_PersistBatch_RollbackOnPartialFailure(t *testing.T) {
 	mustEmit("ws_bad", "INVALID") // triggers CHECK violation
 	mustEmit("ws_ok", "valid-2")
 
-	// Wait for the worker to attempt the flush.
-	time.Sleep(100 * time.Millisecond)
+	// Close drains the queue + attempts a final persistBatch + waits for
+	// the worker goroutine to exit. After Close returns we have a
+	// deterministic terminal state — no more writes can occur, no race
+	// between the assertion and the batcher. Sleep-based waits would be
+	// flaky under CI scheduler latency.
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
 
 	// All three rows should be retained in-batch (none committed) on the
 	// first failed attempt. The retry path keeps trying. The contract
@@ -227,8 +232,8 @@ func TestWriter_PersistBatch_RollbackOnPartialFailure(t *testing.T) {
 		"SELECT COUNT(*) FROM journal_entries").Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	// Either 0 (continued retries) or 3 with all rolled back permanently —
-	// but never 1 or 2 (partial commit).
+	// Either 0 (CHECK violation rolls everything back) or 3 (all valid
+	// — wouldn't happen here) — but never 1 or 2 (partial commit).
 	if n == 1 || n == 2 {
 		t.Fatalf("partial commit detected: %d rows committed", n)
 	}

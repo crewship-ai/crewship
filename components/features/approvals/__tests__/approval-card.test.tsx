@@ -46,7 +46,12 @@ describe("ApprovalCard — base rendering", () => {
   it("clicking the card calls onSelect", () => {
     const onSelect = vi.fn()
     render(<ApprovalCard row={row()} active={false} onSelect={onSelect} />)
-    fireEvent.click(screen.getByRole("button"))
+    // Card is a button whose accessible name comes from the reason
+    // text; query by name so this can't false-positive on an unrelated
+    // future button on the card.
+    fireEvent.click(
+      screen.getByRole("button", { name: /rm -rf important/i }),
+    )
     expect(onSelect).toHaveBeenCalledTimes(1)
   })
 
