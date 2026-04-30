@@ -9,12 +9,23 @@
  * Use this only on calls where a transient flap matters (the
  * crew/agent detail loaders). Plain `fetch` is fine for everything
  * else.
+ *
+ * A request body that's a ReadableStream is consumed by the first
+ * dispatch, so a retry with the same body would either error or send
+ * an empty payload. Such requests are intentionally NOT retried —
+ * callers that need retry semantics for streaming uploads must buffer
+ * the payload themselves (e.g. await response.arrayBuffer()).
  */
 export async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit & { retries?: number; baseDelayMs?: number },
 ): Promise<Response> {
-  const retries = init?.retries ?? 2
+  const requestedRetries = init?.retries ?? 2
+  // ReadableStream bodies can't be re-read after the first fetch consumes
+  // them. Silently retrying would either throw "body stream already read"
+  // or send an empty body to the second attempt — both worse than
+  // surfacing the original failure to the caller.
+  const retries = bodyIsReplayable(init?.body) ? requestedRetries : 0
   const baseDelay = init?.baseDelayMs ?? 250
   let lastError: unknown
 
@@ -42,6 +53,19 @@ export async function fetchWithRetry(
     }
   }
   throw lastError instanceof Error ? lastError : new Error("fetchWithRetry exhausted")
+}
+
+// bodyIsReplayable returns false for body shapes that get consumed on
+// first dispatch (currently just ReadableStream). Strings, Blob,
+// ArrayBuffer, Uint8Array, FormData, and URLSearchParams can all be
+// fetched repeatedly because the runtime re-reads from their backing
+// memory on each call.
+export function bodyIsReplayable(body: BodyInit | null | undefined): boolean {
+  if (body == null) return true
+  if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
+    return false
+  }
+  return true
 }
 
 function sleep(ms: number): Promise<void> {
