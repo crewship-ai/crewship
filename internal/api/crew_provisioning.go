@@ -45,6 +45,13 @@ type ProvisioningHandler struct {
 	// lookup) so tenants never see cross-workspace state.
 	imgListMu    sync.Mutex
 	imgListCache cachedImageList
+
+	// bgCtx scopes the lifetime of the cleanup + GC goroutines. Stop()
+	// cancels it so test helpers don't leak workers across the suite —
+	// each NewProvisioningHandler call previously spawned an immortal
+	// goroutine bound to context.Background().
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
 }
 
 func NewProvisioningHandler(
@@ -62,6 +69,7 @@ func NewProvisioningHandler(
 		installer := devcontainer.NewInstaller(docker, logger)
 		provisioner = devcontainer.NewProvisioner(docker, installer, featureDL, logger)
 	}
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	h := &ProvisioningHandler{
 		db:             db,
 		logger:         logger,
@@ -72,13 +80,17 @@ func NewProvisioningHandler(
 		jobs:           make(map[string]*ProvisionJob),
 		rateLimiter:    newProvisionRateLimiter(),
 		wsHub:          wsHub,
+		bgCtx:          bgCtx,
+		bgCancel:       bgCancel,
 	}
 	if docker != nil {
 		h.gcClient = docker // *client.Client implements orphanGCClient
 	}
 	// Launch background cleanup so completed/failed jobs don't accumulate
-	// forever. Handler lives for the process lifetime; Background ctx is OK.
-	go h.startJobCleanupRoutine(context.Background())
+	// forever. Tied to bgCtx so Stop() can shut both routines down — tests
+	// previously leaked one goroutine per NewProvisioningHandler call into
+	// the rest of the suite.
+	go h.startJobCleanupRoutine(bgCtx)
 
 	// Orphan GC — only runs when Docker is wired in. Does one-shot sweep at
 	// startup (best-effort, non-fatal) then periodic sweeps. Both temp
@@ -86,10 +98,20 @@ func NewProvisioningHandler(
 	// cache-images (leaked if crash between ContainerCommit and DB UPDATE)
 	// are handled here.
 	if docker != nil {
-		go h.runStartupAndPeriodicGC(context.Background())
+		go h.runStartupAndPeriodicGC(bgCtx)
 	}
 
 	return h
+}
+
+// Stop cancels the handler's background cleanup + GC goroutines. Tests must
+// register `t.Cleanup(h.Stop)` after constructing a handler to avoid leaking
+// workers across the rest of the suite. In production it's a no-op since the
+// handler outlives the process.
+func (h *ProvisioningHandler) Stop() {
+	if h.bgCancel != nil {
+		h.bgCancel()
+	}
 }
 
 // Orphan GC tunables. A provisioning run should finish well under tempContainerMaxAge;

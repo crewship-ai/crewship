@@ -175,6 +175,17 @@ var startCmd = &cobra.Command{
 		)
 		srv.SetChatHandler(bridge)
 
+		// Wire the API router's ProvisioningHandler into chatbridge so the
+		// "send first message at unprovisioned crew" path can auto-trigger
+		// the build instead of erroring out. The result-shape adapter exists
+		// purely to avoid an api → chatbridge import (api already depends on
+		// chatbridge for ChatHandler, so the dep flows the other way).
+		if apiRouter := srv.APIRouter(); apiRouter != nil {
+			if ph := apiRouter.Provisioning(); ph != nil {
+				bridge.SetProvisioningEnqueuer(provisioningAdapter{h: ph})
+			}
+		}
+
 		// V-01: Wire up channel authorizer for WebSocket subscription access control
 		if deps.DB != nil {
 			srv.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(deps.DB))

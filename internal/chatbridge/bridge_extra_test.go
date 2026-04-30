@@ -146,6 +146,100 @@ func TestHandleChatMessageBlocksWhenDevcontainerNotProvisioned(t *testing.T) {
 	}
 }
 
+// stubEnqueuer captures the args passed to EnqueueForCrew so the test can
+// assert the bridge auto-triggered the build with the right crew + workspace.
+type stubEnqueuer struct {
+	called      bool
+	gotCrewID   string
+	gotWsID     string
+	resStarted  bool
+	resRunning  bool
+	resStatus   string
+	returnError error
+}
+
+func (s *stubEnqueuer) EnqueueForCrew(_ context.Context, crewID, workspaceID string) (ProvisioningEnqueueResult, error) {
+	s.called = true
+	s.gotCrewID = crewID
+	s.gotWsID = workspaceID
+	if s.returnError != nil {
+		return ProvisioningEnqueueResult{}, s.returnError
+	}
+	return ProvisioningEnqueueResult{
+		Started:        s.resStarted,
+		AlreadyRunning: s.resRunning,
+		Status:         s.resStatus,
+	}, nil
+}
+
+// When a provisioner is wired, sending a message at an unprovisioned crew
+// must auto-trigger the build, emit a structured crew_provisioning event
+// the chat surface can render, and return a sentinel error so the
+// frontend knows the message wasn't actually run. The user message stays
+// out of conv-store because the agent never executed.
+func TestHandleChatMessageAutoTriggersProvisioning(t *testing.T) {
+	t.Parallel()
+	resolver := &mockResolver{
+		info: &ChatInfo{
+			AgentID:            "a1",
+			AgentSlug:          "alice",
+			CrewID:             "crew-1",
+			CrewSlug:           "engineering",
+			WorkspaceID:        "ws-1",
+			CLIAdapter:         "CLAUDE_CODE",
+			ToolProfile:        "CODING",
+			TimeoutSecs:        30,
+			DevcontainerConfig: `{"image":"x","features":{"ghcr.io/devcontainers/features/go:1":{}}}`,
+			CachedImage:        "",
+		},
+	}
+	b, _ := testBridge(t, resolver)
+	enq := &stubEnqueuer{resStarted: true}
+	b.SetProvisioningEnqueuer(enq)
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+
+	err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+	if err == nil {
+		t.Fatal("expected sentinel error so frontend knows message wasn't executed")
+	}
+	if !strings.Contains(err.Error(), "provisioning kicked off") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !enq.called {
+		t.Fatalf("expected EnqueueForCrew to be called")
+	}
+	if enq.gotCrewID != "crew-1" || enq.gotWsID != "ws-1" {
+		t.Errorf("enqueue called with wrong args: crew=%q ws=%q", enq.gotCrewID, enq.gotWsID)
+	}
+
+	var sawProvisioning bool
+	for _, e := range events {
+		if e.Type == "crew_provisioning" {
+			sawProvisioning = true
+			meta, _ := e.Metadata.(map[string]any)
+			if meta["crew_id"] != "crew-1" {
+				t.Errorf("crew_provisioning event missing crew_id: %v", meta)
+			}
+		}
+		if e.Type == "error" {
+			t.Errorf("auto-provision path must not emit a red error event; got: %+v", e)
+		}
+	}
+	if !sawProvisioning {
+		t.Errorf("expected crew_provisioning event, got: %+v", events)
+	}
+
+	msgs, err := b.convStore.Read(context.Background(), "sess-1", 0, 0)
+	if err != nil {
+		t.Fatalf("read conversation: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Errorf("user message must not be persisted when build hasn't run; got %d", len(msgs))
+	}
+}
+
 // Resolver returning info but with no container provider configured and no
 // container ID must surface the "container provider not configured" error
 // after the user message has been persisted.
