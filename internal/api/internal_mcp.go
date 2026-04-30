@@ -16,6 +16,39 @@ import (
 // MCP credential auto-resolution
 // ---------------------------------------------------------------------------
 
+// reservedMCPEnvVarPrefixes are env var prefixes that MUST NOT be auto-resolved
+// from MCP configs. An agent (or anyone with MCP-edit permission) could
+// otherwise drop ${INTERNAL_TOKEN} or ${ENCRYPTION_KEY} into a config and the
+// auto-resolver would happily look up a workspace credential of that name and
+// hand the plaintext to the MCP server process, which may be a third-party
+// binary we don't control. The defense is a deny-list at the resolver entry
+// point — even if a credential with one of these names somehow exists, MCP
+// configs cannot reach it.
+//
+// This is the H4 audit fix; pair it with operator hygiene (don't name regular
+// credentials with these prefixes — they would be unusable from MCP anyway).
+var reservedMCPEnvVarPrefixes = []string{
+	"INTERNAL_",   // sidecar / X-Internal-Token
+	"NEXTAUTH_",   // session JWT secret
+	"ENCRYPTION_", // credential encryption key
+	"CREWSHIP_",   // crewshipd-internal config
+	"JWT_",        // any JWT signing key
+	"DATABASE_",   // DB connection strings
+	"OLLAMA_",     // model server (local LLM)
+}
+
+// isReservedMCPEnvVar reports whether the given env var name is in a
+// reserved namespace that auto-resolve must refuse to look up.
+func isReservedMCPEnvVar(name string) bool {
+	upper := strings.ToUpper(name)
+	for _, p := range reservedMCPEnvVarPrefixes {
+		if strings.HasPrefix(upper, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // autoResolveMCPCredentials parses MCP config JSONs for ${VAR} env references
 // and finds workspace credentials whose name matches the derived prefix.
 // This bridges the gap between the MCP config editor (which stores env var
@@ -26,6 +59,10 @@ import (
 //   - *_CLIENT_ID env vars → oauth_client_id field (plaintext)
 //   - *_CLIENT_SECRET env vars → oauth_client_secret_enc field (decrypted)
 //   - *_ACCESS_TOKEN env vars → encrypted_value (with auto-refresh)
+//
+// References whose name matches reservedMCPEnvVarPrefixes are rejected with
+// a WARN log — those namespaces are owned by crewshipd-internal config and
+// must not be exfiltrated through MCP server env injection.
 func autoResolveMCPCredentials(
 	ctx context.Context,
 	db *sql.DB,
@@ -47,9 +84,15 @@ func autoResolveMCPCredentials(
 	}
 	var missing []string
 	for envVar := range refs {
-		if !coveredVars[envVar] {
-			missing = append(missing, envVar)
+		if coveredVars[envVar] {
+			continue
 		}
+		if isReservedMCPEnvVar(envVar) {
+			logger.Warn("auto-resolve MCP credential refused: reserved namespace",
+				"env_var", envVar, "workspace_id", workspaceID)
+			continue
+		}
+		missing = append(missing, envVar)
 	}
 	if len(missing) == 0 {
 		return existing

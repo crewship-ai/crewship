@@ -103,6 +103,17 @@ func (f CallerFunc) Call(ctx context.Context, req CallRequest) (CallResponse, er
 // retry or surface the error. The provider's response is returned regardless
 // because the work has already been done and refusing it would also waste
 // the budget.
+//
+// KNOWN RACE (security audit H1, partial mitigation only):
+// Between step (1) Enforce and step (3) Record there's a window — the LLM
+// round-trip — where this call's cost has not been written to cost_ledger.
+// Two parallel Middleware invocations against the same scope can both pass
+// Enforce because neither's cost is committed yet, and overspend by up to
+// one call each. enforceLocks (in budgets.go) serializes the Check half of
+// Enforce so they don't both read the same pre-decision snapshot, but the
+// LLM-call gap remains. Closing it requires a reservation row written
+// inside the same SQLite transaction as the Check (needs a schema flag for
+// pending rows) — out of scope for the audit fix; tracked separately.
 func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 	return CallerFunc(func(ctx context.Context, req CallRequest) (CallResponse, error) {
 		// Flat-rate requests bypass $ enforcement. The subscription is already
