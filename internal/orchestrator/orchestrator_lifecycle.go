@@ -77,7 +77,17 @@ func (o *Orchestrator) RecoverFromCrash(ctx context.Context) error {
 		}
 
 		running, _, err := o.container.ExecInspect(ctx, run.ExecID)
-		if err != nil || !running {
+		if err != nil {
+			// Transient inspect failures (Docker daemon briefly unreachable
+			// during startup, container being restarted by an external
+			// process, etc.) must not be collapsed with "exec finished".
+			// Leave the run state alone so the next recovery pass — or the
+			// run's own exec loop — can reconcile it.
+			o.logger.Warn("inspect failed during crash recovery; leaving run state untouched",
+				"run_id", run.ID, "exec_id", run.ExecID, "error", err)
+			continue
+		}
+		if !running {
 			o.updateRunStatus(ctx, run.ID, "completed")
 			o.logger.Info("recovered stale run", "run_id", run.ID, "agent_id", run.AgentID)
 		}

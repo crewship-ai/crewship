@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -363,6 +364,44 @@ func TestRecoverFromCrashNoExecID(t *testing.T) {
 	json.Unmarshal(d, &recovered)
 	if recovered.Status != "error" {
 		t.Errorf("expected error for run without exec ID, got %q", recovered.Status)
+	}
+}
+
+// A transient ExecInspect error (e.g. Docker daemon briefly unreachable on
+// startup) must NOT cause an in-flight run to be marked completed. The next
+// recovery pass — or the run's own exec — will reconcile state. Marking it
+// completed on a transient error silently terminates live work.
+func TestRecoverFromCrashTransientInspectError(t *testing.T) {
+	mc := &mockContainer{
+		// running=true so a "completed" outcome can only come from the bug
+		// (collapsing err with !running).
+		inspectResult: struct {
+			running  bool
+			exitCode int
+		}{true, 0},
+		inspectErr: errors.New("docker daemon unavailable"),
+	}
+	state := newMemState()
+
+	run := RunState{ID: "r1", AgentID: "a1", Status: "running", ExecID: "e1"}
+	data, _ := json.Marshal(run)
+	state.Set(context.Background(), "agent_runs", "r1", data)
+
+	o := New(mc, state, slog.Default())
+	if err := o.RecoverFromCrash(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	d, _ := state.Get(context.Background(), "agent_runs", "r1")
+	var recovered RunState
+	if err := json.Unmarshal(d, &recovered); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if recovered.Status == "completed" {
+		t.Errorf("transient inspect error must not mark live run as completed")
+	}
+	if recovered.Status != "running" {
+		t.Errorf("expected status to stay %q, got %q", "running", recovered.Status)
 	}
 }
 
