@@ -15,8 +15,17 @@ describe("assignmentField", () => {
     expect(assignmentField({ id: "agent_1" })).toBe("agent_1")
   })
 
-  it("falls back to JSON for shape-less objects", () => {
-    expect(assignmentField({ foo: "bar" })).toBe('{"foo":"bar"}')
+  it("returns empty string for shape-less objects (no JSON dump)", () => {
+    // Intentionally returns "" rather than JSON.stringify(v) — the result
+    // lands in user-visible chat and may carry tokens/PII when the backend
+    // shape changes. Better to render nothing than to leak a payload.
+    expect(assignmentField({ foo: "bar" })).toBe("")
+  })
+
+  it("returns empty string for non-serializable (circular) objects", () => {
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    expect(assignmentField(circular)).toBe("")
   })
 
   it("handles null / undefined as empty string", () => {
