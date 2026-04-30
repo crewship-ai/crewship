@@ -54,6 +54,15 @@ export function decrypt(ciphertext: string): string {
   const key = getEncryptionKey(version)
   const buffer = Buffer.from(encoded, 'base64')
 
+  // Reject short inputs up front so the failure mode is a clear error
+  // ("ciphertext too short") instead of node's opaque
+  // ERR_CRYPTO_INVALID_IV thrown deep inside createDecipheriv when the
+  // IV slice is < 16 bytes.
+  const MIN_LEN = 16 /* IV */ + 16 /* AuthTag */
+  if (buffer.length < MIN_LEN) {
+    throw new Error(`ciphertext too short: need >= ${MIN_LEN} bytes, got ${buffer.length}`)
+  }
+
   const iv = buffer.subarray(0, 16)
   const authTag = buffer.subarray(16, 32)
   const encrypted = buffer.subarray(32)
