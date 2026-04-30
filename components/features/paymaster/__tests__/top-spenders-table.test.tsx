@@ -56,10 +56,13 @@ describe("TopSpendersTable", () => {
         rows={[row({ call_count: 12345, total_tokens: 1234567 })]}
       />,
     )
-    // Localized format — accept either 12,345 or 12 345 etc., but
-    // expect at least the digits in some form via partial match.
-    expect(screen.getByText(/12.345/)).toBeInTheDocument()
-    expect(screen.getByText(/1.234.567/)).toBeInTheDocument()
+    // Compare against the exact locale-formatted output produced by the
+    // same Intl.NumberFormat the component uses — the previous /12.345/
+    // pattern's '.' was a regex wildcard and would have matched even
+    // wrong-separator output like "12345" or "12X345".
+    const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 })
+    expect(screen.getByText(nf.format(12345))).toBeInTheDocument()
+    expect(screen.getByText(nf.format(1234567))).toBeInTheDocument()
   })
 
   it("resolves mission_name preferred over agent_name preferred over crew_name", () => {

@@ -153,8 +153,13 @@ describe("searchCrewIcons", () => {
 
   it("partial category name (e.g. 'sec') matches the category", () => {
     const got = searchCrewIcons("sec")
-    // 'sec' substring matches 'security' category
-    expect(got.length).toBeGreaterThan(0)
+    // 'sec' should resolve through category matching to security icons,
+    // not silently fall back to 'all icons'. Asserting BOTH narrowing
+    // (length < full registry) AND specific membership catches the
+    // regression where category lookup quietly degrades.
+    expect(got).toContain("shield")
+    expect(got).toContain("lock")
+    expect(got.length).toBeLessThan(CREW_ICONS.length)
   })
 
   it("query that matches nothing falls back to all icons", () => {

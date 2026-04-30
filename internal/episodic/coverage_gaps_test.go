@@ -393,7 +393,9 @@ func TestLinkSupports_EmptyEvidenceIsNoop(t *testing.T) {
 	}
 
 	var n int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM memory_relations`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_relations`).Scan(&n); err != nil {
+		t.Fatalf("count memory_relations: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("expected 0 rows, got %d", n)
 	}
@@ -412,7 +414,9 @@ func TestLinkSupports_Idempotent(t *testing.T) {
 	}
 
 	var n int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM memory_relations`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_relations`).Scan(&n); err != nil {
+		t.Fatalf("count memory_relations: %v", err)
+	}
 	if n != 2 {
 		t.Errorf("after 3× call expected 2 rows, got %d", n)
 	}
@@ -460,7 +464,9 @@ func TestLinkSimilarOnIndex_BelowThreshold(t *testing.T) {
 	}
 
 	var n int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM memory_relations`).Scan(&n)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM memory_relations`).Scan(&n); err != nil {
+		t.Fatalf("count memory_relations: %v", err)
+	}
 	if n != 0 {
 		t.Errorf("orthogonal vectors should produce 0 edges, got %d", n)
 	}

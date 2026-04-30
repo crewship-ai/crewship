@@ -224,8 +224,12 @@ describe("JournalEntryCard — summary.generated hero card", () => {
         })}
       />,
     )
-    // Long body collapses to clamp-3 with collapse / read-more toggle.
-    expect(screen.getByRole("button")).toBeInTheDocument()
+    // Match the named control directly — getByRole("button") alone is
+    // too broad and would pass even if a different button (e.g. payload
+    // toggle) appeared on the hero card path.
+    expect(
+      screen.getByRole("button", { name: /read more/i }),
+    ).toBeInTheDocument()
   })
 })
 

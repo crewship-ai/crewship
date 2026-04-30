@@ -12,7 +12,10 @@ import {
   EDGE_COLOR_PALETTE,
 } from "@/lib/colors"
 
-const HEX_RE = /^#[0-9a-fA-F]{3,8}$/
+// Restrict to CSS-style hex lengths only (3, 4, 6, 8 digits) — a 5- or
+// 7-digit hex string is invalid, but the lazy /3,8/ pattern would
+// accept those and let a typo slip through.
+const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
 
 describe("STATUS_COLORS", () => {
   it("every value is a valid hex color", () => {

@@ -168,7 +168,9 @@ func TestUpdateRunStatus_StampsCompletedAt(t *testing.T) {
 		t.Fatal(err)
 	}
 	var completedAt *string
-	_ = db.QueryRow(`SELECT completed_at FROM eval_runs WHERE id = 'r1'`).Scan(&completedAt)
+	if err := db.QueryRow(`SELECT completed_at FROM eval_runs WHERE id = 'r1'`).Scan(&completedAt); err != nil {
+		t.Fatalf("select completed_at (running): %v", err)
+	}
 	if completedAt != nil {
 		t.Errorf("running status should not stamp completed_at, got %v", *completedAt)
 	}
@@ -178,7 +180,9 @@ func TestUpdateRunStatus_StampsCompletedAt(t *testing.T) {
 		"completed", "ok", "sig", 100, 0.05, false); err != nil {
 		t.Fatal(err)
 	}
-	_ = db.QueryRow(`SELECT completed_at FROM eval_runs WHERE id = 'r1'`).Scan(&completedAt)
+	if err := db.QueryRow(`SELECT completed_at FROM eval_runs WHERE id = 'r1'`).Scan(&completedAt); err != nil {
+		t.Fatalf("select completed_at (completed): %v", err)
+	}
 	if completedAt == nil {
 		t.Errorf("completed status should stamp completed_at")
 	}
@@ -201,7 +205,9 @@ func TestUpdateRunStatus_FailedAlsoStamps(t *testing.T) {
 		t.Fatal(err)
 	}
 	var completedAt *string
-	_ = db.QueryRow(`SELECT completed_at FROM eval_runs WHERE id = 'r1'`).Scan(&completedAt)
+	if err := db.QueryRow(`SELECT completed_at FROM eval_runs WHERE id = 'r1'`).Scan(&completedAt); err != nil {
+		t.Fatalf("select completed_at (failed): %v", err)
+	}
 	if completedAt == nil {
 		t.Errorf("failed should stamp completed_at")
 	}
@@ -223,7 +229,9 @@ func TestUpdateRunStatus_RegressedFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	var regressed int
-	_ = db.QueryRow(`SELECT regressed FROM eval_runs WHERE id = 'r1'`).Scan(&regressed)
+	if err := db.QueryRow(`SELECT regressed FROM eval_runs WHERE id = 'r1'`).Scan(&regressed); err != nil {
+		t.Fatalf("select regressed: %v", err)
+	}
 	if regressed != 1 {
 		t.Errorf("regressed=true should write 1, got %d", regressed)
 	}

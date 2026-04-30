@@ -180,6 +180,10 @@ describe("ApprovalCard — TimeoutCountdown", () => {
         onSelect={() => {}}
       />,
     )
+    // Assert BOTH the 'expired' label and any MM:SS-shaped string are
+    // absent — the previous version only checked 'expired' which would
+    // miss an unintended countdown render.
+    expect(screen.queryByText(/^\d+:\d{2}$/)).not.toBeInTheDocument()
     expect(screen.queryByText("expired")).not.toBeInTheDocument()
   })
 })

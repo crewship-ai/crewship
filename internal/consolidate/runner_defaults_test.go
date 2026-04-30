@@ -50,51 +50,49 @@ func TestApplyDefaults_PreservesExplicitValues(t *testing.T) {
 	if got.ConsolidationInterval != in.ConsolidationInterval {
 		t.Errorf("ConsolidationInterval overwritten: %v", got.ConsolidationInterval)
 	}
+	if got.ConsolidationSince != in.ConsolidationSince {
+		t.Errorf("ConsolidationSince overwritten: %v", got.ConsolidationSince)
+	}
+	if got.CompactionOlderThan != in.CompactionOlderThan {
+		t.Errorf("CompactionOlderThan overwritten: %v", got.CompactionOlderThan)
+	}
 	if got.MinEntries != 100 {
 		t.Errorf("MinEntries overwritten: %d", got.MinEntries)
 	}
 	if got.CompactionHourUTC != 7 {
 		t.Errorf("CompactionHourUTC overwritten: %d", got.CompactionHourUTC)
 	}
+	if got.CrewMemoryRoot != in.CrewMemoryRoot {
+		t.Errorf("CrewMemoryRoot overwritten: %q", got.CrewMemoryRoot)
+	}
 }
 
-// TestApplyDefaults_ClampsCompactionHour — out-of-range hour resets to 3.
+// TestApplyDefaults_ClampsCompactionHour pins the exact behaviour for
+// every hour value the runner might see. Implementation predicate is
+// `if opts.CompactionHourUTC < 0 || opts.CompactionHourUTC > 23 { = 3 }`,
+// so the zero value (0) is in-range and survives — caller asking for
+// midnight UTC compaction gets midnight, NOT 3am.
 func TestApplyDefaults_ClampsCompactionHour(t *testing.T) {
 	tests := []struct {
+		name string
 		in   int
 		want int
 	}{
-		{-1, 3},
-		{24, 3},
-		{99, 3},
-		{0, 3}, // 0 is at the boundary — implementation treats it as "default" since it's also the zero value? Actually 0 is valid (midnight) per the < 0 check. Let me read that again.
-		{1, 1},
-		{23, 23},
+		{"negative clamps to 3", -1, 3},
+		{"24 clamps to 3", 24, 3},
+		{"99 clamps to 3", 99, 3},
+		{"zero (midnight) preserved", 0, 0},
+		{"1am preserved", 1, 1},
+		{"11pm preserved", 23, 23},
+		{"7am preserved", 7, 7},
 	}
-	// Implementation: `if opts.CompactionHourUTC < 0 || opts.CompactionHourUTC > 23 { = 3 }`.
-	// Zero is in-range so it stays 0... but 0 is also the zero value, so the
-	// implementation's intent is unclear. Verify what actually happens.
 	for _, tt := range tests {
-		got := applyDefaults(RunnerOptions{CompactionHourUTC: tt.in}).CompactionHourUTC
-		// 0 → caller asked for midnight, but the implementation's
-		// `< 0 || > 23` predicate leaves 0 alone. Yet the doc above
-		// says "default 3". So this test pins what the code actually
-		// does.
-		if tt.in == 0 {
-			if got != 0 && got != 3 {
-				t.Errorf("CompactionHourUTC=0 → %d (want 0 or 3)", got)
+		t.Run(tt.name, func(t *testing.T) {
+			got := applyDefaults(RunnerOptions{CompactionHourUTC: tt.in}).CompactionHourUTC
+			if got != tt.want {
+				t.Errorf("CompactionHourUTC=%d → %d, want %d", tt.in, got, tt.want)
 			}
-			continue
-		}
-		if tt.in >= 0 && tt.in <= 23 {
-			if got != tt.in {
-				t.Errorf("CompactionHourUTC=%d preserved → %d", tt.in, got)
-			}
-			continue
-		}
-		if got != tt.want {
-			t.Errorf("CompactionHourUTC=%d → %d, want %d", tt.in, got, tt.want)
-		}
+		})
 	}
 }
 
@@ -110,25 +108,28 @@ func TestApplyDefaults_ClampsCompactionHour(t *testing.T) {
 // known weakness (filed as a follow-up to switch to crypto/rand).
 func TestRandomHex(t *testing.T) {
 	tests := []struct {
+		name    string
 		n       int
 		wantLen int
 	}{
-		{0, 0},
-		{1, 1},
-		{4, 4},
-		{16, 16},
+		{"zero", 0, 0},
+		{"one char", 1, 1},
+		{"four chars", 4, 4},
+		{"sixteen chars", 16, 16},
 	}
 	for _, tt := range tests {
-		got := randomHex(tt.n)
-		if len(got) != tt.wantLen {
-			t.Errorf("randomHex(%d) len = %d, want %d", tt.n, len(got), tt.wantLen)
-		}
-		for _, c := range got {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-				t.Errorf("randomHex(%d) produced non-hex char: %q", tt.n, c)
-				break
+		t.Run(tt.name, func(t *testing.T) {
+			got := randomHex(tt.n)
+			if len(got) != tt.wantLen {
+				t.Errorf("randomHex(%d) len = %d, want %d", tt.n, len(got), tt.wantLen)
 			}
-		}
+			for _, c := range got {
+				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+					t.Errorf("randomHex(%d) produced non-hex char: %q", tt.n, c)
+					break
+				}
+			}
+		})
 	}
 }
 

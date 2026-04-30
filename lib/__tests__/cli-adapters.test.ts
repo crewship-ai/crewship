@@ -9,7 +9,10 @@ import {
 
 describe("CLI_ADAPTERS registry", () => {
   it("exports all four supported adapters", () => {
-    expect(CLI_ADAPTER_KEYS.sort()).toEqual([
+    // Spread before sort — .sort() mutates in place, and CLI_ADAPTER_KEYS
+    // is a shared module-level export. Mutating it would leak ordering
+    // changes into other tests that import the same array.
+    expect([...CLI_ADAPTER_KEYS].sort()).toEqual([
       "CLAUDE_CODE",
       "CODEX_CLI",
       "GEMINI_CLI",
