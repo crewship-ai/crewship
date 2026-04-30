@@ -300,10 +300,38 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 		return EnqueueResult{}, ErrCrewNoDevcontainer
 	}
 
+	// First lock-and-check: if a job is already pending/running, fast-path
+	// out without touching the rate limiter — no slot needed for a request
+	// we're not actually starting.
 	h.mu.Lock()
 	if existing, ok := h.jobs[crewID]; ok && (existing.Status == "pending" || existing.Status == "running") {
 		status := existing.Status
 		h.mu.Unlock()
+		return EnqueueResult{AlreadyRunning: true, Status: status}, nil
+	}
+	h.mu.Unlock()
+
+	// Acquire the rate-limit slot BEFORE publishing the job. The previous
+	// order (publish "pending" → tryAcquire → delete on failure) created a
+	// visible-but-doomed job: a concurrent caller could see status="pending"
+	// and report AlreadyRunning, only for this goroutine to delete the
+	// entry a moment later when the limiter rejected it. Acquiring first
+	// keeps h.jobs honest — every published row corresponds to a goroutine
+	// the limiter has already greenlit.
+	if err := h.rateLimiter.tryAcquire(workspaceID); err != nil {
+		return EnqueueResult{}, err
+	}
+
+	// Second lock-and-check: a different caller may have raced past the
+	// first check and won the rate-limit slot before us. Recheck under the
+	// lock to avoid double-publishing the same crew. If a duplicate already
+	// landed, release our slot and report AlreadyRunning so the limiter
+	// counter stays consistent.
+	h.mu.Lock()
+	if existing, ok := h.jobs[crewID]; ok && (existing.Status == "pending" || existing.Status == "running") {
+		status := existing.Status
+		h.mu.Unlock()
+		h.rateLimiter.release(workspaceID)
 		return EnqueueResult{AlreadyRunning: true, Status: status}, nil
 	}
 	job := &ProvisionJob{
@@ -313,13 +341,6 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 	}
 	h.jobs[crewID] = job
 	h.mu.Unlock()
-
-	if err := h.rateLimiter.tryAcquire(workspaceID); err != nil {
-		h.mu.Lock()
-		delete(h.jobs, crewID)
-		h.mu.Unlock()
-		return EnqueueResult{}, err
-	}
 
 	go h.runProvisioning(crewID, workspaceID, devcontainerCfg.String, miseCfg.String, runtimeImage.String, job)
 	h.logger.Info("provisioning triggered", "crew_id", crewID)

@@ -1,12 +1,17 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
@@ -123,6 +128,73 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	if resp.Error == "" {
 		t.Error("expected non-empty error message in 503 response")
 	}
+}
+
+// TestEnqueueForCrew_RateLimitDoesNotPublishGhostJob verifies the
+// TOCTOU window between "publish pending job" and "acquire rate-limit
+// slot" is closed. Previously a caller rejected by the limiter would
+// leave a transient pending row visible to a concurrent caller, who
+// would falsely report AlreadyRunning for a build that never started.
+// After the fix, the rejected caller never published a row and a
+// follow-up call sees a clean slate.
+func TestEnqueueForCrew_RateLimitDoesNotPublishGhostJob(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	// We need a non-nil provisioner; pass a synthetic one and don't
+	// actually run any builds — the test exits before runProvisioning
+	// would touch Docker because tryAcquire pre-empts it.
+	h := newProvisioningHandlerForRateLimitTest(t, db, logger)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	crewID := "crew-ghost"
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, name, slug, devcontainer_config)
+		 VALUES (?, ?, 'Devs', 'devs', ?)`,
+		crewID, wsID, `{"image":"ubuntu:22.04","features":{"ghcr.io/devcontainers/features/go:1":{}}}`,
+	); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+
+	// Saturate the "starts in last minute" budget. Acquire and immediately
+	// release so the running-count budget (maxConcurrentProvisionsPerWorkspace,
+	// hit first when all slots stay live) doesn't trigger before we've
+	// recorded enough recent-start timestamps to fail the per-minute check.
+	for i := 0; i < maxProvisionStartsPerMinute; i++ {
+		if err := h.rateLimiter.tryAcquire(wsID); err != nil {
+			t.Fatalf("seed rate-limiter slot %d: %v", i, err)
+		}
+		h.rateLimiter.release(wsID)
+	}
+
+	// First call must hit the limiter and bail. Crucially it must NOT
+	// leave a "pending" row in h.jobs.
+	_, err := h.EnqueueForCrew(context.Background(), crewID, wsID)
+	if err == nil {
+		t.Fatal("expected ErrRateLimited, got nil")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("expected ErrRateLimited, got %v", err)
+	}
+
+	h.mu.Lock()
+	job, ok := h.jobs[crewID]
+	h.mu.Unlock()
+	if ok {
+		t.Errorf("rejected caller leaked a pending job into h.jobs: %+v", job)
+	}
+}
+
+// newProvisioningHandlerForRateLimitTest builds a handler with a
+// non-nil provisioner so EnqueueForCrew advances past the
+// ErrProvisionerUnavailable guard. The test bails before runProvisioning
+// would actually use it, so the provisioner's deps can be nil.
+func newProvisioningHandlerForRateLimitTest(t *testing.T, db *sql.DB, logger *slog.Logger) *ProvisioningHandler {
+	t.Helper()
+	h := NewProvisioningHandler(db, logger, nil, nil, nil, "", nil)
+	h.provisioner = devcontainer.NewProvisioner(nil, nil, nil, logger)
+	return h
 }
 
 func TestProvisionStatus_NoCrew(t *testing.T) {
