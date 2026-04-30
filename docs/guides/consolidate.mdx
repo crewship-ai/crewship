@@ -65,13 +65,31 @@ Production wiring uses the Ollama adapter against a chat model (typically `llama
 
 ## Compactor
 
-Compaction target: `info` and `notice` entries older than 30 days that are NOT type `summary.generated`, `memory.consolidated`, or any checkpoint/fork/approval/regression. Rolls up into one `system.compaction` entry per (crew, day) bucket with a count and kind breakdown in the payload, then deletes the originals in a single transaction.
+Compaction target: `info` and `notice` entries older than 30 days that are NOT type `summary.generated`, `memory.consolidated`, or any checkpoint/fork/approval/regression. Rolls up into one `system.compaction` entry per (crew, day) bucket with a count and kind breakdown in the payload, then **archives** the originals to `journal_entries_archived` (with the payload truncated to 400 chars) before deleting from the base table. Done in a single transaction so neither side can drift.
 
-Preserved indefinitely:
+Preserved indefinitely (never compacted):
 
 - `warn` and `error` severity
 - `summary.generated`, `memory.consolidated`
 - Everything under `approval.*`, `checkpoint.*`, `fork.*`, `eval.regression_detected`
+- Anything tagged with `priority='permanent'` (see [Crew Journal — Priority markers](/guides/crew-journal#priority-markers))
+
+### Archive layer (PR #212)
+
+Migration 55 added `journal_entries_archived` so compaction is no longer destructive. The aged row is copied verbatim except for `payload`, which is truncated to 400 characters with a trailing `…[truncated]` marker. The archive table has the same workspace/ts indexes as the base, so historical forensic queries still work — they just have to include the archive table:
+
+```sql
+SELECT id, ts, entry_type, summary
+FROM (
+  SELECT id, ts, entry_type, summary FROM journal_entries
+  UNION ALL
+  SELECT id, ts, entry_type, summary FROM journal_entries_archived
+) WHERE workspace_id = ?
+ORDER BY ts DESC
+LIMIT 100;
+```
+
+The frontend `/journal` view does **not** read from the archive by default — operators have to explicitly opt in via `?include_archive=true`. This keeps the live UI fast and the archive as a forensic-only surface.
 
 If you want to tune retention, edit `RunnerOptions.CompactionOlderThan` and restart. Per-workspace retention is a follow-up.
 

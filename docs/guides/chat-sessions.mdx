@@ -1,0 +1,105 @@
+---
+title: "Chat & Sessions"
+description: "Full-page chat with sessions, attachments, message reactions, live terminal, and the right-panel artefact tabs."
+icon: "message-square"
+---
+
+# Chat & Sessions
+
+Chatting with an agent is a first-class surface in Crewship. PRs #213, #214, #223, and #225 re-shaped it from a side drawer into a full-page experience with session history, attachments, message reactions, and a right-panel that exposes the agent's working files, artefacts, and a live terminal.
+
+This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase; here we focus on what the platform persists.
+
+## Routes
+
+Two top-level routes serve chat:
+
+| Route | Purpose |
+|---|---|
+| `/crews?crew=<slug>&agent=<slug>` | Selection-driven canvas. Click an agent in the canvas to open a chat panel inline. |
+| `/chat/<agentSlug>?session=<chatId>` | Full-page chat — the same agent, the same session model, the whole viewport for messages + composer + right panel. |
+
+The `/chat/<agentSlug>` URL is **deep-linkable** — the `session` query parameter scopes to a specific chat history. Without `?session`, the route opens the agent's most recent chat. With a `session` ID, it scrolls to that chat's history and resumes the conversation in place.
+
+The state of which tab is open in the right panel, which message is being edited, whether the slash palette is open, and the like is held in **shallow router** state — `useShallowSearchParam` writes to `window.history.replaceState` directly without triggering a Next.js navigation. This keeps the page interactive (no rerender on tab switch) while still giving you a copyable URL for any state.
+
+## Sessions
+
+A "session" is a `chats` row. Sessions persist across page reloads, browser sessions, and operators (any user with read access to the agent can see its history). Migration v59 added the `chats.origin` column (DB-side; the Prisma TypeScript schema is intentionally not regenerated for this column — Prisma is types-only in this project, see CLAUDE.md). The Go handler at `POST /api/v1/agents/{agentId}/chats` accepts an `origin` field on the body and whitelists these values:
+
+| `origin` value | When written |
+|---|---|
+| `UI` | Created via the chat page in the browser. |
+| `CLI` | Created via `crewship run` or other programmatic CLI use. |
+| `WEBHOOK` | Created by a webhook trigger (see [Webhooks](/api-reference/webhooks)). |
+| `CRON` | Created by a scheduled trigger. |
+| `AGENT` | Created by a peer agent (agent-to-agent assignment). |
+
+Anything else (or empty) is stored as `NULL` so a rogue caller cannot shove arbitrary text into a UI-rendered chip. The Sessions sidebar renders a colored chip per origin — NULL rows show no chip. Sessions can be renamed, archived, or pinned; pinning floats a session to the top of the sidebar regardless of last-message timestamp.
+
+## Composer
+
+The bottom-of-page composer is a single textarea with three superpowers:
+
+- **Slash palette** — typing `/` at the start of a line opens a fuzzy-search palette over registered slash commands (e.g. `/eval`, `/checkpoint`, `/skill <name>`). Commands are registered server-side so a multi-line `/eval my-suite --baseline last-week` is parsed as a structured command rather than a chat message.
+- **Model picker** — dropdown next to the send button overrides the agent's default `llm_model` for this turn only. Useful when an operator wants to spend Opus on a hard reasoning step inside an agent that normally runs Sonnet.
+- **Attachments** — paste images, drag files, or paste image data from the clipboard. Files are uploaded via `POST /api/v1/agents/{agentId}/chats/{chatId}/attachments` (handler `ProxyHandler.AgentChatAttachment` in `internal/api/proxy_attachments.go`) and stored on the server's storage provider with a `chat_attachments` row pointing at them (migration v57). The agent's container sees the file under `/output/<agentSlug>/attachments/<chatId>/<filename>`. 25 MB cap per upload.
+
+Enter sends; Shift-Enter inserts a newline. `Ctrl+K` opens the palette unconditionally.
+
+### Edit-and-resend
+
+Hovering over a user message reveals an "Edit" button. Editing the message rewrites that turn and **truncates** the conversation — every message after it is dropped. The new edit is sent as a fresh user turn. This matches the ChatGPT/Claude UX and lets operators reroll an agent's response without abandoning the whole session.
+
+## Message reactions
+
+Each assistant message has a reactions strip (👍 👎 ❤️ 🤔 🚀). Reactions are workspace-shared — if two operators are in the same workspace, they each see the other's reactions. Migration v57 added the `message_reactions` table.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions` | Aggregated counts: `[{emoji, count, mine}]`. |
+| `POST` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions` | Body: `{emoji}`. Idempotent under `UNIQUE(chat, message, emoji, user)`. |
+| `DELETE` | `/api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji}` | Emoji is a path segment. |
+
+The List response is **aggregated** (one row per emoji, with `count` and `mine` boolean) — not a per-user list. This keeps the FE's `👍 3 (you)` rendering a single fetch.
+
+Reactions are surfaced to the agent on the next turn as part of the conversation context: the model sees that a previous response was 👎'd by an operator and can adjust. They are also surfaced in [Quartermaster](/guides/quartermaster) replays as a coarse human-feedback signal.
+
+## Right panel
+
+The right side of the chat surface is a tab strip. Tabs are sticky — switching agents preserves which tab was open, but switching tabs does not retrigger the SSE/WS streams from the inactive tabs.
+
+| Tab | Hotkey | Purpose |
+|---|---|---|
+| **Files** | F1 | Live view of the agent's working tree under `/workspace`. Click a path to preview; double-click to open in the in-page editor. |
+| **Artifacts** | F2 | Generated outputs — markdown reports, screenshots, downloads. Pulled from `output/` mount. |
+| **Terminal** | F4 | Live tmux attach to the agent's session via the sidecar's interactive exec endpoint. Read-only by default; OWNER/ADMIN can flip to read-write. |
+| **Diff** | F3 | (When the agent is mid-edit) live diff against the workspace's last commit. |
+
+The terminal tab reads from the sidecar's exec stream and writes back through the same socket; latency is bounded by the WS round-trip. Closing the tab does **not** kill the agent's tmux session — re-opening reattaches.
+
+## Presence and reconnect
+
+The composer footer shows a small presence chip — "online", "thinking", "blocked", or "offline" — driven by the [Watch Roster](/guides/watch-roster). When the WS connection drops, a reconnect banner appears at the top of the chat ("Reconnecting…"), the composer disables sends, and queued user messages are flushed once the socket re-establishes.
+
+Network blips do not lose messages. Sends that were in-flight at disconnect time are retried with the same client-generated `request_id`; the server idempotently dedupes by `request_id` so a retry never duplicates a turn.
+
+## URL state cheat-sheet
+
+| URL fragment | Meaning |
+|---|---|
+| `/chat/viktor` | Most recent session for `viktor`. |
+| `/chat/viktor?session=cht_a1b2c3` | Specific session; deep-linkable. |
+| `/chat/viktor?session=cht_a1b2c3&panel=files` | Open the Files tab on load. |
+| `/chat/viktor?session=cht_a1b2c3&panel=terminal` | Open the Terminal tab on load. |
+| `/crews?crew=backend&agent=viktor` | Canvas view, viktor selected. |
+
+These query params are stable. Do not link to the Next.js internal route segments; those are subject to refactoring.
+
+## Related
+
+- [User preferences API](/api-reference/preferences) — composer settings (default model, slash-palette behaviour).
+- [Conversations API](/api-reference/conversations) — message reactions, attachments, crew messaging.
+- [Watch Roster](/guides/watch-roster) — presence chips.
+- [Webhooks](/api-reference/webhooks) — programmatic chat-session creation (`origin=webhook`).
+- [Quartermaster](/guides/quartermaster) — uses message reactions as eval signals.

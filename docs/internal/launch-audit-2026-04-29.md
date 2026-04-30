@@ -145,7 +145,7 @@ Total: **2** (across `internal/`, `app/`, `components/`, `lib/`)
 | `internal/backup/keyring.go:32` | Pavel Srba, 2026-04-15 | `TODO(CRE-130 follow-up)`: mutex does NOT cover concurrent CLI |
 | `components/features/orchestration/orchestration-layout.tsx:602` | Pavel Srba, 2026-04-10 | `TODO`: wire up status/label/priority filters |
 
-Both are **<3 weeks old** and authored by the maintainer. No `FIXME`, no `HACK`, no `XXX`. The earlier raw scan (~150 hits) was dominated by the literal status enum value `"TODO"` used in mission/issue state machines — not actual deferred work.
+Both are **less than 3 weeks old** and authored by the maintainer. No `FIXME`, no `HACK`, no `XXX`. The earlier raw scan (~150 hits) was dominated by the literal status enum value `"TODO"` used in mission/issue state machines — not actual deferred work.
 
 **Verdict:** debt level is very low. Both real TODOs are actionable and tracked in tickets/context.
 

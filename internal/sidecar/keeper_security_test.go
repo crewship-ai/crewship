@@ -153,6 +153,79 @@ func TestHandleKeeperRequest_AgentIDNotOverrideable(t *testing.T) {
 	}
 }
 
+// TestHandleKeeperRequest_AgentSlugIgnored is the regression test for C2 in
+// the security audit. Before the fix, sending agent_slug=<peer> in the
+// request body caused the sidecar to attribute the call to that peer's
+// agent_id — letting agent A make keeper requests as agent B. The fix
+// strips slug-based identity entirely; the canonical s.ipc.AgentID is
+// always forwarded.
+func TestHandleKeeperRequest_AgentSlugIgnored(t *testing.T) {
+	var capturedBody map[string]string
+
+	fakeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"decision": "DENY"})
+	}))
+	defer fakeSrv.Close()
+
+	srv := newKeeperServer(t, &IPCConfig{
+		BaseURL: fakeSrv.URL, Token: "test-token",
+		AgentID: "agent-A", AgentSlug: "alice",
+		CrewID: "c1", WorkspaceID: "ws1",
+	})
+	srv.crewMembers = []CrewMember{
+		{ID: "agent-B", Slug: "bob"},
+		{ID: "agent-C", Slug: "carol"},
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"credential_id": "valid-cred",
+		"intent":        "I need this credential to deploy",
+		"agent_slug":    "bob",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/keeper/request", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleKeeperRequest(w, req)
+
+	if got := capturedBody["requesting_agent_id"]; got != "agent-A" {
+		t.Errorf("requesting_agent_id forwarded as %q — agent_slug spoofing not blocked (must be agent-A)", got)
+	}
+}
+
+// TestHandleKeeperExecute_AgentSlugIgnored — same regression for /keeper/execute.
+func TestHandleKeeperExecute_AgentSlugIgnored(t *testing.T) {
+	var capturedBody map[string]string
+
+	fakeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"decision": "DENY"})
+	}))
+	defer fakeSrv.Close()
+
+	srv := newKeeperServer(t, &IPCConfig{
+		BaseURL: fakeSrv.URL, Token: "test-token",
+		AgentID: "agent-A", AgentSlug: "alice",
+		CrewID: "c1", WorkspaceID: "ws1", ContainerID: "container-1",
+	})
+	srv.crewMembers = []CrewMember{{ID: "agent-B", Slug: "bob"}}
+
+	body, _ := json.Marshal(map[string]string{
+		"credential_id": "valid-cred",
+		"intent":        "deploy please",
+		"command":       "echo hi",
+		"agent_slug":    "bob",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/keeper/execute", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.handleKeeperExecute(w, req)
+
+	if got := capturedBody["requesting_agent_id"]; got != "agent-A" {
+		t.Errorf("execute requesting_agent_id forwarded as %q — slug spoofing not blocked", got)
+	}
+}
+
 // TestHandleKeeperRequest_ValidCredentialID_Allowed verifies that credential IDs
 // with only valid characters (alphanumeric, hyphen, underscore) are accepted.
 func TestHandleKeeperRequest_ValidCredentialID_Allowed(t *testing.T) {

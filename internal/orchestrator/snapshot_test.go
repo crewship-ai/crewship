@@ -194,7 +194,6 @@ func TestRecordContainerSnapshot_EmitsAndDedups(t *testing.T) {
 	if last == nil {
 		t.Fatal("expected a snapshot entry")
 	}
-	type aptCounter interface{ Len() int }
 	got := -1
 	if pkgs, ok := last.Payload["apt"].([]any); ok {
 		got = len(pkgs)

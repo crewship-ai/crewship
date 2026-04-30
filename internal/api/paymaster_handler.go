@@ -176,6 +176,34 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "limit": limit, "since": since})
 }
 
+// SubscriptionUsage serves GET /api/v1/paymaster/subscriptions
+// Returns one row per (subscription_plan, provider) with call counts,
+// token totals, and last-used timestamp. Drives the "Subscription plans"
+// panel on the Paymaster dashboard — the surface that finally tells
+// operators which flat-rate credentials are active alongside the
+// metered $-tracked spend.
+//
+// Behaves identically to the metered rollups for windowing: same
+// since/until/range query params, same workspace isolation. Output rows
+// carry NO $ figure because flat-rate cost is always $0 by construction;
+// the UI is expected to render "no per-call cost tracking — flat-rate
+// plan" rather than implying free.
+func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	since, until := parseWindow(r)
+	rows, err := paymaster.SubscriptionUsageByPlan(r.Context(), h.db, workspaceID, since, until)
+	if err != nil {
+		h.logger.Error("paymaster subscription-usage", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})
+}
+
 // parseWindow accepts ?since=<RFC3339>&until=<RFC3339> or ?range=7d|24h|1h
 // and returns sensible defaults (7 days back) when absent.
 func parseWindow(r *http.Request) (time.Time, time.Time) {

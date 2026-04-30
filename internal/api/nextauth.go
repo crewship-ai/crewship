@@ -40,7 +40,7 @@ type NextAuthHandler struct {
 }
 
 // NewNextAuthHandler creates a NextAuthHandler for compatibility with the next-auth client SDK.
-// sessionsStore must back user_sessions (migration v60); pass *sessions.DBStore in production.
+// sessionsStore must back user_sessions (migration v63); pass *sessions.DBStore in production.
 func NewNextAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, sessionsStore sessions.Store) *NextAuthHandler {
 	return &NextAuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore}
 }

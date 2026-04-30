@@ -28,6 +28,16 @@ type CallRequest struct {
 	// before the call. Optional; used only for finer-grained pre-check
 	// estimates and ignored if zero. Final ledger row uses CallResponse.
 	EstimatedInputTokens int64
+
+	// BillingMode tells Enforce which kind of budget rules apply. Default
+	// (empty) is treated as BillingMetered for backwards-compat. Flat-rate
+	// requests skip $ enforcement; quota enforcement runs after the call
+	// based on response headers (see EnforceQuota).
+	BillingMode BillingMode
+
+	// SubscriptionPlan is the human label persisted on the ledger row when
+	// BillingMode is BillingFlatRate. Empty for metered.
+	SubscriptionPlan string
 }
 
 // CallResponse is what the underlying Caller returns. Token counts are
@@ -42,6 +52,21 @@ type CallResponse struct {
 	CostUSD             float64 // may be 0; middleware estimates if so
 	Tags                map[string]any
 	CompletedAt         time.Time
+
+	// Confidence labels how trustworthy CostUSD is. Empty defaults to
+	// ConfidenceEstimate when middleware fills cost via Estimate, or
+	// ConfidencePrecise when the underlying Caller computed it from a
+	// provider-reported usage block.
+	Confidence CostConfidence
+
+	// QuotaRemainingPct (0.0–1.0) carries the live remaining-quota signal
+	// that the underlying Caller pulled from response headers. Zero means
+	// no header was returned (Google, OAuth tunnels, transport errors).
+	QuotaRemainingPct float64
+
+	// QuotaWindow names which axis QuotaRemainingPct refers to. Empty when
+	// no header signal is present.
+	QuotaWindow QuotaWindow
 }
 
 // LLMCaller is the interface every layer in the call stack implements. The
@@ -78,17 +103,34 @@ func (f CallerFunc) Call(ctx context.Context, req CallRequest) (CallResponse, er
 // retry or surface the error. The provider's response is returned regardless
 // because the work has already been done and refusing it would also waste
 // the budget.
+//
+// KNOWN RACE (security audit H1, partial mitigation only):
+// Between step (1) Enforce and step (3) Record there's a window — the LLM
+// round-trip — where this call's cost has not been written to cost_ledger.
+// Two parallel Middleware invocations against the same scope can both pass
+// Enforce because neither's cost is committed yet, and overspend by up to
+// one call each. enforceLocks (in budgets.go) serializes the Check half of
+// Enforce so they don't both read the same pre-decision snapshot, but the
+// LLM-call gap remains. Closing it requires a reservation row written
+// inside the same SQLite transaction as the Check (needs a schema flag for
+// pending rows) — out of scope for the audit fix; tracked separately.
 func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 	return CallerFunc(func(ctx context.Context, req CallRequest) (CallResponse, error) {
-		if err := Enforce(ctx, db, j, req.Scope); err != nil {
-			// Pass BudgetExceededError through unwrapped so callers can errors.As it.
-			var bx *BudgetExceededError
-			if errors.As(err, &bx) {
+		// Flat-rate requests bypass $ enforcement. The subscription is already
+		// paid for; the only meaningful "stop" signal is provider quota
+		// exhaustion (handled post-call via EnforceQuota when the upstream
+		// returns a 429 + rate-limit headers).
+		if req.BillingMode != BillingFlatRate {
+			if err := Enforce(ctx, db, j, req.Scope); err != nil {
+				// Pass BudgetExceededError through unwrapped so callers can errors.As it.
+				var bx *BudgetExceededError
+				if errors.As(err, &bx) {
+					return CallResponse{}, err
+				}
+				// Other check errors (DB unreachable, etc.) are also fatal — we
+				// fail closed because the alternative is uncapped spending.
 				return CallResponse{}, err
 			}
-			// Other check errors (DB unreachable, etc.) are also fatal — we
-			// fail closed because the alternative is uncapped spending.
-			return CallResponse{}, err
 		}
 
 		resp, callErr := next.Call(ctx, req)
@@ -119,10 +161,16 @@ func Middleware(next LLMCaller, j journal.Emitter, db *sql.DB) LLMCaller {
 // the same as full billing on success, just with smaller numbers.
 func recordFromResponse(ctx context.Context, db *sql.DB, j journal.Emitter, req CallRequest, resp CallResponse) error {
 	cost := resp.CostUSD
-	if cost == 0 {
+	confidence := resp.Confidence
+	if cost == 0 && req.BillingMode != BillingFlatRate {
+		// Backfill via the rate card and label as estimate — caller didn't
+		// pre-compute, so we can't claim precision.
 		cost = Estimate(req.Provider, req.Model,
 			resp.InputTokens, resp.OutputTokens,
 			resp.CachedInputTokens, resp.CacheCreationTokens)
+		if confidence == "" {
+			confidence = ConfidenceEstimate
+		}
 	}
 
 	ts := resp.CompletedAt
@@ -141,6 +189,11 @@ func recordFromResponse(ctx context.Context, db *sql.DB, j journal.Emitter, req 
 		CostUSD:             cost,
 		Tags:                resp.Tags,
 		TS:                  ts,
+		BillingMode:         req.BillingMode,
+		Confidence:          confidence,
+		SubscriptionPlan:    req.SubscriptionPlan,
+		QuotaRemainingPct:   resp.QuotaRemainingPct,
+		QuotaWindow:         resp.QuotaWindow,
 	})
 	return err
 }

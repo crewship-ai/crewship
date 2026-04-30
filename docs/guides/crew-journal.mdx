@@ -43,15 +43,50 @@ Defined in `internal/journal/types.go`. Every type is a stable string -- renames
 |---|---|
 | Communication | `peer.conversation`, `peer.escalation`, `message.broadcast`, `agent.mentioned` |
 | Mission | `mission.status_change`, `mission.comment`, `assignment.created/running/completed/failed`, `crew.action`, `task.delegated` |
+| **Runs** (since PR #234) | `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `run.timeout` |
 | Security | `keeper.request`, `keeper.decision`, `guardrail.input_blocked`, `guardrail.output_blocked`, `approval.requested/granted/denied/timeout/cancelled` |
 | Cost | `llm.call`, `llm.cache_hit`, `cost.incurred`, `budget.exceeded`, `budget.warning` |
 | Memory | `memory.updated`, `memory.consolidated`, `summary.generated` |
-| Observability | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics` |
+| Observability | `exec.command`, `exec.output_chunk`, `network.port_opened/closed`, `network.egress`, `file.written`, `container.metrics`, `container.snapshot` |
 | Presence | `agent.status_change` |
 | Checkpointing | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
 | Eval | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
 | Hooks | `hook.fired`, `hook.blocked` |
 | System | `system.compaction`, `system.migration`, `system.hook_toggled`, `system.consolidation_triggered/completed` |
+
+#### `run.*` — agent run lifecycle
+
+Since PR #234 (migration 61) the legacy `agent_runs` table no longer exists; a "run" is reconstructed by grouping journal entries on `trace_id` (which equals the run id). Five typed entries cover every transition:
+
+| Entry type | When |
+|---|---|
+| `run.started` | Orchestrator picked up the assignment and exec'd the CLI. |
+| `run.completed` | CLI returned exit 0 within budget. |
+| `run.failed` | Non-zero exit, panic, or upstream API error. |
+| `run.cancelled` | Operator or hook called stop. |
+| `run.timeout` | Run TTL elapsed without a terminal entry. |
+
+Trace-id propagation is explicit: emit sites attach the id to context with `journal.WithRunID(ctx, runID)`, and downstream emitters read it back via `RunIDFromContext(ctx)`. The `noop` emitter loudly errors on `run.*` types so a misconfigured wiring fails immediately rather than silently dropping observability.
+
+`journal.ListRuns` and `journal.RunStats` reconstruct the row shape and KPIs that used to come from `agent_runs`. The `/journal` UI's `Runs` tab is a thin view over these.
+
+#### `container.snapshot` — container actuals
+
+Emitted by `internal/containerstate` after every successful agent exec. The package probes `dpkg-query -W`, `pip freeze`, `npm ls -g --json`, and `/etc/os-release`; the result is hashed; the entry is emitted **only** when the hash changes — so a quiet session is free. Missing probes (e.g. no `pip` in a Node-only image) soft-fail to empty lists. The payload structure:
+
+```json
+{
+  "os_name": "Debian GNU/Linux 12 (bookworm)",
+  "packages": {
+    "apt": [{"name": "curl", "version": "7.88.1-10+deb12u5"}, ...],
+    "pip": [{"name": "requests", "version": "2.31.0"}, ...],
+    "npm": [{"name": "typescript", "version": "5.4.5"}, ...]
+  },
+  "hash": "sha256:..."
+}
+```
+
+This is **what the container actually has** after agents ran `apt-get install` / `pip install` / `npm install` during a session. Compare with declared intent in [`devcontainer.json`](/guides/devcontainers#container-actuals).
 
 Severity is one of `info`, `notice`, `warn`, `error`. Actor types: `agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`.
 
@@ -151,9 +186,56 @@ Every filter is AND-combined and indexed at the DB level:
 | `entry_type` | `--type` | CSV `IN (?,?,...)` |
 | `severity` | `--severity` | CSV `IN (?,?,...)` |
 | `since`, `until` | `--since` | `ts >= ?` / `ts <= ?` |
+| `q` | `--query` / `-q` | FTS5 MATCH on `summary` + `payload` (see below) |
 | `cursor` | -- | keyset `(ts, id) <` prior page |
 
 Pagination is keyset (compound `ts, id`), not offset, so deep paging stays O(log n). `limit` is 1-500, default 100 for list, 50 for the SSE seed.
+
+### Full-text search
+
+Migration 55 adds a contentless FTS5 virtual table `journal_entries_fts` mirroring `summary` and `payload`, with insert / update / delete triggers that keep it in sync with the base table. The `?q=` query parameter (CLI: `--query` / `-q`) compiles to a phrase-wrapped `MATCH` against this index:
+
+```bash
+crewship journal --query "OOM" --since 24h
+crewship journal --query "google.com" --crew backend-team
+```
+
+```http
+GET /api/v1/journal?q=ratelimit&since=2026-04-29T00:00:00Z
+GET /api/v1/journal/stream?q=approval         # live tail filtered by FTS
+```
+
+The same parameter works on the SSE stream — the seed slice and every subsequent poll apply the FTS filter, so a "watch for `OOM`" tab stays cheap. `q` is bounded in length (rejected if absurd) and merges with structural filters (`crew_id`, `severity`, ...) via AND.
+
+### Lookup table (card enrichment)
+
+```http
+GET /api/v1/journal/lookup
+```
+
+Returns a workspace-scoped map of `crews`, `agents`, and `missions` so the UI can render entry cards with palette-coloured chips and lucide icons without joining on the streaming path. The lookup payload is fetched once on page mount (the React `JournalLookupProvider` caches it) and invalidated by realtime events (new crew, renamed agent, ...). `useJournalLookup` is the consumer hook; backend handler is `internal/api/journal_lookup.go`.
+
+The endpoint returns:
+
+```json
+{
+  "crews":    [{"id":"crw_…","slug":"backend","name":"Backend","icon":"server","color":"emerald"}, ...],
+  "agents":   [{"id":"agt_…","slug":"viktor","name":"Viktor","crew_id":"crw_…","avatar":"…"}, ...],
+  "missions": [{"id":"MIS-42","title":"Migrate auth","status":"in_progress","crew_id":"crw_…"}, ...]
+}
+```
+
+Entries themselves never carry display strings — the journal stores stable IDs only. Renaming a crew updates the lookup on the next fetch; historical journal rows continue to show the new name.
+
+## Unified runs surface
+
+Since PR #234 the standalone `/runs` page is folded into `/journal` as a preset tab. The `/runs` URL serves a redirect to `/journal?tab=runs`. The tab strip is `Timeline | Runs | Stats`:
+
+- **Timeline** — chronological event stream with FTS, severity, type, and crew filters.
+- **Runs** — KPI tiles (total / completed / failed / cancelled / running) plus a table grouped by `trace_id`. Same data the old `/runs` page rendered, now sourced via `journal.ListRuns`.
+- **Stats** — workspace KPIs (calls/day, top entry types, top error types).
+
+All three share the same SSE stream and FTS index — selecting a tab does not retrigger a fetch, only a client-side filter shift. Audit-tab navigation is dropped (it was always a redirect placeholder); the `/audit` page remains in the sidebar for security review.
 
 ## Tenancy
 

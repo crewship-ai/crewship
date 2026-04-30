@@ -105,6 +105,27 @@ All Crewship configuration can be set via environment variables. These override 
 | (YAML only) | `llm_proxy.token_sync_interval: 30s` | Token sync interval |
 | (YAML only) | `llm_proxy.health_check_interval: 60s` | Health check interval |
 
+## Paymaster (Billing Modes)
+
+These variables tag every cost-ledger row written from inside an agent run. The orchestrator sets them on the agent's environment from the credential type before exec; the sidecar reads them once at startup and includes them on every `POST /api/v1/internal/cost/record` call.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_BILLING_MODE` | `metered` | `metered` (per-token \$ math) or `flat_rate` (subscription credential, marginal cost = \$0). Source: `internal/orchestrator/exec_env.go:142,153`, `internal/sidecar/server.go:168`. |
+| `CREWSHIP_SUBSCRIPTION_PLAN` | (empty) | Display label for flat-rate credentials. Currently the orchestrator hard-codes `"Anthropic Max"` for the OAuth Claude Code path; future credential types (`"Cursor Ultra"`, `"ChatGPT Plus"`) will surface their own labels. Set when `CREWSHIP_BILLING_MODE=flat_rate`; the Paymaster surfaces it on the Subscriptions panel. Source: `internal/orchestrator/exec_env.go:143`, `internal/sidecar/server.go:172`. |
+
+<Note>
+  Operators do **not** set these manually for normal use. They are propagated automatically based on the credential's auth type (API key → `metered`, OAuth/subscription → `flat_rate`). They are listed here only for sidecar-image authors and tooling that intercepts the orchestrator handoff.
+</Note>
+
+See [Paymaster](/guides/paymaster) for the full billing-mode model and [Migrations](/guides/migrations) for the v62 cost-ledger schema.
+
+## Ollama (Episodic Memory + Keeper)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OLLAMA_MODELS` | `~/.ollama/models` | Directory where Ollama stores model blobs. Used by the [Keeper](/guides/keeper) gatekeeper LLM, the [Episodic memory](/guides/episodic-memory) embedder, and the [Consolidator](/guides/consolidate). On macOS dev machines this is typically pointed at an external SSD: `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"`. Set this **before** starting Ollama (`./dev.sh start` or `ollama serve`); changing it requires a restart. |
+
 ## License
 
 | Variable | Default | Description |

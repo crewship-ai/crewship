@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/lookout"
 )
 
 // Recall runs a cosine-similarity scan over the embeddings that match
@@ -200,8 +202,21 @@ func RenderInjection(hits []Hit, maxChars int) string {
 	}
 	var body strings.Builder
 	for _, h := range hits {
+		// Defense-in-depth (audit H3): the wrapper above tells the model
+		// to treat recalled content as untrusted, but heavyweight
+		// injection payloads still occasionally win against the framing
+		// — so before rendering, run the summary through Lookout's
+		// injection scanner. A high-severity match means we redact the
+		// body and keep only the metadata, preserving the "something
+		// happened" signal without giving the model an exfiltration
+		// vector. Most relevant for peer.escalation entries which carry
+		// arbitrary text from another agent.
+		summary := h.Summary
+		if scan := lookout.ScanInput(summary); scan.Verdict == lookout.VerdictBlock {
+			summary = "[redacted: recalled entry flagged by Lookout — possible prompt injection]"
+		}
 		line := fmt.Sprintf("- [%s • %s ago • score=%.2f] %s\n",
-			h.EntryType, humanizeAge(h.Age), h.Score, h.Summary)
+			h.EntryType, humanizeAge(h.Age), h.Score, summary)
 		if body.Len()+len(line) > budget {
 			break
 		}

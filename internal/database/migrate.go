@@ -675,6 +675,14 @@ DROP INDEX IF EXISTS idx_run_chat;
 DROP INDEX IF EXISTS idx_run_triggered_by;
 DROP TABLE agent_runs;
 `},
+	// Subscription-aware paymaster: distinguishes API-key calls (where we can
+	// price per token) from OAuth/subscription calls (flat-rate, opaque). Adds
+	// rate-card snapshot columns so historical rows survive future ceník
+	// changes (Langfuse pattern), and a confidence column so the UI can label
+	// every cost figure with its provenance (Helicone pattern).
+	// Renumbered from v60 to v62 after PR #234 took 60+61 for the unified
+	// journal Phase D + drop_agent_runs migrations.
+	{version: 62, name: "add_paymaster_billing_modes", sql: migrationAddPaymasterBillingModes},
 	// Server-side session evidence backing the access/refresh token
 	// model (see internal/auth/jwt.go). A row exists for every issued
 	// refresh-token chain; the access token's `sid` claim joins to it
@@ -688,10 +696,11 @@ DROP TABLE agent_runs;
 	// so the table doesn't take a write hammering on hot endpoints.
 	//
 	// Originally landed at v60 in the session-lifecycle PR, renumbered
-	// to v62 after main merged unified-journal v60+v61. The renumber
-	// is forced by the runner only checking version (not name) — see
-	// the migration-version-conflicts pitfall in CLAUDE.md.
-	{version: 62, name: "add_user_sessions", sql: `
+	// to v62 after unified-journal landed v60+v61, then to v63 after
+	// the paymaster billing-modes migration took v62 on main. The
+	// runner only checks version (not name) — see the migration-version-
+	// conflicts pitfall in CLAUDE.md.
+	{version: 63, name: "add_user_sessions", sql: `
 CREATE TABLE IF NOT EXISTS user_sessions (
 	id TEXT PRIMARY KEY,
 	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -722,7 +731,7 @@ CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at
 	// any direct INSERT/UPDATE that tries to point two rows at the
 	// same JTI fails at the DB, which keeps a future bug or migration
 	// script from silently breaking rotation/reuse detection.
-	{version: 63, name: "add_session_rotation_and_lockout", sql: `
+	{version: 64, name: "add_session_rotation_and_lockout", sql: `
 ALTER TABLE user_sessions ADD COLUMN current_refresh_jti TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sessions_current_refresh_jti
   ON user_sessions(current_refresh_jti)

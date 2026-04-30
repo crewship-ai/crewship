@@ -220,13 +220,6 @@ func defaultStatus(s string) string {
 	return s
 }
 
-func defaultDepends(s string) string {
-	if s == "" {
-		return "[]"
-	}
-	return s
-}
-
 // remapDepends parses a depends_on JSON array of task ids, replaces each
 // id with its fork-side counterpart from idMap, and re-marshals the
 // result. Ids missing from the map (e.g. references to tasks deleted

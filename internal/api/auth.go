@@ -28,7 +28,7 @@ type AuthHandler struct {
 }
 
 // NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
-// sessionsStore must back user_sessions (migration v60).
+// sessionsStore must back user_sessions (migration v63).
 func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, sessionsStore sessions.Store, allowSignup bool) *AuthHandler {
 	return &AuthHandler{db: db, logger: logger, validator: validator, sessions: sessionsStore, allowSignup: allowSignup}
 }
@@ -390,6 +390,15 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
+		return
+	}
+	// Audit H7: defensive nil check. The router only mounts AuthHandler
+	// when JWTSecret is configured (so validator is non-nil at startup),
+	// but a misconfigured deployment that wires the handler without a
+	// validator would panic on the next line. Fail closed instead.
+	if h.validator == nil {
+		h.logger.Error("WsToken called without configured JWT validator")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

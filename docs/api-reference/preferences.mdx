@@ -1,0 +1,135 @@
+---
+title: "User Preferences"
+description: "Per-user JSON-blob key-value store backing UI settings (panel sizes, last-opened tabs, density, …). Each key is opaque to the server; the frontend owns the schema."
+icon: "sliders"
+---
+
+# User Preferences
+
+User preferences are persisted in `user_preferences` (migration v58) as a string-keyed map of raw JSON values, scoped to the authenticated user. They follow the user across browsers, devices, and workspaces — preferences are never workspace-scoped.
+
+The handler is **deliberately schemaless on the value side**. The frontend writes whatever JSON shape it wants under a key; the server stores the bytes and hands them back unchanged on read. This keeps UI iteration fast — adding a new preference doesn't need a migration or a backend release.
+
+Implementation: `internal/api/user_preferences.go`. Backed by `user_preferences (user_id, pref_key, pref_value, updated_at)` with a `UNIQUE(user_id, pref_key)` constraint.
+
+## Auth and limits
+
+- All endpoints require an authenticated session.
+- The `user_id` is taken from the session — never from request bodies or query parameters.
+- **Key constraint**: `[a-zA-Z0-9._-]{1,64}`. Anything else returns `400`. Keys land in URL paths, so this is a defensive parse before they reach the SQL layer.
+- **Value cap**: 16 KB per key. Larger payloads return `400`.
+- There is no admin endpoint to read another user's preferences.
+
+---
+
+## List preferences
+
+```
+GET /api/v1/me/preferences
+```
+
+Returns every preference row for the authenticated user as a flat map of `key → JSON value`. Missing keys are simply absent from the map; the frontend falls back to its compiled-in defaults.
+
+**Response:** `200 OK`
+
+```json
+{
+  "ui.density": "comfortable",
+  "ui.theme": "system",
+  "crews.bottom_panel_height": 220,
+  "chat.composer.send_on_enter": true,
+  "chat.last_session_per_agent": {
+    "agt_viktor": "cht_a1b2",
+    "agt_eva": "cht_c3d4"
+  }
+}
+```
+
+Values are **parsed JSON** — a number stays a number, an object stays an object. The handler round-trips through `json.RawMessage` so the FE doesn't have to JSON-decode each value separately.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | Not authenticated. |
+| 500 | DB error or invalid JSON in a stored row (corruption — should not happen). |
+
+---
+
+## Set one preference
+
+```
+PUT /api/v1/me/preferences/{key}
+Content-Type: application/json
+```
+
+Upserts one key. The request body is the **raw JSON value** to store — not a `{value: …}` wrapper. So setting `ui.theme` to `"dark"` is:
+
+```http
+PUT /api/v1/me/preferences/ui.theme
+Content-Type: application/json
+
+"dark"
+```
+
+And setting `crews.bottom_panel_height`:
+
+```http
+PUT /api/v1/me/preferences/crews.bottom_panel_height
+Content-Type: application/json
+
+220
+```
+
+**Response:** `204 No Content` on success.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid key (regex), body is not valid JSON, or body exceeds 16 KB. |
+| 401 | Not authenticated. |
+| 500 | DB error. |
+
+The PUT is atomic via SQLite UPSERT (`INSERT … ON CONFLICT(user_id, pref_key) DO UPDATE`), so concurrent writes from two devices don't lose data — last write wins.
+
+---
+
+## Delete one preference
+
+```
+DELETE /api/v1/me/preferences/{key}
+```
+
+Removes the row for `(user_id, key)`. Idempotent — deleting a non-existent key returns 204, not 404. The frontend's "reset to default" action just deletes the key.
+
+**Response:** `204 No Content`.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid key. |
+| 401 | Not authenticated. |
+| 500 | DB error. |
+
+---
+
+## Conventional keys
+
+The server does not enforce these names, but the frontend uses them consistently. Listing them here so integrators know what to read/write:
+
+| Key | Type | Purpose |
+|---|---|---|
+| `ui.theme` | string | `"light"`, `"dark"`, or `"system"`. |
+| `ui.density` | string | `"compact"`, `"comfortable"`, or `"spacious"`. |
+| `crews.bottom_panel_height` | number | Pixel height of the bottom panel in `/crews`. First consumer of this table — the schema is intentionally generic so further preferences land without another migration. |
+| `chat.composer.send_on_enter` | bool | If false, Enter inserts newline and Cmd-Enter sends. |
+| `chat.last_session_per_agent` | object | Map `agentId → chatId` so the chat surface re-opens the last session per agent. |
+
+Adding a new key is purely a frontend change — no API or migration work needed. Use the dotted-namespace convention (`<surface>.<setting>`) so a future grep stays scannable.
+
+## Related
+
+- [Chat & Sessions guide](/guides/chat-sessions) — uses `chat.*` keys.
+- [Migrations — v58](/guides/migrations#v56-v59-chat-ui-overhaul) — `user_preferences` schema.

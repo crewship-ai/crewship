@@ -50,7 +50,7 @@ const (
 // shape is preserved across access / refresh / ws tickets — the `Kind`
 // claim disambiguates and Validate*() refuses cross-use.
 //
-// Sid joins to user_sessions.id (migration v60). Without a matching row
+// Sid joins to user_sessions.id (migration v63). Without a matching row
 // (or with revoked_at != NULL) the auth middleware rejects the token,
 // so a stolen access token is killable in <= AccessTokenTTL once the
 // user signs out / changes password / an admin force-revokes.

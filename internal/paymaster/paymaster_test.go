@@ -13,11 +13,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schemaSQL mirrors the cost_ledger / budget_limits tables from migration 52.
-// We define the schema inline so the test stays decoupled from the migrate
-// package — same approach the journal package's tests use. journal_entries is
-// also created so the recordingEmitter that writes through to the real Writer
-// can be used if we ever swap it back in.
+// schemaSQL mirrors the cost_ledger / budget_limits tables. Kept inline so the
+// test stays decoupled from the migrate package — same approach the journal
+// package's tests use. The columns added in migration v62 (billing_mode,
+// quota_*, rate_*, cost_confidence, subscription_plan) are reflected here.
 const schemaSQL = `
 CREATE TABLE cost_ledger (
     id TEXT PRIMARY KEY,
@@ -33,11 +32,21 @@ CREATE TABLE cost_ledger (
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
-    tags TEXT NOT NULL DEFAULT '{}'
+    tags TEXT NOT NULL DEFAULT '{}',
+    billing_mode TEXT NOT NULL DEFAULT 'metered' CHECK(billing_mode IN ('metered','flat_rate')),
+    quota_remaining_pct REAL,
+    quota_window TEXT,
+    subscription_plan TEXT,
+    rate_input_per_m REAL,
+    rate_output_per_m REAL,
+    rate_cached_in_per_m REAL,
+    rate_cache_write_per_m REAL,
+    cost_confidence TEXT NOT NULL DEFAULT 'estimate' CHECK(cost_confidence IN ('precise','estimate','unknown'))
 );
 CREATE INDEX idx_cost_ws_ts ON cost_ledger(workspace_id, ts DESC);
 CREATE INDEX idx_cost_crew_ts ON cost_ledger(crew_id, ts DESC);
 CREATE INDEX idx_cost_agent_ts ON cost_ledger(agent_id, ts DESC);
+CREATE INDEX idx_cost_billing_mode ON cost_ledger(workspace_id, billing_mode, ts DESC) WHERE billing_mode = 'flat_rate';
 
 CREATE TABLE budget_limits (
     id TEXT PRIMARY KEY,
@@ -117,8 +126,9 @@ func TestEstimate(t *testing.T) {
 			name:     "opus 1k in / 1k out",
 			provider: "anthropic", model: "claude-opus-4-7",
 			in: 1000, out: 1000,
-			// 1000 * 15/1e6 + 1000 * 75/1e6 = 0.015 + 0.075
-			want: 0.015 + 0.075,
+			// 2026-04 reprice: $5 input / $25 output per 1M.
+			// 1000 * 5/1e6 + 1000 * 25/1e6 = 0.005 + 0.025
+			want: 0.005 + 0.025,
 		},
 		{
 			name:     "sonnet with cached input",
@@ -131,8 +141,9 @@ func TestEstimate(t *testing.T) {
 			name:     "haiku tiny call",
 			provider: "anthropic", model: "claude-haiku-4-5",
 			in: 100, out: 50,
-			// 100 * 0.80/1e6 + 50 * 4/1e6
-			want: 0.00008 + 0.0002,
+			// 2026-04 reprice: $1 input / $5 output per 1M.
+			// 100 * 1/1e6 + 50 * 5/1e6
+			want: 0.0001 + 0.00025,
 		},
 		{
 			name:     "ollama free",
@@ -141,11 +152,39 @@ func TestEstimate(t *testing.T) {
 			want: 0,
 		},
 		{
-			name:     "openai gpt-5",
+			name:     "openai gpt-5 alias maps to 5.5 rate",
 			provider: "openai", model: "gpt-5",
 			in: 1000, out: 500,
-			// 1000 * 10/1e6 + 500 * 30/1e6
-			want: 0.01 + 0.015,
+			// gpt-5 alias resolves to gpt-5.5 rate: $4 in / $24 out per 1M.
+			// 1000 * 4/1e6 + 500 * 24/1e6
+			want: 0.004 + 0.012,
+		},
+		{
+			name:     "openai gpt-5.5 flagship",
+			provider: "openai", model: "gpt-5.5",
+			in: 1000, out: 500,
+			want: 0.004 + 0.012,
+		},
+		{
+			name:     "gemini 2.5 pro",
+			provider: "google", model: "gemini-2.5-pro",
+			in: 1000, out: 500,
+			// 1000 * 2.50/1e6 + 500 * 15/1e6 (upper tier)
+			want: 0.0025 + 0.0075,
+		},
+		{
+			name:     "grok 4.20",
+			provider: "xai", model: "grok-4.20",
+			in: 1000, out: 500,
+			// 1000 * 2/1e6 + 500 * 6/1e6
+			want: 0.002 + 0.003,
+		},
+		{
+			name:     "deepseek chat",
+			provider: "deepseek", model: "deepseek-chat",
+			in: 1_000_000, out: 1_000_000,
+			// $0.252 in + $0.378 out
+			want: 0.252 + 0.378,
 		},
 		{
 			name:     "unknown provider returns zero",
@@ -157,15 +196,37 @@ func TestEstimate(t *testing.T) {
 			name:     "anthropic fallback for unknown model",
 			provider: "anthropic", model: "claude-future-99",
 			in: 1000, out: 500,
-			// falls back to sonnet rate (3/15)
-			want: 0.003 + 0.0075,
+			// Conservative fallback: Opus-tier ($5/$25 per 1M).
+			// 1000 * 5/1e6 + 500 * 25/1e6 = 0.005 + 0.0125
+			want: 0.005 + 0.0125,
+		},
+		{
+			name:     "google fallback for unknown model",
+			provider: "google", model: "gemini-future-99",
+			in: 1000, out: 500,
+			// fallback equals gemini-2.5-pro rate (upper tier)
+			want: 0.0025 + 0.0075,
+		},
+		{
+			name:     "openai fallback for unknown model",
+			provider: "openai", model: "gpt-future-99",
+			in: 1000, out: 500,
+			// Conservative fallback: o3-pro tier ($20/$80 per 1M).
+			want: 0.02 + 0.04,
+		},
+		{
+			name:     "deepseek fallback for unknown model",
+			provider: "deepseek", model: "deepseek-future-99",
+			in: 1000, out: 500,
+			// Conservative fallback: reasoner tier ($0.70/$2.50 per 1M).
+			want: 0.0007 + 0.00125,
 		},
 		{
 			name:     "negative tokens treated as zero",
 			provider: "anthropic", model: "claude-opus-4-7",
 			in: -50, out: 100,
-			// only output tokens count
-			want: 100 * 75 / 1_000_000.0,
+			// only output tokens count, $25/M
+			want: 100 * 25 / 1_000_000.0,
 		},
 	}
 
@@ -537,6 +598,190 @@ func TestMiddlewareBlocksOnHardBudget(t *testing.T) {
 	}
 	if called {
 		t.Error("inner caller was invoked despite hard budget block")
+	}
+}
+
+// TestRecordFlatRateNullsCost asserts the v62 flat-rate invariant: even if
+// the caller hands in a non-zero CostUSD, the row lands with cost=0 and
+// confidence=unknown. Pricing for subscription calls is structurally
+// nonsense, so we never persist a number that would imply otherwise.
+func TestRecordFlatRateNullsCost(t *testing.T) {
+	db := openTestDB(t)
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	rec, err := Record(ctx, db, em, Call{
+		Scope:            Scope{WorkspaceID: "ws1", CrewID: "crew1"},
+		Provider:         "anthropic",
+		Model:            "claude-opus-4-7",
+		InputTokens:      1000,
+		OutputTokens:     500,
+		CostUSD:          99.99, // would be ignored
+		BillingMode:      BillingFlatRate,
+		SubscriptionPlan: "Anthropic Max",
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	var (
+		cost       float64
+		mode       string
+		confidence string
+		plan       sql.NullString
+	)
+	err = db.QueryRowContext(ctx,
+		`SELECT cost_usd, billing_mode, cost_confidence, subscription_plan
+		 FROM cost_ledger WHERE id = ?`, rec.ID).
+		Scan(&cost, &mode, &confidence, &plan)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if cost != 0 {
+		t.Errorf("flat-rate cost should be 0, got %v", cost)
+	}
+	if mode != "flat_rate" {
+		t.Errorf("billing_mode: %q want flat_rate", mode)
+	}
+	if confidence != "unknown" {
+		t.Errorf("confidence: %q want unknown", confidence)
+	}
+	if !plan.Valid || plan.String != "Anthropic Max" {
+		t.Errorf("plan: %+v want Anthropic Max", plan)
+	}
+
+	// Flat-rate must NOT fire cost.incurred — no $ was incurred.
+	if got := len(em.byType(journal.EntryCostIncurred)); got != 0 {
+		t.Errorf("flat-rate should not emit cost.incurred, got %d", got)
+	}
+	if got := len(em.byType(journal.EntryLLMCall)); got != 1 {
+		t.Errorf("expected 1 llm.call entry, got %d", got)
+	}
+}
+
+// TestRecordMeteredSnapshotsRateCard is the Langfuse-pattern check: the
+// v62 ratecard columns are populated at write time so a future pricing.go
+// change can't retroactively rewrite history.
+func TestRecordMeteredSnapshotsRateCard(t *testing.T) {
+	db := openTestDB(t)
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	rec, err := Record(ctx, db, em, Call{
+		Scope:        Scope{WorkspaceID: "ws1"},
+		Provider:     "anthropic",
+		Model:        "claude-sonnet-4-6",
+		InputTokens:  100,
+		OutputTokens: 200,
+		CostUSD:      0.01,
+		BillingMode:  BillingMetered,
+		Confidence:   ConfidencePrecise,
+	})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	var inRate, outRate sql.NullFloat64
+	err = db.QueryRowContext(ctx,
+		`SELECT rate_input_per_m, rate_output_per_m FROM cost_ledger WHERE id = ?`, rec.ID).
+		Scan(&inRate, &outRate)
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if !inRate.Valid || !nearly(inRate.Float64, 3.00, 1e-9) {
+		t.Errorf("rate_input_per_m: %+v want 3.00", inRate)
+	}
+	if !outRate.Valid || !nearly(outRate.Float64, 15.00, 1e-9) {
+		t.Errorf("rate_output_per_m: %+v want 15.00", outRate)
+	}
+}
+
+// TestEnforceQuotaWarnAtLowRemaining asserts a budget.warning fires when
+// remaining quota drops below 20% — without blocking. Mirrors the soft /
+// tiered $-budget warn behaviour for the rate-limit-header signal.
+func TestEnforceQuotaWarnAtLowRemaining(t *testing.T) {
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	if err := EnforceQuota(ctx, em, Scope{WorkspaceID: "ws1"}, 0.10, QuotaTokensPerMin, false); err != nil {
+		t.Fatalf("low remaining should not block: %v", err)
+	}
+	if got := len(em.byType(journal.EntryBudgetWarning)); got != 1 {
+		t.Errorf("expected 1 warning, got %d", got)
+	}
+}
+
+// TestEnforceQuota429Blocks asserts the upstream's authoritative "you're
+// out" signal returns BudgetExceededError so the caller can surface a
+// quota_exhausted error consistently with the $-budget enforcement path.
+func TestEnforceQuota429Blocks(t *testing.T) {
+	em := &fakeEmitter{}
+	ctx := context.Background()
+
+	err := EnforceQuota(ctx, em, Scope{WorkspaceID: "ws1"}, 0, QuotaTokensPerMin, true)
+	if err == nil {
+		t.Fatal("expected BudgetExceededError on 429")
+	}
+	var bx *BudgetExceededError
+	if !errors.As(err, &bx) {
+		t.Errorf("want BudgetExceededError, got %T", err)
+	}
+	if got := len(em.byType(journal.EntryBudgetExceed)); got != 1 {
+		t.Errorf("expected 1 budget.exceeded entry, got %d", got)
+	}
+}
+
+// TestEnforceQuotaPlentyOfRoom is the no-op path: above 20% remaining, no
+// signal, no error. The journal stays clean and the proxy hot path
+// doesn't pay for an unnecessary entry.
+func TestEnforceQuotaPlentyOfRoom(t *testing.T) {
+	em := &fakeEmitter{}
+	ctx := context.Background()
+	if err := EnforceQuota(ctx, em, Scope{WorkspaceID: "ws1"}, 0.85, QuotaTokensPerMin, false); err != nil {
+		t.Fatalf("85%% remaining should be no-op: %v", err)
+	}
+	if got := len(em.byType(journal.EntryBudgetWarning)) + len(em.byType(journal.EntryBudgetExceed)); got != 0 {
+		t.Errorf("plenty-of-room path should not emit, got %d entries", got)
+	}
+}
+
+// TestSubscriptionUsageByPlan exercises the new flat-rate rollup helper.
+// Mixed metered + flat-rate ledger rows are seeded; the rollup must return
+// only flat-rate aggregates grouped by (plan, provider).
+func TestSubscriptionUsageByPlan(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Format(tsLayout)
+
+	// 2 flat-rate Anthropic Max rows + 1 metered row + 1 different plan row.
+	mustExec(t, db, `INSERT INTO cost_ledger
+	    (id, workspace_id, ts, provider, model, input_tokens, output_tokens,
+	     cost_usd, billing_mode, subscription_plan, cost_confidence) VALUES
+	    ('s1', 'ws1', ?, 'anthropic', 'claude-opus-4-7', 100, 200, 0, 'flat_rate', 'Anthropic Max', 'unknown'),
+	    ('s2', 'ws1', ?, 'anthropic', 'claude-opus-4-7', 50,  100, 0, 'flat_rate', 'Anthropic Max', 'unknown'),
+	    ('s3', 'ws1', ?, 'anthropic', 'claude-opus-4-7', 10,  20,  0.05, 'metered',  NULL, 'precise'),
+	    ('s4', 'ws1', ?, 'openai',    'gpt-5.5',         30,  40,  0, 'flat_rate', 'Cursor Ultra', 'unknown')`,
+		now, now, now, now)
+
+	rows, err := SubscriptionUsageByPlan(ctx, db, "ws1", time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("SubscriptionUsageByPlan: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 plan-provider groups, got %d: %+v", len(rows), rows)
+	}
+
+	gotByPlan := map[string]SubscriptionUsage{}
+	for _, r := range rows {
+		gotByPlan[r.SubscriptionPlan] = r
+	}
+	max := gotByPlan["Anthropic Max"]
+	if max.CallCount != 2 || max.InTokens != 150 || max.OutTokens != 300 {
+		t.Errorf("Anthropic Max rollup wrong: %+v", max)
+	}
+	cursor := gotByPlan["Cursor Ultra"]
+	if cursor.CallCount != 1 || cursor.Provider != "openai" {
+		t.Errorf("Cursor Ultra row wrong: %+v", cursor)
 	}
 }
 

@@ -160,6 +160,77 @@ func SpendByMission(ctx context.Context, db *sql.DB, missionID string) (MissionS
 	return s, nil
 }
 
+// SubscriptionUsage is one row of "this flat-rate subscription was used N
+// times since X". CostUSD is intentionally omitted — flat-rate rows have
+// $0 by construction, and surfacing a zero would imply the calls were
+// free at the user level (they're not, the user already paid the sub).
+// LastTS is the most-recent flat-rate ledger row matching the plan, used
+// by the UI to surface "last used 14m ago".
+type SubscriptionUsage struct {
+	SubscriptionPlan string    `json:"subscription_plan"`
+	Provider         string    `json:"provider"`
+	CallCount        int64     `json:"call_count"`
+	InTokens         int64     `json:"input_tokens"`
+	OutTokens        int64     `json:"output_tokens"`
+	LastTS           time.Time `json:"last_ts"`
+}
+
+// SubscriptionUsageByPlan rolls up flat_rate ledger rows in the workspace
+// by (subscription_plan, provider) for the given window. Empty plan label
+// (rare; pre-migration rows or buggy emitters) is reported as "unknown" so
+// the UI doesn't render a blank cell.
+//
+// since/until follow the same convention as SpendByCrew. The query is
+// bounded by the partial idx_cost_billing_mode index so even on large
+// ledgers the scan is small.
+func SubscriptionUsageByPlan(ctx context.Context, db *sql.DB, workspaceID string, since, until time.Time) ([]SubscriptionUsage, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("paymaster: workspace_id required")
+	}
+	conds := []string{"workspace_id = ?", "billing_mode = 'flat_rate'"}
+	args := []any{workspaceID}
+	if !since.IsZero() {
+		conds = append(conds, "ts >= ?")
+		args = append(args, since.UTC().Format(tsLayout))
+	}
+	if !until.IsZero() {
+		conds = append(conds, "ts < ?")
+		args = append(args, until.UTC().Format(tsLayout))
+	}
+
+	q := `SELECT COALESCE(NULLIF(subscription_plan, ''), 'unknown'), provider,
+	             COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+	             COALESCE(MAX(ts), '')
+	      FROM cost_ledger WHERE ` + joinAnd(conds) +
+		` GROUP BY COALESCE(NULLIF(subscription_plan, ''), 'unknown'), provider
+		  ORDER BY COUNT(*) DESC`
+
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("paymaster: query subscription usage: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SubscriptionUsage
+	for rows.Next() {
+		var (
+			s       SubscriptionUsage
+			lastStr string
+		)
+		if err := rows.Scan(&s.SubscriptionPlan, &s.Provider,
+			&s.CallCount, &s.InTokens, &s.OutTokens, &lastStr); err != nil {
+			return nil, fmt.Errorf("paymaster: scan subscription usage: %w", err)
+		}
+		if lastStr != "" {
+			if t, err := time.Parse(tsLayout, lastStr); err == nil {
+				s.LastTS = t
+			}
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // TopSpenders returns the top-N agents ordered by cost in the workspace since
 // `since`. Used by the leaderboard widget on the workspace dashboard. limit
 // is clamped to [1, 100] so a misconfigured caller can't drag in megabytes

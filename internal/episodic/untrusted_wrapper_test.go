@@ -11,6 +11,12 @@ import (
 // wrapper. The wrapper is load-bearing — a past peer.escalation could
 // carry "IGNORE PREVIOUS INSTRUCTIONS" verbatim and without the framing
 // the model treats it as authoritative.
+//
+// Audit H3 hardening: in addition to the wrapper, summaries that match a
+// Lookout injection rule are redacted to a placeholder before rendering.
+// The test below covers BOTH the wrapper and the redaction — the
+// "IGNORE PREVIOUS INSTRUCTIONS" payload must NOT survive into the
+// rendered output, but the wrapper framing must still appear.
 func TestRenderInjectionWrapsUntrusted(t *testing.T) {
 	hits := []Hit{
 		{
@@ -36,19 +42,20 @@ func TestRenderInjectionWrapsUntrusted(t *testing.T) {
 	if !strings.Contains(out, "</recalled-memory>") {
 		t.Errorf("output missing </recalled-memory> close tag:\n%s", out)
 	}
-	// The "UNTRUSTED HINTS" framing must appear BEFORE the payload —
-	// otherwise a model might read the injection payload first and
-	// treat it as instruction before seeing the caveat.
-	hintsIdx := strings.Index(out, "UNTRUSTED HINTS")
-	payloadIdx := strings.Index(out, "IGNORE PREVIOUS INSTRUCTIONS")
-	if hintsIdx < 0 {
+	if !strings.Contains(out, "UNTRUSTED HINTS") {
 		t.Fatal("missing 'UNTRUSTED HINTS' framing")
 	}
-	if payloadIdx < 0 {
-		t.Fatal("missing expected payload (test fixture broken)")
+	// The injection payload must be redacted — it must NOT appear verbatim
+	// in the rendered output, even inside the wrapper.
+	if strings.Contains(out, "IGNORE PREVIOUS INSTRUCTIONS") {
+		t.Errorf("Lookout-flagged payload leaked into rendered output:\n%s", out)
 	}
-	if hintsIdx > payloadIdx {
-		t.Errorf("UNTRUSTED HINTS header must precede payload, but hintsIdx=%d payloadIdx=%d", hintsIdx, payloadIdx)
+	if !strings.Contains(out, "redacted") {
+		t.Errorf("expected redaction marker for flagged hit, got:\n%s", out)
+	}
+	// The benign hit must survive — redaction must not apply to clean entries.
+	if !strings.Contains(out, "deploy reliability up 4%") {
+		t.Errorf("benign hit was incorrectly redacted:\n%s", out)
 	}
 }
 
