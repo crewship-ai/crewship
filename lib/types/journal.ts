@@ -20,6 +20,12 @@ export const JOURNAL_ENTRY_TYPES = [
   "assignment.failed",
   "crew.action",
   "task.delegated",
+  // Runs
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.timeout",
   // Security
   "keeper.request",
   "keeper.decision",
@@ -126,6 +132,10 @@ export const ENTRY_TYPE_GROUPS: { label: string; types: JournalEntryType[] }[] =
   {
     label: "Presence",
     types: ["agent.status_change"],
+  },
+  {
+    label: "Runs",
+    types: ["run.started", "run.completed", "run.failed", "run.cancelled", "run.timeout"],
   },
   {
     label: "Checkpointing",
