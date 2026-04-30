@@ -681,6 +681,27 @@ func (panickingSubagent) Run(_ context.Context, _ Hook, _ EventContext) (Result,
 	panic("simulated handler panic")
 }
 
+// TestShellHandlerTimeoutOverflowGuarded verifies a timeout_secs value
+// past the int64-nanoseconds boundary (~9.22e9 sec) doesn't wrap to a
+// negative time.Duration, which would silently fire the context
+// deadline before the shell command had a chance to run. The cap fires
+// before the multiplication so `true` completes normally.
+func TestShellHandlerTimeoutOverflowGuarded(t *testing.T) {
+	res, err := shellHandler(context.Background(), Hook{
+		HandlerKind: HandlerKindShell,
+		HandlerConfig: map[string]any{
+			"command":      "true",
+			"timeout_secs": int(1e10), // past int64 ns capacity → negative duration without cap
+		},
+	}, EventContext{})
+	if err != nil {
+		t.Fatalf("shellHandler returned err: %v", err)
+	}
+	if res.Outcome != OutcomePass {
+		t.Errorf("expected OutcomePass for trivial command with capped timeout, got %s (msg=%q)", res.Outcome, res.Message)
+	}
+}
+
 // TestDispatcherNonBlockingHandlerPanicRecovered verifies that a panic
 // inside a non-blocking hook goroutine does NOT crash the process. Without
 // the recover guard, the goroutine's panic propagates to the runtime and
