@@ -79,11 +79,34 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
     return res
   }
   if (refreshResult === "retryable_failed") {
-    // Don't emit; the user's session is presumably still valid, the
-    // backend is just temporarily unreachable. Return the original
-    // 401; the caller will see it and either retry on next user
-    // action or surface a transport error in their loading UI.
-    return res
+    // The original request hit a 401 with a refreshable reason, then
+    // the refresh endpoint itself failed transiently (5xx, network
+    // throw, abort). The user's session is presumably still valid;
+    // we just couldn't rotate.
+    //
+    // Returning the original 401 here would lie to the caller —
+    // hooks like use-auth and consumers that branch on 401/403 →
+    // "logged out" would tear down auth-dependent flows even
+    // though the cookies are still good. Synthesize a 503 instead
+    // so the same loading-state / retry-button UI that any other
+    // backend hiccup would trigger fires here too. The
+    // X-Crewship-Refresh-Failed header is the machine-readable
+    // signal; the JSON body is for humans tailing logs.
+    return new Response(
+      JSON.stringify({
+        error: "refresh_unavailable",
+        detail: "Token refresh endpoint unavailable; original request returned 401 but the session is likely still valid. Retry shortly.",
+      }),
+      {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Crewship-Refresh-Failed": "1",
+          "Retry-After": "5",
+        },
+      },
+    )
   }
 
   const replayable = bodyIsReplayable(initWithCreds.body) && inputIsReplayable(input)

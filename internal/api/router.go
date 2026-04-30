@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -138,9 +139,19 @@ func (noopEmitter) Emit(_ context.Context, e journal.Entry) (string, error) {
 func (noopEmitter) Flush(_ context.Context) error { return nil }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
+	// db is non-optional. NewAuthMiddleware joins to user_sessions on
+	// every authed request, and the workspace-membership middleware
+	// runs queries before any handler is reached. The previous code
+	// accepted nil here and the failure mode was the first authed
+	// request panicking with a nil-pointer dereference — fail at
+	// construction so deployment-wiring bugs surface in startup logs
+	// instead of production traffic.
+	if db == nil {
+		return nil, fmt.Errorf("new router: db is required")
+	}
 	validator, err := auth.NewJWTValidator(jwtSecret)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new router: create JWT validator: %w", err)
 	}
 
 	sessionsStore := sessions.NewDBStore(db)

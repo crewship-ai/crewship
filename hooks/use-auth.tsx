@@ -93,10 +93,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const goLoginExpired = () => {
       if (redirected) return
       redirected = true
-      const currentPath = window.location.pathname + window.location.search
+      const { pathname, search } = window.location
+      const currentPath = pathname + search
       const params = new URLSearchParams({ reason: "expired" })
       // Don't append ?redirect for /login itself or unsafe absolute URLs.
-      if (currentPath !== "/login" && currentPath.startsWith("/") && !currentPath.startsWith("//")) {
+      // The check uses pathname (not pathname+search) so /login?reason=expired
+      // — the URL we're about to redirect TO — is recognised as the
+      // login page even when it carries query params. Without this,
+      // the user could end up bouncing /login → /login?redirect=/login?...
+      if (pathname !== "/login" && currentPath.startsWith("/") && !currentPath.startsWith("//")) {
         params.set("redirect", currentPath)
       }
       window.location.replace(`/login?${params.toString()}`)
