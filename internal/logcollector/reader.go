@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Reader reads structured log entries from per-agent JSONL files.
@@ -44,6 +45,13 @@ func validatePathSegment(s string) error {
 	}
 	if len(s) > 256 {
 		return fmt.Errorf("invalid path segment: too long (%d bytes)", len(s))
+	}
+	// Reject invalid UTF-8 explicitly. Without this, byte sequences like
+	// 0xFF 0xFE decode to the replacement rune U+FFFD, which is both
+	// printable and non-space — so the per-rune scan below would let them
+	// through despite the sequence being a malformed encoding.
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("invalid path segment: invalid UTF-8")
 	}
 	if strings.ContainsAny(s, "/\\") || strings.Contains(s, "..") {
 		return fmt.Errorf("invalid path segment: %q", s)
