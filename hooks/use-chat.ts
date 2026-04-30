@@ -50,6 +50,30 @@ export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" 
 /** WebSocket event types for agent-to-agent task assignment lifecycle. */
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
 
+/** Safely render an assignment-event payload field as a string. The
+ *  backend has historically sent both `target: "viktor"` and
+ *  `target: { slug: "viktor" }`, and naive template-literal interpolation
+ *  of the latter renders "[object Object]" in the chat. Prefer a
+ *  human-shaped field, fall back to JSON. Exported for unit tests.
+ */
+export function assignmentField(v: unknown): string {
+  if (v == null) return ""
+  if (typeof v === "string") return v
+  if (typeof v === "number" || typeof v === "boolean") return String(v)
+  if (typeof v === "object") {
+    const obj = v as Record<string, unknown>
+    if (typeof obj.slug === "string") return obj.slug
+    if (typeof obj.name === "string") return obj.name
+    if (typeof obj.id === "string") return obj.id
+    try {
+      return JSON.stringify(v)
+    } catch {
+      return ""
+    }
+  }
+  return String(v)
+}
+
 /** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
   id: string
@@ -153,19 +177,23 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           ? msg.payload as Record<string, unknown>
           : {}
         let content = ""
+        const target = assignmentField(payload.target)
+        const task = assignmentField(payload.task)
+        const result = assignmentField(payload.result)
+        const errMsg = assignmentField(payload.error)
         switch (msg.type as AssignmentEventType) {
           case "assignment_created":
-            content = `[Assignment] Assigning task to @${payload.target}: ${payload.task}`
+            content = `[Assignment] Assigning task to @${target}: ${task}`
             break
           case "assignment_running":
-            content = `[Assignment] @${payload.target} is working on the task...`
+            content = `[Assignment] @${target} is working on the task...`
             break
           case "assignment_completed":
-            content = `[Assignment] @${payload.target} completed the task.`
-            if (payload.result) content += `\nResult: ${payload.result}`
+            content = `[Assignment] @${target} completed the task.`
+            if (result) content += `\nResult: ${result}`
             break
           case "assignment_failed":
-            content = `[Assignment] @${payload.target} failed: ${payload.error}`
+            content = `[Assignment] @${target} failed: ${errMsg}`
             break
         }
         setTurns((prev) => [
