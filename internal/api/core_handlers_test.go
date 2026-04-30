@@ -32,6 +32,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
 
@@ -83,34 +84,20 @@ func seedAgentRow(t *testing.T, db *sql.DB, id, wsID, crewID, name, slug, role s
 	return id
 }
 
-// seedRunFixture writes one agent_runs row AND the equivalent run.*
-// journal entries so tests stay green regardless of which side the
-// handler reads. status="" means "leave running" (no terminal entry).
-// metadata is a JSON string or "" for none.
+// seedRunFixture writes the run.* journal entries that represent one
+// agent run. status="" means "leave running" (only run.started, no
+// terminal entry). metadata is a JSON string or "" for none.
 //
-// This mirrors what the live dual-write handlers do (Phase C); Phase J
-// of unified-journal will drop agent_runs and tests can switch to
-// journal-only seeding then.
+// Post Phase J of unified-journal there is no agent_runs table — the
+// journal is the source of truth, and the test helper mirrors what
+// CreateRun + UpdateRun emit at runtime.
 func seedRunFixture(t *testing.T, db *sql.DB, runID, agentID, wsID, status, trigger, metadata string) {
 	t.Helper()
 	if trigger == "" {
 		trigger = "USER"
 	}
-	dbStatus := status
-	if status == "" {
-		dbStatus = "RUNNING"
-	}
-	var metaArg interface{}
-	if metadata != "" {
-		metaArg = metadata
-	}
-	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, status, trigger_type, metadata, started_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		runID, agentID, wsID, dbStatus, trigger, metaArg); err != nil {
-		t.Fatalf("seed agent_runs %s: %v", runID, err)
-	}
 
-	// run.started journal entry — payload mirrors what CreateRun emits.
+	// run.started — mirror the payload shape CreateRun emits at runtime.
 	startedPayload := `{"trigger_type":"` + trigger + `"`
 	if metadata != "" {
 		startedPayload += `,"metadata":` + metadata
@@ -155,6 +142,48 @@ func seedRunFixture(t *testing.T, db *sql.DB, runID, agentID, wsID, status, trig
 		"run "+runID+" "+status, terminalPayload, runID); err != nil {
 		t.Fatalf("seed journal terminal %s: %v", runID, err)
 	}
+}
+
+// wireTestJournalForHandler attaches a real (synchronous-flushing)
+// journal writer to handler so its run.* emits are durable for the
+// SELECT-after-handler verifications. Returns the writer so the test
+// can call Flush before reading. Closes via t.Cleanup so callers don't
+// have to remember.
+func wireTestJournalForHandler(t *testing.T, db *sql.DB, handler *InternalHandler) *journal.Writer {
+	t.Helper()
+	w := journal.NewWriter(db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = w.Close() })
+	handler.SetJournal(w)
+	return w
+}
+
+// runStatusFromJournal looks up the legacy status enum value for runID
+// by reading the run.* journal entries — used by UpdateRun tests that
+// previously read agent_runs.status.
+func runStatusFromJournal(t *testing.T, db *sql.DB, runID string) string {
+	t.Helper()
+	var terminal sql.NullString
+	if err := db.QueryRow(`SELECT entry_type FROM journal_entries
+		WHERE trace_id = ? AND entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+		ORDER BY ts DESC LIMIT 1`, runID).Scan(&terminal); err != nil && err != sql.ErrNoRows {
+		t.Fatalf("read run terminal entry: %v", err)
+	}
+	if !terminal.Valid {
+		// No terminal entry → still RUNNING (matches legacy semantics
+		// where status='RUNNING' until UpdateRun set a terminal one).
+		return "RUNNING"
+	}
+	switch terminal.String {
+	case "run.completed":
+		return "COMPLETED"
+	case "run.failed":
+		return "FAILED"
+	case "run.cancelled":
+		return "CANCELLED"
+	case "run.timeout":
+		return "TIMEOUT"
+	}
+	return terminal.String
 }
 
 // withWorkspaceUser merges user + workspace context.

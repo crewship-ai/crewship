@@ -86,7 +86,11 @@ func TestMigrate(t *testing.T) {
 		"crews", "crew_members", "agents", "assignments",
 		"skills", "skill_reviews", "agent_skills",
 		"credentials", "agent_credentials",
-		"chats", "agent_runs", "audit_logs",
+		// agent_runs was dropped in migration v61 (unified-journal Phase
+		// J). Runs are now reconstructed from journal_entries grouped by
+		// trace_id; agent_runs_archive holds the pre-migration data for
+		// one release cycle as an insurance policy.
+		"chats", "agent_runs_archive", "audit_logs",
 		"subscriptions", "plans", "feature_flags", "feature_flag_overrides",
 		"agent_config_history",
 	}

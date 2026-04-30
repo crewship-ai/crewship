@@ -34,30 +34,18 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	var metadataVal interface{}
-	if body.Metadata != nil {
-		metadataVal = string(body.Metadata)
-	}
-	_, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, metadata, started_at, created_at)
-		VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?)`,
-		body.ID, body.AgentID, body.ChatID, body.WorkspaceID, body.TriggerType, metadataVal, now, now)
-	if err != nil {
-		h.logger.Error("create run", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
 
-	// Update agent status to RUNNING
+	// Update agent status to RUNNING. The run lifecycle itself is
+	// recorded as a run.started journal entry below — agent_runs was
+	// dropped in migration v61.
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ?", now, body.AgentID); err != nil {
 		h.logger.Debug("update agent status on run create", "error", err, "agent_id", body.AgentID)
 	}
 
-	// Mirror into journal — Phase J of unified-journal will drop agent_runs
-	// and leave this as the single source of truth. Until then the run is
-	// dual-written so a half-deployed migration can roll back without data
-	// loss.
+	// Emit run.started — the source of truth for runs. trace_id == run.id
+	// so subsequent in-run journal entries (LLM call, exec, etc.) group
+	// under the same trace via journal.WithRunID.
 	{
 		payload := map[string]any{"trigger_type": body.TriggerType}
 		if body.ChatID != "" {
@@ -69,7 +57,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				payload["metadata"] = md
 			}
 		}
-		_, _ = h.journal.Emit(r.Context(), journal.Entry{
+		if _, err := h.journal.Emit(r.Context(), journal.Entry{
 			WorkspaceID: body.WorkspaceID,
 			AgentID:     body.AgentID,
 			Type:        journal.EntryRunStarted,
@@ -78,7 +66,11 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			Summary:     fmt.Sprintf("run %s started", shortRunID(body.ID)),
 			Payload:     payload,
 			TraceID:     body.ID,
-		})
+		}); err != nil {
+			h.logger.Error("create run: emit run.started", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	// Broadcast real-time events
@@ -106,8 +98,15 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
 }
 
-// UpdateRun updates the status of an agent run (e.g. COMPLETED, FAILED) when it finishes.
+// UpdateRun records the terminal state of an agent run by emitting
+// the matching run.* journal entry. Also refreshes the agent's status
+// and broadcasts real-time events for the dashboard.
 // PATCH /api/v1/internal/runs/{runId}
+//
+// Post Phase J of unified-journal: there is no agent_runs row to UPDATE;
+// the run is fully reconstructed from journal entries grouped by
+// trace_id (== runID). Workspace + agent context is read from the
+// run.started entry that was previously emitted by CreateRun.
 func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runId")
 	var body struct {
@@ -122,128 +121,130 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	validStatuses := map[string]bool{
-		"RUNNING": true, "COMPLETED": true, "FAILED": true, "CANCELLED": true,
+		"RUNNING": true, "COMPLETED": true, "FAILED": true, "CANCELLED": true, "TIMEOUT": true,
 	}
 	if !validStatuses[body.Status] {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid status"})
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	terminal := map[string]bool{"COMPLETED": true, "FAILED": true, "CANCELLED": true}
-	query := "UPDATE agent_runs SET status = ?"
-	args := []interface{}{body.Status}
-	if terminal[body.Status] {
-		query += ", finished_at = ?"
-		args = append(args, now)
+	terminal := map[string]bool{"COMPLETED": true, "FAILED": true, "CANCELLED": true, "TIMEOUT": true}
+	if !terminal[body.Status] {
+		// Non-terminal updates (i.e. status=RUNNING) are no-ops post-J:
+		// the run is already RUNNING from CreateRun's run.started entry.
+		writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
+		return
 	}
 
-	if body.ExitCode != nil {
-		query += ", exit_code = ?"
-		args = append(args, *body.ExitCode)
-	}
-	if body.ErrorMessage != nil {
-		query += ", error_message = ?"
-		args = append(args, *body.ErrorMessage)
-	}
-	if body.Metadata != nil {
-		query += ", metadata = ?"
-		args = append(args, string(body.Metadata))
-	}
-	query += " WHERE id = ?"
-	args = append(args, runID)
-
-	_, err := h.db.ExecContext(r.Context(), query, args...)
-	if err != nil {
-		h.logger.Error("update run", "error", err)
+	// Look up workspace_id + agent_id from the run.started journal entry
+	// belonging to this trace. Without this we can't broadcast events.
+	var agentID, workspaceID string
+	var agentName sql.NullString
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT je.workspace_id, je.agent_id, a.name
+		 FROM journal_entries je
+		 LEFT JOIN agents a ON a.id = je.agent_id
+		 WHERE je.trace_id = ? AND je.entry_type = 'run.started'
+		 LIMIT 1`, runID,
+	).Scan(&workspaceID, &agentID, &agentName); err != nil {
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+			return
+		}
+		h.logger.Error("update run: lookup", "error", err, "run_id", runID)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
-	// Update agent status and broadcast events for terminal states
-	if terminal[body.Status] {
-		var agentID, workspaceID string
-		var agentName sql.NullString
-		if err := h.db.QueryRowContext(r.Context(),
-			`SELECT r.agent_id, r.workspace_id, a.name FROM agent_runs r
-			 LEFT JOIN agents a ON a.id = r.agent_id WHERE r.id = ?`, runID,
-		).Scan(&agentID, &workspaceID, &agentName); err != nil {
-			h.logger.Debug("fetch run details for broadcast", "error", err, "run_id", runID)
-		}
-
-		// Mirror terminal state into journal (dual-write — see CreateRun).
-		// Severity is error for FAILED so it surfaces in the warn/error
-		// filter; CANCELLED stays info because it's user-initiated.
-		if workspaceID != "" {
-			entryType := terminalEntryType(body.Status)
-			severity := journal.SeverityInfo
-			if body.Status == "FAILED" {
-				severity = journal.SeverityError
-			}
-			payload := map[string]any{}
-			if body.ExitCode != nil {
-				payload["exit_code"] = *body.ExitCode
-			}
-			if body.ErrorMessage != nil && *body.ErrorMessage != "" {
-				payload["error_message"] = *body.ErrorMessage
-			}
-			_, _ = h.journal.Emit(r.Context(), journal.Entry{
-				WorkspaceID: workspaceID,
-				AgentID:     agentID,
-				Type:        entryType,
-				Severity:    severity,
-				ActorType:   journal.ActorSidecar,
-				Summary:     fmt.Sprintf("run %s %s", shortRunID(runID), entryType[len("run."):]),
-				Payload:     payload,
-				TraceID:     runID,
-			})
-		}
-
-		// Atomic agent status update: always runs regardless of hub presence
-		agentStatus := "IDLE"
-		if agentID != "" {
-			failedStatus := "IDLE"
-			if body.Status == "FAILED" {
-				failedStatus = "ERROR"
-			}
-			if _, err := h.db.ExecContext(r.Context(), `
-				UPDATE agents SET status = CASE
-					WHEN (SELECT COUNT(*) FROM agent_runs WHERE agent_id = ? AND status = 'RUNNING' AND id != ?) > 0 THEN 'RUNNING'
-					ELSE ?
-				END, updated_at = ? WHERE id = ?`,
-				agentID, runID, failedStatus, now, agentID); err != nil {
-				h.logger.Debug("update agent status on run completion", "error", err, "agent_id", agentID)
-			}
-
-			// Read back actual status
-			agentStatus = failedStatus
-			var readBack string
-			if err := h.db.QueryRowContext(r.Context(), "SELECT status FROM agents WHERE id = ?", agentID).Scan(&readBack); err == nil {
-				agentStatus = readBack
-			}
-		}
-
-		// Broadcast real-time events (only when hub is available)
-		if workspaceID != "" {
-			eventType := "run.completed"
-			if body.Status == "FAILED" || body.Status == "CANCELLED" {
-				eventType = "run.failed"
-			}
-			broadcastWorkspaceEvent(h.hub, workspaceID, eventType,
-				map[string]string{
-					"run_id":     runID,
-					"agent_id":   agentID,
-					"agent_name": agentName.String,
-					"status":     body.Status,
-				})
-			broadcastWorkspaceEvent(h.hub, workspaceID, "agent.status",
-				map[string]string{
-					"agent_id":   agentID,
-					"agent_name": agentName.String,
-					"status":     agentStatus,
-				})
+	// Emit the terminal journal entry. This is the source-of-truth write.
+	entryType := terminalEntryType(body.Status)
+	severity := journal.SeverityInfo
+	if body.Status == "FAILED" || body.Status == "TIMEOUT" {
+		severity = journal.SeverityError
+	}
+	payload := map[string]any{}
+	if body.ExitCode != nil {
+		payload["exit_code"] = *body.ExitCode
+	}
+	if body.ErrorMessage != nil && *body.ErrorMessage != "" {
+		payload["error_message"] = *body.ErrorMessage
+	}
+	if body.Metadata != nil {
+		var md map[string]any
+		if err := json.Unmarshal(body.Metadata, &md); err == nil && md != nil {
+			payload["metadata"] = md
 		}
 	}
+	if _, err := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: workspaceID,
+		AgentID:     agentID,
+		Type:        entryType,
+		Severity:    severity,
+		ActorType:   journal.ActorSidecar,
+		Summary:     fmt.Sprintf("run %s %s", shortRunID(runID), entryType[len("run."):]),
+		Payload:     payload,
+		TraceID:     runID,
+	}); err != nil {
+		h.logger.Error("update run: emit terminal", "error", err, "run_id", runID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Refresh the agent's atomic status. RUNNING when another run for
+	// the same agent is still active (no terminal yet for that trace),
+	// IDLE / ERROR otherwise. The subquery counts active runs in the
+	// journal: traces with a run.started but no terminal entry.
+	now := time.Now().UTC().Format(time.RFC3339)
+	failedStatus := "IDLE"
+	if body.Status == "FAILED" || body.Status == "TIMEOUT" {
+		failedStatus = "ERROR"
+	}
+	agentStatus := failedStatus
+	if agentID != "" {
+		if _, err := h.db.ExecContext(r.Context(), `
+			UPDATE agents SET status = CASE
+				WHEN (
+					SELECT COUNT(DISTINCT je1.trace_id)
+					FROM journal_entries je1
+					WHERE je1.agent_id = ?
+					  AND je1.entry_type = 'run.started'
+					  AND je1.trace_id != ?
+					  AND NOT EXISTS (
+					    SELECT 1 FROM journal_entries je2
+					    WHERE je2.trace_id = je1.trace_id
+					      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+					  )
+				) > 0 THEN 'RUNNING'
+				ELSE ?
+			END, updated_at = ? WHERE id = ?`,
+			agentID, runID, failedStatus, now, agentID); err != nil {
+			h.logger.Debug("update agent status on run completion", "error", err, "agent_id", agentID)
+		}
+		var readBack string
+		if err := h.db.QueryRowContext(r.Context(), "SELECT status FROM agents WHERE id = ?", agentID).Scan(&readBack); err == nil {
+			agentStatus = readBack
+		}
+	}
+
+	// Broadcast — same event names and payloads the dashboard already
+	// listens to, so frontends don't need rewiring.
+	eventType := "run.completed"
+	if body.Status == "FAILED" || body.Status == "CANCELLED" || body.Status == "TIMEOUT" {
+		eventType = "run.failed"
+	}
+	broadcastWorkspaceEvent(h.hub, workspaceID, eventType,
+		map[string]string{
+			"run_id":     runID,
+			"agent_id":   agentID,
+			"agent_name": agentName.String,
+			"status":     body.Status,
+		})
+	broadcastWorkspaceEvent(h.hub, workspaceID, "agent.status",
+		map[string]string{
+			"agent_id":   agentID,
+			"agent_name": agentName.String,
+			"status":     agentStatus,
+		})
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
 }

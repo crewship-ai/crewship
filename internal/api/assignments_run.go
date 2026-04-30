@@ -8,7 +8,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -213,45 +212,29 @@ func (h *AssignmentHandler) runAssignment(
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Create a run record in agent_runs so the dashboard shows sub-agent activity
+	// Record the sub-agent run via the journal — this is the source of
+	// truth for "run started" post Phase J. trace_id == runID groups
+	// every entry the assignment will produce.
 	runID := generateCUID()
-	metadataBytes, err := json.Marshal(map[string]string{
-		"assignment_id":    assignmentID,
-		"assigned_by_chat": body.ChatID,
-	})
-	if err != nil {
-		h.logger.Error("marshal assignment metadata", "error", err, "assignment_id", assignmentID)
-		metadataBytes = []byte("{}")
-	}
-	if _, err := h.db.ExecContext(ctx, `
-		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, metadata, started_at, created_at)
-		VALUES (?, ?, ?, ?, 'ASSIGNMENT', 'RUNNING', ?, ?, ?)`,
-		runID, target.ID, body.ChatID, body.WorkspaceID,
-		string(metadataBytes),
-		now, now,
-	); err != nil {
+	if _, err := h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		AgentID:     target.ID,
+		Type:        journal.EntryRunStarted,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorOrchestrator,
+		Summary:     fmt.Sprintf("run %s started (assignment)", shortRunID(runID)),
+		Payload: map[string]any{
+			"trigger_type":     "ASSIGNMENT",
+			"chat_id":          body.ChatID,
+			"assignment_id":    assignmentID,
+			"assigned_by_chat": body.ChatID,
+			"target_slug":      body.TargetSlug,
+		},
+		Refs:    map[string]any{"assignment_id": assignmentID},
+		TraceID: runID,
+	}); err != nil {
 		h.logger.Error("create run record for assignment", "error", err, "assignment_id", assignmentID)
-		runID = "" // prevent finishAssignment from updating a non-existent record
-	}
-
-	// Mirror into journal (dual-write — Phase J drops agent_runs).
-	if runID != "" {
-		_, _ = h.journal.Emit(ctx, journal.Entry{
-			WorkspaceID: body.WorkspaceID,
-			AgentID:     target.ID,
-			Type:        journal.EntryRunStarted,
-			Severity:    journal.SeverityInfo,
-			ActorType:   journal.ActorOrchestrator,
-			Summary:     fmt.Sprintf("run %s started (assignment)", shortRunID(runID)),
-			Payload: map[string]any{
-				"trigger_type":  "ASSIGNMENT",
-				"chat_id":       body.ChatID,
-				"assignment_id": assignmentID,
-				"target_slug":   body.TargetSlug,
-			},
-			Refs:    map[string]any{"assignment_id": assignmentID},
-			TraceID: runID,
-		})
+		runID = "" // prevent finishAssignment from emitting a terminal entry
 	}
 
 	// Mark assignment as RUNNING
@@ -387,24 +370,9 @@ func (h *AssignmentHandler) finishAssignment(
 		h.logger.Error("update assignment status", "error", err, "assignment_id", assignmentID)
 	}
 
-	// Update the agent_runs record so the dashboard reflects the final state
+	// Emit the terminal run.* journal entry — the source of truth post
+	// Phase J. trace_id == runID joins it with the run.started entry.
 	if runID != "" {
-		runQuery := `UPDATE agent_runs SET status = ?, finished_at = ?`
-		runArgs := []interface{}{status, now}
-		if errMsg != "" {
-			runQuery += `, error_message = ?`
-			runArgs = append(runArgs, errMsg)
-		}
-		if status == "COMPLETED" {
-			runQuery += `, exit_code = 0`
-		}
-		runQuery += ` WHERE id = ?`
-		runArgs = append(runArgs, runID)
-		if _, err := h.db.ExecContext(ctx, runQuery, runArgs...); err != nil {
-			h.logger.Error("update run record for assignment", "error", err, "run_id", runID)
-		}
-
-		// Mirror terminal state into journal (dual-write).
 		entryType := terminalEntryType(status)
 		severity := journal.SeverityInfo
 		if status == "FAILED" {
@@ -417,7 +385,7 @@ func (h *AssignmentHandler) finishAssignment(
 		if status == "COMPLETED" {
 			payload["exit_code"] = 0
 		}
-		_, _ = h.journal.Emit(ctx, journal.Entry{
+		if _, err := h.journal.Emit(ctx, journal.Entry{
 			WorkspaceID: workspaceID,
 			Type:        entryType,
 			Severity:    severity,
@@ -426,7 +394,9 @@ func (h *AssignmentHandler) finishAssignment(
 			Payload:     payload,
 			Refs:        map[string]any{"assignment_id": assignmentID},
 			TraceID:     runID,
-		})
+		}); err != nil {
+			h.logger.Error("emit terminal run entry for assignment", "error", err, "run_id", runID)
+		}
 	}
 
 	// Notify MissionEngine first — must run regardless of websocket availability

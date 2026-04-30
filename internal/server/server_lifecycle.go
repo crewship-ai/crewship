@@ -243,50 +243,54 @@ func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, l
 // recoverOrphanedRuns marks stale RUNNING runs as CANCELLED and resets
 // agent statuses. This handles cases where the server crashed or was
 // restarted while agent runs were in progress.
+//
+// Post Phase J of unified-journal: source of truth is the journal —
+// orphaned runs are traces with a run.started entry but no terminal
+// run.* entry. We emit run.cancelled for each to give them a clean
+// terminal state, then reset any agent still flagged RUNNING that
+// has no live run anymore.
 
 func (s *Server) recoverOrphanedRuns(ctx context.Context) {
-	now := time.Now().UTC().Format(time.RFC3339)
+	if s.journalWriter == nil {
+		// Without a journal writer we can't write the cancel entries —
+		// but we can still reset agents to IDLE since their status is
+		// stored on the agents table.
+		s.logger.Debug("recover orphaned runs: no journal writer, skipping cancel entries")
+	}
 
-	// Snapshot the orphaned runs first so we can mirror per-run cancel
-	// entries into the journal after the UPDATE. We're inside startup,
-	// so contention is minimal — any run that's RUNNING here was
-	// definitely orphaned by the previous process.
 	type orphan struct {
 		id, agentID, workspaceID string
 	}
 	var orphans []orphan
-	if rows, err := s.db.QueryContext(ctx,
-		`SELECT id, agent_id, workspace_id FROM agent_runs WHERE status = 'RUNNING'`); err == nil {
-		for rows.Next() {
-			var o orphan
-			if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID); scanErr == nil {
-				orphans = append(orphans, o)
-			}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT je1.trace_id, je1.agent_id, je1.workspace_id
+		FROM journal_entries je1
+		WHERE je1.entry_type = 'run.started'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM journal_entries je2
+		    WHERE je2.trace_id = je1.trace_id
+		      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+		  )`)
+	if err != nil {
+		s.logger.Error("recover orphaned runs: scan", "error", err)
+		return
+	}
+	for rows.Next() {
+		var o orphan
+		if scanErr := rows.Scan(&o.id, &o.agentID, &o.workspaceID); scanErr == nil {
+			orphans = append(orphans, o)
 		}
-		_ = rows.Close()
 	}
-
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE agent_runs SET status = 'CANCELLED', finished_at = ?
-		WHERE status = 'RUNNING'`, now)
-	if err != nil {
-		s.logger.Error("recover orphaned runs", "error", err)
-		return
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		s.logger.Warn("rows affected check failed", "error", err)
-		return
-	}
-	if affected == 0 {
+	_ = rows.Close()
+	if len(orphans) == 0 {
 		return
 	}
 
-	s.logger.Info("recovered orphaned runs", "count", affected)
+	s.logger.Info("recovered orphaned runs", "count", len(orphans))
 
-	// Mirror each cancellation into the journal so the Runs view (which
-	// will be journal-backed after Phase E) matches reality. Severity is
-	// 'notice' because this is a routine recovery, not an actual failure.
+	// Emit run.cancelled per orphan so the Runs view shows them as
+	// terminal. Severity 'notice' because this is routine recovery,
+	// not an actual failure.
 	if s.journalWriter != nil {
 		for _, o := range orphans {
 			_, _ = s.journalWriter.Emit(ctx, journal.Entry{
@@ -300,13 +304,30 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 				TraceID:     o.id,
 			})
 		}
+		// Flush before the agent reset SELECT so it sees the just-
+		// emitted terminal entries — the writer is async and the
+		// SELECT counts traces with no terminal entry.
+		if err := s.journalWriter.Flush(ctx); err != nil {
+			s.logger.Warn("flush journal before agent reset", "error", err)
+		}
 	}
 
-	// Reset agents that no longer have active runs to IDLE
+	// Reset agents to IDLE if no live run remains for them.
+	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET status = 'IDLE', updated_at = ?
 		WHERE status = 'RUNNING'
-		AND id NOT IN (SELECT DISTINCT agent_id FROM agent_runs WHERE status = 'RUNNING')`, now); err != nil {
+		AND id NOT IN (
+			SELECT DISTINCT je1.agent_id
+			FROM journal_entries je1
+			WHERE je1.entry_type = 'run.started'
+			  AND je1.agent_id IS NOT NULL
+			  AND NOT EXISTS (
+			    SELECT 1 FROM journal_entries je2
+			    WHERE je2.trace_id = je1.trace_id
+			      AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+			  )
+		)`, now); err != nil {
 		s.logger.Error("reset agent statuses after recovery", "error", err)
 	}
 }

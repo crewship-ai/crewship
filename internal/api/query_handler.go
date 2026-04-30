@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -180,43 +179,30 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Refs: map[string]any{"peer_conversation_id": convID, "chat_id": body.ChatID},
 	})
 
-	// Create agent_runs record for dashboard visibility
+	// Record the peer-query as an agent run via the journal (single
+	// source of truth post Phase J). trace_id == runID groups the
+	// query's lifecycle entries.
 	runID := generateCUID()
-	metadataMap := map[string]string{
-		"peer_query_id": convID,
-		"from_slug":     body.FromSlug,
-		"question":      body.Question,
-	}
-	metadataBytes, _ := json.Marshal(metadataMap)
-	metadata := string(metadataBytes)
-	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, metadata, started_at, created_at)
-		VALUES (?, ?, ?, ?, 'PEER_QUERY', 'RUNNING', ?, ?, ?)`,
-		runID, target.ID, body.ChatID, body.WorkspaceID, metadata, now, now)
-	if err != nil {
+	if _, err := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		AgentID:     target.ID,
+		Type:        journal.EntryRunStarted,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorAgent,
+		Summary:     fmt.Sprintf("run %s started (peer query)", shortRunID(runID)),
+		Payload: map[string]any{
+			"trigger_type":  "PEER_QUERY",
+			"chat_id":       body.ChatID,
+			"peer_query_id": convID,
+			"from_slug":     body.FromSlug,
+			"target_slug":   body.TargetSlug,
+			"question":      body.Question,
+		},
+		Refs:    map[string]any{"peer_query_id": convID, "chat_id": body.ChatID},
+		TraceID: runID,
+	}); err != nil {
 		h.logger.Error("create run record for query", "error", err)
-		runID = "" // prevent finishQuery from updating a non-existent record
-	}
-
-	// Mirror into journal (dual-write — Phase J drops agent_runs).
-	if runID != "" {
-		_, _ = h.journal.Emit(r.Context(), journal.Entry{
-			WorkspaceID: body.WorkspaceID,
-			AgentID:     target.ID,
-			Type:        journal.EntryRunStarted,
-			Severity:    journal.SeverityInfo,
-			ActorType:   journal.ActorAgent,
-			Summary:     fmt.Sprintf("run %s started (peer query)", shortRunID(runID)),
-			Payload: map[string]any{
-				"trigger_type":  "PEER_QUERY",
-				"chat_id":       body.ChatID,
-				"peer_query_id": convID,
-				"from_slug":     body.FromSlug,
-				"target_slug":   body.TargetSlug,
-			},
-			Refs:    map[string]any{"peer_query_id": convID, "chat_id": body.ChatID},
-			TraceID: runID,
-		})
+		runID = "" // prevent finishQuery from emitting a terminal entry
 	}
 
 	// Broadcast event
@@ -393,25 +379,9 @@ func (h *QueryHandler) finishQuery(
 		Refs: map[string]any{"peer_conversation_id": convID, "chat_id": chatID},
 	})
 
-	// Update agent_runs
+	// Emit terminal run.* entry — the source of truth post Phase J.
 	if runID != "" {
 		runStatus := status
-		runQuery := `UPDATE agent_runs SET status = ?, finished_at = ?`
-		runArgs := []interface{}{runStatus, now}
-		if errMsg != "" {
-			runQuery += `, error_message = ?`
-			runArgs = append(runArgs, errMsg)
-		}
-		if status == "COMPLETED" {
-			runQuery += `, exit_code = 0`
-		}
-		runQuery += ` WHERE id = ?`
-		runArgs = append(runArgs, runID)
-		if _, err := h.db.ExecContext(ctx, runQuery, runArgs...); err != nil {
-			h.logger.Error("update run record for query", "error", err, "run_id", runID)
-		}
-
-		// Mirror terminal state into journal (dual-write).
 		entryType := terminalEntryType(runStatus)
 		runSeverity := journal.SeverityInfo
 		if runStatus == "FAILED" {
@@ -427,7 +397,7 @@ func (h *QueryHandler) finishQuery(
 		if runStatus == "COMPLETED" {
 			runPayload["exit_code"] = 0
 		}
-		_, _ = h.journal.Emit(ctx, journal.Entry{
+		if _, err := h.journal.Emit(ctx, journal.Entry{
 			WorkspaceID: workspaceID,
 			CrewID:      crewID,
 			AgentID:     targetAgentID,
@@ -438,7 +408,9 @@ func (h *QueryHandler) finishQuery(
 			Payload:     runPayload,
 			Refs:        map[string]any{"peer_query_id": convID, "chat_id": chatID},
 			TraceID:     runID,
-		})
+		}); err != nil {
+			h.logger.Error("emit terminal run entry for query", "error", err, "run_id", runID)
+		}
 	}
 
 	// Broadcast completion
