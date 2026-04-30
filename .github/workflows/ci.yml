@@ -3,8 +3,34 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # Skip CI on changes that can't affect lint/typecheck/build/test:
+    # docs (Mintlify-rendered, separate pipeline), markdown reference
+    # files, license/notices files, the GitHub issue templates, and
+    # the wireframe HTML mocks. Code changes that *also* touch these
+    # paths still trigger CI because GitHub treats paths-ignore as
+    # "trigger if ANY changed file is outside the ignore list".
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'LICENSE'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.claude/**'
+      - '.factory/**'
+      - '.cloud/**'
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'LICENSE'
+      - 'THIRD-PARTY-NOTICES.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.claude/**'
+      - '.factory/**'
+      - '.cloud/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
