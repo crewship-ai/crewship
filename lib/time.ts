@@ -84,7 +84,10 @@ export function formatDateTime(dateStr: string): string {
 export function formatRelativeTime(dateStr: string): string {
   const date = parseDate(dateStr)
   if (date === null) return INVALID_DATE_PLACEHOLDER
-  const diffMs = Date.now() - date
+  // Clock skew or future-dated timestamps would otherwise emit "-12s ago",
+  // which renders as nonsense in the UI. Clamp the diff so the formatter
+  // collapses anything in the future to "0s ago" rather than negatives.
+  const diffMs = Math.max(0, Date.now() - date)
 
   const seconds = Math.floor(diffMs / 1000)
   if (seconds < 60) return `${seconds}s ago`
