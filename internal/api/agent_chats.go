@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // ListChats returns all chat sessions for a given agent.
@@ -145,50 +147,60 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 
 // ListRuns returns all execution runs for a given agent, ordered by most recent first.
 // GET /api/v1/agents/{agentId}/runs
+//
+// Reads from journal_entries (unified-journal Phase E). Up to 100 most
+// recent runs scoped to the workspace + agent_id.
 func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, agent_id, chat_id, workspace_id, triggered_by,
-			trigger_type, status, started_at, finished_at,
-			error_message, exit_code, metadata, created_at
-		FROM agent_runs
-		WHERE agent_id = ? AND workspace_id = ?
-		ORDER BY created_at DESC
-		LIMIT 100
-	`, agentID, workspaceID)
+	aggregated, _, err := journal.ListRuns(r.Context(), h.db, journal.RunsQuery{
+		WorkspaceID: workspaceID,
+		AgentID:     agentID,
+		Limit:       100,
+	})
 	if err != nil {
 		h.logger.Error("list agent runs", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	defer rows.Close()
 
-	var result []runResponse
-	for rows.Next() {
-		var run runResponse
-		var metadataStr sql.NullString
-		if err := rows.Scan(&run.ID, &run.AgentID, &run.ChatID, &run.WorkspaceID,
-			&run.TriggeredBy, &run.TriggerType, &run.Status,
-			&run.StartedAt, &run.FinishedAt, &run.ErrorMessage, &run.ExitCode,
-			&metadataStr, &run.CreatedAt); err != nil {
-			h.logger.Error("scan run", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-			return
+	// Per-agent endpoint doesn't enrich with crew/agent names — caller
+	// already knows the agent context. Convert directly.
+	result := make([]runResponse, 0, len(aggregated))
+	for _, ar := range aggregated {
+		resp := runResponse{
+			ID:           ar.ID,
+			AgentID:      ar.AgentID,
+			WorkspaceID:  ar.WorkspaceID,
+			TriggerType:  ar.TriggerType,
+			Status:       string(ar.Status),
+			ErrorMessage: stringPtrOrNil(ar.ErrorMessage),
+			ExitCode:     ar.ExitCode,
+			CreatedAt:    formatRFC3339(ar.CreatedAt),
 		}
-		if metadataStr.Valid {
-			run.Metadata = json.RawMessage(metadataStr.String)
+		if ar.ChatID != "" {
+			c := ar.ChatID
+			resp.ChatID = &c
 		}
-		result = append(result, run)
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (runs)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if result == nil {
-		result = []runResponse{}
+		if ar.TriggeredBy != "" {
+			t := ar.TriggeredBy
+			resp.TriggeredBy = &t
+		}
+		if !ar.StartedAt.IsZero() {
+			s := formatRFC3339(ar.StartedAt)
+			resp.StartedAt = &s
+		}
+		if ar.FinishedAt != nil && !ar.FinishedAt.IsZero() {
+			f := formatRFC3339(*ar.FinishedAt)
+			resp.FinishedAt = &f
+		}
+		if ar.Metadata != nil {
+			if b, jerr := json.Marshal(ar.Metadata); jerr == nil {
+				resp.Metadata = b
+			}
+		}
+		result = append(result, resp)
 	}
 	writeJSON(w, http.StatusOK, result)
 }

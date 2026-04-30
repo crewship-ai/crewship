@@ -541,11 +541,15 @@ func TestCreateRun_UpdatesAgentStatus(t *testing.T) {
 	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
+	jw := wireTestJournalForHandler(t, db, handler)
 	// Hub is nil — broadcasts are skipped, but DB updates still happen
 	body := strings.NewReader(`{"id":"run1","agent_id":"a1","chat_id":"c1","workspace_id":"` + wsID + `","trigger_type":"USER"}`)
 	req := httptest.NewRequest("POST", "/api/v1/internal/runs", body)
 	rr := httptest.NewRecorder()
 	handler.CreateRun(rr, req)
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusCreated, rr.Body.String())
@@ -572,24 +576,25 @@ func TestUpdateRun_UpdatesAgentStatusOnCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert agent: %v", err)
 	}
-
-	now := "2026-01-01T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
-	if err != nil {
-		t.Fatalf("insert run: %v", err)
-	}
+	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	// Use real hub for broadcast testing
+	// Use real hub for broadcast testing. ws.NewHub now requires a typed
+	// JWT validator + sessions store (see security pass on PR #233);
+	// the package exports test-only sentinels for callers that don't
+	// exercise the upgrade path.
 	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
+	jw := wireTestJournalForHandler(t, db, handler)
 
 	body := strings.NewReader(`{"status":"COMPLETED","exit_code":0}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -604,13 +609,9 @@ func TestUpdateRun_UpdatesAgentStatusOnCompletion(t *testing.T) {
 		t.Errorf("agent status = %q, want IDLE", status)
 	}
 
-	// Verify run was marked completed
-	var runStatus string
-	if err := db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus); err != nil {
-		t.Fatalf("query run status: %v", err)
-	}
-	if runStatus != "COMPLETED" {
-		t.Errorf("run status = %q, want COMPLETED", runStatus)
+	// Verify run terminal entry is COMPLETED
+	if got := runStatusFromJournal(t, db, "run1"); got != "COMPLETED" {
+		t.Errorf("run status = %q, want COMPLETED", got)
 	}
 }
 
@@ -625,23 +626,21 @@ func TestUpdateRun_FailedSetsAgentError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert agent: %v", err)
 	}
-
-	now := "2026-01-01T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
-	if err != nil {
-		t.Fatalf("insert run: %v", err)
-	}
+	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
+	jw := wireTestJournalForHandler(t, db, handler)
 
 	body := strings.NewReader(`{"status":"FAILED","error_message":"OOM killed"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -668,21 +667,14 @@ func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert agent: %v", err)
 	}
-
-	now := "2026-01-01T00:00:00Z"
 	// Two running runs for the same agent
-	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
-		t.Fatalf("insert run1: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
-		t.Fatalf("insert run2: %v", err)
-	}
+	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
+	seedRunFixture(t, db, "run2", "a1", wsID, "", "ASSIGNMENT", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
+	jw := wireTestJournalForHandler(t, db, handler)
 
 	// Complete run1, but run2 is still active
 	body := strings.NewReader(`{"status":"COMPLETED","exit_code":0}`)
@@ -690,6 +682,9 @@ func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -717,19 +712,13 @@ func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
 		t.Fatalf("insert agent: %v", err)
 	}
 
-	now := "2026-01-01T00:00:00Z"
-	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
-		t.Fatalf("insert run1: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
-		t.Fatalf("insert run2: %v", err)
-	}
+	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
+	seedRunFixture(t, db, "run2", "a1", wsID, "", "ASSIGNMENT", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
+	jw := wireTestJournalForHandler(t, db, handler)
 
 	// Fail run1, but run2 is still active — agent should stay RUNNING, not ERROR
 	body := strings.NewReader(`{"status":"FAILED","error_message":"crash"}`)
@@ -737,6 +726,9 @@ func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -762,23 +754,21 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert agent: %v", err)
 	}
-
-	now := "2026-01-01T00:00:00Z"
-	_, err = db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
-	if err != nil {
-		t.Fatalf("insert run: %v", err)
-	}
+	seedRunFixture(t, db, "run1", "a1", wsID, "", "USER", "")
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
+	jw := wireTestJournalForHandler(t, db, handler)
 
 	body := strings.NewReader(`{"status":"CANCELLED"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -791,13 +781,8 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 	if status != "IDLE" {
 		t.Errorf("agent status = %q, want IDLE", status)
 	}
-
-	var runStatus string
-	if err := db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus); err != nil {
-		t.Fatalf("query run status: %v", err)
-	}
-	if runStatus != "CANCELLED" {
-		t.Errorf("run status = %q, want CANCELLED", runStatus)
+	if got := runStatusFromJournal(t, db, "run1"); got != "CANCELLED" {
+		t.Errorf("run status = %q, want CANCELLED", got)
 	}
 }
 

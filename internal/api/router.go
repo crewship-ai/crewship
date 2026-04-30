@@ -104,10 +104,32 @@ func (r *Router) Journal() journal.Emitter {
 // noopEmitter swallows Emit calls so early-init code paths and tests that
 // don't wire a real writer still compile and run. It returns a synthesized
 // ID so callers treating the return value as "something happened" stay
+// happy.
+//
+// EXCEPTION: run.* lifecycle entries are the canonical source of truth
+// for agent runs after Phase J of unified-journal — silently dropping
+// them in production would leave the dashboard, KPIs and recovery loop
+// blind to runs that did happen. So when a run.* type is emitted into
+// the noop, we log loudly AND return an error. Handlers that check err
+// (CreateRun, UpdateRun, runAssignment, peer query) will then 500
+// rather than acknowledging a phantom success. Non-run entries pass
+// through silently to preserve test ergonomics.
 
 type noopEmitter struct{}
 
+// errJournalNotWired is returned by noopEmitter for run lifecycle
+// entries so callers fail loudly instead of silently dropping the
+// canonical run record.
+var errJournalNotWired = errors.New("journal emitter not wired (SetJournal not called); run lifecycle event dropped")
+
 func (noopEmitter) Emit(_ context.Context, e journal.Entry) (string, error) {
+	if strings.HasPrefix(string(e.Type), "run.") {
+		slog.Default().Error("journal not wired — run lifecycle entry dropped",
+			"entry_type", e.Type,
+			"workspace_id", e.WorkspaceID,
+			"trace_id", e.TraceID)
+		return "", errJournalNotWired
+	}
 	if e.ID != "" {
 		return e.ID, nil
 	}

@@ -508,6 +508,7 @@ func TestInternalCreateRun(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('ch1', 'ag1', ?, 'CHAT', 'ACTIVE')`, wsID)
 
 	h := NewInternalHandler(db, "tok", testLogger())
+	wireTestJournalForHandler(t, db, h)
 
 	t.Run("happy", func(t *testing.T) {
 		body := `{"id":"r1","agent_id":"ag1","chat_id":"ch1","workspace_id":"` + wsID + `","trigger_type":"USER","metadata":{"k":"v"}}`
@@ -545,10 +546,10 @@ func TestInternalUpdateRun(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr1', ?, 'C', 'c')`, wsID)
 	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'cr1', ?, 'A', 'a')`, wsID)
-	execOrFatal(t, db, `INSERT INTO agent_runs (id, agent_id, workspace_id, status, started_at, created_at)
-		VALUES ('r1', 'ag1', ?, 'RUNNING', datetime('now'), datetime('now'))`, wsID)
+	seedRunFixture(t, db, "r1", "ag1", wsID, "", "USER", "")
 
 	h := NewInternalHandler(db, "tok", testLogger())
+	wireTestJournalForHandler(t, db, h)
 
 	t.Run("completed", func(t *testing.T) {
 		exitCode := 0

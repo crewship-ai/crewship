@@ -41,6 +41,14 @@ const (
 	EntryCrewAction       EntryType = "crew.action"
 	EntryTaskDelegated    EntryType = "task.delegated"
 
+	// Runs — one trace per agent execution. trace_id == run.id; spans
+	// (exec/network/llm/...) belonging to the run carry the same trace_id.
+	EntryRunStarted   EntryType = "run.started"
+	EntryRunCompleted EntryType = "run.completed"
+	EntryRunFailed    EntryType = "run.failed"
+	EntryRunCancelled EntryType = "run.cancelled"
+	EntryRunTimeout   EntryType = "run.timeout"
+
 	// Security
 	EntryKeeperRequest     EntryType = "keeper.request"
 	EntryKeeperDecision    EntryType = "keeper.decision"
