@@ -166,11 +166,15 @@ type containerJSON struct {
 
 Auto-detection tries Docker first, then falls back to Apple Containers. Useful for development environments where the runtime may vary.
 
-### Kubernetes Provider
+### Kubernetes Provider — Planned
 
 **Config key:** `container.provider: "k8s"`
 
-Kubernetes support for running agent crews as pods in a cluster. This is the recommended provider for production deployments at scale.
+<Warning>
+  The `k8s` value passes config validation but **no Kubernetes provider is wired in `cmd/crewship/cmd_start.go`** today. The startup switch only branches on `docker` and `apple`; selecting `k8s` falls through to an error. This is forward-declared scaffolding, not a usable backend.
+</Warning>
+
+A Kubernetes provider that runs each crew as a pod (or job) is on the roadmap for distributed deployments. Until it lands, production-at-scale runs use Docker on a dedicated host or a small fleet of VMs with the `prefix` field set to keep container names from colliding. Track progress and design discussion in the project's GitHub issues; do not put `k8s` into a real config file expecting the server to start.
 
 ## Storage Providers
 
@@ -217,7 +221,7 @@ At startup, the config validates all provider selections:
 ```go
 var (
     validContainerProviders = map[string]bool{
-        "docker": true, "apple": true, "auto": true, "k8s": true,
+        "docker": true, "apple": true, "auto": true, "k8s": true, // k8s passes validation but is not wired
     }
     validStorageProviders = map[string]bool{
         "localfs": true, "s3": true,
@@ -265,14 +269,19 @@ Invalid provider values cause a startup error with a descriptive message.
 
   <Tab title="Production (Distributed)">
     ```yaml
+    # Distributed deployment is currently a Docker-on-multiple-VMs pattern
+    # with a unique container.prefix per host. The k8s provider is planned
+    # but not yet wired — see "Kubernetes Provider — Planned" above.
     container:
-      provider: "k8s"
+      provider: "docker"
+      default_runtime: "runsc"
+      prefix: "host-a"          # set per host to avoid name collisions
       sidecar_enabled: true
     storage:
       provider: "s3"
     state:
       provider: "postgres"
     ```
-    Kubernetes for container orchestration, S3 for shared storage, PostgreSQL for state.
+    Docker on a fleet of VMs with per-host prefixes, S3 for shared storage, PostgreSQL for state.
   </Tab>
 </Tabs>

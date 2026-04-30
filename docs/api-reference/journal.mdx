@@ -25,6 +25,7 @@ GET /api/v1/journal
 | `severity` | string | Comma-separated: `info`, `notice`, `warn`, `error`. |
 | `since` | string | RFC3339 lower bound on `ts`. |
 | `until` | string | RFC3339 upper bound on `ts`. |
+| `q` | string | FTS5 search across `summary` + `payload` (added migration 55, PR #234). Bounded length; phrase-wrapped before MATCH. AND-combined with structural filters. |
 | `cursor` | string | Opaque pagination token from a prior response. |
 | `limit` | integer | 1-500, default 100. |
 
@@ -137,6 +138,43 @@ Returns one entry by ID, workspace-scoped. 404 for unknown or cross-tenant IDs (
 **Response:** `200 OK` -- single entry object matching the `entries[]` schema above.
 
 **Errors:** `404` if not found; `401` on missing workspace.
+
+---
+
+## Workspace lookup table
+
+```
+GET /api/v1/journal/lookup
+```
+
+Returns workspace-scoped crews, agents, and missions for journal-card enrichment (palette colours and lucide icons). Fetched once on page mount; the frontend invalidates it from realtime crew/agent/mission events. Backend handler: `internal/api/journal_lookup.go`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "crews": [
+    {"id":"crw_abc","slug":"backend","name":"Backend","icon":"server","color":"emerald"}
+  ],
+  "agents": [
+    {"id":"agt_xyz","slug":"viktor","name":"Viktor","crew_id":"crw_abc","avatar":"https://…"}
+  ],
+  "missions": [
+    {"id":"MIS-42","title":"Migrate auth","status":"in_progress","crew_id":"crw_abc"}
+  ]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `crews[].icon` | string | Lucide icon name (`server`, `code`, `rocket`, ...). |
+| `crews[].color` | string | Palette ID (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`). |
+| `agents[].crew_id` | string | Foreign key to a `crews[]` entry in this same payload. |
+| `missions[].status` | string | `pending`, `in_progress`, `completed`, `cancelled`, ... |
+
+The journal entries themselves never carry display strings — they store stable IDs only. This endpoint is the join surface used by every UI card.
+
+**Errors:** `401` on missing workspace; `500` on DB error.
 
 ---
 

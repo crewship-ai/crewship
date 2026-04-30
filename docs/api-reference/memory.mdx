@@ -1,0 +1,89 @@
+---
+title: "Memory"
+description: "Memory health snapshot — five metrics that quantify how usable the episodic memory is."
+icon: "brain"
+---
+
+# Memory
+
+Read-only endpoint for the memory health dashboard. Backed by `internal/consolidate.ComputeHealth`. The five aggregate queries it runs are cheap, so the handler **recomputes on every request** rather than reading the persisted `memory_health_snapshots` table — those snapshots exist for time-series plots, not real-time reads.
+
+See [Episodic memory — health scoring](/guides/episodic-memory#health-scoring) for the formula and operator interpretation.
+
+---
+
+## Get health snapshot
+
+```
+GET /api/v1/memory/health
+```
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `crew_id` | string | Optional. Crew **ID** (not slug) to scope the score to a single crew. Omit for workspace-aggregate. The ID is validated against the caller's workspace via `crewBelongsToWorkspace`; a foreign ID returns `404`. |
+
+**Auth:** Every workspace member can read. The response contains only counts and ratios, no raw entry content.
+
+**Response:** `200 OK`
+
+```json
+{
+  "workspace_id": "ws_123",
+  "crew_id": "",
+  "computed_at": "2026-04-30T11:42:18.018Z",
+  "overall": 77.4,
+  "metrics": {
+    "freshness":    83.1,
+    "coverage":     62.0,
+    "coherence":    80.2,
+    "efficiency":   77.4,
+    "reachability": 78.0
+  },
+  "details": {
+    "indexed_entries":    1284,
+    "embeddable_entries": 1390
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `workspace_id` | string | Echo of the session's workspace. |
+| `crew_id` | string | Echo of the request's `crew_id` (empty for workspace-aggregate). |
+| `computed_at` | string (RFC3339) | When this response was computed. The handler **always recomputes**, so this is `now`. |
+| `overall` | number | Weighted composite, 0–100. Formula: `0.25·freshness + 0.25·coverage + 0.20·coherence + 0.15·efficiency + 0.15·reachability`. |
+| `metrics.*` | number | Each metric, 0–100. See [the guide](/guides/episodic-memory#health-scoring) for what each one measures. |
+| `details` | object | Free-form supplementary data (entry counts, embedding model, recent compaction stats, …). Schema is not stable across versions; consume defensively. |
+
+There is no separate `band` field — clients categorise locally:
+
+| Band | Range |
+|---|---|
+| Red | `overall < 50` |
+| Yellow | `50 ≤ overall < 75` |
+| Green | `overall ≥ 75` |
+
+The CLI uses these exact thresholds (`internal/cli` colour helpers) and the FE follows.
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No workspace context in session. |
+| 404 | `crew_id` set and not in caller's workspace. |
+| 500 | Compute failure — propagated from `ComputeHealth`. |
+
+---
+
+## Tenancy
+
+- `workspace_id` is always pulled from the session — never accepted as a query parameter or body field.
+- `crew_id`, when set, is validated via `crewBelongsToWorkspace` (same helper as the [Paymaster API](/api-reference/paymaster)). Cross-tenant lookups return `404`.
+
+## Related
+
+- [Episodic memory guide](/guides/episodic-memory).
+- [`crewship memory health`](/cli/memory#health) — CLI wrapper.
+- [Crew Journal](/guides/crew-journal) — source of indexed entries.

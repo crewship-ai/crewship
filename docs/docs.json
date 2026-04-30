@@ -26,10 +26,12 @@
             "pages": [
               "guides/installation",
               "guides/first-crew",
+              "guides/chat-sessions",
               "guides/devcontainers",
               "guides/credentials",
               "guides/skills",
               "guides/orchestration",
+              "guides/cli-adapters",
               "guides/captain",
               "guides/keeper",
               "guides/integrations",
@@ -51,7 +53,8 @@
               "guides/watch-roster",
               "guides/consolidate",
               "guides/telemetry",
-              "guides/llm-middleware"
+              "guides/llm-middleware",
+              "guides/migrations"
             ]
           },
           {
@@ -103,7 +106,9 @@
               "cli/eval",
               "cli/hooks",
               "cli/presence",
-              "cli/consolidate"
+              "cli/consolidate",
+              "cli/features",
+              "cli/runtimes"
             ]
           }
         ]
@@ -122,18 +127,24 @@
               "api-reference/credentials",
               "api-reference/skills",
               "api-reference/integrations",
+              "api-reference/conversations",
+              "api-reference/preferences",
               "api-reference/webhooks",
               "api-reference/websocket",
               "api-reference/admin",
               "api-reference/backup",
+              "api-reference/provisioning",
+              "api-reference/port-expose",
               "api-reference/journal",
               "api-reference/paymaster",
               "api-reference/approvals",
               "api-reference/checkpoints",
               "api-reference/hooks",
               "api-reference/presence",
+              "api-reference/memory",
               "api-reference/eval",
-              "api-reference/consolidate"
+              "api-reference/consolidate",
+              "api-reference/internal"
             ]
           }
         ]

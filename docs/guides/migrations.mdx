@@ -1,0 +1,91 @@
+---
+title: "Migrations Catalog"
+description: "Index of every Crewship database migration from v50 onwards — what each one added, which PR introduced it, and whether it changes user-visible behaviour."
+icon: "database"
+---
+
+# Migrations Catalog
+
+Crewship runs Go-only migrations against SQLite. The full ordered list lives in `internal/database/migrate.go` (`var migrations`), and they apply in version order at startup, tracked in the `_migrations` table for idempotency.
+
+This page is a flat reference for the recent set — useful when reading server logs, restoring from a backup that pre-dates a feature, or auditing what shipped between two releases. For older migrations (v1–v49) read `migrate.go` directly; this catalog focuses on the Crew Journal era and onward.
+
+<Warning>
+  Never run `prisma migrate`. Prisma is for TypeScript type generation only (`pnpm db:generate`). Database schema is **exclusively** the responsibility of the Go migrations runner.
+</Warning>
+
+## v50–v53 — Backup & Crew Journal foundations
+
+| v | Name | Adds | PR |
+|---|---|---|---|
+| 50 | `add_instance_config` | Per-instance config row (replaces env-only configuration). | — |
+| 51 | `add_port_exposures` | `port_exposures` table — capability URLs for in-container ports. | — |
+| 52 | `add_crew_journal` | 8 tables: `journal_entries`, `journal_embeddings`, `agent_status`, `approvals_queue`, `checkpoints`, `hooks_config`, `cost_ledger`, `budget_limits`. | #204 |
+| 53 | `add_eval_runs` | `eval_runs` (Quartermaster's durable replay/regression index with status + metrics columns). | #204 |
+
+After v52, `journal_entries` is the canonical audit stream. After v53, replay/regression analytics have a durable home.
+
+## v54–v55 — Memory uplift
+
+| v | Name | Adds | PR |
+|---|---|---|---|
+| 54 | `add_memory_importance_and_gate_rewards` | `journal_embeddings.importance_score`, `reference_count`, `last_referenced_at`. Foundations for nightly decay-and-reinforce. | #211 |
+| 55 | `add_memory_quality_uplift` | `journal_entries_fts` (FTS5 mirror), `journal_entries_archived` (compaction sink with truncated payloads), `memory_relations` (A-Mem-style edges), `memory_health_snapshots` (daily 5-metric scores). | #212 |
+
+These two PRs together delivered the [Episodic memory](/guides/episodic-memory) uplift: hybrid retrieval (RRF over dense + BM25), archive layer, relation graph, and the health dashboard. The `?q=` parameter on the journal API is backed by the FTS5 table from v55.
+
+## v56–v59 — Chat UI overhaul
+
+| v | Name | Adds | PR |
+|---|---|---|---|
+| 56 | `add_journal_ws_crew_ts_index` | Composite `(workspace_id, crew_id, ts)` index for the Timeline tab's crew-filtered queries. | #225 |
+| 57 | `add_chat_extras` | Four tables: `chat_branches` (edit-and-resend branch tree), `message_reactions` (per-`(chat, message, emoji, user)` aggregated to counts), `chat_attachments` (per-chat link row with sha256 + storage path), `workspace_files` (durable workspace-scoped blob index). | #225 |
+| 58 | `add_user_preferences` | `user_preferences (user_id, pref_key, pref_value)` — generic per-user JSON-blob KV. First consumer is bottom-panel height in `/crews`; the schema is intentionally generic so further UI settings land without another migration. | #225 |
+| 59 | `add_chats_origin` | `chats.origin` (`web` \| `cli` \| `webhook` \| `crew`) for grouping in the Sessions sidebar. NULL = pre-migration; UI omits the chip rather than guessing. | #225 |
+
+After this batch the chat surface has session history, attachments, reactions, edit-and-resend branches, per-user preferences, and origin tagging. See [Chat & Sessions](/guides/chat-sessions).
+
+## v60–v61 — Unified journal / Runs SSOT
+
+| v | Name | Adds | PR |
+|---|---|---|---|
+| 60 | `add_journal_ws_trace_index` | Composite partial index `(workspace_id, trace_id) WHERE trace_id IS NOT NULL`. Makes `GROUP BY trace_id` (run aggregation) cheap. | #234 |
+| 61 | `drop_agent_runs` | Idempotent backfill from `agent_runs` → `journal_entries`, snapshot to `agent_runs_archive`, then `DROP TABLE agent_runs`. | #234 |
+
+After v61, `journal_entries` is the **single source of truth** for runs. `journal.ListRuns` reconstructs the row shape via aggregation; the legacy table is gone but its content survived in `agent_runs_archive` for forensic reads.
+
+The five new entry types (`run.started`, `run.completed`, `run.failed`, `run.cancelled`, `run.timeout`) shipped with the same PR.
+
+## v62 — Paymaster billing modes
+
+| v | Name | Adds | PR |
+|---|---|---|---|
+| 62 | `add_paymaster_billing_modes` | 9 columns on `cost_ledger`: `billing_mode`, `quota_remaining_pct`, `quota_window`, `subscription_plan`, four `rate_*_per_m` rate-card snapshot columns, `cost_confidence`. Plus partial index `(workspace_id, billing_mode)`. | #232 |
+
+<Note>
+  PR #232 originally numbered this migration v60. The merge with PR #234 (which had taken v60 + v61 for the unified journal) renumbered it to v62 — see the `Renumbered from v60 to v62` comment in `migrate.go`. Documentation that pre-dates the merge may still mention v60; the canonical number is **v62**.
+</Note>
+
+After v62, `cost_ledger` distinguishes metered API-key calls from flat-rate subscription calls and snapshots the rate card per row (Langfuse pattern). See [Paymaster](/guides/paymaster).
+
+## How to read this in operation
+
+When `crewshipd` starts, it logs each migration as it applies:
+
+```
+INFO  applying migration  version=62  name=add_paymaster_billing_modes
+```
+
+The `_migrations` table records the applied set and refuses to apply a version-name pair that disagrees with what the code expects — this catches the classic "two PRs both claimed version N with different SQL" footgun loudly at startup.
+
+## Restoring from a backup that pre-dates a column
+
+The backup subsystem (`internal/backup/runner.go`) records the migrations applied at backup time. On restore, every migration the **target** has but the **source** lacked runs its `restoreBackfill` hook (when defined) against the freshly-inserted rows — so a restore from a v59 bundle into a v62 server populates the new columns sanely instead of leaving them at the SQL DEFAULT. Pure `ADD COLUMN` migrations that rely on the DB default need no hook; complex ones (e.g. backfilling a JSON column) provide one.
+
+## Related
+
+- [Architecture — Schema footprint](/architecture#schema-footprint).
+- [Crew Journal](/guides/crew-journal) — what v52, v55, v60, v61 mean for the audit stream.
+- [Paymaster](/guides/paymaster) — what v62 means for cost accounting.
+- [Episodic memory](/guides/episodic-memory) — what v54 + v55 mean for recall.
+- [Chat & Sessions](/guides/chat-sessions) — what v57–v59 mean for the chat surface.

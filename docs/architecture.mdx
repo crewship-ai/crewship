@@ -428,6 +428,26 @@ The `server` package is the one place that imports all of them -- exactly becaus
 
 - **Migration 52** added 8 tables: `journal_entries`, `journal_embeddings`, `agent_status`, `approvals_queue`, `checkpoints`, `hooks_config`, `cost_ledger`, `budget_limits`.
 - **Migration 53** added `eval_runs` (Quartermaster's durable replay/regression index with status + metrics columns).
+- **Migration 55** added `journal_entries_fts` (FTS5 mirror of `summary` + `payload`), `journal_entries_archived` (compaction sink with truncated payloads), `memory_relations` (A-Mem-style edge graph), and `memory_health_snapshots` (daily 5-metric scoring) — see [Episodic memory](/guides/episodic-memory).
+- **Migration 60** added a partial index on `journal_entries (workspace_id, trace_id) WHERE trace_id IS NOT NULL` to make run aggregation `GROUP BY trace_id` cheap.
+- **Migration 61** backfilled the legacy `agent_runs` table into journal entries, snapshotted the original rows to `agent_runs_archive`, and dropped `agent_runs` — `journal_entries` is now the **single source of truth** for runs.
+- **Migration 62** added 9 columns to `cost_ledger` for billing-mode-aware accounting (`billing_mode`, `quota_remaining_pct`, `quota_window`, `subscription_plan`, four `rate_*_per_m` snapshot columns, `cost_confidence`) plus a partial index on `(workspace_id, billing_mode)` — see [Paymaster](/guides/paymaster).
+
+A consolidated catalog of recent migrations lives in [Migrations](/guides/migrations).
+
+### Runs as journal projections
+
+Since migration 61, the legacy `agent_runs` row no longer exists; a "run" is a logical aggregate over journal entries that share a `trace_id` (which equals the run id). The lifecycle emits five typed entries — `run.started`, `run.completed`, `run.failed`, `run.cancelled`, `run.timeout` — at every transition; `journal.ListRuns` reconstructs the row shape via `GROUP BY trace_id`, and `journal.RunStats` rolls up KPIs the same way. Trace-id propagation through goroutines is explicit: handlers attach the id to context with `journal.WithRunID(ctx, runID)` and emitters extract it via `RunIDFromContext(ctx)`. The `noop` emitter loudly errors on `run.*` types, so a misconfigured wiring fails immediately rather than silently dropping observability.
+
+The `/journal` UI exposes this via a tab strip — `Timeline | Runs | Stats` — backed by the same SSE stream and the same FTS5 index (`?q=` does a server-side `MATCH` against `summary` + `payload`). Card enrichment (palette colours and lucide icons for crew/agent/mission chips) comes from a workspace-scoped lookup map at `GET /api/v1/journal/lookup`, fetched once and invalidated by realtime events. See [Crew Journal](/guides/crew-journal).
+
+### Container snapshots — declared intent vs actual state
+
+`devcontainer.json` is what the operator *declares* the container should look like. `container.snapshot` journal entries record what the container *actually* looks like after agents have finished a session running `apt-get install`, `pip install`, or `npm install`. The `internal/containerstate` package probes `dpkg-query -W`, `pip freeze`, `npm ls -g --json`, and `/etc/os-release` after every successful exec; the snapshot is hashed, and the orchestrator emits an entry **only** when the hash changes — so a quiet session is free. Missing probes (e.g. no `pip` in a Node-only image) are soft-fail and produce empty package lists rather than errors. See [Devcontainers](/guides/devcontainers#container-actuals).
+
+### Reflection
+
+The `internal/reflection` package implements role-based critique (Logician / Skeptic / Domain Expert) over a draft answer, then synthesises the critiques via the [Quartermaster](/guides/quartermaster) judge and feeds the result back into an Evaluator–Optimizer loop. It is provider-neutral and shares the [LLM middleware](/guides/llm-middleware) stack so its calls show up in the journal alongside everything else. See [Reflection](/guides/reflection).
 
 ### Journal emitter wiring
 

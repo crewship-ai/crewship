@@ -167,6 +167,72 @@ GET /api/v1/paymaster/top-spenders?limit=10&range=7d
 | `rows[].scope_kind` | string | `workspace`, `crew`, `mission`, or `agent`. |
 | `rows[].scope_id` | string | Matching ID for the scope_kind. |
 
+---
+
+## Subscriptions
+
+```
+GET /api/v1/paymaster/subscriptions?range=30d
+```
+
+Rollup of flat-rate credential usage grouped by `(subscription_plan, provider)`. Returned rows carry call counts and token totals only — **no \$ figure**. The subscription is a flat fee paid up front, so the marginal token cost is structurally \$0; rendering "\$0.00" would imply the calls are free, which they are not.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|---|---|---|---|
+| `range` / `since` / `until` | | `30d` | Time window. Same semantics as the `spend/*` endpoints. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "rows": [
+    {
+      "subscription_plan": "Anthropic Max 20×",
+      "provider": "anthropic",
+      "call_count": 1284,
+      "input_tokens": 14_205_338,
+      "output_tokens": 5_127_912,
+      "last_used_at": "2026-04-30T11:42:18.221Z"
+    },
+    {
+      "subscription_plan": "ChatGPT Plus",
+      "provider": "openai",
+      "call_count": 312,
+      "input_tokens": 1_802_443,
+      "output_tokens": 622_501,
+      "last_used_at": "2026-04-30T09:11:02.083Z"
+    }
+  ],
+  "since": "2026-03-31T11:42:18Z",
+  "until": "2026-04-30T11:42:18Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `rows[].subscription_plan` | string | Display label set by the orchestrator from the credential type (e.g. `"Anthropic Max 20×"`). |
+| `rows[].provider` | string | LLM provider (`anthropic`, `openai`, ...). |
+| `rows[].call_count` | integer | Number of `cost_ledger` rows with `billing_mode='flat_rate'` for this `(plan, provider)`. |
+| `rows[].input_tokens` | integer | Sum of `input_tokens`. |
+| `rows[].output_tokens` | integer | Sum of `output_tokens`. |
+| `rows[].last_used_at` | string (RFC3339) | Most recent `ts` in the group. |
+
+**Errors:** `401` no workspace; `500` DB error.
+
+---
+
+## Internal: cost record
+
+```
+POST /api/v1/internal/cost/record
+```
+
+**Internal only — `X-Internal-Token` required.** This is how the sidecar reports parsed LLM usage from inside a crew container. Agents cannot reach this endpoint directly; the sidecar runs as UID 1002 and holds the token. Authoritative scope (workspace / crew / agent IDs) is taken from the sidecar's `IPCConfig` set at exec time, so an agent that captures the token still cannot forge cross-tenant attribution.
+
+See [Internal IPC API](/api-reference/internal#cost-record) for the full request/response schema and the surrounding security model.
+
 ## Related
 
 - [Paymaster guide](/guides/paymaster).
