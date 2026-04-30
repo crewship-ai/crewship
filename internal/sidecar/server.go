@@ -159,13 +159,28 @@ func NewServer(cfg ServerConfig) *Server {
 		readyCh:     make(chan struct{}),
 	}
 
+	// Billing-mode + plan come from the orchestrator-set env vars in
+	// exec_env.go. Defaults to "metered" when missing so a sidecar started
+	// outside a managed exec (rare; happens in tests) still produces sane
+	// ledger rows. Read once at startup — credential type is fixed for the
+	// life of one agent container so re-reading per call would just burn
+	// syscalls.
+	billingMode := os.Getenv("CREWSHIP_BILLING_MODE")
+	if billingMode == "" {
+		billingMode = "metered"
+	}
+	subscriptionPlan := os.Getenv("CREWSHIP_SUBSCRIPTION_PLAN")
+
 	proxy := NewProxy(ProxyConfig{
-		CredStore: credStore,
-		Allowlist: allowlist,
-		Scrubber:  scrubber.New(),
-		Logger:    cfg.Logger,
-		FreeMode:  freeMode,
-		OnEgress:  s.buildEgressObserver(),
+		CredStore:        credStore,
+		Allowlist:        allowlist,
+		Scrubber:         scrubber.New(),
+		Logger:           cfg.Logger,
+		FreeMode:         freeMode,
+		OnEgress:         s.buildEgressObserver(),
+		OnLLMCall:        s.buildLLMCallObserver(),
+		BillingMode:      billingMode,
+		SubscriptionPlan: subscriptionPlan,
 	})
 	s.proxy = proxy
 

@@ -376,4 +376,3 @@ CREATE TABLE IF NOT EXISTS budget_limits (
 );
 CREATE INDEX IF NOT EXISTS idx_budget_scope ON budget_limits(scope_kind, scope_id, enabled);
 `
-

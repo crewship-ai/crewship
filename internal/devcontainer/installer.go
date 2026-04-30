@@ -256,7 +256,7 @@ func createTarFromDir(srcDir, prefix string) (*bytes.Buffer, error) {
 // expected" when VERSION is unset).
 //
 // User-provided values always win over defaults, including empty strings —
-// "user explicitly set version=''" is a valid (if rare) intent we don't
+// "user explicitly set version=”" is a valid (if rare) intent we don't
 // override.
 func buildFeatureEnv(containerID, featureID string, metadataOptions, userOptions map[string]any) []string {
 	env := []string{

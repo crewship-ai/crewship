@@ -166,4 +166,3 @@ CREATE TABLE IF NOT EXISTS captain_chats (
 CREATE INDEX IF NOT EXISTS idx_captain_chat_ws ON captain_chats(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_captain_chat_user ON captain_chats(user_id);
 `
-

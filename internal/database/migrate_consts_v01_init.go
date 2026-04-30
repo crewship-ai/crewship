@@ -415,4 +415,3 @@ CREATE TABLE IF NOT EXISTS agent_config_history (
 );
 CREATE INDEX IF NOT EXISTS idx_config_history_agent_time ON agent_config_history(agent_id, created_at);
 `
-

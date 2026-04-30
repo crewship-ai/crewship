@@ -66,7 +66,18 @@ CREATE TABLE cost_ledger (
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
-    tags TEXT NOT NULL DEFAULT '{}'
+    tags TEXT NOT NULL DEFAULT '{}',
+    -- v62 billing-mode columns. Mirror migrate_consts_v62_billing_mode.go
+    -- so this in-memory test schema stays in lockstep with the real one.
+    billing_mode TEXT NOT NULL DEFAULT 'metered',
+    quota_remaining_pct REAL,
+    quota_window TEXT,
+    subscription_plan TEXT,
+    rate_input_per_m REAL,
+    rate_output_per_m REAL,
+    rate_cached_in_per_m REAL,
+    rate_cache_write_per_m REAL,
+    cost_confidence TEXT NOT NULL DEFAULT 'estimate'
 );
 CREATE INDEX idx_cost_ws_ts ON cost_ledger(workspace_id, ts DESC);
 

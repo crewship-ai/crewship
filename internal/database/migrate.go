@@ -675,6 +675,14 @@ DROP INDEX IF EXISTS idx_run_chat;
 DROP INDEX IF EXISTS idx_run_triggered_by;
 DROP TABLE agent_runs;
 `},
+	// Subscription-aware paymaster: distinguishes API-key calls (where we can
+	// price per token) from OAuth/subscription calls (flat-rate, opaque). Adds
+	// rate-card snapshot columns so historical rows survive future ceník
+	// changes (Langfuse pattern), and a confidence column so the UI can label
+	// every cost figure with its provenance (Helicone pattern).
+	// Renumbered from v60 to v62 after PR #234 took 60+61 for the unified
+	// journal Phase D + drop_agent_runs migrations.
+	{version: 62, name: "add_paymaster_billing_modes", sql: migrationAddPaymasterBillingModes},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

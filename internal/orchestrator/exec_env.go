@@ -135,6 +135,12 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		// Still set dummy keys for other providers (OpenAI, Google) for sidecar injection
 		env = append(env, "OPENAI_API_KEY=sk-dummy-crewship-sidecar")
 		env = append(env, "GOOGLE_API_KEY=dummy-crewship-sidecar")
+		// Tell the sidecar this exec is on a flat-rate subscription. Sidecar
+		// uses this to tag cost_ledger rows correctly — flat-rate calls land
+		// with cost=0 + confidence=unknown rather than fake $ figures, and
+		// $-budget enforcement is skipped.
+		env = append(env, "CREWSHIP_BILLING_MODE=flat_rate")
+		env = append(env, "CREWSHIP_SUBSCRIPTION_PLAN=Anthropic Max")
 	} else {
 		// API key mode: use reverse proxy via ANTHROPIC_BASE_URL for credential injection.
 		// The sidecar intercepts plain HTTP requests and injects the real API key.
@@ -143,6 +149,8 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 			"ANTHROPIC_API_KEY=sk-ant-dummy-crewship-sidecar",
 			"OPENAI_API_KEY=sk-dummy-crewship-sidecar",
 			"GOOGLE_API_KEY=dummy-crewship-sidecar",
+			// Metered: provider returns usage and ratecard pricing applies.
+			"CREWSHIP_BILLING_MODE=metered",
 		)
 	}
 
