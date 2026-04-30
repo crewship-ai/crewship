@@ -1,6 +1,14 @@
 name: CI
 
 on:
+  # Manual re-trigger. Useful when the self-hosted runner was offline at
+  # the time of the original push and the resulting run got stranded in
+  # `queued` (verified failure mode during PR #235 — runner saturated,
+  # PR's CI never got picked up before merge). With workflow_dispatch
+  # the run can be re-queued from the Actions tab or via:
+  #   gh workflow run ci.yml --ref <branch>
+  # without needing an empty commit.
+  workflow_dispatch: {}
   pull_request:
     branches: [main]
     # Skip CI on changes that can't affect lint/typecheck/build/test:
