@@ -13,11 +13,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schemaSQL mirrors the cost_ledger / budget_limits tables from migration 52.
-// We define the schema inline so the test stays decoupled from the migrate
-// package — same approach the journal package's tests use. journal_entries is
-// also created so the recordingEmitter that writes through to the real Writer
-// can be used if we ever swap it back in.
+// schemaSQL mirrors the cost_ledger / budget_limits tables. Kept inline so the
+// test stays decoupled from the migrate package — same approach the journal
+// package's tests use. The columns added in migration v60 (billing_mode,
+// quota_*, rate_*, cost_confidence, subscription_plan) are reflected here.
 const schemaSQL = `
 CREATE TABLE cost_ledger (
     id TEXT PRIMARY KEY,
@@ -33,11 +32,21 @@ CREATE TABLE cost_ledger (
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
-    tags TEXT NOT NULL DEFAULT '{}'
+    tags TEXT NOT NULL DEFAULT '{}',
+    billing_mode TEXT NOT NULL DEFAULT 'metered' CHECK(billing_mode IN ('metered','flat_rate')),
+    quota_remaining_pct REAL,
+    quota_window TEXT,
+    subscription_plan TEXT,
+    rate_input_per_m REAL,
+    rate_output_per_m REAL,
+    rate_cached_in_per_m REAL,
+    rate_cache_write_per_m REAL,
+    cost_confidence TEXT NOT NULL DEFAULT 'estimate' CHECK(cost_confidence IN ('precise','estimate','unknown'))
 );
 CREATE INDEX idx_cost_ws_ts ON cost_ledger(workspace_id, ts DESC);
 CREATE INDEX idx_cost_crew_ts ON cost_ledger(crew_id, ts DESC);
 CREATE INDEX idx_cost_agent_ts ON cost_ledger(agent_id, ts DESC);
+CREATE INDEX idx_cost_billing_mode ON cost_ledger(workspace_id, billing_mode, ts DESC) WHERE billing_mode = 'flat_rate';
 
 CREATE TABLE budget_limits (
     id TEXT PRIMARY KEY,
@@ -117,8 +126,9 @@ func TestEstimate(t *testing.T) {
 			name:     "opus 1k in / 1k out",
 			provider: "anthropic", model: "claude-opus-4-7",
 			in: 1000, out: 1000,
-			// 1000 * 15/1e6 + 1000 * 75/1e6 = 0.015 + 0.075
-			want: 0.015 + 0.075,
+			// 2026-04 reprice: $5 input / $25 output per 1M.
+			// 1000 * 5/1e6 + 1000 * 25/1e6 = 0.005 + 0.025
+			want: 0.005 + 0.025,
 		},
 		{
 			name:     "sonnet with cached input",
@@ -131,8 +141,9 @@ func TestEstimate(t *testing.T) {
 			name:     "haiku tiny call",
 			provider: "anthropic", model: "claude-haiku-4-5",
 			in: 100, out: 50,
-			// 100 * 0.80/1e6 + 50 * 4/1e6
-			want: 0.00008 + 0.0002,
+			// 2026-04 reprice: $1 input / $5 output per 1M.
+			// 100 * 1/1e6 + 50 * 5/1e6
+			want: 0.0001 + 0.00025,
 		},
 		{
 			name:     "ollama free",
@@ -141,11 +152,39 @@ func TestEstimate(t *testing.T) {
 			want: 0,
 		},
 		{
-			name:     "openai gpt-5",
+			name:     "openai gpt-5 alias maps to 5.5 rate",
 			provider: "openai", model: "gpt-5",
 			in: 1000, out: 500,
-			// 1000 * 10/1e6 + 500 * 30/1e6
-			want: 0.01 + 0.015,
+			// gpt-5 alias resolves to gpt-5.5 rate: $4 in / $24 out per 1M.
+			// 1000 * 4/1e6 + 500 * 24/1e6
+			want: 0.004 + 0.012,
+		},
+		{
+			name:     "openai gpt-5.5 flagship",
+			provider: "openai", model: "gpt-5.5",
+			in: 1000, out: 500,
+			want: 0.004 + 0.012,
+		},
+		{
+			name:     "gemini 2.5 pro",
+			provider: "google", model: "gemini-2.5-pro",
+			in: 1000, out: 500,
+			// 1000 * 2.50/1e6 + 500 * 15/1e6 (upper tier)
+			want: 0.0025 + 0.0075,
+		},
+		{
+			name:     "grok 4.20",
+			provider: "xai", model: "grok-4.20",
+			in: 1000, out: 500,
+			// 1000 * 2/1e6 + 500 * 6/1e6
+			want: 0.002 + 0.003,
+		},
+		{
+			name:     "deepseek chat",
+			provider: "deepseek", model: "deepseek-chat",
+			in: 1_000_000, out: 1_000_000,
+			// $0.252 in + $0.378 out
+			want: 0.252 + 0.378,
 		},
 		{
 			name:     "unknown provider returns zero",
@@ -161,11 +200,18 @@ func TestEstimate(t *testing.T) {
 			want: 0.003 + 0.0075,
 		},
 		{
+			name:     "google fallback for unknown model",
+			provider: "google", model: "gemini-future-99",
+			in: 1000, out: 500,
+			// fallback equals gemini-2.5-pro rate
+			want: 0.0025 + 0.0075,
+		},
+		{
 			name:     "negative tokens treated as zero",
 			provider: "anthropic", model: "claude-opus-4-7",
 			in: -50, out: 100,
-			// only output tokens count
-			want: 100 * 75 / 1_000_000.0,
+			// only output tokens count, $25/M
+			want: 100 * 25 / 1_000_000.0,
 		},
 	}
 

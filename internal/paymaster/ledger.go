@@ -27,6 +27,15 @@ const tsLayout = "2006-01-02T15:04:05.000Z"
 // j may be nil (rare; used by tests that only care about the SQL side); when
 // nil no journal entries are emitted. Production callers always pass a real
 // emitter so cost activity is observable.
+//
+// Billing-mode handling (added migration v60):
+//   - BillingFlatRate forces CostUSD to 0 and Confidence to Unknown on disk —
+//     subscription calls have no marginal $ cost. The ledger row still serves
+//     as audit ("this credential was used at this timestamp by this agent").
+//     A `cost.incurred` journal entry is suppressed because no $ was incurred.
+//   - BillingMetered (default) snapshots the rate card at write time so a
+//     later pricing.go change can't rewrite history (Langfuse pattern). When
+//     CostUSD is zero on input, Estimate fills it from the same snapshot.
 func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRecord, error) {
 	if db == nil {
 		return CostRecord{}, fmt.Errorf("paymaster: nil db")
@@ -41,6 +50,21 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 	if c.TS.IsZero() {
 		c.TS = time.Now().UTC()
 	}
+	if c.BillingMode == "" {
+		c.BillingMode = BillingMetered
+	}
+
+	// Snapshot the rate card and force flat-rate invariants. Done here (not
+	// at the call site) so the same rules apply whether Record is called
+	// directly or through Middleware.
+	rate := RateCard(c.Provider, c.Model)
+	if c.BillingMode == BillingFlatRate {
+		c.CostUSD = 0
+		c.Confidence = ConfidenceUnknown
+	} else if c.Confidence == "" {
+		c.Confidence = ConfidenceEstimate
+	}
+
 	id := newLedgerID()
 
 	tagsJSON, err := encodeTags(c.Tags)
@@ -51,8 +75,11 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 	const insertSQL = `INSERT INTO cost_ledger
 		(id, workspace_id, crew_id, agent_id, mission_id, ts, provider, model,
 		 input_tokens, output_tokens, cached_input_tokens, cache_creation_tokens,
-		 cost_usd, tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		 cost_usd, tags,
+		 billing_mode, quota_remaining_pct, quota_window, subscription_plan,
+		 rate_input_per_m, rate_output_per_m, rate_cached_in_per_m, rate_cache_write_per_m,
+		 cost_confidence)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err = db.ExecContext(ctx, insertSQL,
 		id,
@@ -69,6 +96,15 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 		c.CacheCreationTokens,
 		c.CostUSD,
 		tagsJSON,
+		string(c.BillingMode),
+		nullableFloat(c.QuotaRemainingPct),
+		nullableQuota(c.QuotaWindow),
+		nullable(c.SubscriptionPlan),
+		nullableFloat(rate.InputPerM),
+		nullableFloat(rate.OutputPerM),
+		nullableFloat(rate.CachedInputPerM),
+		nullableFloat(rate.CacheWritePerM),
+		string(c.Confidence),
 	)
 	if err != nil {
 		return CostRecord{}, fmt.Errorf("paymaster: insert ledger: %w", err)
@@ -78,7 +114,11 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 
 	if j != nil {
 		emitLLMCall(ctx, j, c, rec)
-		if c.CostUSD > 0 {
+		// cost.incurred fires only for metered rows with non-zero $ — flat-
+		// rate rows are not "money spent" from our perspective (sub already
+		// covers them), and zero-cost metered calls (cache hits, local
+		// models) don't need a redundant entry.
+		if c.BillingMode == BillingMetered && c.CostUSD > 0 {
 			emitCostIncurred(ctx, j, c, rec)
 		}
 	}
@@ -91,6 +131,38 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 // because the ledger row already succeeded — we don't want a journal hiccup
 // to roll back accounting.
 func emitLLMCall(ctx context.Context, j journal.Emitter, c Call, rec CostRecord) {
+	summary := fmt.Sprintf("%s/%s: %d in / %d out tokens, $%.4f",
+		c.Provider, c.Model, c.InputTokens, c.OutputTokens, c.CostUSD)
+	if c.BillingMode == BillingFlatRate {
+		// Flat-rate summaries explicitly say so — operators glancing at the
+		// timeline shouldn't have to dig into payload to learn the row had
+		// no $ tracking.
+		plan := c.SubscriptionPlan
+		if plan == "" {
+			plan = "subscription"
+		}
+		summary = fmt.Sprintf("%s/%s: %d in / %d out tokens (flat-rate · %s)",
+			c.Provider, c.Model, c.InputTokens, c.OutputTokens, plan)
+	}
+	payload := map[string]any{
+		"provider":              c.Provider,
+		"model":                 c.Model,
+		"input_tokens":          c.InputTokens,
+		"output_tokens":         c.OutputTokens,
+		"cached_input_tokens":   c.CachedInputTokens,
+		"cache_creation_tokens": c.CacheCreationTokens,
+		"cost_usd":              c.CostUSD,
+		"billing_mode":          string(c.BillingMode),
+		"cost_confidence":       string(c.Confidence),
+		"ledger_id":             rec.ID,
+	}
+	if c.SubscriptionPlan != "" {
+		payload["subscription_plan"] = c.SubscriptionPlan
+	}
+	if c.QuotaRemainingPct > 0 {
+		payload["quota_remaining_pct"] = c.QuotaRemainingPct
+		payload["quota_window"] = string(c.QuotaWindow)
+	}
 	_, _ = j.Emit(ctx, journal.Entry{
 		WorkspaceID: c.Scope.WorkspaceID,
 		CrewID:      c.Scope.CrewID,
@@ -100,19 +172,9 @@ func emitLLMCall(ctx context.Context, j journal.Emitter, c Call, rec CostRecord)
 		Type:        journal.EntryLLMCall,
 		Severity:    journal.SeverityInfo,
 		ActorType:   journal.ActorSystem,
-		Summary: fmt.Sprintf("%s/%s: %d in / %d out tokens, $%.4f",
-			c.Provider, c.Model, c.InputTokens, c.OutputTokens, c.CostUSD),
-		Payload: map[string]any{
-			"provider":              c.Provider,
-			"model":                 c.Model,
-			"input_tokens":          c.InputTokens,
-			"output_tokens":         c.OutputTokens,
-			"cached_input_tokens":   c.CachedInputTokens,
-			"cache_creation_tokens": c.CacheCreationTokens,
-			"cost_usd":              c.CostUSD,
-			"ledger_id":             rec.ID,
-		},
-		Refs: map[string]any{"ledger_id": rec.ID},
+		Summary:     summary,
+		Payload:     payload,
+		Refs:        map[string]any{"ledger_id": rec.ID},
 	})
 }
 
@@ -163,6 +225,26 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullableFloat is the float64 sibling of nullable. Zero floats persist as
+// NULL on the v60-added rate / quota columns so dashboards can distinguish
+// "no signal recorded" from "signal said zero" — the difference between
+// "we didn't see a header" and "the user has no remaining quota" matters
+// for alerting.
+func nullableFloat(f float64) any {
+	if f == 0 {
+		return nil
+	}
+	return f
+}
+
+// nullableQuota mirrors nullable for the typed QuotaWindow enum.
+func nullableQuota(q QuotaWindow) any {
+	if q == "" {
+		return nil
+	}
+	return string(q)
 }
 
 // newLedgerID generates a short collision-free ID for a ledger row. Same

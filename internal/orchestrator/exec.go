@@ -38,7 +38,17 @@ EXPOSE PORT (show a running server to the user):
 `
 
 // BuildCLICommand constructs the CLI command and arguments for the configured
-// adapter (CLAUDE_CODE, OPENCODE, CODEX_CLI, or GEMINI_CLI).
+// adapter. Supported adapters as of 2026-04:
+//   - CLAUDE_CODE   — Anthropic's `claude` CLI (Max subscription or API key)
+//   - CODEX_CLI     — OpenAI's `codex` (ChatGPT Plus/Pro or API key)
+//   - GEMINI_CLI    — Google's `gemini` (Google AI Pro/Ultra or API key)
+//   - OPENCODE      — sst.dev's `opencode` (BYOK any provider)
+//   - CURSOR_CLI    — Cursor's `cursor-agent` headless mode (added 2026-04)
+//   - FACTORY_DROID — Factory's `droid exec` autonomous runs (added 2026-04)
+//
+// Aider, Copilot CLI, Cody CLI, Replit Agent are intentionally NOT here:
+// either too pair-programming-shaped, IDE-tied, browser-only, or shipping
+// breaking changes too aggressively to integrate cleanly right now.
 func BuildCLICommand(req AgentRunRequest) []string {
 	switch req.CLIAdapter {
 	case "CLAUDE_CODE":
@@ -86,6 +96,47 @@ func BuildCLICommand(req AgentRunRequest) []string {
 		// OpenCode reads AGENTS.md from CWD for system instructions.
 		// We write it via setupSystemPromptFiles() before exec.
 		return []string{"opencode", "run", req.UserMessage}
+
+	case "CURSOR_CLI":
+		// Cursor's headless agent. `-p` (print mode) prevents the interactive
+		// TUI from spawning; `--output-format stream-json` aligns its JSONL
+		// stream with what we already parse for Claude Code so the chat-bridge
+		// doesn't need a Cursor-specific reader. `--mode=plan` and `--mode=ask`
+		// are supported flags (added 2026-01-16) but we leave the default
+		// "agent" mode here — adapters can extend this case if a tool profile
+		// asks for read-only browsing.
+		//
+		// System instructions: Cursor reads `.cursor/rules/`, `AGENTS.md`, and
+		// `CLAUDE.md` from the working directory. setupSystemPromptFiles()
+		// writes those before exec, so no `--system-prompt` flag is needed.
+		cmd := []string{"cursor-agent", "-p", "--output-format", "stream-json"}
+		if req.LLMModel != "" {
+			cmd = append(cmd, "-m", req.LLMModel)
+		}
+		// `--` separator is defensive: a Cursor flag landing in the message
+		// body should not be re-parsed by the CLI.
+		cmd = append(cmd, "--", req.UserMessage)
+		return cmd
+
+	case "FACTORY_DROID":
+		// Factory's `droid exec` is the headless single-shot mode of Droid.
+		// Tiered autonomy via --auto: low (read-only, default), medium (can
+		// edit files within scope), high (autonomous). We keep low as the
+		// default and bump to medium when the agent's tool profile signals
+		// it expects to write code. `high` is intentionally not exposed
+		// because Factory's docs warn it can do destructive things without
+		// further confirmation — Crewship operators should opt in via a
+		// dedicated tool profile if they want it.
+		autonomy := "low"
+		if req.ToolProfile == "CODING" {
+			autonomy = "medium"
+		}
+		cmd := []string{"droid", "exec", "--auto", autonomy}
+		if req.LLMModel != "" {
+			cmd = append(cmd, "--model", req.LLMModel)
+		}
+		cmd = append(cmd, req.UserMessage)
+		return cmd
 
 	default:
 		return []string{"claude", "--print", req.UserMessage}

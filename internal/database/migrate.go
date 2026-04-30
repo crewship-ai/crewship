@@ -564,6 +564,12 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id
 ALTER TABLE chats ADD COLUMN origin TEXT;
 CREATE INDEX IF NOT EXISTS idx_chats_origin ON chats(origin) WHERE origin IS NOT NULL;
 `},
+	// Subscription-aware paymaster: distinguishes API-key calls (where we can
+	// price per token) from OAuth/subscription calls (flat-rate, opaque). Adds
+	// rate-card snapshot columns so historical rows survive future ceník
+	// changes (Langfuse pattern), and a confidence column so the UI can label
+	// every cost figure with its provenance (Helicone pattern).
+	{version: 60, name: "add_paymaster_billing_modes", sql: migrationAddPaymasterBillingModes},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
