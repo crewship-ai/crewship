@@ -157,17 +157,20 @@ describe("useWebSocket", () => {
     expect(mockInstances[1].url).toContain("token=t2")
   })
 
-  it("reconnect attempts are capped — after MAX, fires session-expired", async () => {
-    const handler = vi.fn()
-    window.addEventListener("auth:session-expired", handler)
-    renderHook(() =>
+  it("reconnect attempts capped — surfaces transport error, NOT session-expired", async () => {
+    // Backend down ≠ auth dead. The retry-cap branch must NOT fire
+    // auth:session-expired (which would bounce the user to /login on
+    // every restart-induced outage); status flips to "error" and we
+    // stop retrying.
+    const authHandler = vi.fn()
+    window.addEventListener("auth:session-expired", authHandler)
+
+    const { result } = renderHook(() =>
       useWebSocket({ url: "ws://localhost:8080/ws", getToken: tokenFn("t") }),
     )
     await act(async () => { await vi.runAllTimersAsync() })
 
-    // Force-close repeatedly. Each backoff is capped at 30s + jitter,
-    // so 35s per iteration safely advances past the next reconnect
-    // window. After MAX_RECONNECT_ATTEMPTS (=8) the hook should give up.
+    // Force-close repeatedly past MAX_RECONNECT_ATTEMPTS (=8).
     for (let i = 0; i < 9; i++) {
       const idx = mockInstances.length - 1
       if (idx < 0) break
@@ -175,8 +178,9 @@ describe("useWebSocket", () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(35_000) })
     }
 
-    expect(handler).toHaveBeenCalled()
-    window.removeEventListener("auth:session-expired", handler)
+    expect(authHandler).not.toHaveBeenCalled()
+    expect(result.current.status).toBe("error")
+    window.removeEventListener("auth:session-expired", authHandler)
   })
 
   it("send is a no-op until socket is OPEN", async () => {

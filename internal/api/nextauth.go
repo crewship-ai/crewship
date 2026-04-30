@@ -19,11 +19,16 @@ import (
 )
 
 // Path-scope on the refresh cookie keeps the long-lived token out of
-// every other endpoint's request. Only /api/auth/token/refresh ever
-// receives it; a stolen access cookie can't be turned into a fresh
-// chain unless the attacker also pulled the refresh cookie, which
-// browser policy stops them from sending elsewhere.
-const refreshCookiePath = "/api/auth/token/refresh"
+// the bulk of the API surface. Only /api/auth/* paths ever receive it
+// — that's still the entire NextAuth-compat surface (signin, signout,
+// session, csrf, refresh) but excludes /api/v1/* and the WebSocket,
+// where a leaked refresh cookie would be most damaging. The slightly
+// looser scope (vs. just /api/auth/token/refresh) is what makes
+// signOut able to revoke the user_sessions row even when the access
+// cookie has expired — without it, the only carrier of session_id
+// would be a 15-min-expired access token, leaving a stale row in the
+// "Active sessions" list for 30 days after the user idle-logged-out.
+const refreshCookiePath = "/api/auth/"
 
 // NextAuthHandler implements the endpoints that next-auth/react client SDK expects.
 // This allows the static-exported Next.js frontend to use signIn(), signOut(), useSession().

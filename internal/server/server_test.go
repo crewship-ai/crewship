@@ -14,6 +14,7 @@ import (
 
 func newTestServer() *Server {
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-server-test-32chars-1"
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, nil)
 	s.startedAt = time.Now()

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -200,11 +201,38 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cookie-set must succeed for the response to honestly mean "you
+	// are signed up and signed in". If it fails (validator down,
+	// sessions store unreachable), tell the client and roll the
+	// account back so we don't leave an orphan that can never log in
+	// because of a cleanup we forgot. The cleanup runs in its own
+	// short-lived context so a request-cancellation doesn't strand
+	// the orphan rows.
 	if err := h.setSessionCookies(w, r, userID, req.FullName, req.Email); err != nil {
-		h.logger.Error("set session cookies after signup", "error", err)
+		h.logger.Error("set session cookies after signup — rolling back", "error", err)
+		h.cleanupOrphanedSignup(userID, workspaceID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to establish session — please try again"})
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": userID, "email": req.Email})
+}
+
+// cleanupOrphanedSignup removes the user + workspace + membership rows
+// created by a Signup that committed but couldn't establish a session.
+// Best-effort — we already logged the original failure, so any error
+// here just means a manual sweep later. FK CASCADE on user delete
+// handles workspace_members; we still nuke the workspace explicitly
+// because it has no inbound FK from users.
+func (h *AuthHandler) cleanupOrphanedSignup(userID, workspaceID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := h.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
+		h.logger.Error("cleanup orphan user", "error", err, "user_id", userID)
+	}
+	if _, err := h.db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = ?`, workspaceID); err != nil {
+		h.logger.Error("cleanup orphan workspace", "error", err, "workspace_id", workspaceID)
+	}
 }
 
 // Bootstrap creates the first admin user on an empty database.

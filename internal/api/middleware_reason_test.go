@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -95,20 +94,27 @@ func TestMiddleware_SessionRevoked(t *testing.T) {
 }
 
 func TestMiddleware_SessionRowMissing(t *testing.T) {
-	// Session row deleted out of band (e.g. user deleted via admin).
-	// The token still verifies cryptographically, so we get session_revoked,
-	// not session_invalid. Clients treat both terminally.
-	mw, store, v, uid, sid := newMwRig(t)
+	// Session row deleted out of band (e.g. user deleted with FK
+	// CASCADE, or DB cleanup job pruned an old row). The token still
+	// verifies cryptographically, but Get returns ErrNotFound and we
+	// map that to session_revoked — clients treat both terminally.
+	//
+	// Previous version of this test only Revoke'd, which left the row
+	// present and exercised the same inactive-session branch already
+	// covered by TestMiddleware_SessionRevoked. Now we DELETE the
+	// row outright via FK CASCADE so this test actually hits the
+	// ErrNotFound path.
+	mw, _, v, uid, sid := newMwRig(t)
 	tok, _ := v.IssueAccessToken(uid, sid, "", "")
-	// Delete the row entirely.
-	if err := store.Revoke(context.Background(), sid, sessions.ReasonLogout); err != nil {
-		t.Fatalf("revoke: %v", err)
-	}
-	// Even if the row vanished entirely (FK CASCADE on user delete),
-	// the middleware's Get returns ErrNotFound which we map to
-	// session_revoked.
 
-	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	// Delete the user → FK CASCADE deletes the user_sessions row.
+	if _, err := mw.db.Exec(`DELETE FROM users WHERE id = ?`, uid); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+
+	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("inner handler should not run when session row is gone")
+	}))
 	req := httptest.NewRequest("GET", "/api/v1/x", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	rr := httptest.NewRecorder()
@@ -123,11 +129,22 @@ func TestMiddleware_SessionRowMissing(t *testing.T) {
 }
 
 func TestMiddleware_TokenExpired(t *testing.T) {
+	// Verify the middleware maps ErrTokenExpired → session_expired.
+	// Frontend's apiFetch wrapper branches on this exact reason code:
+	// session_expired triggers a refresh attempt, anything else does
+	// not. If this test ever stops working the user-visible behavior
+	// "stale token silently rotates" is broken.
 	mw, _, v, uid, sid := newMwRig(t)
-	// Forge an access token with exp in the past. We can't go through
-	// IssueAccessToken since it always uses time.Now; reach into the
-	// internal salt via the test helper.
-	tok := encryptForgedAccessToken(t, v, uid, sid, time.Now().Add(-time.Hour).Unix())
+	// Inject a clock 1 hour in the past on the validator. The issued
+	// token will have iat/exp anchored to that past moment, so by the
+	// time the middleware's real-time clock validates it, the token
+	// is well past expiry.
+	v.SetClock(func() time.Time { return time.Now().Add(-2 * time.Hour) })
+	tok, err := v.IssueAccessToken(uid, sid, "", "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	v.SetClock(time.Now) // restore for the middleware's validate call
 
 	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Fatal("expired token must not reach inner handler")
@@ -248,43 +265,6 @@ func TestMiddleware_SessionLastUsedTouched(t *testing.T) {
 
 // --- helpers ---------------------------------------------------------------
 
-// encryptForgedAccessToken produces a JWE bound to the access salt
-// with custom claims. Used to forge expired tokens that the real
-// IssueAccessToken refuses to mint (the issuer only sets exp in the
-// future). Reaches into a public-but-test-oriented Issue surface that
-// would forbid this in prod — adequate for a unit test of the
-// validator/middleware boundary.
-func encryptForgedAccessToken(t *testing.T, v *auth.JWTValidator, userID, sid string, expUnix int64) string {
-	t.Helper()
-	// The current public API doesn't expose forged-claim issuance;
-	// since middleware_auth_test.go and others have to verify expiry
-	// behavior, we ship a tiny test-only path that issues then rewrites
-	// the exp claim. Easier: produce a long-TTL token, then advance
-	// our middleware's clock backwards. But middleware uses time.Now
-	// directly. Simplest: live with a slightly synthetic token built
-	// by reaching into validate() against a forged JWE.
-	//
-	// For now, leverage the existing pattern: issue with a real future
-	// exp, then sleep enough for it to expire.  Not great. Instead,
-	// build the JWE inline using internal helpers that the validator
-	// itself exposes for testing.
-	tok, err := v.IssueAccessToken(userID, sid, "", "")
-	if err != nil {
-		t.Fatalf("issue: %v", err)
-	}
-	// Repackage the token through a known-bad-exp claim. Since the
-	// only public way is IssueAccessToken (15-min TTL), and time
-	// manipulation lives outside this scope, accept a small synthetic
-	// leak: validate the token, surface the actual ErrTokenExpired
-	// after fast-forwarding the validator's clock would require
-	// validator-level clock injection. The hammer here: just return
-	// the token, and the test relies on TestValidateExpiredToken in
-	// jwt_test.go to cover the expired path. Skip this branch.
-	t.Skip("expired-token forging via current public API requires clock injection — covered by TestValidateExpiredToken in jwt_test.go")
-	_ = tok
-	_ = expUnix
-	if errors.Is(nil, nil) {
-		return ""
-	}
-	return ""
-}
+// (encryptForgedAccessToken removed — superseded by validator.SetClock,
+// which lets tests issue tokens with arbitrary iat/exp without
+// reaching into the internals.)

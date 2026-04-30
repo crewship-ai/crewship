@@ -582,7 +582,7 @@ func TestUpdateRun_UpdatesAgentStatusOnCompletion(t *testing.T) {
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	// Use real hub for broadcast testing
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 
 	body := strings.NewReader(`{"status":"COMPLETED","exit_code":0}`)
@@ -634,7 +634,7 @@ func TestUpdateRun_FailedSetsAgentError(t *testing.T) {
 	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 
 	body := strings.NewReader(`{"status":"FAILED","error_message":"OOM killed"}`)
@@ -681,7 +681,7 @@ func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
 	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 
 	// Complete run1, but run2 is still active
@@ -728,7 +728,7 @@ func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
 	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 
 	// Fail run1, but run2 is still active — agent should stay RUNNING, not ERROR
@@ -771,7 +771,7 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
-	hub := ws.NewHub(logger, nil)
+	hub := ws.NewHub(logger, nil, ws.NopValidatorForTests, ws.NopSessionsForTests)
 	handler.SetHub(hub)
 
 	body := strings.NewReader(`{"status":"CANCELLED"}`)

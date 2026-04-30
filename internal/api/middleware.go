@@ -127,37 +127,53 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
+			// Tokens MUST carry a session id. Empty sid means either
+			// (a) a token minted before migration v60 ever ran, or
+			// (b) a hand-crafted token from a non-issuer code path.
+			// Either way it bypasses the user_sessions revocation
+			// check — i.e. signOut, password-change, admin force-
+			// logout would all fail to invalidate it. Refuse it.
+			if claims.Sid == "" {
+				m.logger.Warn("rejected access token without sid",
+					"user_id", claims.ID, "jti", claims.Jti)
+				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				return
+			}
+
 			// JWT signed by us and not yet expired — but the session
 			// may have been revoked since this token was minted.
 			// user_sessions is the source of truth for "is this
 			// session still valid"; the JWT exp is just an upper
 			// bound on revocation latency.
-			if m.sessions != nil && claims.Sid != "" {
-				sess, err := m.sessions.Get(r.Context(), claims.Sid)
-				if err != nil {
-					if errors.Is(err, sessions.ErrNotFound) {
-						writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
-						return
-					}
-					m.logger.Error("session lookup failed", "error", err)
-					writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+			if m.sessions == nil {
+				m.logger.Error("auth middleware: sessions store not configured")
+				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				return
+			}
+			sess, err := m.sessions.Get(r.Context(), claims.Sid)
+			if err != nil {
+				if errors.Is(err, sessions.ErrNotFound) {
+					writeAuthError(w, http.StatusUnauthorized, reasonSessionRevoked)
 					return
 				}
-				if !sess.Active(timeNow()) {
-					reason := reasonSessionRevoked
-					if sess.RevokedAt == nil {
-						reason = reasonSessionExpired
-					}
-					writeAuthError(w, http.StatusUnauthorized, reason)
-					return
+				m.logger.Error("session lookup failed", "error", err)
+				writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				return
+			}
+			if !sess.Active(timeNow()) {
+				reason := reasonSessionRevoked
+				if sess.RevokedAt == nil {
+					reason = reasonSessionExpired
 				}
-				// Best-effort touch — failures here are logged but
-				// don't block the request. The whole point of the
-				// throttle is that a transient SQLite error on one
-				// touch shouldn't 500 a happy-path API call.
-				if err := m.sessions.TouchLastUsed(r.Context(), claims.Sid); err != nil {
-					m.logger.Debug("touch last_used failed", "error", err)
-				}
+				writeAuthError(w, http.StatusUnauthorized, reason)
+				return
+			}
+			// Best-effort touch — failures here are logged but
+			// don't block the request. The whole point of the
+			// throttle is that a transient SQLite error on one
+			// touch shouldn't 500 a happy-path API call.
+			if err := m.sessions.TouchLastUsed(r.Context(), claims.Sid); err != nil {
+				m.logger.Debug("touch last_used failed", "error", err)
 			}
 
 			user = &AuthUser{

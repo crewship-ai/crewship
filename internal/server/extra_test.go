@@ -63,7 +63,14 @@ func hexEncode(b []byte) string {
 }
 
 // silentCfg returns a fresh Default() config.
-func silentCfg() *config.Config { return config.Default() }
+func silentCfg() *config.Config {
+	c := config.Default()
+	// Server.New now panics if NEXTAUTH_SECRET is unset. Every test
+	// using silentCfg gets a fixed test secret so the panic-on-missing
+	// guard doesn't torpedo unrelated assertions.
+	c.Auth.JWTSecret = "test-secret-for-server-extra-test-32c"
+	return c
+}
 
 // --- routes wiring ---------------------------------------------------------
 

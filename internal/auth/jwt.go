@@ -75,6 +75,14 @@ type JWTValidator struct {
 	accessKey  []byte
 	refreshKey []byte
 	wsKey      []byte
+
+	// nowFn is the time source for issuing claims (iat/exp). Tests
+	// override it via SetClock to mint already-expired tokens without
+	// sleeping; production never reassigns. Validation always uses
+	// time.Now directly because the validator's clock and the world
+	// clock are the same in production, and we want validation to
+	// reflect real wall time even in tests that issue forged tokens.
+	nowFn func() time.Time
 }
 
 // NewJWTValidator constructs a validator that can issue and verify all
@@ -101,7 +109,18 @@ func NewJWTValidator(secret string) (*JWTValidator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("derive ws key: %w", err)
 	}
-	return &JWTValidator{accessKey: a, refreshKey: r, wsKey: w}, nil
+	return &JWTValidator{accessKey: a, refreshKey: r, wsKey: w, nowFn: time.Now}, nil
+}
+
+// SetClock overrides the issue-side clock. Tests use this to mint
+// tokens with iat/exp in the past or future without sleeping.
+// Production code must never call this.
+func (v *JWTValidator) SetClock(fn func() time.Time) {
+	if fn == nil {
+		v.nowFn = time.Now
+		return
+	}
+	v.nowFn = fn
 }
 
 // IssueAccessToken creates a short-lived API/cookie token bound to a
@@ -184,7 +203,7 @@ func (v *JWTValidator) issue(key []byte, kind string, ttl time.Duration, userID,
 	if sessionID == "" && kind != KindWS {
 		return "", errors.New("session id required")
 	}
-	now := time.Now()
+	now := v.nowFn()
 	jti, err := randomJti()
 	if err != nil {
 		return "", fmt.Errorf("generate jti: %w", err)

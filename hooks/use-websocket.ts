@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import { broadcastSessionExpired } from "@/lib/api-fetch"
 
 /** WebSocket connection lifecycle status. */
 export type WSStatus = "connecting" | "connected" | "disconnected" | "error"
@@ -46,16 +47,12 @@ const MAX_RECONNECT_ATTEMPTS = 8
  *  these for application protocols. */
 const CLOSE_CODE_SESSION_REVOKED = 4401
 
-/** Same event name that lib/api-fetch fires on terminal 401. The
- *  AuthProvider listens for it and hard-redirects to /login. We
- *  redispatch from here so a WS-detected revocation has the same
- *  effect as an HTTP-detected one. */
-const AUTH_EVENT = "auth:session-expired"
-
-function emitSessionExpired(reason: string) {
-  if (typeof window === "undefined") return
-  window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason } }))
-}
+// emitSessionExpired delegates to lib/api-fetch's shared emitter so a
+// WS-detected revocation reaches not just this tab's AuthProvider but
+// every other tab via the BroadcastChannel. Without this, only the
+// tab that received the 4401 frame redirected; sibling tabs sat idle
+// on stale UI until they themselves tried an HTTP request.
+const emitSessionExpired = broadcastSessionExpired
 
 /**
  * Managed WebSocket connection with token-aware automatic reconnection.
@@ -98,7 +95,18 @@ export function useWebSocket({
     onStatusChangeRef.current?.(s)
   }, [])
 
-  const terminate = useCallback((reason: string) => {
+  // terminate has two flavors deliberately kept separate:
+  //   - terminateAuth(reason): an actual auth signal (null ticket from
+  //     /ws-token, close code 4401, in-stream session_revoked frame).
+  //     Stops retrying AND fires session-expired so the AuthProvider
+  //     hard-redirects to /login.
+  //   - terminateTransport(): the backend was unreachable past the
+  //     reconnect cap. Stops retrying with status="error" but does
+  //     NOT fire session-expired — the user's session is presumably
+  //     still valid; their backend just isn't.  Bouncing them to
+  //     /login on every restart-induced outage is exactly the UX
+  //     bug that prompted this whole rewrite.
+  const terminateAuth = useCallback((reason: string) => {
     terminatedRef.current = true
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current)
@@ -108,19 +116,36 @@ export function useWebSocket({
     emitSessionExpired(reason)
   }, [updateStatus])
 
+  const terminateTransport = useCallback(() => {
+    terminatedRef.current = true
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
+    updateStatus("error")
+  }, [updateStatus])
+
   const connect = useCallback(async () => {
-    if (terminatedRef.current) return
+    if (terminatedRef.current || disconnectingRef.current) return
 
     // Refresh-fetch the ticket on every (re)connect. A stale token
     // from before a backend restart would 401 the upgrade and trip
     // an infinite loop; re-fetching forces apiFetch to either rotate
     // the access cookie or surface session_expired.
     const token = await getTokenRef.current()
-    if (terminatedRef.current) return
+
+    // Re-check after the await: getToken can take a refresh round-trip,
+    // and the consumer (or React unmount) might have called disconnect
+    // while we were waiting. Without this guard a late-resolving token
+    // would clobber disconnectingRef back to false and open a leaked
+    // connection that then wouldn't be closed by the original
+    // disconnect call.
+    if (terminatedRef.current || disconnectingRef.current) return
+
     if (!token) {
       // /ws-token returned null → apiFetch already emitted the auth
       // event; we just need to stop trying.
-      terminate("session_expired")
+      terminateAuth("session_expired")
       return
     }
 
@@ -155,7 +180,7 @@ export function useWebSocket({
         // Server-side revoke watcher sends this frame just before
         // closing. Treat it the same as close code 4401: hard-redirect.
         if (result.data.type === "session_revoked") {
-          terminate("session_revoked")
+          terminateAuth("session_revoked")
           ws.close()
           return
         }
@@ -174,21 +199,26 @@ export function useWebSocket({
       updateStatus("disconnected")
 
       if (event.code === CLOSE_CODE_SESSION_REVOKED) {
-        terminate("session_revoked")
+        terminateAuth("session_revoked")
         return
       }
       if (disconnectingRef.current || terminatedRef.current) return
 
       const attempts = reconnectAttemptsRef.current
       if (attempts >= MAX_RECONNECT_ATTEMPTS) {
-        terminate("session_expired")
+        // Backend's been down past the budget. The user's session is
+        // (presumably) still fine — kicking them to /login here was
+        // exactly the bug that prompted the rewrite. Surface the
+        // transport failure as status="error" and let the user retry
+        // by reloading the page.
+        terminateTransport()
         return
       }
       const delay = backoffDelay(attempts)
       reconnectAttemptsRef.current = attempts + 1
       reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
     }
-  }, [url, updateStatus, terminate])
+  }, [url, updateStatus, terminateAuth, terminateTransport])
 
   const disconnect = useCallback(() => {
     disconnectingRef.current = true

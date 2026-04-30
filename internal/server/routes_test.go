@@ -72,6 +72,11 @@ func (m *mockContainer) CopyToContainer(_ context.Context, _ string, _ string, _
 
 func newTestServerWithDeps() *Server {
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-server-tests-32-chars"
+	// JWT validator is required by ws.NewHub since the security
+	// hardening pass — provide a fixed test secret instead of
+	// letting the panic-on-missing fire and abort the whole suite.
+	cfg.Auth.JWTSecret = "test-secret-for-server-routes-test-32"
 	logger := logging.New("error", "json", nil)
 	deps := &Deps{
 		Container: &mockContainer{},
@@ -173,7 +178,9 @@ func TestContainerStopWithProvider(t *testing.T) {
 func TestSessionMessagesWithStore(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-server-tests-32-chars"
 	cfg.Storage.BasePath = dir
+	cfg.Auth.JWTSecret = "test-secret-for-server-routes-test-32"
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, nil)
 	s.startedAt = time.Now()

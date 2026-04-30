@@ -57,19 +57,29 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
     return res
   }
 
-  // session_expired (or unknown): try refresh once. If the body / input
-  // wasn't safely replayable we can't reissue the request, so propagate
-  // the original 401 — caller will hit the same response shape it would
-  // have got without the wrapper.
-  const replayable = bodyIsReplayable(initWithCreds.body) && inputIsReplayable(input)
-  if (!replayable) {
+  // session_expired (or unknown): try refresh first. The previous
+  // version short-circuited to session-expired when the body wasn't
+  // replayable (uploads, streams), bouncing the user to /login on
+  // every routine 15-min access-token expiry that happened during
+  // an upload. That wasn't an auth death — only the request-replay
+  // was unsafe, the session itself was fine.
+  //
+  // New flow: always try refresh. On success, replayable callers
+  // get the request retried; non-replayable callers get the 401
+  // back to handle themselves (their next request will pass on
+  // the freshly-rotated cookies). On failure, emit session-expired
+  // and return the original 401 either way.
+  const refreshOk = await tryRefresh()
+  if (!refreshOk) {
     emitSessionExpired(reason ?? "session_expired")
     return res
   }
 
-  const refreshOk = await tryRefresh()
-  if (!refreshOk) {
-    emitSessionExpired(reason ?? "session_expired")
+  const replayable = bodyIsReplayable(initWithCreds.body) && inputIsReplayable(input)
+  if (!replayable) {
+    // Refresh worked, but we can't safely re-send this request.
+    // Hand the original 401 back; the caller's next request will
+    // use the new cookies and succeed.
     return res
   }
 
@@ -150,6 +160,18 @@ function emitSessionExpired(reason: string): void {
  *  toast in the other tab, just a clean redirect. */
 export function broadcastSignOut(): void {
   getAuthChannel()?.postMessage({ type: "signout" })
+}
+
+/** broadcastSessionExpired is the public mirror of emitSessionExpired —
+ *  exported so other auth-failure detectors (use-websocket close 4401,
+ *  in-stream session_revoked frames) reach the same propagation path
+ *  as HTTP-detected expiry: local CustomEvent + cross-tab BroadcastChannel.
+ *
+ *  Without this, a WS-only failure would only redirect the tab whose
+ *  socket died; sibling tabs would keep showing stale UI until they
+ *  themselves tried an HTTP request. */
+export function broadcastSessionExpired(reason: string): void {
+  emitSessionExpired(reason)
 }
 
 export const AUTH_EVENT = EVENT_SESSION_EXPIRED

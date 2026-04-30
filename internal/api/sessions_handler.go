@@ -105,6 +105,16 @@ func (h *SessionsHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.sessions.Revoke(r.Context(), id, sessions.ReasonAdminForce); err != nil {
+		// TOCTOU race window: the row passed Get above but vanished
+		// before Revoke could flip it (concurrent revoke, FK cascade
+		// from a user-delete in another transaction, etc.). The
+		// caller's intent — "this session is gone" — is satisfied
+		// either way; surface the same opaque 404 the missing-row
+		// branch above uses so callers don't need to distinguish.
+		if errors.Is(err, sessions.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
 		h.logger.Error("revoke session", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return

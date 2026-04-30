@@ -14,6 +14,7 @@ import (
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -154,20 +155,38 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	orch.SetConversationStore(convStore)
 
-	var jwtValidator *auth.JWTValidator
-	if cfg.Auth.JWTSecret != "" {
-		var err error
-		jwtValidator, err = auth.NewJWTValidator(cfg.Auth.JWTSecret)
-		if err != nil {
-			logger.Error("failed to create JWT validator", "error", err)
-		} else {
-			logger.Info("JWT validator configured for WebSocket auth")
-		}
-	} else {
-		logger.Warn("NEXTAUTH_SECRET not set, WebSocket auth disabled")
+	// Auth is non-optional. Previously a missing NEXTAUTH_SECRET would
+	// silently skip JWT validator construction, which then bubbled up
+	// as a Hub running without auth (revoke checks no-op'd, every
+	// upgrade accepted). The NEXTAUTH_SECRET-MUST-be-set rule is
+	// already documented in CLAUDE.md after the prod misfire — make
+	// it enforced at startup instead of leaving it for the user to
+	// notice via 404'd routes. ws.NewHub panics on nil validator, so
+	// missing secret takes the process down at startup with a clear
+	// "jwtValidator required" message.
+	if cfg.Auth.JWTSecret == "" {
+		logger.Error("NEXTAUTH_SECRET is required: cannot start server without JWT validator")
+		panic("NEXTAUTH_SECRET not set — refusing to start an unauthenticated server")
 	}
+	jwtValidator, err := auth.NewJWTValidator(cfg.Auth.JWTSecret)
+	if err != nil {
+		logger.Error("create JWT validator", "error", err)
+		panic(fmt.Sprintf("create JWT validator: %v", err))
+	}
+	logger.Info("JWT validator configured for WebSocket auth")
 
-	wsHub := ws.NewHub(logger, nil, jwtValidator)
+	// Tests construct Server with nil deps to exercise routing/auth
+	// helpers in isolation; in that mode there's no DB to back a real
+	// sessions store. Use the package-level test stub so ws.NewHub's
+	// "store required" assertion is satisfied without forcing every
+	// test to spin up a SQLite. Production callers always pass deps.
+	var sessionsStore sessions.Store
+	if deps != nil && deps.DB != nil {
+		sessionsStore = sessions.NewDBStore(deps.DB)
+	} else {
+		sessionsStore = ws.NopSessionsForTests
+	}
+	wsHub := ws.NewHub(logger, nil, jwtValidator, sessionsStore)
 
 	// File watcher broadcasts real-time file events to WebSocket clients
 	// on the crew:{crewID} channel.

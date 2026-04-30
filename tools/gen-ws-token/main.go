@@ -16,9 +16,15 @@ import (
 )
 
 func main() {
+	// Fail fast on missing secret. Generating a token against the
+	// hardcoded dev fallback used to silently produce a JWE the real
+	// server immediately rejects, which made the failure mode "WS
+	// upgrade returns 401 with no useful error" — confusing during
+	// debugging. Mirror the existing SESSION_ID handling.
 	secret := os.Getenv("NEXTAUTH_SECRET")
 	if secret == "" {
-		secret = "dev-secret-not-for-production-use-only"
+		fmt.Fprintln(os.Stderr, "NEXTAUTH_SECRET required (read from /etc/crewship/*.env on server hosts)")
+		os.Exit(2)
 	}
 
 	userID := os.Getenv("USER_ID")

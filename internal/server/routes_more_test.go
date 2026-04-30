@@ -61,6 +61,7 @@ func TestHandleAgentStart_InvalidJSON(t *testing.T) {
 func TestHandleFileList_RecursiveAndSubdir(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-routes-more-test-32ch"
 	dir := t.TempDir()
 	cfg.Storage.BasePath = dir
 	logger := logging.New("error", "json", nil)
@@ -149,6 +150,7 @@ func TestRecoverOrphanedRuns_MarksRunningCancelled(t *testing.T) {
 	mustExec(t, db.DB, `INSERT INTO agent_runs (id, agent_id, workspace_id, chat_id, status, started_at) VALUES ('r1','a1','w1','c1','RUNNING',?)`, now)
 
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-routes-more-test-32ch"
 	s := New(cfg, logger, &Deps{DB: db.DB})
 	s.startedAt = time.Now()
 
@@ -285,6 +287,7 @@ func (failingStorage) Write(_ context.Context, _ string, _ io.Reader) error {
 func TestHandleFileSave_StorageWriteFailure(t *testing.T) {
 	t.Parallel()
 	cfg := config.Default()
+	cfg.Auth.JWTSecret = "test-secret-for-routes-more-test-32ch"
 	cfg.Storage.BasePath = t.TempDir()
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, nil)

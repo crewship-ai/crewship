@@ -359,14 +359,27 @@ func scanSession(r rowScanner) (*Session, error) {
 		return nil, fmt.Errorf("scan session: %w", err)
 	}
 
-	sess.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	sess.ExpiresAt, _ = time.Parse(time.RFC3339, expiresAt)
-	sess.LastUsedAt, _ = time.Parse(time.RFC3339, lastUsedAt)
+	// Treat malformed timestamps as data corruption, not a benign
+	// zero-time. A row with garbage in revoked_at silently parsing
+	// to nil would auth a revoked session; a bad expires_at would
+	// hand back a session.Active(now) of false even when the user
+	// is fine. Surface it loudly.
+	var perr error
+	if sess.CreatedAt, perr = time.Parse(time.RFC3339, createdAt); perr != nil {
+		return nil, fmt.Errorf("scan session %s: bad created_at %q: %w", sess.ID, createdAt, perr)
+	}
+	if sess.ExpiresAt, perr = time.Parse(time.RFC3339, expiresAt); perr != nil {
+		return nil, fmt.Errorf("scan session %s: bad expires_at %q: %w", sess.ID, expiresAt, perr)
+	}
+	if sess.LastUsedAt, perr = time.Parse(time.RFC3339, lastUsedAt); perr != nil {
+		return nil, fmt.Errorf("scan session %s: bad last_used_at %q: %w", sess.ID, lastUsedAt, perr)
+	}
 	if revokedAt.Valid {
 		t, perr := time.Parse(time.RFC3339, revokedAt.String)
-		if perr == nil {
-			sess.RevokedAt = &t
+		if perr != nil {
+			return nil, fmt.Errorf("scan session %s: bad revoked_at %q: %w", sess.ID, revokedAt.String, perr)
 		}
+		sess.RevokedAt = &t
 	}
 	if revokedReason.Valid {
 		sess.RevokedReason = revokedReason.String

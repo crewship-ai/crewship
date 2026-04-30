@@ -101,32 +101,35 @@ func checkAndLockoutOnFail(ctx context.Context, db *sql.DB, email, password stri
 	}
 
 	if compareErr := bcryptCompareHashAndPassword(hashedPw, password); compareErr != nil {
-		// Wrong password. Increment the counter; if it crossed the
-		// threshold, set locked_until to now+LockoutDuration. Both
-		// branches set last_failed_login_at for audit.
-		newCount := failedCount + 1
-		if newCount >= LockoutThreshold {
-			lockedUntil := now.Add(LockoutDuration).UTC().Format(time.RFC3339)
-			if _, ue := db.ExecContext(ctx,
-				`UPDATE users
-				    SET failed_login_count = ?,
-				        locked_until = ?,
-				        last_failed_login_at = ?
-				  WHERE id = ?`,
-				newCount, lockedUntil, now.UTC().Format(time.RFC3339), userID,
-			); ue != nil {
-				return "", "", fmt.Errorf("lockout: lock: %w", ue)
-			}
-			return "", "", ErrAccountLocked
+		// Wrong password. Update the counter atomically — the previous
+		// read-modify-write was racy: two concurrent bad-password
+		// attempts could both read failedCount=N, both write N+1, and
+		// the lockout would advance by 1 instead of 2. Under the exact
+		// parallel attack pattern this code is meant to stop, that
+		// keeps the threshold artificially out of reach.
+		//
+		// SQLite supports `UPDATE ... RETURNING` since 3.35 (modernc
+		// driver carries it). One round-trip + one row written.
+		const q = `
+			UPDATE users
+			   SET failed_login_count = failed_login_count + 1,
+			       last_failed_login_at = ?,
+			       locked_until = CASE
+			           WHEN failed_login_count + 1 >= ? THEN ?
+			           ELSE locked_until
+			       END
+			 WHERE id = ?
+		 RETURNING failed_login_count, locked_until`
+		lockedUntilStr := now.Add(LockoutDuration).UTC().Format(time.RFC3339)
+		var newCount int
+		var newLockedUntil sql.NullString
+		if scanErr := db.QueryRowContext(ctx, q,
+			now.UTC().Format(time.RFC3339), LockoutThreshold, lockedUntilStr, userID,
+		).Scan(&newCount, &newLockedUntil); scanErr != nil {
+			return "", "", fmt.Errorf("lockout: bump: %w", scanErr)
 		}
-		if _, ue := db.ExecContext(ctx,
-			`UPDATE users
-			    SET failed_login_count = ?,
-			        last_failed_login_at = ?
-			  WHERE id = ?`,
-			newCount, now.UTC().Format(time.RFC3339), userID,
-		); ue != nil {
-			return "", "", fmt.Errorf("lockout: bump: %w", ue)
+		if newCount >= LockoutThreshold {
+			return "", "", ErrAccountLocked
 		}
 		return "", "", ErrInvalidCredentials
 	}

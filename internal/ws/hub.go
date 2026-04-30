@@ -105,28 +105,79 @@ func mustMarshalServerMessage(typ string) []byte {
 	return b
 }
 
-// NewHub creates a WebSocket hub. Optional deps are inspected for a *auth.JWTValidator
-// to enable token-based authentication on upgrade.
-func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *Hub {
-	h := &Hub{
-		logger:      logger,
-		chatHandler: chatHandler,
-		clients:     make(map[*Client]bool),
-		channels:    make(map[string]map[*Client]bool),
-		register:    make(chan *Client),
-		unregister:  make(chan *Client),
-		broadcast:   make(chan ChannelMessage, 256),
-		cancelFns:   make(map[string]context.CancelFunc),
+// NopValidatorForTests is a sentinel JWT validator suitable for tests
+// that exercise hub plumbing (broadcast routing, channel auth, chat
+// dispatch) without exercising the upgrade path. Production code MUST
+// NOT use this — its key is a fixed test secret.
+var NopValidatorForTests = mustNopValidator()
+
+func mustNopValidator() *auth.JWTValidator {
+	v, err := auth.NewJWTValidator("hub-test-nop-secret-of-sufficient-length")
+	if err != nil {
+		panic(fmt.Errorf("ws.NopValidatorForTests: %w", err))
 	}
-	for _, d := range deps {
-		switch v := d.(type) {
-		case *auth.JWTValidator:
-			h.jwtValidator = v
-		case sessions.Store:
-			h.sessions = v
-		}
+	return v
+}
+
+// NopSessionsForTests is a sessions.Store stub for the same purpose as
+// NopValidatorForTests. Get always returns ErrNotFound, all writes are
+// no-ops. Tests that need a working sessions row construct their own
+// *sessions.DBStore against an in-memory DB.
+var NopSessionsForTests sessions.Store = &nopHubSessions{}
+
+type nopHubSessions struct{}
+
+func (*nopHubSessions) Create(ctx context.Context, userID, ua, ip string, ttl time.Duration) (*sessions.Session, error) {
+	return nil, errors.New("nop store: Create not supported in tests")
+}
+func (*nopHubSessions) Get(ctx context.Context, id string) (*sessions.Session, error) {
+	return nil, sessions.ErrNotFound
+}
+func (*nopHubSessions) ListActiveForUser(ctx context.Context, userID string) ([]*sessions.Session, error) {
+	return nil, nil
+}
+func (*nopHubSessions) Revoke(ctx context.Context, id, reason string) error { return nil }
+func (*nopHubSessions) RevokeAllForUser(ctx context.Context, userID, reason string) (int64, error) {
+	return 0, nil
+}
+func (*nopHubSessions) TouchLastUsed(ctx context.Context, id string) error { return nil }
+func (*nopHubSessions) RotateRefreshJti(ctx context.Context, id, expected, next string) error {
+	return nil
+}
+func (*nopHubSessions) SetClock(fn func() time.Time) {}
+
+// NewHub creates a WebSocket hub. The JWT validator and sessions store
+// are required positional parameters — the previous variadic deps bag
+// allowed nil sessions which silently downgraded the upgrade path to
+// "valid signature only", letting revoked tickets reconnect until the
+// 15-min ticket TTL expired. Make the dependency contract explicit.
+//
+// chatHandler is allowed to be nil at construction time: server.go
+// wires the hub before the orchestrator is ready; SetChatHandler
+// fills it in later. Auth dependencies don't have that order problem
+// — they're always available before the hub starts.
+func NewHub(logger *slog.Logger, chatHandler ChatHandler, jwtValidator *auth.JWTValidator, sessionsStore sessions.Store) *Hub {
+	if logger == nil {
+		panic("ws.NewHub: logger required")
 	}
-	return h
+	if jwtValidator == nil {
+		panic("ws.NewHub: jwtValidator required")
+	}
+	if sessionsStore == nil {
+		panic("ws.NewHub: sessionsStore required")
+	}
+	return &Hub{
+		logger:       logger,
+		chatHandler:  chatHandler,
+		jwtValidator: jwtValidator,
+		sessions:     sessionsStore,
+		clients:      make(map[*Client]bool),
+		channels:     make(map[string]map[*Client]bool),
+		register:     make(chan *Client),
+		unregister:   make(chan *Client),
+		broadcast:    make(chan ChannelMessage, 256),
+		cancelFns:    make(map[string]context.CancelFunc),
+	}
 }
 
 // Run starts the hub's event loop, processing client registrations,
@@ -248,11 +299,9 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.jwtValidator == nil {
-		h.logger.Error("ws auth not configured")
-		http.Error(w, "ws auth not configured", http.StatusServiceUnavailable)
-		return
-	}
+	// jwtValidator and sessions are guaranteed non-nil by NewHub. No
+	// need to defend; the nil-check noise here was the original sin
+	// that made revoke-on-WS optional.
 
 	claims, err := h.jwtValidator.ValidateWS(token)
 	if err != nil {
@@ -267,7 +316,7 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	// the upgrade if the row is gone or already revoked. CLI-derived
 	// tickets have no sid (their CLI token is the auth artifact, with
 	// its own revocation table) — those skip this check.
-	if authSessionID != "" && h.sessions != nil {
+	if authSessionID != "" {
 		sess, sErr := h.sessions.Get(r.Context(), authSessionID)
 		if sErr != nil {
 			if errors.Is(sErr, sessions.ErrNotFound) {
@@ -325,7 +374,7 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 			h.register <- client
 
 			go client.writePump()
-			if authSessionID != "" && h.sessions != nil {
+			if authSessionID != "" {
 				go client.watchSessionRevocation()
 			}
 			client.readPump()
@@ -404,6 +453,13 @@ func (c *Client) writePump() {
 // force-logout from a different process, password change, etc). The 30s
 // cadence is the documented worst-case "how long until a revoked token
 // stops working over WS"; tighten only if you find that's too lax.
+//
+// Critically — and this is what CodeRabbit caught — only an explicit
+// "this session is revoked or expired" signal terminates the watcher.
+// A transient sessions.Get failure (DB timeout under load, momentary
+// network blip to a remote-DB deployment) MUST NOT close the WS:
+// kicking users to /login on every backend hiccup defeats the whole
+// "robust auth" goal. Log + skip + retry on the next tick.
 func (c *Client) watchSessionRevocation() {
 	if c.authSessionID == "" || c.hub == nil || c.hub.sessions == nil {
 		return
@@ -419,19 +475,41 @@ func (c *Client) watchSessionRevocation() {
 			ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 			sess, err := c.hub.sessions.Get(ctx, c.authSessionID)
 			cancel()
-			if err != nil || sess == nil || !sess.Active(time.Now()) {
-				// Send the terminal frame, then close. safeSend
-				// dropping is fine — readPump's defer will tear
-				// the connection down on the next read failure.
-				revokedFrame, _ := json.Marshal(ServerMessage{
-					Type:    "session_revoked",
-					Payload: map[string]string{"reason": "session_revoked"},
-				})
-				c.safeSend(revokedFrame)
-				time.Sleep(50 * time.Millisecond) // give writePump a chance to flush
-				c.conn.Close()
-				return
+
+			// Definitively revoked: row is gone or revoked_at != NULL
+			// or expires_at in the past. Close.
+			revoked := false
+			switch {
+			case errors.Is(err, sessions.ErrNotFound):
+				revoked = true
+			case err == nil && sess != nil && !sess.Active(time.Now()):
+				revoked = true
+			case err != nil:
+				// Transient — DB timeout, momentary unavailability.
+				// Skip this tick; the next one will try again. The
+				// connection stays up; the user keeps working. If
+				// the row really IS revoked the very next tick will
+				// see ErrNotFound and close cleanly.
+				c.hub.logger.Debug("ws session-revoke poll: transient error, retrying next tick",
+					"error", err, "sid", c.authSessionID)
+				continue
 			}
+
+			if !revoked {
+				continue
+			}
+
+			// Send the terminal frame, then close. safeSend dropping
+			// is fine — readPump's defer will tear the connection
+			// down on the next read failure.
+			revokedFrame, _ := json.Marshal(ServerMessage{
+				Type:    "session_revoked",
+				Payload: map[string]string{"reason": "session_revoked"},
+			})
+			c.safeSend(revokedFrame)
+			time.Sleep(50 * time.Millisecond) // give writePump a chance to flush
+			c.conn.Close()
+			return
 		}
 	}
 }
