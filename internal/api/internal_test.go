@@ -547,7 +547,9 @@ func TestCreateRun_UpdatesAgentStatus(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/internal/runs", body)
 	rr := httptest.NewRecorder()
 	handler.CreateRun(rr, req)
-	_ = jw.Flush(req.Context())
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusCreated, rr.Body.String())
@@ -586,7 +588,9 @@ func TestUpdateRun_UpdatesAgentStatusOnCompletion(t *testing.T) {
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
-	_ = jw.Flush(req.Context())
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -630,7 +634,9 @@ func TestUpdateRun_FailedSetsAgentError(t *testing.T) {
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
-	_ = jw.Flush(req.Context())
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -672,7 +678,9 @@ func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
-	_ = jw.Flush(req.Context())
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -714,7 +722,9 @@ func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
-	_ = jw.Flush(req.Context())
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
@@ -752,7 +762,9 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 	req.SetPathValue("runId", "run1")
 	rr := httptest.NewRecorder()
 	handler.UpdateRun(rr, req)
-	_ = jw.Flush(req.Context())
+	if err := jw.Flush(req.Context()); err != nil {
+		t.Fatalf("flush journal: %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
