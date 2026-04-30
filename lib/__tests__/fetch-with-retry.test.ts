@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { bodyIsReplayable } from "@/lib/fetch-with-retry"
+import { bodyIsReplayable, inputIsReplayable } from "@/lib/fetch-with-retry"
 
 describe("bodyIsReplayable", () => {
   it("treats null/undefined as replayable", () => {
@@ -36,5 +36,30 @@ describe("bodyIsReplayable", () => {
       },
     })
     expect(bodyIsReplayable(stream)).toBe(false)
+  })
+})
+
+describe("inputIsReplayable", () => {
+  it("treats string URLs as replayable", () => {
+    expect(inputIsReplayable("https://example.test/x")).toBe(true)
+  })
+
+  it("treats URL objects as replayable", () => {
+    expect(inputIsReplayable(new URL("https://example.test/x"))).toBe(true)
+  })
+
+  it("treats Request without body as replayable", () => {
+    expect(inputIsReplayable(new Request("https://example.test/x"))).toBe(true)
+  })
+
+  it("treats Request carrying a body as NOT replayable", () => {
+    // A body attached to a Request lives on the Request, not init.body —
+    // so the retry guard would otherwise miss it and re-fetch a consumed
+    // body on the second attempt.
+    const req = new Request("https://example.test/x", {
+      method: "POST",
+      body: "payload",
+    })
+    expect(inputIsReplayable(req)).toBe(false)
   })
 })

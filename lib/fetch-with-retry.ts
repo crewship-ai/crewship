@@ -24,8 +24,13 @@ export async function fetchWithRetry(
   // ReadableStream bodies can't be re-read after the first fetch consumes
   // them. Silently retrying would either throw "body stream already read"
   // or send an empty body to the second attempt — both worse than
-  // surfacing the original failure to the caller.
-  const retries = bodyIsReplayable(init?.body) ? requestedRetries : 0
+  // surfacing the original failure to the caller. Check both the explicit
+  // init.body AND any body attached to a Request passed as `input`, since
+  // either path can deliver a stream.
+  const retries =
+    bodyIsReplayable(init?.body) && inputIsReplayable(input)
+      ? requestedRetries
+      : 0
   const baseDelay = init?.baseDelayMs ?? 250
   let lastError: unknown
 
@@ -64,6 +69,17 @@ export function bodyIsReplayable(body: BodyInit | null | undefined): boolean {
   if (body == null) return true
   if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
     return false
+  }
+  return true
+}
+
+// inputIsReplayable mirrors bodyIsReplayable but for the `input` argument:
+// when callers pass `new Request(url, { body: stream })` the stream lives on
+// the Request object and isn't visible via init.body. Treat any Request
+// carrying a non-null body as not safely replayable.
+export function inputIsReplayable(input: RequestInfo | URL): boolean {
+  if (typeof Request !== "undefined" && input instanceof Request) {
+    return input.body == null
   }
   return true
 }
