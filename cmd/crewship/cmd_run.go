@@ -54,6 +54,7 @@ Examples:
 		withGitStatus, _ := cmd.Flags().GetBool("with-git-status")
 		withFiles, _ := cmd.Flags().GetStringSlice("with-file")
 		withCmds, _ := cmd.Flags().GetStringSlice("with-cmd")
+		paste, _ := cmd.Flags().GetBool("paste")
 
 		var positional []string
 		if len(args) > 1 {
@@ -70,6 +71,7 @@ Examples:
 			WithGitStatus:     withGitStatus,
 			WithFiles:         withFiles,
 			WithCmds:          withCmds,
+			Paste:             paste,
 		})
 		if err != nil {
 			return err
@@ -506,6 +508,7 @@ func init() {
 	runCmd.Flags().Bool("with-git-status", false, "Append `git status -s` as context")
 	runCmd.Flags().StringSlice("with-file", nil, "Append file content(s) as context (repeatable)")
 	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
+	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	runCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")

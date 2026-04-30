@@ -36,15 +36,20 @@ type PromptOptions struct {
 	WithFiles []string
 	// WithCmds shell commands whose stdout is appended as labelled fenced blocks.
 	WithCmds []string
+	// Paste, when true, appends the system clipboard contents as a context block.
+	// Detects pbpaste (macOS), wl-paste (Wayland), or xclip (X11) at runtime.
+	Paste bool
 
 	// MaxContextBytes caps each appended context block. 0 means no cap. Defaults to 64 KiB.
 	MaxContextBytes int
 
-	// readFile, readStdin, runCmd, isStdinPipe are injection points for tests.
-	readFile     func(string) ([]byte, error)
-	readStdin    func() ([]byte, error)
-	runCmd       func(name string, args ...string) ([]byte, error)
-	isStdinPipe  func() bool
+	// readFile, readStdin, runCmd, isStdinPipe, readPaste are injection points
+	// for tests so the helpers stay deterministic without touching the real OS.
+	readFile    func(string) ([]byte, error)
+	readStdin   func() ([]byte, error)
+	runCmd      func(name string, args ...string) ([]byte, error)
+	isStdinPipe func() bool
+	readPaste   func() ([]byte, error)
 }
 
 // BuildPrompt assembles the final prompt string from PromptOptions.
@@ -119,6 +124,14 @@ func BuildPrompt(opts PromptOptions) (string, error) {
 		appendBlock(&sb, "$ "+c, capBytes(string(out), o.MaxContextBytes))
 	}
 
+	if o.Paste {
+		data, err := o.readPaste()
+		if err != nil {
+			return "", fmt.Errorf("read clipboard: %w", err)
+		}
+		appendBlock(&sb, "clipboard", capBytes(string(data), o.MaxContextBytes))
+	}
+
 	return strings.TrimRight(sb.String(), "\n"), nil
 }
 
@@ -140,7 +153,38 @@ func withDefaults(opts PromptOptions) PromptOptions {
 	if opts.isStdinPipe == nil {
 		opts.isStdinPipe = func() bool { return !term.IsTerminal(int(os.Stdin.Fd())) }
 	}
+	if opts.readPaste == nil {
+		opts.readPaste = readClipboard
+	}
 	return opts
+}
+
+// readClipboard returns the system clipboard contents using the first
+// available helper: pbpaste (macOS), wl-paste (Wayland), xclip (X11).
+//
+// Why shell out instead of a Go binding: each platform's clipboard binding
+// has different cgo / Wayland-protocol requirements, and the CLI is meant
+// to stay a small static binary. A runtime exec(1) trades a few ms of
+// startup for zero added build complexity. If none of the helpers are
+// available (typical for headless servers), a clear error is returned so
+// the user knows what to install.
+func readClipboard() ([]byte, error) {
+	candidates := []struct {
+		name string
+		args []string
+	}{
+		{"pbpaste", nil},
+		{"wl-paste", nil},
+		{"xclip", []string{"-selection", "clipboard", "-o"}},
+		{"xsel", []string{"--clipboard", "--output"}},
+	}
+	for _, c := range candidates {
+		if _, err := exec.LookPath(c.name); err != nil {
+			continue
+		}
+		return exec.Command(c.name, c.args...).Output()
+	}
+	return nil, fmt.Errorf("no clipboard helper found (install pbpaste/wl-paste/xclip/xsel)")
 }
 
 // resolveBase returns the base prompt and whether stdin was consumed by @-.

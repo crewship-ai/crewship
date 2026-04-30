@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -247,6 +248,36 @@ func TestBuildPrompt_MultipleContexts(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in result", want)
 		}
+	}
+}
+
+func TestBuildPrompt_Paste(t *testing.T) {
+	got, err := BuildPrompt(PromptOptions{
+		Positional:  []string{"summarize"},
+		Paste:       true,
+		readPaste:   func() ([]byte, error) { return []byte("clipboard contents"), nil },
+		isStdinPipe: func() bool { return false },
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(got, "--- clipboard ---") {
+		t.Errorf("missing label: %q", got)
+	}
+	if !strings.Contains(got, "clipboard contents") {
+		t.Errorf("missing content: %q", got)
+	}
+}
+
+func TestBuildPrompt_PasteError(t *testing.T) {
+	_, err := BuildPrompt(PromptOptions{
+		Positional:  []string{"x"},
+		Paste:       true,
+		readPaste:   func() ([]byte, error) { return nil, fmt.Errorf("no helper") },
+		isStdinPipe: func() bool { return false },
+	})
+	if err == nil {
+		t.Fatal("expected error when paste fails")
 	}
 }
 
