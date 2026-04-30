@@ -144,6 +144,71 @@ func TestProvisionTrigger_NoDockerClient(t *testing.T) {
 	}
 }
 
+// TestProvisionTrigger_AlreadyRunningReturnsProblemDetails pins the 409
+// shape introduced when ProvisionTrigger switched to RFC 7807 Problem
+// Details. The interesting bit beyond "is it problem-shaped" is the
+// `job_status` extension member: clients (CLI, UI) read this directly
+// to decide whether to wait or surface "build is already running" — if
+// it ever drifts back into a free-form detail string, callers parsing
+// JSON would silently lose that signal.
+func TestProvisionTrigger_AlreadyRunningReturnsProblemDetails(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	h := newProvisioningHandlerForRateLimitTest(t, db, logger)
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	crewID := "crew-already-running"
+	if _, err := db.Exec(
+		`INSERT INTO crews (id, workspace_id, name, slug, devcontainer_config)
+		 VALUES (?, ?, 'Devs', 'devs', ?)`,
+		crewID, wsID, `{"image":"ubuntu:22.04","features":{"ghcr.io/devcontainers/features/go:1":{}}}`,
+	); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+
+	// Seed an in-flight job directly so the trigger short-circuits to 409.
+	h.mu.Lock()
+	h.jobs[crewID] = &ProvisionJob{CrewID: crewID, Status: "running"}
+	h.mu.Unlock()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/crews/{crewId}/provision", h.ProvisionTrigger)
+
+	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/provision", nil)
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusConflict, rr.Body.String())
+	}
+	var resp struct {
+		Type      string `json:"type"`
+		Title     string `json:"title"`
+		Status    int    `json:"status"`
+		Detail    string `json:"detail"`
+		Instance  string `json:"instance"`
+		JobStatus string `json:"job_status"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != http.StatusConflict {
+		t.Errorf("problem.status = %d, want %d", resp.Status, http.StatusConflict)
+	}
+	if resp.JobStatus != "running" {
+		t.Errorf("job_status extension = %q, want %q", resp.JobStatus, "running")
+	}
+	if resp.Detail == "" {
+		t.Error("problem.detail must be non-empty")
+	}
+	if resp.Type != "about:blank" {
+		t.Errorf("problem.type = %q, want %q", resp.Type, "about:blank")
+	}
+}
+
 // TestEnqueueForCrew_RateLimitDoesNotPublishGhostJob verifies the
 // TOCTOU window between "publish pending job" and "acquire rate-limit
 // slot" is closed. Previously a caller rejected by the limiter would
