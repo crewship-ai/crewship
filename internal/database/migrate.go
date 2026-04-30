@@ -564,6 +564,17 @@ CREATE INDEX IF NOT EXISTS idx_user_preferences_user ON user_preferences(user_id
 ALTER TABLE chats ADD COLUMN origin TEXT;
 CREATE INDEX IF NOT EXISTS idx_chats_origin ON chats(origin) WHERE origin IS NOT NULL;
 `},
+	// Phase D of unified-journal: composite index for the Runs aggregation
+	// view. journal.ListRuns groups by trace_id within a workspace; the
+	// existing idx_journal_trace is global and forces SQLite to scan the
+	// whole table when narrowing to one workspace. The (workspace_id,
+	// trace_id) partial index lets the query planner do an index-only
+	// range scan keyed on the workspace.
+	{version: 60, name: "add_journal_ws_trace_index", sql: `
+CREATE INDEX IF NOT EXISTS idx_journal_ws_trace
+    ON journal_entries(workspace_id, trace_id)
+    WHERE trace_id IS NOT NULL;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
