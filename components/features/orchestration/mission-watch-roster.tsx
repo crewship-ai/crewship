@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Bell, Wrench } from "lucide-react"
+import { AlertTriangle, Bell, CheckCircle2, MessageCircle, Wrench } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 
 interface MissionWatchRosterProps {
@@ -147,12 +147,24 @@ function InboxRow({ item }: { item: InboxItem }) {
     : item.kind === "question"
     ? "border-blue-500/60 bg-blue-500/5"
     : "border-emerald-500/60 bg-emerald-500/5"
-  const icon = item.kind === "approval" ? "⚠️" : item.kind === "question" ? "💬" : "✅"
+  // Project rule (components/**/*.tsx): "ONLY lucide-react for icons".
+  // Map each inbox kind to its lucide glyph + a tone-matching colour so
+  // the row stays visually distinct without emoji.
+  const Icon = item.kind === "approval"
+    ? AlertTriangle
+    : item.kind === "question"
+    ? MessageCircle
+    : CheckCircle2
+  const iconClass = item.kind === "approval"
+    ? "text-amber-500"
+    : item.kind === "question"
+    ? "text-blue-500"
+    : "text-emerald-500"
   const label = item.kind === "approval" ? "Approval" : item.kind === "question" ? "Question" : "Result"
   return (
     <li className={`rounded border-l-2 ${tone} p-3`}>
       <div className="text-xs font-semibold mb-1 flex items-center gap-1">
-        <span>{icon}</span>
+        <Icon className={`h-3.5 w-3.5 ${iconClass}`} aria-hidden="true" />
         <span>{label}</span>
         <span className="ml-auto font-mono text-[10px] text-blue-600 dark:text-blue-400">
           @{item.agent}

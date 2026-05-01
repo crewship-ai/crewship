@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { Check, Clock, Lock, Pause, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { MissionTask } from "@/lib/types/mission"
 
@@ -82,28 +83,35 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
           ))}
         </svg>
 
-        {layout.nodes.map((n) => (
-          <div
-            key={n.task.id}
-            className={cn(
-              "absolute rounded-md border-2 bg-card text-xs shadow-sm px-3 py-2",
-              statusBorder(n.task.status),
-            )}
-            style={{
-              left: n.x,
-              top: n.y,
-              width: NODE_WIDTH,
-            }}
-          >
-            <div className="font-semibold text-foreground line-clamp-2">
-              {statusEmoji(n.task.status)} #{n.task.task_order} {n.task.title}
+        {layout.nodes.map((n) => {
+          const StatusIcon = statusIcon(n.task.status)
+          return (
+            <div
+              key={n.task.id}
+              className={cn(
+                "absolute rounded-md border-2 bg-card text-xs shadow-sm px-3 py-2",
+                statusBorder(n.task.status),
+              )}
+              style={{
+                left: n.x,
+                top: n.y,
+                width: NODE_WIDTH,
+              }}
+            >
+              <div className="font-semibold text-foreground line-clamp-2 flex items-center gap-1.5">
+                <StatusIcon
+                  className={cn("h-3.5 w-3.5 flex-shrink-0", statusIconClass(n.task.status))}
+                  aria-hidden="true"
+                />
+                <span>#{n.task.task_order} {n.task.title}</span>
+              </div>
+              <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                {n.task.agent_slug ? `@${n.task.agent_slug}` : "unassigned"}
+                {n.task.depends_on ? ` · dep: ${n.task.depends_on}` : ""}
+              </div>
             </div>
-            <div className="mt-1 font-mono text-[10px] text-muted-foreground">
-              {n.task.agent_slug ? `@${n.task.agent_slug}` : "unassigned"}
-              {n.task.depends_on ? ` · dep: ${n.task.depends_on}` : ""}
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       <p className="mt-4 text-xs italic text-muted-foreground text-center">
@@ -268,18 +276,38 @@ function statusBorder(status: MissionTask["status"]): string {
   }
 }
 
-function statusEmoji(status: MissionTask["status"]): string {
+// Project rule (components/**/*.tsx): "ONLY lucide-react for icons".
+// Status → glyph mapping mirrors the wireframe semantics: hourglass for
+// in-flight, check for done, pause for awaiting approval, X for failed,
+// lock for blocked/queued.
+function statusIcon(status: MissionTask["status"]) {
   switch (status) {
     case "IN_PROGRESS":
-      return "⏳"
+      return Clock
     case "COMPLETED":
     case "SKIPPED":
-      return "✅"
+      return Check
     case "AWAITING_APPROVAL":
-      return "⏸️"
+      return Pause
     case "FAILED":
-      return "❌"
+      return X
     default:
-      return "🔒"
+      return Lock
+  }
+}
+
+function statusIconClass(status: MissionTask["status"]): string {
+  switch (status) {
+    case "IN_PROGRESS":
+      return "text-blue-500"
+    case "COMPLETED":
+    case "SKIPPED":
+      return "text-emerald-500"
+    case "AWAITING_APPROVAL":
+      return "text-amber-500"
+    case "FAILED":
+      return "text-rose-500"
+    default:
+      return "text-muted-foreground"
   }
 }

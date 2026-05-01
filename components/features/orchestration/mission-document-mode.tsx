@@ -70,8 +70,8 @@ export function MissionDocumentMode({ mission }: MissionDocumentModeProps) {
       )}
 
       <p className="mt-6 text-xs italic text-muted-foreground font-sans">
-        Same mission as Spec Mode — different lens. Edits here propagate
-        to the structured task list and back.
+        Same mission as Spec Mode — different lens. Switch to Spec Mode
+        to edit the structured task list.
       </p>
     </article>
   )
