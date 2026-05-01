@@ -156,14 +156,16 @@ type Orchestrator struct {
 	// container recreation) are harmless — a new container ID gets a
 	// fresh slot and the first snapshot lands as expected.
 	//
-	// snapshotPending tracks containers where one goroutine has claimed
-	// the emit slot but hasn't completed yet. Concurrent goroutines that
-	// see a containerID in this set skip work entirely (a single in-flight
-	// emit is enough). The mutex covers both maps so claim+publish is
-	// atomic relative to the read path.
+	// snapshotPending maps containerID -> the hash currently being emitted
+	// by some goroutine. A concurrent caller with the *same* hash skips
+	// (the in-flight emit dedupes for it); a caller with a *different*
+	// hash falls through and emits its own — silently dropping a
+	// different-hash snapshot would lose real state changes that happened
+	// while a prior probe was mid-flight. The mutex covers both maps so
+	// claim+publish is atomic relative to the read path.
 	snapshotHashMu    sync.Mutex
 	snapshotHashCache map[string]string
-	snapshotPending   map[string]bool
+	snapshotPending   map[string]string
 
 	// journal is the Crew Journal emitter. Nil-safe: SetJournal replaces it
 	// with a no-op. Used by Crow's Nest emit points (exec.command,
@@ -505,7 +507,7 @@ func New(
 		crews:             make(map[string]*crewState),
 		tmuxCache:         make(map[string]bool),
 		snapshotHashCache: make(map[string]string),
-		snapshotPending:   make(map[string]bool),
+		snapshotPending:   make(map[string]string),
 	}
 }
 

@@ -54,28 +54,44 @@ func (o *Orchestrator) recordContainerSnapshot(ctx context.Context, req AgentRun
 
 	hash := snap.Hash()
 	// Atomic claim under the lock: skip if (a) an identical snapshot was
-	// already emitted, or (b) another goroutine already claimed the emit
-	// slot for this container — a single in-flight emit dedupes concurrent
-	// callers since the resulting journal entry will satisfy them all.
+	// already emitted, or (b) another goroutine is already in-flight
+	// emitting THIS SAME hash. A goroutine with a *different* hash from
+	// the in-flight one falls through and emits — different hashes
+	// represent real state changes that must not be silently dropped.
+	// The fall-through caller does NOT overwrite the in-flight caller's
+	// pending entry; only an empty slot is claimed, so the original
+	// dedup contract for the original hash stays intact.
 	o.snapshotHashMu.Lock()
 	if prev, seen := o.snapshotHashCache[containerID]; seen && prev == hash {
 		o.snapshotHashMu.Unlock()
 		return
 	}
-	if o.snapshotPending[containerID] {
+	existing, hasPending := o.snapshotPending[containerID]
+	if hasPending && existing == hash {
 		o.snapshotHashMu.Unlock()
 		return
 	}
-	o.snapshotPending[containerID] = true
+	claimed := !hasPending
+	if claimed {
+		o.snapshotPending[containerID] = hash
+	}
 	o.snapshotHashMu.Unlock()
 	defer func() {
-		// Unconditionally release the pending claim. The hash itself
-		// is published via snapshotHashCache only on a successful emit
-		// (see below), so a failure here leaves no entry behind and
-		// the next caller retries — preserving the existing
-		// "failed-emit doesn't poison the dedup cache" invariant.
+		// Release only OUR pending claim. If we didn't claim (a
+		// different-hash emit was already in-flight), don't touch
+		// snapshotPending at all — the original owner's defer will
+		// clean it up. The hash is published via snapshotHashCache
+		// only on a successful emit (see below), so a failure here
+		// leaves no entry and the next caller retries — preserving
+		// the existing "failed-emit doesn't poison the dedup cache"
+		// invariant.
+		if !claimed {
+			return
+		}
 		o.snapshotHashMu.Lock()
-		delete(o.snapshotPending, containerID)
+		if o.snapshotPending[containerID] == hash {
+			delete(o.snapshotPending, containerID)
+		}
 		o.snapshotHashMu.Unlock()
 	}()
 
