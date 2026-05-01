@@ -155,8 +155,15 @@ type Orchestrator struct {
 	// journal entry when nothing actually changed. Stale entries (after
 	// container recreation) are harmless — a new container ID gets a
 	// fresh slot and the first snapshot lands as expected.
+	//
+	// snapshotPending tracks containers where one goroutine has claimed
+	// the emit slot but hasn't completed yet. Concurrent goroutines that
+	// see a containerID in this set skip work entirely (a single in-flight
+	// emit is enough). The mutex covers both maps so claim+publish is
+	// atomic relative to the read path.
 	snapshotHashMu    sync.Mutex
 	snapshotHashCache map[string]string
+	snapshotPending   map[string]bool
 
 	// journal is the Crew Journal emitter. Nil-safe: SetJournal replaces it
 	// with a no-op. Used by Crow's Nest emit points (exec.command,
@@ -498,6 +505,7 @@ func New(
 		crews:             make(map[string]*crewState),
 		tmuxCache:         make(map[string]bool),
 		snapshotHashCache: make(map[string]string),
+		snapshotPending:   make(map[string]bool),
 	}
 }
 

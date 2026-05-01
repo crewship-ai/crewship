@@ -53,12 +53,31 @@ func (o *Orchestrator) recordContainerSnapshot(ctx context.Context, req AgentRun
 	}
 
 	hash := snap.Hash()
+	// Atomic claim under the lock: skip if (a) an identical snapshot was
+	// already emitted, or (b) another goroutine already claimed the emit
+	// slot for this container — a single in-flight emit dedupes concurrent
+	// callers since the resulting journal entry will satisfy them all.
 	o.snapshotHashMu.Lock()
-	prev, seen := o.snapshotHashCache[containerID]
-	o.snapshotHashMu.Unlock()
-	if seen && prev == hash {
+	if prev, seen := o.snapshotHashCache[containerID]; seen && prev == hash {
+		o.snapshotHashMu.Unlock()
 		return
 	}
+	if o.snapshotPending[containerID] {
+		o.snapshotHashMu.Unlock()
+		return
+	}
+	o.snapshotPending[containerID] = true
+	o.snapshotHashMu.Unlock()
+	defer func() {
+		// Unconditionally release the pending claim. The hash itself
+		// is published via snapshotHashCache only on a successful emit
+		// (see below), so a failure here leaves no entry behind and
+		// the next caller retries — preserving the existing
+		// "failed-emit doesn't poison the dedup cache" invariant.
+		o.snapshotHashMu.Lock()
+		delete(o.snapshotPending, containerID)
+		o.snapshotHashMu.Unlock()
+	}()
 
 	payload := map[string]any{
 		"hash": hash,
