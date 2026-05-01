@@ -11,10 +11,15 @@ import (
 // CLIConfig holds persisted CLI settings including server URL, workspace,
 // auth token, and output format.
 type CLIConfig struct {
-	Server    string `yaml:"server,omitempty"`
-	Workspace string `yaml:"workspace,omitempty"`
-	Token     string `yaml:"token,omitempty"`
-	Format    string `yaml:"format,omitempty"`
+	Server       string `yaml:"server,omitempty"`
+	Workspace    string `yaml:"workspace,omitempty"`
+	Token        string `yaml:"token,omitempty"`
+	Format       string `yaml:"format,omitempty"`
+	DefaultAgent string `yaml:"default_agent,omitempty"`
+	// Markdown enables ANSI markdown rendering for streamed agent text.
+	// "auto" (default) renders only when stdout is a TTY; "on" forces;
+	// "off" disables. Overridden by --no-markdown / --markdown flags.
+	Markdown string `yaml:"markdown,omitempty"`
 }
 
 // DefaultConfigDir returns the path to ~/.crewship.
@@ -126,6 +131,31 @@ func ResolveWorkspace(flagVal string, cfg *CLIConfig) string {
 	}
 	if cfg != nil && cfg.Workspace != "" {
 		return cfg.Workspace
+	}
+	return ""
+}
+
+// ResolveDefaultAgent returns the agent slug to use by default for `crewship ask`
+// when no --agent flag is given. Order of precedence:
+//
+//	flag > CREWSHIP_DEFAULT_AGENT env var > config.default_agent
+//
+// Returns empty if none are set; callers decide whether to error or
+// open the interactive picker.
+//
+// The env var slot exists so users with multiple shells or shell-scoped
+// agent contexts (e.g. a frontend project shell vs a backend project
+// shell) can override the persisted default without `crewship config set`
+// every time.
+func ResolveDefaultAgent(flagVal string, cfg *CLIConfig) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if v := os.Getenv("CREWSHIP_DEFAULT_AGENT"); v != "" {
+		return v
+	}
+	if cfg != nil && cfg.DefaultAgent != "" {
+		return cfg.DefaultAgent
 	}
 	return ""
 }

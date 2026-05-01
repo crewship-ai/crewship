@@ -16,48 +16,77 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run <agent-slug> [prompt]",
-	Short: "Run an agent with a prompt",
+	Use:               "run <agent-slug> [prompt]",
+	Short:             "Run an agent with a prompt",
+	ValidArgsFunction: completeAgentSlug,
 	Long: `Run an agent with a prompt and stream output to the terminal.
 
 Examples:
   crewship run viktor "Create a REST API"
   crewship run viktor --prompt @task.txt
+  crewship run viktor --prompt @-           # read from stdin
+  cat issue.md | crewship run viktor "fix"  # stdin auto-appended as context
+  git diff | crewship run viktor "review" --with-git-status
   crewship run viktor --interactive
   crewship run viktor --chat <chatId> "follow-up question"`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireAuth(); err != nil {
-			return err
-		}
-		if err := requireWorkspace(); err != nil {
-			return err
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		estimate, _ := cmd.Flags().GetBool("estimate")
+		offline := dryRun || estimate
+
+		// Auth/workspace + agent resolution are skipped for offline modes
+		// (--dry-run / --estimate) so users can preview prompts and token
+		// counts without a login or server.
+		if !offline {
+			if err := requireAuth(); err != nil {
+				return err
+			}
+			if err := requireWorkspace(); err != nil {
+				return err
+			}
 		}
 
 		agentSlug := args[0]
-		client := newAPIClient()
+		var client *cli.Client
+		var agentID string
+		if !offline {
+			client = newAPIClient()
+			id, err := resolveAgentID(client, agentSlug)
+			if err != nil {
+				return err
+			}
+			agentID = id
+		}
 
-		// Resolve agent
-		agentID, err := resolveAgentID(client, agentSlug)
+		flagPrompt, _ := cmd.Flags().GetString("prompt")
+		withGitDiff, _ := cmd.Flags().GetBool("with-git-diff")
+		withGitDiffStaged, _ := cmd.Flags().GetBool("with-git-staged")
+		withGitLog, _ := cmd.Flags().GetBool("with-git-log")
+		withGitStatus, _ := cmd.Flags().GetBool("with-git-status")
+		withFiles, _ := cmd.Flags().GetStringSlice("with-file")
+		withCmds, _ := cmd.Flags().GetStringSlice("with-cmd")
+		paste, _ := cmd.Flags().GetBool("paste")
+
+		var positional []string
+		if len(args) > 1 {
+			positional = args[1:]
+		}
+
+		prompt, err := cli.BuildPrompt(cmd.Context(), cli.PromptOptions{
+			Positional:        positional,
+			PromptFlag:        flagPrompt,
+			AutoStdin:         true,
+			WithGitDiff:       withGitDiff,
+			WithGitDiffStaged: withGitDiffStaged,
+			WithGitLog:        withGitLog,
+			WithGitStatus:     withGitStatus,
+			WithFiles:         withFiles,
+			WithCmds:          withCmds,
+			Paste:             paste,
+		})
 		if err != nil {
 			return err
-		}
-
-		// Get prompt
-		prompt := ""
-		if len(args) > 1 {
-			prompt = strings.Join(args[1:], " ")
-		}
-		if p, _ := cmd.Flags().GetString("prompt"); p != "" {
-			if strings.HasPrefix(p, "@") {
-				data, err := os.ReadFile(p[1:])
-				if err != nil {
-					return fmt.Errorf("read prompt file: %w", err)
-				}
-				prompt = string(data)
-			} else {
-				prompt = p
-			}
 		}
 
 		interactive, _ := cmd.Flags().GetBool("interactive")
@@ -68,6 +97,19 @@ Examples:
 
 		if !interactive && prompt == "" {
 			return fmt.Errorf("prompt is required (provide as argument, --prompt flag, or use --interactive)")
+		}
+
+		if dryRun {
+			fmt.Print(prompt)
+			if !strings.HasSuffix(prompt, "\n") {
+				fmt.Println()
+			}
+			return nil
+		}
+
+		if estimate {
+			fmt.Print(cli.FormatEstimate(prompt))
+			return nil
 		}
 
 		if timeoutSecs > 0 {
@@ -108,19 +150,66 @@ Examples:
 
 		server := cli.ResolveServer(flagServer, cliCfg)
 
+		md := resolveMarkdownFromCmd(cmd)
+		saveFile, err := openSaveFile(cmd)
+		if err != nil {
+			return err
+		}
+		if saveFile != nil {
+			defer saveFile.Close()
+		}
+
 		if interactive {
-			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet)
+			return runInteractive(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile)
 		}
 
 		if noStream {
-			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet)
+			return runNoStream(server, wsToken, agentID, chatID, prompt, quiet, md, saveFile)
 		}
 
-		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet)
+		return runStream(server, wsToken, agentID, agentSlug, chatID, prompt, quiet, md, saveFile)
 	},
 }
 
-func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool) error {
+// resolveMarkdownFromCmd reads --markdown / --no-markdown and returns a renderer
+// (or nil if rendering is disabled). Callers pass the result through to
+// streaming/no-stream printers.
+func resolveMarkdownFromCmd(cmd *cobra.Command) *cli.MarkdownRenderer {
+	on, _ := cmd.Flags().GetBool("markdown")
+	off, _ := cmd.Flags().GetBool("no-markdown")
+	setting := ""
+	if cliCfg != nil {
+		setting = cliCfg.Markdown
+	}
+	if cli.ResolveMarkdown(setting, on, off, flagNoColor) {
+		return cli.NewMarkdownRenderer()
+	}
+	return nil
+}
+
+// openSaveFile reads the --save flag and opens an atomic file for tee'ing
+// agent text. Returns (nil, nil) when the flag is unset.
+//
+// Atomic = a tempfile in the target's directory; the caller must call
+// Commit() on the success path. A crash mid-stream leaves the previous
+// file (or no file) intact rather than a half-written replacement.
+//
+// Files are truncated on commit — `--save` is "save this run's output",
+// not "append to a log". Append behaviour is trivially available via
+// shell `tee -a` if the user really wants it.
+func openSaveFile(cmd *cobra.Command) (*cli.AtomicFile, error) {
+	path, _ := cmd.Flags().GetString("save")
+	if path == "" {
+		return nil, nil
+	}
+	f, err := cli.NewAtomicFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("open save file: %w", err)
+	}
+	return f, nil
+}
+
+func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -151,10 +240,10 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 		return fmt.Errorf("send message: %w", err)
 	}
 
-	return streamEvents(ws, quiet)
+	return streamEvents(ws, quiet, md, save)
 }
 
-func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool) error {
+func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -203,8 +292,34 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool)
 
 	text := fullText.String()
 	if text != "" {
-		fmt.Print(text)
-		if !strings.HasSuffix(text, "\n") {
+		// Save raw (un-styled) text to file so the saved artefact is plain
+		// markdown — useful for piping into tools or committing. Failures
+		// here (disk full, permission denied) propagate as a non-zero exit
+		// so scripts can rely on the artefact being either complete or
+		// known-broken.
+		if save != nil {
+			if _, err := save.WriteString(text); err != nil {
+				return fmt.Errorf("save write: %w", err)
+			}
+			if !strings.HasSuffix(text, "\n") {
+				if _, err := save.WriteString("\n"); err != nil {
+					return fmt.Errorf("save write: %w", err)
+				}
+			}
+			// Commit only on a clean stream — error/missing-done branches below
+			// fall through without committing so the tempfile is discarded.
+			if streamErr == "" && gotDone {
+				if err := save.Commit(); err != nil {
+					return fmt.Errorf("save commit: %w", err)
+				}
+			}
+		}
+		toPrint := text
+		if md != nil {
+			toPrint = md.Render(text)
+		}
+		fmt.Print(toPrint)
+		if !strings.HasSuffix(toPrint, "\n") {
 			fmt.Println()
 		}
 	}
@@ -231,7 +346,7 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool)
 	return nil
 }
 
-func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool) error {
+func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPrompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
 	ws, err := cli.NewWSClient(serverURL, wsToken)
 	if err != nil {
 		return err
@@ -264,7 +379,7 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 		if err := ws.SendMessage(agentChannel, chatID, initialPrompt); err != nil {
 			return fmt.Errorf("send message: %w", err)
 		}
-		if err := streamEvents(ws, quiet); err != nil {
+		if err := streamEvents(ws, quiet, md, save); err != nil {
 			return err
 		}
 	}
@@ -289,17 +404,60 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 			return fmt.Errorf("send message: %w", err)
 		}
 
-		if err := streamEvents(ws, quiet); err != nil {
+		if err := streamEvents(ws, quiet, md, save); err != nil {
 			return err
 		}
 	}
 }
 
-func streamEvents(ws *cli.WSClient, quiet bool) error {
+func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
+	flush := func() {
+		if md != nil {
+			fmt.Print(md.Flush())
+		}
+	}
+	// saveErr captures the first error from Write/Commit so a script-mode
+	// caller can detect that --save failed even though the on-screen
+	// stream looked fine. Returning it from streamEvents propagates to a
+	// non-zero exit at the cobra level.
+	var saveErr error
+	emitText := func(s string) {
+		// Always write raw text to the save file before any markdown
+		// styling — saved files should be plain markdown the user can
+		// re-process, not a screencast of ANSI codes.
+		if save != nil && saveErr == nil {
+			if _, err := save.WriteString(s); err != nil {
+				saveErr = fmt.Errorf("save write: %w", err)
+				fmt.Fprintf(os.Stderr, "%s[save]%s write failed: %v\n", cli.Yellow, cli.Reset, err)
+			}
+		}
+		if md != nil {
+			fmt.Print(md.Write(s))
+		} else {
+			fmt.Print(s)
+		}
+	}
+	// joinErrs combines a save-time error with a stream-time error so
+	// the caller sees both. Without this, "agent error" and "save commit
+	// failed" together would lose one — exit-code reliability matters
+	// for scripts wrapping run/ask.
+	joinErrs := func(streamErr error) error {
+		if saveErr != nil && streamErr != nil {
+			return fmt.Errorf("%v; %w", saveErr, streamErr)
+		}
+		if streamErr != nil {
+			return streamErr
+		}
+		return saveErr
+	}
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
-			return nil
+			flush()
+			// A dropped WS connection is a real failure — exit non-zero so
+			// scripts (e.g. `crewship run x "y" || alert`) notice. Was
+			// previously masking this as success when --save was unset.
+			return joinErrs(fmt.Errorf("ws read: %w", err))
 		}
 
 		event, err := cli.ParseChatEvent(msg)
@@ -312,7 +470,7 @@ func streamEvents(ws *cli.WSClient, quiet bool) error {
 
 		switch event.Type {
 		case "text":
-			fmt.Print(event.Content)
+			emitText(event.Content)
 		case "thinking":
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "%s[thinking]%s %s\n", cli.Gray, cli.Reset, truncate(event.Content, 100))
@@ -330,13 +488,23 @@ func streamEvents(ws *cli.WSClient, quiet bool) error {
 				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, event.Content)
 			}
 		case "error":
+			flush()
+			// Don't commit save — defer Close in the caller discards the
+			// tempfile so an aborted run never overwrites a previous artefact.
 			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
-			return nil
+			return joinErrs(fmt.Errorf("agent error: %s", event.Content))
 		case "done":
+			flush()
+			if save != nil && saveErr == nil {
+				if err := save.Commit(); err != nil {
+					saveErr = fmt.Errorf("save commit: %w", err)
+					fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
+				}
+			}
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "\n%s[done]%s\n", cli.Green, cli.Reset)
 			}
-			return nil
+			return saveErr
 		}
 	}
 }
@@ -403,12 +571,24 @@ var runListCmd = &cobra.Command{
 }
 
 func init() {
-	runCmd.Flags().StringP("prompt", "p", "", "Prompt text or @file.txt")
+	runCmd.Flags().StringP("prompt", "p", "", "Prompt text, @file, or @- for stdin")
 	runCmd.Flags().Bool("interactive", false, "Interactive chat mode")
 	runCmd.Flags().String("chat", "", "Continue existing chat (chat ID)")
 	runCmd.Flags().Bool("no-stream", false, "Wait for completion, show only result")
 	runCmd.Flags().BoolP("quiet", "q", false, "Only output text, no meta info")
 	runCmd.Flags().Int("timeout", 0, "Timeout in seconds (0 = no timeout)")
+	runCmd.Flags().Bool("with-git-diff", false, "Append `git diff` as context")
+	runCmd.Flags().Bool("with-git-staged", false, "Append `git diff --staged` as context")
+	runCmd.Flags().Bool("with-git-log", false, "Append last 20 commits as context")
+	runCmd.Flags().Bool("with-git-status", false, "Append `git status -s` as context")
+	runCmd.Flags().StringSlice("with-file", nil, "Append file content(s) as context (repeatable)")
+	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
+	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
+	runCmd.Flags().Bool("dry-run", false, "Print the assembled prompt (with all context) and exit without running")
+	runCmd.Flags().Bool("estimate", false, "Print token count + cost estimate for the prompt and exit (no run)")
+	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
+	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
+	runCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")
 
 	runCmd.AddCommand(runListCmd)
 }

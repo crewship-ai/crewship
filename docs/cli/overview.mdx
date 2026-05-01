@@ -24,6 +24,8 @@ Every command inherits these persistent flags:
 | `--verbose` | `-v` | `bool` | `false` | Verbose output. |
 | `--no-color` | | `bool` | `false` | Disable ANSI colors. |
 
+In addition: `CREWSHIP_DEFAULT_AGENT` env var sets the default agent for `crewship ask` / `crewship explain`. Resolution order: command-line flag → env var → config key.
+
 ## Authentication
 
 ### `crewship init`
@@ -116,32 +118,208 @@ Run an agent with a prompt and stream output to the terminal.
 crewship run <agent-slug> [prompt]
 crewship run viktor "Create a REST API"
 crewship run viktor --prompt @task.txt
+crewship run viktor --prompt @-                     # read prompt from stdin
+cat error.log | crewship run viktor "what's wrong?" # auto-append stdin as context
+crewship run viktor "review" --with-git-diff
+crewship run viktor "explain" --with-file notes.md --with-file plan.md
 crewship run viktor --interactive
 crewship run viktor --chat <chatId> "follow-up question"
 ```
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--prompt` | `-p` | `string` | | Prompt text or `@file.txt` to read from file. |
+| `--prompt` | `-p` | `string` | | Prompt text, `@file.txt`, or `@-` for stdin. |
 | `--interactive` | | `bool` | `false` | Interactive chat mode (REPL). |
 | `--chat` | | `string` | | Continue an existing chat by chat ID. |
 | `--no-stream` | | `bool` | `false` | Wait for completion, show only the final result. |
 | `--quiet` | `-q` | `bool` | `false` | Only output text, suppress meta info. |
 | `--timeout` | | `int` | `0` | Timeout in seconds (0 = no timeout). |
+| `--with-git-diff` | | `bool` | `false` | Append `git diff` (working tree) as context. |
+| `--with-git-staged` | | `bool` | `false` | Append `git diff --staged` as context. |
+| `--with-git-log` | | `bool` | `false` | Append last 20 commits as context. |
+| `--with-git-status` | | `bool` | `false` | Append `git status -s` as context. |
+| `--with-file` | | `[]string` | | Append file contents as context (repeatable). |
+| `--with-cmd` | | `[]string` | | Append shell command output as context (repeatable). |
+| `--paste` | | `bool` | `false` | Append system clipboard as context. |
+| `--save` | | `string` | | Tee response to this path (atomic write, no ANSI). |
+| `--dry-run` | | `bool` | `false` | Print assembled prompt and exit without sending. |
+| `--estimate` | | `bool` | `false` | Print token count + cost estimate and exit. |
+| `--markdown` | | `bool` | _auto on TTY_ | Force markdown ANSI styling. |
+| `--no-markdown` | | `bool` | `false` | Disable markdown ANSI styling. |
 
 <Tip>
 In interactive mode, press Ctrl+C to cancel the current run. Press Ctrl+D to exit the session.
+
+Stdin is auto-detected when piped — `git diff | crewship run viktor "review"` works without an explicit flag. Piped data is appended after the positional prompt under a `--- stdin ---` separator. Each context block is capped at 64 KiB and labelled.
 </Tip>
 
 #### `crewship run list`
 
-List recent runs across all agents.
+List recent runs across all agents. See also `crewship history` for a friendlier view with optional prompt previews.
 
 ```bash
 crewship run list
 ```
 
 **Output columns:** ID, AGENT, STATUS, TRIGGER, CREATED, FINISHED
+
+### `crewship ask`
+
+Low-friction one-shot prompt against a default agent. Inherits the same `--with-*`, `--save`, `--markdown`, `--dry-run`, `--estimate`, and `--paste` flags as `run`. The agent is resolved from `--agent` flag → `CREWSHIP_DEFAULT_AGENT` env var → `default-agent` config key → interactive picker (TTY) → error. `--agents <list>` runs the same prompt against multiple agents in parallel.
+
+```bash
+crewship ask "what time is it?"
+git diff | crewship ask "review this change"
+crewship ask "summarize" --with-file notes.md
+crewship ask --agent viktor "explain how the journal works"
+crewship ask --prompt @-                              # full prompt from stdin
+
+# One-time setup so future asks don't need --agent:
+crewship config set default-agent viktor
+```
+
+Run `crewship ask` with no positional arg or default to launch a `huh` picker that lists every agent in the workspace. The picker offers to save the choice as the new default.
+
+### `crewship retry`
+
+Re-run a previous run. Recovers the original first user prompt from the chat history and starts a new run on the same agent.
+
+```bash
+crewship retry r_abc                       # same agent, same prompt, NEW chat
+crewship retry r_abc --continue            # append to the SAME chat
+crewship retry r_abc --new-prompt "be more specific"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--new-prompt` | `string` | | Override the original prompt. |
+| `--continue` | `bool` | `false` | Append to the original chat instead of starting fresh. |
+| `--quiet` | `bool` | `false` | Only output text. |
+| `--no-stream` | `bool` | `false` | Wait for completion, show only result. |
+| `--save` | `string` | | Tee the response to this path. |
+
+### `crewship copy-prompt`
+
+Recover the original prompt of a previous run without running anything. Pairs naturally with `crewship retry --new-prompt` for tweak-and-rerun loops.
+
+```bash
+crewship copy-prompt r_abc                  # to stdout
+crewship copy-prompt r_abc --clipboard      # to system clipboard
+crewship copy-prompt r_abc > prompt.txt
+```
+
+### `crewship explain`
+
+Summarize what happened in a run via the default agent. Fetches journal entries scoped to the run's agent + start window and asks the agent for a 3-6 bullet summary.
+
+```bash
+crewship explain r_abc
+crewship explain r_abc --agent reviewer
+crewship explain r_abc --types error,keeper.decision,peer.escalation
+```
+
+### `crewship watch`
+
+Live-tail the Crew Journal. Top-level alias for `journal --follow`.
+
+```bash
+crewship watch
+crewship watch --severity warn,error
+crewship watch --crew backend-team
+```
+
+### `crewship inspect`
+
+Show a structured journal timeline of a run (no LLM, instant). Sibling of `explain`.
+
+```bash
+crewship inspect r_abc
+crewship inspect r_abc --types error,exec.error,keeper.decision
+crewship inspect r_abc --filter '.entries[] | select(.severity=="error")'
+crewship inspect r_abc --watch 2s         # follow a running mission
+```
+
+### `crewship export`
+
+Bundle a run's prompt + response + journal + messages into a folder for handoffs / post-mortems.
+
+```bash
+crewship export r_abc                 # ./run-r_abc/{prompt,response,messages,journal,timeline}
+crewship export r_abc --out /tmp/pm
+crewship export r_abc --no-journal    # skip journal pass
+```
+
+### `crewship prompt`
+
+Local prompt library at `~/.crewship/prompts/<name>.md`. Server-free.
+
+```bash
+crewship prompt save sec-review --content "Review this diff for security issues."
+crewship prompt list
+crewship prompt use sec-review | crewship ask
+crewship prompt path sec-review
+crewship prompt edit sec-review
+crewship prompt delete sec-review
+```
+
+### `crewship open`
+
+Open a web UI deep-link in your default browser.
+
+```bash
+crewship open chat c_abc123
+crewship open mission MIS-42
+crewship open journal
+crewship open --print-only mission MIS-42
+```
+
+Resources: `dashboard`, `agents`, `agent <slug>`, `crews`, `crew <slug>`, `chat <id>`, `mission <id>`, `journal`, `approvals`, `paymaster`, `crows-nest`.
+
+### `crewship chat`
+
+Print the full message history of a chat session as a rendered transcript.
+
+```bash
+crewship chat c_abc123
+crewship chat c_abc123 --no-markdown
+crewship chat c_abc123 --since 24h
+```
+
+### `crewship agent files | inbox | git-log`
+
+Per-agent introspection beyond `agent debug`:
+
+```bash
+crewship agent files viktor                       # list agent's working dir
+crewship agent files viktor --download report.md  # download
+crewship agent inbox viktor                       # peer messages received
+crewship agent git-log viktor                     # git log inside container
+```
+
+### `crewship triage | recurring | saved-view | mcp-calls | metrics`
+
+Thin surfaces over existing API endpoints — `--filter` for jq, `--format json|yaml` for scripts.
+
+```bash
+crewship triage list
+crewship triage process
+crewship recurring list
+crewship saved-view list
+crewship mcp-calls --limit 50
+crewship metrics                       # mission summary
+crewship metrics --series active_runs --range 24h
+```
+
+### `crewship lint | doctor --fix | config validate`
+
+Local hygiene:
+
+```bash
+crewship lint              # static-analyse config + prompt library
+crewship lint --strict     # warnings also fail (CI-friendly)
+crewship doctor --fix      # safe auto-repairs (creates missing data dir)
+crewship config validate   # token + workspace + default-agent sanity
+```
 
 ### `crewship logs`
 
@@ -191,6 +369,63 @@ crewship audit --lines 100
 |------|------|---------|-------------|
 | `--action` | `string` | | Filter by action: `create`, `update`, `delete`. |
 | `--lines` | `int` | `50` | Number of audit entries. |
+
+### `crewship cost`
+
+Single-screen spend summary: total, top spenders, per-crew rollup, active subscription plans.
+
+```bash
+crewship cost                # last 24h, top 5 spenders
+crewship cost --range 7d
+crewship cost --range 30d --limit 10
+crewship cost --format json  # for scripts
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--range` | `string` | `24h` | Time window (`1h`, `24h`, `7d`, `30d`). |
+| `--limit` | `int` | `5` | Number of top spenders to show. |
+
+For per-crew or per-agent rollups in full fidelity, see `crewship paymaster`.
+
+### `crewship recall`
+
+Free-text search across the Crew Journal. Renders matched entries as snippet cards with the search term highlighted.
+
+```bash
+crewship recall "auth migration"
+crewship recall "rate limit" --since 30d --limit 30
+crewship recall "keeper denied" --crew backend-team
+crewship recall "deploy" --format json | jq '.[].summary'
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `int` | `20` | Max matches to return. |
+| `--since` | `string` | | Time window (`1h`, `24h`, `7d`, or RFC3339). |
+| `--crew` | `string` | | Filter by crew slug or ID. |
+| `--agent` | `string` | | Filter by agent ID. |
+
+Hits the `/api/v1/journal?q=` FTS5 endpoint. Server caps the query at 200 chars.
+
+### `crewship history`
+
+Recent runs across the workspace with timestamp, agent, status, and trigger. Optional prompt preview per run.
+
+```bash
+crewship history
+crewship history --limit 50
+crewship history --since 7d --status failed
+crewship history --prompts        # also fetch first user prompt per run
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `int` | `20` | Max runs to list. |
+| `--since` | `string` | `24h` | Time window (filtered client-side). |
+| `--status` | `string` | | Filter by status (`running`, `completed`, `failed`). |
+| `--agent` | `string` | | Filter by agent slug or ID. |
+| `--prompts` | `bool` | `false` | Fetch first user prompt per run (slower; one extra GET each). |
 
 ---
 

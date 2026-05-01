@@ -1,0 +1,321 @@
+---
+title: "AI Workflows"
+description: "Compose stdin, files, git context, and agents into shell pipelines."
+icon: "wand-magic-sparkles"
+---
+
+# AI workflows from the CLI
+
+The CLI is built so the friction between "I have a question / a file / a
+diff" and "what would my agent say?" is one command. This page collects
+the patterns the day-to-day shows up needing.
+
+## Quick prompts: `crewship ask`
+
+`crewship ask` is the lowest-friction path. Resolves an agent from
+`--agent` flag → `CREWSHIP_DEFAULT_AGENT` env var → `default-agent`
+config → interactive picker.
+
+```bash
+# One-time setup (no need to repeat)
+crewship config set default-agent viktor
+
+# Or per-shell, e.g. for project-scoped contexts:
+export CREWSHIP_DEFAULT_AGENT=viktor
+
+# Then everywhere:
+crewship ask "what does the journal contain?"
+crewship ask "summarize this" --with-file plan.md
+git diff | crewship ask "review this change"
+```
+
+Without a default agent on a TTY, `crewship ask` opens a `huh` picker
+listing every agent in the workspace and offers to save the choice as
+the new default.
+
+## Stdin piping
+
+Three patterns, in order of locality:
+
+```bash
+# 1. Auto-stdin (most common): piped data is appended after the prompt
+git diff | crewship ask "review"
+cat error.log | crewship run viktor "what's wrong?"
+echo "summarise: ..." | crewship ask
+
+# 2. Explicit @-: prompt itself is on stdin
+crewship ask --prompt @-
+
+# 3. @file: prompt from a file
+crewship run viktor --prompt @prompts/refactor.txt
+```
+
+When stdin is auto-detected, the data is appended after the positional
+prompt under a `--- stdin ---` separator and capped at 64 KiB.
+`@-` overrides this — the prompt is read from stdin in full and no
+auto-append happens.
+
+## Auto-context flags
+
+Composable flags inject extra blocks of context into any `run` / `ask` /
+`retry` invocation. Each block is fenced with `--- <label> ---` and
+capped at 64 KiB.
+
+| Flag | Source |
+|------|--------|
+| `--with-git-diff` | `git diff` (unstaged changes) |
+| `--with-git-staged` | `git diff --staged` |
+| `--with-git-status` | `git status -s` |
+| `--with-git-log` | `git log --oneline -20` |
+| `--with-file <path>` | File content. Repeatable. |
+| `--with-cmd '<sh-command>'` | Stdout of a shell command. Repeatable. |
+| `--paste` | System clipboard (`pbpaste` / `wl-paste` / `xclip` / `xsel`). |
+
+Examples:
+
+```bash
+# Code review on a feature branch
+crewship ask "review and flag risky changes" \
+  --with-git-diff --with-git-status
+
+# Debug session: error log + recent process tree
+crewship ask "diagnose this" \
+  --with-file /var/log/app.log \
+  --with-cmd 'ps auxf | head -30'
+
+# Multi-file explanation
+crewship ask "explain how these wire together" \
+  --with-file internal/api/auth.go \
+  --with-file internal/auth/jwt.go \
+  --with-file internal/auth/sessions/store.go
+```
+
+## Preview without sending
+
+`--dry-run` and `--estimate` both compose the full prompt (with all
+`--with-*`, stdin, paste context) and exit before any network round-trip.
+Useful for review, scripting, or planning a budget.
+
+```bash
+# See exactly what would be sent
+crewship ask "review" --with-git-diff --dry-run
+
+# Save the assembled prompt for later editing or re-use
+crewship ask "summarize" --with-file plan.md --dry-run > prompt.txt
+
+# Get a token count + per-model input cost estimate
+crewship ask "review" --with-git-diff --estimate
+```
+
+`--dry-run` skips authentication and agent resolution entirely — handy
+on a fresh shell or for scripting offline. `--estimate` does the same
+and adds a heuristic-based token count plus list-price cost across
+Sonnet 4.6, Opus 4.7, and Haiku 4.5.
+
+## Multi-agent comparison
+
+`crewship ask --agents v,e,p "prompt"` runs the same prompt against
+multiple agents in parallel. Sends concurrently (one WS connection per
+agent), prints sequentially under labelled `=== <slug> ===` headers.
+
+```bash
+crewship ask --agents viktor,eva,piotr "is this regex correct: ^\\d{3}-\\d{4}$"
+crewship ask --agents reviewer,security "audit this diff" --with-git-diff
+```
+
+One agent failing does not abort the others — the use case is "ask N,
+see who got it right." Errors are surfaced under their own slot.
+
+## Saving responses
+
+`--save <path>` tees the agent's text response to a file. The on-disk
+artefact is plain markdown — no ANSI escapes — so it can be committed,
+piped through `pandoc`, or read by another tool.
+
+```bash
+crewship ask "draft a release note" \
+  --with-git-log --save RELEASE_NOTES.md
+
+crewship run viktor --prompt @brief.md --save out/answer.md
+```
+
+The terminal continues to render the response normally, including
+markdown ANSI styling on a TTY.
+
+Writes are **atomic**: the CLI writes to a tempfile in the target's
+directory and renames into place only when the stream completes
+successfully. A Ctrl-C or stream error mid-run leaves the previous
+file (or no file) intact rather than half-overwritten.
+
+## Markdown rendering
+
+Streamed agent output is line-buffered through a small markdown renderer
+that highlights headings, bold, italic, inline code, fenced blocks,
+lists, links, and block quotes — without ever waiting for a complete
+document. Inline span delimiters are line-scoped, so partial chunks
+arriving over the wire never produce broken output.
+
+| Setting | Behaviour |
+|---------|-----------|
+| `--markdown` flag | Force on. |
+| `--no-markdown` flag | Force off. |
+| `crewship config set markdown on\|off\|auto` | Persist a default. |
+| `auto` (default) | Render only when stdout is a TTY (so piped output stays plain). |
+| `--no-color` global flag | Implies `--no-markdown`. |
+
+## Recall + history
+
+When you can't remember what you ran, ask the journal:
+
+```bash
+crewship recall "rate limit"            # FTS5 search over the journal
+crewship recall "auth" --since 30d --crew backend-team
+
+crewship history                        # recent runs across the workspace
+crewship history --status failed --since 7d
+crewship history --prompts              # also fetch first user prompt
+```
+
+`crewship retry <run-id>` re-runs a previous run (recovers the original
+prompt from the chat). Add `--continue` to append to the same chat
+instead of starting a new one.
+
+`crewship copy-prompt <run-id>` recovers the original prompt without
+running anything. Use it for tweak-and-rerun loops:
+
+```bash
+crewship copy-prompt r_abc                  # to stdout
+crewship copy-prompt r_abc --clipboard      # to system clipboard
+crewship copy-prompt r_abc > prompt.txt     # to file for editing
+$EDITOR prompt.txt
+crewship run viktor --prompt @prompt.txt
+```
+
+`crewship explain <run-id>` asks the default agent to summarize what
+happened in a run by feeding it the journal entries scoped to that
+run's agent + start window. Useful for "why did this fail?" lookups
+without scanning logs by hand.
+
+## Live observation: `crewship watch`
+
+`crewship watch` is the top-level alias for `journal --follow` —
+shorter to type for the most-common live-observation workflow.
+
+```bash
+crewship watch
+crewship watch --severity warn,error --crew backend-team
+crewship watch --type peer.escalation,keeper.decision
+```
+
+Opens an SSE connection to `/api/v1/journal/stream`. Prints entries in
+the same format as the listing. Reconnects with bounded backoff (1 s →
+30 s cap) and threads `Last-Event-ID` so a brief disconnect resumes
+without dropping or duplicating entries. Press Ctrl-C to exit.
+
+## Cost awareness
+
+```bash
+crewship cost                  # spend in last 24h, top 5 spenders
+crewship cost --range 7d
+```
+
+Single-screen view: total $, top spenders by scope, per-crew rollup,
+active subscription plans. For full-fidelity rollups by crew/agent/mission,
+see `crewship paymaster`.
+
+## Run forensics: `inspect`, `explain`, `export`
+
+Three complementary windows on a past run:
+
+```bash
+crewship inspect r_abc      # structured timeline (no LLM, instant)
+crewship explain r_abc      # LLM-summarised narrative (asks default agent)
+crewship export  r_abc      # bundle prompt+response+journal+timeline to a folder
+```
+
+`inspect` is a fast deterministic timeline (events, costs, tool calls,
+errors). `explain` adds an agent-written summary. `export` produces
+`./run-r_abc/` with `prompt.md`, `response.md`, `messages.json`,
+`journal.json`, `timeline.txt`, and `run.json` — one stop for handoffs
+or post-mortems.
+
+## Prompt library
+
+A local, server-free knowledge base of reusable prompts kept in
+`~/.crewship/prompts/<name>.md`:
+
+```bash
+echo "Review this diff for security issues." | crewship prompt save sec-review
+crewship prompt list
+crewship prompt use sec-review | crewship ask
+crewship prompt edit sec-review            # opens in $EDITOR
+crewship ask --prompt @"$(crewship prompt path sec-review)"
+```
+
+## Web UI deep-links: `crewship open`
+
+Hybrid CLI/web workflow — jump from terminal to the right web page:
+
+```bash
+crewship open chat c_abc123
+crewship open mission MIS-42
+crewship open journal
+crewship open --print-only mission MIS-42   # just print the URL
+```
+
+## Auto-refresh: `--watch`
+
+Several list-style commands accept `--watch <duration>` to redraw on a
+timer (Ctrl-C to exit):
+
+```bash
+crewship history --watch 5s
+crewship cost --watch 30s
+crewship inspect r_abc --watch 2s     # follow a running mission
+```
+
+## Filtering with jq: `--filter`
+
+Most JSON-emitting commands accept `--filter '<jq-expr>'` so you don't
+need a shell pipe just to extract one field. `jq` must be installed; the
+filter is silently bypassed otherwise.
+
+```bash
+crewship history --format json --filter '.[] | select(.status=="failed") | .id'
+crewship inspect r_abc --filter '.entries[] | select(.severity=="error")'
+crewship agent files viktor --filter '.[] | .name'
+```
+
+## Container shell access (deferred)
+
+`crewship shell <agent>` for a live PTY into an agent container is
+deferred to its own follow-up — it requires WS-multiplexed terminal
+plumbing not yet wired in the CLI. Today, the closest paths are:
+
+```bash
+crewship logs viktor --follow      # live stdout
+crewship agent debug viktor        # container state + env
+crewship open crows-nest <crew>    # full live observation in web UI
+```
+
+## Health: `doctor`, `lint`, `config validate`
+
+```bash
+crewship doctor                     # system requirements
+crewship doctor --fix               # safe auto-repairs (data dir, etc.)
+crewship lint                       # static-analyse local config + prompt lib
+crewship lint --strict              # warnings also fail (CI-friendly)
+crewship config validate            # token + workspace + default-agent sanity
+```
+
+## Tab completion for agent slugs
+
+`crewship run`, `crewship logs`, and `crewship agent get` provide
+dynamic shell completion: tab on the agent argument fetches available
+slugs from the API. Set up shell completion once with
+`crewship completion bash|zsh|fish|powershell`.
+
+```bash
+crewship run vi<TAB>          # → viktor
+crewship logs e<TAB>          # → eva
+```

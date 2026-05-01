@@ -64,6 +64,36 @@ func TestResolveWorkspace(t *testing.T) {
 	}
 }
 
+func TestResolveDefaultAgent(t *testing.T) {
+	tests := []struct {
+		name   string
+		flag   string
+		env    string
+		config *CLIConfig
+		want   string
+	}{
+		{"flag wins", "viktor", "", &CLIConfig{DefaultAgent: "eva"}, "viktor"},
+		{"env wins over config", "", "piotr", &CLIConfig{DefaultAgent: "eva"}, "piotr"},
+		{"config fallback", "", "", &CLIConfig{DefaultAgent: "eva"}, "eva"},
+		{"empty when all empty", "", "", &CLIConfig{}, ""},
+		{"nil config", "", "", nil, ""},
+		{"flag beats env", "from-flag", "from-env", &CLIConfig{DefaultAgent: "from-cfg"}, "from-flag"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("CREWSHIP_DEFAULT_AGENT")
+			if tt.env != "" {
+				t.Setenv("CREWSHIP_DEFAULT_AGENT", tt.env)
+			}
+			got := ResolveDefaultAgent(tt.flag, tt.config)
+			if got != tt.want {
+				t.Errorf("ResolveDefaultAgent() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveFormat(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -86,6 +86,7 @@
             "group": "CLI",
             "pages": [
               "cli/overview",
+              "cli/ai-workflows",
               "cli/agent",
               "cli/crew",
               "cli/mission",
