@@ -223,6 +223,91 @@ Single-screen view: total $, top spenders by scope, per-crew rollup,
 active subscription plans. For full-fidelity rollups by crew/agent/mission,
 see `crewship paymaster`.
 
+## Run forensics: `inspect`, `explain`, `export`
+
+Three complementary windows on a past run:
+
+```bash
+crewship inspect r_abc      # structured timeline (no LLM, instant)
+crewship explain r_abc      # LLM-summarised narrative (asks default agent)
+crewship export  r_abc      # bundle prompt+response+journal+timeline to a folder
+```
+
+`inspect` is a fast deterministic timeline (events, costs, tool calls,
+errors). `explain` adds an agent-written summary. `export` produces
+`./run-r_abc/` with `prompt.md`, `response.md`, `messages.json`,
+`journal.json`, `timeline.txt`, and `run.json` — one stop for handoffs
+or post-mortems.
+
+## Prompt library
+
+A local, server-free knowledge base of reusable prompts kept in
+`~/.crewship/prompts/<name>.md`:
+
+```bash
+echo "Review this diff for security issues." | crewship prompt save sec-review
+crewship prompt list
+crewship prompt use sec-review | crewship ask
+crewship prompt edit sec-review            # opens in $EDITOR
+crewship ask --prompt @"$(crewship prompt path sec-review)"
+```
+
+## Web UI deep-links: `crewship open`
+
+Hybrid CLI/web workflow — jump from terminal to the right web page:
+
+```bash
+crewship open chat c_abc123
+crewship open mission MIS-42
+crewship open journal
+crewship open --print-only mission MIS-42   # just print the URL
+```
+
+## Auto-refresh: `--watch`
+
+Several list-style commands accept `--watch <duration>` to redraw on a
+timer (Ctrl-C to exit):
+
+```bash
+crewship history --watch 5s
+crewship cost --watch 30s
+crewship inspect r_abc --watch 2s     # follow a running mission
+```
+
+## Filtering with jq: `--filter`
+
+Most JSON-emitting commands accept `--filter '<jq-expr>'` so you don't
+need a shell pipe just to extract one field. `jq` must be installed; the
+filter is silently bypassed otherwise.
+
+```bash
+crewship history --format json --filter '.[] | select(.status=="failed") | .id'
+crewship inspect r_abc --filter '.entries[] | select(.severity=="error")'
+crewship agent files viktor --filter '.[] | .name'
+```
+
+## Container shell access (deferred)
+
+`crewship shell <agent>` for a live PTY into an agent container is
+deferred to its own follow-up — it requires WS-multiplexed terminal
+plumbing not yet wired in the CLI. Today, the closest paths are:
+
+```bash
+crewship logs viktor --follow      # live stdout
+crewship agent debug viktor        # container state + env
+crewship open crows-nest <crew>    # full live observation in web UI
+```
+
+## Health: `doctor`, `lint`, `config validate`
+
+```bash
+crewship doctor                     # system requirements
+crewship doctor --fix               # safe auto-repairs (data dir, etc.)
+crewship lint                       # static-analyse local config + prompt lib
+crewship lint --strict              # warnings also fail (CI-friendly)
+crewship config validate            # token + workspace + default-agent sanity
+```
+
 ## Tab completion for agent slugs
 
 `crewship run`, `crewship logs`, and `crewship agent get` provide

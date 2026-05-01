@@ -95,7 +95,76 @@ func valueOrDefault(v, def string) string {
 	return v
 }
 
+// configValidateCmd performs sanity checks: token authenticates, workspace
+// resolves, default-agent (if set) exists. Quick way to spot a stale token
+// or a renamed agent breaking your `crewship ask` muscle memory.
+var configValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Sanity-check the current CLI configuration",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := cli.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		errs := 0
+		warns := 0
+
+		check := func(label string, ok bool, hint string) {
+			if ok {
+				fmt.Printf("  %s✓%s %s\n", cli.Green, cli.Reset, label)
+				return
+			}
+			fmt.Printf("  %s✗%s %s\n      %s\n", cli.Red, cli.Reset, label, hint)
+			errs++
+		}
+		warn := func(label, hint string) {
+			fmt.Printf("  %s!%s %s — %s\n", cli.Yellow, cli.Reset, label, hint)
+			warns++
+		}
+
+		fmt.Printf("%sCLI config%s\n", cli.Bold, cli.Reset)
+		check("token present", cfg.Token != "",
+			"run `crewship login` to authenticate")
+		check("server URL set", cli.ResolveServer(flagServer, cfg) != "",
+			"unexpected — default should be http://localhost:8080")
+		ws := cli.ResolveWorkspace(flagWorkspace, cfg)
+		check("workspace resolvable", ws != "",
+			"run `crewship workspace use <slug>` or set CREWSHIP_WORKSPACE")
+
+		if cfg.Token == "" || ws == "" {
+			fmt.Printf("\n%s%d error(s), %d warning(s)%s\n", cli.Red, errs, warns, cli.Reset)
+			return fmt.Errorf("config validation failed")
+		}
+
+		// Reachability check — are we hitting the API?
+		client := newAPIClient()
+		var who any
+		if err := getJSON(client, "/api/v1/auth/cli-token/validate", &who); err != nil {
+			check("token validates against server", false, fmt.Sprintf("server rejected token: %v", err))
+		} else {
+			check("token validates against server", true, "")
+		}
+
+		// Default-agent existence (warning, not error — the picker handles missing).
+		if defaultAgent := cli.ResolveDefaultAgent("", cfg); defaultAgent != "" {
+			if _, err := resolveAgentID(client, defaultAgent); err != nil {
+				warn(fmt.Sprintf("default-agent %q", defaultAgent),
+					"agent not found in current workspace — picker will be used instead")
+			} else {
+				check(fmt.Sprintf("default-agent %q exists", defaultAgent), true, "")
+			}
+		}
+
+		fmt.Printf("\n%sresult:%s %d error(s), %d warning(s)\n", cli.Bold, cli.Reset, errs, warns)
+		if errs > 0 {
+			return fmt.Errorf("config validation failed")
+		}
+		return nil
+	},
+}
+
 func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configValidateCmd)
 }

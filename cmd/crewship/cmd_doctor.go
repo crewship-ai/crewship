@@ -15,8 +15,17 @@ import (
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Check system requirements and health",
+	Short: "Check system requirements and health (--fix to attempt safe auto-repair)",
+	Long: `Run a battery of system checks: container runtime, data directory,
+database presence, network reachability.
+
+  --fix attempts only safe, reversible repairs (creating the missing
+  data directory). Unsafe fixes (installing Docker, repairing networks)
+  are deliberately left to the operator with actionable URLs in the
+  output.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		fixMode, _ := cmd.Flags().GetBool("fix")
+		_ = fixMode
 		logger := logging.New("info", "text", os.Stdout)
 
 		allOK := true
@@ -78,6 +87,18 @@ var doctorCmd = &cobra.Command{
 				"database", dbPath,
 				"db_exists", statErr == nil,
 			)
+			// Auto-fix: create the data directory if it's missing and --fix
+			// is set. This is the only safe automatic repair — installing
+			// Docker or fiddling with networks is left to humans.
+			if fixMode {
+				if _, statErr := os.Stat(dataDir.Root); os.IsNotExist(statErr) {
+					if mkErr := os.MkdirAll(dataDir.Root, 0o700); mkErr == nil {
+						logger.Info("[fix] created data directory", "path", dataDir.Root)
+					} else {
+						logger.Error("[fix] could not create data directory", "error", mkErr)
+					}
+				}
+			}
 		}
 
 		if allOK {
@@ -86,4 +107,8 @@ var doctorCmd = &cobra.Command{
 			logger.Warn("some checks failed, run 'crewship doctor' after fixing to verify")
 		}
 	},
+}
+
+func init() {
+	doctorCmd.Flags().Bool("fix", false, "Attempt safe auto-repairs (e.g. create missing data directory)")
 }

@@ -278,4 +278,6 @@ func init() {
 	historyCmd.Flags().String("status", "", "Filter by status (running|completed|failed)")
 	historyCmd.Flags().String("agent", "", "Filter by agent slug or ID")
 	historyCmd.Flags().Bool("prompts", false, "Fetch first user prompt per run (slower)")
+	addWatchFlag(historyCmd)
+	historyCmd.RunE = watchWrap(historyCmd.RunE)
 }

@@ -218,4 +218,6 @@ func printCostSubscriptions(rows []subUsageRow) {
 func init() {
 	costCmd.Flags().String("range", "24h", "Time window (1h, 24h, 7d, 30d)")
 	costCmd.Flags().Int("limit", 5, "Number of top spenders to show")
+	addWatchFlag(costCmd)
+	costCmd.RunE = watchWrap(costCmd.RunE)
 }

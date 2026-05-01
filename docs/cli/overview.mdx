@@ -214,6 +214,99 @@ crewship watch --severity warn,error
 crewship watch --crew backend-team
 ```
 
+### `crewship inspect`
+
+Show a structured journal timeline of a run (no LLM, instant). Sibling of `explain`.
+
+```bash
+crewship inspect r_abc
+crewship inspect r_abc --types error,exec.error,keeper.decision
+crewship inspect r_abc --filter '.entries[] | select(.severity=="error")'
+crewship inspect r_abc --watch 2s         # follow a running mission
+```
+
+### `crewship export`
+
+Bundle a run's prompt + response + journal + messages into a folder for handoffs / post-mortems.
+
+```bash
+crewship export r_abc                 # ./run-r_abc/{prompt,response,messages,journal,timeline}
+crewship export r_abc --out /tmp/pm
+crewship export r_abc --no-journal    # skip journal pass
+```
+
+### `crewship prompt`
+
+Local prompt library at `~/.crewship/prompts/<name>.md`. Server-free.
+
+```bash
+crewship prompt save sec-review --content "Review this diff for security issues."
+crewship prompt list
+crewship prompt use sec-review | crewship ask
+crewship prompt path sec-review
+crewship prompt edit sec-review
+crewship prompt delete sec-review
+```
+
+### `crewship open`
+
+Open a web UI deep-link in your default browser.
+
+```bash
+crewship open chat c_abc123
+crewship open mission MIS-42
+crewship open journal
+crewship open --print-only mission MIS-42
+```
+
+Resources: `dashboard`, `agents`, `agent <slug>`, `crews`, `crew <slug>`, `chat <id>`, `mission <id>`, `journal`, `approvals`, `paymaster`, `crows-nest`.
+
+### `crewship chat`
+
+Print the full message history of a chat session as a rendered transcript.
+
+```bash
+crewship chat c_abc123
+crewship chat c_abc123 --no-markdown
+crewship chat c_abc123 --since 24h
+```
+
+### `crewship agent files | inbox | git-log`
+
+Per-agent introspection beyond `agent debug`:
+
+```bash
+crewship agent files viktor                       # list agent's working dir
+crewship agent files viktor --download report.md  # download
+crewship agent inbox viktor                       # peer messages received
+crewship agent git-log viktor                     # git log inside container
+```
+
+### `crewship triage | recurring | saved-view | mcp-calls | metrics`
+
+Thin surfaces over existing API endpoints — `--filter` for jq, `--format json|yaml` for scripts.
+
+```bash
+crewship triage list
+crewship triage process
+crewship recurring list
+crewship saved-view list
+crewship mcp-calls --limit 50
+crewship metrics                       # mission summary
+crewship metrics --series active_runs --range 24h
+```
+
+### `crewship lint | doctor --fix | config validate`
+
+Local hygiene:
+
+```bash
+crewship lint              # static-analyse config + prompt library
+crewship lint --strict     # warnings also fail (CI-friendly)
+crewship doctor --fix      # safe auto-repairs (creates missing data dir)
+crewship config validate   # token + workspace + default-agent sanity
+```
+
 ```bash
 crewship retry r_abc                       # same agent, same prompt, NEW chat
 crewship retry r_abc --continue            # append to the SAME chat
