@@ -4,7 +4,11 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE    ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LICENSE_PUBKEY ?=
-LDFLAGS  = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY)"
+LDFLAGS    = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/crewship-ai/crewship/internal/license.publicKey=$(LICENSE_PUBKEY)"
+# -trimpath strips workspace paths (/Users/.../crewship_2/...) from the
+# binary, giving reproducible builds across machines and shaving a few KB
+# off the embedded debug info. Adds nothing measurable to compile time.
+GO_BUILD   = go build -trimpath $(LDFLAGS)
 
 # Multi-instance support: crewship_1 -> instance 1, crewship_2 -> instance 2, etc.
 INSTANCE_NUM := $(shell basename $(CURDIR) | sed -n 's/^crewship_\([0-9]*\)$$/\1/p')
@@ -43,17 +47,17 @@ dev\:go-once:
 build: build\:sidecar
 	pnpm build
 	rm -rf web/out && cp -r out web/out
-	go build $(LDFLAGS) -o crewship ./cmd/crewship
+	$(GO_BUILD) -o crewship ./cmd/crewship
 
 build\:go: build\:sidecar
-	go build $(LDFLAGS) -o crewship ./cmd/crewship
+	$(GO_BUILD) -o crewship ./cmd/crewship
 
 # Build the crewship-sidecar binary as a standalone executable and stage
 # entrypoint.sh next to it. This lets users bring their own base image
 # (debian, ubuntu, alpine-glibc, etc.) while reusing the baked-in sidecar
 # via a host bind mount. See internal/provider/docker/docker.go buildMounts.
 build\:sidecar:
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o crewship-sidecar ./cmd/crewship-sidecar
 	cp scripts/entrypoint.sh ./entrypoint.sh
 	chmod +x ./entrypoint.sh
 

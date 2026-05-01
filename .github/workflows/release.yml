@@ -26,11 +26,11 @@ jobs:
           fetch-depth: 0
 
       # -- Build Next.js static export (required for embed.FS) --
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -51,26 +51,33 @@ jobs:
         run: rm -rf web/out && cp -r out web/out
 
       # -- GoReleaser --
+      # cache: true reuses module + build cache across releases keyed on
+      # go.sum; on the ubuntu-latest hosted runner this cuts setup-go from
+      # ~45s (cold module download for ~80 modules) to <2s.
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: true
 
       # Install syft for SBOM generation (CRE-122).
-      # Pin to a specific tag so release artifacts are reproducible across runs.
+      # Pin to a SHA matching v0.20.7 so a retargeted tag cannot redirect
+      # the action binary; release artifacts now carry both the tag-as-comment
+      # AND the immutable commit SHA (the latter is what GitHub actually fetches).
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@v0.20.7
+        uses: anchore/sbom-action/download-syft@d8a2c0130026bf585de5c176ab8f7ce62d75bf04 # v0.20.7
         with:
           syft-version: v1.38.0
 
       # Install cosign for keyless release signing (CRE-122).
-      # Pin to a specific action release AND a specific cosign version so
-      # the same git tag always produces the same signature chain.
+      # SHA-pinned to v3.10.0 (same supply-chain rationale as the syft step
+      # above). Cosign version is pinned at the action's input level so the
+      # same git tag always produces the same signature chain.
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3.10.0
+        uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62 # v3.10.0
         with:
           cosign-release: v2.7.0
 
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@1a80836c5c9d9e5755a25cb59ec6f45a3b5f41a8 # v7
         with:
           version: "~> v2"
           args: release --clean
