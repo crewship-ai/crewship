@@ -70,12 +70,14 @@ paths = [
   '''docs/configuration/environment\.mdx$''',
   '''docs/api-reference/overview\.mdx$''',
 
-  # Launch audit memos document the gitleaks allowlist itself, which
+  # Launch audit memo: documents the gitleaks allowlist itself, which
   # means the placeholder strings being allowlisted (e.g. AKIAABCDEFG…)
   # appear verbatim in the memo body and re-trigger the very rule the
-  # memo is documenting. Scoped to docs/internal/ so unrelated public
-  # docs cannot accidentally hide real findings.
-  '''docs/internal/launch-audit-.*\.md$''',
+  # memo is documenting. Pinned to the exact dated filename — future
+  # audit memos require an explicit per-file entry, preserving this
+  # file's documented "narrow, file-specific" allowlist policy and
+  # forcing a manual verify step before any new memo can hide findings.
+  '''docs/internal/launch-audit-2026-04-29\.md$''',
 
   # HTML wireframes with mockup data (static design artifacts).
   '''\.claude/context/wireframes/.*\.html$''',
