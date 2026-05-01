@@ -72,11 +72,12 @@ jobs:
   go:
     name: Go
     runs-on: [self-hosted, macos-arm64]
-    # 10 min was tight: a cold module cache on the self-hosted runner pushes
-    # vet+build+test past the limit (test alone is ~2 min, but cold compile of
-    # every package plus cache-restore retries eats the rest). 20 min gives
-    # slack without masking a real regression.
-    timeout-minutes: 20
+    # 30 min: setup-go-embed alone has shown 602-1052s variance across
+    # consecutive runs on the self-hosted runner — actions/setup-go
+    # fetches the Go SDK and the runner network occasionally serves it
+    # slowly. Actual vet+build+test on this codebase is ~75s; the rest
+    # of the budget is buffer for setup variance.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -97,7 +98,10 @@ jobs:
   go-lint:
     name: Go Lint
     runs-on: [self-hosted, macos-arm64]
-    timeout-minutes: 10
+    # 20 min, matching the Go job's expanded budget — setup-go-embed
+    # variance can eat the entire 10-min original budget before lint
+    # even starts. Lint itself runs in ~30s.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -124,7 +128,9 @@ jobs:
   binary:
     name: Binary Build
     runs-on: [self-hosted, macos-arm64]
-    timeout-minutes: 10
+    # 20 min for the same setup-go-embed variance as the Go and Go Lint
+    # jobs above — the actual go build finishes in seconds.
+    timeout-minutes: 20
     needs: [frontend, go]
     if: github.event_name == 'push'
     steps:
