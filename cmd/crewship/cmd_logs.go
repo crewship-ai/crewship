@@ -18,7 +18,8 @@ Examples:
   crewship logs viktor
   crewship logs viktor --follow
   crewship logs viktor --lines 50`,
-	Args: cobra.ExactArgs(1),
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeAgentSlug,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
