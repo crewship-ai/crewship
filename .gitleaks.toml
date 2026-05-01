@@ -25,7 +25,17 @@ paths = [
   '''internal/scrubber/security_test\.go$''',
 
   # Encryption test vectors (AES-GCM roundtrip tests with fake keys).
+  # All three encryption test files contain hardcoded hex keys
+  # ('0123456789abcdef…' / 'fedcba…') used for deterministic round-trip
+  # assertions. Documented in docs/internal/launch-audit-2026-04-29.md.
   '''internal/encryption/encryption_test\.go$''',
+  '''internal/encryption/encryption_bench_test\.go$''',
+  '''internal/encryption/layout_test\.go$''',
+
+  # Onboarding test fixture: ENCRYPTION_KEY string passed to mock
+  # bootstrap calls — generic-api-key rule fires on the high-entropy
+  # value. Verified in the launch audit; not a real credential.
+  '''internal/services/onboarding_test\.go$''',
 
   # Orchestrator security tests — fake stripe-access-token test vectors
   # used to verify credential file writing paths.
@@ -34,6 +44,12 @@ paths = [
   # Sidecar security/e2e tests — fake x-api-key and provider tokens.
   '''internal/sidecar/security_test\.go$''',
   '''internal/sidecar/e2e_test\.go$''',
+
+  # Lookout redaction test — exercises the scrubber against placeholder
+  # AWS/OpenAI/Anthropic/GitHub tokens. Verified: the strings are static
+  # test inputs (e.g. "id=AKIAABCDEFGHIJKLMNOP") used to assert that
+  # the redaction path strips them from output.
+  '''internal/lookout/lookout_test\.go$''',
 
   # E2E test fixtures with mock credentials.
   '''e2e/.*''',
@@ -53,6 +69,13 @@ paths = [
   '''docs/guides/installation\.mdx$''',
   '''docs/configuration/environment\.mdx$''',
   '''docs/api-reference/overview\.mdx$''',
+
+  # Launch audit memos document the gitleaks allowlist itself, which
+  # means the placeholder strings being allowlisted (e.g. AKIAABCDEFG…)
+  # appear verbatim in the memo body and re-trigger the very rule the
+  # memo is documenting. Scoped to docs/internal/ so unrelated public
+  # docs cannot accidentally hide real findings.
+  '''docs/internal/launch-audit-.*\.md$''',
 
   # HTML wireframes with mockup data (static design artifacts).
   '''\.claude/context/wireframes/.*\.html$''',
