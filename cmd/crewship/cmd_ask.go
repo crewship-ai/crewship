@@ -57,7 +57,13 @@ Examples:
 
 		agentFlag, _ := cmd.Flags().GetString("agent")
 		fanoutAgents, _ := cmd.Flags().GetStringSlice("agents")
-		agentSlug := cli.ResolveDefaultAgent(agentFlag, cliCfg)
+		// Single-agent default only matters when --agents is not given —
+		// otherwise the fan-out path resolves each agent in its own loop and
+		// neither the picker nor the "no default" error should fire.
+		var agentSlug string
+		if len(fanoutAgents) == 0 {
+			agentSlug = cli.ResolveDefaultAgent(agentFlag, cliCfg)
+		}
 
 		var client *cli.Client
 		if !offline {
@@ -67,10 +73,11 @@ Examples:
 		// No default agent: open an interactive picker on a TTY, error in
 		// non-TTY mode (CI / scripts can't satisfy a prompt). Saves the
 		// pick as the default if the user opts in, so the next run is
-		// frictionless. Skipped entirely in offline modes (dry-run/estimate).
-		if !offline && agentSlug == "" {
+		// frictionless. Skipped entirely in offline modes (dry-run/estimate)
+		// and in fan-out mode (--agents resolves each slug itself).
+		if !offline && len(fanoutAgents) == 0 && agentSlug == "" {
 			if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stderr.Fd())) {
-				return fmt.Errorf("no default agent set. Use --agent <slug> or run 'crewship config set default-agent <slug>'")
+				return fmt.Errorf("no default agent set. Use --agent <slug>, --agents <list>, or run 'crewship config set default-agent <slug>'")
 			}
 			picked, save, err := pickAgentInteractive(client)
 			if err != nil {
@@ -78,16 +85,25 @@ Examples:
 			}
 			agentSlug = picked
 			if save {
+				// Only print the saved-default banner after SaveConfig actually
+				// returns nil — disk-full / permission failures otherwise leave
+				// the user thinking the choice was persisted when it wasn't.
 				if cfg, _ := cli.LoadConfig(); cfg != nil {
 					cfg.DefaultAgent = agentSlug
-					_ = cli.SaveConfig(cfg)
-					fmt.Fprintf(os.Stderr, "%s[saved default-agent=%s]%s\n", cli.Dim, agentSlug, cli.Reset)
+					if err := cli.SaveConfig(cfg); err != nil {
+						fmt.Fprintf(os.Stderr, "%s[warn]%s could not save default-agent=%s: %v\n",
+							cli.Yellow, cli.Reset, agentSlug, err)
+					} else {
+						fmt.Fprintf(os.Stderr, "%s[saved default-agent=%s]%s\n", cli.Dim, agentSlug, cli.Reset)
+					}
 				}
 			}
 		}
 
 		var agentID string
-		if !offline {
+		// Resolve the single-agent ID only on the single-agent path.
+		// Fan-out path resolves each slug inline below.
+		if !offline && len(fanoutAgents) == 0 {
 			id, err := resolveAgentID(client, agentSlug)
 			if err != nil {
 				return err
@@ -104,7 +120,7 @@ Examples:
 		withCmds, _ := cmd.Flags().GetStringSlice("with-cmd")
 		paste, _ := cmd.Flags().GetBool("paste")
 
-		prompt, err := cli.BuildPrompt(cli.PromptOptions{
+		prompt, err := cli.BuildPrompt(cmd.Context(), cli.PromptOptions{
 			Positional:        args,
 			PromptFlag:        flagPrompt,
 			AutoStdin:         true,

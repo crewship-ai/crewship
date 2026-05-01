@@ -45,7 +45,7 @@ Examples:
 		if err != nil {
 			return err
 		}
-		subRows, _ := fetchSubscriptionUsage(client) // best-effort; not every workspace has plans
+		subRows, _ := fetchSubscriptionUsage(client, rng) // best-effort; not every workspace has plans
 
 		f := newFormatter()
 		if f.Format == "json" {
@@ -133,8 +133,13 @@ func fetchCrewSpend(c *cli.Client, rng string) ([]crewSpendRow, error) {
 	return body.Rows, nil
 }
 
-func fetchSubscriptionUsage(c *cli.Client) ([]subUsageRow, error) {
-	resp, err := c.Get("/api/v1/paymaster/subscriptions")
+// fetchSubscriptionUsage takes the same range as the metered rollups so
+// every section of `crewship cost` reports against the same window.
+// Without this the subscriptions block silently fell back to the
+// server-side default — confusing when comparing rows.
+func fetchSubscriptionUsage(c *cli.Client, rng string) ([]subUsageRow, error) {
+	path := "/api/v1/paymaster/subscriptions" + queryString("range", rng)
+	resp, err := c.Get(path)
 	if err != nil {
 		return nil, err
 	}

@@ -80,8 +80,17 @@ var promptListCmd = &cobra.Command{
 		sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 
 		f := newFormatter()
-		if f.Format == "json" {
+		switch f.Format {
+		case "json":
 			return f.JSON(rows)
+		case "yaml":
+			return f.YAML(rows)
+		case "quiet":
+			// Quiet mode = names only, one per line — handy for shell pipelines.
+			for _, r := range rows {
+				fmt.Println(r.Name)
+			}
+			return nil
 		}
 		if len(rows) == 0 {
 			fmt.Printf("%sNo prompts saved.%s  Try: crewship prompt save <name>\n", cli.Dim, cli.Reset)
@@ -208,7 +217,18 @@ var promptEditCmd = &cobra.Command{
 		if editor == "" {
 			editor = "vi" // POSIX-mandated fallback; almost always present.
 		}
-		c := exec.Command(editor, path)
+		// $EDITOR commonly carries arguments — `code -w`, `vim -c "set wrap"`,
+		// `emacsclient -t`. exec.Command(editor, path) would treat the whole
+		// string as the executable name and fail. strings.Fields splits on
+		// any whitespace so the first token becomes the binary and the rest
+		// become leading args, with the file path appended.
+		parts := strings.Fields(editor)
+		if len(parts) == 0 {
+			return fmt.Errorf("$EDITOR is empty after whitespace split")
+		}
+		// `args` is the cobra positional slice — use a different name here.
+		editorArgs := append(parts[1:], path)
+		c := exec.Command(parts[0], editorArgs...)
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
@@ -285,14 +305,30 @@ func promptPath(name string) (string, error) {
 }
 
 // suggestSimilarPrompt enriches a not-found error with did-you-mean
-// suggestions drawn from the prompt library. Reuses nearestSlugs since
-// the matching pattern is identical to agent-slug lookups.
+// suggestions drawn from the prompt library. Only kicks in for ENOENT
+// — non-existence errors. Permission denied / I/O errors propagate
+// through unchanged so the user isn't misled by a "not found" message
+// when the real problem is `chmod 000` on the prompts directory.
+//
+// Reuses nearestSlugs since the matching pattern is identical to
+// agent-slug lookups.
 func suggestSimilarPrompt(name string, baseErr error) error {
+	if !os.IsNotExist(baseErr) {
+		return baseErr
+	}
 	dir, err := promptDir()
 	if err != nil {
 		return baseErr
 	}
-	entries, _ := os.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		// Promptdir itself isn't readable — propagate the underlying error
+		// rather than dressing it up as "not found".
+		if os.IsNotExist(err) {
+			return fmt.Errorf("prompt %q not found (no prompts saved yet — try `crewship prompt save`)", name)
+		}
+		return fmt.Errorf("read prompts dir: %w", err)
+	}
 	available := make([]string, 0, len(entries))
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {

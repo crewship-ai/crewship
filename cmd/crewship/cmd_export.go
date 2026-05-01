@@ -63,6 +63,12 @@ Examples:
 		}
 		windowStart, err := runWindowStart(client, runID)
 		if err != nil {
+			// Synthetic 1-hour window is a fallback for runs older than the
+			// /api/v1/runs page horizon. Surface the warning so the operator
+			// knows the journal slice in the bundle may be incomplete.
+			fmt.Fprintf(os.Stderr,
+				"%s[warn]%s could not resolve run window for %s; using last 1h: %v\n",
+				cli.Yellow, cli.Reset, runID, err)
 			windowStart = time.Now().Add(-1 * time.Hour)
 		}
 
@@ -90,10 +96,14 @@ Examples:
 				}
 				prompt, response := splitPromptResponse(messages)
 				if prompt != "" {
-					_ = os.WriteFile(filepath.Join(out, "prompt.md"), []byte(prompt+"\n"), 0o644)
+					if err := os.WriteFile(filepath.Join(out, "prompt.md"), []byte(prompt+"\n"), 0o644); err != nil {
+						return fmt.Errorf("write prompt.md: %w", err)
+					}
 				}
 				if response != "" {
-					_ = os.WriteFile(filepath.Join(out, "response.md"), []byte(response+"\n"), 0o644)
+					if err := os.WriteFile(filepath.Join(out, "response.md"), []byte(response+"\n"), 0o644); err != nil {
+						return fmt.Errorf("write response.md: %w", err)
+					}
 				}
 			}
 		}
@@ -108,7 +118,9 @@ Examples:
 					return err
 				}
 				timeline := formatJournalTimeline(entries)
-				_ = os.WriteFile(filepath.Join(out, "timeline.txt"), []byte(timeline), 0o644)
+				if err := os.WriteFile(filepath.Join(out, "timeline.txt"), []byte(timeline), 0o644); err != nil {
+					return fmt.Errorf("write timeline.txt: %w", err)
+				}
 			}
 		}
 

@@ -73,7 +73,7 @@ Examples:
 			positional = args[1:]
 		}
 
-		prompt, err := cli.BuildPrompt(cli.PromptOptions{
+		prompt, err := cli.BuildPrompt(cmd.Context(), cli.PromptOptions{
 			Positional:        positional,
 			PromptFlag:        flagPrompt,
 			AutoStdin:         true,
@@ -293,17 +293,24 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	text := fullText.String()
 	if text != "" {
 		// Save raw (un-styled) text to file so the saved artefact is plain
-		// markdown — useful for piping into tools or committing.
+		// markdown — useful for piping into tools or committing. Failures
+		// here (disk full, permission denied) propagate as a non-zero exit
+		// so scripts can rely on the artefact being either complete or
+		// known-broken.
 		if save != nil {
-			_, _ = save.WriteString(text)
+			if _, err := save.WriteString(text); err != nil {
+				return fmt.Errorf("save write: %w", err)
+			}
 			if !strings.HasSuffix(text, "\n") {
-				_, _ = save.WriteString("\n")
+				if _, err := save.WriteString("\n"); err != nil {
+					return fmt.Errorf("save write: %w", err)
+				}
 			}
 			// Commit only on a clean stream — error/missing-done branches below
 			// fall through without committing so the tempfile is discarded.
 			if streamErr == "" && gotDone {
 				if err := save.Commit(); err != nil {
-					fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
+					return fmt.Errorf("save commit: %w", err)
 				}
 			}
 		}
@@ -409,12 +416,20 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			fmt.Print(md.Flush())
 		}
 	}
+	// saveErr captures the first error from Write/Commit so a script-mode
+	// caller can detect that --save failed even though the on-screen
+	// stream looked fine. Returning it from streamEvents propagates to a
+	// non-zero exit at the cobra level.
+	var saveErr error
 	emitText := func(s string) {
 		// Always write raw text to the save file before any markdown
 		// styling — saved files should be plain markdown the user can
 		// re-process, not a screencast of ANSI codes.
-		if save != nil {
-			_, _ = save.WriteString(s)
+		if save != nil && saveErr == nil {
+			if _, err := save.WriteString(s); err != nil {
+				saveErr = fmt.Errorf("save write: %w", err)
+				fmt.Fprintf(os.Stderr, "%s[save]%s write failed: %v\n", cli.Yellow, cli.Reset, err)
+			}
 		}
 		if md != nil {
 			fmt.Print(md.Write(s))
@@ -426,7 +441,7 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 		msg, err := ws.ReadMessage()
 		if err != nil {
 			flush()
-			return nil
+			return saveErr
 		}
 
 		event, err := cli.ParseChatEvent(msg)
@@ -461,18 +476,19 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// Don't commit save — defer Close in the caller discards the
 			// tempfile so an aborted run never overwrites a previous artefact.
 			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
-			return nil
+			return saveErr
 		case "done":
 			flush()
-			if save != nil {
+			if save != nil && saveErr == nil {
 				if err := save.Commit(); err != nil {
+					saveErr = fmt.Errorf("save commit: %w", err)
 					fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
 				}
 			}
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "\n%s[done]%s\n", cli.Green, cli.Reset)
 			}
-			return nil
+			return saveErr
 		}
 	}
 }

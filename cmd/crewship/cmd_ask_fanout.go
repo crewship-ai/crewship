@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
@@ -27,6 +31,15 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 		return fmt.Errorf("no agents")
 	}
 
+	// Per-agent timeout + Ctrl-C: an agent whose WS hangs would otherwise
+	// block wg.Wait() forever, freezing the CLI. 5 min is generous for a
+	// streamed response; tightening can be done with --fanout-timeout if
+	// users hit it. Ctrl-C cancels every still-running goroutine.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	ctx, cancelTimeout := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancelTimeout()
+
 	type result struct {
 		slug string
 		text string
@@ -40,7 +53,7 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 		wg.Add(1)
 		go func(agentID, slug string) {
 			defer wg.Done()
-			text, err := fanoutOne(client, server, wsToken, agentID, prompt)
+			text, err := fanoutOne(ctx, client, server, wsToken, agentID, prompt)
 			results <- result{slug: slug, text: text, err: err}
 		}(agentID, slug)
 	}
@@ -106,10 +119,11 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 	}
 	// All agents iterated — commit the save file. Even if individual agents
 	// errored, the saved artefact captures every header + (partial) text we
-	// printed, which is what the user just saw on screen.
+	// printed, which is what the user just saw on screen. Commit failure
+	// returns non-zero so scripts notice a missing/partial artefact.
 	if save != nil {
 		if err := save.Commit(); err != nil {
-			fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
+			return fmt.Errorf("save commit: %w", err)
 		}
 	}
 	return nil
@@ -118,8 +132,13 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 // fanoutOne creates a chat, sends the prompt, and returns the full text
 // response (or an error). All run-level errors are returned to the caller
 // — fan-out's display layer decides how to surface them.
-func fanoutOne(client *cli.Client, server, wsToken, agentID, prompt string) (string, error) {
-	resp, err := client.Post("/api/v1/agents/"+agentID+"/chats", map[string]string{
+//
+// Honours `ctx`: if the parent fan-out context is cancelled (Ctrl-C or
+// timeout) the goroutine wraps up promptly. WS read errors are now
+// propagated to the caller with the partial text so a connection drop
+// surfaces as a per-agent error instead of a silently-truncated success.
+func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID, prompt string) (string, error) {
+	resp, err := client.WithContext(ctx).Post("/api/v1/agents/"+agentID+"/chats", map[string]string{
 		"mode":   "CHAT",
 		"origin": "CLI",
 	})
@@ -149,11 +168,24 @@ func fanoutOne(client *cli.Client, server, wsToken, agentID, prompt string) (str
 		return "", fmt.Errorf("send: %w", err)
 	}
 
+	// Bridge ctx → ws.Close() so a parent cancel unblocks the read loop.
+	// Without this, ws.ReadMessage() blocks indefinitely on a hung agent
+	// even though the goroutine was told to give up.
+	go func() {
+		<-ctx.Done()
+		_ = ws.Close()
+	}()
+
 	var text strings.Builder
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
-			return text.String(), nil
+			// If the cancel was the cause, surface that instead of a
+			// generic "connection closed" — operator-facing clarity.
+			if ctx.Err() != nil {
+				return text.String(), fmt.Errorf("cancelled: %w", ctx.Err())
+			}
+			return text.String(), fmt.Errorf("read: %w", err)
 		}
 		event, err := cli.ParseChatEvent(msg)
 		if err != nil || event == nil {

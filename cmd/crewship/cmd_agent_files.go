@@ -96,24 +96,26 @@ func downloadAgentFile(client *cli.Client, agentID, fileName string, cmd *cobra.
 		return err
 	}
 
-	var w io.Writer
 	if out == "-" {
-		w = os.Stdout
-	} else {
-		f, err := os.Create(out)
-		if err != nil {
-			return fmt.Errorf("create %s: %w", out, err)
-		}
-		defer f.Close()
-		w = f
+		_, err := io.Copy(os.Stdout, resp.Body)
+		return err
 	}
-	n, err := io.Copy(w, resp.Body)
+	// Atomic download: stream into a tempfile next to the target, then
+	// rename only on success. Without this, Ctrl-C or a transport hiccup
+	// mid-copy clobbers an existing good file with a truncated one.
+	af, err := cli.NewAtomicFile(out)
 	if err != nil {
 		return err
 	}
-	if out != "-" {
-		fmt.Fprintf(os.Stderr, "%s[saved %d bytes → %s]%s\n", cli.Dim, n, out, cli.Reset)
+	defer af.Close() // discards tempfile if Commit didn't run
+	n, err := io.Copy(af, resp.Body)
+	if err != nil {
+		return fmt.Errorf("copy: %w", err)
 	}
+	if err := af.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "%s[saved %d bytes → %s]%s\n", cli.Dim, n, out, cli.Reset)
 	return nil
 }
 

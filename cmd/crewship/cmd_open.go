@@ -96,8 +96,10 @@ func buildOpenURL(base string, args []string) (string, error) {
 		if err := require(1); err != nil {
 			return "", err
 		}
-		// Web UI uses ?chat=<id> on the chat page in this repo.
-		path = "/chat?id=" + esc(rest[0])
+		// Web UI uses ?chat=<id> on the chat page in this repo. Earlier
+		// version of this code shipped `?id=<id>` which silently opened
+		// the chat list without selecting the target — fixed here.
+		path = "/chat?chat=" + esc(rest[0])
 	case "mission":
 		if err := require(1); err != nil {
 			return "", err

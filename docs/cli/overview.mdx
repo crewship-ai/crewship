@@ -184,6 +184,20 @@ Run `crewship ask` with no positional arg or default to launch a `huh` picker th
 
 Re-run a previous run. Recovers the original first user prompt from the chat history and starts a new run on the same agent.
 
+```bash
+crewship retry r_abc                       # same agent, same prompt, NEW chat
+crewship retry r_abc --continue            # append to the SAME chat
+crewship retry r_abc --new-prompt "be more specific"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--new-prompt` | `string` | | Override the original prompt. |
+| `--continue` | `bool` | `false` | Append to the original chat instead of starting fresh. |
+| `--quiet` | `bool` | `false` | Only output text. |
+| `--no-stream` | `bool` | `false` | Wait for completion, show only result. |
+| `--save` | `string` | | Tee the response to this path. |
+
 ### `crewship copy-prompt`
 
 Recover the original prompt of a previous run without running anything. Pairs naturally with `crewship retry --new-prompt` for tweak-and-rerun loops.
@@ -306,20 +320,6 @@ crewship lint --strict     # warnings also fail (CI-friendly)
 crewship doctor --fix      # safe auto-repairs (creates missing data dir)
 crewship config validate   # token + workspace + default-agent sanity
 ```
-
-```bash
-crewship retry r_abc                       # same agent, same prompt, NEW chat
-crewship retry r_abc --continue            # append to the SAME chat
-crewship retry r_abc --new-prompt "be more specific"
-```
-
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--new-prompt` | `string` | | Override the original prompt. |
-| `--continue` | `bool` | `false` | Append to the original chat instead of starting fresh. |
-| `--quiet` | `bool` | `false` | Only output text. |
-| `--no-stream` | `bool` | `false` | Wait for completion, show only result. |
-| `--save` | `string` | | Tee the response to this path. |
 
 ### `crewship logs`
 

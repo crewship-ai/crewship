@@ -95,6 +95,8 @@ Examples:
 		}
 
 		// Apply --since filter client-side (the runs API has no since param).
+		// Inclusive on the boundary — `--since 24h` should keep a run created
+		// at exactly the cutoff, not silently drop it.
 		filtered := body.Data[:0]
 		for _, r := range body.Data {
 			if sinceTime.IsZero() {
@@ -102,7 +104,7 @@ Examples:
 				continue
 			}
 			t, err := time.Parse(time.RFC3339, r.CreatedAt)
-			if err != nil || t.After(sinceTime) {
+			if err != nil || !t.Before(sinceTime) {
 				filtered = append(filtered, r)
 			}
 		}

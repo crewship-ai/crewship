@@ -91,12 +91,20 @@ database presence, network reachability.
 			// is set. This is the only safe automatic repair — installing
 			// Docker or fiddling with networks is left to humans.
 			if fixMode {
-				if _, statErr := os.Stat(dataDir.Root); os.IsNotExist(statErr) {
-					if mkErr := os.MkdirAll(dataDir.Root, 0o700); mkErr == nil {
-						logger.Info("[fix] created data directory", "path", dataDir.Root)
+				_, statErr := os.Stat(dataDir.Root)
+				switch {
+				case os.IsNotExist(statErr):
+					if mkErr := os.MkdirAll(dataDir.Root, 0o700); mkErr != nil {
+						logger.Error("[fix] could not create data directory", "error", mkErr, "path", dataDir.Root)
+						allOK = false
 					} else {
-						logger.Error("[fix] could not create data directory", "error", mkErr)
+						logger.Info("[fix] created data directory", "path", dataDir.Root)
 					}
+				case statErr != nil:
+					// Permission denied or another non-ENOENT failure — surface
+					// it instead of swallowing. Auto-fix shouldn't pretend success.
+					logger.Error("[fix] could not stat data directory", "error", statErr, "path", dataDir.Root)
+					allOK = false
 				}
 			}
 		}

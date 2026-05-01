@@ -42,7 +42,11 @@ func (c *Client) StreamSSE(ctx context.Context, path string, lastEventID string,
 	if err != nil {
 		return fmt.Errorf("parse URL: %w", err)
 	}
-	if wsID := c.GetWorkspaceID(); wsID != "" {
+	// Use a context-bound clone so the workspace-resolution preflight
+	// (which may issue an HTTP GET) honours the StreamSSE caller's
+	// cancellation. Without this, a cancelled follow could still block on
+	// that lookup before the SSE connection is even opened.
+	if wsID := c.WithContext(ctx).GetWorkspaceID(); wsID != "" {
 		q := u.Query()
 		if q.Get("workspace_id") == "" {
 			q.Set("workspace_id", wsID)

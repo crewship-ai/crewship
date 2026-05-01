@@ -68,7 +68,7 @@ func TestFetchSubscriptionUsage_HandlesEmpty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rows, err := fetchSubscriptionUsage(cli.NewClient(srv.URL, "t", ""))
+	rows, err := fetchSubscriptionUsage(cli.NewClient(srv.URL, "t", ""), "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestFetchSubscriptionUsage_PropagatesError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchSubscriptionUsage(cli.NewClient(srv.URL, "t", ""))
+	_, err := fetchSubscriptionUsage(cli.NewClient(srv.URL, "t", ""), "")
 	if err == nil {
 		t.Fatal("expected error")
 	}

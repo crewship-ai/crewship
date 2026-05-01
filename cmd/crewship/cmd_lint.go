@@ -140,7 +140,11 @@ func lintPromptLibrary(emit func(severity, file, msg string)) {
 			continue
 		}
 		info, err := e.Info()
-		if err == nil && info.Size() == 0 {
+		if err != nil {
+			emit("warn", path, "stat failed: "+err.Error())
+			continue
+		}
+		if info.Size() == 0 {
 			emit("warn", path, "prompt is empty (0 bytes) — accidental?")
 		}
 	}

@@ -56,10 +56,15 @@ Examples:
 		}
 
 		typesFilter, _ := cmd.Flags().GetString("types")
+		// Fetch agent+window-scoped entries then filter to this run's
+		// trace_id. Without the trace filter, a later run on the same agent
+		// would fold its events into this timeline (and its cost/tool
+		// totals), which is misleading.
 		entries, err := fetchInspectEntries(client, runMeta.AgentID, windowStart, typesFilter)
 		if err != nil {
 			return err
 		}
+		entries = filterEntriesByTrace(entries, runID)
 
 		// JSON / YAML / filter paths bypass the table formatter and emit the
 		// raw entry list. Filter is jq-piped via emitJSONFiltered.
@@ -102,6 +107,30 @@ func fetchInspectEntries(client *cli.Client, agentID string, from time.Time, typ
 		out[len(body.Entries)-1-i] = e
 	}
 	return out, nil
+}
+
+// filterEntriesByTrace narrows entries to those whose trace_id matches
+// the inspected run. journal entries record trace_id = run_id by
+// convention (see internal/journal/types.go), so this is the canonical
+// way to scope a multi-run agent's journal slice down to one run.
+//
+// If no entries have a trace_id (older entries pre-dating the trace
+// rollout, or non-run-scoped events the user explicitly --types-included),
+// they're kept on the assumption the user wants to see them.
+func filterEntriesByTrace(entries []map[string]any, runID string) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		t, ok := e["trace_id"].(string)
+		if !ok || t == "" {
+			// No trace metadata — keep, since we can't disprove it belongs.
+			out = append(out, e)
+			continue
+		}
+		if t == runID {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // printInspectTable renders entries as a one-line-per-event timeline,

@@ -17,7 +17,7 @@ func TestBuildOpenURL(t *testing.T) {
 		{"agents list", "http://localhost:8080", []string{"agents"}, "http://localhost:8080/agents", false},
 		{"agent detail", "http://localhost:8080", []string{"agent", "viktor"}, "http://localhost:8080/agents/viktor", false},
 		{"crew detail", "http://localhost:8080", []string{"crew", "backend-team"}, "http://localhost:8080/crews/backend-team", false},
-		{"chat", "http://localhost:8080", []string{"chat", "c_abc123"}, "http://localhost:8080/chat?id=c_abc123", false},
+		{"chat", "http://localhost:8080", []string{"chat", "c_abc123"}, "http://localhost:8080/chat?chat=c_abc123", false},
 		{"mission", "http://localhost:8080", []string{"mission", "MIS-42"}, "http://localhost:8080/missions/MIS-42", false},
 		{"journal", "http://localhost:8080", []string{"journal"}, "http://localhost:8080/journal", false},
 		{"approvals", "http://localhost:8080", []string{"approvals"}, "http://localhost:8080/approvals", false},
