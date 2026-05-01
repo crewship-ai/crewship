@@ -15,6 +15,17 @@ runs:
     - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
       with:
         go-version: ${{ inputs.go-version }}
+        # Explicitly disable the cache. The self-hosted MBA runner is
+        # persistent — $GOMODCACHE and $GOCACHE are already warm on local
+        # disk between jobs. The actions/cache layer tries to tar+upload
+        # ~1-2 GB to GitHub's cache CDN in the post-step, which routinely
+        # exceeds the post-step's silent ~35s budget and ends with
+        # 'The operation was canceled' — marking the entire job as
+        # failure even when its real work succeeded. Empirical: PR #240
+        # run 25204871572 had golangci-lint pass cleanly in 6s, then
+        # the post-step cache-save was killed mid-tar and the job went
+        # red. cache: false skips both restore and save.
+        cache: false
 
     - shell: bash
       run: |
