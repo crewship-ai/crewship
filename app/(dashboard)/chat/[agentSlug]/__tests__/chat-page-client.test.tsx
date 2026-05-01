@@ -144,10 +144,17 @@ describe("<ChatPageClient> — slug resolution from URL", () => {
   })
 
   it("creates a session and navigates with ?session= query when none provided", async () => {
+    // chat-page-client owns URL writes via window.history.pushState (see
+    // the docstring on the selectSession callback) — NOT useRouter().replace.
+    // We can't read the result off window.location because the beforeEach
+    // shadows it with Object.defineProperty for the slug-resolution tests
+    // and that severs the link to history. Instead spy on the History
+    // API call directly and assert on its third arg (the URL).
+    const pushSpy = vi.spyOn(window.history, "pushState")
     render(<ChatPageClient />)
-    await waitFor(() => expect(mockReplace).toHaveBeenCalled(), { timeout: 3000 })
-    const callUrl = mockReplace.mock.calls[0][0] as string
-    expect(callUrl).toMatch(/^\/chat\/filip\?session=session-1$/)
+    await waitFor(() => expect(pushSpy).toHaveBeenCalled(), { timeout: 3000 })
+    const url = pushSpy.mock.calls[0][2] as string
+    expect(url).toMatch(/^\/chat\/filip\?session=session-1$/)
   })
 })
 
