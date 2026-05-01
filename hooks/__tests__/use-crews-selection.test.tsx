@@ -1,125 +1,130 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 
+// useCrewsSelection delegates to useShallowSearchParam, which:
+//   - reads the initial value from useSearchParams (next/navigation) at mount
+//   - writes URL changes via window.history.replaceState — NOT through
+//     next/navigation — so picking another agent/crew never re-evaluates
+//     the dashboard layout subtree (see the docstring on
+//     hooks/use-shallow-search-param.ts).
+//
+// The test surface therefore needs to mock useSearchParams / usePathname
+// for the *read* path and assert against window.location for the *write*
+// path. Mocking useRouter().replace would assert against an API the hook
+// no longer touches — and was the cause of the earlier test failures.
+
 const mocks = vi.hoisted(() => ({
-  replace: vi.fn(),
   searchParams: new URLSearchParams(),
   pathname: "/crews",
 }))
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({
-    replace: mocks.replace,
-    push: vi.fn(),
-    back: vi.fn(),
-    forward: vi.fn(),
-    prefetch: vi.fn(),
-    refresh: vi.fn(),
-  }),
   useSearchParams: () => mocks.searchParams,
   usePathname: () => mocks.pathname,
 }))
 
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
 
-function setSearchParams(init: string) {
-  mocks.searchParams = new URLSearchParams(init)
+function setURL(pathname: string, search: string) {
+  mocks.pathname = pathname
+  mocks.searchParams = new URLSearchParams(search)
+  // happy-dom honours replaceState updates to window.location, so the
+  // hook's reads of window.location.{pathname,search} also see this.
+  const qs = search ? `?${search}` : ""
+  window.history.replaceState(null, "", `${pathname}${qs}`)
 }
 
 describe("useCrewsSelection", () => {
   beforeEach(() => {
-    mocks.replace.mockClear()
-    mocks.pathname = "/crews"
-    setSearchParams("")
+    setURL("/crews", "")
   })
 
   describe("reading URL state", () => {
     it("returns null slugs when query is empty", () => {
-      setSearchParams("")
+      setURL("/crews", "")
       const { result } = renderHook(() => useCrewsSelection())
       expect(result.current.selectedAgentSlug).toBeNull()
       expect(result.current.selectedCrewSlug).toBeNull()
     })
 
     it("reads agent slug from ?agent=", () => {
-      setSearchParams("agent=mia")
+      setURL("/crews", "agent=mia")
       const { result } = renderHook(() => useCrewsSelection())
       expect(result.current.selectedAgentSlug).toBe("mia")
       expect(result.current.selectedCrewSlug).toBeNull()
     })
 
     it("reads crew slug from ?crew=", () => {
-      setSearchParams("crew=research")
+      setURL("/crews", "crew=research")
       const { result } = renderHook(() => useCrewsSelection())
       expect(result.current.selectedCrewSlug).toBe("research")
       expect(result.current.selectedAgentSlug).toBeNull()
     })
 
     it("reads both agent and crew when both present", () => {
-      setSearchParams("agent=mia&crew=research")
+      setURL("/crews", "agent=mia&crew=research")
       const { result } = renderHook(() => useCrewsSelection())
       expect(result.current.selectedAgentSlug).toBe("mia")
       expect(result.current.selectedCrewSlug).toBe("research")
     })
 
     it("preserves unrelated query params", () => {
-      setSearchParams("agent=mia&sort=name")
+      setURL("/crews", "agent=mia&sort=name")
       const { result } = renderHook(() => useCrewsSelection())
       expect(result.current.selectedAgentSlug).toBe("mia")
     })
   })
 
   describe("selectAgent", () => {
-    it("writes agent slug to URL with scroll:false", () => {
+    it("writes agent slug to URL", () => {
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.selectAgent("mia")
       })
-      expect(mocks.replace).toHaveBeenCalledWith("/crews?agent=mia", { scroll: false })
+      expect(window.location.pathname + window.location.search).toBe(
+        "/crews?agent=mia",
+      )
     })
 
     it("clears agent param when called with null", () => {
-      setSearchParams("agent=mia&crew=research")
+      setURL("/crews", "agent=mia&crew=research")
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.selectAgent(null)
       })
-      expect(mocks.replace).toHaveBeenCalledWith("/crews?crew=research", { scroll: false })
+      expect(window.location.search).toBe("?crew=research")
     })
 
     it("does not touch crew param", () => {
-      setSearchParams("crew=research")
+      setURL("/crews", "crew=research")
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.selectAgent("mia")
       })
-      const call = mocks.replace.mock.calls[0][0] as string
-      expect(call).toContain("crew=research")
-      expect(call).toContain("agent=mia")
+      expect(window.location.search).toContain("crew=research")
+      expect(window.location.search).toContain("agent=mia")
     })
   })
 
   describe("selectCrew (mutual exclusivity)", () => {
     it("writes crew slug and clears agent", () => {
-      setSearchParams("agent=mia")
+      setURL("/crews", "agent=mia")
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.selectCrew("research")
       })
-      const call = mocks.replace.mock.calls[0][0] as string
-      expect(call).toContain("crew=research")
-      expect(call).not.toContain("agent=")
+      expect(window.location.search).toContain("crew=research")
+      expect(window.location.search).not.toContain("agent=")
     })
 
     it("clears crew param when called with null", () => {
-      setSearchParams("crew=research&agent=mia")
+      setURL("/crews", "crew=research&agent=mia")
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.selectCrew(null)
       })
-      const call = mocks.replace.mock.calls[0][0] as string
-      expect(call).not.toContain("crew=")
-      expect(call).not.toContain("agent=")
+      expect(window.location.search).not.toContain("crew=")
+      expect(window.location.search).not.toContain("agent=")
     })
   })
 
@@ -129,45 +134,42 @@ describe("useCrewsSelection", () => {
       act(() => {
         result.current.update({ agent: "filip", crew: "devops" })
       })
-      const call = mocks.replace.mock.calls[0][0] as string
-      expect(call).toContain("agent=filip")
-      expect(call).toContain("crew=devops")
+      expect(window.location.search).toContain("agent=filip")
+      expect(window.location.search).toContain("crew=devops")
     })
 
     it("distinguishes null (clear) from undefined (no-op)", () => {
-      setSearchParams("agent=mia&crew=research")
+      setURL("/crews", "agent=mia&crew=research")
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.update({ agent: null })
       })
-      const call = mocks.replace.mock.calls[0][0] as string
-      expect(call).not.toContain("agent=")
-      expect(call).toContain("crew=research")
+      expect(window.location.search).not.toContain("agent=")
+      expect(window.location.search).toContain("crew=research")
     })
   })
 
   describe("clearSelection", () => {
     it("removes both agent and crew", () => {
-      setSearchParams("agent=mia&crew=research")
+      setURL("/crews", "agent=mia&crew=research")
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.clearSelection()
       })
-      expect(mocks.replace).toHaveBeenCalledWith("/crews", { scroll: false })
+      expect(window.location.pathname).toBe("/crews")
+      expect(window.location.search).toBe("")
     })
   })
 
   describe("pathname agnostic", () => {
     it("uses current pathname, not hardcoded /crews", () => {
-      mocks.pathname = "/some/other/path"
+      setURL("/some/other/path", "")
       const { result } = renderHook(() => useCrewsSelection())
       act(() => {
         result.current.selectCrew("research")
       })
-      expect(mocks.replace).toHaveBeenCalledWith(
-        "/some/other/path?crew=research",
-        { scroll: false },
-      )
+      expect(window.location.pathname).toBe("/some/other/path")
+      expect(window.location.search).toBe("?crew=research")
     })
   })
 })

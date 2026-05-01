@@ -98,11 +98,13 @@ type Store interface {
 
 // ErrJTIMismatch fires when a refresh request carries a JTI that does
 // not match the session's current_refresh_jti. Either:
-//   (a) the rightful client already rotated and the attacker is using
-//       the old token (theft), or
-//   (b) the attacker rotated first and the rightful client is now
-//       presenting a since-superseded token (still theft, just from
-//       the other side).
+//
+//	(a) the rightful client already rotated and the attacker is using
+//	    the old token (theft), or
+//	(b) the attacker rotated first and the rightful client is now
+//	    presenting a since-superseded token (still theft, just from
+//	    the other side).
+//
 // In both cases the response is to revoke the whole session.
 var ErrJTIMismatch = errors.New("refresh jti mismatch")
 

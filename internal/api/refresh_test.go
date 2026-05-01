@@ -22,15 +22,12 @@ type refreshTestRig struct {
 	h        *NextAuthHandler
 	v        *auth.JWTValidator
 	store    sessions.Store
-	db       *signinDBHandle
 	userID   string
 	sessID   string
 	access   string
 	refresh  string
 	hostName string
 }
-
-type signinDBHandle struct{ inner interface{ Exec(string, ...any) (any, error) } }
 
 func newRefreshRig(t *testing.T) *refreshTestRig {
 	t.Helper()

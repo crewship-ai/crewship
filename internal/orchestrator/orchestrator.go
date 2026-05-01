@@ -155,8 +155,17 @@ type Orchestrator struct {
 	// journal entry when nothing actually changed. Stale entries (after
 	// container recreation) are harmless — a new container ID gets a
 	// fresh slot and the first snapshot lands as expected.
+	//
+	// snapshotPending maps containerID -> the hash currently being emitted
+	// by some goroutine. A concurrent caller with the *same* hash skips
+	// (the in-flight emit dedupes for it); a caller with a *different*
+	// hash falls through and emits its own — silently dropping a
+	// different-hash snapshot would lose real state changes that happened
+	// while a prior probe was mid-flight. The mutex covers both maps so
+	// claim+publish is atomic relative to the read path.
 	snapshotHashMu    sync.Mutex
 	snapshotHashCache map[string]string
+	snapshotPending   map[string]string
 
 	// snapshotInFlightMu protects snapshotInFlight itself. The per-container
 	// locks inside it serialize concurrent recordContainerSnapshot calls
@@ -508,6 +517,7 @@ func New(
 		crews:             make(map[string]*crewState),
 		tmuxCache:         make(map[string]bool),
 		snapshotHashCache: make(map[string]string),
+		snapshotPending:   make(map[string]string),
 		snapshotInFlight:  make(map[string]*sync.Mutex),
 	}
 }
