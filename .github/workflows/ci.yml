@@ -121,9 +121,10 @@ jobs:
     runs-on: [self-hosted, macos-arm64]
     # 30 min: setup-go-embed alone has shown 602-1052s variance across
     # consecutive runs on this self-hosted runner (mba-m3-arm64) —
-    # consistent with network-side variability while actions/setup-go
-    # fetches the Go SDK. Actual vet+build+test on this codebase is
-    # ~75s; the rest of the budget is the network-buffer for setup.
+    # actions/setup-go fetches the Go SDK and the runner network
+    # occasionally serves it slowly. Actual vet+build+test on this
+    # codebase is ~75s; the rest of the budget is buffer for setup
+    # variance.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -145,10 +146,10 @@ jobs:
   go-lint:
     name: Go Lint
     runs-on: [self-hosted, macos-arm64]
-    # 20 min, matching the Go job's expanded budget. setup-go-embed has
-    # shown 602-1052s variance from network alone, so a 15-min budget
-    # could still timeout before lint starts on a slow-network run.
-    # Lint itself runs in ~30s with the cached golangci-lint binary.
+    # 20 min, matching the Go job's expanded budget — setup-go-embed
+    # variance can eat the entire 10-min original budget before lint
+    # even starts. Lint itself runs in ~30s with the cached
+    # golangci-lint binary.
     timeout-minutes: 20
     env:
       GOLANGCI_VERSION: v2.1.6
@@ -194,9 +195,9 @@ jobs:
   binary:
     name: Binary Build
     runs-on: [self-hosted, macos-arm64]
-    # 20 min, not 10: same setup-go-embed network variability as the Go
-    # and Go Lint jobs. Go build itself finishes in seconds; the budget
-    # is entirely network-buffer for actions/setup-go.
+    # 20 min, not 10: same setup-go-embed network variability as the
+    # Go and Go Lint jobs above. Go build itself finishes in seconds;
+    # the budget is entirely network-buffer for actions/setup-go.
     timeout-minutes: 20
     needs: [frontend, go]
     if: github.event_name == 'push'

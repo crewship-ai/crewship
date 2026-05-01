@@ -243,11 +243,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		})
 	}
 
-	// Create MissionEngine for orchestrating multi-task missions
-	var missionEngine *orchestrator.MissionEngine
-	if deps != nil && deps.DB != nil {
-		missionEngine = orchestrator.NewMissionEngine(deps.DB, orch, wsHub, logger)
-	}
+	// Create MissionEngine for orchestrating multi-task missions.
+	// deps + deps.DB are guaranteed non-nil by the panic guard above (the
+	// sessions store needs them too); the redundant nil check that was
+	// here confused staticcheck SA5011 into flagging deps.DB usage at
+	// the sessions.NewDBStore call.
+	missionEngine := orchestrator.NewMissionEngine(deps.DB, orch, wsHub, logger)
 
 	// Create terminal handler for interactive container shells.
 	var termHandler *terminal.Handler

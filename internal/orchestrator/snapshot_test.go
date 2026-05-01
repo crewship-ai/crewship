@@ -320,6 +320,52 @@ func TestRecordContainerSnapshot_ConcurrentDedup(t *testing.T) {
 	}
 }
 
+// TestRecordContainerSnapshot_DifferentHashFallsThrough verifies that the
+// pending-claim guard only short-circuits same-hash callers — a caller
+// whose probe produced a *different* hash from the in-flight one must
+// fall through and emit its own snapshot. Otherwise a real state change
+// detected mid-emit (e.g. the container ran `apt-get install` between
+// two near-simultaneous run completions) would be silently dropped.
+//
+// Setup: pre-populate snapshotPending with a sentinel hash that does not
+// match anything snap.Hash() will produce, then call recordContainerSnapshot
+// against a real (non-conflicting) stub. The call must emit exactly one
+// entry — proving the pending-different-hash branch fell through.
+func TestRecordContainerSnapshot_DifferentHashFallsThrough(t *testing.T) {
+	t.Parallel()
+	o := New(&snapshotStubContainer{
+		apt: "git\t2.43.0-1\n",
+		os:  "Ubuntu 24.04 LTS",
+	}, newMemState(), slog.Default())
+	rec := &chunkRecorder{}
+	o.SetJournal(rec)
+
+	// Inject a sentinel pending hash for ctr-1 that the test stub will
+	// never produce. A boolean pending flag would block this call; the
+	// hash-keyed flag must let it through.
+	o.snapshotHashMu.Lock()
+	o.snapshotPending["ctr-1"] = "sentinel-hash-not-a-real-snapshot"
+	o.snapshotHashMu.Unlock()
+
+	o.recordContainerSnapshot(context.Background(), AgentRunRequest{
+		WorkspaceID: "ws", CrewID: "c1", CrewSlug: "team",
+		ContainerID: "ctr-1",
+	}, "ctr-1")
+
+	if got := countSnapshots(rec); got != 1 {
+		t.Errorf("different-hash call must fall through and emit: want 1 entry, got %d", got)
+	}
+
+	// The deferred cleanup only deletes our hash, so the sentinel stays.
+	o.snapshotHashMu.Lock()
+	pending := o.snapshotPending["ctr-1"]
+	o.snapshotHashMu.Unlock()
+	if pending != "sentinel-hash-not-a-real-snapshot" {
+		t.Errorf("deferred cleanup must only delete OUR pending hash, "+
+			"sentinel was clobbered: got %q", pending)
+	}
+}
+
 // TestRecordContainerSnapshot_HungProbeBoundedByTimeout verifies the
 // snapshot path can't wedge run completion on a frozen container or a
 // broken probe binary. Override snapshotProbeTimeout to a sub-second
