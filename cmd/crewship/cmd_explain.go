@@ -74,13 +74,12 @@ Examples:
 			return fmt.Errorf("no journal entries found for agent in window starting %s", windowStart.Format(time.RFC3339))
 		}
 
-		// Resolve summarizing agent: --agent override, else default-agent config.
-		summarizerSlug, _ := cmd.Flags().GetString("agent")
-		if summarizerSlug == "" && cliCfg != nil {
-			summarizerSlug = cliCfg.DefaultAgent
-		}
+		// Resolve summarizing agent: --agent flag → CREWSHIP_DEFAULT_AGENT env
+		// → config.default_agent.
+		summarizerFlag, _ := cmd.Flags().GetString("agent")
+		summarizerSlug := cli.ResolveDefaultAgent(summarizerFlag, cliCfg)
 		if summarizerSlug == "" {
-			return fmt.Errorf("no agent set to summarize. Use --agent or 'crewship config set default-agent <slug>'")
+			return fmt.Errorf("no agent set to summarize. Use --agent, set CREWSHIP_DEFAULT_AGENT, or run 'crewship config set default-agent <slug>'")
 		}
 		summarizerID, err := resolveAgentID(client, summarizerSlug)
 		if err != nil {

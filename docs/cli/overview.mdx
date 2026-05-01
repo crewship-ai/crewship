@@ -24,6 +24,8 @@ Every command inherits these persistent flags:
 | `--verbose` | `-v` | `bool` | `false` | Verbose output. |
 | `--no-color` | | `bool` | `false` | Disable ANSI colors. |
 
+In addition: `CREWSHIP_DEFAULT_AGENT` env var sets the default agent for `crewship ask` / `crewship explain`. Resolution order: command-line flag → env var → config key.
+
 ## Authentication
 
 ### `crewship init`
@@ -138,7 +140,10 @@ crewship run viktor --chat <chatId> "follow-up question"
 | `--with-git-status` | | `bool` | `false` | Append `git status -s` as context. |
 | `--with-file` | | `[]string` | | Append file contents as context (repeatable). |
 | `--with-cmd` | | `[]string` | | Append shell command output as context (repeatable). |
-| `--save` | | `string` | | Tee the agent's text response to this path (no ANSI). |
+| `--paste` | | `bool` | `false` | Append system clipboard as context. |
+| `--save` | | `string` | | Tee response to this path (atomic write, no ANSI). |
+| `--dry-run` | | `bool` | `false` | Print assembled prompt and exit without sending. |
+| `--estimate` | | `bool` | `false` | Print token count + cost estimate and exit. |
 | `--markdown` | | `bool` | _auto on TTY_ | Force markdown ANSI styling. |
 | `--no-markdown` | | `bool` | `false` | Disable markdown ANSI styling. |
 
@@ -160,7 +165,7 @@ crewship run list
 
 ### `crewship ask`
 
-Low-friction one-shot prompt against a default agent. Inherits the same `--with-*`, `--save`, and `--markdown` flags as `run`. The agent is resolved from `--agent` flag → `default-agent` config key → interactive picker (TTY) → error.
+Low-friction one-shot prompt against a default agent. Inherits the same `--with-*`, `--save`, `--markdown`, `--dry-run`, `--estimate`, and `--paste` flags as `run`. The agent is resolved from `--agent` flag → `CREWSHIP_DEFAULT_AGENT` env var → `default-agent` config key → interactive picker (TTY) → error. `--agents <list>` runs the same prompt against multiple agents in parallel.
 
 ```bash
 crewship ask "what time is it?"
@@ -178,6 +183,36 @@ Run `crewship ask` with no positional arg or default to launch a `huh` picker th
 ### `crewship retry`
 
 Re-run a previous run. Recovers the original first user prompt from the chat history and starts a new run on the same agent.
+
+### `crewship copy-prompt`
+
+Recover the original prompt of a previous run without running anything. Pairs naturally with `crewship retry --new-prompt` for tweak-and-rerun loops.
+
+```bash
+crewship copy-prompt r_abc                  # to stdout
+crewship copy-prompt r_abc --clipboard      # to system clipboard
+crewship copy-prompt r_abc > prompt.txt
+```
+
+### `crewship explain`
+
+Summarize what happened in a run via the default agent. Fetches journal entries scoped to the run's agent + start window and asks the agent for a 3-6 bullet summary.
+
+```bash
+crewship explain r_abc
+crewship explain r_abc --agent reviewer
+crewship explain r_abc --types error,keeper.decision,peer.escalation
+```
+
+### `crewship watch`
+
+Live-tail the Crew Journal. Top-level alias for `journal --follow`.
+
+```bash
+crewship watch
+crewship watch --severity warn,error
+crewship watch --crew backend-team
+```
 
 ```bash
 crewship retry r_abc                       # same agent, same prompt, NEW chat

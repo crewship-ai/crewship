@@ -135,6 +135,31 @@ func ResolveWorkspace(flagVal string, cfg *CLIConfig) string {
 	return ""
 }
 
+// ResolveDefaultAgent returns the agent slug to use by default for `crewship ask`
+// when no --agent flag is given. Order of precedence:
+//
+//	flag > CREWSHIP_DEFAULT_AGENT env var > config.default_agent
+//
+// Returns empty if none are set; callers decide whether to error or
+// open the interactive picker.
+//
+// The env var slot exists so users with multiple shells or shell-scoped
+// agent contexts (e.g. a frontend project shell vs a backend project
+// shell) can override the persisted default without `crewship config set`
+// every time.
+func ResolveDefaultAgent(flagVal string, cfg *CLIConfig) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if v := os.Getenv("CREWSHIP_DEFAULT_AGENT"); v != "" {
+		return v
+	}
+	if cfg != nil && cfg.DefaultAgent != "" {
+		return cfg.DefaultAgent
+	}
+	return ""
+}
+
 // ResolveFormat returns the effective output format from flag > config > default.
 func ResolveFormat(flagVal string, cfg *CLIConfig) string {
 	if flagVal != "" {

@@ -55,11 +55,9 @@ Examples:
 			}
 		}
 
-		agentSlug, _ := cmd.Flags().GetString("agent")
+		agentFlag, _ := cmd.Flags().GetString("agent")
 		fanoutAgents, _ := cmd.Flags().GetStringSlice("agents")
-		if agentSlug == "" && cliCfg != nil {
-			agentSlug = cliCfg.DefaultAgent
-		}
+		agentSlug := cli.ResolveDefaultAgent(agentFlag, cliCfg)
 
 		var client *cli.Client
 		if !offline {
