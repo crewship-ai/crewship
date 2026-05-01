@@ -12,16 +12,22 @@ inputs:
 runs:
   using: composite
   steps:
-    # cache: true enables actions/setup-go's built-in module + build cache,
-    # keyed on the platform and go.sum hash. On the self-hosted MBA runner
-    # (where Go-touching jobs land) a cold module graph adds ~30-45s per
-    # job; with cache restored the same step finishes in <2s. The cache
-    # also covers the build cache, so `go vet` / `go test` reuse compiled
-    # archives across jobs sharing the same go.sum.
+    # cache is intentionally NOT enabled here. The self-hosted MBA runner
+    # is persistent — $GOMODCACHE and $GOCACHE under the runner's home
+    # directory are already warm from prior jobs, so actions/setup-go's
+    # built-in actions/cache restore is pure overhead: it tries to fetch
+    # ~1-2 GB tarballs over the cache CDN to populate a directory that's
+    # already populated locally. Empirically this adds ~10 minutes per
+    # job on cold actions-cache state (verified on PR #239 / run 25196471236
+    # where setup-go-embed alone took 602s in the Go job and timed out
+    # Go Lint's 10-minute budget).
+    #
+    # If we ever move Go-touching jobs to ephemeral GitHub-hosted runners,
+    # add `cache: true` here so the module download cost is amortized
+    # across runs. For self-hosted, the local disk *is* the cache.
     - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
       with:
         go-version: ${{ inputs.go-version }}
-        cache: true
 
     - shell: bash
       run: |
