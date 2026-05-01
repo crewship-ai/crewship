@@ -38,6 +38,13 @@ All development and dogfood production happen on remote Proxmox VMs via SSH. Nev
 - **Tracks:** `main` branch (always-bleeding-edge); started via `./dev.sh start` in tmux
 - **VS Code / Cursor:** `code --remote ssh-remote+dev-server /opt/crewship`
 - Go PATH on the server requires: `export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin` (already in `.bashrc`)
+- **Multi-instance (`dev 1` / `dev 2` / `dev 3`):** parallel checkouts on the **same VM** — they differ by directory and port, NOT by IP/host. All four reach via `ssh dev-server` and share `10.0.0.1`. Layout:
+  - `/opt/crewship` (default, often on `main`) — Go `:8080`, Next `:3001`
+  - `/opt/crewship_1` — Go `:8081`, Next `:3011`
+  - `/opt/crewship_2` — Go `:8082`, Next `:3012`
+  - `/opt/crewship_3` — Go `:8083`, Next `:3013`
+  - Port formula in `dev.sh`: instance 0 = 8080/3001 (default); instance N≥1 = `8080+N` / `3010+N` (note the 9-port gap between default Next 3001 and instance-1 Next 3011).
+  - Each instance has its own `.env.local`, `crewship.db`, and tmux session — they're independent enough to run different feature branches in parallel for testing/PR review. The branches checked out in `_1` / `_2` / `_3` are typically WIP — see "Dev VM hosts feature branches" rule before any `git checkout`/`pull`/`stash`.
 - Tags: `crewship`, `dev`, `environment-development`
 
 ### `prod-server` — VMID 301 (dogfood production)
