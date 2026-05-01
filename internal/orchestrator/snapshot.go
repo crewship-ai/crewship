@@ -3,10 +3,27 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/containerstate"
 )
+
+// snapshotLock returns the per-container mutex used to serialize concurrent
+// recordContainerSnapshot calls for the same containerID. Locks are created
+// lazily and never deleted; the map grows by one entry per container the
+// orchestrator has ever seen, which is bounded by container lifecycle (one
+// entry per crew on a given host).
+func (o *Orchestrator) snapshotLock(containerID string) *sync.Mutex {
+	o.snapshotInFlightMu.Lock()
+	defer o.snapshotInFlightMu.Unlock()
+	if m, ok := o.snapshotInFlight[containerID]; ok {
+		return m
+	}
+	m := &sync.Mutex{}
+	o.snapshotInFlight[containerID] = m
+	return m
+}
 
 // snapshotProbeTimeout bounds the four exec calls that capture the
 // container's actual installed-package state. Three execs of dpkg-query
@@ -38,6 +55,17 @@ func (o *Orchestrator) recordContainerSnapshot(ctx context.Context, req AgentRun
 			o.logger.Debug("container snapshot probe panicked", "container_id", containerID, "panic", r)
 		}
 	}()
+
+	// Serialize concurrent snapshot attempts on the same container.
+	// Without this, N goroutines that all hit run-completion at the same
+	// instant each pass the cache check before any of them stores a hash,
+	// and every goroutine emits a duplicate container.snapshot entry.
+	// The per-container lock means the first goroutine probes/emits/stores
+	// while the rest queue, then short-circuit on the cached hash.
+	// Different containers don't block each other.
+	lock := o.snapshotLock(containerID)
+	lock.Lock()
+	defer lock.Unlock()
 
 	// Decouple from the request ctx so a user cancelling chat right at
 	// run-end doesn't cancel the snapshot probe (snapshot survives the

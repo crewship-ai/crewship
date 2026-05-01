@@ -1,0 +1,1077 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Crewship Dashboard — Mission Control Wireframe</title>
+  <style>
+    /* ──────────────────────────────────────────────────────────────
+       Design tokens — match Crewship orchestration dark theme.
+       ────────────────────────────────────────────────────────────── */
+    :root {
+      --bg: #0b0d12;
+      --card: #12151c;
+      --card-2: #171b24;
+      --card-3: #1c2029;
+      --border: rgba(255,255,255,0.08);
+      --border-60: rgba(255,255,255,0.06);
+      --border-10: rgba(255,255,255,0.10);
+      --fg: #e6e7eb;
+      --fg-80: rgba(230,231,235,0.80);
+      --fg-50: rgba(230,231,235,0.50);
+      --fg-40: rgba(230,231,235,0.40);
+      --fg-30: rgba(230,231,235,0.30);
+      --blue: #60a5fa;
+      --emerald: #34d399;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --violet: #a78bfa;
+      --cyan: #22d3ee;
+      --fuchsia: #e879f9;
+      --orange: #fb923c;
+      --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; font-size: 14px; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; padding: 0; }
+
+    /* Typography (same scale as orchestration page) */
+    .h-card { font-size: 10px; font-weight: 600; color: var(--fg-50); text-transform: uppercase; letter-spacing: 0.06em; }
+    .h-card .num { color: var(--fg-40); }
+    .body { font-size: 11px; color: var(--fg-80); }
+    .meta { font-size: 10px; color: var(--fg-40); }
+    .num  { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .id   { font-family: var(--mono); font-size: 10px; color: var(--fg-50); }
+
+    /* Shell */
+    .shell { padding: 12px 16px 40px; max-width: 1760px; margin: 0 auto; }
+
+    /* ── Toolbar ─────────────────────────────────────────────── */
+    .toolbar {
+      display: flex; align-items: center; gap: 8px; height: 36px;
+      padding: 0 8px 0 12px; background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; margin-bottom: 12px;
+    }
+    .toolbar .tab {
+      font-size: 12px; font-weight: 500; color: var(--fg-50);
+      padding: 0 10px; border-bottom: 2px solid transparent;
+      height: 100%; display: inline-flex; align-items: center; gap: 6px;
+      position: relative; top: 1px;
+    }
+    .toolbar .tab:hover { color: var(--fg-80); }
+    .toolbar .tab.active { color: var(--blue); border-color: var(--blue); }
+    .toolbar .spacer { flex: 1; }
+    .search {
+      display: flex; align-items: center; gap: 6px; height: 26px;
+      padding: 0 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--fg-50); font-size: 11px;
+      min-width: 220px;
+    }
+    .search kbd {
+      font-family: var(--mono); font-size: 9px; padding: 1px 5px;
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      border-radius: 3px; margin-left: auto;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px; height: 26px;
+      padding: 0 8px; border-radius: 6px; font-size: 10px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+      border: 1px solid rgba(52,211,153,0.3); color: var(--emerald);
+      background: rgba(52,211,153,0.10);
+    }
+    .pill .dot {
+      position: relative; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--emerald);
+    }
+    .pill .dot::after {
+      content: ''; position: absolute; inset: 0; border-radius: 50%;
+      background: var(--emerald); opacity: 0.6; animation: ping 1.6s cubic-bezier(0,0,0.2,1) infinite;
+    }
+    @keyframes ping { 0% { transform: scale(1); opacity: 0.6; } 80% { transform: scale(2.2); opacity: 0; } 100% { transform: scale(2.2); opacity: 0; } }
+    .btn-ghost {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 26px; padding: 0 10px; font-size: 11px; font-weight: 500;
+      border-radius: 6px; border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03); color: var(--fg-80);
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.06); }
+
+    /* ── Action Center ───────────────────────────────────────── */
+    .action-center {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; margin-bottom: 12px;
+      background: linear-gradient(90deg, rgba(251,146,60,0.08), rgba(251,191,36,0.05));
+      border: 1px solid rgba(251,146,60,0.18);
+      border-radius: 10px;
+    }
+    .action-center .ac-label {
+      font-size: 11px; font-weight: 600; color: var(--orange);
+      display: inline-flex; align-items: center; gap: 6px;
+      padding-right: 10px; margin-right: 4px;
+      border-right: 1px solid rgba(255,255,255,0.08);
+    }
+    .action-center .chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px 3px 3px; border-radius: 999px;
+      background: var(--card-2); border: 1px solid var(--border);
+      font-size: 11px; color: var(--fg-80); cursor: pointer;
+      transition: border-color .15s;
+    }
+    .chip:hover { border-color: var(--border-10); }
+    .chip .count {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 18px; height: 18px; padding: 0 5px;
+      background: rgba(255,255,255,0.06); border-radius: 999px;
+      font-family: var(--mono); font-size: 10px; font-weight: 600;
+    }
+    .chip.urgent .count { background: rgba(248,113,113,0.18); color: var(--red); }
+    .chip.wait   .count { background: rgba(251,191,36,0.18); color: var(--amber); }
+    .chip.info   .count { background: rgba(96,165,250,0.18); color: var(--blue); }
+
+    /* ── Grid layout helpers ─────────────────────────────────── */
+    .grid { display: grid; gap: 10px; }
+    .grid-6  { grid-template-columns: repeat(6, minmax(0,1fr)); }
+    .grid-3  { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .grid-23 { grid-template-columns: 2fr 1fr; }
+    .grid-221 { grid-template-columns: 1.5fr 1fr 1fr; }
+    .row { margin-bottom: 10px; }
+
+    /* ── Card primitive ──────────────────────────────────────── */
+    .card {
+      background: var(--card); border: 1px solid var(--border-60);
+      border-radius: 10px; padding: 12px;
+    }
+    .card.tight { padding: 10px 12px; }
+    .card-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .card-title {
+      font-size: 10px; font-weight: 600; color: var(--fg-50);
+      text-transform: uppercase; letter-spacing: 0.06em;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .card-hint { font-size: 10px; color: var(--fg-40); font-family: var(--mono); }
+
+    /* ── KPI cards (row 1) ───────────────────────────────────── */
+    .kpi {
+      background: var(--card); border: 1px solid var(--border-60);
+      border-radius: 10px; padding: 10px 12px; position: relative;
+      display: flex; flex-direction: column; gap: 2px; min-height: 96px;
+      overflow: hidden;
+    }
+    .kpi .label { font-size: 10px; font-weight: 600; color: var(--fg-50); text-transform: uppercase; letter-spacing: 0.06em; }
+    .kpi .value { font-size: 24px; font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; }
+    .kpi .delta { font-size: 10px; color: var(--fg-40); margin-top: 1px; }
+    .kpi .delta.up    { color: var(--emerald); }
+    .kpi .delta.down  { color: var(--red); }
+    .kpi .spark { position: absolute; right: 6px; bottom: 6px; opacity: 0.95; width: 80px; height: 32px; }
+
+    /* ── Chart container ─────────────────────────────────────── */
+    .chart { position: relative; width: 100%; }
+    .chart svg { width: 100%; height: 100%; display: block; overflow: visible; }
+    .chart-h-180 { height: 180px; }
+    .chart-h-160 { height: 160px; }
+    .chart-h-140 { height: 140px; }
+
+    /* ── Legend ──────────────────────────────────────────────── */
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+    .legend .item { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--fg-50); }
+    .swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+    /* ── Tables / rows ───────────────────────────────────────── */
+    .tbl-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 8px; border-radius: 6px; font-size: 11px; color: var(--fg-80);
+      border-bottom: 1px solid var(--border-60);
+    }
+    .tbl-row:last-child { border-bottom: 0; }
+    .tbl-row:hover { background: rgba(255,255,255,0.02); }
+    .tag-status {
+      display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px;
+      border-radius: 4px; font-size: 9px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      border: 1px solid var(--border);
+    }
+    .tag-status.s-in-progress { color: var(--blue); border-color: rgba(96,165,250,0.35); background: rgba(96,165,250,0.10); }
+    .tag-status.s-review      { color: var(--amber); border-color: rgba(251,191,36,0.35); background: rgba(251,191,36,0.10); }
+    .tag-status.s-completed   { color: var(--emerald); border-color: rgba(52,211,153,0.35); background: rgba(52,211,153,0.10); }
+    .tag-status.s-failed      { color: var(--red); border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.10); }
+    .tag-status.s-todo        { color: var(--cyan); border-color: rgba(34,211,238,0.35); background: rgba(34,211,238,0.10); }
+
+    /* ── Container resources row ─────────────────────────────── */
+    .res-row {
+      display: grid; grid-template-columns: 62px 1fr 110px 150px 84px;
+      align-items: center; gap: 12px;
+      padding: 9px 6px; border-bottom: 1px solid var(--border-60);
+      font-size: 11px;
+    }
+    .res-row:last-child { border-bottom: 0; }
+    .res-row .name { font-weight: 500; color: var(--fg); display: flex; align-items: center; gap: 6px; }
+    .res-row .val { font-family: var(--mono); color: var(--fg-80); font-size: 10px; }
+    .mem-bar { position: relative; height: 4px; border-radius: 999px; background: rgba(255,255,255,0.05); overflow: hidden; }
+    .mem-bar .fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; }
+
+    /* ── Heatmap ─────────────────────────────────────────────── */
+    .heatmap {
+      display: grid; grid-template-columns: 60px 1fr; gap: 8px;
+      font-size: 10px;
+    }
+    .heatmap .labels { display: flex; flex-direction: column; gap: 2px; }
+    .heatmap .labels .lbl { height: 16px; line-height: 16px; color: var(--fg-50); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .heatmap .grid-cells { display: flex; flex-direction: column; gap: 2px; }
+    .heatmap .hm-row { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; height: 16px; }
+    .heatmap .cell { height: 16px; border-radius: 2px; background: rgba(255,255,255,0.04); }
+    .heatmap .cell.v1 { background: rgba(96,165,250,0.18); }
+    .heatmap .cell.v2 { background: rgba(96,165,250,0.35); }
+    .heatmap .cell.v3 { background: rgba(96,165,250,0.55); }
+    .heatmap .cell.v4 { background: rgba(96,165,250,0.8); }
+    .heatmap .cell.v5 { background: #60a5fa; }
+    .heatmap-xaxis {
+      display: grid; grid-template-columns: 60px 1fr; gap: 8px;
+      margin-top: 6px; font-family: var(--mono); font-size: 9px; color: var(--fg-40);
+    }
+    .heatmap-xaxis .ticks { display: flex; justify-content: space-between; padding: 0 2px; }
+
+    /* ── Radial (crew health) ────────────────────────────────── */
+    .radial-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .radial-card {
+      padding: 10px; border: 1px solid var(--border-60); border-radius: 8px;
+      background: var(--card-2); text-align: center;
+    }
+    .radial-card .name { font-size: 11px; font-weight: 500; color: var(--fg); margin-bottom: 4px; }
+    .radial-card .sub { font-size: 9px; color: var(--fg-40); font-family: var(--mono); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* ── Inbox items ─────────────────────────────────────────── */
+    .inbox-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 10px; border: 1px solid var(--border-60);
+      border-radius: 8px; background: var(--card-2); margin-bottom: 6px;
+      transition: border-color .15s;
+      cursor: pointer;
+    }
+    .inbox-item:hover { border-color: var(--border-10); }
+    .inbox-item:last-child { margin-bottom: 0; }
+    .inbox-icon { width: 22px; height: 22px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+    .inbox-icon.esc { background: rgba(248,113,113,0.12); color: var(--red); }
+    .inbox-icon.key { background: rgba(251,191,36,0.12); color: var(--amber); }
+    .inbox-icon.rev { background: rgba(96,165,250,0.12); color: var(--blue); }
+    .inbox-icon.men { background: rgba(167,139,250,0.12); color: var(--violet); }
+    .inbox-title { font-size: 11px; font-weight: 500; flex: 1; line-height: 1.35; }
+    .inbox-title .sub { display: block; font-size: 10px; color: var(--fg-40); font-weight: 400; margin-top: 1px; }
+    .inbox-meta { font-size: 10px; color: var(--fg-40); font-family: var(--mono); }
+
+    /* ── Captain widget ──────────────────────────────────────── */
+    .captain-box {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .captain-prompt {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 10px; background: var(--card-2); border: 1px solid var(--border-60);
+      border-radius: 8px; font-size: 11px; color: var(--fg-50);
+    }
+    .captain-prompt::before {
+      content: '⌁'; color: var(--violet); font-size: 16px; font-weight: 700;
+    }
+    .captain-suggestions { display: flex; flex-direction: column; gap: 4px; }
+    .captain-suggestions .s {
+      padding: 6px 8px; border: 1px dashed var(--border); border-radius: 6px;
+      font-size: 10px; color: var(--fg-50); cursor: pointer;
+    }
+    .captain-suggestions .s:hover { color: var(--fg-80); background: rgba(255,255,255,0.02); }
+
+    /* ── Project bars ────────────────────────────────────────── */
+    .project-row {
+      padding: 8px 4px; border-bottom: 1px solid var(--border-60); font-size: 11px;
+    }
+    .project-row:last-child { border-bottom: 0; }
+    .project-row .top { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .project-row .name { display: flex; align-items: center; gap: 6px; color: var(--fg-80); }
+    .project-row .pct { font-family: var(--mono); font-size: 10px; color: var(--fg-40); }
+    .project-row .bar { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.05); overflow: hidden; position: relative; }
+    .project-row .bar .fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; transition: width .5s; }
+
+    /* ── Mission rows compact ────────────────────────────────── */
+    .mis-row {
+      display: grid; grid-template-columns: 52px 1fr 100px 70px 60px 70px;
+      align-items: center; gap: 10px; padding: 8px 6px; font-size: 11px;
+      border-bottom: 1px solid var(--border-60);
+    }
+    .mis-row:last-child { border-bottom: 0; }
+    .mis-row:hover { background: rgba(255,255,255,0.02); }
+    .mis-row .prog {
+      height: 4px; border-radius: 999px; background: rgba(255,255,255,0.06);
+      overflow: hidden; position: relative;
+    }
+    .mis-row .prog .fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--blue); }
+
+    /* Disclaimer */
+    .section-note {
+      font-size: 10px; color: var(--fg-40); padding: 9px 12px;
+      border: 1px dashed var(--border); border-radius: 8px; margin-bottom: 12px;
+      background: rgba(96,165,250,0.04); line-height: 1.45;
+    }
+    .section-note strong { color: var(--fg-80); }
+    .section-note code { font-family: var(--mono); color: var(--fg-50); font-size: 10px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+
+    <!-- Disclaimer ─────────────────────────────────────────── -->
+    <div class="section-note">
+      <strong>Mission Control Wireframe</strong> · <code>wireframes/dashboard.html</code> · static HTML, open offline.
+      All charts are mocked but <em>live</em> (redraws + ticking feed every 1–5 s).
+      Real implementation uses <strong>shadcn/ui charts</strong> (Recharts v3) — see
+      <code>PLAN-dashboard.md</code> for phased rollout. No <code>New Agent</code> button — creation lives in
+      <code>/agents/new</code>; the dashboard is for <em>control</em>, not creation.
+    </div>
+
+    <!-- ── Toolbar ──────────────────────────────────────────── -->
+    <div class="toolbar">
+      <button class="tab active">🗺 Overview</button>
+      <button class="tab">👤 My Work <span class="num" style="color:var(--orange);">11</span></button>
+      <button class="tab">💸 Costs</button>
+      <button class="tab">📊 Insights</button>
+      <button class="tab">📡 Activity</button>
+      <div class="spacer"></div>
+      <div class="search">
+        <span>🔍</span>
+        <span>Search agents, missions, issues…</span>
+        <kbd>⌘K</kbd>
+      </div>
+      <button class="btn-ghost">⌁ Ask Captain</button>
+      <span class="pill"><span class="dot"></span>Live</span>
+    </div>
+
+    <!-- ── Action Center ────────────────────────────────────── -->
+    <div class="action-center">
+      <div class="ac-label">⚡ Waiting for you</div>
+      <div class="chips">
+        <button class="chip urgent"><span class="count">3</span>Escalations</button>
+        <button class="chip wait"><span class="count">2</span>Keeper requests</button>
+        <button class="chip wait"><span class="count">4</span>Missions in REVIEW</button>
+        <button class="chip info"><span class="count">1</span>Mission proposal</button>
+        <button class="chip info"><span class="count">1</span>Mention in chat</button>
+      </div>
+      <div class="meta">Updated just now</div>
+    </div>
+
+    <!-- ── Row 1: KPI strip (6 cards) ───────────────────────── -->
+    <div class="grid grid-6 row">
+
+      <div class="kpi">
+        <div class="label">Agents</div>
+        <div class="value">12</div>
+        <div class="delta">4 crews · 4 leads · 8 workers</div>
+        <svg class="spark" viewBox="0 0 80 32" preserveAspectRatio="none">
+          <polyline fill="rgba(96,165,250,0.15)" stroke="none" points="0,22 10,20 20,22 30,18 40,14 50,16 60,10 70,12 80,8 80,32 0,32"/>
+          <polyline fill="none" stroke="#60a5fa" stroke-width="1.5" points="0,22 10,20 20,22 30,18 40,14 50,16 60,10 70,12 80,8"/>
+        </svg>
+      </div>
+
+      <div class="kpi">
+        <div class="label">Running now</div>
+        <div class="value" style="color: var(--emerald);">3</div>
+        <div class="delta up">▲ 2 vs 1h ago</div>
+        <svg class="spark" viewBox="0 0 80 32" preserveAspectRatio="none">
+          <polyline fill="rgba(52,211,153,0.15)" stroke="none" points="0,26 10,24 20,22 30,24 40,18 50,20 60,14 70,10 80,8 80,32 0,32"/>
+          <polyline fill="none" stroke="#34d399" stroke-width="1.5" points="0,26 10,24 20,22 30,24 40,18 50,20 60,14 70,10 80,8"/>
+        </svg>
+      </div>
+
+      <div class="kpi">
+        <div class="label">Active missions</div>
+        <div class="value">5</div>
+        <div class="delta">13 today · 28 this week</div>
+        <svg class="spark" viewBox="0 0 80 32" preserveAspectRatio="none">
+          <polyline fill="rgba(167,139,250,0.15)" stroke="none" points="0,20 10,18 20,20 30,16 40,18 50,14 60,16 70,12 80,14 80,32 0,32"/>
+          <polyline fill="none" stroke="#a78bfa" stroke-width="1.5" points="0,20 10,18 20,20 30,16 40,18 50,14 60,16 70,12 80,14"/>
+        </svg>
+      </div>
+
+      <div class="kpi">
+        <div class="label">Open issues</div>
+        <div class="value">14</div>
+        <div class="delta down">▼ 3 vs yesterday</div>
+        <svg class="spark" viewBox="0 0 80 32" preserveAspectRatio="none">
+          <polyline fill="rgba(251,191,36,0.15)" stroke="none" points="0,10 10,12 20,10 30,14 40,16 50,14 60,18 70,16 80,20 80,32 0,32"/>
+          <polyline fill="none" stroke="#fbbf24" stroke-width="1.5" points="0,10 10,12 20,10 30,14 40,16 50,14 60,18 70,16 80,20"/>
+        </svg>
+      </div>
+
+      <div class="kpi">
+        <div class="label">Cost (24h)</div>
+        <div class="value">$1.24</div>
+        <div class="delta">24k tokens · $3.80 / week</div>
+        <svg class="spark" viewBox="0 0 80 32" preserveAspectRatio="none">
+          <polyline fill="rgba(34,211,238,0.15)" stroke="none" points="0,24 10,22 20,20 30,18 40,16 50,18 60,14 70,12 80,8 80,32 0,32"/>
+          <polyline fill="none" stroke="#22d3ee" stroke-width="1.5" points="0,24 10,22 20,20 30,18 40,16 50,18 60,14 70,12 80,8"/>
+        </svg>
+      </div>
+
+      <div class="kpi">
+        <div class="label">Success rate (24h)</div>
+        <div class="value">92<span style="font-size:14px; color: var(--fg-50);">%</span></div>
+        <div class="delta up">▲ 4% vs last 24h</div>
+        <svg class="spark" viewBox="0 0 80 32" preserveAspectRatio="none">
+          <polyline fill="rgba(52,211,153,0.12)" stroke="none" points="0,14 10,12 20,14 30,10 40,12 50,8 60,10 70,6 80,4 80,32 0,32"/>
+          <polyline fill="none" stroke="#34d399" stroke-width="1.5" points="0,14 10,12 20,14 30,10 40,12 50,8 60,10 70,6 80,4"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ── Row 2: Throughput + Status donut ─────────────────── -->
+    <div class="grid grid-23 row">
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">📈 Issue throughput · 24h · stacked by crew</div>
+          <div class="card-hint"><span id="throughput-total">48</span> closed</div>
+        </div>
+        <div class="chart chart-h-180">
+          <svg viewBox="0 0 600 180" preserveAspectRatio="none">
+            <line x1="0" y1="30"  x2="600" y2="30"  stroke="rgba(255,255,255,0.04)" />
+            <line x1="0" y1="70"  x2="600" y2="70"  stroke="rgba(255,255,255,0.04)" />
+            <line x1="0" y1="110" x2="600" y2="110" stroke="rgba(255,255,255,0.04)" />
+            <line x1="0" y1="150" x2="600" y2="150" stroke="rgba(255,255,255,0.08)" />
+            <g id="throughput-bars"></g>
+            <text x="4"   y="172" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">0h</text>
+            <text x="148" y="172" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">6h</text>
+            <text x="292" y="172" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">12h</text>
+            <text x="436" y="172" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">18h</text>
+            <text x="570" y="172" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">now</text>
+          </svg>
+        </div>
+        <div class="legend">
+          <span class="item"><span class="swatch" style="background:#60a5fa"></span>Engineering</span>
+          <span class="item"><span class="swatch" style="background:#34d399"></span>DevOps</span>
+          <span class="item"><span class="swatch" style="background:#fbbf24"></span>Quality</span>
+          <span class="item"><span class="swatch" style="background:#a78bfa"></span>Research</span>
+          <span class="item" style="margin-left:auto;"><span style="color:var(--fg-40);">MTTC: </span><span class="num">42m</span></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">🎯 Mission status</div>
+          <div class="card-hint">28 total</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:16px;">
+          <svg style="width:140px; height:140px; flex-shrink:0;" viewBox="0 0 42 42">
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="4.5"/>
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#60a5fa" stroke-width="4.5"
+                    stroke-dasharray="21.4 78.6" stroke-dashoffset="25" stroke-linecap="butt"/>
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#22d3ee" stroke-width="4.5"
+                    stroke-dasharray="10.7 89.3" stroke-dashoffset="3.6" stroke-linecap="butt"/>
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#a78bfa" stroke-width="4.5"
+                    stroke-dasharray="17.8 82.2" stroke-dashoffset="-7.1" stroke-linecap="butt"/>
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#fbbf24" stroke-width="4.5"
+                    stroke-dasharray="14.3 85.7" stroke-dashoffset="-24.9" stroke-linecap="butt"/>
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#34d399" stroke-width="4.5"
+                    stroke-dasharray="28.6 71.4" stroke-dashoffset="-39.2" stroke-linecap="butt"/>
+            <circle cx="21" cy="21" r="15.915" fill="none" stroke="#f87171" stroke-width="4.5"
+                    stroke-dasharray="7.1 92.9" stroke-dashoffset="-67.9" stroke-linecap="butt"/>
+            <text x="21" y="21.8" text-anchor="middle" dominant-baseline="middle" font-size="7.5" font-weight="600" fill="#e6e7eb" font-family="ui-monospace">28</text>
+            <text x="21" y="27" text-anchor="middle" dominant-baseline="middle" font-size="2.8" fill="rgba(230,231,235,0.4)" style="text-transform:uppercase; letter-spacing:0.06em;">missions</text>
+          </svg>
+          <div style="flex:1; display:flex; flex-direction:column; gap:5px; font-size:11px;">
+            <div style="display:flex; justify-content:space-between; color:var(--fg-80);"><span><span class="swatch" style="background:#60a5fa; margin-right:6px;"></span>Backlog</span><span class="num">6</span></div>
+            <div style="display:flex; justify-content:space-between; color:var(--fg-80);"><span><span class="swatch" style="background:#22d3ee; margin-right:6px;"></span>Todo</span><span class="num">3</span></div>
+            <div style="display:flex; justify-content:space-between; color:var(--fg-80);"><span><span class="swatch" style="background:#a78bfa; margin-right:6px;"></span>In progress</span><span class="num">5</span></div>
+            <div style="display:flex; justify-content:space-between; color:var(--fg-80);"><span><span class="swatch" style="background:#fbbf24; margin-right:6px;"></span>Review</span><span class="num">4</span></div>
+            <div style="display:flex; justify-content:space-between; color:var(--fg-80);"><span><span class="swatch" style="background:#34d399; margin-right:6px;"></span>Completed</span><span class="num">8</span></div>
+            <div style="display:flex; justify-content:space-between; color:var(--fg-80);"><span><span class="swatch" style="background:#f87171; margin-right:6px;"></span>Failed</span><span class="num">2</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Row 3: Cost burn + Top missions ──────────────────── -->
+    <div class="grid grid-23 row">
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">💸 Cost burn · 7 days · stacked by model</div>
+          <div class="card-hint">$3.80 total · $0.54/day avg</div>
+        </div>
+        <div class="chart chart-h-160">
+          <svg viewBox="0 0 600 160" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="costGrad1" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.55"/>
+                <stop offset="100%" stop-color="#22d3ee" stop-opacity="0.05"/>
+              </linearGradient>
+              <linearGradient id="costGrad2" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.55"/>
+                <stop offset="100%" stop-color="#a78bfa" stop-opacity="0.05"/>
+              </linearGradient>
+            </defs>
+            <line x1="0" y1="30"  x2="600" y2="30"  stroke="rgba(255,255,255,0.04)" />
+            <line x1="0" y1="70"  x2="600" y2="70"  stroke="rgba(255,255,255,0.04)" />
+            <line x1="0" y1="110" x2="600" y2="110" stroke="rgba(255,255,255,0.04)" />
+            <line x1="0" y1="140" x2="600" y2="140" stroke="rgba(255,255,255,0.08)" />
+
+            <!-- Sonnet stacked area (top) -->
+            <path id="cost-sonnet-area" fill="url(#costGrad2)" d="M0,140 L85,122 L171,118 L257,102 L343,88 L429,72 L515,60 L600,52 L600,140 Z"/>
+            <path id="cost-sonnet-line" fill="none" stroke="#a78bfa" stroke-width="1.8" d="M0,140 L85,122 L171,118 L257,102 L343,88 L429,72 L515,60 L600,52"/>
+
+            <!-- Haiku area (bottom, on zero) -->
+            <path id="cost-haiku-area" fill="url(#costGrad1)" d="M0,154 L85,148 L171,146 L257,144 L343,142 L429,138 L515,136 L600,132 L600,160 L0,160 Z"/>
+            <path id="cost-haiku-line" fill="none" stroke="#22d3ee" stroke-width="1.8" d="M0,154 L85,148 L171,146 L257,144 L343,142 L429,138 L515,136 L600,132"/>
+
+            <!-- x-axis ticks -->
+            <text x="4"   y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Thu</text>
+            <text x="88"  y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Fri</text>
+            <text x="174" y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Sat</text>
+            <text x="260" y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Sun</text>
+            <text x="346" y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Mon</text>
+            <text x="432" y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Tue</text>
+            <text x="518" y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Wed</text>
+            <text x="576" y="158" font-family="ui-monospace" font-size="8" fill="rgba(230,231,235,0.3)">Thu</text>
+
+            <!-- today marker -->
+            <line x1="600" y1="10" x2="600" y2="140" stroke="rgba(96,165,250,0.4)" stroke-dasharray="2 2"/>
+          </svg>
+        </div>
+        <div class="legend">
+          <span class="item"><span class="swatch" style="background:#a78bfa"></span>claude-sonnet-4-5 · $3.10</span>
+          <span class="item"><span class="swatch" style="background:#22d3ee"></span>claude-haiku-4-5 · $0.70</span>
+          <span class="item" style="margin-left:auto;"><span style="color:var(--fg-40);">Burn rate:</span><span class="num"> $0.05/h</span></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">💎 Top cost missions · 24h</div>
+          <div class="card-hint">top 6</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
+            <span class="id" style="width:40px; flex-shrink:0;">ENG-5</span>
+            <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--fg-80);">Refactor credential rotation</span>
+            <span class="num" style="color:var(--fg-80); width:52px; text-align:right;">$0.42</span>
+          </div>
+          <div class="mem-bar"><div class="fill" style="width:100%; background:#a78bfa;"></div></div>
+
+          <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
+            <span class="id" style="width:40px; flex-shrink:0;">DEV-3</span>
+            <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--fg-80);">Inventory installed tools in containers</span>
+            <span class="num" style="color:var(--fg-80); width:52px; text-align:right;">$0.28</span>
+          </div>
+          <div class="mem-bar"><div class="fill" style="width:66%; background:#a78bfa;"></div></div>
+
+          <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
+            <span class="id" style="width:40px; flex-shrink:0;">RES-3</span>
+            <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--fg-80);">Analyze public JSON API usage</span>
+            <span class="num" style="color:var(--fg-80); width:52px; text-align:right;">$0.18</span>
+          </div>
+          <div class="mem-bar"><div class="fill" style="width:43%; background:#60a5fa;"></div></div>
+
+          <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
+            <span class="id" style="width:40px; flex-shrink:0;">QUA-1</span>
+            <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--fg-80);">Log parser for errors</span>
+            <span class="num" style="color:var(--fg-80); width:52px; text-align:right;">$0.14</span>
+          </div>
+          <div class="mem-bar"><div class="fill" style="width:33%; background:#60a5fa;"></div></div>
+
+          <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
+            <span class="id" style="width:40px; flex-shrink:0;">ENG-3</span>
+            <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--fg-80);">Directory tree with samples</span>
+            <span class="num" style="color:var(--fg-80); width:52px; text-align:right;">$0.11</span>
+          </div>
+          <div class="mem-bar"><div class="fill" style="width:26%; background:#22d3ee;"></div></div>
+
+          <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
+            <span class="id" style="width:40px; flex-shrink:0;">DEV-1</span>
+            <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--fg-80);">Trace DNS resolution</span>
+            <span class="num" style="color:var(--fg-80); width:52px; text-align:right;">$0.08</span>
+          </div>
+          <div class="mem-bar"><div class="fill" style="width:19%; background:#22d3ee;"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Row 4: Container resources (live) ────────────────── -->
+    <div class="card row">
+      <div class="card-hdr">
+        <div class="card-title">🐳 Container resources · live · 1 container per crew</div>
+        <div class="card-hint">via <span style="font-family:var(--mono);">container.stats</span> WS stream</div>
+      </div>
+      <div>
+        <div class="res-row">
+          <div class="name"><span class="swatch" style="background:#60a5fa;"></span>ENG</div>
+          <svg id="res-spark-eng" width="100%" height="22" viewBox="0 0 240 22" preserveAspectRatio="none">
+            <polyline fill="rgba(96,165,250,0.18)" stroke="none" class="area" points=""/>
+            <polyline fill="none" stroke="#60a5fa" stroke-width="1.5" class="line" points=""/>
+          </svg>
+          <div class="val" data-res-cpu="eng">42% CPU</div>
+          <div>
+            <div class="mem-bar"><div class="fill" style="width: 25%; background:#60a5fa;"></div></div>
+            <div class="val" style="margin-top: 3px;">512 / 2048 MB · 42 PIDs</div>
+          </div>
+          <div class="tag-status s-in-progress">Running</div>
+        </div>
+
+        <div class="res-row">
+          <div class="name"><span class="swatch" style="background:#34d399;"></span>DEV</div>
+          <svg id="res-spark-dev" width="100%" height="22" viewBox="0 0 240 22" preserveAspectRatio="none">
+            <polyline fill="rgba(52,211,153,0.18)" stroke="none" class="area" points=""/>
+            <polyline fill="none" stroke="#34d399" stroke-width="1.5" class="line" points=""/>
+          </svg>
+          <div class="val" data-res-cpu="dev">28% CPU</div>
+          <div>
+            <div class="mem-bar"><div class="fill" style="width: 18%; background: #34d399;"></div></div>
+            <div class="val" style="margin-top: 3px;">380 / 2048 MB · 28 PIDs</div>
+          </div>
+          <div class="tag-status s-in-progress">Running</div>
+        </div>
+
+        <div class="res-row">
+          <div class="name"><span class="swatch" style="background:#fbbf24;"></span>QUA</div>
+          <svg id="res-spark-qua" width="100%" height="22" viewBox="0 0 240 22" preserveAspectRatio="none">
+            <polyline fill="rgba(251,191,36,0.18)" stroke="none" class="area" points=""/>
+            <polyline fill="none" stroke="#fbbf24" stroke-width="1.5" class="line" points=""/>
+          </svg>
+          <div class="val" data-res-cpu="qua">12% CPU</div>
+          <div>
+            <div class="mem-bar"><div class="fill" style="width: 12%; background: #fbbf24;"></div></div>
+            <div class="val" style="margin-top: 3px;">240 / 2048 MB · 8 PIDs</div>
+          </div>
+          <div class="tag-status">Idle</div>
+        </div>
+
+        <div class="res-row">
+          <div class="name"><span class="swatch" style="background:#a78bfa;"></span>RES</div>
+          <svg id="res-spark-res" width="100%" height="22" viewBox="0 0 240 22" preserveAspectRatio="none">
+            <polyline fill="rgba(167,139,250,0.18)" stroke="none" class="area" points=""/>
+            <polyline fill="none" stroke="#a78bfa" stroke-width="1.5" class="line" points=""/>
+          </svg>
+          <div class="val" data-res-cpu="res">18% CPU</div>
+          <div>
+            <div class="mem-bar"><div class="fill" style="width: 15%; background: #a78bfa;"></div></div>
+            <div class="val" style="margin-top: 3px;">310 / 2048 MB · 14 PIDs</div>
+          </div>
+          <div class="tag-status">Idle</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Row 5: Agent heatmap + Crew radial + Projects ────── -->
+    <div class="grid grid-221 row">
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">🔥 Agent activity heatmap · 24h</div>
+          <div class="card-hint">tasks in-progress per hour</div>
+        </div>
+        <div class="heatmap" id="heatmap">
+          <div class="labels">
+            <div class="lbl">@tomas</div>
+            <div class="lbl">@martin</div>
+            <div class="lbl">@nela</div>
+            <div class="lbl">@viktor</div>
+            <div class="lbl">@eva</div>
+            <div class="lbl">@daniel</div>
+            <div class="lbl">@petra</div>
+            <div class="lbl">@jakub</div>
+            <div class="lbl">@ondrej</div>
+            <div class="lbl">@radek</div>
+            <div class="lbl">@lucie</div>
+            <div class="lbl">@filip</div>
+          </div>
+          <div class="grid-cells" id="heatmap-cells"></div>
+        </div>
+        <div class="heatmap-xaxis">
+          <div></div>
+          <div class="ticks">
+            <span>0h</span><span>3h</span><span>6h</span><span>9h</span><span>12h</span><span>15h</span><span>18h</span><span>21h</span><span>now</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">🛟 Crew health</div>
+          <div class="card-hint">4 crews</div>
+        </div>
+        <div class="radial-grid">
+          <!-- Engineering -->
+          <div class="radial-card">
+            <div class="name">Engineering</div>
+            <svg width="76" height="76" viewBox="0 0 42 42" style="transform: rotate(-90deg);">
+              <circle cx="21" cy="21" r="16" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="4"/>
+              <circle cx="21" cy="21" r="16" fill="none" stroke="#60a5fa" stroke-width="4"
+                      stroke-dasharray="95.5 100.5" stroke-linecap="round"/>
+            </svg>
+            <div style="margin-top:-58px; font-size:14px; font-weight:600; color:#60a5fa;">95%</div>
+            <div class="sub" style="margin-top: 40px;">3/4 running</div>
+          </div>
+          <!-- DevOps -->
+          <div class="radial-card">
+            <div class="name">DevOps</div>
+            <svg width="76" height="76" viewBox="0 0 42 42" style="transform: rotate(-90deg);">
+              <circle cx="21" cy="21" r="16" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="4"/>
+              <circle cx="21" cy="21" r="16" fill="none" stroke="#34d399" stroke-width="4"
+                      stroke-dasharray="100 100.5" stroke-linecap="round"/>
+            </svg>
+            <div style="margin-top:-58px; font-size:14px; font-weight:600; color:#34d399;">100%</div>
+            <div class="sub" style="margin-top: 40px;">1/2 running</div>
+          </div>
+          <!-- Quality -->
+          <div class="radial-card">
+            <div class="name">Quality</div>
+            <svg width="76" height="76" viewBox="0 0 42 42" style="transform: rotate(-90deg);">
+              <circle cx="21" cy="21" r="16" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="4"/>
+              <circle cx="21" cy="21" r="16" fill="none" stroke="#fbbf24" stroke-width="4"
+                      stroke-dasharray="80 100.5" stroke-linecap="round"/>
+            </svg>
+            <div style="margin-top:-58px; font-size:14px; font-weight:600; color:#fbbf24;">80%</div>
+            <div class="sub" style="margin-top: 40px;">0/3 idle</div>
+          </div>
+          <!-- Research -->
+          <div class="radial-card">
+            <div class="name">Research</div>
+            <svg width="76" height="76" viewBox="0 0 42 42" style="transform: rotate(-90deg);">
+              <circle cx="21" cy="21" r="16" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="4"/>
+              <circle cx="21" cy="21" r="16" fill="none" stroke="#a78bfa" stroke-width="4"
+                      stroke-dasharray="100 100.5" stroke-linecap="round"/>
+            </svg>
+            <div style="margin-top:-58px; font-size:14px; font-weight:600; color:#a78bfa;">100%</div>
+            <div class="sub" style="margin-top: 40px;">0/1 idle</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">📁 Active projects</div>
+          <div class="card-hint">5 projects</div>
+        </div>
+        <div>
+          <div class="project-row">
+            <div class="top">
+              <div class="name"><span class="swatch" style="background:#60a5fa;"></span>File Operations</div>
+              <div class="pct">12/14 · 86%</div>
+            </div>
+            <div class="bar"><div class="fill" style="width:86%; background:#60a5fa;"></div></div>
+          </div>
+          <div class="project-row">
+            <div class="top">
+              <div class="name"><span class="swatch" style="background:#34d399;"></span>Network Probes</div>
+              <div class="pct">4/6 · 67%</div>
+            </div>
+            <div class="bar"><div class="fill" style="width:67%; background:#34d399;"></div></div>
+          </div>
+          <div class="project-row">
+            <div class="top">
+              <div class="name"><span class="swatch" style="background:#fbbf24;"></span>Script Factory</div>
+              <div class="pct">3/8 · 38%</div>
+            </div>
+            <div class="bar"><div class="fill" style="width:38%; background:#fbbf24;"></div></div>
+          </div>
+          <div class="project-row">
+            <div class="top">
+              <div class="name"><span class="swatch" style="background:#a78bfa;"></span>System Info</div>
+              <div class="pct">2/3 · 67%</div>
+            </div>
+            <div class="bar"><div class="fill" style="width:67%; background:#a78bfa;"></div></div>
+          </div>
+          <div class="project-row">
+            <div class="top">
+              <div class="name"><span class="swatch" style="background:#22d3ee;"></span>Web Scraping</div>
+              <div class="pct">1/5 · 20%</div>
+            </div>
+            <div class="bar"><div class="fill" style="width:20%; background:#22d3ee;"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Row 6: Activity + Inbox + Captain ────────────────── -->
+    <div class="grid grid-221 row">
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">📡 Live activity · streaming</div>
+          <div class="card-hint">task.updated · mission.updated · run.*</div>
+        </div>
+        <div id="feed" style="max-height: 260px; overflow-y: auto;"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">📬 Inbox</div>
+          <a class="card-hint" href="#">View all →</a>
+        </div>
+        <div class="inbox-item">
+          <div class="inbox-icon esc">!</div>
+          <div class="inbox-title">DevOps escalation<span class="sub">Ondřej blocked on network policy</span></div>
+          <div class="inbox-meta">2m</div>
+        </div>
+        <div class="inbox-item">
+          <div class="inbox-icon esc">!</div>
+          <div class="inbox-title">Quality OOM<span class="sub">Eva reported test-runner out of memory</span></div>
+          <div class="inbox-meta">18m</div>
+        </div>
+        <div class="inbox-item">
+          <div class="inbox-icon key">🔑</div>
+          <div class="inbox-title">Keeper request<span class="sub">GH_TOKEN for @martin</span></div>
+          <div class="inbox-meta">34m</div>
+        </div>
+        <div class="inbox-item">
+          <div class="inbox-icon rev">✓</div>
+          <div class="inbox-title">Proposal awaiting review<span class="sub">Refactor credential rotation</span></div>
+          <div class="inbox-meta">1h</div>
+        </div>
+        <div class="inbox-item">
+          <div class="inbox-icon men">@</div>
+          <div class="inbox-title">Mentioned by @eva<span class="sub">"Can you approve the new test suite?"</span></div>
+          <div class="inbox-meta">2h</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">⌁ Captain</div>
+          <div class="card-hint">workspace AI</div>
+        </div>
+        <div class="captain-box">
+          <div class="captain-prompt">Ask anything about your fleet…</div>
+          <div class="captain-suggestions">
+            <div class="s">"Why is QUA-1 taking so long?"</div>
+            <div class="s">"Summary of yesterday's failures"</div>
+            <div class="s">"What's the most expensive mission this week?"</div>
+            <div class="s">"Which agents are idle?"</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Row 7: Recent missions table ─────────────────────── -->
+    <div class="card">
+      <div class="card-hdr">
+        <div class="card-title">🗂 Recent missions</div>
+        <a class="card-hint" href="#">Orchestration →</a>
+      </div>
+      <div>
+        <div class="mis-row">
+          <span class="id">ENG-5</span>
+          <span style="color:var(--fg-80); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Write a Python script that generates Fibonacci</span>
+          <div class="prog"><div class="fill" style="width:100%; background:#34d399;"></div></div>
+          <span class="tag-status s-review">Review</span>
+          <span class="num" style="color:var(--fg-50);">$0.42</span>
+          <span class="meta">just now</span>
+        </div>
+        <div class="mis-row">
+          <span class="id">DEV-1</span>
+          <span style="color:var(--fg-80); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Trace DNS resolution for 3 domains</span>
+          <div class="prog"><div class="fill" style="width:60%;"></div></div>
+          <span class="tag-status s-in-progress">Running</span>
+          <span class="num" style="color:var(--fg-50);">$0.08</span>
+          <span class="meta">28s</span>
+        </div>
+        <div class="mis-row">
+          <span class="id">QUA-2</span>
+          <span style="color:var(--fg-80); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Write and run a simple test suite in bash</span>
+          <div class="prog"><div class="fill" style="width:100%; background:#34d399;"></div></div>
+          <span class="tag-status s-review">Review</span>
+          <span class="num" style="color:var(--fg-50);">$0.14</span>
+          <span class="meta">2m</span>
+        </div>
+        <div class="mis-row">
+          <span class="id">DEV-3</span>
+          <span style="color:var(--fg-80); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Inventory all installed tools in the container</span>
+          <div class="prog"><div class="fill" style="width:100%; background:#34d399;"></div></div>
+          <span class="tag-status s-completed">Done</span>
+          <span class="num" style="color:var(--fg-50);">$0.28</span>
+          <span class="meta">12m</span>
+        </div>
+        <div class="mis-row">
+          <span class="id">ENG-1</span>
+          <span style="color:var(--fg-80); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Ping google.com 5 times and save results</span>
+          <div class="prog"><div class="fill" style="width:100%; background:#f87171;"></div></div>
+          <span class="tag-status s-failed">Failed</span>
+          <span class="num" style="color:var(--fg-50);">$0.05</span>
+          <span class="meta">18m</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ────────────────────────────────────────────────────────────
+    //  Live animation layer — no backend, uses setInterval + random
+    //  walks so the user can judge how the real page will feel.
+    // ────────────────────────────────────────────────────────────
+
+    // ── Stacked throughput bar chart ───────────────────────────
+    function buildThroughput() {
+      const g = document.getElementById('throughput-bars')
+      if (!g) return
+      g.innerHTML = ''
+      const colors = ['#60a5fa','#34d399','#fbbf24','#a78bfa']
+      const bucketCount = 24
+      const gap = 3
+      const totalWidth = 600
+      const barWidth = (totalWidth - (bucketCount - 1) * gap) / bucketCount
+      const chartTop = 10
+      const chartBottom = 150
+      let total = 0
+      const maxStack = 32
+      for (let i = 0; i < bucketCount; i++) {
+        const x = i * (barWidth + gap)
+        const values = [
+          Math.max(0, Math.round(Math.sin(i * 0.6 + Date.now()/9000) * 2 + Math.random() * 3 + 1)),
+          Math.max(0, Math.round(Math.cos(i * 0.4 + Date.now()/8000) * 1.5 + Math.random() * 2.5 + 0.5)),
+          Math.max(0, Math.round(Math.sin(i * 0.3 + 1) * 1 + Math.random() * 2)),
+          Math.max(0, Math.round(Math.cos(i * 0.5) * 1.2 + Math.random() * 1.8 + 0.5)),
+        ]
+        let stackTop = chartBottom
+        for (let c = 0; c < 4; c++) {
+          const v = values[c]
+          total += v
+          const h = (v / maxStack) * (chartBottom - chartTop)
+          stackTop -= h
+          const rect = document.createElementNS('http://www.w3.org/2000/svg','rect')
+          rect.setAttribute('x', x)
+          rect.setAttribute('y', stackTop)
+          rect.setAttribute('width', barWidth)
+          rect.setAttribute('height', Math.max(0, h))
+          rect.setAttribute('fill', colors[c])
+          rect.setAttribute('opacity', i === bucketCount - 1 ? '1' : '0.85')
+          rect.setAttribute('rx', '1')
+          g.appendChild(rect)
+        }
+      }
+      const totalEl = document.getElementById('throughput-total')
+      if (totalEl) totalEl.textContent = total
+    }
+    buildThroughput()
+    setInterval(buildThroughput, 5000)
+
+    // ── Container resource sparklines (live) ────────────────────
+    function resSpark(id, seed) {
+      const svg = document.getElementById(id)
+      if (!svg) return
+      const line = svg.querySelector('.line')
+      const area = svg.querySelector('.area')
+      const W = 240, H = 22
+      const points = 30
+      const data = []
+      for (let i = 0; i < points; i++) {
+        const base = Math.sin((Date.now() / 800 + seed + i * 0.6)) * 8 + 11
+        data.push(Math.max(1, Math.min(21, base + (Math.random() - 0.5) * 3)))
+      }
+      const pts = data.map((v, i) => `${(i / (points - 1)) * W},${v}`).join(' ')
+      const areaPts = `0,${H} ${pts} ${W},${H}`
+      line.setAttribute('points', pts)
+      area.setAttribute('points', areaPts)
+    }
+    function tickRes() {
+      resSpark('res-spark-eng', 1.2)
+      resSpark('res-spark-dev', 2.4)
+      resSpark('res-spark-qua', 3.6)
+      resSpark('res-spark-res', 4.8)
+
+      const jitter = (v, r) => Math.max(0, Math.min(100, v + (Math.random() - 0.5) * r)).toFixed(0)
+      const cpu = document.querySelectorAll('[data-res-cpu]')
+      const baseCPU = { eng: 42, dev: 28, qua: 12, res: 18 }
+      cpu.forEach(el => {
+        const k = el.getAttribute('data-res-cpu')
+        el.textContent = jitter(baseCPU[k], 6) + '% CPU'
+      })
+    }
+    tickRes()
+    setInterval(tickRes, 1000)
+
+    // ── Agent activity heatmap ─────────────────────────────────
+    function buildHeatmap() {
+      const host = document.getElementById('heatmap-cells')
+      if (!host) return
+      host.innerHTML = ''
+      // 12 agents × 24 hours
+      const agents = 12
+      const hours = 24
+      for (let a = 0; a < agents; a++) {
+        const row = document.createElement('div')
+        row.className = 'hm-row'
+        for (let h = 0; h < hours; h++) {
+          const cell = document.createElement('div')
+          cell.className = 'cell'
+          // lead agents (0,4,8,10) work in bursts during day hours
+          const isLead = [0,4,8,10].includes(a)
+          const daytime = h >= 9 && h <= 18
+          const base = daytime ? 0.45 : 0.1
+          const boost = isLead ? 0.2 : 0.1
+          const raw = base + boost + Math.random() * 0.5 * (daytime ? 1 : 0.3)
+          const v = Math.min(5, Math.max(0, Math.round(raw * 5)))
+          if (v > 0) cell.classList.add('v' + v)
+          row.appendChild(cell)
+        }
+        host.appendChild(row)
+      }
+    }
+    buildHeatmap()
+    setInterval(buildHeatmap, 6000)
+
+    // ── Cost burn chart — animate end slightly ─────────────────
+    function tickCost() {
+      // small wobble on the endpoints
+      const sonnet = document.getElementById('cost-sonnet-line')
+      const sonnetArea = document.getElementById('cost-sonnet-area')
+      if (!sonnet) return
+      const wobble = (Math.random() - 0.5) * 3
+      const newEndY = Math.max(30, Math.min(70, 52 + wobble))
+      sonnet.setAttribute('d', `M0,140 L85,122 L171,118 L257,102 L343,88 L429,72 L515,60 L600,${newEndY}`)
+      sonnetArea.setAttribute('d', `M0,140 L85,122 L171,118 L257,102 L343,88 L429,72 L515,60 L600,${newEndY} L600,140 Z`)
+    }
+    setInterval(tickCost, 2000)
+
+    // ── Activity feed (live ticker) ─────────────────────────────
+    const events = [
+      { ts: '14:23:11', tag: 'ENG-5', who: '@martin', text: 'Task COMPLETED — Python Fibonacci script saved to /tmp/fib.py', status: 's-completed', label: 'DONE' },
+      { ts: '14:23:04', tag: 'ENG-5', who: '@martin', text: 'Running: python3 /tmp/fib.py && cat /tmp/fib.txt', status: 's-in-progress', label: 'RUN' },
+      { ts: '14:22:49', tag: 'DEV-1', who: '@radek', text: 'Started mission — Trace DNS resolution for 3 domains', status: 's-in-progress', label: 'START' },
+      { ts: '14:22:12', tag: 'ENG-4', who: '@nela', text: 'Task COMPLETED — CSV report at /tmp/sample-data.csv (50 rows)', status: 's-completed', label: 'DONE' },
+      { ts: '14:21:48', tag: 'QUA-2', who: '@daniel', text: 'Escalating to @eva — missing nslookup binary in container', status: 's-failed', label: 'ESC' },
+      { ts: '14:21:22', tag: 'DEV-3', who: '@ondrej', text: 'Delegated to @radek — "Inventory installed tools"', status: 's-in-progress', label: 'DLG' },
+      { ts: '14:21:01', tag: 'RES-1', who: '@filip', text: 'Fetched HN frontpage — 30 stories saved to /tmp/hn.json', status: 's-review', label: 'REVIEW' },
+      { ts: '14:20:38', tag: 'ENG-3', who: '@viktor', text: 'Created /tmp/tree with 12 sample files', status: 's-completed', label: 'DONE' },
+      { ts: '14:20:05', tag: 'ENG-2', who: '@martin', text: 'Status check on 5 websites — all 200 OK', status: 's-completed', label: 'DONE' },
+      { ts: '14:19:47', tag: 'QUA-1', who: '@petra', text: 'Log parser found 23 errors in /var/log/syslog', status: 's-completed', label: 'DONE' },
+    ]
+    function renderFeed() {
+      const feed = document.getElementById('feed')
+      feed.innerHTML = events.map(e => `
+        <div class="tbl-row">
+          <span style="font-family:var(--mono); color:var(--fg-40); width:50px; flex-shrink:0;">${e.ts.slice(3)}</span>
+          <span class="tag-status ${e.status}">${e.label}</span>
+          <span class="id">${e.tag}</span>
+          <span style="flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${e.text}</span>
+          <span style="font-size:10px; color:var(--fg-50);">${e.who}</span>
+        </div>
+      `).join('')
+    }
+    renderFeed()
+
+    const sampleEvents = [
+      { tag: 'DEV-2', who: '@radek', text: 'Measured download speed — 94.2 Mbps', status: 's-completed', label: 'DONE' },
+      { tag: 'ENG-1', who: '@martin', text: 'Ping test fallback — curl timing saved', status: 's-review', label: 'REVIEW' },
+      { tag: 'RES-2', who: '@filip', text: 'Fetched wttr.in — Prague 12°C cloudy', status: 's-completed', label: 'DONE' },
+      { tag: 'DEV-4', who: '@jakub', text: 'Container resource scan started', status: 's-in-progress', label: 'START' },
+      { tag: 'ENG-6', who: '@nela', text: 'Bash info collector saved to /tmp/sysinfo.txt', status: 's-completed', label: 'DONE' },
+    ]
+    let feedTick = 0
+    setInterval(() => {
+      const now = new Date()
+      const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`
+      const ev = sampleEvents[feedTick % sampleEvents.length]
+      events.unshift({ ts, ...ev })
+      if (events.length > 14) events.pop()
+      feedTick++
+      renderFeed()
+    }, 4000)
+  </script>
+</body>
+</html>

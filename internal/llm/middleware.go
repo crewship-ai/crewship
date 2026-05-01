@@ -41,32 +41,41 @@ import (
 //     through paymaster for the hit-event accounting.
 //  5. base is the raw Provider.
 //
-// Stream() is passed through unchanged for now. Streamed calls bypass the
-// middleware because the paymaster ledger row depends on final token
-// counts which arrive in the final `message_delta` event — wiring that
-// through the sync LLMCaller shape would require a streaming variant of
-// CallResponse. That's deferred; callers who use Stream today still pay
-// through the orchestrator-level accounting that predates this middleware.
+// Stream() is wired through the same telemetry → paymaster → lookout
+// stack as Complete(). The wrap happens per-call (the handler is closed
+// over by the inner caller) so each streaming response generates exactly
+// one cost_ledger row and exactly one OTel span — built from the final
+// token counts that the underlying Provider.Stream returns alongside the
+// last delta event. Pre-call Enforce, post-call Record, and span
+// recording all behave identically to the synchronous path.
 func Middleware(base Provider, j journal.Emitter, db *sql.DB) Provider {
 	if base == nil {
 		return nil
 	}
-	// Build the chain bottom-up so each wrap sees its inner caller as a
-	// concrete paymaster.LLMCaller, not a hand-rolled struct.
+	// Build the synchronous chain bottom-up so each wrap sees its inner
+	// caller as a concrete paymaster.LLMCaller, not a hand-rolled struct.
 	var caller paymaster.LLMCaller = providerCaller{p: base}
 	caller = lookoutCaller(caller, j)
 	caller = paymaster.Middleware(caller, j, db)
 	caller = telemetry.LLMMiddleware(caller)
 
-	return &wrappedProvider{base: base, caller: caller}
+	return &wrappedProvider{base: base, caller: caller, j: j, db: db}
 }
 
 // wrappedProvider is the Provider returned by Middleware. Complete() runs
-// through the full caller stack; Stream() delegates to the underlying
-// provider verbatim (see notes on Stream above).
+// through the pre-built synchronous caller stack; Stream() builds a
+// matching stack per-call so the per-stream handler can be captured in
+// the innermost streamCaller without leaking into the long-lived chain.
 type wrappedProvider struct {
 	base   Provider
 	caller paymaster.LLMCaller
+
+	// j and db are retained so Stream() can rebuild the telemetry →
+	// paymaster → lookout chain on each call. Rebuilding is cheap (the
+	// constructors are plain function wrappers) and avoids storing the
+	// per-call handler on a long-lived struct.
+	j  journal.Emitter
+	db *sql.DB
 }
 
 func (w *wrappedProvider) Name() string { return w.base.Name() }
@@ -93,35 +102,85 @@ func (w *wrappedProvider) Complete(ctx context.Context, req Request) (*Response,
 	return out, nil
 }
 
-// Stream applies the lookout input guard synchronously before delegating
-// to the base provider. Paymaster budget accounting and telemetry spans
-// still aren't wired into the streaming path (that needs a streaming-
-// aware ledger variant — tracked as a follow-up), but refusing to pass
-// a prompt-injection attempt through to the LLM is the minimum the
-// security layer has to do. Without this pre-call guard, any caller
-// that picks Stream over Complete would silently bypass every guardrail
-// — the classic "optional security" trap CodeRabbit flagged.
+// Stream runs the streaming call through the same middleware stack as
+// Complete: a per-call telemetry → paymaster → lookout chain is built
+// around a streamCaller that closes over the handler. The synchronous
+// CallResponse returned by streamCaller carries the final token counts
+// from Provider.Stream, which lets paymaster.Middleware Record a normal
+// cost_ledger row and lets telemetry.LLMMiddleware close out a normal
+// LLM span. Callers that pick Stream over Complete now pay, log, and
+// guard identically.
 func (w *wrappedProvider) Stream(ctx context.Context, req Request, handler func(StreamEvent) error) (*Response, error) {
-	for _, m := range req.Messages {
-		if m.Role != RoleUser && m.Role != RoleTool {
-			continue
-		}
-		res := lookout.ScanInput(m.Content)
-		if res.Verdict == lookout.VerdictBlock {
-			// VerdictBlock with zero findings would be a lookout bug,
-			// not a legitimate allow — fail closed with a synthetic
-			// finding so the caller still learns the block happened
-			// and the LLM doesn't see the payload. Prior to this
-			// guard a `Verdict==Block && len>0` gate silently passed
-			// such payloads through.
-			finding := lookout.Finding{Kind: "unknown", Detail: "blocked by lookout (no finding detail)"}
-			if len(res.Findings) > 0 {
-				finding = res.Findings[0]
-			}
-			return nil, &lookout.BlockedError{Direction: "input", Finding: finding}
-		}
+	scope, _ := paymasterScopeFromContext(ctx)
+
+	// Build a matching chain bottom-up. lookoutCaller stays inside
+	// paymaster.Middleware so a blocked input does not produce a
+	// ledger row (an LLM that never received the prompt did no work
+	// to bill for). telemetry sits outermost so the span covers
+	// budget enforcement and guardrails too.
+	var caller paymaster.LLMCaller = &streamCaller{p: w.base, handler: handler}
+	caller = lookoutCaller(caller, w.j)
+	caller = paymaster.Middleware(caller, w.j, w.db)
+	caller = telemetry.LLMMiddleware(caller)
+
+	resp, err := caller.Call(ctx, paymaster.CallRequest{
+		Scope:    scope,
+		Provider: w.base.Name(),
+		Model:    req.Model,
+		Inputs:   req,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return w.base.Stream(ctx, req, handler)
+	out, ok := resp.Output.(*Response)
+	if !ok || out == nil {
+		return nil, errors.New("llm/middleware: streamCaller returned no Response")
+	}
+	return out, nil
+}
+
+// streamCaller is the innermost layer for streaming calls. It unpacks
+// the opaque CallRequest back into a typed llm.Request, invokes
+// Provider.Stream with the captured handler, and packages the final
+// Response (including the input/output token counts the provider
+// computed across the stream) as a CallResponse so the outer
+// paymaster + telemetry layers can Record/Span it the same way they
+// handle a Complete call.
+type streamCaller struct {
+	p       Provider
+	handler func(StreamEvent) error
+}
+
+// Call satisfies paymaster.LLMCaller for streamCaller.
+func (s *streamCaller) Call(ctx context.Context, req paymaster.CallRequest) (paymaster.CallResponse, error) {
+	inReq, ok := req.Inputs.(Request)
+	if !ok {
+		return paymaster.CallResponse{}, fmt.Errorf("llm/middleware: stream inputs not llm.Request (got %T)", req.Inputs)
+	}
+	resp, err := s.p.Stream(ctx, inReq, s.handler)
+	if err != nil {
+		// Pass through whatever the provider returned (often nil) so
+		// paymaster's failure path still records a partial-billing row.
+		// Token counts default to zero, which is correct: if the
+		// provider errored before any tokens were produced, no
+		// rate-card lookup should price this as a non-trivial call.
+		var partial paymaster.CallResponse
+		if resp != nil {
+			partial = paymaster.CallResponse{
+				Output:       resp,
+				InputTokens:  int64(resp.InputToks),
+				OutputTokens: int64(resp.OutputToks),
+				CompletedAt:  time.Now().UTC(),
+			}
+		}
+		return partial, err
+	}
+	return paymaster.CallResponse{
+		Output:       resp,
+		InputTokens:  int64(resp.InputToks),
+		OutputTokens: int64(resp.OutputToks),
+		CompletedAt:  time.Now().UTC(),
+	}, nil
 }
 
 // providerCaller is the innermost layer: it unpacks the opaque CallRequest
