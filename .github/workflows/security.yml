@@ -46,9 +46,14 @@ jobs:
           set -euo pipefail
           GITLEAKS_VERSION="8.29.1"
           BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          wget -q "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+          # --timeout=30 + --tries=3 = fail fast on a flaking GitHub release
+          # CDN instead of hanging until the 5-minute job timeout. With one
+          # retry per attempt and a 30s connect cap, worst-case wait is ~3min
+          # and a transient blip self-heals on retry.
+          WGET_OPTS=(-q --timeout=30 --tries=3)
+          wget "${WGET_OPTS[@]}" "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             -O /tmp/gitleaks.tar.gz
-          wget -q "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+          wget "${WGET_OPTS[@]}" "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
             -O /tmp/gitleaks_checksums.txt
           # Extract just the linux_x64 row and feed it to sha256sum -c.
           grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" /tmp/gitleaks_checksums.txt \

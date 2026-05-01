@@ -336,20 +336,3 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 
 	writeJSONResponse(w, resp.StatusCode, result)
 }
-
-// resolveAgentBySlug looks up an agent by slug and returns their agent ID.
-// Checks crew members first, then the IPC agent itself (self-reference).
-// Returns "" if not found — caller falls back to IPC default agent ID.
-func (s *Server) resolveAgentBySlug(slug string) string {
-	// Check if it's the IPC agent itself
-	if s.ipc != nil && s.ipc.AgentSlug == slug {
-		return s.ipc.AgentID
-	}
-	// Check crew members (other agents in the same crew)
-	for _, m := range s.crewMembers {
-		if m.Slug == slug {
-			return m.ID
-		}
-	}
-	return ""
-}
