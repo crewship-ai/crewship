@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
     "dev": "next dev --turbopack",
@@ -147,8 +147,7 @@
     "@typescript-eslint/parser": "^8.59.1",
     "@vitejs/plugin-react": "^5.1.4",
     "dotenv-cli": "^11.0.0",
-    "eslint": "^9.39.2",
-    "eslint-plugin-react": "^7.37.5",
+    "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.5.0",
     "happy-dom": "^20.9.0",
