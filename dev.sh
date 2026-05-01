@@ -324,6 +324,7 @@ start_next() {
 
   (
     cd "$PROJECT_DIR"
+    set -a && . ./.env.local && set +a
     exec node dev-server.mjs "$NEXT_PORT"
   ) > "$NEXT_LOG" 2>&1 &
 
