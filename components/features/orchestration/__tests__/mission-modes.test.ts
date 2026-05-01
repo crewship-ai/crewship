@@ -120,6 +120,26 @@ describe("derivePhases", () => {
     expect(phases[3].status).toBe("active")
   })
 
+  it("all tasks FAILED keeps Implement pending (failure should not look like 'ready to implement')", () => {
+    // When every task fails before the mission status flips to FAILED,
+    // we still mark Tasks as 'done' (resolved — work is no longer in
+    // flight) but Implement must stay pending. Otherwise Spec Mode
+    // would render 'implementation can start', which is the wrong
+    // signal — the operator needs to see the failures, not advance.
+    const phases = derivePhases(
+      makeMission({
+        plan: "p",
+        status: "IN_PROGRESS",
+        tasks: [
+          makeTask({ id: "a", status: "FAILED" as MissionTaskStatus }),
+          makeTask({ id: "b", status: "FAILED" as MissionTaskStatus }),
+        ],
+      }),
+    )
+    expect(phases[2].status).toBe("done")
+    expect(phases[3].status).toBe("pending")
+  })
+
   it("mission terminal flips implement to done", () => {
     const phases = derivePhases(
       makeMission({

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Check, ChevronDown, Clock, Lock, Pause } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -161,8 +161,8 @@ interface PhaseSectionProps {
   phase: MissionPhase
   title: string
   defaultOpen?: boolean
-  rightHeader?: React.ReactNode
-  children: React.ReactNode
+  rightHeader?: ReactNode
+  children: ReactNode
 }
 
 /**

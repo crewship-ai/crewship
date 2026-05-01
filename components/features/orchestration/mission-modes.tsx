@@ -140,8 +140,18 @@ export function derivePhases(mission: Mission): MissionPhase[] {
     mission.status === "REVIEW" ||
     mission.status === "COMPLETED" ||
     mission.status === "DONE"
-  const tasksTerminal = tasks.length > 0 &&
+  // Two distinct "done" notions for the Tasks phase:
+  //   - tasksResolved: every task reached SOME terminal state (incl. FAILED).
+  //     Used to mark the Tasks bar "done" — the work is no longer in flight.
+  //   - tasksSucceeded: every task reached COMPLETED/SKIPPED. Required to
+  //     promote Implement to "active" — a mission whose tasks all FAILED
+  //     should not advertise "implementation can start", that would be
+  //     misleading. The mission status will eventually flip to FAILED and
+  //     missionTerminal handles the rest.
+  const tasksResolved = tasks.length > 0 &&
     tasks.every((t) => isTerminalTaskStatus(t.status))
+  const tasksSucceeded = tasks.length > 0 &&
+    tasks.every((t) => t.status === "COMPLETED" || t.status === "SKIPPED")
   const missionTerminal =
     mission.status === "COMPLETED" ||
     mission.status === "DONE" ||
@@ -158,7 +168,7 @@ export function derivePhases(mission: Mission): MissionPhase[] {
     {
       id: "tasks",
       label: "Tasks",
-      status: tasksTerminal
+      status: tasksResolved
         ? "done"
         : tasks.length > 0
         ? "active"
@@ -169,14 +179,19 @@ export function derivePhases(mission: Mission): MissionPhase[] {
     {
       id: "implement",
       label: "Implement",
-      status: missionTerminal ? "done" : tasksTerminal ? "active" : "pending",
+      status: missionTerminal ? "done" : tasksSucceeded ? "active" : "pending",
     },
   ]
 
   // Promote the first non-done phase to "active" if nothing is currently
   // marked active — covers the gap where Plan is done but no tasks exist
-  // yet, so the operator can see the cursor sitting on Tasks.
-  if (!phases.some((p) => p.status === "active")) {
+  // yet, so the operator can see the cursor sitting on Tasks. Skip the
+  // promotion when any task has FAILED: the bar should sit on the
+  // resolved-but-failed Tasks phase rather than advancing the cursor
+  // into Implement, which would suggest "ready to implement" when in
+  // fact the operator needs to look at the failures.
+  const hasFailedTask = tasks.some((t) => t.status === "FAILED")
+  if (!phases.some((p) => p.status === "active") && !hasFailedTask) {
     const firstPending = phases.find((p) => p.status === "pending")
     if (firstPending) firstPending.status = "active"
   }

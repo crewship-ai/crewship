@@ -34,7 +34,7 @@ I researched the current React chart landscape via Context7. Candidates evaluate
 
 Matches `wireframes/dashboard.html` exactly. The row order is deliberate: highest-urgency content at the top, trends in the middle, reference material at the bottom.
 
-```
+```text
 ┌─ Toolbar ────────────────────────────────────────────────────────────┐
 │ Overview · My Work(11) · Costs · Insights · Activity          ⌁ Ask │
 │                                                  🔍 Search · ● Live │
@@ -67,13 +67,13 @@ Matches `wireframes/dashboard.html` exactly. The row order is deliberate: highes
 | KPI: Open issues | `/api/v1/issues?status=BACKLOG,TODO,IN_PROGRESS,REVIEW` | 🟢 exists |
 | KPI: Cost 24h | `/api/v1/mission-metrics` (`total_cost_24h`) | 🟢 exists |
 | KPI: Success rate | derived from `runs` stats | 🟢 exists |
-| KPI **sparklines** (trend series) | no dedicated endpoint | 🟡 **new** — see "Metrics backend" below |
+| KPI **sparklines** (trend series) | `/api/v1/metrics/timeseries` | 🟢 endpoint exists — see "Metrics backend" below |
 | Mission status donut | `/api/v1/missions` grouped client-side | 🟢 exists |
-| **Issue throughput 24h stacked by crew** | – | 🟡 **new aggregation endpoint** |
-| **Cost burn 7d stacked by model** | – | 🟡 **new aggregation endpoint** |
+| **Issue throughput 24h stacked by crew** | `/api/v1/metrics/timeseries?metric=issues_closed&group_by=crew` | 🟢 exists |
+| **Cost burn 7d stacked by model** | `/api/v1/metrics/timeseries?metric=cost_usd&window=7d&group_by=model` | 🟢 exists |
 | Top-cost missions | `/api/v1/missions?sort=cost&limit=6` | 🟡 sort param missing, ~10 LOC to add |
 | Container resources (live) | `container.stats` WS event | 🟢 **already streaming in current dashboard** |
-| Agent heatmap | `/api/v1/runs` grouped by agent × hour | 🟡 **new aggregation endpoint** |
+| Agent heatmap | `/api/v1/metrics/timeseries?metric=runs_count&group_by=agent` | 🟡 endpoint exists; needs `group_by=agent` added (~15 LOC) |
 | Crew health radial | `/api/v1/crews` + `/api/v1/agents` grouped | 🟢 exists (client aggregate) |
 | Projects progress | `/api/v1/projects` (has `issue_count` + completion) | 🟢 exists |
 | Activity feed | WS events `mission.updated`, `task.updated`, `run.*`, `issue.*` | 🟢 exists, just subscribe |
@@ -81,23 +81,27 @@ Matches `wireframes/dashboard.html` exactly. The row order is deliberate: highes
 | Captain | `/api/v1/captain/chat` | 🟢 exists |
 | Recent missions table | `/api/v1/missions?limit=5&sort=updated_at` | 🟢 exists |
 
-### New metrics backend: one endpoint covers all trend charts
+### Metrics backend: extend the existing timeseries endpoint
 
-Instead of adding 4 separate aggregation endpoints, add a single generic one:
+`GET /api/v1/metrics/timeseries` is already shipped (`internal/api/metrics_handler.go`, `internal/api/router_routes.go`). It returns zero-filled bucket sequences and supports the metric set this dashboard needs:
 
+```http
+GET /api/v1/metrics/timeseries?metric=<name>&window=<24h|7d|30d>&bucket=<15m|1h|1d>&group_by=<crew|model|status|none>
+
+Response: { metric, window, bucket, group_by,
+  buckets: [{ts: "2026-04-10T13:00:00Z", series: {"eng": 3, "dev": 2, "qua": 1, "res": 0}}, ...],
+  series_labels: { ... } }
 ```
-GET /api/v1/metrics/timeseries?metric=<name>&window=<24h|7d|30d>&bucket=<1h|1d>&group_by=<crew|model|agent|status>
 
-Response: { buckets: [{ts: "2026-04-10T13:00:00Z", series: {"eng": 3, "dev": 2, "qua": 1, "res": 0}}, ...] }
-```
+Already supported:
+- `metric`: `issues_closed`, `cost_usd`, `runs_count`, `active_missions` — covers KPI sparklines + throughput + cost burn out of the box.
+- `group_by`: `crew`, `model`, `status`, `none`.
+- `window`: `24h`, `7d`, `30d`. `bucket`: `15m`, `1h`, `1d`.
 
-Supported `metric` names:
-- `issues_closed` → throughput chart
-- `cost_usd` → cost burn chart
-- `runs_count` → KPI sparklines + heatmap
-- `active_missions` → KPI sparklines
+Gap to close for this redesign:
+- `group_by=agent` is not currently in the handler's `validGroupBy` set. Adding it requires the validator entry plus an `agent_id`-keyed aggregation branch alongside the existing crew/model branches — roughly 15 LOC plus a query for the `runs` table. The agent heatmap is the only widget that needs it; everything else uses the values already wired.
 
-~80 LOC Go handler against `missions`, `runs`, `mission_tasks` tables with `DATE_TRUNC` or sqlite `strftime` bucketing. One endpoint, many widgets.
+So this row in the dashboard plan is "wire the frontend" not "build a new backend endpoint" — except for that single 15-LOC `group_by=agent` extension.
 
 ## Phased implementation
 
@@ -110,13 +114,13 @@ Supported `metric` names:
 
 **Outcome:** layout matches wireframe, Action Center works, KPI strip looks right but sparklines are constant.
 
-### Phase 2 — Real trend charts (needs metrics endpoint, ~1 session)
-1. Add `GET /api/v1/metrics/timeseries` Go handler (see spec above)
-2. Wire KPI sparklines to real data (last 24 data points)
-3. Add **Issue throughput** stacked bar chart (Recharts `BarChart` + `stackId`)
-4. Add **Mission status** donut (Recharts `PieChart`)
-5. Add **Cost burn** stacked area chart (Recharts `AreaChart` + gradients)
-6. Add **Top cost missions** horizontal bar (Recharts `BarChart` layout="vertical")
+### Phase 2 — Real trend charts (mostly frontend wiring, ~1 session)
+1. Wire KPI sparklines to `GET /api/v1/metrics/timeseries` (already shipped) — last 24 data points per card
+2. Add **Issue throughput** stacked bar chart (Recharts `BarChart` + `stackId`) using `metric=issues_closed&group_by=crew`
+3. Add **Mission status** donut (Recharts `PieChart`)
+4. Add **Cost burn** stacked area chart (Recharts `AreaChart` + gradients) using `metric=cost_usd&group_by=model`
+5. Add **Top cost missions** horizontal bar (Recharts `BarChart` layout="vertical") — needs the small `sort=cost` param add on `/missions`
+6. Extend `metrics_handler.go` to accept `group_by=agent` (heatmap dependency) — single validator entry + agent-keyed aggregation branch
 
 **Outcome:** all 4 trend charts populated from real data.
 
@@ -161,7 +165,9 @@ Supported `metric` names:
 - `components/features/dashboard/inbox-tile.tsx` — consolidated urgent items
 - `components/features/dashboard/captain-tile.tsx` — prompt + suggestions
 - `components/features/dashboard/recent-missions-table.tsx` — compact missions list
-- `internal/api/metrics_handler.go` — new `timeseries` endpoint
+
+### To extend
+- `internal/api/metrics_handler.go` — add `group_by=agent` (only gap on the existing handler)
 
 ### Reused
 - `hooks/use-realtime.tsx` — WS subscriptions already exist

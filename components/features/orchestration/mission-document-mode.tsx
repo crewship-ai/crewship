@@ -1,5 +1,6 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { Check, Clock, Pause } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionTask } from "@/lib/types/mission"
@@ -76,7 +77,7 @@ export function MissionDocumentMode({ mission }: MissionDocumentModeProps) {
   )
 }
 
-function DocSection({ title, children }: { title: string; children: React.ReactNode }) {
+function DocSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mb-6">
       <h2 className="text-lg font-bold mb-2 pb-1 border-b">{title}</h2>

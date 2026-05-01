@@ -120,10 +120,15 @@ function deriveInboxItems(tasks: MissionTask[]): InboxItem[] {
       })
       continue
     }
+    // Surface results that explicitly request a human glance —
+    // needs_review is the dedicated "operator should look at this"
+    // signal. Gating on approved_at would keep every completed task
+    // with a result_summary in the inbox forever, since approved_at
+    // stays null on tasks that never required approval.
     if (
       (t.status === "COMPLETED" || t.status === "SKIPPED") &&
-      t.result_summary &&
-      !t.approved_at
+      t.needs_review &&
+      t.result_summary
     ) {
       out.push({
         id: t.id,

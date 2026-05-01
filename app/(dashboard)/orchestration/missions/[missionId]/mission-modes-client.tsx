@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
@@ -37,37 +37,70 @@ export function MissionModesClient() {
   // /api/v1/missions/_.
   const isValidMission = Boolean(missionId) && missionId !== "_"
 
-  const fetchMission = useCallback(async () => {
-    if (!workspaceId || !isValidMission) return
-    try {
-      const res = await fetch(
-        `/api/v1/missions?workspace_id=${workspaceId}&id=${missionId}&include_tasks=true&limit=1`,
-      )
-      if (!res.ok) {
-        setError(`Mission lookup failed (${res.status})`)
+  // Track the most recent fetch so a slower response for an old
+  // mission/workspace can't overwrite the current view after the user
+  // navigated away. Each fetch increments the token; only the response
+  // that still matches the latest value is allowed to set state.
+  const fetchTokenRef = useRef(0)
+
+  const fetchMission = useCallback(
+    async (signal: AbortSignal) => {
+      // Workspace bootstrap can settle to null when the user has no
+      // active workspace selected. Surface that explicitly instead of
+      // leaving the page on the skeleton forever.
+      if (!workspaceId) {
+        if (!isValidMission) return
         setMission(null)
+        setError("No active workspace selected.")
+        setLoading(false)
         return
       }
-      const list = (await res.json()) as Mission[]
-      const found = list.find((m) => m.id === missionId) ?? null
-      setMission(found)
-      if (!found) setError("Mission not found")
-      else setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load mission")
-    } finally {
-      setLoading(false)
-    }
-  }, [workspaceId, missionId, isValidMission])
+      if (!isValidMission) return
+
+      const myToken = ++fetchTokenRef.current
+      try {
+        const res = await fetch(
+          `/api/v1/missions?workspace_id=${workspaceId}&id=${missionId}&include_tasks=true&limit=1`,
+          { signal },
+        )
+        if (myToken !== fetchTokenRef.current) return
+        if (!res.ok) {
+          setError(`Mission lookup failed (${res.status})`)
+          setMission(null)
+          return
+        }
+        const list = (await res.json()) as Mission[]
+        if (myToken !== fetchTokenRef.current) return
+        const found = list.find((m) => m.id === missionId) ?? null
+        setMission(found)
+        setError(found ? null : "Mission not found")
+      } catch (e) {
+        // Aborts are expected on rapid navigation; never surface them.
+        if (signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
+          return
+        }
+        if (myToken !== fetchTokenRef.current) return
+        setError(e instanceof Error ? e.message : "Failed to load mission")
+      } finally {
+        if (myToken === fetchTokenRef.current) setLoading(false)
+      }
+    },
+    [workspaceId, missionId, isValidMission],
+  )
 
   useEffect(() => {
-    fetchMission()
+    const ac = new AbortController()
+    void fetchMission(ac.signal)
+    return () => ac.abort()
   }, [fetchMission])
 
   // Realtime: task status changes update the loaded mission in place
   // without an extra fetch — keeps the Spec/Graph views animating
   // while an agent is running. mission.updated triggers a full
-  // refetch so structural changes (new tasks, new plan blob) land.
+  // refetch so structural changes (new tasks, new plan blob) land,
+  // but only when the broadcast is for THIS mission — the workspace
+  // socket fires mission.updated for every mission and unfiltered
+  // refetches would generate avoidable load on busy workspaces.
   const handleTaskUpdate = useCallback(
     (event: RealtimeEvent) => {
       const { id, status, mission_id } = event.payload as {
@@ -90,7 +123,18 @@ export function MissionModesClient() {
     [missionId],
   )
   useRealtimeEvent("task.updated", handleTaskUpdate)
-  useRealtimeEvent("mission.updated", useCallback(() => fetchMission(), [fetchMission]))
+  const handleMissionUpdate = useCallback(
+    (event: RealtimeEvent) => {
+      const id = (event.payload as { id?: string }).id
+      if (!id || id !== missionId) return
+      const ac = new AbortController()
+      void fetchMission(ac.signal)
+      // No teardown wired — the next fetch will bump the token and
+      // any in-flight earlier response is discarded by the guard.
+    },
+    [fetchMission, missionId],
+  )
+  useRealtimeEvent("mission.updated", handleMissionUpdate)
 
   const ready = useMemo(
     () => !wsLoading && !loading && !!mission,
