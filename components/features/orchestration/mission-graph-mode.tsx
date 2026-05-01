@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useId, useMemo, type CSSProperties } from "react"
 import { Check, Clock, Lock, Pause, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { MissionTask } from "@/lib/types/mission"
@@ -25,6 +25,16 @@ interface MissionGraphModeProps {
  */
 export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
   const layout = useMemo(() => layoutTasks(tasks), [tasks])
+  // Per-instance SVG marker IDs so two MissionGraphMode trees in the
+  // same DOM (split view, dialog over page, etc.) don't collide on a
+  // shared "mg-arrow-blue" / "mg-arrow-gray" definition. Browsers
+  // resolve url(#id) against the document, not the subtree, so static
+  // IDs would silently bind every line to the first marker definition
+  // they find — the second instance's lines would inherit the first
+  // instance's colour.
+  const reactId = useId()
+  const blueMarkerId = `mg-arrow-blue-${reactId}`
+  const grayMarkerId = `mg-arrow-gray-${reactId}`
 
   if (tasks.length === 0) {
     return (
@@ -35,10 +45,18 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
     )
   }
 
+  // Wrapper height is runtime-computed from the layered layout. There
+  // is no Tailwind utility that can express a build-unknown pixel
+  // value (`h-[${layout.height}px]` would not survive JIT), so the
+  // single legitimate use of style here is the CSS-variable bridge:
+  // pass the value through a custom property and let a static
+  // Tailwind arbitrary class read it.
+  const wrapperStyle = { "--mg-h": `${layout.height}px` } as CSSProperties
+
   return (
     <div>
       <Legend />
-      <div className="relative w-full" style={{ height: layout.height }}>
+      <div className="relative w-full h-[var(--mg-h)]" style={wrapperStyle}>
         <svg
           viewBox={`0 0 ${layout.width} ${layout.height}`}
           preserveAspectRatio="xMidYMid meet"
@@ -46,7 +64,7 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
         >
           <defs>
             <marker
-              id="mg-arrow-blue"
+              id={blueMarkerId}
               viewBox="0 -5 10 10"
               refX="9"
               refY="0"
@@ -54,10 +72,10 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
               markerHeight="6"
               orient="auto"
             >
-              <path d="M0,-5L10,0L0,5" fill="rgb(59 130 246)" />
+              <path d="M0,-5L10,0L0,5" className="fill-blue-500" />
             </marker>
             <marker
-              id="mg-arrow-gray"
+              id={grayMarkerId}
               viewBox="0 -5 10 10"
               refX="9"
               refY="0"
@@ -65,7 +83,7 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
               markerHeight="6"
               orient="auto"
             >
-              <path d="M0,-5L10,0L0,5" fill="rgb(156 163 175)" />
+              <path d="M0,-5L10,0L0,5" className="fill-gray-400" />
             </marker>
           </defs>
           {layout.edges.map((e, i) => (
@@ -75,28 +93,38 @@ export function MissionGraphMode({ tasks }: MissionGraphModeProps) {
               y1={e.y1}
               x2={e.x2}
               y2={e.y2}
-              stroke={e.upstreamRunning ? "rgb(59 130 246)" : "rgb(156 163 175)"}
-              strokeWidth={2}
+              className={cn(
+                "stroke-2",
+                e.upstreamRunning ? "stroke-blue-500" : "stroke-gray-400",
+              )}
               strokeDasharray={e.upstreamRunning ? undefined : "4 4"}
-              markerEnd={`url(#mg-arrow-${e.upstreamRunning ? "blue" : "gray"})`}
+              markerEnd={`url(#${e.upstreamRunning ? blueMarkerId : grayMarkerId})`}
             />
           ))}
         </svg>
 
         {layout.nodes.map((n) => {
           const StatusIcon = statusIcon(n.task.status)
+          // Same CSS-variable bridge as the wrapper: x/y come from the
+          // layout solver and can't be expressed as a static Tailwind
+          // class. Pass them as custom properties; static
+          // arbitrary-value classes consume them at render time. Width
+          // is also bridged so NODE_WIDTH stays the single source of
+          // truth for both layout math and rendering.
+          const nodeStyle = {
+            "--mg-x": `${n.x}px`,
+            "--mg-y": `${n.y}px`,
+            "--mg-w": `${NODE_WIDTH}px`,
+          } as CSSProperties
           return (
             <div
               key={n.task.id}
               className={cn(
                 "absolute rounded-md border-2 bg-card text-xs shadow-sm px-3 py-2",
+                "left-[var(--mg-x)] top-[var(--mg-y)] w-[var(--mg-w)]",
                 statusBorder(n.task.status),
               )}
-              style={{
-                left: n.x,
-                top: n.y,
-                width: NODE_WIDTH,
-              }}
+              style={nodeStyle}
             >
               <div className="font-semibold text-foreground line-clamp-2 flex items-center gap-1.5">
                 <StatusIcon
