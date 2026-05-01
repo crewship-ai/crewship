@@ -149,12 +149,29 @@ describe("<ChatPageClient> — slug resolution from URL", () => {
     // We can't read the result off window.location because the beforeEach
     // shadows it with Object.defineProperty for the slug-resolution tests
     // and that severs the link to history. Instead spy on the History
-    // API call directly and assert on its third arg (the URL).
+    // API call directly. Two assertions, both load-bearing:
+    //
+    //   1. *some* pushState call carried the expected URL (don't assume
+    //      it was the first one — the component may make unrelated
+    //      pushState calls on mount that arrive before the session-create
+    //      navigation lands).
+    //   2. mockReplace was NOT called — proves we navigated via push, not
+    //      via the router. If the component ever regresses back to
+    //      router.replace this assertion catches it.
     const pushSpy = vi.spyOn(window.history, "pushState")
     render(<ChatPageClient />)
-    await waitFor(() => expect(pushSpy).toHaveBeenCalled(), { timeout: 3000 })
-    const url = pushSpy.mock.calls[0][2] as string
-    expect(url).toMatch(/^\/chat\/filip\?session=session-1$/)
+    await waitFor(
+      () =>
+        expect(
+          pushSpy.mock.calls.some(
+            (call) =>
+              typeof call[2] === "string" &&
+              /^\/chat\/filip\?session=session-1$/.test(call[2]),
+          ),
+        ).toBe(true),
+      { timeout: 3000 },
+    )
+    expect(mockReplace).not.toHaveBeenCalled()
   })
 })
 
