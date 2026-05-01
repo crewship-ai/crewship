@@ -158,6 +158,16 @@ type Orchestrator struct {
 	snapshotHashMu    sync.Mutex
 	snapshotHashCache map[string]string
 
+	// snapshotInFlightMu protects snapshotInFlight itself. The per-container
+	// locks inside it serialize concurrent recordContainerSnapshot calls
+	// for the same containerID so only the first emits while the rest
+	// short-circuit on the cached hash. Without this, N goroutines that
+	// all complete a run at the same instant each pass the cache check
+	// before any of them stores the hash — and every goroutine emits a
+	// duplicate journal entry. Different containers don't contend.
+	snapshotInFlightMu sync.Mutex
+	snapshotInFlight   map[string]*sync.Mutex
+
 	// journal is the Crew Journal emitter. Nil-safe: SetJournal replaces it
 	// with a no-op. Used by Crow's Nest emit points (exec.command,
 	// container.metrics) so live visibility into containers flows through
@@ -498,6 +508,7 @@ func New(
 		crews:             make(map[string]*crewState),
 		tmuxCache:         make(map[string]bool),
 		snapshotHashCache: make(map[string]string),
+		snapshotInFlight:  make(map[string]*sync.Mutex),
 	}
 }
 

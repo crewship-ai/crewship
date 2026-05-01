@@ -18,6 +18,12 @@ builds:
     binary: crewship
     env:
       - CGO_ENABLED=0
+    # -trimpath produces reproducible binaries: workspace paths are stripped
+    # from debug info, so the same source + toolchain version emits the same
+    # bytes from any builder. Required for the cosign keyless verification
+    # chain below — verifiers compare hashes against signed digests.
+    flags:
+      - -trimpath
     goos:
       - darwin
       - linux

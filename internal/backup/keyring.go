@@ -26,18 +26,11 @@ var ErrKeyringEntryNotFound = errors.New("backup keyring: entry not found")
 
 // Keyring is a file-backed passphrase cache scoped to a host's
 // ~/.crewship/ directory. Intentionally tiny: one level of indirection
-// per workspace, AES-256-GCM at rest via internal/encryption, and a
-// per-process mutex so writes within the same process serialise.
-//
-// TODO(CRE-130 follow-up): the mutex does NOT cover concurrent CLI
-// invocations — two `crewship backup ... --use-keyring` processes
-// racing on the same file are last-write-wins and can clobber an
-// entry. In practice the CLI is interactive so a real race is
-// unlikely; a proper fix adds an OS-level advisory lock
-// (syscall.Flock on POSIX) around the full load-modify-save sequence.
-// Deliberately deferred: fix requires either golang.org/x/sys/unix or
-// a new dep, and the failure mode (single passphrase lost, never data
-// corruption) does not justify the surface-area growth mid-PR.
+// per workspace, AES-256-GCM at rest via internal/encryption, a
+// per-process mutex for in-process serialisation, and an OS-level
+// advisory lock (flock(2) on POSIX) for cross-process serialisation
+// so two `crewship backup ... --use-keyring` processes racing on the
+// same file cannot clobber each other's entries.
 //
 // We do not adopt 99designs/keyring because it pulls cgo (macOS
 // Security framework, libsecret) on all platforms, which conflicts
@@ -49,6 +42,7 @@ type Keyring struct {
 	path    string
 	storage StorageOps
 	mu      sync.Mutex
+	flock   *fileLock
 }
 
 // DefaultKeyring returns a Keyring rooted at ~/.crewship/
@@ -68,66 +62,91 @@ func DefaultKeyring(ctx context.Context) (*Keyring, error) {
 	if err := st.MkdirAll(ctx, dir, 0o700); err != nil {
 		return nil, fmt.Errorf("backup keyring: create dir: %w", err)
 	}
+	path := filepath.Join(dir, keyringFileName)
 	return &Keyring{
-		path:    filepath.Join(dir, keyringFileName),
+		path:    path,
 		storage: st,
+		flock:   newFileLock(path),
 	}, nil
+}
+
+// withLocks acquires the in-process mutex and the cross-process
+// advisory lock in that order, runs fn, then releases both. The order
+// matters: the in-process mutex coalesces concurrent goroutines in
+// the same process before they each open a separate fd for flock
+// (flock state is per-fd, so two fds from the same process can both
+// hold the "exclusive" lock simultaneously). The flock release error
+// is reported but does not mask fn's own error.
+func (k *Keyring) withLocks(fn func() error) error {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.flock != nil {
+		if err := k.flock.Lock(); err != nil {
+			return fmt.Errorf("backup keyring: lock: %w", err)
+		}
+		defer func() { _ = k.flock.Unlock() }()
+	}
+	return fn()
 }
 
 // StorePassphrase writes (or overwrites) the passphrase for
 // workspaceID, re-encrypting and re-writing the whole file under the
-// process lock. The file mode is forced to 0o600 on every write so a
-// mistaken `umask` cannot widen permissions after the initial create.
+// process+file lock. The file mode is forced to 0o600 on every write
+// so a mistaken `umask` cannot widen permissions after the initial
+// create.
 func (k *Keyring) StorePassphrase(ctx context.Context, workspaceID, passphrase string) error {
 	if workspaceID == "" {
 		return fmt.Errorf("backup keyring: workspaceID required")
 	}
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	entries, err := k.loadLocked(ctx)
-	if err != nil {
-		return err
-	}
-	enc, err := encryption.Encrypt(passphrase)
-	if err != nil {
-		return fmt.Errorf("backup keyring: encrypt: %w", err)
-	}
-	entries[workspaceID] = enc
-	return k.saveLocked(ctx, entries)
+	return k.withLocks(func() error {
+		entries, err := k.loadLocked(ctx)
+		if err != nil {
+			return err
+		}
+		enc, err := encryption.Encrypt(passphrase)
+		if err != nil {
+			return fmt.Errorf("backup keyring: encrypt: %w", err)
+		}
+		entries[workspaceID] = enc
+		return k.saveLocked(ctx, entries)
+	})
 }
 
 // GetPassphrase returns the decrypted passphrase or
 // ErrKeyringEntryNotFound.
 func (k *Keyring) GetPassphrase(ctx context.Context, workspaceID string) (string, error) {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	entries, err := k.loadLocked(ctx)
-	if err != nil {
-		return "", err
-	}
-	ct, ok := entries[workspaceID]
-	if !ok {
-		return "", ErrKeyringEntryNotFound
-	}
-	pt, err := encryption.Decrypt(ct)
-	if err != nil {
-		return "", fmt.Errorf("backup keyring: decrypt: %w", err)
-	}
-	return pt, nil
+	var out string
+	err := k.withLocks(func() error {
+		entries, err := k.loadLocked(ctx)
+		if err != nil {
+			return err
+		}
+		ct, ok := entries[workspaceID]
+		if !ok {
+			return ErrKeyringEntryNotFound
+		}
+		pt, err := encryption.Decrypt(ct)
+		if err != nil {
+			return fmt.Errorf("backup keyring: decrypt: %w", err)
+		}
+		out = pt
+		return nil
+	})
+	return out, err
 }
 
 // Forget removes a workspace's passphrase. Non-existence is not an
 // error — the caller usually does not care whether a delete was a
 // no-op.
 func (k *Keyring) Forget(ctx context.Context, workspaceID string) error {
-	k.mu.Lock()
-	defer k.mu.Unlock()
-	entries, err := k.loadLocked(ctx)
-	if err != nil {
-		return err
-	}
-	delete(entries, workspaceID)
-	return k.saveLocked(ctx, entries)
+	return k.withLocks(func() error {
+		entries, err := k.loadLocked(ctx)
+		if err != nil {
+			return err
+		}
+		delete(entries, workspaceID)
+		return k.saveLocked(ctx, entries)
+	})
 }
 
 // loadLocked reads the file. An absent file returns an empty map so
