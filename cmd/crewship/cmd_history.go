@@ -43,6 +43,11 @@ Examples:
 		client := newAPIClient()
 
 		limit, _ := cmd.Flags().GetInt("limit")
+		// Reject non-positive limits up-front rather than letting the API
+		// return an opaque 400 — preserves a friendly CLI error surface.
+		if limit <= 0 {
+			return fmt.Errorf("bad --limit: must be greater than 0")
+		}
 		since, _ := cmd.Flags().GetString("since")
 		statusFlag, _ := cmd.Flags().GetString("status")
 		agentFlag, _ := cmd.Flags().GetString("agent")

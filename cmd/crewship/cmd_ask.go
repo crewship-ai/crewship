@@ -162,6 +162,9 @@ Examples:
 			defer saveFile.Close()
 		}
 
+		noStream, _ := cmd.Flags().GetBool("no-stream")
+		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
+
 		// Fan-out path: --agents takes precedence over --agent / default-agent.
 		if len(fanoutAgents) > 0 {
 			agentsByID := map[string]string{}
@@ -181,10 +184,8 @@ Examples:
 				return fmt.Errorf("get WS token: %w", err)
 			}
 			server := cli.ResolveServer(flagServer, cliCfg)
-			return runFanout(server, wsToken, agentsByID, prompt, quiet, md, saveFile)
+			return runFanout(server, wsToken, agentsByID, prompt, quiet, md, saveFile, timeoutSecs)
 		}
-		noStream, _ := cmd.Flags().GetBool("no-stream")
-		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
 		if timeoutSecs > 0 {
 			client.HTTPClient.Timeout = time.Duration(timeoutSecs) * time.Second
 		}

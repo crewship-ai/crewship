@@ -244,7 +244,7 @@ func TestBuildPrompt_CapBytes(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	if !strings.Contains(got, "(truncated)") {
-		t.Errorf("expected truncation marker: %q", got[:200])
+		t.Errorf("expected truncation marker: %q", got)
 	}
 }
 
@@ -376,7 +376,7 @@ func TestReadBounded_TruncationMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(got), "(truncated)") {
-		t.Errorf("expected truncation marker, got: %q", string(got)[:200])
+		t.Errorf("expected truncation marker, got: %q", string(got))
 	}
 }
 

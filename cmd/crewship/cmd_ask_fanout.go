@@ -26,18 +26,22 @@ import (
 //   - First-failure does NOT abort the others. A common use case is "ask 3
 //     agents, see who got it right" — losing 2 responses because 1 errored
 //     would defeat the purpose. Failures are reported in their own slot.
-func runFanout(server, wsToken string, agentsByID map[string]string, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
+func runFanout(server, wsToken string, agentsByID map[string]string, prompt string, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile, timeoutSecs int) error {
 	if len(agentsByID) == 0 {
 		return fmt.Errorf("no agents")
 	}
 
 	// Per-agent timeout + Ctrl-C: an agent whose WS hangs would otherwise
-	// block wg.Wait() forever, freezing the CLI. 5 min is generous for a
-	// streamed response; tightening can be done with --fanout-timeout if
-	// users hit it. Ctrl-C cancels every still-running goroutine.
+	// block wg.Wait() forever, freezing the CLI. Default 5 min when no
+	// --timeout was passed; otherwise honour the user's value so
+	// `crewship ask --agents ... --timeout 10` does what it says.
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	ctx, cancelTimeout := context.WithTimeout(ctx, 5*time.Minute)
+	timeout := 5 * time.Minute
+	if timeoutSecs > 0 {
+		timeout = time.Duration(timeoutSecs) * time.Second
+	}
+	ctx, cancelTimeout := context.WithTimeout(ctx, timeout)
 	defer cancelTimeout()
 
 	type result struct {
@@ -79,6 +83,19 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 	// repeat (shouldn't, but defensively) we de-dup.
 	slugs = uniqueSorted(slugs)
 
+	// saveErr captures the first write failure so a disk-full or permission
+	// problem surfaces as a non-zero exit even when Commit happens to
+	// succeed (e.g. tmpfs vs. final dir on different volumes).
+	var saveErr error
+	writeSave := func(s string) {
+		if save == nil || saveErr != nil {
+			return
+		}
+		if _, err := save.WriteString(s); err != nil {
+			saveErr = fmt.Errorf("save write: %w", err)
+		}
+	}
+
 	for i, slug := range slugs {
 		if i > 0 {
 			fmt.Println()
@@ -88,40 +105,42 @@ func runFanout(server, wsToken string, agentsByID map[string]string, prompt stri
 		if !quiet {
 			fmt.Printf("%s%s%s\n", cli.Bold, header, cli.Reset)
 		}
-		if save != nil {
-			_, _ = save.WriteString(header)
-			_, _ = save.WriteString("\n")
-		}
+		writeSave(header + "\n")
 
-		if r.err != nil {
-			fmt.Fprintf(os.Stderr, "%s[error]%s %v\n", cli.Red, cli.Reset, r.err)
-			continue
-		}
-
+		// Print + save the partial text BEFORE the error footer — a late
+		// read failure shouldn't throw away whatever the agent already
+		// produced. Without this, `crewship ask --agents v,e --save out.md`
+		// drops an agent's response if its WS dropped near the end.
 		text := r.text
-		if save != nil {
-			_, _ = save.WriteString(text)
+		if text != "" {
+			writeSave(text)
 			if !strings.HasSuffix(text, "\n") {
-				_, _ = save.WriteString("\n")
+				writeSave("\n")
+			}
+			toPrint := text
+			if md != nil {
+				// Each agent's output gets its own renderer state — fenced blocks
+				// don't bleed across the boundary.
+				toPrint = cli.NewMarkdownRenderer().Render(text)
+			}
+			fmt.Print(toPrint)
+			if !strings.HasSuffix(toPrint, "\n") {
+				fmt.Println()
 			}
 		}
-
-		toPrint := text
-		if md != nil {
-			// Each agent's output gets its own renderer state — fenced blocks
-			// don't bleed across the boundary.
-			toPrint = cli.NewMarkdownRenderer().Render(text)
-		}
-		fmt.Print(toPrint)
-		if !strings.HasSuffix(toPrint, "\n") {
-			fmt.Println()
+		if r.err != nil {
+			fmt.Fprintf(os.Stderr, "%s[error]%s %v\n", cli.Red, cli.Reset, r.err)
 		}
 	}
 	// All agents iterated — commit the save file. Even if individual agents
 	// errored, the saved artefact captures every header + (partial) text we
-	// printed, which is what the user just saw on screen. Commit failure
-	// returns non-zero so scripts notice a missing/partial artefact.
+	// printed, which is what the user just saw on screen. Surface the first
+	// write error if any — Commit alone could otherwise mask earlier
+	// truncation.
 	if save != nil {
+		if saveErr != nil {
+			return saveErr
+		}
 		if err := save.Commit(); err != nil {
 			return fmt.Errorf("save commit: %w", err)
 		}

@@ -437,11 +437,27 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			fmt.Print(s)
 		}
 	}
+	// joinErrs combines a save-time error with a stream-time error so
+	// the caller sees both. Without this, "agent error" and "save commit
+	// failed" together would lose one — exit-code reliability matters
+	// for scripts wrapping run/ask.
+	joinErrs := func(streamErr error) error {
+		if saveErr != nil && streamErr != nil {
+			return fmt.Errorf("%v; %w", saveErr, streamErr)
+		}
+		if streamErr != nil {
+			return streamErr
+		}
+		return saveErr
+	}
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
 			flush()
-			return saveErr
+			// A dropped WS connection is a real failure — exit non-zero so
+			// scripts (e.g. `crewship run x "y" || alert`) notice. Was
+			// previously masking this as success when --save was unset.
+			return joinErrs(fmt.Errorf("ws read: %w", err))
 		}
 
 		event, err := cli.ParseChatEvent(msg)
@@ -476,7 +492,7 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// Don't commit save — defer Close in the caller discards the
 			// tempfile so an aborted run never overwrites a previous artefact.
 			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
-			return saveErr
+			return joinErrs(fmt.Errorf("agent error: %s", event.Content))
 		case "done":
 			flush()
 			if save != nil && saveErr == nil {
