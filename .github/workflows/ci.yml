@@ -145,7 +145,15 @@ jobs:
   go-lint:
     name: Go Lint
     runs-on: [self-hosted, macos-arm64]
-    timeout-minutes: 10
+    # 15 min, not 10: empirically setup-go-embed alone takes ~10 min on
+    # the self-hosted MBA runner (verified across runs 25196471236 +
+    # 25198805401, both with and without cache: true). Root cause not
+    # yet identified — likely actions/setup-go downloading + extracting
+    # the Go SDK on a slow workspace mount, or a network bottleneck
+    # specific to this runner. The 10-min budget left zero headroom for
+    # the actual lint step. 15 min keeps lint comfortably within budget
+    # without papering over a real timeout regression.
+    timeout-minutes: 15
     env:
       GOLANGCI_VERSION: v2.1.6
     steps:
