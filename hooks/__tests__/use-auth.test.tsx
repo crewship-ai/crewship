@@ -197,7 +197,11 @@ describe("useAuth / AuthProvider", () => {
       expect(result.current.session).toBeNull()
     })
 
-    it("swallows fetch rejection and still clears session state", async () => {
+    it("preserves session state when sign-out fetch rejects (network error)", async () => {
+      // PR #233 CodeRabbit-driven change: signOut now gates the local
+      // reset on a server acknowledgement. On network error the catch
+      // arm in hooks/use-auth.tsx returns early so a transient outage
+      // doesn't desync this tab from a still-active server session.
       mockFetch.mockResolvedValueOnce(
         okJSON({ user: { id: "u1", name: "A", email: "a@b" }, expires: "2026-05-01" }),
       )
@@ -207,8 +211,9 @@ describe("useAuth / AuthProvider", () => {
       mockFetch.mockRejectedValueOnce(new Error("offline"))
       await act(() => result.current.signOut())
 
-      expect(result.current.status).toBe("unauthenticated")
-      expect(result.current.session).toBeNull()
+      // Local state intentionally untouched — see comment above.
+      expect(result.current.status).toBe("authenticated")
+      expect(result.current.session?.user.id).toBe("u1")
     })
   })
 
