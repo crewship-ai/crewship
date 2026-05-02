@@ -7,7 +7,7 @@ import type { WizardState } from "./types"
 interface Props {
   state: WizardState
   /** Optional jump-back callback to allow click-to-edit on a row */
-  onEdit?: (step: 1 | 2 | 3) => void
+  onEdit?: (step: 1 | 2 | 3 | 4) => void
   /** Lineup summary derived from wizard mode */
   lineupSummary: { count: number; source: string; agents?: { name: string; agent_role: string }[] }
 }
@@ -79,6 +79,25 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         )}
       </Row>
 
+      {hasContainerOverrides(state) && (
+        <Row label="Image" onEdit={onEdit && (() => onEdit(4))}>
+          <Pill>{summaryBaseImage(state)}</Pill>
+          {summaryFeatureCount(state.devcontainerConfig) > 0 && (
+            <Pill>{summaryFeatureCount(state.devcontainerConfig)} feature{summaryFeatureCount(state.devcontainerConfig) === 1 ? "" : "s"}</Pill>
+          )}
+          {summaryRuntimeCount(state.miseConfig) > 0 && (
+            <Pill>{summaryRuntimeCount(state.miseConfig)} runtime{summaryRuntimeCount(state.miseConfig) === 1 ? "" : "s"}</Pill>
+          )}
+        </Row>
+      )}
+
+      {summaryMCPCount(state.mcpConfig) > 0 && (
+        <Row label="MCP" onEdit={onEdit && (() => onEdit(4))}>
+          <span className="h-2 w-2 rounded-full inline-block bg-violet-400" />
+          <Pill>{summaryMCPCount(state.mcpConfig)} server{summaryMCPCount(state.mcpConfig) === 1 ? "" : "s"}</Pill>
+        </Row>
+      )}
+
       <Row label="After create">
         <span className="text-muted-foreground text-[12px] leading-relaxed">
           Container <code className="text-[11px] font-mono bg-black/30 px-1 py-0.5 rounded">crewship-team-{state.slug}</code> built in background.
@@ -119,4 +138,53 @@ function Pill({ children }: { children: React.ReactNode }) {
 function prettyMemory(mb: number): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB`
   return `${mb} MB`
+}
+
+// Container summary helpers — same parsers as step-container, kept local because
+// step-container.tsx is a sibling and we don't want a 3rd file just for these.
+
+function hasContainerOverrides(s: WizardState): boolean {
+  return (
+    s.runtimeImage.trim() !== "" ||
+    s.devcontainerConfig.trim() !== "" ||
+    s.miseConfig.trim() !== ""
+  )
+}
+
+function summaryBaseImage(s: WizardState): string {
+  if (s.devcontainerConfig.trim()) {
+    try {
+      const parsed = JSON.parse(s.devcontainerConfig) as { image?: unknown }
+      if (typeof parsed.image === "string" && parsed.image) return parsed.image
+    } catch { /* fallthrough */ }
+  }
+  return s.runtimeImage.trim() || "debian:bookworm-slim"
+}
+
+function summaryFeatureCount(devcontainerConfig: string): number {
+  if (!devcontainerConfig.trim()) return 0
+  try {
+    const parsed = JSON.parse(devcontainerConfig) as { features?: Record<string, unknown> }
+    return parsed.features ? Object.keys(parsed.features).length : 0
+  } catch { return 0 }
+}
+
+function summaryRuntimeCount(miseConfig: string): number {
+  if (!miseConfig.trim()) return 0
+  let inTools = false
+  let count = 0
+  for (const raw of miseConfig.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (line.startsWith("[")) { inTools = line === "[tools]"; continue }
+    if (inTools && /^[\w-]+\s*=/.test(line)) count++
+  }
+  return count
+}
+
+function summaryMCPCount(mcpConfig: string): number {
+  if (!mcpConfig.trim()) return 0
+  try {
+    const parsed = JSON.parse(mcpConfig) as { mcpServers?: Record<string, unknown> }
+    return parsed.mcpServers ? Object.keys(parsed.mcpServers).length : 0
+  } catch { return 0 }
 }

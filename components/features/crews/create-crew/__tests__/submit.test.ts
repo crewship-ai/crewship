@@ -258,6 +258,106 @@ describe("submitCrew — browse (template) mode", () => {
   })
 })
 
+// =============================================================================
+// Container fields (Step 4)
+// =============================================================================
+
+describe("submitCrew — container fields (image, devcontainer, mise, MCP)", () => {
+  let fetcher: ReturnType<typeof setupFetchMock>
+  beforeEach(() => { fetcher = setupFetchMock() })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it("blank mode: passes runtime_image / devcontainer_config / mise_config on initial POST", async () => {
+    fetcher.queueResponse({ ok: true, body: { id: "x", slug: "x", name: "X" } })
+
+    await submitCrew(WS, fullState({
+      mode: "empty",
+      runtimeImage: "ubuntu:22.04",
+      devcontainerConfig: '{"image":"ubuntu:22.04","features":{"ghcr.io/devcontainers/features/git:1":{}}}',
+      miseConfig: '[tools]\npython = "3.12"',
+    }))
+
+    expect(fetcher.calls[0].body).toMatchObject({
+      runtime_image: "ubuntu:22.04",
+      devcontainer_config: '{"image":"ubuntu:22.04","features":{"ghcr.io/devcontainers/features/git:1":{}}}',
+      mise_config: '[tools]\npython = "3.12"',
+    })
+  })
+
+  it("blank mode: omits container fields when blank (don't send empty strings)", async () => {
+    fetcher.queueResponse({ ok: true, body: { id: "x", slug: "x", name: "X" } })
+
+    await submitCrew(WS, fullState({ mode: "empty" }))
+
+    expect(fetcher.calls[0].body).not.toHaveProperty("runtime_image")
+    expect(fetcher.calls[0].body).not.toHaveProperty("devcontainer_config")
+    expect(fetcher.calls[0].body).not.toHaveProperty("mise_config")
+  })
+
+  it("blank mode: PATCHes mcp_config_json after POST when set (POST doesn't accept it)", async () => {
+    fetcher.queueResponse({ ok: true, body: { id: "crew_1", slug: "x", name: "X" } })
+    fetcher.queueResponse({ ok: true, body: {} })
+
+    await submitCrew(WS, fullState({
+      mode: "empty",
+      mcpConfig: '{"mcpServers":{"github":{"command":"npx","args":["@modelcontextprotocol/server-github"]}}}',
+    }))
+
+    expect(fetcher.calls).toHaveLength(2)
+    expect(fetcher.calls[0].method).toBe("POST")
+    expect(fetcher.calls[0].body).not.toHaveProperty("mcp_config_json")
+    expect(fetcher.calls[1].method).toBe("PATCH")
+    expect(fetcher.calls[1].url).toContain("/api/v1/crews/crew_1")
+    expect(fetcher.calls[1].body).toMatchObject({
+      mcp_config_json: '{"mcpServers":{"github":{"command":"npx","args":["@modelcontextprotocol/server-github"]}}}',
+    })
+  })
+
+  it("blank mode: skips PATCH entirely when no MCP config set", async () => {
+    fetcher.queueResponse({ ok: true, body: { id: "x", slug: "x", name: "X" } })
+
+    await submitCrew(WS, fullState({ mode: "empty" }))
+
+    expect(fetcher.calls).toHaveLength(1)
+    expect(fetcher.calls[0].method).toBe("POST")
+  })
+
+  it("browse mode: PATCH override includes container fields + MCP", async () => {
+    fetcher.queueResponse({ ok: true, body: { crew_id: "crew_1", crew_name: "X", crew_slug: "x" } })
+    fetcher.queueResponse({ ok: true, body: {} })
+
+    await submitCrew(WS, fullState({
+      mode: "browse",
+      pickedTemplateSlug: "any",
+      runtimeImage: "alpine:3.19",
+      devcontainerConfig: '{"image":"alpine:3.19","features":{}}',
+      miseConfig: '[tools]\nnode = "20"',
+      mcpConfig: '{"mcpServers":{"slack":{"type":"http","url":"https://example/sse"}}}',
+    }))
+
+    expect(fetcher.calls[1].method).toBe("PATCH")
+    expect(fetcher.calls[1].body).toMatchObject({
+      runtime_image: "alpine:3.19",
+      devcontainer_config: '{"image":"alpine:3.19","features":{}}',
+      mise_config: '[tools]\nnode = "20"',
+      mcp_config_json: '{"mcpServers":{"slack":{"type":"http","url":"https://example/sse"}}}',
+    })
+  })
+
+  it("browse mode: omits container fields from PATCH when blank", async () => {
+    fetcher.queueResponse({ ok: true, body: { crew_id: "crew_1", crew_name: "X", crew_slug: "x" } })
+    fetcher.queueResponse({ ok: true, body: {} })
+
+    await submitCrew(WS, fullState({ mode: "browse", pickedTemplateSlug: "any" }))
+
+    const patchBody = fetcher.calls[1].body
+    expect(patchBody).not.toHaveProperty("runtime_image")
+    expect(patchBody).not.toHaveProperty("devcontainer_config")
+    expect(patchBody).not.toHaveProperty("mise_config")
+    expect(patchBody).not.toHaveProperty("mcp_config_json")
+  })
+})
+
 describe("submitCrew — dispatcher", () => {
   let fetcher: ReturnType<typeof setupFetchMock>
 

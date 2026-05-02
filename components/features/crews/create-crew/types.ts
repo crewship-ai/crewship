@@ -1,6 +1,6 @@
 import type { CrewTemplateAgent } from "./api"
 
-export type WizardStep = 1 | 2 | 3 | 4
+export type WizardStep = 1 | 2 | 3 | 4 | 5
 
 export type LineupMode = "browse" | "empty"
 
@@ -24,6 +24,13 @@ export interface WizardState {
   ttlHours: number | null
   networkMode: "free" | "restricted"
   allowedDomains: string[]
+
+  // Step 4 — Container (image+features+MCP). Strings to match the existing
+  // RuntimeConfig and MCPConfigEditor `value` props; empty string = "use server default".
+  runtimeImage: string
+  devcontainerConfig: string
+  miseConfig: string
+  mcpConfig: string
 }
 
 export const INITIAL_STATE: WizardState = {
@@ -41,6 +48,10 @@ export const INITIAL_STATE: WizardState = {
   ttlHours: null,
   networkMode: "free",
   allowedDomains: [],
+  runtimeImage: "",
+  devcontainerConfig: "",
+  miseConfig: "",
+  mcpConfig: "",
 }
 
 export const MEMORY_PRESETS = [

@@ -26,6 +26,16 @@ function runtimeBody(state: WizardState): Record<string, unknown> {
   return body
 }
 
+// Container fields accepted by POST /api/v1/crews — runtime_image, devcontainer_config,
+// mise_config (mcp_config_json is PATCH-only on the backend, see hasMCPOverride).
+function containerCreateBody(state: WizardState): Record<string, unknown> {
+  const body: Record<string, unknown> = {}
+  if (state.runtimeImage.trim()) body.runtime_image = state.runtimeImage.trim()
+  if (state.devcontainerConfig.trim()) body.devcontainer_config = state.devcontainerConfig
+  if (state.miseConfig.trim()) body.mise_config = state.miseConfig
+  return body
+}
+
 function identityBody(state: WizardState): Record<string, unknown> {
   const body: Record<string, unknown> = {
     name: state.name.trim(),
@@ -37,19 +47,33 @@ function identityBody(state: WizardState): Record<string, unknown> {
   return body
 }
 
+function hasMCPOverride(state: WizardState): boolean {
+  return state.mcpConfig.trim() !== ""
+}
+
 async function submitBlank(workspaceId: string, state: WizardState): Promise<SubmitResult> {
   const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...identityBody(state), ...runtimeBody(state) }),
+    body: JSON.stringify({
+      ...identityBody(state),
+      ...runtimeBody(state),
+      ...containerCreateBody(state),
+    }),
   })
   if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`)
-  const created = await res.json()
+  const created = await res.json() as { id: string; slug: string; name: string }
+
+  // POST doesn't accept mcp_config_json — patch it after create when set.
+  if (hasMCPOverride(state)) {
+    await applyOverrides(workspaceId, created.id, { mcp_config_json: state.mcpConfig })
+  }
+
   return { id: created.id, slug: created.slug, name: created.name }
 }
 
-// Two-step: template deploy creates crew + agents; we then PATCH for any identity/runtime
-// fields the user customized (deploy ignores those overrides today).
+// Two-step: template deploy creates crew + agents; we then PATCH for any identity / runtime /
+// container / MCP fields the user customized (deploy ignores those overrides today).
 async function submitFromTemplate(workspaceId: string, state: WizardState): Promise<SubmitResult> {
   if (!state.pickedTemplateSlug) {
     throw new Error("No template selected")
@@ -65,23 +89,36 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
   if (!deployRes.ok) throw new Error(await deployRes.text() || `HTTP ${deployRes.status}`)
   const deployed = await deployRes.json() as { crew_id: string; crew_name: string; crew_slug: string }
 
-  // Override icon/color/description/runtime on the freshly-deployed crew so user choices
-  // win over template defaults. Single PATCH; failure here doesn't roll back the deploy.
   const patchBody: Record<string, unknown> = {
     icon: state.icon,
     color: state.color,
     ...runtimeBody(state),
   }
   if (state.description.trim()) patchBody.description = state.description.trim()
+  if (state.runtimeImage.trim()) patchBody.runtime_image = state.runtimeImage.trim()
+  if (state.devcontainerConfig.trim()) patchBody.devcontainer_config = state.devcontainerConfig
+  if (state.miseConfig.trim()) patchBody.mise_config = state.miseConfig
+  if (hasMCPOverride(state)) patchBody.mcp_config_json = state.mcpConfig
 
-  const patchRes = await fetch(`/api/v1/crews/${encodeURIComponent(deployed.crew_id)}?workspace_id=${encodeURIComponent(workspaceId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patchBody),
-  })
-  if (!patchRes.ok) {
-    console.warn("Crew created but identity/runtime override failed:", await patchRes.text())
-  }
+  await applyOverrides(workspaceId, deployed.crew_id, patchBody)
 
   return { id: deployed.crew_id, slug: deployed.crew_slug, name: deployed.crew_name }
+}
+
+// applyOverrides PATCHes a freshly-created crew. Failure here is logged but
+// non-fatal — the crew exists with whatever defaults the create call applied.
+async function applyOverrides(
+  workspaceId: string,
+  crewId: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  if (Object.keys(body).length === 0) return
+  const res = await fetch(`/api/v1/crews/${encodeURIComponent(crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    console.warn("Crew created but override PATCH failed:", await res.text())
+  }
 }

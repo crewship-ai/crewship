@@ -92,7 +92,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     setupFetch([])
     renderDialog()
     // "step 1 of 3" appears in dialog title AND in footer.
-    expect(screen.getAllByText(/step 1 of 3/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/step 1 of 4/i).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByPlaceholderText("Engineering")).toBeInTheDocument()
   })
 
@@ -117,11 +117,14 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     expect(screen.getByRole("button", { name: /Continue/ })).toBeDisabled()
   })
 
-  it("Step 2 — empty mode → Step 3 → Review → submit POSTs only /api/v1/crews once", async () => {
+  it("Step 2 — empty mode → Step 3 → Step 4 → Review → submit POSTs only /api/v1/crews once", async () => {
     const calls = setupFetch([
       // Templates list
       (c) => c.url.includes("/crew-templates") && !c.url.includes("/deploy")
         ? jsonResponse([TPL_ENG]) : null,
+      // Features catalog (Step 4 RuntimeConfig fetches it on mount)
+      (c) => c.url.includes("/features/catalog")
+        ? jsonResponse({ features: [], runtimes: [] }) : null,
       // Crew create (POST /api/v1/crews)
       (c) => c.url.includes("/api/v1/crews") && c.method === "POST"
         ? jsonResponse({ id: "crew_1", slug: "engineering", name: "Engineering" }, 201) : null,
@@ -148,7 +151,14 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
-    // Step 4 — Review → click "✓ Create crew"
+    // Step 4 — Container (optional) — skip via Skip-to-defaults to keep this happy
+    // path from depending on RuntimeConfig / MCPConfigEditor mounting cleanly.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+
+    // Step 5 — Review → click "✓ Create crew"
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Create crew/ })).toBeInTheDocument()
     })
@@ -217,7 +227,13 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
 
-    // Step 4 → submit
+    // Step 4 — skip Container customisation
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+
+    // Step 5 → submit
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Create crew/ })).toBeInTheDocument()
     })
@@ -250,11 +266,11 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
     })
-    expect(screen.getAllByText(/step 2 of 3/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/step 2 of 4/i).length).toBeGreaterThanOrEqual(1)
 
     fireEvent.click(screen.getByRole("button", { name: /Back/ }))
     // "step 1 of 3" appears in dialog title AND in footer.
-    expect(screen.getAllByText(/step 1 of 3/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/step 1 of 4/i).length).toBeGreaterThanOrEqual(1)
   })
 
   it("Cancel calls onOpenChange(false)", () => {
@@ -289,6 +305,11 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       expect(screen.getByText("Container resources")).toBeInTheDocument()
     })
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    // Step 4 — skip
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Create crew/ })).toBeInTheDocument()
     })
@@ -300,6 +321,56 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     expect(onCreated).not.toHaveBeenCalled()
     // Dialog should NOT have been closed by submit attempt
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it("Skip to defaults on Step 4 jumps directly to Review (Step 5)", async () => {
+    setupFetch([
+      (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
+    ])
+
+    renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 1 → 2
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Continue/ })).not.toBeDisabled()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 2 → 3
+    await waitFor(() => {
+      expect(screen.getByText("Container resources")).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ })) // Step 3 → 4
+
+    // On Step 4, Skip-to-defaults is visible and jumps straight to Review.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Skip to defaults/ })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+
+    expect(screen.getByRole("button", { name: /Create crew/ })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Skip to defaults/ })).toBeNull()
+  })
+
+  it("Skip to defaults button is NOT visible on Steps 1-3 or Review", async () => {
+    setupFetch([
+      (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
+    ])
+
+    renderDialog()
+
+    // Step 1 — no skip button
+    expect(screen.queryByRole("button", { name: /Skip to defaults/ })).toBeNull()
+
+    fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Eng" } })
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Browse templates/ })).toBeInTheDocument()
+    })
+    // Step 2 — no skip button
+    expect(screen.queryByRole("button", { name: /Skip to defaults/ })).toBeNull()
   })
 
   it("step strip jumping is allowed only to already-completed steps", async () => {

@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check, ChevronRight } from "lucide-react"
+import { Check, ChevronRight, FastForward } from "lucide-react"
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
 import { StepRuntime } from "./create-crew/step-runtime"
+import { StepContainer } from "./create-crew/step-container"
 import { StepReview } from "./create-crew/step-review"
 import { submitCrew } from "./create-crew/submit"
 import { INITIAL_STATE, type WizardState, type WizardStep } from "./create-crew/types"
@@ -26,7 +27,8 @@ const STEP_LABELS: Record<WizardStep, { title: string; sub: string }> = {
   1: { title: "Identity", sub: "icon, color, name" },
   2: { title: "Lineup", sub: "template or blank" },
   3: { title: "Runtime", sub: "resources, network" },
-  4: { title: "Review", sub: "create" },
+  4: { title: "Container", sub: "image, MCP — optional" },
+  5: { title: "Review", sub: "create" },
 }
 
 export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }: CreateCrewDialogProps) {
@@ -70,7 +72,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   }
 
   const advance = () => {
-    if (step === 4) {
+    if (step === 5) {
       submit()
       return
     }
@@ -80,6 +82,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   const back = () => {
     if (step > 1) setStep((step - 1) as WizardStep)
   }
+
+  const skipToReview = () => setStep(5)
 
   // Cmd+Enter advances/submits on supported steps.
   useEffect(() => {
@@ -107,14 +111,15 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           <DialogTitle className="text-base">
             New crew
             <span className="ml-2 text-sm text-muted-foreground font-normal">
-              {step === 4 ? "— ready to create" : `— step ${step} of 3`}
+              {step === 5 ? "— ready to create" : `— step ${step} of 4`}
             </span>
           </DialogTitle>
           <DialogDescription className="text-[12.5px]">
             {step === 1 && "Crews group agents that work together. Pick a recognizable icon and name."}
             {step === 2 && "The agents this crew starts with. Pick a curated lineup, or stay empty and add agents later."}
             {step === 3 && "Resource limits and network policy for the crew's container. Defaults are sane."}
-            {step === 4 && "Last look before commit. Click any section to jump back."}
+            {step === 4 && "Container image, devcontainer features, and MCP servers. All optional — skip to defaults if unsure."}
+            {step === 5 && "Last look before commit. Click any section to jump back."}
           </DialogDescription>
         </DialogHeader>
 
@@ -124,7 +129,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           {step === 1 && <StepIdentity state={state} setState={setState} />}
           {step === 2 && <StepLineup state={state} setState={setState} />}
           {step === 3 && <StepRuntime state={state} setState={setState} />}
-          {step === 4 && (
+          {step === 4 && <StepContainer state={state} setState={setState} workspaceId={workspaceId} />}
+          {step === 5 && (
             <StepReview
               state={state}
               onEdit={(s) => setStep(s)}
@@ -135,9 +141,9 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 
         <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
           <span className="text-[11.5px] text-muted-foreground mr-auto">
-            {step === 4
+            {step === 5
               ? "⌘+Enter to confirm · Esc cancel"
-              : `Step ${step} of 3 · ⌘+Enter to continue`}
+              : `Step ${step} of 4 · ⌘+Enter to continue`}
           </span>
           <button
             type="button"
@@ -157,6 +163,18 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
               ← Back
             </button>
           )}
+          {step === 4 && (
+            <button
+              type="button"
+              onClick={skipToReview}
+              disabled={busy}
+              className="text-sm px-3 py-1.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5 flex items-center gap-1.5"
+              title="Skip to Review with default container settings"
+            >
+              <FastForward className="h-3.5 w-3.5" />
+              Skip to defaults
+            </button>
+          )}
           <button
             type="button"
             onClick={advance}
@@ -164,8 +182,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             className="text-sm px-3.5 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
             {busy && <span className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />}
-            {step === 4 ? (busy ? "Creating…" : "✓ Create crew") : "Continue"}
-            {step < 4 && !busy && <ChevronRight className="h-3.5 w-3.5" />}
+            {step === 5 ? (busy ? "Creating…" : "✓ Create crew") : "Continue"}
+            {step < 5 && !busy && <ChevronRight className="h-3.5 w-3.5" />}
           </button>
         </div>
       </DialogContent>
@@ -174,7 +192,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 }
 
 function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep) => void }) {
-  const steps = [1, 2, 3] as const
+  const steps = [1, 2, 3, 4] as const
   return (
     <div className="px-5 py-3 border-b border-white/10 bg-card/50 flex items-center gap-3">
       {steps.map((n, i) => (
@@ -204,7 +222,7 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
           {i < steps.length - 1 && (
             <div
               className={cn(
-                "flex-1 h-px transition-colors",
+                "flex-1 h-px min-w-[16px] transition-colors",
                 n < step ? "bg-emerald-400/40" : "bg-white/10",
               )}
             />
@@ -234,6 +252,7 @@ function stepIsValid(step: WizardStep, s: WizardState): boolean {
       (s.networkMode === "free" || s.allowedDomains.length > 0 || s.networkMode === "restricted")
     // restricted with zero domains is allowed (locks all egress) — explicit choice.
   }
+  // step === 4 (Container) is always valid — all fields are optional.
   return true
 }
 
