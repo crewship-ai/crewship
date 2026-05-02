@@ -65,7 +65,11 @@ function ImageFeaturesSection({ state, setState }: { state: WizardState; setStat
           </span>
         )}
       </header>
-      <div className="px-3.5 py-3">
+      {/* Cap inner height so the 1308-row feature catalog inside RuntimeConfig
+          doesn't push MCP servers below the fold. RuntimeConfig manages its own
+          internal scroll for the feature list; the wrapper here is a safety net
+          for the BASE IMAGE picker + tabs combined height. */}
+      <div className="px-3.5 py-3 max-h-[280px] overflow-y-auto">
         <RuntimeConfig
           value={{
             runtimeImage: state.runtimeImage,
