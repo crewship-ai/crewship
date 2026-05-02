@@ -25,7 +25,7 @@ That's it. The runtime is now serving on your hardware. No agents have been crea
 
 ## Prerequisites for the Full Setup
 
-- **Docker** (or Apple Containers on macOS 26+) — every agent runs in its own Linux container
+- **Docker** (or Apple Containers on macOS 26+) — one Linux container per crew, shared by its agents
 - An LLM API key (Anthropic, OpenAI, or Google) — agents call out to whichever provider you wire up
 - **Go 1.26+** and **Node.js 22+ + pnpm** — only if you build from source instead of using the binary
 
