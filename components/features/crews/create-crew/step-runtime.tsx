@@ -3,7 +3,11 @@
 import { useId, useState } from "react"
 import { Cpu, MemoryStick, Clock, Network as NetIcon, Globe, Lock, X, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { CPU_PRESETS, MEMORY_PRESETS, TTL_PRESETS, type WizardState } from "./types"
+import {
+  CPU_PRESETS, CPU_MIN, CPU_MAX,
+  MEMORY_PRESETS, MEMORY_MIN_MB, MEMORY_MAX_MB,
+  TTL_PRESETS, type WizardState,
+} from "./types"
 
 interface Props {
   state: WizardState
@@ -38,8 +42,8 @@ export function StepRuntime({ state, setState }: Props) {
               active={!MEMORY_PRESETS.some((p) => p.value === state.memoryMB)}
               value={state.memoryMB}
               onChange={(v) => setState({ memoryMB: v })}
-              min={128}
-              max={65536}
+              min={MEMORY_MIN_MB}
+              max={MEMORY_MAX_MB}
               suffix="MB"
             />
           </ChipRow>
@@ -63,8 +67,8 @@ export function StepRuntime({ state, setState }: Props) {
               active={!CPU_PRESETS.some((p) => p.value === state.cpus)}
               value={state.cpus}
               onChange={(v) => setState({ cpus: v })}
-              min={0.1}
-              max={64}
+              min={CPU_MIN}
+              max={CPU_MAX}
               step={0.1}
               suffix="cpu"
             />

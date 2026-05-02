@@ -54,6 +54,16 @@ export const INITIAL_STATE: WizardState = {
   mcpConfig: "",
 }
 
+// Resource bounds — enforced by the wizard's CustomNumberChip and the Review
+// step's validation. Backend (crews_create.go) currently only checks > 0, but
+// Docker / Apple-containers will fail noisily if asked for 64 GB on a 16 GB
+// host or 0 CPUs. These ranges keep the user in the realm of "things that
+// might actually run".
+export const MEMORY_MIN_MB = 128
+export const MEMORY_MAX_MB = 32768
+export const CPU_MIN = 0.1
+export const CPU_MAX = 16
+
 export const MEMORY_PRESETS = [
   { label: "512 MB", value: 512 },
   { label: "1 GB", value: 1024 },

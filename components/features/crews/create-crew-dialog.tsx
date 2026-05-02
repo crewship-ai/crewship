@@ -55,8 +55,15 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 
   const lineupSummary = useMemo(() => deriveLineupSummary(state), [state])
 
+  // submittingRef is a synchronous latch — `busy` is only updated on the next
+  // render, so two fast clicks (or ⌘+Enter while a click is mid-flight) can
+  // both observe busy=false and fire submit twice, creating duplicate crews.
+  // The ref flips immediately and gates the second call before any async work.
+  const submittingRef = useRef(false)
+
   const submit = async () => {
-    if (busy) return
+    if (submittingRef.current || busy) return
+    submittingRef.current = true
     setBusy(true)
     try {
       const result = await submitCrew(workspaceId, state)
@@ -73,6 +80,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
       toast.error(`Could not create crew: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
+      submittingRef.current = false
     }
   }
 
@@ -88,7 +96,19 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     if (step > 1) setStep((step - 1) as WizardStep)
   }
 
-  const skipToReview = () => setStep(5)
+  // Skip-to-defaults must clear Step 4 overrides — otherwise a user who typed
+  // a custom image / devcontainer / mise / MCP and then clicks "Skip to
+  // defaults" still has those values land on Review and submit, which
+  // contradicts the CTA's promise.
+  const skipToReview = () => {
+    setState({
+      runtimeImage: INITIAL_STATE.runtimeImage,
+      devcontainerConfig: INITIAL_STATE.devcontainerConfig,
+      miseConfig: INITIAL_STATE.miseConfig,
+      mcpConfig: INITIAL_STATE.mcpConfig,
+    })
+    setStep(5)
+  }
 
   // Auto-focus the primary action when the user lands on Review (Step 5) so
   // ⌘+Enter is unambiguous and screen readers announce "Create crew" first.

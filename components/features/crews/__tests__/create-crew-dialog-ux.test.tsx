@@ -267,6 +267,88 @@ describe("<CreateCrewDialog> — loading state during submit", () => {
 // Re-open resets state
 // =============================================================================
 
+describe("<CreateCrewDialog> — double-submit guard", () => {
+  it("two rapid Create-crew clicks fire submitCrew exactly once", async () => {
+    let resolveCreate: ((res: Response) => void) | null = null
+    const pending = new Promise<Response>((resolve) => { resolveCreate = resolve })
+    const calls = setupFetch([
+      (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
+      (c) => c.url.includes("/api/v1/crews") && c.method === "POST"
+        ? (pending as unknown as Response) : null,
+    ])
+
+    renderDialog()
+
+    // Walk to Review fast
+    fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Latch" } })
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByText("Container resources"))
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
+
+    // Two synchronous clicks — the second must be swallowed by submittingRef
+    // even though `busy` hasn't re-rendered yet.
+    const createBtn = screen.getByRole("button", { name: /Create crew/ })
+    fireEvent.click(createBtn)
+    fireEvent.click(createBtn)
+
+    // Unblock the pending POST and let the test settle.
+    resolveCreate?.(jsonResponse({ id: "x", slug: "x", name: "X" }, 201))
+
+    await waitFor(() => {
+      const postCalls = calls.filter((c) => c.url.includes("/api/v1/crews") && c.method === "POST")
+      expect(postCalls).toHaveLength(1)
+    })
+  })
+})
+
+describe("<CreateCrewDialog> — Skip-to-defaults clears Step 4", () => {
+  it("clears runtimeImage / devcontainer / mise / mcp before jumping to Review", async () => {
+    setupFetch([
+      (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
+      (c) => c.url.includes("/api/v1/crews") && c.method === "POST"
+        ? jsonResponse({ id: "x", slug: "x", name: "X" }, 201) : null,
+    ])
+
+    renderDialog()
+    fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "Sk" } })
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByText("Container resources"))
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+
+    // Step 4 — Skip-to-defaults
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+
+    // We're now on Review (Step 5). Submit and assert NO container fields
+    // leaked into the body — even if user had set them before clicking skip,
+    // the skip handler clears them first.
+    fireEvent.click(screen.getByRole("button", { name: /Create crew/ }))
+
+    await waitFor(() => {
+      const post = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find(
+        ([url, init]) =>
+          typeof url === "string" &&
+          url.includes("/api/v1/crews") &&
+          (init as RequestInit | undefined)?.method === "POST",
+      )
+      expect(post).toBeDefined()
+      const body = JSON.parse(((post as unknown[])[1] as RequestInit).body as string)
+      expect(body).not.toHaveProperty("runtime_image")
+      expect(body).not.toHaveProperty("devcontainer_config")
+      expect(body).not.toHaveProperty("mise_config")
+    })
+  })
+})
+
 describe("<CreateCrewDialog> — open/close lifecycle", () => {
   it("closing and re-opening resets to a fresh Step 1 with empty form", async () => {
     setupFetch([(c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null])
