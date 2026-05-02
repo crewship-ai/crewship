@@ -72,9 +72,13 @@ try {
   await pollForResponse((r) => r.url.includes("/api/v1/workspaces") && r.status === 200)
   await page.waitForTimeout(500)
 
-  // ── /crews ────────────────────────────────────────────────────────
-  await page.goto(`${URL}/crews`, { waitUntil: "domcontentloaded", timeout: 15000 })
-  // Sub-bar's "+ Agent" button has data-crews-add-agent.
+  // ── /crews?crew=engineering ──────────────────────────────────────
+  // Hitting /crews?crew=<slug> makes the sub-bar pass crewSlug down to
+  // the +Agent button so the dialog opens with that crew pre-selected.
+  // Without the query, defaultCrewSlug is null and the user has to pick
+  // a crew manually — fine in real life, but it's a fragile path for an
+  // automated test (different selects, race with crew list loading).
+  await page.goto(`${URL}/crews?crew=engineering`, { waitUntil: "domcontentloaded", timeout: 15000 })
   const triggerLocator = page.locator("button[data-crews-add-agent]")
   await triggerLocator.waitFor({ state: "visible", timeout: 10000 })
   step("crews page renders +Agent button", true)
