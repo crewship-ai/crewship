@@ -35,6 +35,11 @@ async function openCreateCrew(page: import("@playwright/test").Page) {
   await expect(page.getByText(/New crew/)).toBeVisible()
 }
 
+// Serialize this suite — it creates real crews against a shared workspace
+// with a 15-crew community-license cap. Parallel workers racing to create
+// simultaneously can push the cap over before the afterAll cleanup runs.
+test.describe.configure({ mode: "serial" })
+
 test.describe("/crews — Create-crew wizard happy paths", () => {
   // Reclaim seats: delete e2e-created crews after the suite so the workspace
   // doesn't fill up against the community license cap (max_crews=15). Each

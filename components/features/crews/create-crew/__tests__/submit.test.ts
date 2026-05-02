@@ -87,9 +87,10 @@ describe("submitCrew — blank mode", () => {
     const call = fetcher.calls[0]
     expect(call.method).toBe("POST")
     expect(call.url).toContain("/api/v1/crews")
-    // workspace_id is resolved from the session via wsCtx middleware — query
-    // string is intentionally NOT present.
-    expect(call.url).not.toContain("workspace_id=")
+    // wsCtx middleware (RequireWorkspace) reads workspace_id from the query
+    // string and rejects 400 otherwise — so this MUST be present on every
+    // crew API call.
+    expect(call.url).toContain(`workspace_id=${WS}`)
 
     expect(call.body).toMatchObject({
       name: "Engineering",

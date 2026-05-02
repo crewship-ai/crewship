@@ -286,7 +286,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       (c) => c.url.includes("/api/v1/crew-templates") && c.method === "GET"
         ? jsonResponse([TPL_ENG]) : null,
       // POST /api/v1/crews returns 402 Payment Required (license cap reached)
-      (c) => c.url.endsWith("/api/v1/crews") && c.method === "POST"
+      (c) => c.url.includes("/api/v1/crews") && c.method === "POST" && !c.url.includes("/deploy")
         ? jsonResponse({ error: "Crew limit reached: 15 crews max" }, 402) : null,
     ])
 

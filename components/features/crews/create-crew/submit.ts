@@ -11,12 +11,12 @@ export interface SubmitResult {
   partial?: boolean
 }
 
-// workspace_id is resolved from the session via wsCtx middleware; the legacy
-// query string was dead code and is dropped. Keep workspaceId in the function
-// signature to make the dependency explicit at call sites.
-export async function submitCrew(_workspaceId: string, state: WizardState): Promise<SubmitResult> {
-  if (state.mode === "browse") return submitFromTemplate(state)
-  return submitBlank(state)
+// workspace_id MUST be passed as a query parameter — the wsCtx middleware
+// (RequireWorkspace) reads it from r.URL.Query() / r.PathValue and rejects
+// 400 "workspace_id is required" otherwise.
+export async function submitCrew(workspaceId: string, state: WizardState): Promise<SubmitResult> {
+  if (state.mode === "browse") return submitFromTemplate(workspaceId, state)
+  return submitBlank(workspaceId, state)
 }
 
 function runtimeBody(state: WizardState): Record<string, unknown> {
@@ -59,8 +59,8 @@ function hasMCPOverride(state: WizardState): boolean {
   return state.mcpConfig.trim() !== ""
 }
 
-async function submitBlank(state: WizardState): Promise<SubmitResult> {
-  const res = await fetch(`/api/v1/crews`, {
+async function submitBlank(workspaceId: string, state: WizardState): Promise<SubmitResult> {
+  const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -75,7 +75,7 @@ async function submitBlank(state: WizardState): Promise<SubmitResult> {
   // POST doesn't accept mcp_config_json — patch it after create when set.
   let partial = false
   if (hasMCPOverride(state)) {
-    partial = !(await applyOverrides(created.id, { mcp_config_json: state.mcpConfig }))
+    partial = !(await applyOverrides(workspaceId, created.id, { mcp_config_json: state.mcpConfig }))
   }
 
   return { id: created.id, slug: created.slug, name: created.name, partial }
@@ -83,12 +83,12 @@ async function submitBlank(state: WizardState): Promise<SubmitResult> {
 
 // Two-step: template deploy creates crew + agents; we then PATCH for any identity / runtime /
 // container / MCP fields the user customized (deploy ignores those overrides today).
-async function submitFromTemplate(state: WizardState): Promise<SubmitResult> {
+async function submitFromTemplate(workspaceId: string, state: WizardState): Promise<SubmitResult> {
   if (!state.pickedTemplateSlug) {
     throw new Error("No template selected")
   }
   const deployRes = await fetch(
-    `/api/v1/crew-templates/${encodeURIComponent(state.pickedTemplateSlug)}/deploy`,
+    `/api/v1/crew-templates/${encodeURIComponent(state.pickedTemplateSlug)}/deploy?workspace_id=${encodeURIComponent(workspaceId)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -109,7 +109,7 @@ async function submitFromTemplate(state: WizardState): Promise<SubmitResult> {
   if (state.miseConfig.trim()) patchBody.mise_config = state.miseConfig
   if (hasMCPOverride(state)) patchBody.mcp_config_json = state.mcpConfig
 
-  const ok = await applyOverrides(deployed.crew_id, patchBody)
+  const ok = await applyOverrides(workspaceId, deployed.crew_id, patchBody)
 
   return {
     id: deployed.crew_id,
@@ -124,11 +124,12 @@ async function submitFromTemplate(state: WizardState): Promise<SubmitResult> {
 // defaults) but caller should surface a warning to the user. Toast is also
 // fired here so that callers that don't read .partial still flag the regression.
 async function applyOverrides(
+  workspaceId: string,
   crewId: string,
   body: Record<string, unknown>,
 ): Promise<boolean> {
   if (Object.keys(body).length === 0) return true
-  const res = await fetch(`/api/v1/crews/${encodeURIComponent(crewId)}`, {
+  const res = await fetch(`/api/v1/crews/${encodeURIComponent(crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
