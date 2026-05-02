@@ -179,7 +179,14 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 		return
 	}
 	defer rows.Close()
-	assigned := 0
+	// credentialsFound flips on the first successful Scan, so it stays
+	// false ONLY when the workspace has zero matching credential rows.
+	// We deliberately don't track "assigned count" for the empty-event
+	// gate: if rows existed but every insert failed, those are already
+	// covered by per-row credential.auto_assign_failed entries — firing
+	// the "empty" entry there too would misreport "no credentials"
+	// when really there were credentials we just couldn't link.
+	credentialsFound := false
 	for rows.Next() {
 		var credID, credName string
 		if err := rows.Scan(&credID, &credName); err != nil {
@@ -190,6 +197,7 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 			emitFailure("scan", "", err)
 			continue
 		}
+		credentialsFound = true
 		if _, err := db.ExecContext(ctx, `
 			INSERT OR IGNORE INTO agent_credentials (agent_id, credential_id, env_var_name, created_at)
 			VALUES (?, ?, ?, ?)`, agentID, credID, credName, now); err != nil {
@@ -201,7 +209,6 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 			emitFailure("insert", credID, err)
 			continue
 		}
-		assigned++
 	}
 	// Surface late cursor failures (network blip, conn drop mid-iteration)
 	// — without this, partial assignments could be reported as success.
@@ -212,7 +219,7 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 		}
 		emitFailure("row_iteration", "", err)
 	}
-	if assigned == 0 {
+	if !credentialsFound {
 		// Most common cause of "agent created but chat returns empty":
 		// no Anthropic creds in the workspace yet. Log so operators
 		// know to add a credential, and surface in the journal so it
