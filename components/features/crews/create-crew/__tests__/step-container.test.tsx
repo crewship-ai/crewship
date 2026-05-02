@@ -76,22 +76,14 @@ describe("<StepContainer> — section structure", () => {
     expect(screen.getByText("MCP servers")).toBeInTheDocument()
   })
 
-  it("both sections are collapsed by default (children stubs not visible)", () => {
+  it("BOTH sections are always visible (no collapse) — RuntimeConfig + MCPConfigEditor mount immediately", () => {
     harness()
-    expect(screen.queryByTestId("runtime-config-stub")).toBeNull()
-    expect(screen.queryByTestId("mcp-editor-stub")).toBeNull()
-  })
-
-  it("clicking the Image & features header expands it and mounts RuntimeConfig", () => {
-    harness()
-    fireEvent.click(screen.getByText("Image & features"))
     expect(screen.getByTestId("runtime-config-stub")).toBeInTheDocument()
+    expect(screen.getByTestId("mcp-editor-stub")).toBeInTheDocument()
   })
 
-  it("clicking the MCP header expands it and mounts MCPConfigEditor with workspaceId", () => {
+  it("MCPConfigEditor receives the workspaceId prop", () => {
     harness()
-    fireEvent.click(screen.getByText("MCP servers"))
-    expect(screen.getByTestId("mcp-editor-stub")).toBeInTheDocument()
     expect(screen.getByTestId("mcp-workspace-id")).toHaveTextContent("ws_test")
   })
 })
@@ -99,7 +91,6 @@ describe("<StepContainer> — section structure", () => {
 describe("<StepContainer> — value flow", () => {
   it("RuntimeConfig.onChange propagates all 3 fields into wizard state", () => {
     const { setState } = harness()
-    fireEvent.click(screen.getByText("Image & features"))
     fireEvent.click(screen.getByRole("button", { name: /Set base ubuntu/ }))
 
     expect(setState).toHaveBeenCalledWith({
@@ -111,7 +102,6 @@ describe("<StepContainer> — value flow", () => {
 
   it("MCPConfigEditor.onChange propagates JSON string into mcpConfig", () => {
     const { setState } = harness()
-    fireEvent.click(screen.getByText("MCP servers"))
     fireEvent.click(screen.getByRole("button", { name: /Add GitHub MCP/ }))
 
     expect(setState).toHaveBeenCalledWith({
@@ -139,7 +129,9 @@ describe("<StepContainer> — summary chips", () => {
     harness({
       devcontainerConfig: '{"image":"debian:bookworm-slim","features":{"a":{}}}',
     })
-    expect(screen.getByText(/1 feature$/)).toBeInTheDocument()
+    // Count is rendered in the section header chip; allow >=1 match because
+    // ancestor textContent also matches the regex.
+    expect(screen.getAllByText(/1 feature$/).length).toBeGreaterThanOrEqual(1)
   })
 
   it("renders MCP server count summary when mcpConfig has servers", () => {
