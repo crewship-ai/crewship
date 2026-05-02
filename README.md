@@ -5,7 +5,7 @@
 <h1 align="center">Crewship</h1>
 
 <p align="center">
-  Open-source platform for orchestrating AI agents as virtual employees.
+  <strong>Self-hosted agent runtime</strong> — Linux containers your AI can build in, on your hardware, backed up by default.
 </p>
 
 <p align="center">
@@ -22,18 +22,20 @@
 
 ---
 
-Crewship lets you organize AI agents into crews, assign them roles, credentials, and skills, and run them in isolated containers. Think of it as an HR platform — but for AI workers.
+Crewship is a self-hosted runtime for AI coding agents. Each agent gets its own Linux container — a real machine where it can install services, run databases, mount volumes, and build a complete working system. The whole environment — code, data, conversations, AI cost ledger — runs on your hardware and is packaged into portable, encrypted backups, so nothing your agents create ever disappears. Scale a Claude Code, Gemini, or OpenCode session into a fleet of governed agents with cost budgets, approval gates, and audit logs built in.
 
 ## Features
 
-- **Agents as colleagues** — each agent has a role, crew, credentials, and persistent memory
+- **Real Linux containers** — every agent gets a full container; databases, queues, file stores, mounted volumes — anything your AI needs to build a complete working system
+- **Self-hosted** — runs on your own hardware; your data, your perimeter, your control
+- **Backup & restore** — portable, AGE-encrypted bundles capture an entire workspace or crew (code, data, conversations, AI cost ledger) so nothing your agents create ever disappears
+- **Fleet mode for any AI coding CLI** — scale a Claude Code, Gemini, Codex, or OpenCode session into a coordinated fleet of governed agents
+- **Cost budgets & audit log** — Crew Journal records every LLM call, tool use, and decision; budgets enforced hierarchically (workspace → crew → mission → agent)
+- **Approval gates** — risky actions pause for human sign-off (sync or async)
+- **Credential vault + Keeper** — AES-256-GCM encrypted keys; agent-side access guarded by a local LLM (Ollama)
 - **Crew-based organization** — group agents into crews with shared filesystem and lead-mode coordination
-- **Credential vault** — AES-256-GCM encrypted keys with priority-based failover
-- **Keeper** — agent-side credential access guarded by a local LLM (Ollama)
-- **Isolated execution** — every crew runs in its own Docker container; agents share via Unix socket IPC
-- **Crew Journal** — append-only event stream is the canonical source of truth (cost, guardrails, approvals, checkpoints)
+- **Persistent agent identity** — agents have role, history, conversations, and a workspace they keep across runs
 - **Single binary** — Next.js static export embedded into the Go server; no Node.js at runtime
-- **Self-hosted** — run on your own infrastructure, keep your data
 
 ## Tech Stack
 

@@ -1,11 +1,11 @@
 ---
 title: "Crewship Documentation"
-description: "Open-source platform for orchestrating AI agents as virtual employees. Organize agents into teams, assign credentials and skills, and run them in isolated containers."
+description: "Self-hosted runtime for AI coding agents. Each agent gets its own Linux container with full tooling, the whole environment runs on your hardware and is backed up by default — code, data, conversations, AI cost ledger, all of it."
 ---
 
 # Welcome to Crewship
 
-Crewship lets you organize AI agents into teams, assign them roles, credentials, and skills, and run them in isolated containers. Think of it as an **HR platform for AI workers**.
+Crewship is a **self-hosted runtime for AI coding agents**. Each agent gets its own Linux container — a real machine where it can install services, run databases, mount volumes, and build a complete working system. The whole environment runs on **your hardware** and is packaged into portable, encrypted backups, so nothing your agents create ever disappears. Scale your Claude Code, Gemini, or OpenCode session into a fleet of governed agents with cost budgets, approval gates, and audit logs built in.
 
 <CardGroup cols={2}>
   <Card title="Quick Start" icon="rocket" href="/quickstart">
@@ -49,7 +49,7 @@ Crewship lets you organize AI agents into teams, assign them roles, credentials,
 
 | Feature | Description |
 |---------|-------------|
-| **Agents as employees** | Each agent has a role, team, credentials, and work history |
+| **Persistent agent identity** | Each agent has a role, team, credentials, memory, and work history |
 | **Team-based organization** | Group agents into crews with shared context |
 | **Credential vault** | AES-256-GCM encrypted keys with priority-based failover |
 | **Isolated execution** | Every crew runs in its own Docker container |
