@@ -280,6 +280,37 @@ describe("<CreateCrewDialog> full wizard flow", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("license cap (402) leaves dialog open + toasts error — same path as other failures", async () => {
+    const { toast } = await import("sonner")
+    setupFetch([
+      (c) => c.url.includes("/api/v1/crew-templates") && c.method === "GET"
+        ? jsonResponse([TPL_ENG]) : null,
+      // POST /api/v1/crews returns 402 Payment Required (license cap reached)
+      (c) => c.url.endsWith("/api/v1/crews") && c.method === "POST"
+        ? jsonResponse({ error: "Crew limit reached: 15 crews max" }, 402) : null,
+    ])
+
+    const { onCreated, onOpenChange } = renderDialog()
+
+    fireEvent.change(screen.getByPlaceholderText("Engineering"), { target: { value: "OverCap" } })
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Empty crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByText("Container resources"))
+    fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Create crew/ }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled()
+    })
+    expect(onCreated).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
   it("submit failure leaves dialog open and toasts error (does NOT close)", async () => {
     const { toast } = await import("sonner")
     setupFetch([

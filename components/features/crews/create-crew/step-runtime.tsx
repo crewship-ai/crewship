@@ -305,34 +305,56 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(String(value))
+  const [error, setError] = useState<string | null>(null)
 
   if (active || editing) {
     return (
-      <div className={cn(
-        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]",
-        active ? "bg-blue-500/20 border-blue-400" : "bg-card border-white/10",
-      )}>
-        <input
-          type="number"
-          autoFocus={editing}
-          value={draft}
-          min={min}
-          max={max}
-          step={step}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => {
-            const n = Number(draft)
-            if (!Number.isNaN(n) && n >= min && n <= max) onChange(n)
-            else setDraft(String(value))
-            setEditing(false)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur()
-            if (e.key === "Escape") { setDraft(String(value)); setEditing(false) }
-          }}
-          className="w-12 bg-transparent outline-none text-right text-blue-300 font-medium"
-        />
-        <span className="text-[9px] text-muted-foreground">{suffix}</span>
+      <div className="inline-flex flex-col gap-0.5">
+        <div className={cn(
+          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]",
+          error
+            ? "bg-red-500/10 border-red-400/60"
+            : active
+              ? "bg-blue-500/20 border-blue-400"
+              : "bg-card border-white/10",
+        )}>
+          <input
+            type="number"
+            autoFocus={editing}
+            value={draft}
+            min={min}
+            max={max}
+            step={step}
+            aria-invalid={error ? "true" : undefined}
+            aria-describedby={error ? "custom-number-error" : undefined}
+            onChange={(e) => { setDraft(e.target.value); if (error) setError(null) }}
+            onBlur={() => {
+              const n = Number(draft)
+              if (!Number.isNaN(n) && n >= min && n <= max) {
+                onChange(n)
+                setError(null)
+              } else {
+                setError(`Enter ${min}-${max} ${suffix}`)
+                setDraft(String(value))
+              }
+              setEditing(false)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+              if (e.key === "Escape") { setDraft(String(value)); setError(null); setEditing(false) }
+            }}
+            className={cn(
+              "w-12 bg-transparent outline-none text-right font-medium",
+              error ? "text-red-300" : "text-blue-300",
+            )}
+          />
+          <span className="text-[9px] text-muted-foreground">{suffix}</span>
+        </div>
+        {error && (
+          <span id="custom-number-error" role="alert" className="text-[10px] text-red-300/90">
+            {error}
+          </span>
+        )}
       </div>
     )
   }

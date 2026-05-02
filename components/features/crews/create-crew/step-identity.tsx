@@ -60,8 +60,9 @@ export function StepIdentity({ state, setState }: Props) {
         <div className="min-w-0 space-y-4">
           <div className="grid grid-cols-[2fr_1fr] gap-3">
             <div>
-              <Label required>Name</Label>
+              <Label required htmlFor="crew-wizard-name">Name</Label>
               <input
+                id="crew-wizard-name"
                 value={state.name}
                 onChange={(e) => onNameChange(e.target.value)}
                 autoFocus
@@ -70,8 +71,9 @@ export function StepIdentity({ state, setState }: Props) {
               />
             </div>
             <div>
-              <Label required>Slug</Label>
+              <Label required htmlFor="crew-wizard-slug">Slug</Label>
               <input
+                id="crew-wizard-slug"
                 value={state.slug}
                 onChange={(e) => setState({ slug: e.target.value, slugTouched: true })}
                 placeholder="engineering"
@@ -81,13 +83,14 @@ export function StepIdentity({ state, setState }: Props) {
           </div>
 
           <div>
-            <Label>
+            <Label htmlFor="crew-wizard-description">
               Description
               <span className="text-muted-foreground/60 normal-case tracking-normal text-[11px] font-normal ml-2">
                 optional, shown in roster &amp; sidebar
               </span>
             </Label>
             <input
+              id="crew-wizard-description"
               value={state.description}
               onChange={(e) => setState({ description: e.target.value })}
               placeholder="What does this crew do, in one line?"
@@ -121,9 +124,9 @@ export function StepIdentity({ state, setState }: Props) {
   )
 }
 
-function Label({ children, required }: { children: React.ReactNode; required?: boolean }) {
+function Label({ children, required, htmlFor }: { children: React.ReactNode; required?: boolean; htmlFor?: string }) {
   return (
-    <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+    <label htmlFor={htmlFor} className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
       {children}
       {required && <span className="text-red-400 ml-1">*</span>}
     </label>

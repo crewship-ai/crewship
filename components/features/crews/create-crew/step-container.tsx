@@ -1,10 +1,31 @@
 "use client"
 
 import { useMemo } from "react"
+import dynamic from "next/dynamic"
 import { Box, Plug } from "lucide-react"
-import { RuntimeConfig } from "../runtime-config"
-import { MCPConfigEditor } from "@/components/features/mcp/mcp-config-editor"
 import type { WizardState } from "./types"
+
+// Code-split the heavy children: RuntimeConfig (806 lines + 1308-row catalog
+// fetch) and MCPConfigEditor (template registry + credential picker). Without
+// these, every page that mounts CreateCrewDialog (e.g. /crews) pays for them
+// in the initial bundle even when the user never opens the wizard.
+const RuntimeConfig = dynamic(
+  () => import("../runtime-config").then((m) => m.RuntimeConfig),
+  { ssr: false, loading: () => <SectionSkeleton /> },
+)
+
+const MCPConfigEditor = dynamic(
+  () => import("@/components/features/mcp/mcp-config-editor").then((m) => m.MCPConfigEditor),
+  { ssr: false, loading: () => <SectionSkeleton /> },
+)
+
+function SectionSkeleton() {
+  return (
+    <div className="text-xs text-muted-foreground py-6 text-center" role="status" aria-live="polite">
+      Loading…
+    </div>
+  )
+}
 
 interface Props {
   state: WizardState

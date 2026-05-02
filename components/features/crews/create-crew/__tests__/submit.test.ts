@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { submitCrew } from "../submit"
 import { INITIAL_STATE, type WizardState } from "../types"
 
+// submit.ts now fires toast.warning on PATCH override failure. Stub sonner so
+// tests don't crash on missing toaster context.
+vi.mock("sonner", () => ({
+  toast: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}))
+
 // =============================================================================
 // fetch helper — single source of truth for what each call returned, so a
 // failed assertion can show "deploy returned 500, then patch returned 404".
@@ -75,13 +81,15 @@ describe("submitCrew — blank mode", () => {
 
     const result = await submitCrew(WS, fullState({ mode: "empty" }))
 
-    expect(result).toEqual({ id: "crew_1", slug: "engineering", name: "Engineering" })
+    expect(result).toMatchObject({ id: "crew_1", slug: "engineering", name: "Engineering" })
     expect(fetcher.calls).toHaveLength(1)
 
     const call = fetcher.calls[0]
     expect(call.method).toBe("POST")
     expect(call.url).toContain("/api/v1/crews")
-    expect(call.url).toContain(`workspace_id=${WS}`)
+    // workspace_id is resolved from the session via wsCtx middleware — query
+    // string is intentionally NOT present.
+    expect(call.url).not.toContain("workspace_id=")
 
     expect(call.body).toMatchObject({
       name: "Engineering",
@@ -183,7 +191,7 @@ describe("submitCrew — browse (template) mode", () => {
       pickedTemplateSlug: "software-development",
     }))
 
-    expect(result).toEqual({ id: "crew_42", slug: "engineering", name: "Engineering" })
+    expect(result).toMatchObject({ id: "crew_42", slug: "engineering", name: "Engineering" })
     expect(fetcher.calls).toHaveLength(2)
 
     // Call 1: POST /api/v1/crew-templates/{slug}/deploy

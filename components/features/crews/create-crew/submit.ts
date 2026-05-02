@@ -1,14 +1,22 @@
+import { toast } from "sonner"
 import type { WizardState } from "./types"
 
 export interface SubmitResult {
   id: string
   slug: string
   name: string
+  /** True when the crew was created but a follow-up override PATCH failed (icon /
+   *  color / runtime / mcp). The crew exists with whatever defaults the create
+   *  call applied. Caller should surface this to the user. */
+  partial?: boolean
 }
 
-export async function submitCrew(workspaceId: string, state: WizardState): Promise<SubmitResult> {
-  if (state.mode === "browse") return submitFromTemplate(workspaceId, state)
-  return submitBlank(workspaceId, state)
+// workspace_id is resolved from the session via wsCtx middleware; the legacy
+// query string was dead code and is dropped. Keep workspaceId in the function
+// signature to make the dependency explicit at call sites.
+export async function submitCrew(_workspaceId: string, state: WizardState): Promise<SubmitResult> {
+  if (state.mode === "browse") return submitFromTemplate(state)
+  return submitBlank(state)
 }
 
 function runtimeBody(state: WizardState): Record<string, unknown> {
@@ -51,8 +59,8 @@ function hasMCPOverride(state: WizardState): boolean {
   return state.mcpConfig.trim() !== ""
 }
 
-async function submitBlank(workspaceId: string, state: WizardState): Promise<SubmitResult> {
-  const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
+async function submitBlank(state: WizardState): Promise<SubmitResult> {
+  const res = await fetch(`/api/v1/crews`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -65,21 +73,22 @@ async function submitBlank(workspaceId: string, state: WizardState): Promise<Sub
   const created = await res.json() as { id: string; slug: string; name: string }
 
   // POST doesn't accept mcp_config_json — patch it after create when set.
+  let partial = false
   if (hasMCPOverride(state)) {
-    await applyOverrides(workspaceId, created.id, { mcp_config_json: state.mcpConfig })
+    partial = !(await applyOverrides(created.id, { mcp_config_json: state.mcpConfig }))
   }
 
-  return { id: created.id, slug: created.slug, name: created.name }
+  return { id: created.id, slug: created.slug, name: created.name, partial }
 }
 
 // Two-step: template deploy creates crew + agents; we then PATCH for any identity / runtime /
 // container / MCP fields the user customized (deploy ignores those overrides today).
-async function submitFromTemplate(workspaceId: string, state: WizardState): Promise<SubmitResult> {
+async function submitFromTemplate(state: WizardState): Promise<SubmitResult> {
   if (!state.pickedTemplateSlug) {
     throw new Error("No template selected")
   }
   const deployRes = await fetch(
-    `/api/v1/crew-templates/${encodeURIComponent(state.pickedTemplateSlug)}/deploy?workspace_id=${encodeURIComponent(workspaceId)}`,
+    `/api/v1/crew-templates/${encodeURIComponent(state.pickedTemplateSlug)}/deploy`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -100,25 +109,37 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
   if (state.miseConfig.trim()) patchBody.mise_config = state.miseConfig
   if (hasMCPOverride(state)) patchBody.mcp_config_json = state.mcpConfig
 
-  await applyOverrides(workspaceId, deployed.crew_id, patchBody)
+  const ok = await applyOverrides(deployed.crew_id, patchBody)
 
-  return { id: deployed.crew_id, slug: deployed.crew_slug, name: deployed.crew_name }
+  return {
+    id: deployed.crew_id,
+    slug: deployed.crew_slug,
+    name: deployed.crew_name,
+    partial: !ok,
+  }
 }
 
-// applyOverrides PATCHes a freshly-created crew. Failure here is logged but
-// non-fatal — the crew exists with whatever defaults the create call applied.
+// applyOverrides PATCHes a freshly-created crew. Returns true on success, false
+// on HTTP failure or empty body — failure is non-fatal (crew exists with create
+// defaults) but caller should surface a warning to the user. Toast is also
+// fired here so that callers that don't read .partial still flag the regression.
 async function applyOverrides(
-  workspaceId: string,
   crewId: string,
   body: Record<string, unknown>,
-): Promise<void> {
-  if (Object.keys(body).length === 0) return
-  const res = await fetch(`/api/v1/crews/${encodeURIComponent(crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`, {
+): Promise<boolean> {
+  if (Object.keys(body).length === 0) return true
+  const res = await fetch(`/api/v1/crews/${encodeURIComponent(crewId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
   if (!res.ok) {
-    console.warn("Crew created but override PATCH failed:", await res.text())
+    const detail = await res.text()
+    console.warn("Crew created but override PATCH failed:", detail)
+    toast.warning("Crew created, but some customizations didn't apply", {
+      description: "Open crew settings to retry icon, color, runtime or MCP overrides.",
+    })
+    return false
   }
+  return true
 }

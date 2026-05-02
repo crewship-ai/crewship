@@ -117,8 +117,9 @@ function Row({ label, onEdit, children }: { label: string; onEdit?: (() => void)
           <button
             type="button"
             onClick={onEdit}
+            aria-label={`Edit ${label}`}
             className="text-[10px] text-blue-400/80 hover:text-blue-300 ml-auto"
-            title="Edit"
+            title={`Edit ${label}`}
           >
             edit
           </button>

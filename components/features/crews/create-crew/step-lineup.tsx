@@ -148,8 +148,10 @@ function BrowseTemplates({ state, setState }: Props) {
       <div className="flex flex-col min-h-0 border-r border-white/10">
         <div className="px-3 py-2 border-b border-white/10 flex items-center gap-2">
           <div className="flex-1 relative">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <label htmlFor="crew-template-search" className="sr-only">Search crew templates</label>
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <input
+              id="crew-template-search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder='Search templates… (e.g. "saas", "research")'

@@ -35,7 +35,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Software Development", slug: "software-development",
 		description: "Full dev team: Tech Lead, Backend Dev, Frontend Dev, QA Engineer",
-		icon:        "💻", color: "#3B82F6", category: "ENGINEERING",
+		icon:        "code", color: "blue", category: "ENGINEERING",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Tech Lead", Slug: "tech-lead", RoleTitle: "Technical Architect",
@@ -70,7 +70,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "DevOps / SRE", slug: "devops-sre",
 		description: "Infrastructure team: SRE Lead, Platform Engineer, Security Analyst, CI/CD Specialist",
-		icon:        "🔧", color: "#EF4444", category: "ENGINEERING",
+		icon:        "wrench", color: "rose", category: "ENGINEERING",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "SRE Lead", Slug: "sre-lead", RoleTitle: "Site Reliability Lead",
@@ -104,7 +104,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Content Marketing", slug: "content-marketing",
 		description: "Marketing team: Content Lead, Researcher, Copywriter, SEO Specialist",
-		icon:        "📈", color: "#8B5CF6", category: "MARKETING",
+		icon:        "megaphone", color: "violet", category: "MARKETING",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Content Lead", Slug: "content-lead", RoleTitle: "Content Strategy Lead",
@@ -135,7 +135,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Accounting & Finance", slug: "accounting-finance",
 		description: "Finance team: Finance Lead, Bookkeeper, Tax Analyst, Reporting Specialist",
-		icon:        "📊", color: "#10B981", category: "BUSINESS",
+		icon:        "chart", color: "emerald", category: "BUSINESS",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Finance Lead", Slug: "finance-lead", RoleTitle: "Finance Director",
@@ -166,7 +166,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Customer Support", slug: "customer-support",
 		description: "Support team: Support Lead, Tier 1 Agent, Tier 2 Specialist, Knowledge Manager",
-		icon:        "🎧", color: "#F59E0B", category: "OPERATIONS",
+		icon:        "headphones", color: "amber", category: "OPERATIONS",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Support Lead", Slug: "support-lead", RoleTitle: "Support Manager",
@@ -197,7 +197,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Research & Analysis", slug: "research-analysis",
 		description: "Research team: Research Lead, Data Collector, Analyst, Report Writer",
-		icon:        "🔍", color: "#06B6D4", category: "RESEARCH",
+		icon:        "search", color: "cyan", category: "RESEARCH",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Research Lead", Slug: "research-lead", RoleTitle: "Research Director",
@@ -407,26 +407,37 @@ var builtinCrewTemplates = []struct {
 	},
 }
 
-// SeedBuiltinCrewTemplates inserts bundled crew templates if they don't exist.
+// SeedBuiltinCrewTemplates inserts bundled crew templates and updates existing
+// builtin rows so format changes (emoji → lucide, hex → palette ID, agent
+// roster tweaks) propagate to dev / prod DBs that ran an earlier seed. Custom
+// user templates (is_builtin=0) with conflicting slug are NEVER touched.
 func SeedBuiltinCrewTemplates(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	for _, bt := range builtinCrewTemplates {
-		var exists bool
-		err := db.QueryRowContext(ctx,
-			`SELECT 1 FROM crew_templates WHERE slug = ? AND is_builtin = 1`, bt.slug).Scan(&exists)
-		if err == nil {
-			continue
-		}
-		if err != sql.ErrNoRows {
-			return fmt.Errorf("check crew template %s: %w", bt.slug, err)
-		}
-
 		agentsJSON, err := json.Marshal(bt.agents)
 		if err != nil {
 			return fmt.Errorf("marshal agents for %s: %w", bt.slug, err)
 		}
 
-		id := generateSeedID("ct")
 		now := time.Now().UTC().Format(time.RFC3339)
+
+		// Try update first — touches only builtin rows; rowsAffected=0 means we
+		// need to insert. Avoids ON CONFLICT(slug) which would also update a
+		// user-created row that happened to share the slug.
+		res, err := db.ExecContext(ctx, `
+			UPDATE crew_templates
+			SET name = ?, description = ?, icon = ?, color = ?,
+			    category = ?, agents_json = ?, updated_at = ?
+			WHERE slug = ? AND is_builtin = 1`,
+			bt.name, bt.description, bt.icon, bt.color, bt.category, string(agentsJSON), now, bt.slug)
+		if err != nil {
+			logger.Warn("failed to update builtin crew template", "slug", bt.slug, "error", err)
+			continue
+		}
+		if affected, _ := res.RowsAffected(); affected > 0 {
+			continue
+		}
+
+		id := generateSeedID("ct")
 		if _, err := db.ExecContext(ctx, `
 			INSERT OR IGNORE INTO crew_templates (id, name, slug, description, icon, color, category, agents_json, is_builtin, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,

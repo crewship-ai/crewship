@@ -22,6 +22,10 @@ import { resolve } from "node:path"
 import { INITIAL_STATE, type WizardState } from "../types"
 import { submitCrew } from "../submit"
 
+vi.mock("sonner", () => ({
+  toast: { warning: vi.fn(), error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}))
+
 const CLI_SOURCE_PATH = resolve(__dirname, "../../../../../cmd/crewship/cmd_crew_manage.go")
 
 // EXPECTED_MAP — the source of truth that pairs every CLI flag with its
