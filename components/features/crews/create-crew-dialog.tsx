@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Check, ChevronRight, FastForward } from "lucide-react"
@@ -84,6 +84,16 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   }
 
   const skipToReview = () => setStep(5)
+
+  // Auto-focus the primary action when the user lands on Review (Step 5) so
+  // ⌘+Enter is unambiguous and screen readers announce "Create crew" first.
+  // Step 1's Name input keeps its inline `autoFocus` (mounts fresh each entry).
+  const primaryActionRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (step === 5 && !busy) {
+      primaryActionRef.current?.focus()
+    }
+  }, [step, busy])
 
   // Cmd+Enter advances/submits on supported steps.
   useEffect(() => {
@@ -176,6 +186,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             </button>
           )}
           <button
+            ref={primaryActionRef}
             type="button"
             onClick={advance}
             disabled={!stepValid || busy}
@@ -194,7 +205,10 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep) => void }) {
   const steps = [1, 2, 3, 4] as const
   return (
-    <div className="px-5 py-3 border-b border-white/10 bg-card/50 flex items-center gap-3">
+    <nav
+      aria-label="Wizard progress"
+      className="px-5 py-3 border-b border-white/10 bg-card/50 flex items-center gap-3"
+    >
       {steps.map((n, i) => (
         <Fragment key={n}>
           <div className="flex items-center gap-2 text-[12px] shrink-0 min-w-0">
@@ -202,6 +216,7 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
               type="button"
               disabled={n >= step}
               onClick={() => onJump(n)}
+              aria-current={n === step ? "step" : undefined}
               className={cn(
                 "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center transition-all shrink-0",
                 n < step
@@ -221,6 +236,7 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
           </div>
           {i < steps.length - 1 && (
             <div
+              aria-hidden="true"
               className={cn(
                 "flex-1 h-px min-w-[16px] transition-colors",
                 n < step ? "bg-emerald-400/40" : "bg-white/10",
@@ -229,7 +245,7 @@ function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep)
           )}
         </Fragment>
       ))}
-    </div>
+    </nav>
   )
 }
 
