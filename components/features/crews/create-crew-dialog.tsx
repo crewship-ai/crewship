@@ -1,19 +1,19 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { Check, ChevronRight } from "lucide-react"
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
-
-interface CrewTemplate {
-  slug: string
-  name: string
-  description?: string | null
-  icon?: string | null
-  color?: string | null
-}
+import { cn } from "@/lib/utils"
+import { StepIdentity } from "./create-crew/step-identity"
+import { StepLineup } from "./create-crew/step-lineup"
+import { StepRuntime } from "./create-crew/step-runtime"
+import { StepReview } from "./create-crew/step-review"
+import { submitCrew } from "./create-crew/submit"
+import { INITIAL_STATE, type WizardState, type WizardStep } from "./create-crew/types"
 
 export interface CreateCrewDialogProps {
   workspaceId: string
@@ -22,200 +22,227 @@ export interface CreateCrewDialogProps {
   onCreated: () => void
 }
 
-/**
- * Replaces the deleted /crews/new full-page form with an inline modal.
- * Two paths: blank crew (just name + slug) or from a crew_templates row
- * (presets like "Research", "Engineering" with a default agent roster).
- */
+const STEP_LABELS: Record<WizardStep, { title: string; sub: string }> = {
+  1: { title: "Identity", sub: "icon, color, name" },
+  2: { title: "Lineup", sub: "templates · AI · blank" },
+  3: { title: "Runtime", sub: "resources, network" },
+  4: { title: "Review", sub: "create" },
+}
+
 export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }: CreateCrewDialogProps) {
   const router = useRouter()
-  const [mode, setMode] = useState<"blank" | "template">("blank")
-  const [name, setName] = useState("")
-  const [slug, setSlug] = useState("")
-  const [templates, setTemplates] = useState<CrewTemplate[]>([])
-  const [pickedTemplate, setPickedTemplate] = useState<string | null>(null)
+  const [step, setStep] = useState<WizardStep>(1)
+  const [state, setStateFull] = useState<WizardState>(INITIAL_STATE)
   const [busy, setBusy] = useState(false)
 
-  // Reset state on close so a re-open starts clean.
+  // Reset to fresh state every time the dialog re-opens.
   useEffect(() => {
     if (!open) {
-      setMode("blank")
-      setName("")
-      setSlug("")
-      setPickedTemplate(null)
+      setStep(1)
+      setStateFull(INITIAL_STATE)
+      setBusy(false)
     }
   }, [open])
 
-  // Lazy-load templates on first open into template mode.
-  useEffect(() => {
-    if (mode !== "template" || templates.length > 0) return
-    let cancelled = false
-    fetch("/api/v1/crew-templates")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => {
-        if (!cancelled && Array.isArray(data)) setTemplates(data)
-      })
-      .catch(() => { /* silent — empty list is fine fallback */ })
-    return () => { cancelled = true }
-  }, [mode, templates.length])
+  const setState = useMemo(() => (patch: Partial<WizardState>) => {
+    setStateFull((prev) => ({ ...prev, ...patch }))
+  }, [])
 
-  // Auto-derive slug from name unless the user has manually edited it.
-  const [slugTouched, setSlugTouched] = useState(false)
-  useEffect(() => {
-    if (slugTouched) return
-    setSlug(name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""))
-  }, [name, slugTouched])
+  // Step validity gates the "Continue" button.
+  const stepValid = useMemo(() => stepIsValid(step, state), [step, state])
+
+  const lineupSummary = useMemo(() => deriveLineupSummary(state), [state])
 
   const submit = async () => {
-    if (!name.trim() || !slug.trim()) return
-    if (mode === "template" && !pickedTemplate) {
-      toast.error("Pick a template before creating from template")
-      return
-    }
+    if (busy) return
     setBusy(true)
     try {
-      const body: Record<string, unknown> = {
-        name: name.trim(),
-        slug: slug.trim(),
-      }
-      if (mode === "template" && pickedTemplate) {
-        body.template_slug = pickedTemplate
-      }
-      const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `HTTP ${res.status}`)
-      }
-      const created = await res.json()
-      toast.success(`Crew "${created.name}" created`)
+      const result = await submitCrew(workspaceId, state)
+      toast.success(`Crew "${result.name}" created`)
       onOpenChange(false)
       onCreated()
-      router.replace(`/crews?crew=${encodeURIComponent(created.slug)}`)
-    } catch (err) {
-      toast.error(`Could not create crew: ${err instanceof Error ? err.message : String(err)}`)
+      router.replace(`/crews?crew=${encodeURIComponent(result.slug)}`)
+    } catch (e) {
+      toast.error(`Could not create crew: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBusy(false)
     }
   }
 
-  const valid =
-    name.trim().length >= 2 &&
-    /^[a-z0-9-]{2,}$/.test(slug) &&
-    (mode !== "template" || !!pickedTemplate)
+  const advance = () => {
+    if (step === 4) {
+      submit()
+      return
+    }
+    setStep((step + 1) as WizardStep)
+  }
+
+  const back = () => {
+    if (step > 1) setStep((step - 1) as WizardStep)
+  }
+
+  // Cmd+Enter advances/submits on supported steps.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault()
+        if (stepValid) advance()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, step, stepValid, state])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>New crew</DialogTitle>
-          <DialogDescription>
-            Create a new crew. Blank starts empty; templates seed a typical role lineup.
+      <DialogContent
+        className={cn(
+          "p-0 overflow-hidden",
+          step === 2 ? "sm:max-w-[940px]" : "sm:max-w-[680px]",
+        )}
+      >
+        <DialogHeader className="px-5 pt-4 pb-3 border-b border-white/10">
+          <DialogTitle className="text-base">
+            New crew
+            <span className="ml-2 text-sm text-muted-foreground font-normal">
+              {step === 4 ? "— ready to create" : `— step ${step} of 3`}
+            </span>
+          </DialogTitle>
+          <DialogDescription className="text-[12.5px]">
+            {step === 1 && "Crews group agents that work together. Pick a recognizable icon and name."}
+            {step === 2 && "The agents this crew starts with. Pick a curated lineup, ask AI to generate one, or stay empty."}
+            {step === 3 && "Resource limits and network policy for the crew's container. Defaults are sane."}
+            {step === 4 && "Last look before commit. Click any section to jump back."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex gap-2 mb-2">
-          <button
-            type="button"
-            onClick={() => setMode("blank")}
-            className={`flex-1 px-3 py-2 rounded border text-sm transition-colors ${
-              mode === "blank"
-                ? "border-blue-400 bg-blue-500/10 text-blue-300"
-                : "border-white/10 hover:bg-white/5"
-            }`}
-          >
-            Blank
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("template")}
-            className={`flex-1 px-3 py-2 rounded border text-sm transition-colors ${
-              mode === "template"
-                ? "border-blue-400 bg-blue-500/10 text-blue-300"
-                : "border-white/10 hover:bg-white/5"
-            }`}
-          >
-            From template
-          </button>
+        <StepStrip step={step} onJump={(s) => s < step && setStep(s)} />
+
+        <div className="px-5 py-4 max-h-[58vh] overflow-y-auto">
+          {step === 1 && <StepIdentity state={state} setState={setState} />}
+          {step === 2 && <StepLineup state={state} setState={setState} />}
+          {step === 3 && <StepRuntime state={state} setState={setState} />}
+          {step === 4 && (
+            <StepReview
+              state={state}
+              onEdit={(s) => setStep(s)}
+              lineupSummary={lineupSummary}
+            />
+          )}
         </div>
 
-        {mode === "template" && (
-          <div className="max-h-[200px] overflow-y-auto rounded border border-white/10 divide-y divide-white/5 mb-2">
-            {templates.length === 0 && (
-              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-                No templates available
-              </div>
-            )}
-            {templates.map((t) => (
-              <button
-                key={t.slug}
-                type="button"
-                onClick={() => {
-                  setPickedTemplate(t.slug)
-                  if (!name) setName(t.name)
-                }}
-                className={`w-full px-3 py-2 text-left text-sm hover:bg-white/5 transition-colors ${
-                  pickedTemplate === t.slug ? "bg-blue-500/10" : ""
-                }`}
-              >
-                <div className="font-medium">{t.name}</div>
-                {t.description && (
-                  <div className="text-xs text-muted-foreground mt-0.5">{t.description}</div>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <label className="text-xs text-muted-foreground block">
-            Name
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-              className="mt-1 w-full bg-zinc-950 border border-white/15 rounded px-2 py-1.5 text-sm outline-none focus:border-blue-400"
-              placeholder="Engineering"
-            />
-          </label>
-          <label className="text-xs text-muted-foreground block">
-            Slug
-            <input
-              type="text"
-              value={slug}
-              onChange={(e) => {
-                setSlug(e.target.value)
-                setSlugTouched(true)
-              }}
-              className="mt-1 w-full bg-zinc-950 border border-white/15 rounded px-2 py-1.5 text-sm font-mono outline-none focus:border-blue-400"
-              placeholder="engineering"
-            />
-          </label>
-        </div>
-
-        <DialogFooter>
+        <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
+          <span className="text-[11.5px] text-muted-foreground mr-auto">
+            {step === 4
+              ? "⌘+Enter to confirm · Esc cancel"
+              : `Step ${step} of 3 · ⌘+Enter to continue`}
+          </span>
           <button
             type="button"
-            className="text-sm px-3 py-1.5 rounded text-muted-foreground hover:text-foreground"
             onClick={() => onOpenChange(false)}
             disabled={busy}
+            className="text-sm px-3 py-1.5 rounded text-muted-foreground hover:text-foreground"
           >
             Cancel
           </button>
+          {step > 1 && (
+            <button
+              type="button"
+              onClick={back}
+              disabled={busy}
+              className="text-sm px-3 py-1.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
+            >
+              ← Back
+            </button>
+          )}
           <button
             type="button"
-            onClick={submit}
-            disabled={!valid || busy}
-            className="text-sm px-3 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40"
+            onClick={advance}
+            disabled={!stepValid || busy}
+            className="text-sm px-3.5 py-1.5 rounded bg-blue-500 hover:bg-blue-400 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
-            {busy ? "Creating…" : "Create crew"}
+            {busy && <span className="h-3 w-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />}
+            {step === 4 ? (busy ? "Creating…" : "✓ Create crew") : "Continue"}
+            {step < 4 && !busy && <ChevronRight className="h-3.5 w-3.5" />}
           </button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )
+}
+
+function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep) => void }) {
+  return (
+    <div className="px-5 py-2.5 border-b border-white/10 bg-card/50 flex items-center gap-0">
+      {([1, 2, 3] as const).map((n, i) => (
+        <div key={n} className="flex items-center flex-1 gap-2 text-[12px] min-w-0">
+          <button
+            type="button"
+            disabled={n >= step}
+            onClick={() => onJump(n)}
+            className={cn(
+              "h-5.5 w-5.5 min-w-[22px] min-h-[22px] rounded-full border text-[11px] font-semibold flex items-center justify-center transition-colors",
+              n < step
+                ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300 hover:scale-110"
+                : n === step
+                  ? "bg-blue-500/20 border-blue-400 text-blue-300"
+                  : "bg-card border-white/10 text-muted-foreground",
+              n >= step && "cursor-default",
+            )}
+            aria-label={`Step ${n}: ${STEP_LABELS[n].title}`}
+          >
+            {n < step ? <Check className="h-3 w-3" /> : n}
+          </button>
+          <div className={cn("flex flex-col leading-tight min-w-0", n !== step && "opacity-70")}>
+            <span className="font-medium truncate">{STEP_LABELS[n].title}</span>
+            <span className="text-[10.5px] text-muted-foreground truncate">{STEP_LABELS[n].sub}</span>
+          </div>
+          {i < 2 && <div className={cn("h-px flex-1 max-w-6 mx-1", n < step ? "bg-emerald-400/40" : "bg-white/10")} />}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/
+
+function stepIsValid(step: WizardStep, s: WizardState): boolean {
+  if (step === 1) {
+    return s.name.trim().length >= 2 && s.slug.trim().length >= 2 && SLUG_RE.test(s.slug)
+  }
+  if (step === 2) {
+    if (s.mode === "browse") return !!s.pickedTemplateSlug
+    if (s.mode === "ai") return !!s.aiResult && s.aiResult.agents.length > 0
+    return true // empty
+  }
+  if (step === 3) {
+    return s.memoryMB > 0 && s.cpus > 0 &&
+      (s.networkMode === "free" || s.allowedDomains.length > 0 || s.networkMode === "restricted")
+    // restricted with zero domains is allowed (locks all egress) — explicit choice.
+  }
+  return true
+}
+
+function deriveLineupSummary(s: WizardState): { count: number; source: string; agents?: { name: string; agent_role: string }[] } {
+  if (s.mode === "browse" && s.pickedTemplateMeta) {
+    return {
+      count: s.pickedTemplateMeta.agentCount,
+      source: `template: ${s.pickedTemplateMeta.name}`,
+      agents: s.pickedTemplateMeta.agents,
+    }
+  }
+  if (s.mode === "ai" && s.aiResult) {
+    return {
+      count: s.aiResult.agents.length,
+      source: "AI-generated",
+      agents: s.aiResult.agents.map((a) => ({ name: a.name, agent_role: a.agent_role })),
+    }
+  }
+  return { count: 0, source: "empty" }
 }
