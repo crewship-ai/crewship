@@ -188,6 +188,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter,
 	})
 
+	// Auto-assign workspace AI credentials so the agent can chat
+	// immediately. Without this, the agent runs claude CLI but with no
+	// API key — the run completes with empty output and the user sees
+	// silence. Captain and crew templates already do this; we now match
+	// them so wizard-created agents are equally functional.
+	autoAssignCredentials(r.Context(), h.db, workspaceID, agentID, now)
+
 	writeJSON(w, http.StatusCreated, agentResponse{
 		ID:             agentID,
 		CrewID:         req.CrewID,
