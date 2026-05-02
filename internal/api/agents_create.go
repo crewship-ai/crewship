@@ -191,8 +191,19 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Auto-assign workspace AI credentials so the agent can chat
 	// immediately. Without this, the agent runs claude CLI but with no
 	// API key — the run completes with empty output and the user sees
-	// silence. Captain and crew templates already do this; we now match
-	// them so wizard-created agents are equally functional.
+	// silence (the "silent chat" bug).
+	//
+	// Policy deviation note: CLAUDE.md historically said "Agents created
+	// via CLI/UI assign credentials manually." That rule was written when
+	// the UI was a 4-field minimal form. The current dialog is
+	// template-like (12 built-in personas, pre-filled provider/model/tool
+	// profile, system prompt seeded from persona), so it matches the
+	// template/Captain flow that already auto-assigns. We treat this
+	// endpoint as the same shape and auto-assign here too.
+	//
+	// Best-effort: failures are logged at WARN, never propagated — the
+	// 201 still ships and the operator gets a recoverable signal in the
+	// server log. See autoAssignCredentials for the per-failure logging.
 	autoAssignCredentials(r.Context(), h.db, h.logger, workspaceID, agentID, now)
 
 	writeJSON(w, http.StatusCreated, agentResponse{

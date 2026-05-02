@@ -127,9 +127,16 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, ws
 // autoAssignCredentials assigns all workspace-scoped AI credentials (API_KEY, AI_CLI_TOKEN)
 // from Anthropic to the given agent. Best-effort: failures are logged at WARN level so
 // callers (agent create, crew template apply, Captain) can still finish the parent
-// operation and surface 201 — but operators see a signal in the journal so they don't
+// operation and surface 201 — but operators see a signal in the server log so they don't
 // chase a "silent run" mystery (agent runs claude --print with no API key, returns
 // empty). Pass nil logger only in tests.
+//
+// TODO(crew-journal): once AgentHandler / CrewTemplateHandler get a journal.Emitter
+// dependency, mirror these WARN logs into a typed journal entry (e.g.
+// `credential.auto_assign_failed` / `credential.auto_assign_empty`) so the failure shows
+// up in the workspace timeline, not just the server log. Tracked as a follow-up because
+// wiring the emitter through both handlers + their constructors is a separate concern
+// from the policy/parity work in this PR.
 func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger, wsID, agentID, now string) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name FROM credentials
@@ -165,6 +172,12 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 			continue
 		}
 		assigned++
+	}
+	// Surface late cursor failures (network blip, conn drop mid-iteration)
+	// — without this, partial assignments could be reported as success.
+	if err := rows.Err(); err != nil && logger != nil {
+		logger.Warn("autoAssignCredentials: row iteration error",
+			"workspace_id", wsID, "agent_id", agentID, "error", err)
 	}
 	if logger != nil && assigned == 0 {
 		// Most common cause of "agent created but chat returns empty":
