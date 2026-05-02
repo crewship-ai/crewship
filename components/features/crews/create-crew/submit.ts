@@ -119,28 +119,42 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
   }
 }
 
-// applyOverrides PATCHes a freshly-created crew. Returns true on success, false
-// on HTTP failure or empty body — failure is non-fatal (crew exists with create
-// defaults) but caller should surface a warning to the user. Toast is also
-// fired here so that callers that don't read .partial still flag the regression.
+// applyOverrides PATCHes a freshly-created crew. Returns true on success and
+// false on HTTP failure OR transport failure (network drop, abort) — both are
+// non-fatal because the crew already exists with whatever defaults the create
+// call applied. Toast is fired here so callers that don't read .partial still
+// surface the regression. Error bodies are NEVER logged: a 422 from the
+// devcontainer / mise / mcp_config_json validators may echo back the user's
+// raw config, which can contain credential references or PII.
 async function applyOverrides(
   workspaceId: string,
   crewId: string,
   body: Record<string, unknown>,
 ): Promise<boolean> {
   if (Object.keys(body).length === 0) return true
-  const res = await fetch(`/api/v1/crews/${encodeURIComponent(crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const detail = await res.text()
-    console.warn("Crew created but override PATCH failed:", detail)
-    toast.warning("Crew created, but some customizations didn't apply", {
-      description: "Open crew settings to retry icon, color, runtime or MCP overrides.",
-    })
-    return false
+
+  let status: number | "transport-error" = "transport-error"
+  try {
+    const res = await fetch(
+      `/api/v1/crews/${encodeURIComponent(crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    )
+    if (res.ok) return true
+    status = res.status
+  } catch (e) {
+    // fetch() rejects on network errors / aborts. Capture the message but not
+    // the original error object (no stack with potentially-sensitive context).
+    console.warn("crew override PATCH transport error:", e instanceof Error ? e.name : "unknown")
   }
-  return true
+
+  // One log line, metadata only — no body, no headers.
+  console.warn("crew override PATCH non-OK", { crewId, status })
+  toast.warning("Crew created, but some customizations didn't apply", {
+    description: "Open crew settings to retry icon, color, runtime or MCP overrides.",
+  })
+  return false
 }

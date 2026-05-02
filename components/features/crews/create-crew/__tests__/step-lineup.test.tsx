@@ -149,6 +149,33 @@ describe("<StepLineup> — browse mode (template fetch)", () => {
     })
   })
 
+  it("re-syncs pickedTemplateSlug when the current selection gets filtered out", async () => {
+    // Start on Software Development; switch source/category so it's filtered
+    // out — picked falls back to filtered[0]. The effect must update state
+    // to match, otherwise submit deploys the hidden (no-longer-visible)
+    // template (CodeRabbit finding).
+    const { setState } = harness(
+      { mode: "browse", pickedTemplateSlug: "software-development" },
+      [TPL_BUILTIN_ENG, TPL_BUILTIN_RESEARCH],
+    )
+    await waitFor(() => {
+      expect(screen.getAllByText("Software Development")).not.toHaveLength(0)
+    })
+
+    // Filter to "research" category — Software Development disappears, only
+    // Research & Analysis remains. picked becomes Research, state must follow.
+    const buttons = screen.getAllByRole("button")
+    const researchChip = buttons.find((b) => /^research\s+\d/.test(b.textContent ?? ""))
+    expect(researchChip).toBeDefined()
+    setState.mockClear()
+    fireEvent.click(researchChip!)
+
+    await waitFor(() => {
+      const calls = setState.mock.calls.map((c) => c[0])
+      expect(calls.some((c) => c.pickedTemplateSlug === "research-analysis")).toBe(true)
+    })
+  })
+
   it("clicking a template patches pickedTemplateSlug + meta", async () => {
     const { setState } = harness(
       { mode: "browse", pickedTemplateSlug: "software-development" },

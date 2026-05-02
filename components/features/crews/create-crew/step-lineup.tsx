@@ -113,10 +113,14 @@ function BrowseTemplates({ state, setState }: Props) {
 
   const picked = filtered.find((t) => t.slug === state.pickedTemplateSlug) ?? filtered[0] ?? null
 
-  // Auto-pick first visible template when nothing selected, so the preview
-  // pane never shows "select a template" empty state on first render.
+  // Keep state.pickedTemplateSlug in sync with the visible preview. Two cases
+  // covered by the same effect:
+  //   1. Nothing selected yet → adopt filtered[0] (auto-pick on first render).
+  //   2. Current selection got filtered out (search / source / category change)
+  //      → the preview falls back to filtered[0]; if we don't update state,
+  //      submit deploys the hidden template, not the visible one (CodeRabbit).
   useEffect(() => {
-    if (!state.pickedTemplateSlug && picked) {
+    if (picked && picked.slug !== state.pickedTemplateSlug) {
       setState({
         pickedTemplateSlug: picked.slug,
         pickedTemplateMeta: {

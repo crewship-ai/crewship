@@ -248,6 +248,40 @@ describe("submitCrew — browse (template) mode", () => {
     }))).rejects.toThrow(/Template not found/)
   })
 
+  it("treats fetch transport errors on PATCH as partial success (does NOT throw)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const { toast } = await import("sonner")
+    fetcher.queueResponse({
+      ok: true,
+      body: { crew_id: "crew_42", crew_name: "X", crew_slug: "x" },
+    })
+    // Simulate fetch rejection on the second call (PATCH).
+    const realFetch = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
+    let n = 0
+    realFetch.mockImplementation(async (url: string | URL, init?: RequestInit) => {
+      n++
+      if (n === 2) throw new TypeError("Failed to fetch")
+      const u = typeof url === "string" ? url : url.toString()
+      let body: Record<string, unknown> | undefined
+      if (init?.body && typeof init.body === "string") {
+        try { body = JSON.parse(init.body) } catch { /* ignore */ }
+      }
+      fetcher.calls.push({ url: u, method: init?.method ?? "GET", body })
+      return {
+        ok: true, status: 200,
+        json: async () => ({ crew_id: "crew_42", crew_name: "X", crew_slug: "x" }),
+        text: async () => "",
+      } as Response
+    })
+
+    const result = await submitCrew(WS, fullState({ mode: "browse", pickedTemplateSlug: "any" }))
+
+    expect(result.id).toBe("crew_42")
+    expect(result.partial).toBe(true)
+    expect(toast.warning).toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
   it("does NOT throw if PATCH override fails — crew exists with template defaults", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     fetcher.queueResponse({

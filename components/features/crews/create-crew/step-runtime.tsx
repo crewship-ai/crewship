@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Cpu, MemoryStick, Clock, Network as NetIcon, Globe, Lock, X, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CPU_PRESETS, MEMORY_PRESETS, TTL_PRESETS, type WizardState } from "./types"
@@ -306,8 +306,16 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(String(value))
   const [error, setError] = useState<string | null>(null)
+  // useId gives each chip instance (memory / cpu) a unique error id so
+  // simultaneous editors don't collide on duplicate aria-describedby targets.
+  const errorId = useId()
 
-  if (active || editing) {
+  // Show the editor while the user is editing OR while value is custom OR
+  // while an error is sticky — without the error gate, an invalid blur
+  // collapses the editor before the error message renders (CodeRabbit).
+  const showEditor = active || editing || !!error
+
+  if (showEditor) {
     return (
       <div className="inline-flex flex-col gap-0.5">
         <div className={cn(
@@ -326,18 +334,21 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
             max={max}
             step={step}
             aria-invalid={error ? "true" : undefined}
-            aria-describedby={error ? "custom-number-error" : undefined}
+            aria-describedby={error ? errorId : undefined}
+            aria-label={`Custom ${suffix} value (range ${min}-${max})`}
             onChange={(e) => { setDraft(e.target.value); if (error) setError(null) }}
             onBlur={() => {
               const n = Number(draft)
               if (!Number.isNaN(n) && n >= min && n <= max) {
                 onChange(n)
                 setError(null)
+                setEditing(false)
               } else {
                 setError(`Enter ${min}-${max} ${suffix}`)
                 setDraft(String(value))
+                // Keep editing=true so the field stays mounted and the user
+                // can read the error + retry without re-clicking Custom….
               }
-              setEditing(false)
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") (e.target as HTMLInputElement).blur()
@@ -348,10 +359,10 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
               error ? "text-red-300" : "text-blue-300",
             )}
           />
-          <span className="text-[9px] text-muted-foreground">{suffix}</span>
+          <span className="text-[9px] text-muted-foreground" aria-hidden="true">{suffix}</span>
         </div>
         {error && (
-          <span id="custom-number-error" role="alert" className="text-[10px] text-red-300/90">
+          <span id={errorId} role="alert" className="text-[10px] text-red-300/90">
             {error}
           </span>
         )}
@@ -372,6 +383,7 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
 
 function DomainChips({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const [draft, setDraft] = useState("")
+  const inputId = useId()
 
   const commit = () => {
     const trimmed = draft.trim().toLowerCase()
@@ -392,8 +404,10 @@ function DomainChips({ value, onChange }: { value: string[]; onChange: (v: strin
         </span>
       ))}
       <div className="flex items-center gap-1 flex-1 min-w-[140px]">
-        <Plus className="h-3 w-3 text-muted-foreground/50 ml-1" />
+        <label htmlFor={inputId} className="sr-only">Add an allowed domain</label>
+        <Plus className="h-3 w-3 text-muted-foreground/50 ml-1" aria-hidden="true" />
         <input
+          id={inputId}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {

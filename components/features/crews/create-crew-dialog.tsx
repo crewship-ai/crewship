@@ -60,7 +60,12 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     setBusy(true)
     try {
       const result = await submitCrew(workspaceId, state)
-      toast.success(`Crew "${result.name}" created`)
+      // applyOverrides() inside submit fires toast.warning when partial=true.
+      // Suppress the success toast in that case so the user doesn't see a
+      // contradictory pair ("Created" + "Some customizations didn't apply").
+      if (!result.partial) {
+        toast.success(`Crew "${result.name}" created`)
+      }
       onOpenChange(false)
       onCreated()
       router.replace(`/crews?crew=${encodeURIComponent(result.slug)}`)
