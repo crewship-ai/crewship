@@ -1,0 +1,114 @@
+---
+title: "Production Agent Checklist"
+description: "Six things a production agent system needs — and how Crewship covers all of them. A neutral framework for evaluating any agent stack against real operational requirements."
+icon: "circle-check"
+---
+
+# What a Production Agent System Actually Needs
+
+Most teams hit the same wall when they try to take an agent demo to production: the demo answers the prompt, but no one knows what the agent did, what it cost, what it touched, or how to stop it from doing something dumb. The framework below is the checklist of things you need *before* the first paying customer talks to your agents.
+
+Crewship was designed to cover all six. The table at the bottom compares Crewship to other common stacks against the same checklist — neutrally, by feature.
+
+## The Six
+
+### 1. Cost budgets
+
+LLM bills surprise teams roughly once. After that, every system needs **enforced budgets** at multiple scopes — not just dashboards, but actual rejection of LLM calls when the budget is blown.
+
+A real production system answers:
+
+- What is the per-mission cap, the per-crew cap, the per-workspace cap?
+- What happens at 80%? At 100%? At 120%?
+- Who gets paged?
+- Is the cost recorded *before* the call leaves the box, or only after the response comes back?
+
+### 2. Approval gates (human-in-the-loop)
+
+Some actions should never run without human sign-off. Production systems need a **gate primitive** that can pause an agent mid-task, route the decision to a human (sync or async), and resume cleanly when the answer arrives.
+
+The questions are:
+
+- Can a tool call be marked "requires approval" without changing the agent's code?
+- Does the agent block on the decision, or queue it for async review?
+- What happens on timeout?
+- Is there a record of who approved what?
+
+### 3. Eval suite + regression detection
+
+You cannot take an agent to production without a way to measure it. **Eval suites** answer "does the new model break what worked yesterday?" and **regression detection** flags it automatically when a previously-good trajectory degrades.
+
+The questions are:
+
+- Can you replay a known-good mission against a new model?
+- Can you compare two trajectories and get a quantitative diff?
+- Is there a judge that scores results consistently (and is it itself audited for bias)?
+- Does the system flag regression on its own, or do you have to look?
+
+### 4. Audit log
+
+Every agent decision needs to land in a **canonical, append-only event stream** — not as a log line, but as a structured record you can query. This is non-negotiable for any regulated industry, and it is what makes the difference between "we use AI" and "we can answer a regulator's question about what the AI did on March 14th."
+
+The questions are:
+
+- Is there one source of truth, or do you have to stitch logs from five places?
+- Are the entries typed, or just JSON blobs?
+- Can you reconstruct a full mission from the journal alone?
+- How long is the retention, and how is it compacted?
+
+### 5. Secrets vault + scoped access
+
+Agents need credentials. Credentials in environment variables are a security incident waiting to happen. A production system needs an **encrypted vault** with scoped, audited, revocable access — and ideally a guardrail that decides *whether the agent should get the credential at all* on each request.
+
+The questions are:
+
+- Are credentials encrypted at rest with versioned crypto?
+- Are they injected into the agent process, or fetched on demand?
+- Can an agent's access to a credential be revoked without restarting it?
+- Is there a record of every credential access?
+
+### 6. Container isolation
+
+Agents that can run code need to run it somewhere that cannot eat your laptop, your cloud account, or your customer's data. **Real container isolation** — not a sandboxed function, not a VM image you reuse — means every crew (or agent) gets its own filesystem, network, and process namespace.
+
+The questions are:
+
+- Is there one container per agent, per crew, or per process?
+- Can the agent install packages without affecting other agents?
+- Is the network isolated by default?
+- Is the filesystem ephemeral, persistent, or backed up?
+
+## How Crewship covers all six
+
+| Requirement | Crewship | How |
+|---|:---:|---|
+| Cost budgets | ✅ | Hierarchical budgets: workspace → crew → mission → agent. Cost recorded before the call leaves the box (so even blocked calls have an audit row). See [Paymaster](/guides/paymaster). |
+| Approval gates | ✅ | Sync (agent blocks until decided) and async (agent queues, returns later) modes. Per-action allowlists, configurable timeouts, full decision history. See [Harbormaster](/guides/harbormaster). |
+| Eval + regression | ✅ | Trajectory replay, regression detection, LLM-as-judge with rubric-shuffle anti-bias. Provider-neutral judge interface. See [Quartermaster](/guides/quartermaster). |
+| Audit log | ✅ | Append-only event stream as canonical truth. Typed entry catalog. Query, replay, and fork from any cursor. See [Crew Journal](/guides/crew-journal) and [Cartographer](/guides/cartographer). |
+| Secrets vault | ✅ | AES-256-GCM versioned encryption, never injected as env vars; agents fetch via the [Keeper](/guides/keeper) gatekeeper, which decides per-request whether to grant access using a local LLM. |
+| Container isolation | ✅ | One Docker container per crew, sidecar UID 1002 vs agent UID 1001 boundary, internal network, optional persistent volumes, AGE-encrypted backup. See [Container Isolation](/security/container-isolation) and [Backup](/guides/backup). |
+
+Crewship is **6 of 6 by default** — every requirement is there in the open-source release, not gated behind an enterprise tier. The `ee/` directory adds marketplace and federation features, but the production checklist itself is fully covered by the Apache-2.0 core.
+
+## How other stacks compare
+
+This is a neutral feature comparison, not a marketing claim. Any of these stacks can be wrapped with custom code to add what they're missing — the question is what you get *out of the box* without writing your own governance layer.
+
+| Requirement | Crewship | LangChain | CrewAI | Claude Code (subagents) |
+|---|:---:|:---:|:---:|:---:|
+| Cost budgets | ✅ | ⚠️ callbacks only | ❌ | ❌ |
+| Approval gates | ✅ | ⚠️ HITL helpers | ❌ | ❌ |
+| Eval + regression | ✅ | ⚠️ LangSmith (cloud, paid) | ❌ | ❌ |
+| Audit log | ✅ | ⚠️ tracing (cloud) | ⚠️ logs only | ⚠️ session logs |
+| Secrets vault | ✅ | ❌ env vars | ❌ env vars | ❌ env vars |
+| Container isolation | ✅ | ❌ in-process | ❌ in-process | ⚠️ Anthropic-managed |
+| Self-hosted by default | ✅ | ✅ | ✅ | ❌ |
+
+**Legend:** ✅ covered out of the box · ⚠️ partial / requires extra integration / cloud-paid · ❌ not provided
+
+## Why this checklist matters
+
+Every item on this list is a thing you will eventually need. The choice is whether to discover that under deadline pressure, the night before launch, or to design for it from day one. Crewship is opinionated: all six are there from the first commit, because every team that has shipped agents to production has needed every one of them.
+
+If your agent stack does not cover the six, you are not yet running in production — you are running a demo with an audience. That's fine for prototypes. It's not fine for paying customers.

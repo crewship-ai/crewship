@@ -1,12 +1,12 @@
 ---
 title: "Architecture"
-description: "How Crewship orchestrates AI agents using containers, a sidecar proxy, Unix socket IPC, and a single-binary deployment model."
+description: "How Crewship runs AI coding agents — one Linux container per crew, sidecar proxy, Unix socket IPC, and a single-binary deployment model that runs entirely on your hardware."
 icon: "building"
 ---
 
 # Architecture
 
-Crewship is a single-binary application that orchestrates AI coding agents in Docker containers. It combines a Go backend with an embedded Next.js frontend, SQLite database, and a sidecar proxy for secure credential injection.
+Crewship is a self-hosted runtime that gives every crew of AI coding agents a shared Linux container — a real machine where they can install services, run databases, and build a complete working system. The runtime is shipped as a single Go binary with the Next.js UI embedded in it, an embedded SQLite database (PostgreSQL optional), and a sidecar proxy that handles credential access without exposing keys to the agent process.
 
 ## High-Level Architecture
 

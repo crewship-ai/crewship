@@ -19,7 +19,7 @@
         "groups": [
           {
             "group": "Get Started",
-            "pages": ["index", "quickstart", "architecture"]
+            "pages": ["index", "quickstart", "philosophy", "production-checklist", "architecture"]
           },
           {
             "group": "Guides",
