@@ -139,7 +139,12 @@ try {
 
   // ── Verify the agent shows up in the list ────────────────────────
   // Dialog should auto-close on success and navigate to /crews?agent=<slug>.
-  await page.waitForURL(new RegExp(`/crews\\?agent=${AGENT_SLUG}`), { timeout: 10000 })
+  // waitUntil:'commit' for the same reason smoke.mjs uses it — Next/turbo
+  // sometimes never emits 'load' in the embedded prod build.
+  await page.waitForURL(new RegExp(`/crews\\?agent=${AGENT_SLUG}`), {
+    timeout: 10000,
+    waitUntil: "commit",
+  })
   step("redirected to the new agent's canvas", true, `URL: ${page.url()}`)
 
   // Verify via the agents API too — independent of the UI.
