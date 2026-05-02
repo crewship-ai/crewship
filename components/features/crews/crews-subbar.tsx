@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Menu, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CreateCrewDialog } from "./create-crew-dialog"
-import { CreateAgentDialog } from "./create-agent"
+import { CreateAgentDialog } from "./create-agent-dialog"
 
 export interface CrewsSubbarProps {
   workspaceId: string

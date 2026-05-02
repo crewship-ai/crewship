@@ -308,6 +308,13 @@ export function CrewsLayout({
                   onCrewChanged={onRefresh}
                   onSelectAgent={handleAgentSelectBySlug}
                   onOpenFiles={handleOpenFiles}
+                  onAddAgent={() => {
+                    // Sub-bar holds the create dialog state; defer to it
+                    // via the data-attribute click flow on the +Agent button.
+                    document.querySelector<HTMLButtonElement>(
+                      'button[data-crews-add-agent]',
+                    )?.click()
+                  }}
                 />
               ) : (
                 <EmptyRoster
