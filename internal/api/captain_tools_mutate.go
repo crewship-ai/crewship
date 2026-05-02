@@ -120,7 +120,7 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 	}
 
 	// Auto-assign workspace AI credentials so the agent can run immediately.
-	autoAssignCredentials(ctx, h.db, h.logger, wsID, id, now)
+	autoAssignCredentials(ctx, h.db, h.logger, h.journal, wsID, id, now)
 
 	b, _ := json.Marshal(map[string]string{"id": id, "name": name, "slug": slug, "agent_role": agentRole})
 	return string(b), nil
@@ -303,7 +303,7 @@ func execApplyCrewTemplate(ctx context.Context, h *CaptainHandler, wsID, _, role
 		return "", fmt.Errorf("template_slug and crew_name are required")
 	}
 
-	result, err := deployCrewTemplate(ctx, h.db, h.logger, wsID, templateSlug, crewName, strInput(input, "crew_slug"))
+	result, err := deployCrewTemplate(ctx, h.db, h.logger, h.journal, wsID, templateSlug, crewName, strInput(input, "crew_slug"))
 	if err != nil {
 		return "", err
 	}
