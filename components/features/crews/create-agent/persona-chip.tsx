@@ -19,6 +19,8 @@ export function PersonaChip({ persona, active, onClick }: PersonaChipProps) {
       type="button"
       onClick={onClick}
       title={`${persona.name} — ${persona.roleTitle}`}
+      aria-pressed={active}
+      aria-label={`${persona.name} — ${persona.roleTitle}${active ? ", selected" : ""}`}
       className={cn(
         "shrink-0 inline-flex items-center gap-2 rounded-full pl-1 pr-3 py-1 border text-[12px] transition-colors",
         active
@@ -48,6 +50,8 @@ export function BlankChip({ active, onClick }: { active: boolean; onClick: () =>
       type="button"
       onClick={onClick}
       title="Skip the template — start blank"
+      aria-pressed={active}
+      aria-label={`Start blank — no template${active ? ", selected" : ""}`}
       className={cn(
         "shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-[12px] transition-colors",
         active

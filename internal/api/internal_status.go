@@ -226,7 +226,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-assign workspace AI credentials so the new agent can run immediately.
-	autoAssignCredentials(r.Context(), h.db, wsID, agentID, now)
+	autoAssignCredentials(r.Context(), h.db, h.logger, wsID, agentID, now)
 
 	h.logger.Info("agent created via coordinator", "agent_id", agentID, "name", body.Name, "crew_id", body.CrewID)
 	writeJSON(w, http.StatusCreated, map[string]interface{}{

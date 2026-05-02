@@ -15,8 +15,17 @@ import pkg from "playwright"
 const { chromium } = pkg
 
 const URL = process.env.SMOKE_URL ?? "http://localhost:8081"
-const EMAIL = process.env.SMOKE_EMAIL ?? "demo@crewship.ai"
-const PASSWORD = process.env.SMOKE_PASSWORD ?? "password123"
+// Credentials are env-only on purpose — we don't ship a default
+// account in a script that runs against shared environments. Match
+// e2e/smoke.mjs's posture so neither file leaks an account string.
+const EMAIL = process.env.SMOKE_EMAIL
+const PASSWORD = process.env.SMOKE_PASSWORD
+if (!EMAIL || !PASSWORD) {
+  console.error(
+    "smoke:create-agent needs SMOKE_EMAIL + SMOKE_PASSWORD in env (no hardcoded defaults).",
+  )
+  process.exit(2)
+}
 
 // Random-ish slug so each run creates a new agent without slug collision.
 const SUFFIX = Math.random().toString(36).slice(2, 8)

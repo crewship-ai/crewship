@@ -193,7 +193,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// API key — the run completes with empty output and the user sees
 	// silence. Captain and crew templates already do this; we now match
 	// them so wizard-created agents are equally functional.
-	autoAssignCredentials(r.Context(), h.db, workspaceID, agentID, now)
+	autoAssignCredentials(r.Context(), h.db, h.logger, workspaceID, agentID, now)
 
 	writeJSON(w, http.StatusCreated, agentResponse{
 		ID:             agentID,

@@ -48,6 +48,13 @@ export interface CreateAgentDialogProps {
   onCreated: (slug: string) => void
 }
 
+/** Shared input/select styling. Centralised so the form looks consistent
+ *  without falling back to a global stylesheet hack. Mirrors what other
+ *  Crews dialogs use; small enough to inline rather than carve out a
+ *  separate component. */
+const INPUT_CLASS =
+  "w-full bg-zinc-950 border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
+
 const TOOL_PROFILES = ["MINIMAL", "CODING", "MESSAGING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"] as const
 const LLM_PROVIDERS = ["ANTHROPIC", "OPENAI", "GOOGLE", "OLLAMA"] as const
@@ -81,6 +88,10 @@ export function CreateAgentDialog({
   const router = useRouter()
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
   const [submitting, setSubmitting] = useState(false)
+  // Ref for the in-flight check inside submit() — using `submitting` state
+  // there would close over a stale value and let a fast double-fire through
+  // before the next render wires up the disabled button.
+  const submittingRef = useRef(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [browserOpen, setBrowserOpen] = useState(false)
@@ -129,10 +140,14 @@ export function CreateAgentDialog({
     !draft.customPrompt.trim()
   const valid = isIdentityValid(draft)
   // What's blocking submit? Shown to the user as an inline hint so they
-  // don't have to guess why Create is disabled.
+  // don't have to guess why Create is disabled. Mirrors isIdentityValid
+  // — keep the order matching so the hint reflects the first failing rule.
   const validationHint: string | null = (() => {
     if (valid) return null
-    if (draft.name.trim().length < 2) return "Name must be at least 2 characters"
+    const trimmedName = draft.name.trim()
+    if (trimmedName.length < 2) return "Name must be at least 2 characters"
+    if (trimmedName.length > 100) return "Name is too long (max 100 characters)"
+    if (draft.slug.length > 50) return "Slug is too long (max 50 characters)"
     if (!/^[a-z0-9-]{2,}$/.test(draft.slug))
       return "Slug must use only lowercase letters, digits, and hyphens (2+ chars)"
     if (requiresCrew && !draft.crewSlug)
@@ -171,6 +186,8 @@ export function CreateAgentDialog({
   }, [])
 
   const submit = useCallback(async () => {
+    if (submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
     try {
       const targetCrew = requiresCrew
@@ -178,6 +195,7 @@ export function CreateAgentDialog({
         : null
       if (requiresCrew && !targetCrew) {
         toast.error(`Crew "${draft.crewSlug}" no longer exists. Please reselect.`)
+        submittingRef.current = false
         setSubmitting(false)
         return
       }
@@ -222,6 +240,7 @@ export function CreateAgentDialog({
         `Could not create agent: ${err instanceof Error ? err.message : String(err)}`,
       )
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }, [draft, crews, requiresCrew, workspaceId, finalPrompt, onOpenChange, onCreated, router])
@@ -339,9 +358,12 @@ export function CreateAgentDialog({
                   type="button"
                   onClick={() => setPickerOpen(true)}
                   title="Customize avatar"
+                  aria-label="Customize avatar"
+                  aria-haspopup="dialog"
+                  aria-expanded={pickerOpen}
                   className="group relative w-14 h-14 rounded-xl overflow-hidden border border-white/10 bg-zinc-900 hover:border-blue-400/50 transition-colors"
                 >
-                  <img src={avatarUrl} alt="" className="w-full h-full object-cover" />
+                  <img src={avatarUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" />
                   <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 rounded-full grid place-items-center text-white shadow-md ring-2 ring-card">
                     <Pencil className="h-2.5 w-2.5" />
                   </span>
@@ -354,7 +376,7 @@ export function CreateAgentDialog({
                     onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                     placeholder="Filip"
                     autoFocus
-                    className="input-base"
+                    className={INPUT_CLASS}
                   />
                 </FieldShell>
 
@@ -363,7 +385,7 @@ export function CreateAgentDialog({
                     <select
                       value={draft.crewSlug}
                       onChange={(e) => setDraft({ ...draft, crewSlug: e.target.value })}
-                      className="input-base"
+                      className={INPUT_CLASS}
                     >
                       <option value="" disabled>
                         Pick crew…
@@ -378,7 +400,7 @@ export function CreateAgentDialog({
                 ) : (
                   <FieldShell label="Crew" hint="N/A for Coordinator">
                     <input
-                      className="input-base text-muted-foreground"
+                      className={cn(INPUT_CLASS, "text-muted-foreground")}
                       value="— workspace-wide —"
                       disabled
                     />
@@ -395,7 +417,7 @@ export function CreateAgentDialog({
                       setDraft({ ...draft, slug: e.target.value, slugTouched: true })
                     }
                     placeholder="filip"
-                    className="input-base font-mono text-[12.5px]"
+                    className={cn(INPUT_CLASS, "font-mono text-[12.5px]")}
                   />
                 </FieldShell>
                 <FieldShell label="Role">
@@ -406,7 +428,7 @@ export function CreateAgentDialog({
                       if (next.agentRole === "COORDINATOR") next.crewSlug = ""
                       setDraft(next)
                     }}
-                    className="input-base"
+                    className={INPUT_CLASS}
                   >
                     <option value="AGENT">Agent</option>
                     <option value="LEAD">Lead (1 per crew)</option>
@@ -422,7 +444,7 @@ export function CreateAgentDialog({
                     value={draft.roleTitle}
                     onChange={(e) => setDraft({ ...draft, roleTitle: e.target.value })}
                     placeholder="Data Analyst"
-                    className="input-base"
+                    className={INPUT_CLASS}
                   />
                 </FieldShell>
                 <FieldShell label="Description" hint="optional · shown in roster">
@@ -431,7 +453,7 @@ export function CreateAgentDialog({
                     value={draft.description}
                     onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                     placeholder="What does this agent do, in one line?"
-                    className="input-base"
+                    className={INPUT_CLASS}
                   />
                 </FieldShell>
               </div>
@@ -602,11 +624,18 @@ WORK STYLE: …`}
                         type="number"
                         step="60"
                         min="60"
+                        max="7200"
                         value={draft.timeoutSeconds}
-                        onChange={(e) =>
-                          setDraft({ ...draft, timeoutSeconds: Number(e.target.value) })
-                        }
-                        className="input-base font-mono"
+                        onChange={(e) => {
+                          // Guard against NaN ('' / non-numeric) and clamp to a
+                          // sane range. Without this, an empty field would set
+                          // timeout=NaN which the API would reject as 400 with
+                          // a confusing 'invalid integer' message.
+                          const raw = Number(e.target.value)
+                          const safe = Number.isFinite(raw) ? Math.min(7200, Math.max(60, raw)) : 1800
+                          setDraft({ ...draft, timeoutSeconds: safe })
+                        }}
+                        className={cn(INPUT_CLASS, "font-mono")}
                       />
                     </FieldShell>
                     {draft.agentRole === "LEAD" && (
@@ -616,7 +645,7 @@ WORK STYLE: …`}
                           onChange={(e) =>
                             setDraft({ ...draft, leadMode: e.target.value as "active" | "passive" })
                           }
-                          className="input-base"
+                          className={INPUT_CLASS}
                         >
                           <option value="active">active</option>
                           <option value="passive">passive</option>
@@ -679,24 +708,6 @@ WORK STYLE: …`}
           </button>
         </div>
 
-        {/* Embedded helper styles to match other Crews dialogs. */}
-        <style jsx>{`
-          :global(.input-base) {
-            width: 100%;
-            background: rgb(10 12 17);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 6px;
-            padding: 7px 10px;
-            font-size: 13px;
-            color: inherit;
-            outline: none;
-            transition: border-color 0.12s, box-shadow 0.12s;
-          }
-          :global(.input-base:focus) {
-            border-color: #60a5fa;
-            box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.15);
-          }
-        `}</style>
       </DialogContent>
 
       <AvatarPickerDialog
@@ -800,7 +811,7 @@ function ModelInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="model-name-tag"
-          className="input-base font-mono text-[12px] flex-1"
+          className={cn(INPUT_CLASS, "font-mono text-[12px] flex-1")}
           spellCheck={false}
         />
         <button
@@ -825,7 +836,7 @@ function ModelInput({
         }
         onChange(e.target.value)
       }}
-      className="input-base"
+      className={INPUT_CLASS}
     >
       {known.map((m) => (
         <option key={m} value={m}>

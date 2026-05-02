@@ -124,9 +124,16 @@ export function resolveFinalPrompt(draft: AgentDraft): string {
   return ""
 }
 
-/** Submit-time validation — true means the Create button is enabled. */
+/** Submit-time validation — true means the Create button is enabled.
+ *
+ *  Bounds match `internal/api/agents_create.go` exactly:
+ *    name 2-100, slug 2-50 + lowercase/digits/hyphens. Anything outside
+ *    these is a guaranteed 400 from the backend, so we block client-side
+ *    rather than letting the user submit and bounce. */
 export function isIdentityValid(draft: AgentDraft): boolean {
-  if (draft.name.trim().length < 2) return false
+  const name = draft.name.trim()
+  if (name.length < 2 || name.length > 100) return false
+  if (draft.slug.length < 2 || draft.slug.length > 50) return false
   if (!/^[a-z0-9-]{2,}$/.test(draft.slug)) return false
   if (draft.agentRole !== "COORDINATOR" && !draft.crewSlug) return false
   return true

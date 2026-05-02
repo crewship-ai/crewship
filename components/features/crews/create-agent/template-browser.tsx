@@ -56,10 +56,11 @@ export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60" />
           <input
-            type="text"
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder='Search personas… (e.g. "data analyst", "test", "research")'
+            aria-label="Search personas by name, role, or category"
             className="w-full pl-8 pr-3 py-1.5 bg-zinc-950 border border-white/[0.15] rounded-md text-[12.5px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
           />
         </div>

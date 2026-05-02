@@ -33,7 +33,7 @@ type deployCrewResult struct {
 // (deprecated) Captain tool executors. CrewTemplateHandler is the primary caller;
 // the Captain executor is retained for backward compat only (Captain deprecated 2026-04-16).
 // crewSlugInput may be empty — if so, it is derived from crewName via slugify.
-func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
+func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
 	crewSlug := crewSlugInput
 	if crewSlug == "" {
 		crewSlug = slugify(crewName)
@@ -112,7 +112,7 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, cre
 
 	// Auto-assign workspace AI credentials to all new agents (best-effort, after commit).
 	for _, agentID := range agentIDs {
-		autoAssignCredentials(ctx, db, wsID, agentID, now)
+		autoAssignCredentials(ctx, db, logger, wsID, agentID, now)
 	}
 
 	return &deployCrewResult{
@@ -125,26 +125,53 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, cre
 }
 
 // autoAssignCredentials assigns all workspace-scoped AI credentials (API_KEY, AI_CLI_TOKEN)
-// from Anthropic to the given agent. Errors are silently ignored since this is a best-effort
-// convenience — the agent can still be manually assigned credentials later.
-func autoAssignCredentials(ctx context.Context, db *sql.DB, wsID, agentID, now string) {
+// from Anthropic to the given agent. Best-effort: failures are logged at WARN level so
+// callers (agent create, crew template apply, Captain) can still finish the parent
+// operation and surface 201 — but operators see a signal in the journal so they don't
+// chase a "silent run" mystery (agent runs claude --print with no API key, returns
+// empty). Pass nil logger only in tests.
+func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger, wsID, agentID, now string) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name FROM credentials
 		WHERE workspace_id = ? AND type IN ('API_KEY', 'AI_CLI_TOKEN')
 		  AND provider = 'ANTHROPIC' AND deleted_at IS NULL
 		ORDER BY created_at ASC`, wsID)
 	if err != nil {
+		if logger != nil {
+			logger.Warn("autoAssignCredentials: list query failed",
+				"workspace_id", wsID, "agent_id", agentID, "error", err)
+		}
 		return
 	}
 	defer rows.Close()
+	assigned := 0
 	for rows.Next() {
 		var credID, credName string
 		if err := rows.Scan(&credID, &credName); err != nil {
+			if logger != nil {
+				logger.Warn("autoAssignCredentials: scan failed",
+					"workspace_id", wsID, "agent_id", agentID, "error", err)
+			}
 			continue
 		}
-		_, _ = db.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `
 			INSERT OR IGNORE INTO agent_credentials (agent_id, credential_id, env_var_name, created_at)
-			VALUES (?, ?, ?, ?)`, agentID, credID, credName, now)
+			VALUES (?, ?, ?, ?)`, agentID, credID, credName, now); err != nil {
+			if logger != nil {
+				logger.Warn("autoAssignCredentials: insert failed",
+					"workspace_id", wsID, "agent_id", agentID,
+					"credential_id", credID, "error", err)
+			}
+			continue
+		}
+		assigned++
+	}
+	if logger != nil && assigned == 0 {
+		// Most common cause of "agent created but chat returns empty":
+		// no Anthropic creds in the workspace yet. Log so operators
+		// know to add a credential.
+		logger.Warn("autoAssignCredentials: no Anthropic credentials available — agent will need manual assignment to chat",
+			"workspace_id", wsID, "agent_id", agentID)
 	}
 }
 
@@ -268,7 +295,7 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := deployCrewTemplate(r.Context(), h.db, wsID, slug, body.CrewName, body.CrewSlug)
+	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, wsID, slug, body.CrewName, body.CrewSlug)
 	if err != nil {
 		if errors.Is(err, errTemplateNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
