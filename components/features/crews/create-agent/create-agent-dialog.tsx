@@ -28,6 +28,7 @@ import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/agent-personas"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
 import { TemplateBrowser } from "./template-browser"
 import { PersonaChip, BlankChip } from "./persona-chip"
+import { MODELS_BY_PROVIDER, defaultModelForProvider, isKnownModel } from "./llm-models"
 import {
   applyPersonaDefaults,
   initialAgentDraft,
@@ -36,6 +37,7 @@ import {
   type AgentDraft,
   type CrewLite,
 } from "./types"
+import type { LLMProvider } from "@/lib/agent-personas"
 
 export interface CreateAgentDialogProps {
   workspaceId: string
@@ -49,13 +51,6 @@ export interface CreateAgentDialogProps {
 const TOOL_PROFILES = ["MINIMAL", "CODING", "MESSAGING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"] as const
 const LLM_PROVIDERS = ["ANTHROPIC", "OPENAI", "GOOGLE", "OLLAMA"] as const
-
-const ANTHROPIC_MODELS = [
-  "claude-opus-4-7",
-  "claude-sonnet-4-6",
-  "claude-sonnet-4-5",
-  "claude-haiku-4-5",
-]
 
 /** Slim selection of personas shown as chips at the top. The full list lives
  *  behind the "All templates" popover. Built-ins were ordered to mix Lead +
@@ -133,6 +128,18 @@ export function CreateAgentDialog({
     draft.editedPersonaPrompt === null &&
     !draft.customPrompt.trim()
   const valid = isIdentityValid(draft)
+  // What's blocking submit? Shown to the user as an inline hint so they
+  // don't have to guess why Create is disabled.
+  const validationHint: string | null = (() => {
+    if (valid) return null
+    if (draft.name.trim().length < 2) return "Name must be at least 2 characters"
+    if (!/^[a-z0-9-]{2,}$/.test(draft.slug))
+      return "Slug must use only lowercase letters, digits, and hyphens (2+ chars)"
+    if (requiresCrew && !draft.crewSlug)
+      return crews.length === 0 ? "Create a crew first — Coordinator role works without one" : "Pick a crew"
+    return null
+  })()
+  const hasNoCrews = crews.length === 0
 
   const handlePickPersona = useCallback((persona: AgentPersona) => {
     setDraft((d) => applyPersonaDefaults(d, persona))
@@ -261,6 +268,19 @@ export function CreateAgentDialog({
 
         <div className="overflow-y-auto max-h-[calc(100vh-180px)]">
           <div className="px-5 py-4 space-y-4">
+            {hasNoCrews && (
+              <div className="flex gap-2.5 items-start px-3 py-2.5 rounded-lg bg-amber-400/[0.08] border border-amber-400/[0.25] text-[12px]">
+                <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                  Heads up
+                </span>
+                <div className="text-foreground/85 leading-relaxed">
+                  This workspace has <strong>no crews yet</strong>. Agents (and Leads) live inside a
+                  crew — create one first, or set this agent as a{" "}
+                  <strong>Coordinator</strong> (workspace-wide, no crew required).
+                </div>
+              </div>
+            )}
+
             {/* ─── Templates row ─── */}
             <Section
               label="Template"
@@ -481,18 +501,12 @@ WORK STYLE: …`}
             {/* ─── Runtime (model + memory only — most common) ─── */}
             <Section label="Runtime">
               <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
-                <FieldShell label="Model">
-                  <select
+                <FieldShell label="Model" hint={`from ${draft.llmProvider.toLowerCase()}`}>
+                  <ModelInput
+                    provider={draft.llmProvider}
                     value={draft.llmModel}
-                    onChange={(e) => setDraft({ ...draft, llmModel: e.target.value })}
-                    className="input-base"
-                  >
-                    {ANTHROPIC_MODELS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(model) => setDraft({ ...draft, llmModel: model })}
+                  />
                 </FieldShell>
                 <button
                   type="button"
@@ -561,11 +575,24 @@ WORK STYLE: …`}
                     />
                   </FieldShell>
 
-                  <FieldShell label="LLM provider">
+                  <FieldShell label="LLM provider" hint="changing this swaps the model list">
                     <ChipRow
                       values={LLM_PROVIDERS}
                       active={draft.llmProvider}
-                      onChange={(v) => setDraft({ ...draft, llmProvider: v })}
+                      onChange={(v) => {
+                        // Auto-reset model to the provider's default when
+                        // the user toggles. The previous model string is
+                        // (almost certainly) wrong for the new provider —
+                        // claude-opus on OPENAI would be a runtime error
+                        // hours later.
+                        const newProvider = v as LLMProvider
+                        const keepModel = isKnownModel(newProvider, draft.llmModel)
+                        setDraft({
+                          ...draft,
+                          llmProvider: newProvider,
+                          llmModel: keepModel ? draft.llmModel : defaultModelForProvider(newProvider),
+                        })
+                      }}
                     />
                   </FieldShell>
 
@@ -621,8 +648,13 @@ WORK STYLE: …`}
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-white/[0.08] flex items-center gap-2 bg-card/50">
-          <span className="text-[11px] text-muted-foreground mr-auto">
-            ⌘↵ to create · Esc to close
+          <span
+            className={cn(
+              "text-[11px] mr-auto",
+              validationHint ? "text-amber-400" : "text-muted-foreground",
+            )}
+          >
+            {validationHint ?? "⌘↵ to create · Esc to close"}
           </span>
           <button
             type="button"
@@ -740,6 +772,70 @@ function FieldShell({
       </div>
       {children}
     </label>
+  )
+}
+
+/** Model picker that adapts to the current provider:
+ *    - dropdown listing the curated models for that provider
+ *    - "(custom…)" option flips the input into a free-text field, useful for
+ *      Ollama where model names are whatever the user has pulled locally,
+ *      and for early-access provider models not yet in our list. */
+function ModelInput({
+  provider,
+  value,
+  onChange,
+}: {
+  provider: LLMProvider
+  value: string
+  onChange: (model: string) => void
+}) {
+  const known = MODELS_BY_PROVIDER[provider]
+  const isCustom = !known.includes(value)
+
+  if (isCustom) {
+    return (
+      <div className="flex gap-1.5 items-stretch">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="model-name-tag"
+          className="input-base font-mono text-[12px] flex-1"
+          spellCheck={false}
+        />
+        <button
+          type="button"
+          onClick={() => onChange(defaultModelForProvider(provider))}
+          title="Switch back to the curated list"
+          className="px-2.5 py-1.5 rounded-md text-[11.5px] border border-white/[0.15] hover:bg-white/[0.03] text-foreground/80 whitespace-nowrap"
+        >
+          ← list
+        </button>
+      </div>
+    )
+  }
+  return (
+    <select
+      value={value}
+      onChange={(e) => {
+        if (e.target.value === "__custom__") {
+          // Empty seed so the user knows it's their turn to type.
+          onChange("")
+          return
+        }
+        onChange(e.target.value)
+      }}
+      className="input-base"
+    >
+      {known.map((m) => (
+        <option key={m} value={m}>
+          {m}
+        </option>
+      ))}
+      <option value="__custom__" className="italic">
+        — custom…
+      </option>
+    </select>
   )
 }
 
