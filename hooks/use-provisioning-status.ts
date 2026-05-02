@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtime } from "@/hooks/use-realtime"
+import { apiFetch } from "@/lib/api-fetch"
 
 /**
  * Aggregate provisioning state for the toolbar badge — surfaces "an
@@ -85,7 +86,7 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
       return
     }
     try {
-      const listRes = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      const listRes = await apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       if (!listRes.ok) return
       const crews: CrewListEntry[] = await listRes.json()
       if (!Array.isArray(crews)) return
@@ -94,7 +95,7 @@ export function useProvisioningStatus(workspaceId: string | null): ProvisioningS
       // single 5xx for one crew doesn't blank the whole badge.
       const results = await Promise.allSettled(
         crews.map(async (c): Promise<ProvisioningCrewState> => {
-          const r = await fetch(`/api/v1/crews/${c.id}/provision?workspace_id=${workspaceId}`)
+          const r = await apiFetch(`/api/v1/crews/${c.id}/provision?workspace_id=${workspaceId}`)
           const featureIds = extractFeatureIds(c.devcontainer_config)
           if (!r.ok) return { id: c.id, slug: c.slug, name: c.name, status: "idle", featureIds }
           const data: ProvisionStatusResponse = await r.json()

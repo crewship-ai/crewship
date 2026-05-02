@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { AlertTriangle, X } from "lucide-react"
 import Link from "next/link"
+import { apiFetch } from "@/lib/api-fetch"
 
 export function RuntimeBanner() {
   const [visible, setVisible] = useState(false)
@@ -10,7 +11,10 @@ export function RuntimeBanner() {
 
   const check = useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/system/runtime")
+      // apiFetch instead of raw fetch — without it, an expired session
+      // returns 401 every 30s, the user never gets redirected to /login,
+      // and the toolbar/banner sit on stale state forever.
+      const res = await apiFetch("/api/v1/system/runtime")
       if (!res.ok) return
       const data = await res.json()
       setVisible(!data.available)
