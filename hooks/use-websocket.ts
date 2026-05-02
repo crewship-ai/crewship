@@ -126,7 +126,20 @@ export function useWebSocket({
   }, [updateStatus])
 
   const connect = useCallback(async () => {
-    if (terminatedRef.current || disconnectingRef.current) return
+    // Only `terminatedRef` is permanent — once we've decided we'll
+    // never reconnect (auth dead / past the backoff cap), bail. A set
+    // `disconnectingRef` here used to bail too, but that broke the
+    // common case of "URL changed, cleanup ran disconnect(), now we
+    // want to reconnect": the cleanup left disconnectingRef=true, the
+    // next effect's connect saw it and returned, and `new WebSocket`
+    // was never called. React 19 strict-mode's mount→cleanup→remount
+    // double-pass triggers the same path even on a single URL.
+    // Treat entering connect() as the explicit "we want to be
+    // connected" signal and clear the flag — the in-flight race
+    // (disconnect() called *while* getToken is awaiting) is still
+    // caught by the post-await guard below.
+    if (terminatedRef.current) return
+    disconnectingRef.current = false
 
     // Refresh-fetch the ticket on every (re)connect. A stale token
     // from before a backend restart would 401 the upgrade and trip
@@ -248,8 +261,18 @@ export function useWebSocket({
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current)
     }
-    wsRef.current?.close()
+    const ws = wsRef.current
     wsRef.current = null
+    if (ws) {
+      // Detach handlers before closing so a delayed onclose event
+      // can't fire auto-reconnect or null out wsRef again after a
+      // newer connection has taken its place.
+      ws.onclose = null
+      ws.onerror = null
+      ws.onmessage = null
+      ws.onopen = null
+      try { ws.close() } catch { /* already closed */ }
+    }
   }, [])
 
   const send = useCallback(
