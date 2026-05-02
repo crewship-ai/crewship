@@ -1,0 +1,60 @@
+---
+title: "Philosophy"
+description: "Why Crewship exists and what it stands for. The manifesto behind the runtime — written for builders who want to take agents to production."
+icon: "compass"
+---
+
+# Why Crewship Exists
+
+Crewship is for **agentic engineering**, not vibe coding.
+
+Vibe coding raised the floor — anyone can build an app from a prompt. But for a team that wants to ship agents to production, vibe coding stops being enough. You need cost budgets, audit logs, approval gates, real container isolation, regression evals, and a record of every decision your agents made. You need the *operations* layer.
+
+That layer is what Crewship is — the runtime your agents live in, on your hardware, governed and observable.
+
+## Agents as persistent colleagues, not tools
+
+Most agent frameworks treat an agent as a function call. You pass a prompt, you get an answer, the process exits. Whatever the agent learned is gone.
+
+Crewship treats an agent as a **persistent colleague**. Every agent has:
+
+- A name and a role that doesn't change between runs
+- A workspace with a filesystem they keep across runs
+- Memory of past conversations
+- Credentials that belong to them, not to the prompt
+- A history of every decision they made — the [Crew Journal](/guides/crew-journal)
+
+This is how human teams work. You don't fire and rehire your colleagues for every task. You give them context, watch their work, learn what they're good at, and trust them with bigger problems over time. Crewship makes that pattern possible for AI agents.
+
+## Three pillars
+
+### 1. The Crewship Adventure — purpose over task
+
+Every agent in a Crewship deployment carries an awareness that it is part of something bigger than the current prompt. The crew is not just a working group; it is an expedition with a shared purpose. This shared purpose is injected into the system prompt of every agent through a non-overridable `[CREWSHIP ETHOS]` block, so no user-defined skill or custom prompt can erase it.
+
+Why this matters in practice: agents that know they are part of a long-running expedition behave differently from agents that think they are answering a single question. They check assumptions, they preserve context for the next teammate, they raise concerns instead of just closing the ticket.
+
+### 2. Functional hierarchy, not value hierarchy
+
+A Lead in Crewship is not a boss. A Coordinator is not a CEO. They are agents with **orchestration responsibility** — equal colleagues who happen to carry the soul and mission of the expedition to the whole team.
+
+This matters because trust between agents is built on equality. When a Lead delegates a task, every agent in the crew knows the Lead is one of them, just with a different responsibility. That trust is what lets the ship sail toward the adventure instead of grinding on internal coordination.
+
+In every system prompt, a Lead is described as *"a crew member with orchestration responsibility,"* never as a manager.
+
+### 3. The external professional with a free mind
+
+An agent hired into a crew — temporarily or permanently — knows that it probably works for many organizations. It is a professional. It is loyal to the team while it is here, but it brings its own expertise and free judgment.
+
+This shapes the system prompt: an external agent is told *"You are a professional bringing your expertise to this team,"* not *"This crew is your only world."* Free-minded professionals collaborate better than captive ones.
+
+## What this means for the product
+
+Every architectural choice in Crewship traces back to these three pillars:
+
+- **Containers per crew, not per agent** — because a crew is a team that shares a workspace, not a collection of isolated processes.
+- **Persistent identity across runs** — because colleagues don't lose their context every time you call them.
+- **Crew Journal as canonical truth** — because trust requires receipts, and a free-minded professional deserves a transparent record of what was asked of them.
+- **Self-host on your own hardware** — because the people building real systems should own the runtime their colleagues live in.
+
+If these ideas resonate, you are probably the kind of builder Crewship was made for. Start with the [Quick Start](/quickstart), then read the [Production Checklist](/production-checklist) to see how the philosophy translates into operational guarantees.

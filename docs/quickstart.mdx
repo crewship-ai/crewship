@@ -1,15 +1,33 @@
 ---
 title: "Quick Start"
-description: "Install Crewship and run your first AI agent in under 5 minutes."
+description: "Get Crewship running on your hardware in 60 seconds, then create your first crew in under 5 minutes."
 icon: "rocket"
 ---
 
-## Prerequisites
+Crewship is a **self-hosted runtime for AI coding agents**. This page gets you from zero to a running agent in two passes: a 60-second smoke test that proves the runtime is alive on your hardware, then a 5-minute full setup that creates your first crew.
 
-- **Docker** (or Apple Containers on macOS 26+)
-- **Go 1.26+** (for building from source)
-- **Node.js 22+** and **pnpm** (for frontend development)
-- An LLM API key (Anthropic, OpenAI, or Google)
+## 60-Second Smoke Test
+
+If you just want to see the dashboard come up on your machine, this is enough:
+
+```bash
+# 1. Install (binary, single command)
+curl -fsSL https://get.crewship.ai | sh
+
+# 2. Start the runtime — embedded UI + SQLite + Go server, no Node.js, no external DB
+crewship start
+
+# 3. Open the dashboard
+open http://localhost:8080
+```
+
+That's it. The runtime is now serving on your hardware. No agents have been created yet — that's the next pass.
+
+## Prerequisites for the Full Setup
+
+- **Docker** (or Apple Containers on macOS 26+) — every agent runs in its own Linux container
+- An LLM API key (Anthropic, OpenAI, or Google) — agents call out to whichever provider you wire up
+- **Go 1.26+** and **Node.js 22+ + pnpm** — only if you build from source instead of using the binary
 
 ## Installation
 
@@ -164,7 +182,7 @@ icon: "rocket"
 Navigate to [http://localhost:8080](http://localhost:8080) to see the web UI where you can:
 
 - View crew boards and agent status
-- Monitor real-time logs
+- Monitor real-time logs from inside each container
 - Manage credentials and skills
 - Create and track missions
 - Chat with agents directly
@@ -173,13 +191,13 @@ Navigate to [http://localhost:8080](http://localhost:8080) to see the web UI whe
 
 <CardGroup cols={2}>
   <Card title="Architecture" icon="sitemap" href="/architecture">
-    Learn how the sidecar model, container isolation, and IPC work under the hood.
+    Learn how the runtime, sidecar proxy, container isolation, and IPC fit together under the hood.
   </Card>
   <Card title="Credentials" icon="key" href="/guides/credentials">
-    Set up credential failover, scoping, and Keeper security.
+    Set up credential failover, scoping, and the Keeper guardrail.
   </Card>
-  <Card title="Skills & Marketplace" icon="puzzle-piece" href="/guides/skills">
-    Add capabilities to your agents from the marketplace.
+  <Card title="Production Checklist" icon="circle-check" href="/production-checklist">
+    The 6 things a production agent system needs — and how Crewship covers all of them.
   </Card>
   <Card title="Orchestration" icon="flag" href="/guides/orchestration">
     Create missions with multi-agent task delegation.
