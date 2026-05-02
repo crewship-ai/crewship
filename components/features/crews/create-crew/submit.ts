@@ -1,4 +1,4 @@
-import type { WizardState, AgentDraft } from "./types"
+import type { WizardState } from "./types"
 
 export interface SubmitResult {
   id: string
@@ -7,15 +7,8 @@ export interface SubmitResult {
 }
 
 export async function submitCrew(workspaceId: string, state: WizardState): Promise<SubmitResult> {
-  switch (state.mode) {
-    case "browse":
-      return submitFromTemplate(workspaceId, state)
-    case "ai":
-      return submitFromAI(workspaceId, state)
-    case "empty":
-    default:
-      return submitBlank(workspaceId, state)
-  }
+  if (state.mode === "browse") return submitFromTemplate(workspaceId, state)
+  return submitBlank(workspaceId, state)
 }
 
 function runtimeBody(state: WizardState): Record<string, unknown> {
@@ -86,64 +79,9 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patchBody),
   })
-  // Don't fail the whole submission if PATCH fails — crew exists with template defaults.
   if (!patchRes.ok) {
     console.warn("Crew created but identity/runtime override failed:", await patchRes.text())
   }
 
   return { id: deployed.crew_id, slug: deployed.crew_slug, name: deployed.crew_name }
-}
-
-async function submitFromAI(workspaceId: string, state: WizardState): Promise<SubmitResult> {
-  if (!state.aiResult) throw new Error("No AI suggestion to submit")
-
-  // 1. Create the crew with user's identity + runtime.
-  const crewRes = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...identityBody(state), ...runtimeBody(state) }),
-  })
-  if (!crewRes.ok) throw new Error(await crewRes.text() || `HTTP ${crewRes.status}`)
-  const created = await crewRes.json() as { id: string; slug: string; name: string }
-
-  // 2. Create each suggested agent. Sequential — agent slugs must be unique within
-  // workspace and we want deterministic ordering for the lead-first roster.
-  const errors: string[] = []
-  for (const agent of state.aiResult.agents) {
-    try {
-      await createAgent(workspaceId, created.id, agent)
-    } catch (e) {
-      errors.push(`${agent.name}: ${e instanceof Error ? e.message : String(e)}`)
-    }
-  }
-  if (errors.length > 0) {
-    // Surface partial failure but keep the crew — user can retry agent creation manually.
-    console.warn("Crew created but some agents failed:", errors)
-  }
-
-  return { id: created.id, slug: created.slug, name: created.name }
-}
-
-async function createAgent(workspaceId: string, crewId: string, agent: AgentDraft): Promise<void> {
-  const body: Record<string, unknown> = {
-    name: agent.name,
-    slug: agent.slug,
-    crew_id: crewId,
-    agent_role: agent.agent_role,
-    cli_adapter: agent.cli_adapter || "CLAUDE_CODE",
-    tool_profile: agent.tool_profile || "general",
-    timeout_seconds: 600,
-    memory_enabled: true,
-  }
-  if (agent.role_title) body.role_title = agent.role_title
-  if (agent.system_prompt) body.system_prompt = agent.system_prompt
-  if (agent.llm_provider) body.llm_provider = agent.llm_provider
-  if (agent.llm_model) body.llm_model = agent.llm_model
-
-  const res = await fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`)
 }

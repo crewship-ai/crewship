@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Cpu, MemoryStick, Clock, Network as NetIcon, X } from "lucide-react"
+import { Cpu, MemoryStick, Clock, Network as NetIcon, Globe, Lock, X, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CPU_PRESETS, MEMORY_PRESETS, TTL_PRESETS, type WizardState } from "./types"
 
@@ -13,12 +13,20 @@ interface Props {
 export function StepRuntime({ state, setState }: Props) {
   return (
     <div className="space-y-3">
-      <Group title="Container resources" badge="LIMITS" hint={`applied to crewship-team-${state.slug || "<slug>"}`}>
-        <Field
+      {/* Container resources — three side-by-side cells */}
+      <SectionHeader
+        title="Container resources"
+        badge="LIMITS"
+        hint={`crewship-team-${state.slug || "<slug>"}`}
+      />
+      <div className="grid grid-cols-3 gap-2.5">
+        <ResourceCell
           icon={MemoryStick}
           label="Memory"
-          help="hard limit; container OOM-killed above this"
+          value={prettyMemory(state.memoryMB)}
+          help="Hard limit"
           cli={`--memory-mb ${state.memoryMB}`}
+          tone="blue"
         >
           <ChipRow>
             {MEMORY_PRESETS.map((p) => (
@@ -35,9 +43,16 @@ export function StepRuntime({ state, setState }: Props) {
               suffix="MB"
             />
           </ChipRow>
-        </Field>
+        </ResourceCell>
 
-        <Field icon={Cpu} label="CPUs" help="fractional cores; e.g. 0.5 = half a core" cli={`--cpus ${state.cpus}`}>
+        <ResourceCell
+          icon={Cpu}
+          label="CPUs"
+          value={`${state.cpus} ${state.cpus === 1 ? "core" : "cores"}`}
+          help="Fractional cores OK"
+          cli={`--cpus ${state.cpus}`}
+          tone="violet"
+        >
           <ChipRow>
             {CPU_PRESETS.map((p) => (
               <Chip key={p.value} active={state.cpus === p.value} onClick={() => setState({ cpus: p.value })}>
@@ -51,16 +66,18 @@ export function StepRuntime({ state, setState }: Props) {
               min={0.1}
               max={64}
               step={0.1}
-              suffix="cores"
+              suffix="cpu"
             />
           </ChipRow>
-        </Field>
+        </ResourceCell>
 
-        <Field
+        <ResourceCell
           icon={Clock}
-          label="Auto-stop after idle"
-          help="container stops after N hours of no activity (saves $)"
+          label="Auto-stop"
+          value={state.ttlHours === null ? "Never" : `${state.ttlHours} h idle`}
+          help="Saves cost"
           cli={state.ttlHours === null ? "(no --ttl)" : `--ttl ${state.ttlHours}`}
+          tone="amber"
         >
           <ChipRow>
             {TTL_PRESETS.map((p) => (
@@ -69,34 +86,186 @@ export function StepRuntime({ state, setState }: Props) {
               </Chip>
             ))}
           </ChipRow>
-        </Field>
-      </Group>
+        </ResourceCell>
+      </div>
 
-      <Group title="Network policy" badge="SECURITY" hint="controls outbound HTTP from container">
-        <Field icon={NetIcon} label="Mode" help={undefined} cli={`--network-mode ${state.networkMode}`}>
-          <div className="inline-flex rounded-lg border border-white/10 bg-card p-0.5">
-            <SegBtn active={state.networkMode === "free"} onClick={() => setState({ networkMode: "free", allowedDomains: [] })}>Free</SegBtn>
-            <SegBtn active={state.networkMode === "restricted"} onClick={() => setState({ networkMode: "restricted" })}>Restricted</SegBtn>
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-1.5">
-            <strong>Free:</strong> agents can hit any HTTP endpoint. <strong>Restricted:</strong> only the allowed domains below.
-          </p>
-        </Field>
-
-        {state.networkMode === "restricted" && (
-          <Field
-            label="Allowed domains"
-            help="supports wildcards (*.github.com)"
-            cli={state.allowedDomains.length > 0 ? `--allowed-domains ${state.allowedDomains.join(",")}` : "(empty)"}
-          >
-            <DomainChips
-              value={state.allowedDomains}
-              onChange={(v) => setState({ allowedDomains: v })}
-            />
-          </Field>
-        )}
-      </Group>
+      {/* Network policy — full-width cell with mode + conditional domain list */}
+      <SectionHeader
+        title="Network policy"
+        badge="SECURITY"
+        hint="outbound HTTP from container"
+      />
+      <NetworkCell state={state} setState={setState} />
     </div>
+  )
+}
+
+// =============================================================================
+// Section header
+// =============================================================================
+
+function SectionHeader({ title, badge, hint }: { title: string; badge?: string; hint?: string }) {
+  return (
+    <div className="flex items-baseline gap-2.5 pt-1">
+      <h3 className="text-[12.5px] font-semibold text-foreground/90">{title}</h3>
+      {badge && (
+        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-muted-foreground font-medium">
+          {badge}
+        </span>
+      )}
+      {hint && <span className="ml-auto text-[11px] text-muted-foreground/70 font-mono">{hint}</span>}
+    </div>
+  )
+}
+
+// =============================================================================
+// ResourceCell — card-style cell for a single resource (memory / CPU / TTL)
+// =============================================================================
+
+const TONE_STYLES = {
+  blue: { ring: "border-blue-400/20", icon: "bg-blue-500/15 text-blue-300", value: "text-blue-300" },
+  violet: { ring: "border-violet-400/20", icon: "bg-violet-500/15 text-violet-300", value: "text-violet-300" },
+  amber: { ring: "border-amber-400/20", icon: "bg-amber-500/15 text-amber-300", value: "text-amber-300" },
+} as const
+
+function ResourceCell({
+  icon: Icon, label, value, help, cli, tone, children,
+}: {
+  icon: React.ElementType
+  label: string
+  value: string
+  help: string
+  cli: string
+  tone: keyof typeof TONE_STYLES
+  children: React.ReactNode
+}) {
+  const t = TONE_STYLES[tone]
+  return (
+    <div className={cn(
+      "rounded-lg border bg-card/60 backdrop-blur-sm p-3 flex flex-col gap-2.5 transition-colors hover:bg-card/80",
+      "border-white/10",
+      t.ring,
+    )}>
+      <div className="flex items-start gap-2.5">
+        <div className={cn("h-8 w-8 rounded-md flex items-center justify-center shrink-0", t.icon)}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
+            <span className="text-[10px] text-muted-foreground/60 truncate">— {help}</span>
+          </div>
+          <div className={cn("text-[15px] font-semibold leading-tight mt-0.5", t.value)}>{value}</div>
+        </div>
+      </div>
+      <div className="min-h-[28px]">{children}</div>
+      <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 text-muted-foreground/70 truncate self-start">
+        {cli}
+      </code>
+    </div>
+  )
+}
+
+// =============================================================================
+// NetworkCell — full-width cell with Free/Restricted segmented + domain editor
+// =============================================================================
+
+function NetworkCell({ state, setState }: Props) {
+  const restricted = state.networkMode === "restricted"
+
+  return (
+    <div className="rounded-lg border border-white/10 bg-card/60 backdrop-blur-sm p-3 space-y-3">
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className={cn(
+          "h-8 w-8 rounded-md flex items-center justify-center shrink-0",
+          restricted ? "bg-amber-500/15 text-amber-300" : "bg-emerald-500/15 text-emerald-300",
+        )}>
+          <NetIcon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium">Mode</div>
+          <div className={cn(
+            "text-[15px] font-semibold leading-tight mt-0.5",
+            restricted ? "text-amber-300" : "text-emerald-300",
+          )}>
+            {restricted ? "Restricted" : "Free"}
+            <span className="ml-2 text-[11px] text-muted-foreground font-normal">
+              {restricted ? "— allowlist below" : "— any HTTP endpoint"}
+            </span>
+          </div>
+        </div>
+
+        {/* Toggle as two big mode cards */}
+        <div className="grid grid-cols-2 gap-1.5 w-[280px] shrink-0">
+          <ModeCard
+            active={!restricted}
+            onClick={() => setState({ networkMode: "free", allowedDomains: [] })}
+            icon={Globe}
+            label="Free"
+            tone="emerald"
+          />
+          <ModeCard
+            active={restricted}
+            onClick={() => setState({ networkMode: "restricted" })}
+            icon={Lock}
+            label="Restricted"
+            tone="amber"
+          />
+        </div>
+        <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 text-muted-foreground/70 self-start mt-1.5">
+          --network-mode {state.networkMode}
+        </code>
+      </div>
+
+      {restricted && (
+        <div className="pt-2.5 border-t border-white/5">
+          <div className="flex items-baseline justify-between mb-1.5">
+            <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium">
+              Allowed domains
+              <span className="ml-2 text-[10px] text-muted-foreground/60 normal-case tracking-normal">supports wildcards (<code className="font-mono">*.github.com</code>)</span>
+            </span>
+            <span className="text-[10px] text-muted-foreground">{state.allowedDomains.length} listed</span>
+          </div>
+          <DomainChips
+            value={state.allowedDomains}
+            onChange={(v) => setState({ allowedDomains: v })}
+          />
+          {state.allowedDomains.length === 0 && (
+            <p className="text-[11px] text-amber-400/80 mt-1.5">
+              ⚠ Empty allowlist locks all egress. Add at least one domain unless that's intentional.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ModeCard({ active, onClick, icon: Icon, label, tone }: {
+  active: boolean
+  onClick: () => void
+  icon: React.ElementType
+  label: string
+  tone: "emerald" | "amber"
+}) {
+  const tones = {
+    emerald: { active: "border-emerald-400 bg-emerald-500/10 text-emerald-300", icon: "text-emerald-400" },
+    amber: { active: "border-amber-400 bg-amber-500/10 text-amber-300", icon: "text-amber-400" },
+  } as const
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-md border px-3 py-2 text-xs font-medium flex items-center justify-center gap-2 transition-all",
+        active
+          ? `${tones[tone].active} shadow-sm`
+          : "border-white/10 bg-card/40 text-muted-foreground hover:border-white/20 hover:text-foreground/80",
+      )}
+    >
+      <Icon className={cn("h-3.5 w-3.5", active ? tones[tone].icon : "")} />
+      {label}
+    </button>
   )
 }
 
@@ -104,45 +273,8 @@ export function StepRuntime({ state, setState }: Props) {
 // Building blocks
 // =============================================================================
 
-function Group({ title, badge, hint, children }: { title: string; badge?: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-card/50 p-3.5 space-y-3">
-      <div className="text-xs font-semibold text-foreground/80 flex items-center gap-2 -mb-1">
-        {title}
-        {badge && (
-          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-white/5 border border-white/10 text-muted-foreground font-medium">
-            {badge}
-          </span>
-        )}
-        {hint && <span className="ml-auto text-[11px] text-muted-foreground font-normal font-mono">{hint}</span>}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function Field({ icon: Icon, label, help, cli, children }: { icon?: React.ElementType; label: string; help?: string; cli?: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <div className="text-[12px] flex items-center gap-1.5">
-        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
-        <span className="font-medium">{label}</span>
-        {help && <span className="text-[11px] text-muted-foreground">— {help}</span>}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex-1 min-w-0">{children}</div>
-        {cli && (
-          <code className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/30 text-muted-foreground whitespace-nowrap">
-            {cli}
-          </code>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function ChipRow({ children }: { children: React.ReactNode }) {
-  return <div className="flex flex-wrap gap-1.5">{children}</div>
+  return <div className="flex flex-wrap gap-1">{children}</div>
 }
 
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -151,7 +283,7 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       type="button"
       onClick={onClick}
       className={cn(
-        "px-2.5 py-1 rounded-md text-[11.5px] border transition-colors",
+        "px-2 py-0.5 rounded text-[11px] border transition-colors",
         active
           ? "bg-blue-500/20 border-blue-400 text-blue-300"
           : "bg-card border-white/10 text-foreground/70 hover:border-white/20",
@@ -177,7 +309,7 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
   if (active || editing) {
     return (
       <div className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11.5px]",
+        "inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]",
         active ? "bg-blue-500/20 border-blue-400" : "bg-card border-white/10",
       )}>
         <input
@@ -198,9 +330,9 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
             if (e.key === "Enter") (e.target as HTMLInputElement).blur()
             if (e.key === "Escape") { setDraft(String(value)); setEditing(false) }
           }}
-          className="w-14 bg-transparent outline-none text-right text-blue-300 font-medium"
+          className="w-12 bg-transparent outline-none text-right text-blue-300 font-medium"
         />
-        <span className="text-[10px] text-muted-foreground">{suffix}</span>
+        <span className="text-[9px] text-muted-foreground">{suffix}</span>
       </div>
     )
   }
@@ -209,24 +341,9 @@ function CustomNumberChip({ active, value, onChange, min, max, step = 1, suffix 
     <button
       type="button"
       onClick={() => { setDraft(String(value)); setEditing(true) }}
-      className="px-2.5 py-1 rounded-md text-[11.5px] border border-white/10 bg-card text-foreground/70 hover:border-white/20"
+      className="px-2 py-0.5 rounded text-[11px] border border-white/10 bg-card text-foreground/70 hover:border-white/20"
     >
       Custom…
-    </button>
-  )
-}
-
-function SegBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "px-3 py-1 text-xs rounded-md transition-colors",
-        active ? "bg-blue-500/20 text-blue-300" : "text-muted-foreground hover:text-foreground/80",
-      )}
-    >
-      {children}
     </button>
   )
 }
@@ -243,30 +360,45 @@ function DomainChips({ value, onChange }: { value: string[]; onChange: (v: strin
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-950 border border-white/15 rounded-md min-h-[40px] focus-within:border-blue-400">
+    <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-950 border border-white/15 rounded-md min-h-[40px] focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 transition-shadow">
       {value.map((d) => (
-        <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-white/5 font-mono text-[11px] text-foreground/80">
+        <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-amber-500/10 border border-amber-400/30 font-mono text-[11px] text-amber-200/90">
           {d}
-          <button type="button" onClick={() => onChange(value.filter((x) => x !== d))} className="text-muted-foreground hover:text-red-400 px-0.5">
+          <button type="button" onClick={() => onChange(value.filter((x) => x !== d))} className="text-amber-400/60 hover:text-red-400 px-0.5" aria-label={`Remove ${d}`}>
             <X className="h-3 w-3" />
           </button>
         </span>
       ))}
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === ",") {
-            e.preventDefault()
-            commit()
-          } else if (e.key === "Backspace" && draft === "" && value.length > 0) {
-            onChange(value.slice(0, -1))
-          }
-        }}
-        onBlur={commit}
-        placeholder={value.length === 0 ? "github.com, *.npmjs.org, api.anthropic.com…" : "add another…"}
-        className="flex-1 min-w-[120px] bg-transparent border-0 outline-none text-xs font-mono px-1 py-0.5"
-      />
+      <div className="flex items-center gap-1 flex-1 min-w-[140px]">
+        <Plus className="h-3 w-3 text-muted-foreground/50 ml-1" />
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault()
+              commit()
+            } else if (e.key === "Backspace" && draft === "" && value.length > 0) {
+              onChange(value.slice(0, -1))
+            }
+          }}
+          onBlur={commit}
+          placeholder={value.length === 0 ? "github.com, *.npmjs.org, api.anthropic.com" : "add another…"}
+          className="flex-1 bg-transparent border-0 outline-none text-xs font-mono px-1 py-0.5 placeholder:text-muted-foreground/40"
+        />
+      </div>
     </div>
   )
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function prettyMemory(mb: number): string {
+  if (mb >= 1024) {
+    const gb = mb / 1024
+    return Number.isInteger(gb) ? `${gb} GB` : `${gb.toFixed(1)} GB`
+  }
+  return `${mb} MB`
 }

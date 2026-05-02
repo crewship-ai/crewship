@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Check, ChevronRight } from "lucide-react"
@@ -24,7 +24,7 @@ export interface CreateCrewDialogProps {
 
 const STEP_LABELS: Record<WizardStep, { title: string; sub: string }> = {
   1: { title: "Identity", sub: "icon, color, name" },
-  2: { title: "Lineup", sub: "templates · AI · blank" },
+  2: { title: "Lineup", sub: "template or blank" },
   3: { title: "Runtime", sub: "resources, network" },
   4: { title: "Review", sub: "create" },
 }
@@ -112,7 +112,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           </DialogTitle>
           <DialogDescription className="text-[12.5px]">
             {step === 1 && "Crews group agents that work together. Pick a recognizable icon and name."}
-            {step === 2 && "The agents this crew starts with. Pick a curated lineup, ask AI to generate one, or stay empty."}
+            {step === 2 && "The agents this crew starts with. Pick a curated lineup, or stay empty and add agents later."}
             {step === 3 && "Resource limits and network policy for the crew's container. Defaults are sane."}
             {step === 4 && "Last look before commit. Click any section to jump back."}
           </DialogDescription>
@@ -174,33 +174,42 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
 }
 
 function StepStrip({ step, onJump }: { step: WizardStep; onJump: (s: WizardStep) => void }) {
+  const steps = [1, 2, 3] as const
   return (
-    <div className="px-5 py-2.5 border-b border-white/10 bg-card/50 flex items-center gap-0">
-      {([1, 2, 3] as const).map((n, i) => (
-        <div key={n} className="flex items-center flex-1 gap-2 text-[12px] min-w-0">
-          <button
-            type="button"
-            disabled={n >= step}
-            onClick={() => onJump(n)}
-            className={cn(
-              "h-5.5 w-5.5 min-w-[22px] min-h-[22px] rounded-full border text-[11px] font-semibold flex items-center justify-center transition-colors",
-              n < step
-                ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300 hover:scale-110"
-                : n === step
-                  ? "bg-blue-500/20 border-blue-400 text-blue-300"
-                  : "bg-card border-white/10 text-muted-foreground",
-              n >= step && "cursor-default",
-            )}
-            aria-label={`Step ${n}: ${STEP_LABELS[n].title}`}
-          >
-            {n < step ? <Check className="h-3 w-3" /> : n}
-          </button>
-          <div className={cn("flex flex-col leading-tight min-w-0", n !== step && "opacity-70")}>
-            <span className="font-medium truncate">{STEP_LABELS[n].title}</span>
-            <span className="text-[10.5px] text-muted-foreground truncate">{STEP_LABELS[n].sub}</span>
+    <div className="px-5 py-3 border-b border-white/10 bg-card/50 flex items-center gap-3">
+      {steps.map((n, i) => (
+        <Fragment key={n}>
+          <div className="flex items-center gap-2 text-[12px] shrink-0 min-w-0">
+            <button
+              type="button"
+              disabled={n >= step}
+              onClick={() => onJump(n)}
+              className={cn(
+                "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center transition-all shrink-0",
+                n < step
+                  ? "bg-emerald-500/20 border-emerald-400/50 text-emerald-300 hover:scale-110 cursor-pointer"
+                  : n === step
+                    ? "bg-blue-500/20 border-blue-400 text-blue-300 ring-2 ring-blue-400/20"
+                    : "bg-card border-white/10 text-muted-foreground cursor-default",
+              )}
+              aria-label={`Step ${n}: ${STEP_LABELS[n].title}`}
+            >
+              {n < step ? <Check className="h-3 w-3" strokeWidth={3} /> : n}
+            </button>
+            <div className={cn("flex flex-col leading-tight min-w-0", n !== step && "opacity-60")}>
+              <span className="font-medium truncate">{STEP_LABELS[n].title}</span>
+              <span className="text-[10.5px] text-muted-foreground truncate">{STEP_LABELS[n].sub}</span>
+            </div>
           </div>
-          {i < 2 && <div className={cn("h-px flex-1 max-w-6 mx-1", n < step ? "bg-emerald-400/40" : "bg-white/10")} />}
-        </div>
+          {i < steps.length - 1 && (
+            <div
+              className={cn(
+                "flex-1 h-px transition-colors",
+                n < step ? "bg-emerald-400/40" : "bg-white/10",
+              )}
+            />
+          )}
+        </Fragment>
       ))}
     </div>
   )
@@ -218,7 +227,6 @@ function stepIsValid(step: WizardStep, s: WizardState): boolean {
   }
   if (step === 2) {
     if (s.mode === "browse") return !!s.pickedTemplateSlug
-    if (s.mode === "ai") return !!s.aiResult && s.aiResult.agents.length > 0
     return true // empty
   }
   if (step === 3) {
@@ -235,13 +243,6 @@ function deriveLineupSummary(s: WizardState): { count: number; source: string; a
       count: s.pickedTemplateMeta.agentCount,
       source: `template: ${s.pickedTemplateMeta.name}`,
       agents: s.pickedTemplateMeta.agents,
-    }
-  }
-  if (s.mode === "ai" && s.aiResult) {
-    return {
-      count: s.aiResult.agents.length,
-      source: "AI-generated",
-      agents: s.aiResult.agents.map((a) => ({ name: a.name, agent_role: a.agent_role })),
     }
   }
   return { count: 0, source: "empty" }

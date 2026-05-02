@@ -2,19 +2,7 @@ import type { CrewTemplateAgent } from "./api"
 
 export type WizardStep = 1 | 2 | 3 | 4
 
-export type LineupMode = "browse" | "ai" | "empty"
-
-export interface AgentDraft {
-  name: string
-  slug: string
-  role_title: string
-  agent_role: "AGENT" | "LEAD" | "COORDINATOR"
-  system_prompt?: string
-  cli_adapter?: string
-  llm_provider?: string
-  llm_model?: string
-  tool_profile?: string
-}
+export type LineupMode = "browse" | "empty"
 
 export interface WizardState {
   // Step 1 — Identity
@@ -29,13 +17,6 @@ export interface WizardState {
   mode: LineupMode
   pickedTemplateSlug: string | null
   pickedTemplateMeta: { name: string; agentCount: number; agents: { name: string; agent_role: string }[] } | null
-  aiPrompt: string
-  aiResult: {
-    crew_name: string
-    crew_slug: string
-    description: string
-    agents: AgentDraft[]
-  } | null
 
   // Step 3 — Runtime
   memoryMB: number
@@ -55,8 +36,6 @@ export const INITIAL_STATE: WizardState = {
   mode: "browse",
   pickedTemplateSlug: null,
   pickedTemplateMeta: null,
-  aiPrompt: "",
-  aiResult: null,
   memoryMB: 4096,
   cpus: 2,
   ttlHours: null,

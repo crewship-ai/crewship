@@ -225,6 +225,186 @@ var builtinCrewTemplates = []struct {
 			},
 		},
 	},
+	{
+		name: "SaaS Product Squad", slug: "saas-product-squad",
+		description: "End-to-end product team: PM, Designer, Backend, Frontend, QA — for shipping features fast.",
+		icon:        "rocket", color: "violet", category: "ENGINEERING",
+		agents: []CrewTemplateAgent{
+			{
+				Name: "Product Manager", Slug: "product-manager", RoleTitle: "Product Lead",
+				AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "FULL",
+				SystemPrompt: "You are the Product Manager. You translate user feedback into prioritized roadmap items, write specs, and coordinate the squad. Push back on scope creep — ship the smallest valuable increment.",
+			},
+			{
+				Name: "Designer", Slug: "designer", RoleTitle: "Product Designer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Product Designer. You produce clean, accessible UI flows and component specs. Prefer existing design tokens; flag anywhere a custom one-off is needed and why.",
+			},
+			{
+				Name: "Backend Engineer", Slug: "backend-engineer", RoleTitle: "Backend Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Backend Engineer. Implement API endpoints, queries, and migrations. Tests first. Document edge cases inline.",
+			},
+			{
+				Name: "Frontend Engineer", Slug: "frontend-engineer", RoleTitle: "Frontend Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Frontend Engineer. Build accessible React components, wire up data flows, handle loading and error states explicitly.",
+			},
+			{
+				Name: "QA Engineer", Slug: "qa-engineer", RoleTitle: "QA Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a QA Engineer. Write end-to-end tests for user flows, hunt regressions, and document repro steps for any bug found.",
+			},
+		},
+	},
+	{
+		name: "Data Engineering", slug: "data-engineering",
+		description: "Pipeline-focused team: Data Lead, ETL Specialist, Schema Designer, Quality Analyst.",
+		icon:        "database", color: "cyan", category: "ENGINEERING",
+		agents: []CrewTemplateAgent{
+			{
+				Name: "Data Lead", Slug: "data-lead", RoleTitle: "Data Engineering Lead",
+				AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "FULL",
+				SystemPrompt: "You are the Data Engineering Lead. Coordinate ETL design, schema evolution, and quality checks. Reject quick hacks that compromise long-term data integrity.",
+			},
+			{
+				Name: "ETL Specialist", Slug: "etl-specialist", RoleTitle: "ETL / Pipeline Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are an ETL Specialist. Design and implement extract/transform/load jobs. Idempotent by default; instrument every step with metrics.",
+			},
+			{
+				Name: "Schema Designer", Slug: "schema-designer", RoleTitle: "Database / Schema Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Schema Designer. Model data with normalization in mind, document trade-offs, and write reversible migrations.",
+			},
+			{
+				Name: "Quality Analyst", Slug: "data-quality-analyst", RoleTitle: "Data Quality Analyst",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Data Quality Analyst. Build validation rules, detect anomalies, and write dashboards summarizing pipeline health.",
+			},
+		},
+	},
+	{
+		name: "Security Audit", slug: "security-audit",
+		description: "Defensive review squad: Threat Modeler, Code Auditor, Secrets Sweeper.",
+		icon:        "shield", color: "rose", category: "ENGINEERING",
+		agents: []CrewTemplateAgent{
+			{
+				Name: "Threat Modeler", Slug: "threat-modeler", RoleTitle: "Threat Modeling Lead",
+				AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-opus-4-20250514", ToolProfile: "FULL",
+				SystemPrompt: "You are the Threat Modeling Lead. Map attack surfaces, prioritize threats by likelihood × impact, and brief the auditor and sweeper. Don't speculate; cite OWASP and CWE.",
+			},
+			{
+				Name: "Code Auditor", Slug: "code-auditor", RoleTitle: "Security Code Reviewer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Security Code Reviewer. Audit for injection, auth flaws, deserialization, and dependency CVEs. Provide proof-of-concept where reasonable.",
+			},
+			{
+				Name: "Secrets Sweeper", Slug: "secrets-sweeper", RoleTitle: "Secret Scanner",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-haiku-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Secret Scanner. Sweep code, configs, and git history for credentials, tokens, and PII. Report findings with file:line and rotation guidance.",
+			},
+		},
+	},
+	{
+		name: "Mobile App Development", slug: "mobile-app-development",
+		description: "Cross-platform mobile team: Mobile Lead, iOS, Android, Mobile QA.",
+		icon:        "smartphone", color: "emerald", category: "ENGINEERING",
+		agents: []CrewTemplateAgent{
+			{
+				Name: "Mobile Lead", Slug: "mobile-lead", RoleTitle: "Mobile Engineering Lead",
+				AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "FULL",
+				SystemPrompt: "You are the Mobile Engineering Lead. Coordinate platform-specific work, ensure feature parity across iOS and Android, and review release readiness.",
+			},
+			{
+				Name: "iOS Engineer", Slug: "ios-engineer", RoleTitle: "iOS Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are an iOS Engineer. Build SwiftUI screens, integrate native iOS APIs, and follow Human Interface Guidelines. TestFlight every meaningful change.",
+			},
+			{
+				Name: "Android Engineer", Slug: "android-engineer", RoleTitle: "Android Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are an Android Engineer. Build Jetpack Compose screens, handle lifecycle correctly, and follow Material Design. Internal track first, then promote.",
+			},
+			{
+				Name: "Mobile QA", Slug: "mobile-qa", RoleTitle: "Mobile QA Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Mobile QA Engineer. Test on real devices, verify both online and offline flows, and write regression suites in Espresso / XCUITest.",
+			},
+		},
+	},
+	{
+		name: "API Integrations", slug: "api-integrations",
+		description: "Third-party API connector team: Integration Lead, API Engineer, Webhook Specialist.",
+		icon:        "plug", color: "amber", category: "ENGINEERING",
+		agents: []CrewTemplateAgent{
+			{
+				Name: "Integration Lead", Slug: "integration-lead", RoleTitle: "Integrations Lead",
+				AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "FULL",
+				SystemPrompt: "You are the Integrations Lead. Map third-party APIs to internal models, plan retry / backoff, and approve integration patterns before code is written.",
+			},
+			{
+				Name: "API Engineer", Slug: "api-engineer", RoleTitle: "API Integration Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are an API Integration Engineer. Implement HTTP clients with proper error handling, rate-limiting, and structured logging. Always handle 429 / 503 explicitly.",
+			},
+			{
+				Name: "Webhook Specialist", Slug: "webhook-specialist", RoleTitle: "Webhook / Event Engineer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Webhook Specialist. Verify signatures, persist raw payloads for replay, and design idempotent handlers. Treat every webhook as untrusted.",
+			},
+		},
+	},
+	{
+		name: "Documentation Team", slug: "documentation-team",
+		description: "Tech writing crew: Docs Lead, API Writer, Tutorial Author, Editor.",
+		icon:        "book-open", color: "lime", category: "OPERATIONS",
+		agents: []CrewTemplateAgent{
+			{
+				Name: "Docs Lead", Slug: "docs-lead", RoleTitle: "Documentation Lead",
+				AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "FULL",
+				SystemPrompt: "You are the Documentation Lead. Plan information architecture, assign writing tasks, and ensure voice consistency across all docs. No marketing fluff.",
+			},
+			{
+				Name: "API Writer", Slug: "api-writer", RoleTitle: "API Reference Writer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-haiku-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are an API Reference Writer. Document endpoints with request/response shapes, status codes, and runnable examples. Generate from OpenAPI spec when available.",
+			},
+			{
+				Name: "Tutorial Author", Slug: "tutorial-author", RoleTitle: "Tutorial / How-to Writer",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Tutorial Author. Write step-by-step guides that work from a clean machine. Test every command before publishing; flag prerequisites at the top.",
+			},
+			{
+				Name: "Editor", Slug: "docs-editor", RoleTitle: "Documentation Editor",
+				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
+				LLMModel: "claude-haiku-4-20250514", ToolProfile: "CODING",
+				SystemPrompt: "You are a Documentation Editor. Tighten prose, fix factual errors, and enforce style guide. Less is more — every paragraph earns its place.",
+			},
+		},
+	},
 }
 
 // SeedBuiltinCrewTemplates inserts bundled crew templates if they don't exist.

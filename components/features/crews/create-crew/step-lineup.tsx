@@ -1,8 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Search, Sparkles, BookOpen, FileX2, RefreshCw, Lock } from "lucide-react"
-import { toast } from "sonner"
+import { Search, BookOpen, FileX2, Lock } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import type { CrewTemplate } from "./api"
@@ -19,21 +18,19 @@ export function StepLineup(props: Props) {
     <div className="space-y-3">
       <ModeTabs state={state} setMode={(m) => props.setState({ mode: m })} />
       {state.mode === "browse" && <BrowseTemplates {...props} />}
-      {state.mode === "ai" && <AISuggest {...props} />}
       {state.mode === "empty" && <EmptyMode />}
     </div>
   )
 }
 
 function ModeTabs({ state, setMode }: { state: WizardState; setMode: (m: WizardState["mode"]) => void }) {
-  const tabs: { id: WizardState["mode"]; label: string; Icon: React.ElementType; pill?: string }[] = [
+  const tabs: { id: WizardState["mode"]; label: string; Icon: React.ElementType }[] = [
     { id: "browse", label: "Browse templates", Icon: BookOpen },
-    { id: "ai", label: "AI Suggest", Icon: Sparkles, pill: "beta" },
     { id: "empty", label: "Empty crew", Icon: FileX2 },
   ]
   return (
     <div className="flex border-b border-white/10 -mx-5 px-5">
-      {tabs.map(({ id, label, Icon, pill }) => (
+      {tabs.map(({ id, label, Icon }) => (
         <button
           key={id}
           type="button"
@@ -47,11 +44,6 @@ function ModeTabs({ state, setMode }: { state: WizardState; setMode: (m: WizardS
         >
           <Icon className="h-3.5 w-3.5" />
           {label}
-          {pill && (
-            <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300">
-              {pill}
-            </span>
-          )}
         </button>
       ))}
     </div>
@@ -360,184 +352,6 @@ function PreviewPane({ template }: { template: CrewTemplate }) {
           ))}
         </div>
       </div>
-    </div>
-  )
-}
-
-// =============================================================================
-// AI Suggest mode
-// =============================================================================
-
-const AI_EXAMPLES = [
-  "Build and maintain a small SaaS: Go API, Next.js frontend, PostgreSQL DB. Need feature dev plus bug triage.",
-  "Run a content blog — research topics, write SEO-optimized posts, edit, publish weekly.",
-  "Audit JavaScript dependencies for CVEs and outdated packages, propose patch PRs.",
-  "Triage incoming customer support tickets: categorize, escalate, draft responses.",
-  "Quarterly financial close: collect statements, reconcile, prepare report.",
-]
-
-function AISuggest({ state, setState }: Props) {
-  const [generating, setGenerating] = useState(false)
-
-  const generate = async () => {
-    if (state.aiPrompt.trim().length < 10) {
-      toast.error("Describe the goal in at least 10 characters.")
-      return
-    }
-    setGenerating(true)
-    try {
-      const res = await fetch("/api/v1/crew-ai-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: state.aiPrompt.trim() }),
-      })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `HTTP ${res.status}`)
-      }
-      const data = await res.json()
-      // Map AI agents to AgentDraft. Backend's response is loose — fill defaults.
-      const agents = (data.agents ?? []).map((a: { name?: string; slug?: string; role_title?: string; agent_role?: string; system_prompt?: string }) => ({
-        name: a.name || "Unnamed",
-        slug: a.slug || (a.name || "agent").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
-        role_title: a.role_title || "",
-        agent_role: ((a.agent_role || "AGENT").toUpperCase() === "LEAD" ? "LEAD" : "AGENT") as "AGENT" | "LEAD",
-        system_prompt: a.system_prompt,
-        cli_adapter: "CLAUDE_CODE",
-        tool_profile: "general",
-      }))
-      setState({
-        aiResult: {
-          crew_name: data.crew_name || state.name,
-          crew_slug: data.crew_slug || state.slug,
-          description: data.description || "",
-          agents,
-        },
-        // Also pre-fill Step 1 if user came in blank.
-        ...(state.name.trim() === "" ? { name: data.crew_name } : {}),
-        ...(state.slug.trim() === "" ? { slug: data.crew_slug } : {}),
-        ...(state.description.trim() === "" ? { description: data.description || "" } : {}),
-      })
-      toast.success(`Generated ${agents.length} agents`)
-    } catch (e) {
-      toast.error(`AI suggest failed: ${e instanceof Error ? e.message : String(e)}`)
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  const removeAgent = (slug: string) => {
-    if (!state.aiResult) return
-    setState({
-      aiResult: {
-        ...state.aiResult,
-        agents: state.aiResult.agents.filter((a) => a.slug !== slug),
-      },
-    })
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="rounded border border-violet-500/30 bg-violet-500/[0.06] px-3 py-2 text-xs text-foreground/80 flex gap-2 items-start">
-        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-violet-500 text-violet-950">
-          AI
-        </span>
-        <span>
-          Claude generates a 3-5 agent lineup tailored to your goal — names, role titles, system prompts, recommended LLM/tools per role.
-          You review, edit, then commit. <strong>Requires an Anthropic API key</strong> in workspace credentials.
-        </span>
-      </div>
-
-      <div className="rounded-lg border border-white/10 bg-gradient-to-b from-violet-500/[0.03] to-transparent p-3.5">
-        <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-2">
-          What should this crew accomplish?
-        </label>
-        <textarea
-          value={state.aiPrompt}
-          onChange={(e) => setState({ aiPrompt: e.target.value })}
-          placeholder="Describe the goal in 1-3 sentences…"
-          rows={3}
-          className="w-full bg-zinc-950 border border-white/15 rounded p-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-400/20 resize-none"
-        />
-        <div className="flex flex-wrap gap-1.5 mt-2.5">
-          {AI_EXAMPLES.map((ex) => (
-            <button
-              key={ex}
-              type="button"
-              onClick={() => setState({ aiPrompt: ex })}
-              className="px-2.5 py-1 rounded-full text-[11px] bg-card border border-white/10 text-foreground/70 hover:border-violet-400 hover:text-violet-300 transition-colors text-left max-w-[260px] truncate"
-              title={ex}
-            >
-              {ex}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 mt-3">
-          <button
-            type="button"
-            onClick={generate}
-            disabled={generating || state.aiPrompt.trim().length < 10}
-            className="px-3.5 py-1.5 rounded text-sm font-medium bg-violet-500 hover:bg-violet-400 text-violet-950 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            {generating ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {generating ? "Generating…" : (state.aiResult ? "Regenerate" : "Generate lineup")}
-          </button>
-          <span className="text-[11px] text-muted-foreground">~5 sec · uses 1 LLM call</span>
-        </div>
-      </div>
-
-      {state.aiResult && (
-        <div className="rounded-lg border border-violet-500/30 bg-violet-500/[0.04] p-3.5">
-          <div className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-violet-500/15 text-violet-300 mb-2">
-            <Sparkles className="h-2.5 w-2.5" /> AI generated · claude-sonnet
-          </div>
-          <h4 className="text-sm font-semibold">{state.aiResult.crew_name}</h4>
-          <p className="text-xs text-muted-foreground mt-1 mb-3">{state.aiResult.description}</p>
-
-          <div className="rounded-lg border border-white/10 bg-card overflow-hidden">
-            {state.aiResult.agents.map((a, i) => (
-              <div
-                key={a.slug || i}
-                className={cn(
-                  "px-3 py-2 flex items-center gap-3",
-                  i > 0 && "border-t border-dashed border-white/5",
-                )}
-              >
-                <div className={cn(
-                  "h-6 w-6 rounded text-[11px] font-semibold flex items-center justify-center shrink-0",
-                  a.agent_role === "LEAD" ? "bg-amber-500/15 text-amber-300" : "bg-violet-500/15 text-violet-300",
-                )}>
-                  {a.name.slice(0, 1).toUpperCase()}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[12px] font-medium leading-tight">{a.name}</div>
-                  <div className="text-[10px] text-muted-foreground leading-tight truncate">{a.role_title}</div>
-                </div>
-                <span className={cn(
-                  "text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0",
-                  a.agent_role === "LEAD"
-                    ? "bg-amber-500/15 text-amber-300"
-                    : "bg-white/5 text-muted-foreground",
-                )}>
-                  {a.agent_role}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => removeAgent(a.slug)}
-                  className="text-[11px] text-muted-foreground hover:text-red-400 px-1"
-                  title="Remove from lineup"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="text-[11px] text-muted-foreground mt-2 text-right">
-            {state.aiResult.agents.length} agents will be created
-          </div>
-        </div>
-      )}
     </div>
   )
 }
