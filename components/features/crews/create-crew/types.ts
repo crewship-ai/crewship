@@ -4,14 +4,47 @@ export type WizardStep = 1 | 2 | 3 | 4 | 5
 
 export type LineupMode = "browse" | "empty"
 
+/**
+ * Allowed crew color palette IDs. Mirrors lib/crew-icon.ts → GRADIENT_PALETTES.
+ * Backend stores this as a free-form `color TEXT` column but per CLAUDE.md
+ * convention only these 8 values are valid; tightening the type prevents
+ * arbitrary strings (legacy hex codes, typos) from sneaking into wizard state
+ * at compile time.
+ */
+export type CrewColor =
+  | "blue" | "emerald" | "violet" | "amber"
+  | "rose" | "cyan" | "lime" | "fuchsia"
+
+const CREW_COLORS: readonly CrewColor[] = [
+  "blue", "emerald", "violet", "amber",
+  "rose", "cyan", "lime", "fuchsia",
+] as const
+
+/** Narrow an arbitrary string (e.g. from a picker callback or template DB row)
+ *  into the strict CrewColor union. Falls back to "blue" for legacy hex codes
+ *  or unknown values so wizard state stays well-typed end-to-end. */
+export function asCrewColor(v: string | null | undefined): CrewColor {
+  if (v && (CREW_COLORS as readonly string[]).includes(v)) return v as CrewColor
+  return "blue"
+}
+
+/**
+ * Crew icon name (lucide-react). The full catalog lives in lib/crew-icon.ts
+ * (CREW_ICONS) and is too large to enumerate as a literal union; we keep this
+ * as a `string` newtype plus a runtime check on entry (CrewIconPickerDialog
+ * + step-identity wizard won't write anything not in CREW_ICONS) instead of
+ * forcing every test fixture to pull in the 250-entry tuple type.
+ */
+export type CrewIconName = string
+
 export interface WizardState {
   // Step 1 — Identity
   name: string
   slug: string
   slugTouched: boolean
   description: string
-  icon: string
-  color: string
+  icon: CrewIconName
+  color: CrewColor
 
   // Step 2 — Lineup
   mode: LineupMode

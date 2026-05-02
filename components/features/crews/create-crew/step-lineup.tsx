@@ -5,7 +5,7 @@ import { Search, BookOpen, FileX2, Lock } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import type { CrewTemplate } from "./api"
-import type { WizardState } from "./types"
+import { asCrewColor, type WizardState } from "./types"
 
 interface Props {
   state: WizardState
@@ -142,7 +142,7 @@ function BrowseTemplates({ state, setState }: Props) {
         slug: picked.slug,
         description: state.description || picked.description || "",
         icon: picked.icon || state.icon,
-        color: picked.color || state.color,
+        color: asCrewColor(picked.color) || state.color,
       })
     }
   }, [picked, state.name, state.slug, state.description, state.icon, state.color, setState])

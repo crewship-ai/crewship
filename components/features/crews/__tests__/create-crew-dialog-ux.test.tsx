@@ -345,6 +345,13 @@ describe("<CreateCrewDialog> — Skip-to-defaults clears Step 4", () => {
       expect(body).not.toHaveProperty("runtime_image")
       expect(body).not.toHaveProperty("devcontainer_config")
       expect(body).not.toHaveProperty("mise_config")
+      // mcp_config_json is patched separately when set; clearing state.mcpConfig
+      // means hasMCPOverride() returns false and no PATCH fires.
+      expect(body).not.toHaveProperty("mcp_config_json")
+      const patches = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === "PATCH",
+      )
+      expect(patches).toHaveLength(0)
     })
   })
 })

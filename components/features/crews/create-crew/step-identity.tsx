@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Pencil } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { CrewIconPickerDialog } from "../crew-icon-picker-dialog"
-import type { WizardState } from "./types"
+import { asCrewColor, type WizardState } from "./types"
 
 interface Props {
   state: WizardState
@@ -117,7 +117,7 @@ export function StepIdentity({ state, setState }: Props) {
         icon={state.icon}
         color={state.color}
         onSave={({ icon, color }) => {
-          setState({ icon, color })
+          setState({ icon, color: asCrewColor(color) })
         }}
       />
     </>
