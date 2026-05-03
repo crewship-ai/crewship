@@ -101,7 +101,7 @@ type JudgeInterface interface {
 
 `EnsembleJudge` runs the same grade multiple times with **rubric-shuffle anti-bias** (permuting rubric order per invocation) and aggregates via median + stddev. Stddev > 0.25 lowers the verdict's `Confidence` and flips `HumanEscalate = true`.
 
-Used by [Reflection](/guides/reflection) to synthesize critiques and by future eval rubrics.
+Used by future eval rubrics and crew-to-crew critique flows.
 
 ## CLI
 
@@ -122,7 +122,6 @@ Full reference: [`crewship eval`](/cli/eval).
 
 ## Related
 
-- [Reflection](/guides/reflection) -- uses the quartermaster `Judge` for ensemble grading.
 - [Crew Journal](/guides/crew-journal) -- `eval.run_started`, `eval.metric`, `eval.regression_detected`.
 - [Episodic memory](/guides/episodic-memory) -- embeds regression events for future recall.
 - [`crewship eval`](/cli/eval), [Eval API](/api-reference/eval).

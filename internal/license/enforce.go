@@ -6,88 +6,30 @@ import (
 	"fmt"
 )
 
-// CheckCrewLimit verifies the workspace hasn't exceeded its crew limit.
-func (l *License) CheckCrewLimit(ctx context.Context, db *sql.DB, workspaceID string) error {
-	max := l.MaxCrews()
-	if max <= 0 {
-		return nil
-	}
+// v0.1 ships fully Apache-2.0 with no edition gating, so all enforcement
+// returns nil. The package is preserved as a kostra (skeleton) so v0.2
+// can re-enable tiered limits without re-introducing types and call
+// sites; flip the early-return to a real count check when that lands.
 
-	var count int
-	err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL",
-		workspaceID,
-	).Scan(&count)
-	if err != nil {
-		return fmt.Errorf("count crews: %w", err)
-	}
-
-	if count >= max {
-		return &LimitError{
-			Resource: "crews",
-			Current:  count,
-			Maximum:  max,
-			Edition:  l.Edition(),
-		}
-	}
+// CheckCrewLimit is a no-op in v0.1 — see file-level note.
+func (l *License) CheckCrewLimit(_ context.Context, _ *sql.DB, _ string) error {
 	return nil
 }
 
-// CheckAgentLimit verifies a crew hasn't exceeded its agent limit.
-func (l *License) CheckAgentLimit(ctx context.Context, db *sql.DB, crewID string) error {
-	max := l.MaxAgentsPerCrew()
-	if max <= 0 {
-		return nil
-	}
-
-	var count int
-	err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM agents WHERE crew_id = ? AND deleted_at IS NULL",
-		crewID,
-	).Scan(&count)
-	if err != nil {
-		return fmt.Errorf("count agents: %w", err)
-	}
-
-	if count >= max {
-		return &LimitError{
-			Resource: "agents per crew",
-			Current:  count,
-			Maximum:  max,
-			Edition:  l.Edition(),
-		}
-	}
+// CheckAgentLimit is a no-op in v0.1 — see file-level note.
+func (l *License) CheckAgentLimit(_ context.Context, _ *sql.DB, _ string) error {
 	return nil
 }
 
-// CheckMemberLimit verifies the workspace hasn't exceeded its member limit.
-func (l *License) CheckMemberLimit(ctx context.Context, db *sql.DB, workspaceID string) error {
-	max := l.MaxMembers()
-	if max <= 0 {
-		return nil
-	}
-
-	var count int
-	err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ?",
-		workspaceID,
-	).Scan(&count)
-	if err != nil {
-		return fmt.Errorf("count members: %w", err)
-	}
-
-	if count >= max {
-		return &LimitError{
-			Resource: "workspace members",
-			Current:  count,
-			Maximum:  max,
-			Edition:  l.Edition(),
-		}
-	}
+// CheckMemberLimit is a no-op in v0.1 — see file-level note.
+func (l *License) CheckMemberLimit(_ context.Context, _ *sql.DB, _ string) error {
 	return nil
 }
 
-// LimitError is returned when a license limit is exceeded.
+// LimitError is returned when a license limit is exceeded. v0.1 never
+// constructs one, but the type and IsLimitError() are kept so the 402
+// handlers in agents_create.go / workspaces_membership.go don't need
+// to change shape.
 type LimitError struct {
 	Resource string
 	Current  int
@@ -98,7 +40,7 @@ type LimitError struct {
 // Error returns a human-readable message describing which license limit was exceeded.
 func (e *LimitError) Error() string {
 	return fmt.Sprintf(
-		"license limit reached: %d/%d %s (%s edition). Upgrade your license for higher limits.",
+		"license limit reached: %d/%d %s (%s edition).",
 		e.Current, e.Maximum, e.Resource, e.Edition,
 	)
 }

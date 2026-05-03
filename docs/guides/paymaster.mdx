@@ -249,7 +249,7 @@ VALUES ('bl_default_daily', 'ws_123', 'workspace', 'ws_123', 'day', 250.0, 'hard
 
 ## Sidecar coverage of agent CLI calls
 
-Paymaster wraps `llm.Provider.Complete()` for everything called from the Go side (summaries, Keeper, consolidation, reflection, quartermaster judge). For agent CLI calls (`claude`, `codex`, `gemini`, `cursor-agent`, `droid`) the sidecar is the metering point: the proxy intercepts the outbound HTTPS request, parses the response body for usage tokens, harvests rate-limit headers, and async-POSTs a Call to `POST /api/v1/internal/cost/record`. The handler validates auth and calls `Record` + `EnforceQuota`.
+Paymaster wraps `llm.Provider.Complete()` for everything called from the Go side (summaries, Keeper, consolidation, quartermaster judge). For agent CLI calls (`claude`, `gemini`, `cursor-agent`, `droid`) the sidecar is the metering point: the proxy intercepts the outbound HTTPS request, parses the response body for usage tokens, harvests rate-limit headers, and async-POSTs a Call to `POST /api/v1/internal/cost/record`. The handler validates auth and calls `Record` + `EnforceQuota`.
 
 What the sidecar can and cannot see:
 

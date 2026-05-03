@@ -30,12 +30,12 @@ const (
 )
 
 // Role maps an agent role string to the Scope it unlocks. Invariant:
-// LEAD and COORDINATOR get crew_shared; anything else (AGENT default) is
-// confined to own. Centralizing this mapping keeps the policy decision
-// from drifting across call sites.
+// LEAD gets crew_shared; anything else (AGENT default) is confined to
+// own. Centralizing this mapping keeps the policy decision from
+// drifting across call sites.
 func ScopeForRole(role string) Scope {
 	switch role {
-	case "LEAD", "COORDINATOR":
+	case "LEAD":
 		return ScopeCrewShared
 	default:
 		return ScopeOwn

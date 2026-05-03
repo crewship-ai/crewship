@@ -1,30 +1,18 @@
 ---
 title: "Memory System"
-description: "4-tier persistent memory (agent, crew, workspace, session) with FTS5 search, dynamic budget allocation, and multi-scope queries."
+description: "3-tier persistent memory (agent, crew, session) with FTS5 search, dynamic budget allocation, and multi-scope queries."
 icon: "brain"
 ---
 
-<Note>
-  The **workspace memory** tier is read and written only by the deprecated
-  Captain and COORDINATOR. See [Captain](/guides/captain) and
-  [Coordinator](/guides/coordinator) for deprecation context. Agent, crew,
-  and session memory tiers are **not** deprecated.
-</Note>
-
 # Memory System
 
-Crewship has a 4-tier memory hierarchy that gives agents persistent knowledge across sessions, shared context within crews, and organization-wide visibility for coordinators.
+Crewship has a 3-tier memory hierarchy that gives agents persistent knowledge across sessions and shared context within crews.
 
 Memory is **local-first** with zero external dependencies. No embedding APIs, no vector databases, no cloud services. Search is powered by SQLite FTS5 (BM25 ranking), running sub-millisecond on thousands of chunks.
 
 ## Memory Tiers
 
 ```
-WORKSPACE MEMORY (Coordinator/Captain)
-  Host: ~/.crewship/memory/{workspace-id}/
-  Who writes: Coordinator        Who reads: Coordinator only
-  Budget: 20% of system prompt
-
 CREW SHARED MEMORY (Lead-owned)
   Container: /crew/shared/.memory/
   Who writes: Lead               Who reads: all agents in crew
@@ -41,8 +29,12 @@ SESSION MEMORY (ephemeral)
 ```
 
 <Tip>
-Budget is **dynamic**. If crew memory is empty, the agent reclaims the full budget. If workspace memory is empty (non-coordinator), crew and agent split the whole budget.
+Budget is **dynamic**. If crew memory is empty, the agent reclaims the full budget for the agent tier.
 </Tip>
+
+<Note>
+A workspace-scope memory tier (org-level strategy, cross-crew knowledge) is on the v0.2 roadmap.
+</Note>
 
 ## Enabling Memory
 
@@ -98,19 +90,6 @@ Lives at `/crew/shared/.memory/` inside every agent container in the crew. The L
 The Lead's sidecar owns the crew FTS5 index and reindexes it every 60 seconds automatically. Non-lead agents search crew memory via the sidecar HTTP API.
 </Note>
 
-### Workspace Memory
-
-Lives on the host at `~/.crewship/memory/{workspace-id}/`. Only the Coordinator (Captain) agent reads and writes workspace memory.
-
-```
-~/.crewship/memory/{workspace-id}/
-  WORKSPACE.md          # Org-level strategy, KPIs, policies
-  crews/
-    dev.md              # Crew summaries
-    marketing.md
-  index.sqlite          # FTS5 index
-```
-
 ## How It Works at Runtime
 
 ### 1. Writing Memory
@@ -142,11 +121,6 @@ When a session starts, the orchestrator reads memory files and injects them into
 ...crew conventions and decisions...
 [END CREW SHARED MEMORY]
 
-[WORKSPACE MEMORY]                    (Coordinator only)
---- WORKSPACE.md ---
-...org-level strategy...
-[END WORKSPACE MEMORY]
-
 [MEMORY INSTRUCTIONS]
 ...instructions on how to write memory...
 [END MEMORY INSTRUCTIONS]
@@ -174,24 +148,18 @@ curl localhost:9119/memory/search \
 
 The orchestrator allocates a character budget (default 15,000 chars) across memory tiers. Empty tiers reclaim their budget for lower tiers.
 
-| Agent Role | Workspace | Crew (max) | Agent (remainder) |
-|------------|-----------|------------|-------------------|
-| **Coordinator** | 20% | 40% of remaining | rest |
-| **Lead** (in crew) | -- | 40% | rest |
-| **Agent** (in crew) | -- | 40% | rest |
-| **Solo agent** | -- | -- | 100% |
+| Agent Role | Crew (max) | Agent (remainder) |
+|------------|------------|-------------------|
+| **Lead** (in crew) | 40% | rest |
+| **Agent** (in crew) | 40% | rest |
+| **Single-agent crew** | -- | 100% |
 
 <Accordion title="Budget examples">
-**Coordinator with all tiers populated:**
-- Workspace: 3,000 chars (20%)
-- Crew: 4,800 chars (40% of 12,000 remaining)
-- Agent: 7,200 chars
-
 **Lead with small crew memory:**
 - Crew: 2,000 chars (actual content, under 40% cap)
 - Agent: 13,000 chars (reclaimed from crew)
 
-**Solo agent (no crew):**
+**Single-agent crew (no peers, empty crew memory):**
 - Agent: 15,000 chars (full budget)
 </Accordion>
 
@@ -282,9 +250,6 @@ crewship memory reindex -p /path/to/agents/lead/.memory -S agent
 # Search crew shared memory
 crewship memory search "deployment" -p /path/to/crew-root -S crew
 
-# Check workspace memory status
-crewship memory status -p ~/.crewship/memory/ws-123 -S workspace
-
 # JSON output for scripting
 crewship memory search "PostgreSQL" -p /path -S crew -F json
 ```
@@ -292,20 +257,18 @@ crewship memory search "PostgreSQL" -p /path -S crew -F json
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--path` | `-p` | Base path (meaning depends on scope) |
-| `--scope` | `-S` | `agent`, `crew`, `workspace`, or `all` |
+| `--scope` | `-S` | `agent` or `crew` (workspace scope ships in v0.2) |
 | `--limit` | `-l` | Max results (search only, default 10) |
 | `--format` | `-F` | `table` or `json` (search only) |
 
 ## Access Control
 
-| Operation | Agent | Lead | Coordinator |
-|-----------|-------|------|-------------|
-| Read own agent memory | Yes | Yes | Yes |
-| Write own agent memory | Yes | Yes | Yes |
-| Read crew shared memory | Yes | Yes | Yes |
-| Write crew shared memory | No | **Yes** | No |
-| Read workspace memory | No | No | **Yes** |
-| Write workspace memory | No | No | **Yes** |
+| Operation | Agent | Lead |
+|-----------|-------|------|
+| Read own agent memory | Yes | Yes |
+| Write own agent memory | Yes | Yes |
+| Read crew shared memory | Yes | Yes |
+| Write crew shared memory | No | **Yes** |
 
 <Warning>
 Agents in one crew cannot access another crew's shared memory. Container bind mounts enforce this isolation at the filesystem level.

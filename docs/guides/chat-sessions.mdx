@@ -25,7 +25,7 @@ The state of which tab is open in the right panel, which message is being edited
 
 ## Sessions
 
-A "session" is a `chats` row. Sessions persist across page reloads, browser sessions, and operators (any user with read access to the agent can see its history). Migration v59 added the `chats.origin` column (DB-side; the Prisma TypeScript schema is intentionally not regenerated for this column — Prisma is types-only in this project, see CLAUDE.md). The Go handler at `POST /api/v1/agents/{agentId}/chats` accepts an `origin` field on the body and whitelists these values:
+A "session" is a `chats` row. Sessions persist across page reloads, browser sessions, and operators (any user with read access to the agent can see its history). Migration v59 added the `chats.origin` column (DB-side; the Prisma TypeScript schema is intentionally not regenerated for this column — Prisma is types-only in this project). The Go handler at `POST /api/v1/agents/{agentId}/chats` accepts an `origin` field on the body and whitelists these values:
 
 | `origin` value | When written |
 |---|---|

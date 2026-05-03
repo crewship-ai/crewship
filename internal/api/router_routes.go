@@ -258,15 +258,6 @@ func (r *Router) registerRoutes() {
 	// Issue Sub-issues
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks", authed(wsCtx(http.HandlerFunc(issues.ListSubIssues))))
 
-	// Mission Proposals (workspace-scoped)
-	proposals := NewProposalHandler(r.db, r.hub, missionEngineForPublic, r.logger)
-	r.mux.Handle("GET /api/v1/mission-proposals", authed(wsCtx(http.HandlerFunc(proposals.List))))
-	r.mux.Handle("POST /api/v1/mission-proposals", authed(wsCtx(http.HandlerFunc(proposals.Create))))
-	r.mux.Handle("GET /api/v1/mission-proposals/{proposalId}", authed(wsCtx(http.HandlerFunc(proposals.Get))))
-	r.mux.Handle("POST /api/v1/mission-proposals/{proposalId}/approve", authed(wsCtx(http.HandlerFunc(proposals.Approve))))
-	r.mux.Handle("POST /api/v1/mission-proposals/{proposalId}/reject", authed(wsCtx(http.HandlerFunc(proposals.Reject))))
-	r.mux.Handle("DELETE /api/v1/mission-proposals/{proposalId}", authed(wsCtx(http.HandlerFunc(proposals.Delete))))
-
 	// Agents (require workspace context)
 	r.mux.Handle("GET /api/v1/agents/crews-status", authed(wsCtx(http.HandlerFunc(agents.CrewsStatus))))
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
@@ -458,24 +449,6 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/oauth/discover", authed(http.HandlerFunc(oauth.Discover)))
 	r.mux.Handle("POST /api/v1/oauth/auto-connect", authed(wsCtx(http.HandlerFunc(oauth.AutoConnect))))
 
-	// Captain (require auth + workspace context)
-	//
-	// Deprecated: Captain routes back the deprecated Captain feature (see
-	// internal/api/captain.go). Kept registered for backward compatibility
-	// with existing UI/CLI clients. Do not add new routes here.
-	captain := NewCaptainHandler(r.db, r.logger)
-	captain.SetJournal(r.Journal())
-	if r.captainLLM != nil {
-		captain.SetProvider(r.captainLLM)
-	}
-	if r.captainMissionEngine != nil {
-		captain.SetMissionEngine(r.captainMissionEngine)
-	}
-	r.mux.Handle("POST /api/v1/captain/chat", authed(wsCtx(http.HandlerFunc(captain.Chat))))
-	r.mux.Handle("GET /api/v1/captain/context", authed(wsCtx(http.HandlerFunc(captain.Context))))
-	r.mux.Handle("GET /api/v1/captain/history", authed(wsCtx(http.HandlerFunc(captain.History))))
-	r.mux.Handle("DELETE /api/v1/captain/history", authed(wsCtx(http.HandlerFunc(captain.ClearHistory))))
-
 	// Onboarding (require auth, no workspace context needed)
 	onboardingSvc := services.NewOnboardingService(r.db, r.logger, generateCUID)
 	onboarding := NewOnboardingHandler(r.db, onboardingSvc, r.logger)
@@ -651,12 +624,6 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/internal/issues", internalAuth(http.HandlerFunc(internalIssues.Create)))
 	r.mux.Handle("PATCH /api/v1/internal/issues/{identifier}", internalAuth(http.HandlerFunc(internalIssues.UpdateStatus)))
 	r.mux.Handle("POST /api/v1/internal/issues/{identifier}/comments", internalAuth(http.HandlerFunc(internalIssues.CreateComment)))
-
-	// Internal mission proposal routes (called by sidecar on behalf of COORDINATOR agents)
-	internalProposals := NewProposalHandler(r.db, r.hub, missionEngineForInternal, r.logger)
-	r.mux.Handle("GET /api/v1/internal/mission-proposals", internalAuth(internalWsCtx(http.HandlerFunc(internalProposals.List))))
-	r.mux.Handle("POST /api/v1/internal/mission-proposals", internalAuth(internalWsCtx(http.HandlerFunc(internalProposals.Create))))
-	r.mux.Handle("GET /api/v1/internal/mission-proposals/{proposalId}", internalAuth(internalWsCtx(http.HandlerFunc(internalProposals.Get))))
 
 	// Crew assignments (public, authenticated)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/assignments", authed(wsCtx(http.HandlerFunc(assign.List))))

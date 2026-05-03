@@ -61,8 +61,6 @@ async function main() {
     await prisma.agent.deleteMany()
     await prisma.credential.deleteMany()
     await prisma.skill.deleteMany()
-    await prisma.subscription.deleteMany()
-    await prisma.plan.deleteMany()
     await prisma.crewMember.deleteMany()
     await prisma.crew.deleteMany()
     await prisma.workspaceMember.deleteMany()
@@ -840,38 +838,10 @@ NEVER ACCEPTABLE:
     }
   }
 
-  // Step 12: Plan (max_agents bumped to 10 for 8-agent team)
-  console.log("📋 Seeding plans...")
-  const freePlan = await prisma.plan.upsert({
-    where: { tier: "FREE" },
-    update: { max_agents: 10 },
-    create: {
-      tier: "FREE",
-      display_name: "Community",
-      max_agents: 10,
-      max_crews: 3,
-      max_skills: 20,
-      max_credentials: 10,
-      max_members: 3,
-      price_monthly: 0,
-    },
-  })
-  console.log(`  ✓ Plan: ${freePlan.display_name} (${freePlan.tier})`)
+  // Plan + Subscription seeding removed in v0.1 — billing tiers are on
+  // the v0.2 roadmap.
 
-  // Step 12: Subscription
-  console.log("💳 Seeding subscription...")
-  await prisma.subscription.upsert({
-    where: { workspace_id: org.id },
-    update: { plan_id: freePlan.id },
-    create: {
-      workspace_id: org.id,
-      plan_id: freePlan.id,
-      status: "ACTIVE",
-    },
-  })
-  console.log(`  ✓ ${org.name} → ${freePlan.display_name} plan`)
-
-  // Step 13: Sample AuditLog entries
+  // Sample AuditLog entries
   console.log("📝 Seeding audit log entries...")
   await prisma.auditLog.createMany({
     data: [

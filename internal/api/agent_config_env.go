@@ -1,14 +1,13 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strings"
 )
 
 // resolveCrewMembers fetches peer agents within the same crew and enriches
-// LEAD/COORDINATOR agents with MCP integration info.
+// LEAD agents with MCP integration info.
 func (h *InternalHandler) resolveCrewMembers(r *http.Request, data *agentConfigData, agentID string) ([]crewMemberEntry, error) {
 	crewMembers := []crewMemberEntry{}
 	if !data.crewID.Valid {
@@ -43,8 +42,7 @@ func (h *InternalHandler) resolveCrewMembers(r *http.Request, data *agentConfigD
 	if data.agentRole.Valid && data.agentRole.String != "" {
 		roleStr = data.agentRole.String
 	}
-	// COORDINATOR branch is deprecated (see [BuildCoordinatorContext]); retained for backward compat.
-	if (roleStr == "LEAD" || roleStr == "COORDINATOR") && len(crewMembers) > 0 {
+	if roleStr == "LEAD" && len(crewMembers) > 0 {
 		memberIdx := make(map[string]int, len(crewMembers))
 		placeholders := make([]string, len(crewMembers))
 		args := make([]interface{}, len(crewMembers))
@@ -80,109 +78,6 @@ func (h *InternalHandler) resolveCrewMembers(r *http.Request, data *agentConfigD
 	}
 
 	return crewMembers, nil
-}
-
-// resolveCoordinatorCrews loads all workspace crews and their agents for COORDINATOR agents.
-//
-// Historical note: this used to be 1 + N + N*M queries (one per crew, then a
-// scalar chat subquery per agent row) — a classic N+1. It's now a single query
-// that LEFT JOINs crews → agents, preserving the "empty crew still listed"
-// semantic, and the remaining chat lookup is an O(log n) index hit on
-// idx_chat_agent_status_created(agent_id, status, created_at DESC). Grouping
-// by crew happens in Go since rows come in deterministic order.
-//
-// Ported from PR #132 after the feat/code-quality file-splits refactor moved
-// this function out of agent_config_resolver.go.
-//
-// Deprecated: COORDINATOR role is deprecated (2026-04-16). See
-// [BuildCoordinatorContext] in internal/orchestrator/lead.go. Retained for
-// backward compat with existing COORDINATOR agents.
-func (h *InternalHandler) resolveCoordinatorCrews(r *http.Request, data *agentConfigData) []crewInfoEntry {
-	roleStr := "AGENT"
-	if data.agentRole.Valid && data.agentRole.String != "" {
-		roleStr = data.agentRole.String
-	}
-	if roleStr != "COORDINATOR" {
-		return nil
-	}
-
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT c.id, c.name, c.slug,
-		       a.id, a.name, a.slug,
-		       COALESCE(a.role_title, ''), COALESCE(a.description, ''),
-		       COALESCE(a.status, ''),
-		       COALESCE((
-		           SELECT ch.id FROM chats ch
-		           WHERE ch.agent_id = a.id AND ch.status = 'ACTIVE'
-		           ORDER BY ch.created_at DESC LIMIT 1
-		       ), '')
-		FROM crews c
-		LEFT JOIN agents a ON a.crew_id = c.id AND a.deleted_at IS NULL
-		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
-		-- c.id is the tie-breaker: the schema only has UNIQUE(workspace_id, slug),
-		-- so two crews can share a name. Without this, same-named crews would
-		-- interleave their agent rows and the streaming grouping below would
-		-- produce duplicate crew entries.
-		ORDER BY c.name, c.id, a.name`, data.wsID)
-	if err != nil {
-		h.logger.Error("query crews+agents for coordinator", "error", err)
-		return nil
-	}
-	defer rows.Close()
-
-	// Rows arrive ordered by crew name, so we can stream them into buckets
-	// keyed on the current crew ID without building a map.
-	var allCrews []crewInfoEntry
-	var currentCrewID string
-	for rows.Next() {
-		var crewID, crewName, crewSlug string
-		var agentID, agentName, agentSlug sql.NullString
-		var roleTitle, description, status, chatID string
-		if err := rows.Scan(
-			&crewID, &crewName, &crewSlug,
-			&agentID, &agentName, &agentSlug,
-			&roleTitle, &description, &status, &chatID,
-		); err != nil {
-			h.logger.Error("scan crew+agent row", "error", err)
-			continue
-		}
-
-		if crewID != currentCrewID {
-			// Members is deliberately initialized as a non-nil empty slice so
-			// crews with zero members serialize as `"members": []` in JSON
-			// (not `"members": null`). The frontend consumers consistently
-			// expect an array; matching that contract here avoids a null
-			// check on every caller.
-			allCrews = append(allCrews, crewInfoEntry{
-				ID:      crewID,
-				Name:    crewName,
-				Slug:    crewSlug,
-				Members: []crewMemberEntry{},
-			})
-			currentCrewID = crewID
-		}
-
-		// LEFT JOIN: crews with no agents produce a single row with NULL
-		// agent_id. Skip that row — the crew entry is already recorded.
-		if !agentID.Valid {
-			continue
-		}
-
-		ci := &allCrews[len(allCrews)-1]
-		ci.Members = append(ci.Members, crewMemberEntry{
-			ID:          agentID.String,
-			Name:        agentName.String,
-			Slug:        agentSlug.String,
-			RoleTitle:   roleTitle,
-			Description: description,
-			Status:      status,
-			ChatID:      chatID,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (coordinator crews)", "error", err)
-	}
-	return allCrews
 }
 
 // resolveNetworkPolicy determines the network mode and allowed domains for the agent's crew.

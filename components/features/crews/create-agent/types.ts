@@ -135,6 +135,6 @@ export function isIdentityValid(draft: AgentDraft): boolean {
   if (name.length < 2 || name.length > 100) return false
   if (draft.slug.length < 2 || draft.slug.length > 50) return false
   if (!/^[a-z0-9-]{2,}$/.test(draft.slug)) return false
-  if (draft.agentRole !== "COORDINATOR" && !draft.crewSlug) return false
+  if (!draft.crewSlug) return false
   return true
 }

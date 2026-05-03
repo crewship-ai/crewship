@@ -50,8 +50,6 @@ type ChatInfo struct {
 	WorkspaceID        string
 	MemoryEnabled      bool
 	CrewMembers        []orchestrator.CrewMember
-	AllCrews           []orchestrator.CrewInfo       //nolint:staticcheck // SA1019: COORDINATOR backward compat — keep until COORDINATOR role is fully retired.
-	ActiveMissions     []orchestrator.MissionSummary //nolint:staticcheck // SA1019: COORDINATOR backward compat — keep until COORDINATOR role is fully retired.
 	NetworkMode        string
 	AllowedDomains     []string
 	MemoryMB           int
@@ -75,7 +73,6 @@ type ChatInfo struct {
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
 	PreferredLanguage  string
-	WorkspaceMemPath   string // Deprecated: COORDINATOR-only; see orchestrator.BuildCoordinatorContext.
 }
 
 // ProvisioningEnqueueResult mirrors api.EnqueueResult shape locally so the
@@ -222,15 +219,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
 
-	// For COORDINATOR agents (no crew), use a synthetic crew identity for container management.
-	// Deprecated: COORDINATOR role is deprecated (see orchestrator.BuildCoordinatorContext);
-	// branch retained for backward compat with existing COORDINATOR agents.
 	containerKey := info.CrewID
-	if info.AgentRole == "COORDINATOR" && info.CrewID == "" {
-		containerKey = "coordinator-" + info.WorkspaceID
-		info.CrewID = containerKey
-		info.CrewSlug = "coordinator"
-	}
 
 	// If the crew has a devcontainer config that actually needs provisioning
 	// (features / postCreateCommand / mise) but no cached image has been
@@ -445,8 +434,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		TimeoutSecs:        info.TimeoutSecs,
 		MemoryEnabled:      info.MemoryEnabled,
 		CrewMembers:        info.CrewMembers,
-		AllCrews:           info.AllCrews,
-		ActiveMissions:     info.ActiveMissions,
 		NetworkMode:        info.NetworkMode,
 		AllowedDomains:     info.AllowedDomains,
 		MemoryMB:           memoryMB,
@@ -456,7 +443,6 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
 		PreferredLanguage:  info.PreferredLanguage,
-		WorkspaceMemPath:   info.WorkspaceMemPath,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).

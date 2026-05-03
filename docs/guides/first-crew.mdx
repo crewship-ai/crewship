@@ -4,15 +4,6 @@ description: "Create a team of AI agents, assign roles and credentials, and run 
 icon: "users"
 ---
 
-<Note>
-  This guide still mentions **Captain** and the **COORDINATOR** role. Both are
-  **deprecated as of 2026-04-16** — see the [Captain guide](/guides/captain)
-  and [Coordinator guide](/guides/coordinator) for migration notes. Existing
-  references below still work for backward compatibility, but new workspaces
-  should use the CLI (`crewship crew`, `crewship agent`) or connect an
-  MCP-capable LLM client.
-</Note>
-
 # Your First Crew
 
 A **crew** is a team of AI agents that work together on tasks. Each crew runs inside a shared Docker container, and agents communicate through the sidecar proxy.
@@ -33,13 +24,12 @@ A **crew** is a team of AI agents that work together on tasks. Each crew runs in
 
 ## Agent Roles
 
-Every agent has one of three roles that determines their capabilities:
+Every agent has one of two roles that determines their capabilities:
 
 | Role | Purpose | Capabilities |
 |------|---------|-------------|
 | **AGENT** | Individual contributor | Executes assigned tasks, writes code, runs tools |
 | **LEAD** | Team orchestrator | Assigns tasks to agents, creates missions, monitors progress |
-| **COORDINATOR** *(deprecated 2026-04-16)* | Workspace-level strategist | Sees all crews, creates cross-crew missions, submits proposals |
 
 <Note>
   Roles are functional, not hierarchical. A Lead is an equal colleague with orchestration responsibility -- not a boss. This is a core Crewship philosophy (the "Crewship Adventure" ethos).
@@ -64,12 +54,11 @@ Every agent has one of three roles that determines their capabilities:
     Each agent needs:
     - **Name and slug:** Identity (e.g., "Viktor" / `viktor`)
     - **Role title:** Human-readable role (e.g., "Backend Engineer")
-    - **Agent role:** `AGENT`, `LEAD`, or `COORDINATOR`
-    - **CLI adapter:** Which coding CLI to use (`CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`, `GEMINI_CLI`)
+    - **Agent role:** `AGENT` or `LEAD`
+    - **CLI adapter:** Which coding CLI to use (`CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`)
     - **Tool profile:** Controls available tools:
       - `MINIMAL` -- Read, Search, Grep only
       - `CODING` -- Full coding tools
-      - `MESSAGING` -- Communication-focused
       - `FULL` -- All tools available
     - **System prompt:** The agent's persona and instructions
     - **Memory enabled:** Toggle persistent memory across sessions
@@ -82,25 +71,9 @@ Every agent has one of three roles that determines their capabilities:
     Settings -> Credentials -> Add Credential
     ```
 
-    Agents created from templates, via the (deprecated) Captain flow, or through the internal API have credentials auto-assigned (`autoAssignCredentials` matches on provider). Agents created via the CLI or UI assign credentials manually.
+    Agents created from templates or through the internal API have credentials auto-assigned (`autoAssignCredentials` matches on provider). Agents created via the CLI or UI assign credentials manually.
   </Step>
 </Steps>
-
-## Using Captain to Create a Crew
-
-<Warning>
-  **Deprecated (2026-04-16):** The Captain-based crew creation flow below is
-  retained for backward compat. Prefer the CLI (`crewship crew create`),
-  the Settings UI, or a crew template. See [Captain guide](/guides/captain).
-</Warning>
-
-The fastest way to create a crew is through **Captain**, the workspace AI assistant:
-
-```
-"Create an engineering crew with a lead architect and two developers"
-```
-
-Captain uses the `create_crew` and `create_agent` tools, or can apply a pre-built template with `apply_crew_template`.
 
 ## Running Your First Mission
 
@@ -163,11 +136,10 @@ For the full 2-stage breakdown, see [Architecture > System Prompt Assembly](/arc
 4. User-defined system prompt (persona)
 5. [SKILLS AVAILABLE] (injected skill playbooks)
 6. [CREW CONTEXT] (Lead only: crew member list + API docs)
-7. [COORDINATOR CONTEXT] (Coordinator only: all crews + proposal workflow)
-8. [PEER CONTEXT] (non-Lead agents: peer communication)
-9. [CONVERSATION HISTORY] (recent messages, 60% of remaining token budget)
-10. [AGENT MEMORY] (persistent memory, 40% of remaining token budget)
-11. [MEMORY INSTRUCTIONS] (how to write/read memory files)
+7. [PEER CONTEXT] (non-Lead agents: peer communication)
+8. [CONVERSATION HISTORY] (recent messages, 60% of remaining token budget)
+9. [AGENT MEMORY] (persistent memory, 40% of remaining token budget)
+10. [MEMORY INSTRUCTIONS] (how to write/read memory files)
 ```
 
 The token budget is managed with a 60/40 split: 60% for conversation history, 40% for memory context. The maximum system prompt token budget is defined in `internal/tokenutil/`.

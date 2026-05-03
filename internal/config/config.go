@@ -73,7 +73,7 @@ type IPCConfig struct {
 // ContainerConfig holds container runtime settings including provider type,
 // runtime image, resource limits, and sidecar configuration.
 type ContainerConfig struct {
-	Provider        string  `yaml:"provider"` // "docker" | "k8s"
+	Provider        string  `yaml:"provider"` // "docker" | "apple" | "auto"
 	RuntimeImage    string  `yaml:"runtime_image"`
 	DefaultRuntime  string  `yaml:"default_runtime"` // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
 	Network         string  `yaml:"network"`
@@ -105,9 +105,9 @@ type StorageConfig struct {
 	LogPath  string `yaml:"log_path"`
 }
 
-// StateConfig holds key-value state storage settings (bbolt or postgres).
+// StateConfig holds key-value state storage settings.
 type StateConfig struct {
-	Provider string `yaml:"provider"` // "bbolt" | "postgres"
+	Provider string `yaml:"provider"` // "bbolt" (postgres on the v0.2 roadmap)
 	BoltPath string `yaml:"bolt_path"`
 }
 
@@ -244,9 +244,9 @@ func Load(path string) (*Config, error) {
 }
 
 var (
-	validContainerProviders = map[string]bool{"docker": true, "apple": true, "auto": true, "k8s": true}
+	validContainerProviders = map[string]bool{"docker": true, "apple": true, "auto": true}
 	validStorageProviders   = map[string]bool{"localfs": true, "s3": true}
-	validStateProviders     = map[string]bool{"bbolt": true, "postgres": true}
+	validStateProviders     = map[string]bool{"bbolt": true}
 	validContainerRuntimes  = map[string]bool{
 		"runc": true, "runsc": true, "kata-runtime": true, "sysbox-runc": true,
 	}
@@ -262,13 +262,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("ipc.socket_path is required")
 	}
 	if !validContainerProviders[c.Container.Provider] {
-		return fmt.Errorf("container.provider must be 'docker', 'apple', 'auto', or 'k8s', got %q", c.Container.Provider)
+		return fmt.Errorf("container.provider must be 'docker', 'apple', or 'auto', got %q", c.Container.Provider)
 	}
 	if !validStorageProviders[c.Storage.Provider] {
 		return fmt.Errorf("storage.provider must be 'localfs' or 's3', got %q", c.Storage.Provider)
 	}
 	if !validStateProviders[c.State.Provider] {
-		return fmt.Errorf("state.provider must be 'bbolt' or 'postgres', got %q", c.State.Provider)
+		return fmt.Errorf("state.provider must be 'bbolt', got %q", c.State.Provider)
 	}
 	if v := c.Container.DefaultRuntime; v != "" && !validContainerRuntimes[v] {
 		return fmt.Errorf("container.default_runtime must be one of runc, runsc, kata-runtime, sysbox-runc; got %q", v)

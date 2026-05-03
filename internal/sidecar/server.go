@@ -316,18 +316,6 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/issue/create":
 				s.handleIssueCreate(w, r)
 				return
-			case r.Method == http.MethodPost && r.URL.Path == "/proposal":
-				s.handleCreateProposal(w, r)
-				return
-			case r.Method == http.MethodGet && r.URL.Path == "/proposals":
-				s.handleListProposals(w, r)
-				return
-			case r.Method == http.MethodGet && r.URL.Path == "/missions/all":
-				s.handleListAllMissions(w, r)
-				return
-			case r.Method == http.MethodGet && r.URL.Path == "/missions/all/summary":
-				s.handleAllMissionsSummary(w, r)
-				return
 			case r.Method == http.MethodGet && r.URL.Path == "/manifest":
 				s.handleGetManifest(w, r)
 				return

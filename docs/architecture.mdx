@@ -6,7 +6,7 @@ icon: "building"
 
 # Architecture
 
-Crewship is a self-hosted runtime that gives every crew of AI coding agents a shared Linux container — a real machine where they can install services, run databases, and build a complete working system. The runtime is shipped as a single Go binary with the Next.js UI embedded in it, an embedded SQLite database (PostgreSQL optional), and a sidecar proxy that handles credential access without exposing keys to the agent process.
+Crewship is a self-hosted runtime that gives every crew of AI coding agents a shared Linux container — a real machine where they can install services, run databases, and build a complete working system. The runtime is shipped as a single Go binary with the Next.js UI embedded in it, an embedded SQLite database (PostgreSQL on the v0.2 roadmap), and a sidecar proxy that handles credential access without exposing keys to the agent process.
 
 ## High-Level Architecture
 
@@ -141,7 +141,7 @@ The system prompt is built in two stages:
 **Stage 2** — Runtime context (`internal/orchestrator/orchestrator.go`):
 ```
 6. Conversation history (60% of remaining token budget)
-7. [CREW CONTEXT] (Lead) OR [COORDINATOR CONTEXT] (deprecated 2026-04-16) OR [PEER CONTEXT]
+7. [CREW CONTEXT] (Lead) OR [PEER CONTEXT]
 8. [AGENT MEMORY] (40% of remaining token budget)
 9. [MEMORY INSTRUCTIONS] — how to read/write memory files
 ```
@@ -298,7 +298,7 @@ Crewship uses SQLite in single-binary mode. Key design decisions:
 - **Driver:** `modernc.org/sqlite` (pure Go, no CGo)
 - **Migrations:** Go-only in `internal/database/migrate.go` (never Prisma migrate)
 - **Prisma:** Used only for TypeScript type generation (`pnpm db:generate`)
-- **State:** Agent run states stored in BoltDB (`bbolt`) or PostgreSQL for high-throughput deployments
+- **State:** Agent run states stored in BoltDB (`bbolt`); a PostgreSQL state provider is on the v0.2 roadmap for high-throughput deployments
 
 ## Manifest System
 
@@ -444,10 +444,6 @@ The `/journal` UI exposes this via a tab strip — `Timeline | Runs | Stats` —
 ### Container snapshots — declared intent vs actual state
 
 `devcontainer.json` is what the operator *declares* the container should look like. `container.snapshot` journal entries record what the container *actually* looks like after agents have finished a session running `apt-get install`, `pip install`, or `npm install`. The `internal/containerstate` package probes `dpkg-query -W`, `pip freeze`, `npm ls -g --json`, and `/etc/os-release` after every successful exec; the snapshot is hashed, and the orchestrator emits an entry **only** when the hash changes — so a quiet session is free. Missing probes (e.g. no `pip` in a Node-only image) are soft-fail and produce empty package lists rather than errors. See [Devcontainers](/guides/devcontainers#container-actuals).
-
-### Reflection
-
-The `internal/reflection` package implements role-based critique (Logician / Skeptic / Domain Expert) over a draft answer, then synthesises the critiques via the [Quartermaster](/guides/quartermaster) judge and feeds the result back into an Evaluator–Optimizer loop. It is provider-neutral and shares the [LLM middleware](/guides/llm-middleware) stack so its calls show up in the journal alongside everything else. See [Reflection](/guides/reflection).
 
 ### Journal emitter wiring
 
