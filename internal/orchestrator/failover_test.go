@@ -162,34 +162,60 @@ func TestBuildCLICommand(t *testing.T) {
 			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "--", "hello"},
 		},
 		{
-			"codex cli",
+			// Codex Rust port (npm @openai/codex 0.128.x): non-interactive
+			// is `codex exec --json`, NOT `codex --quiet`. --sandbox needs
+			// a value (workspace-write default for CODING profile).
+			"codex cli default (CODING-equivalent → workspace-write)",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", UserMessage: "hello"},
-			[]string{"codex", "--quiet", "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "hello"},
 		},
 		{
-			"gemini cli",
+			"codex cli minimal profile downgrades sandbox to read-only",
+			AgentRunRequest{CLIAdapter: "CODEX_CLI", ToolProfile: "MINIMAL", UserMessage: "audit"},
+			[]string{"codex", "exec", "--json", "--sandbox", "read-only", "audit"},
+		},
+		{
+			"codex cli with model override",
+			AgentRunRequest{CLIAdapter: "CODEX_CLI", LLMModel: "gpt-5", UserMessage: "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "hello"},
+		},
+		{
+			// gemini-cli has no documented --system-instruction flag in
+			// headless mode — the preamble is folded into the prompt body
+			// with [SYSTEM] / [USER] delimiters.
+			"gemini cli default",
 			AgentRunRequest{CLIAdapter: "GEMINI_CLI", UserMessage: "hello"},
-			[]string{"gemini", "--system-instruction", crewshipSystemPreamble, "-p", "hello"},
+			[]string{"gemini", "-p", "[SYSTEM]\n" + crewshipSystemPreamble + "\n\n[USER]\nhello", "--output-format", "stream-json"},
 		},
 		{
-			"gemini cli with system prompt",
-			AgentRunRequest{CLIAdapter: "GEMINI_CLI", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"gemini", "--system-instruction", crewshipSystemPreamble + "be helpful", "-p", "hello"},
+			"gemini cli with system prompt + model",
+			AgentRunRequest{CLIAdapter: "GEMINI_CLI", SystemPrompt: "be helpful", LLMModel: "gemini-2.5-pro", UserMessage: "hello"},
+			[]string{"gemini", "-p", "[SYSTEM]\n" + crewshipSystemPreamble + "be helpful" + "\n\n[USER]\nhello", "--output-format", "stream-json", "-m", "gemini-2.5-pro"},
 		},
 		{
-			"opencode",
+			// opencode flag is --format (NOT --output-format), values
+			// "default" or "json". Adapter passes --format json.
+			"opencode default",
 			AgentRunRequest{CLIAdapter: "OPENCODE", UserMessage: "hello"},
-			[]string{"opencode", "run", "hello"},
+			[]string{"opencode", "run", "--format", "json", "hello"},
 		},
 		{
+			"opencode with provider/model namespaced model",
+			AgentRunRequest{CLIAdapter: "OPENCODE", LLMModel: "anthropic/claude-sonnet-4-6", UserMessage: "hello"},
+			[]string{"opencode", "run", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "hello"},
+		},
+		{
+			// Cursor headless: --force prevents the agent from blocking on
+			// permission prompts in print mode (otherwise file edits hang).
+			// --stream-partial-output produces incremental deltas.
 			"cursor cli default",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello"},
-			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--", "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--", "hello"},
 		},
 		{
 			"cursor cli with model override",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", LLMModel: "gpt-5.5", UserMessage: "hello"},
-			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "-m", "gpt-5.5", "--", "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "-m", "gpt-5.5", "--", "hello"},
 		},
 		{
 			// Default policy is medium because the API normalises empty

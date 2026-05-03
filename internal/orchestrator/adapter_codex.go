@@ -8,38 +8,60 @@ import (
 )
 
 // codexAdapter wires OpenAI's `codex` CLI (Rust port distributed as the
-// @openai/codex npm package). Auth is BYO API key via OPENAI_API_KEY; the
-// sidecar proxy intercepts api.openai.com when sidecar mode is on.
+// @openai/codex npm package, current as of 0.128.0). Auth is BYO API key via
+// OPENAI_API_KEY.
 //
-// Status (2026-05): command shape preserved bit-for-bit from the pre-refactor
-// switch in exec.go. Stream parsing wired through ParseStreamLine but the
-// concrete event schema is implemented in parser_codex.go.
+// Canonical non-interactive form per developers.openai.com/codex/cli/reference
+// is `codex exec --json` — NOT `codex --quiet` (no such flag in the Rust port).
+// Relevant flags:
+//   - exec / e         : non-interactive subcommand
+//   - --json           : newline-delimited JSON events on stdout
+//   - --sandbox MODE   : read-only | workspace-write | danger-full-access
+//     (requires a value; bare --sandbox is rejected)
+//   - --model, -m      : override model
+//   - --output-last-message, -o FILE : write final assistant message to file
+//
+// Codex does not document a --system-prompt-equivalent flag for exec mode;
+// crewship preamble + agent persona are prepended to UserMessage at the
+// orchestrator layer (see orchestrator_run.go promptBuf assembly).
 type codexAdapter struct{}
 
 func (codexAdapter) Name() string { return "CODEX_CLI" }
 
 func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
-	cmd := []string{"codex", "--quiet"}
-	if req.ToolProfile == "CODING" {
-		cmd = append(cmd, "--sandbox")
+	cmd := []string{"codex", "exec", "--json"}
+
+	// Sandbox policy: agents that should mutate code get workspace-write,
+	// MINIMAL/CONSULTATIVE profiles get read-only. danger-full-access is
+	// never opted into automatically — it bypasses the workspace boundary.
+	sandbox := "workspace-write"
+	switch req.ToolProfile {
+	case "MINIMAL", "CONSULTATIVE":
+		sandbox = "read-only"
 	}
+	cmd = append(cmd, "--sandbox", sandbox)
+
+	if req.LLMModel != "" {
+		cmd = append(cmd, "--model", req.LLMModel)
+	}
+
 	cmd = append(cmd, req.UserMessage)
 	return cmd
 }
 
-// UseStreamJSON is false until we land per-event parsing — keeps the safe
-// raw-text fallback so Codex output is at least readable in chat. Flip to true
-// once parser_codex.go ships a parser validated against fixture output.
-func (codexAdapter) UseStreamJSON() bool { return false }
+// UseStreamJSON returns true: --json emits newline-delimited events
+// (parser_codex.go consumes them). The parser is currently a stub — until it
+// ships the live event stream falls through the parser as no-ops, which means
+// the agent surfaces no incremental UI events but the run still completes and
+// the journal entry captures the raw output for debugging.
+func (codexAdapter) UseStreamJSON() bool { return true }
 
 func (codexAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseCodexStreamJSON(line, handler)
 }
 
-// SetupSystemPrompt is a no-op for Codex pending upstream guidance on how the
-// Rust port consumes system instructions in non-interactive mode. Today the
-// crewship preamble is appended to UserMessage by orchestrator_run.go for any
-// adapter that returns nil here without a CLI flag.
+// SetupSystemPrompt is a no-op for Codex: exec mode has no documented system
+// prompt flag, so the crewship preamble is prepended to UserMessage upstream.
 func (codexAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
