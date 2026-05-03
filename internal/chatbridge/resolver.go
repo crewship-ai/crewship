@@ -396,48 +396,6 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		allowedDomains = []string{}
 	}
 
-	// Convert all_crews for COORDINATOR agents.
-	// Deprecated: COORDINATOR role is deprecated (see orchestrator.BuildCoordinatorContext).
-	// Branch retained for backward compat with existing COORDINATOR agents.
-	var allCrews []orchestrator.CrewInfo //nolint:staticcheck // SA1019: COORDINATOR backward compat
-	for _, c := range data.AllCrews {
-		ci := orchestrator.CrewInfo{ //nolint:staticcheck // SA1019: COORDINATOR backward compat
-			ID:   c.ID,
-			Name: c.Name,
-			Slug: c.Slug,
-		}
-		for _, m := range c.Members {
-			cm := orchestrator.CrewMember{
-				ID:          m.ID,
-				Name:        m.Name,
-				Slug:        m.Slug,
-				RoleTitle:   m.RoleTitle,
-				Description: m.Description,
-				Status:      m.Status,
-				ChatID:      m.ChatID,
-			}
-			for _, ig := range m.Integrations {
-				cm.Integrations = append(cm.Integrations, orchestrator.MemberIntegration{
-					Name:       ig.Name,
-					ServerName: ig.ServerName,
-					Tools:      ig.Tools,
-				})
-			}
-			ci.Members = append(ci.Members, cm)
-		}
-		allCrews = append(allCrews, ci)
-	}
-
-	var activeMissions []orchestrator.MissionSummary //nolint:staticcheck // SA1019: COORDINATOR backward compat
-	for _, m := range data.ActiveMissions {
-		activeMissions = append(activeMissions, orchestrator.MissionSummary{ //nolint:staticcheck // SA1019: COORDINATOR backward compat
-			ID:       m.ID,
-			CrewSlug: m.CrewSlug,
-			Title:    m.Title,
-			Status:   m.Status,
-		})
-	}
-
 	var mcpServers []orchestrator.MCPServerConfig
 	for _, s := range data.MCPServers {
 		cfg := orchestrator.MCPServerConfig{
@@ -532,8 +490,6 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		WorkspaceID:        data.WorkspaceID,
 		MemoryEnabled:      data.MemoryEnabled,
 		CrewMembers:        crewMembers,
-		AllCrews:           allCrews,
-		ActiveMissions:     activeMissions,
 		NetworkMode:        networkMode,
 		AllowedDomains:     allowedDomains,
 		MemoryMB:           data.MemoryMB,

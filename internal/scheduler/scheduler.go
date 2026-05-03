@@ -302,8 +302,6 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		TimeoutSecs:    info.TimeoutSecs,
 		MemoryEnabled:  info.MemoryEnabled,
 		CrewMembers:    info.CrewMembers,
-		AllCrews:       info.AllCrews,
-		ActiveMissions: info.ActiveMissions,
 		NetworkMode:    info.NetworkMode,
 		AllowedDomains: info.AllowedDomains,
 	}

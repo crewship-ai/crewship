@@ -539,22 +539,6 @@ func TestResolveChatParsesCrewMembersAndIntegrations(t *testing.T) {
 				},
 			},
 		},
-		AllCrews: []crewInfoResponse{
-			{
-				ID: "c1", Slug: "ops",
-				Members: []crewMemberResponse{
-					{
-						ID: "m2", Slug: "eva",
-						Integrations: []memberIntegrationResponse{
-							{Name: "linear", Tools: []string{"create_issue"}},
-						},
-					},
-				},
-			},
-		},
-		ActiveMissions: []missionSummaryResponse{
-			{ID: "ms1", Title: "Ship X"},
-		},
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -572,15 +556,6 @@ func TestResolveChatParsesCrewMembersAndIntegrations(t *testing.T) {
 	if len(info.CrewMembers[0].Integrations) != 1 ||
 		info.CrewMembers[0].Integrations[0].Name != "github" {
 		t.Errorf("CrewMembers integrations = %+v", info.CrewMembers[0].Integrations)
-	}
-	if len(info.AllCrews) != 1 || len(info.AllCrews[0].Members) != 1 {
-		t.Errorf("AllCrews = %+v", info.AllCrews)
-	}
-	if len(info.AllCrews[0].Members[0].Integrations) != 1 {
-		t.Errorf("AllCrews member integrations missing")
-	}
-	if len(info.ActiveMissions) != 1 {
-		t.Errorf("ActiveMissions = %+v", info.ActiveMissions)
 	}
 }
 

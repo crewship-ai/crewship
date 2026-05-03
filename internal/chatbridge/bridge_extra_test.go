@@ -378,38 +378,6 @@ func TestHandleChatMessageColdStartStatusEvents(t *testing.T) {
 	}
 }
 
-// COORDINATOR agents (no crew) get a synthetic crew identity for container management.
-// Deprecated: COORDINATOR role is deprecated (2026-04-16); test retained for regression safety.
-func TestHandleChatMessageCoordinatorSyntheticCrew(t *testing.T) {
-	t.Parallel()
-	resolver := &mockResolver{
-		info: &ChatInfo{
-			AgentID:     "agent-coord",
-			AgentSlug:   "coord",
-			AgentRole:   "COORDINATOR",
-			CrewID:      "", // no crew — bridge fabricates one
-			WorkspaceID: "ws-1",
-			CLIAdapter:  "CLAUDE_CODE",
-			ToolProfile: "CODING",
-			TimeoutSecs: 30,
-		},
-	}
-	ctr := &startingContainer{}
-	b := testBridgeWithContainer(t, resolver, ctr)
-
-	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hi", func(_ ws.ChatEvent) {})
-	if ctr.createCalls.Load() == 0 {
-		t.Error("EnsureCrewRuntime should have been called for coordinator")
-	}
-	// The bridge mutates info.CrewID/CrewSlug to the synthetic values — assert
-	// the resolver received the same instance reflecting that.
-	if resolver.info.CrewID != "coordinator-ws-1" {
-		t.Errorf("CrewID = %q, want coordinator-ws-1", resolver.info.CrewID)
-	}
-	if resolver.info.CrewSlug != "coordinator" {
-		t.Errorf("CrewSlug = %q, want coordinator", resolver.info.CrewSlug)
-	}
-}
 
 // Container provider that reports the cached container as stopped — the bridge
 // must invalidate the cache and recreate.
