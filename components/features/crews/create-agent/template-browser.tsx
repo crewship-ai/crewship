@@ -18,7 +18,6 @@ const CATEGORY_LABELS: Record<PersonaCategory, string> = {
   quality: "Quality / Testing",
   writing: "Writing",
   devops: "DevOps",
-  coordinator: "Coordinator",
   custom: "Custom",
 }
 

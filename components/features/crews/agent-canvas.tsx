@@ -43,7 +43,6 @@ import {
 const ROLE_OPTIONS = [
   { value: "AGENT", label: "Agent" },
   { value: "LEAD", label: "Lead" },
-  { value: "COORDINATOR", label: "Coordinator" },
 ] as const
 
 const TOOL_PROFILE_OPTIONS = [
@@ -563,17 +562,7 @@ export function AgentCanvas({
               <Row label="Agent role">
                 <EditableField
                   value={agent.agent_role}
-                  onSave={(v) => {
-                    // COORDINATOR is workspace-wide and must not have a
-                    // crew. Clear crew_id atomically to keep the invariant
-                    // intact (otherwise the backend may either reject the
-                    // patch or silently leave the agent in an inconsistent
-                    // state).
-                    if (v === "COORDINATOR" && agent.crew_id) {
-                      return patch({ agent_role: v, crew_id: null })
-                    }
-                    return patch({ agent_role: v })
-                  }}
+                  onSave={(v) => patch({ agent_role: v })}
                   options={[...ROLE_OPTIONS]}
                   format={(v) => ROLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
                 />
@@ -600,8 +589,8 @@ export function AgentCanvas({
             <RecentRunsCard agentId={agent.id} runs={runs} />
           </section>
 
-          {/* Crew peers (LEAD/COORDINATOR only — uses inbox.peer_messages) */}
-          {(isLead || agent.agent_role === "COORDINATOR") && peerMessages.length > 0 && (
+          {/* Crew peers (LEAD only — uses inbox.peer_messages) */}
+          {isLead && peerMessages.length > 0 && (
             <PeersCard messages={peerMessages} />
           )}
         </div>

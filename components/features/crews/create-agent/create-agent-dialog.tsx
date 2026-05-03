@@ -132,7 +132,7 @@ export function CreateAgentDialog({
 
   const seed = draft.avatarSeed || draft.slug || draft.name || "agent"
   const avatarUrl = getAgentAvatarUrl(seed, draft.avatarStyle)
-  const requiresCrew = draft.agentRole !== "COORDINATOR"
+  const requiresCrew = true
   const finalPrompt = resolveFinalPrompt(draft)
   const isPromptFromTemplate =
     draft.selectedPersona !== null &&
@@ -424,15 +424,12 @@ export function CreateAgentDialog({
                   <select
                     value={draft.agentRole}
                     onChange={(e) => {
-                      const next = { ...draft, agentRole: e.target.value as typeof draft.agentRole }
-                      if (next.agentRole === "COORDINATOR") next.crewSlug = ""
-                      setDraft(next)
+                      setDraft({ ...draft, agentRole: e.target.value as typeof draft.agentRole })
                     }}
                     className={INPUT_CLASS}
                   >
                     <option value="AGENT">Agent</option>
                     <option value="LEAD">Lead (1 per crew)</option>
-                    <option value="COORDINATOR">Coordinator (workspace-wide, no crew)</option>
                   </select>
                 </FieldShell>
               </div>

@@ -69,7 +69,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if roleVal, ok := body["agent_role"]; ok {
 		roleStr, _ := roleVal.(string)
 		if !validAgentRoles[roleStr] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT, LEAD, or COORDINATOR"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT or LEAD"})
 			return
 		}
 

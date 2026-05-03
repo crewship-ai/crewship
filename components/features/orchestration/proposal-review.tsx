@@ -163,7 +163,7 @@ export function ProposalReview({ workspaceId }: ProposalReviewProps) {
       <EmptyState
         icon={FileText}
         title="No proposals yet"
-        description="Mission proposals appear here for your review. (Note: the Coordinator/Captain flows that created proposals are deprecated — this screen is retained for future human-in-the-loop use.)"
+        description="Mission proposals appear here for your review. Retained as a primitive for future human-in-the-loop crew handoff flows."
       />
     )
   }

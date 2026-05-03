@@ -306,13 +306,6 @@ export function SettingsPageClient() {
             </PropertyRow>
             <PropertyRow label="Agent role" icon={Shield}>
               <div className="space-y-2">
-                {agentRole === "COORDINATOR" && (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-200">
-                    This agent is a <strong>COORDINATOR</strong> — a deprecated role
-                    kept for backward compatibility. Selecting Agent or Lead below
-                    will migrate it; the choice is one-way.
-                  </div>
-                )}
                 <div className="flex flex-wrap gap-2">
                   {[
                     { id: "AGENT", label: "Agent", description: "Standard contributor" },
