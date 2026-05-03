@@ -82,8 +82,8 @@ describe("createAgentSchema", () => {
   })
 
   // Role ↔ crew_id conditional validation — mirrors backend rules in
-  // internal/api/agents.go (LEAD requires crew_id, COORDINATOR forbids it,
-  // AGENT requires one by convention).
+  // internal/api/agents.go (LEAD requires crew_id, AGENT requires one
+  // by convention). COORDINATOR was retired in v0.1.
   describe("role-based crew_id rules", () => {
     const base = { name: "Code Writer", slug: "code-writer" }
 
@@ -121,19 +121,10 @@ describe("createAgentSchema", () => {
       expect(result.success).toBe(false)
     })
 
-    it("COORDINATOR without crew_id passes (workspace-level agent)", () => {
+    it("COORDINATOR rejected (retired in v0.1)", () => {
       const result = createAgentSchema.safeParse({
         ...base,
         agent_role: "COORDINATOR",
-      })
-      expect(result.success).toBe(true)
-    })
-
-    it("COORDINATOR with crew_id fails", () => {
-      const result = createAgentSchema.safeParse({
-        ...base,
-        agent_role: "COORDINATOR",
-        crew_id: randomUUID(),
       })
       expect(result.success).toBe(false)
     })
@@ -156,17 +147,9 @@ describe("updateAgentSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("changing role to COORDINATOR with crew_id fails", () => {
-    const result = updateAgentSchema.safeParse({
-      agent_role: "COORDINATOR",
-      crew_id: randomUUID(),
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it("changing role to COORDINATOR without crew_id passes", () => {
+  it("changing role to COORDINATOR rejected (retired in v0.1)", () => {
     const result = updateAgentSchema.safeParse({ agent_role: "COORDINATOR" })
-    expect(result.success).toBe(true)
+    expect(result.success).toBe(false)
   })
 })
 

@@ -119,12 +119,9 @@ var FallbackCatalog = []CatalogEntry{
 	},
 }
 
-// SearchCatalog returns catalog entries whose Name, Description, or Category
-// contain the query string (case-insensitive). An empty query returns all
-// entries.
-//
-// Deprecated: prefer CatalogFetcher.GetCatalog combined with FilterCatalog.
-// This function still operates on the embedded fallback catalog.
+// SearchCatalog filters the embedded fallback catalog. Use
+// CatalogFetcher.GetCatalog + FilterCatalog when you need the live remote
+// catalog instead of the baked-in defaults.
 func SearchCatalog(query string) []CatalogEntry {
 	return FilterCatalog(FallbackCatalog, query)
 }

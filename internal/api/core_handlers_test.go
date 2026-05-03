@@ -2183,42 +2183,6 @@ func TestResolveAgent_LeadAgentWithCrewMembers(t *testing.T) {
 	}
 }
 
-// Deprecated: COORDINATOR role is deprecated (2026-04-16); test retained for regression safety.
-func TestResolveAgent_Coordinator(t *testing.T) {
-	ensureEncryptionKey(t)
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	// Two crews + a coordinator (no crew_id)
-	seedCrewRow(t, db, "crew-cx", wsID, "X", "x")
-	seedCrewRow(t, db, "crew-cy", wsID, "Y", "y")
-	seedAgentRow(t, db, "agent-cx", wsID, "crew-cx", "AX", "ax", "AGENT")
-	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status, cli_adapter, tool_profile, timeout_seconds, memory_enabled)
-		VALUES ('coord1', ?, NULL, 'Coord', 'coord', 'COORDINATOR', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 0)`, wsID)
-	if err != nil {
-		t.Fatalf("seed coord: %v", err)
-	}
-
-	h := NewInternalHandler(db, "tok", newTestLogger())
-	req := httptest.NewRequest("GET", "/api/v1/internal/agents/coord1/resolve", nil)
-	req.SetPathValue("agentId", "coord1")
-	w := httptest.NewRecorder()
-	h.ResolveAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("coord resolve = %d, body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp["agent_role"] != "COORDINATOR" {
-		t.Errorf("role = %v, want COORDINATOR", resp["agent_role"])
-	}
-	allCrews, ok := resp["all_crews"].([]interface{})
-	if !ok || len(allCrews) != 2 {
-		t.Errorf("all_crews = %v, want 2", allCrews)
-	}
-}
-
 func TestResolveAgent_NotFound(t *testing.T) {
 	ensureEncryptionKey(t)
 	db := setupTestDB(t)
@@ -2982,48 +2946,6 @@ func TestAgentBinding_Update_BadCredential(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Additional resolver branches: Coordinator with active missions
-// Deprecated: COORDINATOR role is deprecated (2026-04-16); tests retained for regression safety.
-// ---------------------------------------------------------------------------
-
-func TestResolveCoordinatorCrews_WithMissions(t *testing.T) {
-	ensureEncryptionKey(t)
-	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	seedCrewRow(t, db, "crew-mx", wsID, "MX", "mx")
-	seedAgentRow(t, db, "agent-mx", wsID, "crew-mx", "MX", "mx", "AGENT")
-	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status, cli_adapter, tool_profile, timeout_seconds, memory_enabled)
-		VALUES ('coord-mx', ?, NULL, 'Coord MX', 'coord-mx', 'COORDINATOR', 'IDLE', 'CLAUDE_CODE', 'CODING', 1800, 0)`, wsID)
-	if err != nil {
-		t.Fatalf("seed coord: %v", err)
-	}
-
-	// Add a mission for that crew
-	_, err = db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, 'crew-mx', 'agent-mx', 'tr-mx', 'Demo', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID)
-	if err != nil {
-		t.Fatalf("seed mission: %v", err)
-	}
-
-	h := NewInternalHandler(db, "tok", newTestLogger())
-	req := httptest.NewRequest("GET", "/api/v1/internal/agents/coord-mx/resolve", nil)
-	req.SetPathValue("agentId", "coord-mx")
-	w := httptest.NewRecorder()
-	h.ResolveAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("resolve = %d, body: %s", w.Code, w.Body.String())
-	}
-	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
-	if _, ok := resp["all_crews"]; !ok {
-		t.Errorf("missing all_crews")
-	}
-	if missions, ok := resp["active_missions"].([]interface{}); !ok || len(missions) != 1 {
-		t.Errorf("active_missions = %v, want 1", missions)
-	}
-}
 
 // Exercise Update with most fields populated to lift coverage above 65%.
 func TestCrewUpdate_AllFields(t *testing.T) {

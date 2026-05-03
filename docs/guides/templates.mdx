@@ -10,7 +10,7 @@ Crewship provides two types of templates: **crew templates** (pre-configured tea
 
 ## Crew Templates
 
-Crew templates create a complete team in one step -- a crew with pre-configured agents, roles, system prompts, and skill assignments. Deploy with `crewship template apply <slug>`, the Settings UI, or (deprecated) via the Captain tool `apply_crew_template`.
+Crew templates create a complete team in one step -- a crew with pre-configured agents, roles, system prompts, and skill assignments. Deploy with `crewship template apply <slug>` or the Settings UI.
 
 ### Seed Data Crews
 
@@ -177,24 +177,3 @@ The `ResolveAnthropicCredential` function auto-detects the credential type:
 
 Optional Google credentials from `SEED_GOOGLE_EMAIL` and `SEED_GOOGLE_PASSWORD` environment variables, stored as a JSON object under the `SECRET` type.
 
-## Deploying Templates via Captain
-
-<Warning>
-  **Deprecated (2026-04-16):** The Captain-based template deployment below is
-  retained for backward compat. Use `crewship template deploy <slug>` or the
-  Settings UI instead. See [Captain guide](/guides/captain).
-</Warning>
-
-Captain can deploy crew templates interactively:
-
-```
-User: "I need a team to build a web application"
-Captain: I'll create an Engineering crew for you using our template.
-         [calls apply_crew_template with template_slug="engineering"]
-```
-
-This creates the crew, all agents, assigns skills, and auto-assigns available credentials in a single operation.
-
-<Tip>
-  If you don't know which template to use, ask Captain. It will recommend a template based on your described needs and workspace phase.
-</Tip>

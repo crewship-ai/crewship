@@ -87,19 +87,38 @@ func (h *AgentHandler) CrewsStatus(w http.ResponseWriter, r *http.Request) {
 
 // validAgentRoles lists all accepted agent_role values.
 //
-// NOTE: "COORDINATOR" is deprecated (2026-04-16). See
-// [BuildCoordinatorContext] in internal/orchestrator/lead.go and
-// docs/guides/coordinator.mdx. Retained for backward compatibility with
-// existing COORDINATOR agents. Do not create new COORDINATOR agents.
+// COORDINATOR was a workspace-level cross-crew role. It was deprecated
+// 2026-04-16 and removed from the accepted set in v0.1. The orchestrator
+// branches that handled it remain in the codebase but are unreachable
+// from the public API. v0.2 will replace cross-crew orchestration with a
+// crew-to-crew handoff primitive.
 var validAgentRoles = map[string]bool{
-	"AGENT":       true,
-	"LEAD":        true,
-	"COORDINATOR": true, // Deprecated — see comment above.
+	"AGENT": true,
+	"LEAD":  true,
 }
 
 var validLeadModes = map[string]bool{
 	"active":  true,
 	"passive": true,
+}
+
+// validCLIAdapters mirrors the dispatch table in
+// internal/orchestrator/exec.go. Public API rejects anything outside
+// this set so the orchestrator never receives an adapter it cannot run.
+var validCLIAdapters = map[string]bool{
+	"CLAUDE_CODE":   true,
+	"OPENCODE":      true,
+	"CODEX_CLI":     true,
+	"GEMINI_CLI":    true,
+	"CURSOR_CLI":    true,
+	"FACTORY_DROID": true,
+}
+
+// validToolProfiles mirrors the gating in internal/orchestrator/exec.go.
+var validToolProfiles = map[string]bool{
+	"MINIMAL": true,
+	"CODING":  true,
+	"FULL":    true,
 }
 
 type agentCrewInfo struct {

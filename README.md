@@ -22,14 +22,14 @@
 
 ---
 
-Crewship is a self-hosted runtime for AI coding agents. Each agent gets its own Linux container — a real machine where it can install services, run databases, mount volumes, and build a complete working system. The whole environment — code, data, conversations, AI cost ledger — runs on your hardware and is packaged into portable, encrypted backups, so nothing your agents create ever disappears. Scale a Claude Code, Gemini, or OpenCode session into a fleet of governed agents with cost budgets, approval gates, and audit logs built in.
+Crewship is a self-hosted runtime for AI coding agents. Every crew gets its own Linux container — a real machine where its agents can install services, run databases, mount volumes, and build a complete working system together. The whole environment — code, data, conversations, AI cost ledger — runs on your hardware and is packaged into portable, encrypted backups, so nothing your agents create ever disappears. Scale a Claude Code, Gemini, or OpenCode session into a fleet of governed agents with cost budgets, approval gates, and audit logs built in.
 
 ## Features
 
-- **Real Linux containers** — every agent gets a full container; databases, queues, file stores, mounted volumes — anything your AI needs to build a complete working system
+- **Real Linux containers** — one container per crew; databases, queues, file stores, mounted volumes — anything your AI team needs to build a complete working system
 - **Self-hosted** — runs on your own hardware; your data, your perimeter, your control
 - **Backup & restore** — portable, AGE-encrypted bundles capture an entire workspace or crew (code, data, conversations, AI cost ledger) so nothing your agents create ever disappears
-- **Fleet mode for any AI coding CLI** — scale a Claude Code, Gemini, Codex, or OpenCode session into a coordinated fleet of governed agents
+- **Fleet mode for any AI coding CLI** — scale a Claude Code, Codex, Gemini, OpenCode, Cursor, or Factory Droid session into a coordinated fleet of governed agents
 - **Cost budgets & audit log** — Crew Journal records every LLM call, tool use, and decision; budgets enforced hierarchically (workspace → crew → mission → agent)
 - **Approval gates** — risky actions pause for human sign-off (sync or async)
 - **Credential vault + Keeper** — AES-256-GCM encrypted keys; agent-side access guarded by a local LLM (Ollama)
@@ -43,9 +43,9 @@ Crewship is a self-hosted runtime for AI coding agents. Each agent gets its own 
 |-------|------------|
 | UI | Next.js 16 (static export), React 19, Tailwind CSS 4, shadcn/ui |
 | Auth | NextAuth.js v5 (Auth.js) |
-| Database | SQLite via `modernc.org/sqlite` (PostgreSQL opt-in) |
+| Database | SQLite via `modernc.org/sqlite` (PostgreSQL on the v0.2 roadmap) |
 | Backend | Go (`crewshipd`) — WebSocket, Docker orchestration, Crew Journal, embedded UI |
-| Agent runtime | Docker containers with CLI adapters (Claude Code, OpenCode, Codex, …) |
+| Agent runtime | Docker containers with CLI adapters (Claude Code, Codex CLI, Gemini CLI, OpenCode, Cursor CLI, Factory Droid) |
 | IPC | HTTP-over-Unix-socket on `/tmp/crewship.sock` (X-Internal-Token auth) |
 
 > **Prisma is TypeScript-types only** — all DB migrations are Go-side in `internal/database/migrate.go`. Never run `prisma migrate`.
@@ -118,12 +118,12 @@ pnpm lint && pnpm build                    # Frontend — must pass for UI chang
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [CLAUDE.md](CLAUDE.md) for project rules and anti-patterns. Please open an issue first to discuss what you'd like to change.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, house rules, and commit conventions. Please open an issue first to discuss what you'd like to change.
 
 Security issues: see [SECURITY.md](SECURITY.md).
 
 ## License
 
-[Apache License 2.0](LICENSE) — free to use, modify, and distribute. The `ee/` directory (when present) is governed by a separate enterprise license.
+[Apache License 2.0](LICENSE) — free to use, modify, and distribute.
 
 Copyright 2025-2026 Unify Technology s.r.o.

@@ -49,22 +49,8 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	today := time.Now().UTC().Format("2006-01-02")
 
-	// --- Workspace memory for Coordinator (read from host FS, cap at 20%) ---
-	//
-	// Deprecated: COORDINATOR role is deprecated (see [BuildCoordinatorContext]).
-	// Branch retained for backward compat with existing COORDINATOR agents.
-	var wsBlock string
-	var wsUsed int
-	if req.AgentRole == "COORDINATOR" && req.WorkspaceID != "" {
-		wsMemPath := resolveWorkspaceMemPath(req.WorkspaceMemPath, req.WorkspaceID)
-		if wsMemPath != "" {
-			wsBudget := charBudget * 20 / 100
-			wsBlock, wsUsed = buildWorkspaceMemoryBlock(wsMemPath, wsBudget)
-		}
-	}
-
-	// --- Crew memory (cap at 40% of remaining) ---
-	remaining := charBudget - wsUsed
+	// --- Crew memory (cap at 40%) ---
+	remaining := charBudget
 	var crewBlock string
 	var crewUsed int
 	if req.CrewID != "" {
@@ -77,7 +63,7 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	agentBlock := o.buildAgentMemoryBlock(ctx, req, agentBudget, today)
 
 	// If no memory files at all, return just instructions
-	if agentBlock == "" && crewBlock == "" && wsBlock == "" {
+	if agentBlock == "" && crewBlock == "" {
 		return buildMemoryInstructions(today)
 	}
 
@@ -87,9 +73,6 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	}
 	if crewBlock != "" {
 		b.WriteString(crewBlock)
-	}
-	if wsBlock != "" {
-		b.WriteString(wsBlock)
 	}
 	b.WriteString(buildMemoryInstructions(today))
 	// Agent-curated nudge + cost awareness — two small blocks that

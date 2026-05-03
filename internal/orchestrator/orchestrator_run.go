@@ -197,16 +197,6 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
-	// Inject coordinator context listing all workspace crews.
-	// Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
-	// Branch retained for backward compat so existing COORDINATOR agents keep working.
-	if req.AgentRole == "COORDINATOR" && len(req.AllCrews) > 0 {
-		if coordCtx := BuildCoordinatorContext(req.AllCrews, req.ActiveMissions); coordCtx != "" {
-			promptBuf.WriteString("\n\n")
-			promptBuf.WriteString(coordCtx)
-		}
-	}
-
 	// Inject peer communication context for non-LEAD agents in a crew
 	if req.AgentRole != "LEAD" && len(req.CrewMembers) > 0 {
 		if peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug); peerCtx != "" {
@@ -217,8 +207,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	// Episodic recall: ask the memory layer for past high-value events
 	// similar to the current user prompt. Regular agents see only their
-	// own history; LEAD / COORDINATOR see crew-shared entries too (the
-	// scope rule is inside the recaller). The injection is best-effort
+	// own history; LEAD sees crew-shared entries too (the scope rule is
+	// inside the recaller). The injection is best-effort
 	// — a recall failure logs and continues so a flaky Ollama embed
 	// service never blocks a run. Budget is 2 KB of the 8 KB headroom
 	// reserved in promptBuf.Grow above.
@@ -292,8 +282,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// Build IPC config for agents in a crew so the sidecar can forward
 		// assignment requests (LEAD), peer queries, and escalations (all roles)
 		var ipcCfg *SidecarIPCConfig
-		// COORDINATOR branch is deprecated (see [BuildCoordinatorContext]); retained for backward compat.
-		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || req.AgentRole == "COORDINATOR" || len(req.CrewMembers) > 0) {
+		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
 				Token:       ipcToken,

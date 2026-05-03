@@ -8,7 +8,7 @@ export interface InboxBannerProps {
   agentId: string
   /** Total pending items count. When 0, the banner does not render. */
   count: number
-  /** Optional human summary line (e.g. "1 escalation from Lucie · 1 peer assignment from Captain"). */
+  /** Optional human summary line (e.g. "1 escalation from Lucie · 1 peer assignment from Tomas"). */
   summary?: string
 }
 

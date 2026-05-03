@@ -395,13 +395,12 @@ Aggregated mission metrics for the workspace, covering the last 24 hours.
 ## Mission Proposals
 
 <Note>
-  Mission proposals were created by the deprecated Captain and COORDINATOR
-  flows (see [Captain](/guides/captain), [Coordinator](/guides/coordinator)).
-  The proposals endpoints are retained for potential reuse in future
-  human-in-the-loop approval flows.
+  Mission proposals are a low-level primitive retained for future
+  human-in-the-loop approval flows. The high-level approval gating today
+  is handled by [Harbormaster](/guides/harbormaster).
 </Note>
 
-Agents (typically COORDINATOR role — deprecated) can propose missions that require human approval before execution.
+Agents can propose missions that require human approval before execution.
 
 ### List Proposals
 

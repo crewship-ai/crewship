@@ -69,7 +69,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if roleVal, ok := body["agent_role"]; ok {
 		roleStr, _ := roleVal.(string)
 		if !validAgentRoles[roleStr] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT, LEAD, or COORDINATOR"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT or LEAD"})
 			return
 		}
 
@@ -101,11 +101,32 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate lead_mode if being updated
+	// Validate lead_mode if being updated. The presence of the key
+	// alone is treated as a write intent — empty / non-string values
+	// are rejected so a PATCH cannot persist a blank value via the
+	// fall-through default.
 	if modeVal, ok := body["lead_mode"]; ok {
-		modeStr, _ := modeVal.(string)
-		if modeStr != "" && !validLeadModes[modeStr] {
+		modeStr, isStr := modeVal.(string)
+		if !isStr || !validLeadModes[modeStr] {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lead_mode must be 'active' or 'passive'"})
+			return
+		}
+	}
+
+	// Validate cli_adapter if being updated.
+	if v, ok := body["cli_adapter"]; ok {
+		s, isStr := v.(string)
+		if !isStr || !validCLIAdapters[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be one of CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID"})
+			return
+		}
+	}
+
+	// Validate tool_profile if being updated.
+	if v, ok := body["tool_profile"]; ok {
+		s, isStr := v.(string)
+		if !isStr || !validToolProfiles[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
 			return
 		}
 	}

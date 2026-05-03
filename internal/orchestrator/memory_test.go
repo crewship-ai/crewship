@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -467,75 +465,6 @@ func TestAssembleSections_BudgetRespected(t *testing.T) {
 		t.Error("expected truncation marker")
 	}
 }
-
-// Deprecated: COORDINATOR role is deprecated (2026-04-16); test retained for regression safety.
-func TestBuildMemoryContext_CoordinatorWithWorkspace(t *testing.T) {
-	// Create workspace memory dir on host (temp)
-	wsDir := t.TempDir()
-	os.WriteFile(filepath.Join(wsDir, "WORKSPACE.md"), []byte("# Workspace\nOrg policy: deploy on Fridays only."), 0o644)
-	os.MkdirAll(filepath.Join(wsDir, "crews"), 0o755)
-	os.WriteFile(filepath.Join(wsDir, "crews", "dev.md"), []byte("# Dev Crew\nShipped 3 features."), 0o644)
-
-	mc := mockContainerForMemory(map[string]string{
-		"/crew/agents/captain/.memory/AGENT.md": "# Captain\nI oversee all crews.",
-	})
-
-	o := New(mc, newMemState(), slog.Default())
-	req := AgentRunRequest{
-		AgentSlug:        "captain",
-		ContainerID:      "c1",
-		MemoryEnabled:    true,
-		AgentRole:        "COORDINATOR",
-		WorkspaceID:      "ws-1",
-		WorkspaceMemPath: wsDir,
-	}
-
-	result := o.buildMemoryContext(context.Background(), req, 15000)
-
-	if !strings.Contains(result, "[AGENT MEMORY]") {
-		t.Error("missing agent memory block")
-	}
-	if !strings.Contains(result, "I oversee all crews") {
-		t.Error("missing agent memory content")
-	}
-	if !strings.Contains(result, "[WORKSPACE MEMORY]") {
-		t.Error("Coordinator should have workspace memory block")
-	}
-	if !strings.Contains(result, "deploy on Fridays") {
-		t.Error("missing workspace memory content")
-	}
-	if !strings.Contains(result, "Shipped 3 features") {
-		t.Error("missing crew summary from workspace memory")
-	}
-}
-
-func TestBuildMemoryContext_NonCoordinatorNoWorkspace(t *testing.T) {
-	wsDir := t.TempDir()
-	os.WriteFile(filepath.Join(wsDir, "WORKSPACE.md"), []byte("# Secret workspace data"), 0o644)
-
-	mc := mockContainerForMemory(map[string]string{
-		"/crew/agents/worker/.memory/AGENT.md": "# Worker\nI do tasks.",
-	})
-
-	o := New(mc, newMemState(), slog.Default())
-	req := AgentRunRequest{
-		AgentSlug:        "worker",
-		ContainerID:      "c1",
-		MemoryEnabled:    true,
-		AgentRole:        "AGENT",
-		WorkspaceMemPath: wsDir, // even if set, non-coordinator shouldn't see it
-	}
-
-	result := o.buildMemoryContext(context.Background(), req, 15000)
-
-	if strings.Contains(result, "[WORKSPACE MEMORY]") {
-		t.Error("non-coordinator agent should NOT see workspace memory")
-	}
-	if strings.Contains(result, "Secret workspace data") {
-		t.Error("workspace content leaked to non-coordinator agent")
-	}
-}
-
 func TestBuildMemoryContext_NoCrewForSoloAgent(t *testing.T) {
 	mc := mockContainerForMemory(map[string]string{
 		"/crew/agents/solo/.memory/AGENT.md": "# Solo agent\nI work alone.",

@@ -73,7 +73,7 @@ func (d *DataDir) SkillsDir() string {
 }
 
 // WorkspaceMemoryDir returns the path to workspace-level memory for a given workspace.
-// Used by Coordinator/Captain agents for cross-crew memory.
+// Reserved for the v0.2 workspace-tier memory roadmap.
 func (d *DataDir) WorkspaceMemoryDir(workspaceID string) string {
 	return filepath.Join(d.Root, "memory", workspaceID)
 }

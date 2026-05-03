@@ -20,29 +20,27 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 type AgentRunRequest struct {
 	AgentID            string
 	AgentSlug          string
-	AgentRole          string // AGENT, LEAD, COORDINATOR (deprecated — see docs/guides/coordinator.mdx)
+	AgentRole          string // AGENT, LEAD
 	CrewID             string
 	CrewSlug           string
 	ChatID             string
 	MissionID          string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
 	WorkspaceID        string
 	ContainerID        string
-	CLIAdapter         string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
+	CLIAdapter         string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID
 	LLMModel           string // optional model override (e.g. claude-haiku-4-5-20251001)
 	SystemPrompt       string
 	UserMessage        string
-	ToolProfile        string // MINIMAL, CODING, MESSAGING, FULL
+	ToolProfile        string // MINIMAL, CODING, FULL
 	Credentials        []Credential
 	TimeoutSecs        int
 	MemoryEnabled      bool
-	CrewMembers        []CrewMember     // Populated by bridge for LEAD agents
-	AllCrews           []CrewInfo       // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
-	ActiveMissions     []MissionSummary // Deprecated: COORDINATOR role is deprecated; see [BuildCoordinatorContext].
-	SkipSidecar        bool             // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
-	ApprovalMode       string           // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
-	SkipConvHistory    bool             // When true, skip injecting conversation history (used by assignment sub-agents)
-	NetworkMode        string           // "free" (default) or "restricted" — crew-level network policy
-	AllowedDomains     []string         // Extra allowed domains for restricted mode
+	CrewMembers        []CrewMember // Populated by bridge for LEAD agents
+	SkipSidecar        bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	ApprovalMode       string       // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent
+	SkipConvHistory    bool         // When true, skip injecting conversation history (used by assignment sub-agents)
+	NetworkMode        string       // "free" (default) or "restricted" — crew-level network policy
+	AllowedDomains     []string     // Extra allowed domains for restricted mode
 	MemoryMB           int
 	CPUs               float64
 	TTLHours           int
@@ -50,7 +48,6 @@ type AgentRunRequest struct {
 	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
-	WorkspaceMemPath   string            // Deprecated: used only by COORDINATOR role; see [BuildCoordinatorContext].
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.
@@ -253,7 +250,7 @@ type EpisodicRecallInput struct {
 	WorkspaceID string
 	CrewID      string
 	AgentID     string
-	Role        string // AGENT / LEAD / COORDINATOR
+	Role        string // AGENT / LEAD
 	Query       string
 	MaxChars    int
 }

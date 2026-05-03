@@ -240,23 +240,6 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 |---|---|
 | `GET /api/v1/activity` | Cross-crew activity feed (assignments, peer conversations, escalations). Supports `crew_id` and `limit` query parameters. See also `crewship activity` CLI command. |
 
-### Captain (Workspace AI Assistant) — deprecated
-
-<Warning>
-  **Deprecated (2026-04-16):** Captain endpoints remain registered for
-  backward compatibility but receive no new features. See the
-  [Captain guide](/guides/captain) for migration path.
-</Warning>
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/v1/captain/chat` | POST | *(deprecated)* Send message to Captain (SSE streaming response) |
-| `/api/v1/captain/context` | GET | *(deprecated)* Get workspace context (phase, counts) |
-| `/api/v1/captain/history` | GET | *(deprecated)* Load Captain conversation history |
-| `/api/v1/captain/history` | DELETE | *(deprecated)* Clear Captain conversation history |
-
-See the [Captain guide](/guides/captain) for detailed documentation on tools, streaming protocol, and onboarding phases.
-
 ### Auth / Signup
 
 | Endpoint | Auth | Description |
