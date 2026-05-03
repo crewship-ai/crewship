@@ -2,6 +2,8 @@ import pkg from "playwright"
 const { chromium } = pkg
 
 const URL = process.env.SMOKE_URL ?? "http://localhost:3011"
+const EMAIL = process.env.SMOKE_EMAIL ?? "demo@crewship.ai"
+const PASSWORD = process.env.SMOKE_PASSWORD ?? "password123"
 const browser = await chromium.launch({ headless: true })
 const ctx = await browser.newContext()
 const page = await ctx.newPage()
@@ -19,8 +21,8 @@ console.log("[1] login")
 await page.goto(`${URL}/login`, { waitUntil: "domcontentloaded", timeout: 15000 })
 await page.waitForResponse((r) => r.url().endsWith("/api/v1/auth/google/status"), { timeout: 10000 }).catch(() => {})
 await page.waitForTimeout(300)
-await page.fill("#email", "demo@crewship.ai")
-await page.fill("#password", "password123")
+await page.fill("#email", EMAIL)
+await page.fill("#password", PASSWORD)
 await page.locator("button[type=submit]").click()
 await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15000, waitUntil: "commit" })
 await page.waitForTimeout(2000)
@@ -56,10 +58,12 @@ console.log(`   visible text:\n   ${visibleText2.split("\n").join("\n   ")}`)
 
 // 5. Network summary
 console.log(`\n[5] Network: ${apiResponses.length} API responses, ${wsConnections.length} WS`)
+let failed = false
 const non200 = apiResponses.filter((r) => r.status >= 400)
 if (non200.length > 0) {
   console.log("   FAILED:")
   for (const r of non200) console.log(`   ${r.status} ${r.url}`)
+  failed = true
 }
 const pendingFetch = await page.evaluate(() => {
   // @ts-ignore
@@ -74,5 +78,11 @@ if (pendingFetch.length > 0) {
 
 console.log(`\n[6] JS errors: ${errors.length}`)
 for (const e of errors) console.log(`   ${e.name}: ${e.message}`)
+if (errors.length > 0) failed = true
 
 await browser.close()
+
+if (failed) {
+  console.error("\nSmoke test detected API/JS failures")
+  process.exit(1)
+}
