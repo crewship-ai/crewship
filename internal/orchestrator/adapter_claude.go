@@ -81,7 +81,10 @@ func (claudeCodeAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
+	if err := writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("claude adapter setup system prompt: %w", err)
+	}
+	return nil
 }
 
 func (claudeCodeAdapter) SupportsMCP() bool { return true }
@@ -94,7 +97,10 @@ func (claudeCodeAdapter) WriteMCPConfig(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeMCPClaude(ctx, container, containerID, req, workDir, logger)
+	if err := writeMCPClaude(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("claude adapter write MCP config: %w", err)
+	}
+	return nil
 }
 
 // parseClaudeCodeStreamJSON parses one line of Claude Code stream-json output

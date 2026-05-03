@@ -293,12 +293,20 @@ export function AddCredentialDialog({
                       <SelectItem value="GOOGLE">
                         <span className="flex items-center gap-2"><GeminiIcon className="h-4 w-4" /> Google (Gemini)</span>
                       </SelectItem>
-                      <SelectItem value="CURSOR">
-                        <span className="flex items-center gap-2"><CursorIcon className="h-4 w-4" /> Cursor</span>
-                      </SelectItem>
-                      <SelectItem value="FACTORY">
-                        <span className="flex items-center gap-2"><FactoryIcon className="h-4 w-4" /> Factory (Droid)</span>
-                      </SelectItem>
+                      {/* Cursor + Factory only support raw API keys, not the
+                          Claude-specific setup-token / OAuth flow rendered by
+                          AI_CLI_TOKEN — gate them to API_KEY so users don't
+                          land on the wrong helper text. */}
+                      {type === "API_KEY" && (
+                        <>
+                          <SelectItem value="CURSOR">
+                            <span className="flex items-center gap-2"><CursorIcon className="h-4 w-4" /> Cursor</span>
+                          </SelectItem>
+                          <SelectItem value="FACTORY">
+                            <span className="flex items-center gap-2"><FactoryIcon className="h-4 w-4" /> Factory (Droid)</span>
+                          </SelectItem>
+                        </>
+                      )}
                     </>
                   )}
                   {type === "CLI_TOKEN" && (

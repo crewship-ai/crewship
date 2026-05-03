@@ -2060,16 +2060,27 @@ func TestOnboarding_ResolveLLMProvider(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		in, wantProvider, wantEnv string
+		wantOK                    bool
 	}{
-		{"OPENAI", "OPENAI", "OPENAI_API_KEY"},
-		{"openai", "OPENAI", "OPENAI_API_KEY"},
-		{"GOOGLE", "GOOGLE", "GOOGLE_API_KEY"},
-		{"", "ANTHROPIC", "ANTHROPIC_API_KEY"},
-		{"random", "ANTHROPIC", "ANTHROPIC_API_KEY"},
+		{"OPENAI", "OPENAI", "OPENAI_API_KEY", true},
+		{"openai", "OPENAI", "OPENAI_API_KEY", true},
+		{"GOOGLE", "GOOGLE", "GOOGLE_API_KEY", true},
+		{"CURSOR", "CURSOR", "CURSOR_API_KEY", true},
+		{"FACTORY", "FACTORY", "FACTORY_API_KEY", true},
+		{"ANTHROPIC", "ANTHROPIC", "ANTHROPIC_API_KEY", true},
+		{"", "ANTHROPIC", "ANTHROPIC_API_KEY", true},
+		// Unknown providers are now rejected (used to coerce to ANTHROPIC,
+		// which silently provisioned the wrong credential under the wrong
+		// env var name).
+		{"random", "", "", false},
+		{"BOGUS", "", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			got := resolveLLMProvider(tc.in)
+			got, ok := resolveLLMProvider(tc.in)
+			if ok != tc.wantOK {
+				t.Errorf("resolveLLMProvider(%q) ok = %v, want %v", tc.in, ok, tc.wantOK)
+			}
 			if got.provider != tc.wantProvider || got.envVarName != tc.wantEnv {
 				t.Errorf("resolveLLMProvider(%q) = %+v, want %s/%s", tc.in, got, tc.wantProvider, tc.wantEnv)
 			}

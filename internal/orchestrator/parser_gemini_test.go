@@ -115,8 +115,18 @@ func TestParseGemini_ResultErrorStatus(t *testing.T) {
 	var got []AgentEvent
 	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
 
-	meta := got[0].Metadata.(map[string]interface{})
-	if !meta["is_error"].(bool) {
+	if len(got) != 1 {
+		t.Fatalf("want 1 event, got %d: %+v", len(got), got)
+	}
+	meta, ok := got[0].Metadata.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Metadata is not map[string]interface{}: %#v", got[0].Metadata)
+	}
+	isErr, ok := meta["is_error"].(bool)
+	if !ok {
+		t.Fatalf("is_error missing or wrong type: %#v", meta["is_error"])
+	}
+	if !isErr {
 		t.Errorf("is_error must be true when status=error")
 	}
 }

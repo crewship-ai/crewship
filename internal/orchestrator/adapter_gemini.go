@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -73,7 +74,10 @@ func (geminiAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
+	if err := writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("gemini adapter setup system prompt: %w", err)
+	}
+	return nil
 }
 
 // SupportsMCP returns true: gemini-cli auto-discovers MCP servers from
@@ -89,5 +93,8 @@ func (geminiAdapter) WriteMCPConfig(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeMCPGemini(ctx, container, containerID, req, workDir, logger)
+	if err := writeMCPGemini(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("gemini adapter write MCP config: %w", err)
+	}
+	return nil
 }

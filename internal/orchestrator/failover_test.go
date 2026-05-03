@@ -255,9 +255,14 @@ func TestBuildCLICommand(t *testing.T) {
 			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", codexDroidPrompt("audit only")},
 		},
 		{
-			"factory droid consultative profile downgrades to low",
-			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CONSULTATIVE", UserMessage: "advise"},
+			"factory droid messaging profile downgrades to low",
+			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MESSAGING", UserMessage: "advise"},
 			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", codexDroidPrompt("advise")},
+		},
+		{
+			"factory droid full profile escalates to high",
+			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "FULL", UserMessage: "ship it"},
+			[]string{"droid", "exec", "--auto", "high", "-o", "stream-json", "--", codexDroidPrompt("ship it")},
 		},
 		{
 			"factory droid with model",

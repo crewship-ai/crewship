@@ -127,11 +127,10 @@ var validLLMProviders = map[string]bool{
 
 // validToolProfiles mirrors lib/validations.ts tool_profile enum.
 var validToolProfiles = map[string]bool{
-	"MINIMAL":      true,
-	"CODING":       true,
-	"MESSAGING":    true,
-	"FULL":         true,
-	"CONSULTATIVE": true,
+	"MINIMAL":   true,
+	"CODING":    true,
+	"MESSAGING": true,
+	"FULL":      true,
 }
 
 type agentCrewInfo struct {

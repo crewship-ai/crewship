@@ -60,7 +60,10 @@ func normaliseMCPInputs(req AgentRunRequest) ([]mcpSpec, error) {
 			return nil, fmt.Errorf("unmarshal merged MCP JSON: %w", err)
 		}
 		for name, blob := range raw.MCPServers {
-			s := parseMCPServerJSON(name, blob)
+			s, err := parseMCPServerJSON(name, blob)
+			if err != nil {
+				return nil, err
+			}
 			specs[name] = s
 		}
 	}
@@ -99,8 +102,10 @@ func normaliseMCPInputs(req AgentRunRequest) ([]mcpSpec, error) {
 // parseMCPServerJSON extracts our canonical form from one Claude-style
 // .mcp.json server entry. Field-name accommodation for forward compat:
 // command/url/httpUrl all coexist in the wild depending on which CLI's
-// config flavour someone copy-pasted from.
-func parseMCPServerJSON(name string, blob json.RawMessage) mcpSpec {
+// config flavour someone copy-pasted from. Returns an error so the caller
+// can log + skip a malformed entry instead of silently producing an empty
+// mcpSpec that downstream writers would render as broken or no-op config.
+func parseMCPServerJSON(name string, blob json.RawMessage) (mcpSpec, error) {
 	var raw struct {
 		Type    string            `json:"type"`
 		Command string            `json:"command"`
@@ -110,7 +115,9 @@ func parseMCPServerJSON(name string, blob json.RawMessage) mcpSpec {
 		HTTPURL string            `json:"httpUrl"`
 		Headers map[string]string `json:"headers"`
 	}
-	_ = json.Unmarshal(blob, &raw)
+	if err := json.Unmarshal(blob, &raw); err != nil {
+		return mcpSpec{Name: name}, fmt.Errorf("malformed MCP server %q: %w", name, err)
+	}
 
 	url := raw.URL
 	if url == "" {
@@ -132,7 +139,7 @@ func parseMCPServerJSON(name string, blob json.RawMessage) mcpSpec {
 		URL:       url,
 		Headers:   raw.Headers,
 		Transport: transport,
-	}
+	}, nil
 }
 
 // writeMCPClaude writes /crew/agents/<slug>/.mcp.json — the format the
@@ -434,15 +441,27 @@ func writeMCPCodex(
 					}
 				}
 				// Generic env-header path: ${VAR} → env_http_headers entry.
+				// CRITICAL: env_http_headers in Codex's TOML schema substitutes
+				// the env var's value as the WHOLE header value. So we may only
+				// promote a header into env_http_headers when the value is
+				// EXACTLY ${VAR} or $VAR (with optional surrounding whitespace).
+				// "Bearer ${TOKEN}" or "prefix $KEY suffix" would silently drop
+				// the literal prefix/suffix and send only the env value.
 				refs := extractEnvRefs(v)
+				trimmed := strings.TrimSpace(v)
+				wholeValue := len(refs) == 1 && (trimmed == "${"+refs[0]+"}" || trimmed == "$"+refs[0])
 				switch {
-				case len(refs) == 1:
+				case wholeValue:
 					envHeaders[k] = refs[0]
 				case len(refs) == 0:
 					literalHeaders[k] = v
 				default:
+					// Mixed literal+env refs OR multiple env refs — Codex
+					// has no representation for either, so we drop with a
+					// loud warning rather than silently sending a wrong
+					// header at runtime.
 					if logger != nil {
-						logger.Warn("codex MCP HTTP header has multiple env refs; not representable",
+						logger.Warn("codex MCP HTTP header is not representable (mixed literal/env or multiple refs)",
 							"server", s.Name, "header", k)
 					}
 				}

@@ -163,14 +163,21 @@ func TestE2E_AllAdaptersExposeMinimumContract(t *testing.T) {
 		"CLAUDE_CODE", "CODEX_CLI", "GEMINI_CLI",
 		"OPENCODE", "CURSOR_CLI", "FACTORY_DROID",
 	}
+	// MCP support is per-adapter — see TestAdapterMCPSupportMatrix for the
+	// authoritative matrix. Cursor headless drops MCP tool calls upstream so
+	// we declare false for it here even though we ship a working writer.
+	mcpExpected := map[string]bool{
+		"CLAUDE_CODE": true, "CODEX_CLI": true, "GEMINI_CLI": true,
+		"OPENCODE": true, "CURSOR_CLI": false, "FACTORY_DROID": true,
+	}
 	for _, name := range wantAdapters {
 		t.Run(name, func(t *testing.T) {
 			a := getAdapter(name)
 			if a.Name() != name {
 				t.Errorf("Name() = %q, want %q", a.Name(), name)
 			}
-			if !a.SupportsMCP() {
-				t.Errorf("SupportsMCP() = false; expected true for all 6 first-class adapters after the multi-CLI wave")
+			if got, want := a.SupportsMCP(), mcpExpected[name]; got != want {
+				t.Errorf("SupportsMCP() = %v, want %v", got, want)
 			}
 			// BuildCommand must produce a non-empty argv with the adapter's
 			// canonical binary name as argv[0].

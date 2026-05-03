@@ -12,6 +12,49 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
+// execBinaryInScript reports whether `bin` appears in `script` as a standalone
+// command name (i.e. as the first non-space token after the start-of-string
+// or one of the common shell delimiters: space, semicolon, ampersand, pipe,
+// newline, equals-sign-after-env-var-block). Used by the test mock to spot
+// CLI invocations buried inside `sh -c "tmux new-session ... claude ..."`
+// wrappers, which are the actual production shape RunAgent emits.
+func execBinaryInScript(script, bin string) bool {
+	if bin == "" {
+		return false
+	}
+	// Cheap pre-check.
+	idx := 0
+	for {
+		hit := strings.Index(script[idx:], bin)
+		if hit < 0 {
+			return false
+		}
+		pos := idx + hit
+		// Left boundary: start, or a delimiter that means "next token".
+		left := byte(0)
+		if pos > 0 {
+			left = script[pos-1]
+		}
+		switch left {
+		case 0, ' ', '\t', '\n', ';', '&', '|', '"', '\'', '`':
+			// Right boundary: end, or a delimiter that means "token over".
+			endPos := pos + len(bin)
+			right := byte(0)
+			if endPos < len(script) {
+				right = script[endPos]
+			}
+			switch right {
+			case 0, ' ', '\t', '\n', ';', '&', '|', '"', '\'', '`':
+				return true
+			}
+		}
+		idx = pos + len(bin)
+		if idx >= len(script) {
+			return false
+		}
+	}
+}
+
 // in-memory state mock
 type memState struct {
 	data map[string]map[string][]byte
@@ -88,13 +131,37 @@ func (m *mockContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provi
 	// stream reader. This decouples tests from the exact number of setup
 	// calls (mkdir, manifest, MCP, canonical memory writes, etc.) so
 	// adding new setup steps doesn't shift the agent exec out of bounds.
-	cliBinaries := map[string]bool{
-		"claude": true, "codex": true, "gemini": true,
-		"opencode": true, "cursor-agent": true, "droid": true,
+	//
+	// Detection has TWO paths because RunAgent wraps the real CLI in a
+	// `sh -c "tmux new-session ... claude ..."` so the binary name only
+	// appears as a substring of an `sh -c` argument, never as a standalone
+	// argv[0]. Without the substring scan, exit-code / cancelled-context
+	// tests would skip the agent reader and pass for the wrong reason.
+	cliBinaries := []string{
+		"claude", "codex", "gemini", "opencode", "cursor-agent", "droid",
 	}
-	for i := 0; i < len(cfg.Cmd) && i < 6; i++ {
-		if cliBinaries[cfg.Cmd[i]] && len(m.execResults) > 0 {
-			return m.execResults[len(m.execResults)-1], nil
+	cliBinarySet := map[string]bool{}
+	for _, b := range cliBinaries {
+		cliBinarySet[b] = true
+	}
+	if len(m.execResults) > 0 {
+		// Path A: standalone binary in argv[0..5].
+		for i := 0; i < len(cfg.Cmd) && i < 6; i++ {
+			if cliBinarySet[cfg.Cmd[i]] {
+				return m.execResults[len(m.execResults)-1], nil
+			}
+		}
+		// Path B: shell-wrapped (sh -c "... <binary> ...") — scan the script
+		// body for any CLI binary name. Match on word boundaries via simple
+		// substring + delimiter check so "claude" doesn't accidentally hit
+		// "claudemock" or similar.
+		if len(cfg.Cmd) >= 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
+			script := cfg.Cmd[2]
+			for _, bin := range cliBinaries {
+				if execBinaryInScript(script, bin) {
+					return m.execResults[len(m.execResults)-1], nil
+				}
+			}
 		}
 	}
 	// SETUP CALLS (sh -c "..." for file writes etc.) — return noop. Tests

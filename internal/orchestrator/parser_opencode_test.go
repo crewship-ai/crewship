@@ -86,9 +86,16 @@ func TestParseOpenCode_StepFinish(t *testing.T) {
 	if len(got) != 1 || got[0].Type != "result" {
 		t.Fatalf("step_finish wrong: %+v", got)
 	}
-	meta := got[0].Metadata.(map[string]interface{})
-	if meta["cost_usd"].(float64) != 0.0042 {
-		t.Errorf("cost lost: %v", meta["cost_usd"])
+	meta, ok := got[0].Metadata.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Metadata is not map[string]interface{}: %#v", got[0].Metadata)
+	}
+	cost, ok := meta["cost_usd"].(float64)
+	if !ok {
+		t.Fatalf("cost_usd missing or wrong type: %#v", meta["cost_usd"])
+	}
+	if cost != 0.0042 {
+		t.Errorf("cost lost: %v", cost)
 	}
 	if meta["provider"] != "anthropic" {
 		t.Errorf("providerID → provider mapping lost: %v", meta["provider"])

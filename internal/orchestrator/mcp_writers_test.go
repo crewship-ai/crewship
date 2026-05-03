@@ -266,7 +266,35 @@ func TestWriteMCPGeminiOutput_SSEPreservesURL(t *testing.T) {
 	if len(specs) != 1 || !strings.EqualFold(specs[0].Transport, "sse") {
 		t.Fatalf("transport should preserve sse, got %+v", specs)
 	}
-	// Then verify the gemini writer emits "url" for sse transport.
+
+	// Verify the gemini writer emits "url" (not "httpUrl") for SSE transport.
+	// SSE is the legacy long-lived-stream transport in the MCP spec; the
+	// streamable-HTTP successor uses httpUrl. Conflating the two breaks the
+	// gemini-cli's transport selection.
+	cap := &captureContainer{}
+	req.AgentSlug = "agent-sse"
+	if err := writeMCPGemini(context.Background(), cap, "container-1", req, "/output/agent-sse", slog.Default()); err != nil {
+		t.Fatalf("writer error: %v", err)
+	}
+	if len(cap.calls) != 1 {
+		t.Fatalf("want 1 file write, got %d: %+v", len(cap.calls), cap.calls)
+	}
+	var parsed struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(cap.calls[0].body), &parsed); err != nil {
+		t.Fatalf("invalid JSON written: %v\nbody: %s", err, cap.calls[0].body)
+	}
+	entry, ok := parsed.MCPServers["sse-server"]
+	if !ok {
+		t.Fatalf("sse-server entry missing: %v", parsed.MCPServers)
+	}
+	if entry["url"] != "https://example.com/sse" {
+		t.Errorf("SSE transport must emit url, got %v", entry)
+	}
+	if _, hasHTTPURL := entry["httpUrl"]; hasHTTPURL {
+		t.Errorf("SSE transport must NOT emit httpUrl: %v", entry)
+	}
 }
 
 func TestWriteMCPOpenCodeOutput(t *testing.T) {
@@ -603,13 +631,18 @@ func TestWriteMCP_EmptyConfigSilent(t *testing.T) {
 // TestAdapterMCPSupportMatrix pins which adapters support MCP after the
 // multi-CLI wave. Future drift (someone flipping SupportsMCP() to false on a
 // supported adapter without thinking) fails this test loudly.
+//
+// Cursor is intentionally false: cursor-agent --print mode does not invoke
+// MCP servers at runtime (forum #143045 + #148397). The writer is still in
+// the tree and ready for the day upstream fixes headless MCP — when that
+// happens, flip the bool here AND in adapter_cursor.go.SupportsMCP().
 func TestAdapterMCPSupportMatrix(t *testing.T) {
 	want := map[string]bool{
 		"CLAUDE_CODE":   true,
 		"CODEX_CLI":     true,
 		"GEMINI_CLI":    true,
 		"OPENCODE":      true,
-		"CURSOR_CLI":    true, // best-effort — broken in -p mode upstream
+		"CURSOR_CLI":    false, // headless MCP broken upstream — see adapter_cursor.go
 		"FACTORY_DROID": true,
 	}
 	for name, w := range want {

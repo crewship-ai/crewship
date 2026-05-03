@@ -106,8 +106,14 @@ paths = [
 
   # CLI fixture files for the multi-CLI E2E test suite. NDJSON captured
   # from canonical "say hello" runs against each upstream CLI; contains
-  # no credentials, only event schemas.
-  '''internal/orchestrator/testdata/cli-fixtures/.*\.ndjson$''',
+  # no credentials, only event schemas. Pinned to current filenames so
+  # accidentally dropping a real captured transcript here still scans.
+  '''internal/orchestrator/testdata/cli-fixtures/claude\.ndjson$''',
+  '''internal/orchestrator/testdata/cli-fixtures/codex\.ndjson$''',
+  '''internal/orchestrator/testdata/cli-fixtures/cursor\.ndjson$''',
+  '''internal/orchestrator/testdata/cli-fixtures/droid\.ndjson$''',
+  '''internal/orchestrator/testdata/cli-fixtures/gemini\.ndjson$''',
+  '''internal/orchestrator/testdata/cli-fixtures/opencode\.ndjson$''',
 ]
 
 # Strings that look like secrets but are documented placeholders.

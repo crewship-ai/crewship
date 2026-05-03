@@ -57,24 +57,6 @@ const OPENAI_CODEX_MODELS: ModelOption[] = [
   { value: "gpt-5.2", label: "GPT-5.2", category: "legacy" },
 ]
 
-// ===== OPENAI — General API (used by OpenCode, Cursor multiplexer) =====
-// Source: https://developers.openai.com/api/docs/models/all
-// Wider lineup than Codex CLI accepts.
-const OPENAI_MODELS: ModelOption[] = [
-  { value: "gpt-5.5", label: "GPT-5.5", category: "frontier" },
-  { value: "gpt-5.5-pro", label: "GPT-5.5 Pro", category: "reasoning" },
-  { value: "gpt-5.4", label: "GPT-5.4", category: "frontier" },
-  { value: "gpt-5.4-pro", label: "GPT-5.4 Pro", category: "reasoning" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 mini", category: "fast" },
-  { value: "gpt-5.4-nano", label: "GPT-5.4 nano", category: "cheap" },
-  { value: "gpt-5", label: "GPT-5", category: "legacy" },
-  { value: "gpt-5-mini", label: "GPT-5 mini", category: "fast" },
-  { value: "gpt-5-nano", label: "GPT-5 nano", category: "cheap" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Codex", category: "frontier" },
-  { value: "o3", label: "o3", category: "reasoning" },
-  { value: "o3-pro", label: "o3 Pro", category: "reasoning" },
-]
-
 // ===== GOOGLE GEMINI =====
 // Source: https://ai.google.dev/gemini-api/docs/models
 // 3.x family is preview; 2.5 is GA stable. gemini-2.0-flash + 1.5-pro removed

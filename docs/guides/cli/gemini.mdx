@@ -24,13 +24,14 @@ Crewship's `apiKeyEnvVarsForAdapter("GEMINI_CLI")` accepts either; both are mirr
 
 | API string | Tier |
 |---|---|
-| `gemini-3.1-pro-preview` | frontier (preview) |
-| `gemini-3-flash-preview` | fast |
-| `gemini-2.5-pro` | frontier — Crewship default (stable GA) |
-| `gemini-2.5-flash` | fast |
-| `gemini-2.5-flash-lite` | cheap |
+| `gemini-3-1-pro` | frontier |
+| `gemini-3-1-flash` | fast |
+| `gemini-3-1-flash-lite` | cheap |
+| `gemini-2-5-pro` | frontier — Crewship default (stable GA) |
+| `gemini-2-5-flash` | fast |
+| `gemini-2-5-flash-lite` | cheap |
 
-`gemini-2.0-flash` and `gemini-1.5-pro` retired upstream — removed from picker.
+`gemini-2.0-flash` and `gemini-1.5-pro` are not available in the current Gemini API catalog — removed from picker. Note the dash-separated ID format (`gemini-3-1-pro`, not `gemini-3.1-pro`); Google's `models.list` endpoint returns this canonical form.
 
 ## Command shape
 

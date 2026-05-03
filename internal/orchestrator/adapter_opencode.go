@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -71,7 +72,10 @@ func (opencodeAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
+	if err := writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("opencode adapter setup system prompt: %w", err)
+	}
+	return nil
 }
 
 // SupportsMCP returns true. OpenCode reads opencode.json with MCP servers
@@ -88,5 +92,8 @@ func (opencodeAdapter) WriteMCPConfig(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeMCPOpenCode(ctx, container, containerID, req, workDir, logger)
+	if err := writeMCPOpenCode(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("opencode adapter write MCP config: %w", err)
+	}
+	return nil
 }

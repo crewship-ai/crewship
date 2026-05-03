@@ -11,15 +11,32 @@ import { CLI_ADAPTERS } from "@/lib/cli-adapters"
  *  so the picker and the per-CLI models[] never drift apart. */
 function modelsForProvider(provider: string): readonly string[] {
   const seen = new Set<string>()
+  // Prefix-based recovery for the OpenCode multi-provider catalog. Without
+  // this, single-provider dropdowns lose models that only exist in the
+  // OPENCODE_MODELS list (e.g. openai/o3, openai/o3-pro, openai/gpt-5.5-pro
+  // are not in OPENAI_CODEX_MODELS — Codex CLI doesn't accept reasoning
+  // models — but they ARE valid OPENAI provider models for any non-Codex
+  // surface). Strip the namespace and adopt as a native entry.
+  const prefixByProvider: Record<string, string> = {
+    ANTHROPIC: "anthropic/",
+    OPENAI: "openai/",
+    GOOGLE: "google/",
+  }
+  const prefix = prefixByProvider[provider]
   for (const adapter of Object.values(CLI_ADAPTERS)) {
-    if (adapter.provider !== provider) continue
     for (const m of adapter.models) {
-      // Skip namespaced "provider/model" entries — those belong to the
-      // OpenCode multi-provider catalog and would pollute single-provider
-      // dropdowns (e.g. "openai/gpt-5.5" appearing under ANTHROPIC because
-      // OpenCode's provider field is ANTHROPIC for sidecar credential mapping).
-      if (m.value.includes("/")) continue
-      seen.add(m.value)
+      if (adapter.provider === provider && !m.value.includes("/")) {
+        seen.add(m.value)
+        continue
+      }
+      if (prefix && m.value.startsWith(prefix)) {
+        // Only adopt the immediate "provider/model" form, not nested paths
+        // like "openrouter/openai/gpt-5.5" which are router-specific routes.
+        const rest = m.value.slice(prefix.length)
+        if (!rest.includes("/")) {
+          seen.add(rest)
+        }
+      }
     }
   }
   return Array.from(seen)

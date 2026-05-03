@@ -180,9 +180,12 @@ func (unknownAdapter) WriteMCPConfig(
 //     over AGENTS.md for that CLI
 //   - .factory/AGENTS.md  — Factory Droid alternate path
 //
-// Each path is written best-effort — a failure on one file does not abort the
-// others, because partial parity is still better than none. Errors collect
-// into a single returned error so the caller can log details.
+// Each path is written best-effort — a failure on one file does NOT abort
+// setup. Pre-fix returned firstErr unconditionally, which defeated the
+// "memory parity > none" claim: a single failed write (e.g. .factory/AGENTS.md
+// permission glitch) would error the whole SetupSystemPrompt path. We now
+// log every failure but only return an error if EVERY target failed —
+// guaranteeing at least some discovery file landed before giving up.
 func writeCanonicalMemoryFiles(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -200,17 +203,24 @@ func writeCanonicalMemoryFiles(
 		".factory/AGENTS.md",
 	}
 	var firstErr error
+	failures := 0
 	for _, t := range targets {
 		if err := writeFileViaContainer(ctx, container, containerID, workDir, t, body, logger); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
+			failures++
 			if logger != nil {
 				logger.Warn("canonical memory file write failed", "path", t, "error", err)
 			}
 		}
 	}
-	return firstErr
+	// Only fail loudly when EVERY discovery path failed. Partial success is
+	// fine — the agent's CLI will discover whichever file did land.
+	if failures == len(targets) {
+		return fmt.Errorf("write canonical memory: all %d targets failed (first: %w)", failures, firstErr)
+	}
+	return nil
 }
 
 // writeFileViaContainer is a small helper used by adapters that need to drop

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -49,12 +50,11 @@ func (cursorAdapter) BuildCommand(req AgentRunRequest) []string {
 	// boundary (chroot, --cap-drop=ALL, secrets in /secrets/) is the
 	// authoritative permission layer; per-tool prompts are redundant.
 	cmd = append(cmd, "--force")
-	// --approve-mcps unblocks MCP tool calls in --print mode. The Cursor
-	// docs page implies MCP "just works" headlessly; in practice (forum
-	// #143045 + #148397) MCP servers are listed but their tools never
-	// invoked unless this flag is on. Add it whenever the agent has any
-	// MCP source configured so MCP-equipped agents actually use their
-	// servers; omit otherwise to keep the command shape minimal.
+	// --approve-mcps would unblock MCP tool calls in --print mode IF Cursor
+	// honoured them, but it does not (see SupportsMCP comment below). Keep
+	// the flag wired conditionally so the moment upstream fixes headless
+	// MCP and we flip SupportsMCP() to true, MCP-equipped agents auto-light
+	// up without a second commit.
 	if len(req.MCPServers) > 0 || req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" {
 		cmd = append(cmd, "--approve-mcps")
 	}
@@ -96,17 +96,24 @@ func (cursorAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
+	if err := writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("cursor adapter setup system prompt: %w", err)
+	}
+	return nil
 }
 
-// SupportsMCP returns true *with caveat*. Cursor docs claim MCP support in
-// CLI, and we write .cursor/mcp.json. HOWEVER multiple community reports
-// (forum #143045, #148397) confirm the MCP servers are NOT invoked when
-// cursor-agent runs in --print / non-interactive mode — only the interactive
-// TUI honours them. We write the file anyway for parity (so the moment
-// upstream fixes the bug nothing else changes), but the user-visible effect
-// today is "no MCP tools surface in chat for Cursor agents".
-func (cursorAdapter) SupportsMCP() bool { return true }
+// SupportsMCP returns false: cursor-agent's --print / non-interactive mode
+// does NOT actually invoke MCP servers at runtime, even when --approve-mcps
+// is set and .cursor/mcp.json is present. Forum #143045 and #148397 confirm
+// servers are listed but their tools are never called — only the interactive
+// TUI honours MCP. Returning true here would mislead the rest of the system
+// (paymaster, Crow's Nest tool surface, agent template auto-bind logic) into
+// treating Cursor agents as MCP-capable; users would see no MCP tools fire.
+//
+// writeMCPCursor / .cursor/mcp.json are still in the tree so the moment
+// upstream fixes headless MCP we flip this to true and the writer is wired
+// back automatically — no other change required.
+func (cursorAdapter) SupportsMCP() bool { return false }
 
 func (cursorAdapter) WriteMCPConfig(
 	ctx context.Context,
@@ -116,5 +123,11 @@ func (cursorAdapter) WriteMCPConfig(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeMCPCursor(ctx, container, containerID, req, workDir, logger)
+	// Unreachable while SupportsMCP() returns false (orchestrator gates the
+	// call). Kept as a working implementation so flipping SupportsMCP to true
+	// in the future is the only change needed.
+	if err := writeMCPCursor(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("cursor adapter write MCP config: %w", err)
+	}
+	return nil
 }

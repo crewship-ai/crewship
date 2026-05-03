@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -33,11 +34,12 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	cmd := []string{"codex", "exec", "--json"}
 
 	// Sandbox policy: agents that should mutate code get workspace-write,
-	// MINIMAL/CONSULTATIVE profiles get read-only. danger-full-access is
-	// never opted into automatically — it bypasses the workspace boundary.
+	// the read-only profiles (MINIMAL, MESSAGING) cannot touch the FS.
+	// danger-full-access is never opted into automatically — it bypasses
+	// the workspace boundary.
 	sandbox := "workspace-write"
 	switch req.ToolProfile {
-	case "MINIMAL", "CONSULTATIVE":
+	case "MINIMAL", "MESSAGING":
 		sandbox = "read-only"
 	}
 	cmd = append(cmd, "--sandbox", sandbox)
@@ -91,7 +93,10 @@ func (codexAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
+	if err := writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("codex adapter setup system prompt: %w", err)
+	}
+	return nil
 }
 
 // SupportsMCP returns true: Codex Rust port reads .codex/config.toml at session
@@ -107,5 +112,8 @@ func (codexAdapter) WriteMCPConfig(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return writeMCPCodex(ctx, container, containerID, req, workDir, logger)
+	if err := writeMCPCodex(ctx, container, containerID, req, workDir, logger); err != nil {
+		return fmt.Errorf("codex adapter write MCP config: %w", err)
+	}
+	return nil
 }

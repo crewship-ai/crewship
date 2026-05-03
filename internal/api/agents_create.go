@@ -134,7 +134,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ToolProfile = "CODING"
 	}
 	if !validToolProfiles[req.ToolProfile] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, MESSAGING, FULL, or CONSULTATIVE"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, MESSAGING, or FULL"})
 		return
 	}
 	if req.TimeoutSeconds == 0 {

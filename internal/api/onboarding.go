@@ -21,24 +21,28 @@ type llmProviderInfo struct {
 
 // resolveLLMProvider maps a user-supplied provider string to its canonical
 // (provider, envVarName) pair. Mirrors the multi-CLI registry in
-// lib/cli-adapters.ts — Cursor + Factory added with the multi-CLI wave so
-// the onboarding wizard's provider step doesn't silently coerce them to
-// ANTHROPIC. Unknown values still fall back to ANTHROPIC for backward
-// compatibility (pre-multi-CLI behaviour).
-func resolveLLMProvider(provider string) llmProviderInfo {
+// lib/cli-adapters.ts. Empty input yields the Anthropic default (matches
+// the wizard's pre-multi-CLI behaviour for the unset case); explicit but
+// unknown values return ok=false so the caller can return 400 instead of
+// silently provisioning the wrong provider — that bug used to store keys
+// under ANTHROPIC_API_KEY for any typo'd provider value, masking the
+// real failure until first agent run.
+func resolveLLMProvider(provider string) (llmProviderInfo, bool) {
 	switch strings.ToUpper(provider) {
-	case "OPENAI":
-		return llmProviderInfo{provider: "OPENAI", envVarName: "OPENAI_API_KEY"}
-	case "GOOGLE":
-		return llmProviderInfo{provider: "GOOGLE", envVarName: "GOOGLE_API_KEY"}
-	case "CURSOR":
-		return llmProviderInfo{provider: "CURSOR", envVarName: "CURSOR_API_KEY"}
-	case "FACTORY":
-		return llmProviderInfo{provider: "FACTORY", envVarName: "FACTORY_API_KEY"}
+	case "":
+		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}, true
 	case "ANTHROPIC":
-		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}
+		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}, true
+	case "OPENAI":
+		return llmProviderInfo{provider: "OPENAI", envVarName: "OPENAI_API_KEY"}, true
+	case "GOOGLE":
+		return llmProviderInfo{provider: "GOOGLE", envVarName: "GOOGLE_API_KEY"}, true
+	case "CURSOR":
+		return llmProviderInfo{provider: "CURSOR", envVarName: "CURSOR_API_KEY"}, true
+	case "FACTORY":
+		return llmProviderInfo{provider: "FACTORY", envVarName: "FACTORY_API_KEY"}, true
 	default:
-		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}
+		return llmProviderInfo{}, false
 	}
 }
 
@@ -199,7 +203,11 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	if cliAdapter == "" {
 		cliAdapter = "CLAUDE_CODE"
 	}
-	llm := resolveLLMProvider(req.LlmProvider)
+	llm, ok := resolveLLMProvider(req.LlmProvider)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, or FACTORY"})
+		return
+	}
 	credName := req.CredentialName
 	if credName == "" && req.CredentialValue != "" {
 		credName = "API Key"
