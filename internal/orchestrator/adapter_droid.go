@@ -35,7 +35,9 @@ func (droidAdapter) BuildCommand(req AgentRunRequest) []string {
 	if req.LLMModel != "" {
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
-	cmd = append(cmd, req.UserMessage)
+	// `--` separator: see adapter_codex.go for rationale (user-message
+	// dash-prefix safety).
+	cmd = append(cmd, "--", req.UserMessage)
 	return cmd
 }
 

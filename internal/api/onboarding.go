@@ -19,12 +19,24 @@ type llmProviderInfo struct {
 	envVarName string
 }
 
+// resolveLLMProvider maps a user-supplied provider string to its canonical
+// (provider, envVarName) pair. Mirrors the multi-CLI registry in
+// lib/cli-adapters.ts — Cursor + Factory added with the multi-CLI wave so
+// the onboarding wizard's provider step doesn't silently coerce them to
+// ANTHROPIC. Unknown values still fall back to ANTHROPIC for backward
+// compatibility (pre-multi-CLI behaviour).
 func resolveLLMProvider(provider string) llmProviderInfo {
 	switch strings.ToUpper(provider) {
 	case "OPENAI":
 		return llmProviderInfo{provider: "OPENAI", envVarName: "OPENAI_API_KEY"}
 	case "GOOGLE":
 		return llmProviderInfo{provider: "GOOGLE", envVarName: "GOOGLE_API_KEY"}
+	case "CURSOR":
+		return llmProviderInfo{provider: "CURSOR", envVarName: "CURSOR_API_KEY"}
+	case "FACTORY":
+		return llmProviderInfo{provider: "FACTORY", envVarName: "FACTORY_API_KEY"}
+	case "ANTHROPIC":
+		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}
 	default:
 		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}
 	}

@@ -34,22 +34,54 @@ func New() *Scrubber {
 		re:   regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----`),
 	})
 
-	// Anthropic API keys: sk-ant-*
+	// Anthropic API keys: sk-ant-* (also covers sk-ant-oat for OAuth tokens)
 	s.patterns = append(s.patterns, pattern{
 		name: "anthropic_key",
 		re:   regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{10,}`),
 	})
 
-	// OpenAI API keys: sk-proj-* or sk-{48+ chars}
+	// OpenAI API keys: sk-proj-*, sk-svcacct-*, sk-{48+ chars}
 	s.patterns = append(s.patterns, pattern{
 		name: "openai_key",
-		re:   regexp.MustCompile(`sk-proj-[a-zA-Z0-9]{10,}|sk-[a-zA-Z0-9]{20,}`),
+		re:   regexp.MustCompile(`sk-(?:proj|svcacct)-[a-zA-Z0-9_-]{10,}|sk-[a-zA-Z0-9]{20,}`),
 	})
 
 	// Google API keys: AIzaSy...
 	s.patterns = append(s.patterns, pattern{
 		name: "google_key",
 		re:   regexp.MustCompile(`AIzaSy[a-zA-Z0-9_-]{33}`),
+	})
+
+	// Cursor API keys: cur_* (added with the multi-CLI wave). Pre-fix
+	// scrubber missed these — Cursor key leaked in agent stdout would
+	// flow unscrubbed into chat UI + journal entries.
+	s.patterns = append(s.patterns, pattern{
+		name: "cursor_key",
+		re:   regexp.MustCompile(`cur_[a-zA-Z0-9_-]{20,}`),
+	})
+
+	// Factory Droid API keys: fact_* / factory_* (per Factory CLI docs).
+	s.patterns = append(s.patterns, pattern{
+		name: "factory_key",
+		re:   regexp.MustCompile(`fact(?:ory)?_[a-zA-Z0-9_-]{20,}`),
+	})
+
+	// OpenRouter (used by OpenCode multi-provider routing): sk-or-*
+	s.patterns = append(s.patterns, pattern{
+		name: "openrouter_key",
+		re:   regexp.MustCompile(`sk-or-[a-zA-Z0-9_-]{20,}`),
+	})
+
+	// xAI / Grok keys: xai-*
+	s.patterns = append(s.patterns, pattern{
+		name: "xai_key",
+		re:   regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`),
+	})
+
+	// Groq keys: gsk_*
+	s.patterns = append(s.patterns, pattern{
+		name: "groq_key",
+		re:   regexp.MustCompile(`gsk_[a-zA-Z0-9]{20,}`),
 	})
 
 	// GitHub tokens: ghp_, gho_, ghs_, ghr_, github_pat_

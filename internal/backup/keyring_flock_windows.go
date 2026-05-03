@@ -13,6 +13,6 @@ package backup
 // runner the project does not currently use.
 type fileLock struct{}
 
-func newFileLock(_ string) *fileLock        { return &fileLock{} }
-func (l *fileLock) Lock() error             { return nil }
-func (l *fileLock) Unlock() error           { return nil }
+func newFileLock(_ string) *fileLock { return &fileLock{} }
+func (l *fileLock) Lock() error      { return nil }
+func (l *fileLock) Unlock() error    { return nil }

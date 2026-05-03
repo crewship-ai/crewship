@@ -11,9 +11,9 @@ func TestEstimateTokens(t *testing.T) {
 		want int
 	}{
 		{"", 0},
-		{"x", 1},                    // min 1 for non-empty
-		{"abcd", 1},                 // exactly 4 chars → 1 token
-		{"abcdefgh", 2},             // 8 chars → 2 tokens
+		{"x", 1},                        // min 1 for non-empty
+		{"abcd", 1},                     // exactly 4 chars → 1 token
+		{"abcdefgh", 2},                 // 8 chars → 2 tokens
 		{strings.Repeat("a", 400), 100}, // 400/4 = 100
 	}
 	for _, c := range cases {
@@ -51,13 +51,13 @@ func TestFormatEstimate_Empty(t *testing.T) {
 
 func TestFormatThousands(t *testing.T) {
 	cases := map[int]string{
-		0:        "0",
-		1:        "1",
-		999:      "999",
-		1000:     "1,000",
-		12345:    "12,345",
-		1234567:  "1,234,567",
-		-1234:    "-1,234",
+		0:       "0",
+		1:       "1",
+		999:     "999",
+		1000:    "1,000",
+		12345:   "12,345",
+		1234567: "1,234,567",
+		-1234:   "-1,234",
 	}
 	for in, want := range cases {
 		if got := formatThousands(in); got != want {

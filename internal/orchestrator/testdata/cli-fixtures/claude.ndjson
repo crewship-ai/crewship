@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","model":"claude-sonnet-4-6","tools":["Read","Edit","Bash"],"cwd":"/output/test","mcp_servers":[]}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" world"}}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Hello world"}]}}
+{"type":"result","subtype":"success","duration_ms":1234,"duration_api_ms":987,"total_cost_usd":0.0042,"num_turns":1,"is_error":false,"usage":{"input_tokens":15,"output_tokens":3}}

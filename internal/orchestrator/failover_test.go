@@ -167,17 +167,17 @@ func TestBuildCLICommand(t *testing.T) {
 			// a value (workspace-write default for CODING profile).
 			"codex cli default (CODING-equivalent → workspace-write)",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", UserMessage: "hello"},
-			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--", "hello"},
 		},
 		{
 			"codex cli minimal profile downgrades sandbox to read-only",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", ToolProfile: "MINIMAL", UserMessage: "audit"},
-			[]string{"codex", "exec", "--json", "--sandbox", "read-only", "audit"},
+			[]string{"codex", "exec", "--json", "--sandbox", "read-only", "--", "audit"},
 		},
 		{
 			"codex cli with model override",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", LLMModel: "gpt-5", UserMessage: "hello"},
-			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "--", "hello"},
 		},
 		{
 			// gemini-cli has no documented --system-instruction flag in
@@ -197,12 +197,12 @@ func TestBuildCLICommand(t *testing.T) {
 			// "default" or "json". Adapter passes --format json.
 			"opencode default",
 			AgentRunRequest{CLIAdapter: "OPENCODE", UserMessage: "hello"},
-			[]string{"opencode", "run", "--format", "json", "hello"},
+			[]string{"opencode", "run", "--format", "json", "--", "hello"},
 		},
 		{
 			"opencode with provider/model namespaced model",
 			AgentRunRequest{CLIAdapter: "OPENCODE", LLMModel: "anthropic/claude-sonnet-4-6", UserMessage: "hello"},
-			[]string{"opencode", "run", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "hello"},
+			[]string{"opencode", "run", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "--", "hello"},
 		},
 		{
 			// Cursor headless: --force prevents the agent from blocking on
@@ -231,27 +231,27 @@ func TestBuildCLICommand(t *testing.T) {
 			// See exec.go FACTORY_DROID case for the rationale.
 			"factory droid default (no profile) is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", UserMessage: "fix the bug"},
-			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "fix the bug"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", "fix the bug"},
 		},
 		{
 			"factory droid coding profile is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CODING", UserMessage: "ship the feature"},
-			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "ship the feature"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", "ship the feature"},
 		},
 		{
 			"factory droid minimal profile downgrades to low",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", UserMessage: "audit only"},
-			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "audit only"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", "audit only"},
 		},
 		{
 			"factory droid consultative profile downgrades to low",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CONSULTATIVE", UserMessage: "advise"},
-			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "advise"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", "advise"},
 		},
 		{
 			"factory droid with model",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", LLMModel: "claude-sonnet-4-6", UserMessage: "review"},
-			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--model", "claude-sonnet-4-6", "review"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--model", "claude-sonnet-4-6", "--", "review"},
 		},
 		{
 			"unknown defaults to claude",

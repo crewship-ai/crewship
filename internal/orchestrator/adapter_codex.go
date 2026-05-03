@@ -45,7 +45,11 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
 
-	cmd = append(cmd, req.UserMessage)
+	// `--` separator stops Codex from re-parsing user message tokens that
+	// happen to start with `-` (e.g. "--help") as flags. Without this a
+	// user prompt of "describe --force option" would crash with "unknown
+	// flag: --force" before reaching the model.
+	cmd = append(cmd, "--", req.UserMessage)
 	return cmd
 }
 

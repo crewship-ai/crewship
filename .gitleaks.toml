@@ -97,6 +97,17 @@ paths = [
   # Gitleaks own config files (false positive loop prevention).
   '''\.gitleaks\.toml$''',
   '''\.gitleaksignore$''',
+
+  # Scrubber test fixtures intentionally use realistic-looking fake secrets
+  # to verify the redaction patterns work. Each value is hard-coded inline
+  # in the test, never an actual production credential. Verified all
+  # entries are obviously synthetic (sequential alphabet, repeated digits).
+  '''internal/scrubber/scrubber_multicli_test\.go$''',
+
+  # CLI fixture files for the multi-CLI E2E test suite. NDJSON captured
+  # from canonical "say hello" runs against each upstream CLI; contains
+  # no credentials, only event schemas.
+  '''internal/orchestrator/testdata/cli-fixtures/.*\.ndjson$''',
 ]
 
 # Strings that look like secrets but are documented placeholders.

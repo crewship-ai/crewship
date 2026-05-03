@@ -82,6 +82,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: "Anthropic",
   OPENAI: "OpenAI",
   GOOGLE: "Google",
+  CURSOR: "Cursor",
+  FACTORY: "Factory",
   NONE: "Custom",
 }
 

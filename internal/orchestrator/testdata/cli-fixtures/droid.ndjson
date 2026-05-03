@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","cwd":"/output/test","session_id":"drd-1","model":"claude-sonnet-4-6","tools":["bash","read"]}
+{"type":"message","role":"assistant","id":"msg-1","text":"Hello world","session_id":"drd-1"}
+{"type":"completion","finalText":"Hello world","numTurns":1,"durationMs":1450,"session_id":"drd-1"}

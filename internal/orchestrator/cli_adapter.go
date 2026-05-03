@@ -160,6 +160,13 @@ func (unknownAdapter) WriteMCPConfig(
 // a single text file (system prompt, config) into the container before the CLI
 // runs. The content is base64-encoded over the shell to avoid any quoting or
 // heredoc-delimiter problems with arbitrary user-supplied prompts.
+//
+// SECURITY: chmod 600 is applied unconditionally because all agents in a crew
+// share one container and run as the same UID (1001). MCP configs may contain
+// literal API tokens (e.g. Codex env-block values that the user typed
+// directly). Without 600 perms a sibling agent could `cat` the config and
+// exfiltrate the token. Match the pre-existing pattern in setupMCPConfig +
+// setupClaudeConfig (exec_mcp.go) which already chmod 600 their writes.
 func writeFileViaContainer(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -170,8 +177,9 @@ func writeFileViaContainer(
 	logger *slog.Logger,
 ) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	script := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s",
-		shellEscape(relPath), encoded, shellEscape(relPath))
+	escapedPath := shellEscape(relPath)
+	script := fmt.Sprintf("mkdir -p \"$(dirname %s)\" && echo %s | base64 -d > %s && chmod 600 %s",
+		escapedPath, encoded, escapedPath, escapedPath)
 
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,

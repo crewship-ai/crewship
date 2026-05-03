@@ -34,7 +34,8 @@ func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 		// errors out with a clear message — better than us guessing the prefix.
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
-	cmd = append(cmd, req.UserMessage)
+	// `--` separator: see adapter_codex.go for rationale.
+	cmd = append(cmd, "--", req.UserMessage)
 	return cmd
 }
 
