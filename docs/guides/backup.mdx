@@ -206,7 +206,7 @@ Semantics worth knowing:
 - **Single-process mutex, not file-locked.** Two concurrent CLI
   invocations against the same workspace are last-write-wins (the file
   is small and the failure mode is "one passphrase lost, never data
-  corruption"); tracked as a CRE-130 follow-up.
+  corruption"). Filesystem-level locking is on the v0.2 roadmap.
 - **`--passphrase-file` takes precedence.** When both flags are passed,
   the file wins and the keyring is not consulted.
 
@@ -321,7 +321,7 @@ same REST endpoints the CLI drives and adds:
 The UI does **not** expose instance-scope operations — they remain
 CLI + env-gated to reduce blast radius from a compromised admin session.
 
-## Known caveats (CRE-130 follow-ups)
+## Known caveats (v0.2 roadmap)
 
 The following items are intentionally deferred to post-v2 work. They do
 **not** block production use but are worth knowing:

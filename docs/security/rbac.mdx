@@ -52,33 +52,27 @@ New user registration is controlled by the `CREWSHIP_ALLOW_SIGNUP` environment v
 
 ## Agent Roles
 
-Every AI agent has one of three functional roles:
+Every AI agent has one of two functional roles:
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
   <Card title="AGENT" icon="robot">
     Individual contributor. Executes tasks, writes code, runs tools. The standard role for most agents.
   </Card>
   <Card title="LEAD" icon="crown">
     Crew orchestrator. Assigns tasks to agents, creates missions, monitors progress. Has access to the full sidecar API.
   </Card>
-  <Card title="COORDINATOR (deprecated)" icon="globe">
-    *Deprecated 2026-04-16.* Workspace strategist. Sees all crews, creates cross-crew missions, submits proposals for human approval. See [Coordinator guide](/guides/coordinator).
-  </Card>
 </CardGroup>
 
 ### Agent Role Capabilities
 
-| Capability | AGENT | LEAD | COORDINATOR |
-|-----------|-------|------|-------------|
-| Execute tasks | Yes | Yes | Yes |
-| Use memory | Yes | Yes | Yes |
-| Peer queries | Yes | Yes | Yes |
-| Assign tasks | No | Yes | Yes |
-| Create missions | No | Yes | Yes |
-| See crew members | Via peers | Full list | All crews |
-| Cross-crew missions | No | Connected crews | All crews |
-| Submit proposals | No | No | Yes |
-| Create crews/agents | No | No | Yes |
+| Capability | AGENT | LEAD |
+|-----------|-------|------|
+| Execute tasks | Yes | Yes |
+| Use memory | Yes | Yes |
+| Peer queries | Yes | Yes |
+| Assign tasks | No | Yes |
+| Create missions | No | Yes |
+| See crew members | Via peers | Full list |
 
 ### The Equality Principle
 
@@ -93,36 +87,6 @@ The system prompt for each role reflects this equality:
 
 **LEAD:**
 > You are a crew member with orchestration responsibility. You are not a boss -- you are an equal colleague who carries the soul and mission of the expedition to the whole team.
-
-**COORDINATOR:**
-> You are a workspace member with coordination responsibility -- connecting the expeditions of all crews. You are not above anyone -- you see the bigger picture and help crews align.
-
-## Captain Permissions
-
-Captain (the workspace AI assistant) operates within the authenticated user's permission scope:
-
-- Captain derives the workspace ID and user ID from the authenticated session
-- Chat history is scoped per-user: `cap_{workspaceID}_{userID}`
-- Tool calls are audited with the user's identity
-- Captain never reveals credential values, even to OWNER-level users
-
-### Captain Tool Access
-
-Captain tools are available to all authenticated users, but some tools enforce role-based restrictions:
-
-| Tool | Required Role |
-|------|--------------|
-| `get_workspace_stats` | Any |
-| `list_crews` | Any |
-| `list_agents` | Any |
-| `list_credentials` | Any (values never exposed) |
-| `list_missions` | Any |
-| `list_escalations` | Any |
-| `create_crew` | Manager+ |
-| `create_agent` | Manager+ |
-| `create_mission` | Member+ |
-| `approve_proposal` | Manager+ |
-| `apply_crew_template` | Manager+ |
 
 ## Internal API Authentication
 

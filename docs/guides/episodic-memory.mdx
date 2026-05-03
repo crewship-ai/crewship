@@ -6,6 +6,10 @@ icon: "database"
 
 # Episodic Memory
 
+<Note>
+**Roadmap (v0.2).** The episodic package ships in v0.1 but the embed-on-write hook into the journal writer is not yet wired. Vector recall queries return empty results until v0.2. Manual indexing via API works for evaluation purposes.
+</Note>
+
 Episodic is a narrow vector-recall layer over the [Crew Journal](/guides/crew-journal). It embeds a **selective** subset of journal entries and serves top-K similarity queries to agents planning new work.
 
 The "selective" part is load-bearing. Per 2025-2026 multi-agent memory research, indexing every event causes catastrophic drift: high-volume low-signal types (`exec.output_chunk`, `container.metrics`, `network.*`) drown the embedding space and dilute recall. Episodic refuses to embed those types and ingests only escalations, summaries, terminal mission status, denied keeper calls, eval regressions, and operator-tagged entries.
@@ -129,7 +133,6 @@ const (
 |---|---|
 | `AGENT` (default) | `own` |
 | `LEAD` | `crew_shared` |
-| `COORDINATOR` | `crew_shared` |
 
 **Workspace isolation is always enforced** at the query boundary -- a cross-workspace recall is impossible even with a misconfigured scope.
 
@@ -337,4 +340,3 @@ Only entries whose type survives the coarse SQL filter (the `EmbeddableEntryType
 
 - [Crew Journal](/guides/crew-journal) -- source of entries.
 - [Consolidate](/guides/consolidate) -- runs `IndexNew` on the daily tick.
-- [Reflection](/guides/reflection) -- emits `summary.generated` entries that land in the index.

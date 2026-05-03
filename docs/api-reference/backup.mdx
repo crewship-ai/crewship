@@ -47,7 +47,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 
 | Field | Type | Notes |
 |---|---|---|
-| `scope` | `"workspace"` \| `"crew"` | Required. `"instance"` is reserved for CRE-129 and rejected. |
+| `scope` | `"workspace"` \| `"crew"` | Required. `"instance"` is reserved for the CLI-only flow and rejected by the API. |
 | `crew_id` | string | Required when `scope == "crew"`. |
 | `passphrase` | string | AGE passphrase. Exactly one of `passphrase` / `recipient` / `no_encrypt` must be supplied. |
 | `recipient` | string | AGE X25519 public key (`age1…`). Parsed with `age.ParseX25519Recipient`. |

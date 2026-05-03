@@ -6,6 +6,10 @@ icon: "layers"
 
 # Consolidate
 
+<Note>
+**Roadmap (v0.2).** The Consolidate package ships in v0.1 but is not auto-scheduled. Manual trigger via API/CLI works today; automatic scheduling and the "supervisor crew" pattern are planned for v0.2.
+</Note>
+
 Two background workers run against the [Crew Journal](/guides/crew-journal) on a schedule:
 
 1. **Consolidator** -- every 6h, walks recent journal entries per crew and produces a set of learned rules appended to `.memory/topics/learned-YYYY-MM-DD.md`. Emits `memory.consolidated`.

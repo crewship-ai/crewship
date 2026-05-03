@@ -1,6 +1,6 @@
 ---
 title: "Audit Log"
-description: "Immutable audit trail for all mutations, Captain tool calls, and Keeper security decisions."
+description: "Immutable audit trail for all mutations and Keeper security decisions."
 icon: "scroll"
 ---
 
@@ -18,30 +18,7 @@ Every state-changing operation is recorded in the audit log:
 | **Crews** | `create`, `update`, `delete` | Crew settings updated |
 | **Missions** | `create`, `update`, `delete` | Mission started |
 | **Credentials** | `create`, `update`, `delete` | Credential assigned to agent |
-| **Captain** (*deprecated 2026-04-16*) | `captain_tool_call` | Captain invoked a tool (tool_id, tool_name recorded) |
 | **Keeper** | `credential`, `execute` | Keeper evaluated a credential access or command execution request |
-
-### Captain Tool Call Auditing
-
-<Note>
-  Captain is deprecated (2026-04-16). The `captain_tool_call` audit action
-  remains recorded while Captain endpoints are still wired, but new
-  integrations should not rely on it. See [Captain guide](/guides/captain).
-</Note>
-
-When Captain (the AI assistant) invokes a tool, the audit log records:
-
-```json
-{
-  "action": "captain_tool_call",
-  "entity_type": "CAPTAIN",
-  "entity_id": "tool_name",
-  "metadata": {
-    "tool_id": "toolu_abc123",
-    "tool_name": "create_agent"
-  }
-}
-```
 
 ### Keeper Decision Auditing
 
@@ -80,8 +57,8 @@ CREATE TABLE audit_logs (
 | `id` | `TEXT` | Random hex ID (32 chars) |
 | `workspace_id` | `TEXT` | Workspace the action occurred in |
 | `user_id` | `TEXT` | User who performed the action (null for system actions) |
-| `action` | `TEXT` | Action type (create, update, delete, captain_tool_call) |
-| `entity_type` | `TEXT` | Entity type (AGENT, CREW, MISSION, CAPTAIN, etc.) |
+| `action` | `TEXT` | Action type (create, update, delete) |
+| `entity_type` | `TEXT` | Entity type (AGENT, CREW, MISSION, etc.) |
 | `entity_id` | `TEXT` | ID of the affected entity |
 | `metadata` | `TEXT` | JSON object with action-specific details |
 | `ip_address` | `TEXT` | Client IP address |
@@ -167,11 +144,6 @@ The audit log uses offset-based pagination:
   <Tab title="Recent activity (date range)">
     ```
     GET /api/v1/audit?date_from=2025-01-01T00:00:00Z&date_to=2025-01-31T23:59:59Z
-    ```
-  </Tab>
-  <Tab title="Captain tool calls">
-    ```
-    GET /api/v1/audit?action=captain_tool_call&entity_type=CAPTAIN
     ```
   </Tab>
 </Tabs>
