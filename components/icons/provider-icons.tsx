@@ -37,6 +37,17 @@ export function CursorIcon(props: IconProps) {
   )
 }
 
+// Factory Droid uses a hexagonal/atom-shaped brand mark per their site
+// (factory.ai). Stylised as a single-path geometric glyph: outer hex with an
+// inner triangle, matching the visual weight of the other provider icons.
+export function FactoryIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path d="M12 1.5 2.5 7v10L12 22.5 21.5 17V7Zm0 2.31 7.5 4.34v8.7L12 20.19l-7.5-4.34v-8.7Zm0 3.04L6.4 14.1l5.6 3.24 5.6-3.24Z" />
+    </svg>
+  )
+}
+
 export function GitHubIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -78,8 +89,7 @@ export const PROVIDER_ICONS: Record<string, React.ComponentType<IconProps>> = {
   OPENAI: OpenAIIcon,
   GOOGLE: GeminiIcon,
   CURSOR: CursorIcon,
-  // Factory Droid uses a placeholder icon until we ship a dedicated SVG.
-  FACTORY: AnthropicIcon,
+  FACTORY: FactoryIcon,
   GITHUB: GitHubIcon,
   GITLAB: GitLabIcon,
   VERCEL: VercelIcon,

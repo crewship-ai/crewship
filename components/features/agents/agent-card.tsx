@@ -8,6 +8,10 @@ import { Badge } from "@/components/ui/badge"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import { timeAgo } from "@/lib/time"
+import { CLI_ADAPTERS, getModelLabel, getProviderLabel } from "@/lib/cli-adapters"
+import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
+import { PROVIDER_ICON_COLOR } from "@/lib/colors"
+import { cn } from "@/lib/utils"
 
 interface AgentCrew {
   name: string
@@ -108,11 +112,34 @@ export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }
                 {agent.crew.name}
               </Badge>
             )}
-            {(agent.llm_provider || agent.llm_model) && (
-              <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
-                {agent.llm_provider ?? "—"} / {agent.llm_model ?? "—"}
-              </Badge>
-            )}
+            {/* CLI adapter badge with the adapter's brand icon. Pre-fix this
+                surface only showed llm_provider/llm_model as raw API IDs;
+                the CLI adapter (CLAUDE_CODE / CODEX_CLI / CURSOR_CLI / ...)
+                was invisible despite being a primary axis of agent identity. */}
+            {agent.cli_adapter && CLI_ADAPTERS[agent.cli_adapter] && (() => {
+              const adapter = CLI_ADAPTERS[agent.cli_adapter]
+              const Icon = adapter.icon
+              return (
+                <Badge variant="outline" className="text-micro gap-1">
+                  <Icon className={cn("h-3 w-3", PROVIDER_ICON_COLOR[adapter.provider])} />
+                  {adapter.label}
+                </Badge>
+              )
+            })()}
+            {(agent.llm_provider || agent.llm_model) && (() => {
+              const ProviderIcon = agent.llm_provider ? PROVIDER_ICONS[agent.llm_provider] : null
+              const tint = agent.llm_provider ? PROVIDER_ICON_COLOR[agent.llm_provider] : ""
+              const modelLabel = agent.llm_model ? getModelLabel(agent.llm_model) : "—"
+              const providerLabel = agent.llm_provider ? getProviderLabel(agent.llm_provider) : "—"
+              return (
+                <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
+                  {ProviderIcon && <ProviderIcon className={cn("h-3 w-3", tint)} />}
+                  <span>{providerLabel}</span>
+                  <span className="opacity-60">·</span>
+                  <span>{modelLabel}</span>
+                </Badge>
+              )
+            })()}
           </div>
 
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground">

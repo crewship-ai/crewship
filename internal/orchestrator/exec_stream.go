@@ -31,10 +31,21 @@ type streamJSONMessage struct {
 	ModelUsage   json.RawMessage `json:"modelUsage,omitempty"`
 	Errors       []string        `json:"errors,omitempty"`
 	// For "system" type with subtype "init"
-	Model    string          `json:"model,omitempty"`
-	Tools    []string        `json:"tools,omitempty"`
-	CWD      string          `json:"cwd,omitempty"`
-	MCPSrvrs json.RawMessage `json:"mcp_servers,omitempty"`
+	Model        string          `json:"model,omitempty"`
+	Tools        []string        `json:"tools,omitempty"`
+	CWD          string          `json:"cwd,omitempty"`
+	MCPSrvrs     json.RawMessage `json:"mcp_servers,omitempty"`
+	Plugins      json.RawMessage `json:"plugins,omitempty"`
+	PluginErrors json.RawMessage `json:"plugin_errors,omitempty"`
+	// For "system" type with subtype "api_retry" (Anthropic 2.1.x ships this
+	// as a separate event when auth/rate/billing/server retries kick in).
+	// Surface to journal so backoff investigations have data; pre-fix parser
+	// dropped these to the default branch and Crow's Nest never saw them.
+	Attempt      int     `json:"attempt,omitempty"`
+	MaxRetries   int     `json:"max_retries,omitempty"`
+	RetryDelayMs float64 `json:"retry_delay_ms,omitempty"`
+	ErrorStatus  int     `json:"error_status,omitempty"`
+	ErrorMessage string  `json:"error,omitempty"`
 	// For stream_event type (--include-partial-messages)
 	Event *streamEvent `json:"event,omitempty"`
 }

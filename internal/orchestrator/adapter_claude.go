@@ -18,12 +18,22 @@ type claudeCodeAdapter struct{}
 func (claudeCodeAdapter) Name() string { return "CLAUDE_CODE" }
 
 func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
+	// --bare: skips auto-discovery of hooks/skills/plugins/MCP/CLAUDE.md.
+	// Anthropic docs explicitly recommend it for scripted/SDK calls and say
+	// it will become the default for -p in a future release. Crewship runs
+	// in a clean container so discovery is pure overhead — and a stray
+	// ~/.claude mount could silently inject behaviour. Combined with
+	// --setting-sources (no value) and --strict-mcp-config we get clean
+	// belt-and-suspenders isolation.
 	cmd := []string{
 		"claude", "--print",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
 		"--dangerously-skip-permissions",
 		"--verbose",
+		"--bare",
+		"--strict-mcp-config",
+		"--no-session-persistence",
 	}
 	if req.LLMModel != "" {
 		cmd = append(cmd, "--model", req.LLMModel)
@@ -33,8 +43,13 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	if req.ToolProfile == "MINIMAL" {
 		cmd = append(cmd, "--tools", "Read,Search,Grep")
 	}
+	// --max-turns caps runaway loops at the Claude side as defense-in-depth
+	// alongside Crewship's mission-level paymaster budget. 50 is generous
+	// enough for complex multi-step tasks without letting a stuck agent
+	// burn budget indefinitely.
+	cmd = append(cmd, "--max-turns", "50")
 	// MCP servers are read from /crew/agents/<slug>/.mcp.json — written by
-	// setupMCPConfig before exec when any MCP source is non-empty.
+	// WriteMCPConfig before exec when any MCP source is non-empty.
 	if len(req.MCPServers) > 0 || req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" {
 		cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
 	}
@@ -190,7 +205,8 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 		meta := map[string]interface{}{
 			"subtype": msg.Subtype,
 		}
-		if msg.Subtype == "init" {
+		switch msg.Subtype {
+		case "init":
 			if msg.Model != "" {
 				meta["model"] = msg.Model
 			}
@@ -205,6 +221,38 @@ func parseClaudeCodeStreamJSON(line []byte, handler EventHandler) {
 				if json.Unmarshal(msg.MCPSrvrs, &servers) == nil {
 					meta["mcp_servers"] = servers
 				}
+			}
+			// v2.1.111+ ships plugins + plugin_errors so operators can see
+			// when a plugin fails to load at session start. Crewship runs
+			// --bare which suppresses plugin discovery, but customers who
+			// later opt out of --bare on a per-agent basis benefit from
+			// this visibility.
+			if len(msg.Plugins) > 0 {
+				var plugins json.RawMessage
+				meta["plugins"] = json.RawMessage(append([]byte{}, msg.Plugins...))
+				_ = plugins
+			}
+			if len(msg.PluginErrors) > 0 {
+				meta["plugin_errors"] = json.RawMessage(append([]byte{}, msg.PluginErrors...))
+			}
+		case "api_retry":
+			// Anthropic auth/rate/billing/server retry envelope. Capture all
+			// fields so backoff investigations have ground truth; Crow's
+			// Nest can render a "retrying" banner without polling logs.
+			if msg.Attempt > 0 {
+				meta["attempt"] = msg.Attempt
+			}
+			if msg.MaxRetries > 0 {
+				meta["max_retries"] = msg.MaxRetries
+			}
+			if msg.RetryDelayMs > 0 {
+				meta["retry_delay_ms"] = msg.RetryDelayMs
+			}
+			if msg.ErrorStatus > 0 {
+				meta["error_status"] = msg.ErrorStatus
+			}
+			if msg.ErrorMessage != "" {
+				meta["error"] = msg.ErrorMessage
 			}
 		}
 		handler(AgentEvent{

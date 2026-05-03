@@ -149,17 +149,17 @@ func TestBuildCLICommand(t *testing.T) {
 		{
 			"claude code default",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--max-turns", "50", "--", "hello"},
 		},
 		{
 			"claude code with system prompt",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble + "be helpful", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble + "be helpful", "--max-turns", "50", "--", "hello"},
 		},
 		{
 			"claude code minimal profile",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", ToolProfile: "MINIMAL", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "--max-turns", "50", "--", "hello"},
 		},
 		{
 			// Codex Rust port (npm @openai/codex 0.128.x): non-interactive

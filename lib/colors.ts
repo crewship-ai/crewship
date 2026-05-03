@@ -219,6 +219,8 @@ export const PROVIDER_ICON_COLOR: Record<string, string> = {
   ANTHROPIC: "text-violet-500",
   OPENAI: "text-emerald-500",
   GOOGLE: "text-blue-500",
+  CURSOR: "text-cyan-500",
+  FACTORY: "text-rose-500",
   GITHUB: "text-foreground",
   GITLAB: "text-orange-500",
   VERCEL: "text-foreground",

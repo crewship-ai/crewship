@@ -36,7 +36,7 @@ interface Credential {
   name: string
   description: string | null
   type: "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
-  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
+  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
   status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR" | "PENDING"
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
@@ -74,6 +74,8 @@ const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: "Anthropic",
   OPENAI: "OpenAI",
   GOOGLE: "Google",
+  CURSOR: "Cursor",
+  FACTORY: "Factory",
   GITHUB: "GitHub",
   GITLAB: "GitLab",
   VERCEL: "Vercel",

@@ -26,9 +26,13 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 		pinnedNpmVersion string
 	}{
 		{
-			adapter:          "CLAUDE_CODE",
-			docURL:           "https://code.claude.com/docs/en/cli-reference",
-			mustHave:         []string{"--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--system-prompt"},
+			adapter: "CLAUDE_CODE",
+			docURL:  "https://code.claude.com/docs/en/cli-reference",
+			// --bare: clean container isolation (Anthropic-recommended for SDK).
+			// --strict-mcp-config: only load MCP from --mcp-config, no inheritance.
+			// --no-session-persistence: clean container reuse, no leftover state.
+			// --max-turns: runaway loop killer at the Claude side.
+			mustHave:         []string{"--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--system-prompt", "--bare", "--strict-mcp-config", "--no-session-persistence", "--max-turns"},
 			pinnedNpmVersion: "@anthropic-ai/claude-code@2.1.126",
 		},
 		{

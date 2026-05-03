@@ -42,8 +42,8 @@ export const createAgentSchema = z.object({
   // Kept in the enum for backward compat so existing agents still validate.
   agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).default("AGENT"),
   lead_mode: z.enum(["active", "passive"]).default("active").optional(),
-  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"]).default("CLAUDE_CODE"),
-  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
+  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"]).default("CLAUDE_CODE"),
+  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).default(1800),
@@ -86,8 +86,8 @@ export const updateAgentSchema = z.object({
   role_title: z.string().max(100).optional(),
   agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).optional(),
   lead_mode: z.enum(["active", "passive"]).optional(),
-  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"]).optional(),
-  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
+  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"]).optional(),
+  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).optional(),
@@ -114,8 +114,11 @@ export const updateAgentSchema = z.object({
 /** Allowed credential type discriminators. */
 export const credentialTypeValues = ["AI_CLI_TOKEN", "API_KEY", "SECRET"] as const
 
-/** Allowed credential provider discriminators. */
-export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "NONE"] as const
+/** Allowed credential provider discriminators. Mirrors prisma/schema.prisma
+ *  CredentialProvider enum + the multi-CLI wave additions (CURSOR, FACTORY).
+ *  When OpenCode users need OpenRouter/xAI/Groq/DeepSeek keys, they add them
+ *  as SECRET type with the env var name set manually. */
+export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "NONE"] as const
 
 /**
  * Zod schema for creating a credential with scope validation.
