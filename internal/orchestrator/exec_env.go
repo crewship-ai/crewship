@@ -197,6 +197,41 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		)
 	}
 
+	// Multi-CLI BYO API key path. The sidecar reverse-proxy is wired only for
+	// api.anthropic.com today; Codex/Gemini/OpenCode/Cursor talk to their
+	// upstream over HTTPS CONNECT through the sidecar (no x-api-key
+	// injection). Override the dummy provider keys above with real values
+	// from req.Credentials — but only for env vars that THIS adapter's CLI
+	// actually reads. This preserves the sidecar isolation guarantee for
+	// cross-adapter scenarios (e.g. a Claude Code agent in a workspace that
+	// also has an OpenAI key configured — that key stays out of env).
+	//
+	// Future work: extend the sidecar reverse-proxy to api.openai.com,
+	// generativelanguage.googleapis.com and api.cursor.sh so this leak path
+	// can collapse back into the same x-api-key injection model the Anthropic
+	// path uses today. Tracked in plan: t-m-ukulem-bude-purring-cray.md.
+	allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter)
+	if len(allowed) > 0 {
+		for _, cred := range req.Credentials {
+			if cred.PlainValue == "" {
+				continue
+			}
+			if _, ok := allowed[cred.EnvVarName]; !ok {
+				continue
+			}
+			env = overrideEnv(env, cred.EnvVarName, cred.PlainValue)
+			// gemini-cli reads either GOOGLE_API_KEY or GEMINI_API_KEY; mirror
+			// the value into both so config differences across versions don't
+			// stop authentication.
+			if cred.EnvVarName == "GOOGLE_API_KEY" {
+				env = overrideEnv(env, "GEMINI_API_KEY", cred.PlainValue)
+			}
+			if cred.EnvVarName == "GEMINI_API_KEY" {
+				env = overrideEnv(env, "GOOGLE_API_KEY", cred.PlainValue)
+			}
+		}
+	}
+
 	// CLI_TOKEN credentials: injected as direct env vars (agent sees them).
 	// CLI tools (gh, glab, vercel...) read credentials from env vars, not HTTP proxy.
 	// The sidecar proxy cannot inject credentials into HTTPS CONNECT tunnels.
@@ -218,6 +253,52 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	}
 
 	return env
+}
+
+// apiKeyEnvVarsForAdapter returns the set of env-var names whose presence the
+// given CLI adapter's binary genuinely needs in order to authenticate. Used
+// by BuildEnvVarsSidecar to decide which dummy provider keys to overwrite with
+// real values from req.Credentials.
+//
+// Returning an empty / nil map means "this adapter relies on the sidecar
+// reverse-proxy to inject credentials" — Claude Code's path. Returning a
+// populated map means "this CLI talks directly to its upstream over HTTPS
+// CONNECT and needs the real key in env".
+func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
+	switch adapter {
+	case "CODEX_CLI":
+		return map[string]struct{}{"OPENAI_API_KEY": {}}
+	case "GEMINI_CLI":
+		return map[string]struct{}{"GOOGLE_API_KEY": {}, "GEMINI_API_KEY": {}}
+	case "OPENCODE":
+		// OpenCode is BYOK across providers — accept any of the three so the
+		// user can route via whichever provider their opencode.json chose.
+		return map[string]struct{}{
+			"ANTHROPIC_API_KEY": {},
+			"OPENAI_API_KEY":    {},
+			"GOOGLE_API_KEY":    {},
+		}
+	case "CURSOR_CLI":
+		return map[string]struct{}{"CURSOR_API_KEY": {}}
+	default:
+		// CLAUDE_CODE, FACTORY_DROID, unknown — no overrides; sidecar handles
+		// Anthropic, Droid is out of scope this wave.
+		return nil
+	}
+}
+
+// overrideEnv replaces (or appends) `key=value` in env, returning the updated
+// slice. Used by BuildEnvVarsSidecar to swap dummy provider keys for the real
+// values when a BYO API key is present in req.Credentials.
+func overrideEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
 
 // resolveEnvVar returns the correct env var name for a credential.

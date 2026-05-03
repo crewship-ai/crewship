@@ -371,13 +371,17 @@ func startSidecar(
 // env var in BuildEnvVarsSidecar rather than stored in the sidecar CredStore, because
 // the sidecar CredStore only supports x-api-key injection which won't work for OAuth tokens.
 func credTypeToProvider(c Credential) string {
-	switch {
-	case c.EnvVarName == "ANTHROPIC_API_KEY":
+	switch c.EnvVarName {
+	case "ANTHROPIC_API_KEY":
 		return "ANTHROPIC"
-	case c.EnvVarName == "OPENAI_API_KEY":
+	case "OPENAI_API_KEY":
 		return "OPENAI"
-	case c.EnvVarName == "GOOGLE_API_KEY":
+	case "GOOGLE_API_KEY", "GEMINI_API_KEY":
+		// gemini-cli accepts either GOOGLE_API_KEY or GEMINI_API_KEY; both
+		// map to the same sidecar provider type.
 		return "GOOGLE"
+	case "CURSOR_API_KEY":
+		return "CURSOR"
 	default:
 		return ""
 	}

@@ -159,6 +159,7 @@ enum CredentialProvider {
   ANTHROPIC
   OPENAI
   GOOGLE
+  CURSOR
   NONE
 }
 
