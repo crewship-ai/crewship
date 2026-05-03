@@ -298,7 +298,7 @@ The composite `score` is reported with three colour bands:
 | Yellow | `50–75` | Functional but with at least one weak metric. Watch the dashboard. |
 | Green | `≥ 75` | All metrics in healthy range. |
 
-Health is computed by `internal/episodic/health.go`'s `ComputeSnapshot`. The daily consolidator job calls it after `IndexNew`; operators can call it on demand via:
+Health is exposed by `internal/api/memory_health_handler.go` over scores derived in `internal/episodic/`. The daily consolidator job recomputes it after `IndexNew`; operators can call it on demand via:
 
 - HTTP — `GET /api/v1/memory/health[?crew_id=<slug>]`. See [Memory API](/api-reference/memory).
 - CLI — `crewship memory health [--crew <slug>]`. See [`crewship memory health`](/cli/memory#health).

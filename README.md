@@ -16,9 +16,11 @@
   <a href="https://pkg.go.dev/github.com/crewship-ai/crewship"><img src="https://pkg.go.dev/badge/github.com/crewship-ai/crewship.svg" alt="Go Reference" /></a>
 </p>
 
-> **Project status:** active development. Public APIs and data models may
-> change before the first tagged release. Self-host at your own risk and
-> pin a commit SHA if you ship to production.
+> **Project status:** v0.1 public beta. The API surface and data models
+> are still moving — pre-1.0 minor bumps may break things. Pin a specific
+> `v0.x.y` tag (or commit SHA) if you ship to production. See
+> [CHANGELOG.md](CHANGELOG.md) for what's in each release and
+> [RELEASING.md](RELEASING.md) for the cadence.
 
 ---
 
