@@ -188,6 +188,14 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter,
 	})
 
+	// CLI/UI-created agents require explicit credential assignment per
+	// CLAUDE.md policy ("Agents created via CLI/UI assign credentials
+	// manually"). The Create Agent dialog surfaces a follow-up prompt to
+	// link a workspace credential after the 201; the CLI uses
+	// `crewship credential assign`. Auto-assign is reserved for
+	// template, Captain, and internal-API flows (see autoAssignCredentials
+	// callers in crew_templates.go, captain_tools_mutate.go, internal_status.go).
+
 	writeJSON(w, http.StatusCreated, agentResponse{
 		ID:             agentID,
 		CrewID:         req.CrewID,
