@@ -4,10 +4,9 @@ import (
 	"testing"
 )
 
-// TestParseGemini_Init covers the session bootstrap event documented in
-// geminicli.com/docs/cli/headless/.
+// TestParseGemini_Init pins the bootstrap event.
 func TestParseGemini_Init(t *testing.T) {
-	line := []byte(`{"type":"init","model":"gemini-2.5-pro","session_id":"g-1"}`)
+	line := []byte(`{"type":"init","model":"gemini-2.5-pro","session_id":"g-1","timestamp":"2026-05-03T15:00:00Z"}`)
 	var got []AgentEvent
 	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
 
@@ -20,70 +19,108 @@ func TestParseGemini_Init(t *testing.T) {
 	}
 }
 
-// TestParseGemini_Message covers assistant text deltas.
-func TestParseGemini_Message(t *testing.T) {
-	// Schema favours .text but accepts .content as fallback.
-	for _, payload := range []string{
-		`{"type":"message","text":"hello"}`,
-		`{"type":"message","content":"hello"}`,
-	} {
-		var got []AgentEvent
-		parseGeminiStreamJSON([]byte(payload), func(e AgentEvent) { got = append(got, e) })
-
-		if len(got) != 1 || got[0].Type != "text" || got[0].Content != "hello" {
-			t.Errorf("payload %s want text 'hello', got %+v", payload, got)
-		}
-	}
-}
-
-// TestParseGemini_ToolUse pins the tool invocation shape — name/id/input.
-func TestParseGemini_ToolUse(t *testing.T) {
-	line := []byte(`{"type":"tool_use","name":"web_search","id":"tu-1","input":{"query":"crewship"}}`)
+// TestParseGemini_MessageDelta — PR #10883 added `delta` for streaming. If the
+// parser doesn't read it, streamed text disappears silently. This test pins
+// that streamed deltas reach the chat as text events.
+func TestParseGemini_MessageDelta(t *testing.T) {
+	line := []byte(`{"type":"message","role":"assistant","delta":"hel"}`)
 	var got []AgentEvent
 	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
 
-	if len(got) != 1 || got[0].Type != "tool_call" || got[0].Content != "web_search" {
-		t.Fatalf("want tool_call web_search, got %+v", got)
+	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "hel" {
+		t.Errorf("delta dropped — streaming would silently fail. got %+v", got)
+	}
+}
+
+// TestParseGemini_MessageContent — non-streaming path: `content` field carries
+// the full message body.
+func TestParseGemini_MessageContent(t *testing.T) {
+	line := []byte(`{"type":"message","role":"assistant","content":"hello"}`)
+	var got []AgentEvent
+	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "hello" {
+		t.Errorf("content path wrong: %+v", got)
+	}
+}
+
+// TestParseGemini_ToolUseFieldNames pins the canonical PR #10883 field names:
+// tool_name (NOT name), tool_id (NOT id), parameters (NOT input). If gemini-
+// cli changes any of these, the chat UI will display tool_call events with
+// blank names — this test catches it.
+func TestParseGemini_ToolUseFieldNames(t *testing.T) {
+	line := []byte(`{"type":"tool_use","tool_name":"web_search","tool_id":"tu-1","parameters":{"query":"crewship"}}`)
+	var got []AgentEvent
+	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 || got[0].Type != "tool_call" {
+		t.Fatalf("want tool_call event, got %+v", got)
+	}
+	if got[0].Content != "web_search" {
+		t.Errorf("tool_name lost (parser may be reading 'name' instead of 'tool_name'): %q", got[0].Content)
 	}
 	meta := got[0].Metadata.(map[string]interface{})
-	input, ok := meta["input"].(map[string]interface{})
-	if !ok || input["query"] != "crewship" {
-		t.Errorf("input.query lost: %v", meta["input"])
+	if meta["tool_id"] != "tu-1" {
+		t.Errorf("tool_id lost (parser may be reading 'id'): %v", meta["tool_id"])
+	}
+	input := meta["input"].(map[string]interface{})
+	if input["query"] != "crewship" {
+		t.Errorf("parameters→input mapping lost: %v", meta["input"])
 	}
 }
 
-// TestParseGemini_ToolResult pins how tool responses surface.
+// TestParseGemini_ToolResult — pins tool_id (NOT tool_use_id) and the new
+// status field.
 func TestParseGemini_ToolResult(t *testing.T) {
-	line := []byte(`{"type":"tool_result","tool_use_id":"tu-1","output":"123 results"}`)
+	line := []byte(`{"type":"tool_result","tool_id":"tu-1","status":"success","output":"5 results"}`)
 	var got []AgentEvent
 	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
 
-	if len(got) != 1 || got[0].Type != "tool_result" || got[0].Content != "123 results" {
-		t.Errorf("tool_result wrong: %+v", got)
+	if len(got) != 1 || got[0].Type != "tool_result" || got[0].Content != "5 results" {
+		t.Fatalf("tool_result wrong: %+v", got)
+	}
+	meta := got[0].Metadata.(map[string]interface{})
+	if meta["tool_use_id"] != "tu-1" {
+		t.Errorf("tool_id → tool_use_id remap lost: %v", meta["tool_use_id"])
+	}
+	if meta["status"] != "success" {
+		t.Errorf("status field lost: %v", meta["status"])
 	}
 }
 
-// TestParseGemini_Result pins the terminal envelope (response + stats).
-// stats schema follows Vertex/AI-Studio convention: totalTokens etc.
+// TestParseGemini_Result pins terminal envelope with stats.
 func TestParseGemini_Result(t *testing.T) {
-	line := []byte(`{"type":"result","response":"42","stats":{"totalTokens":150,"inputTokens":100,"outputTokens":50}}`)
+	line := []byte(`{"type":"result","status":"success","response":"42","stats":{"total_tokens":150,"input_tokens":100,"output_tokens":50,"duration_ms":1234,"tool_calls":2}}`)
 	var got []AgentEvent
 	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
 
 	if len(got) != 1 || got[0].Type != "result" || got[0].Content != "42" {
-		t.Fatalf("want result event with response, got %+v", got)
+		t.Fatalf("want result, got %+v", got)
 	}
 	meta := got[0].Metadata.(map[string]interface{})
-	stats, ok := meta["stats"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("stats not a map: %T", meta["stats"])
+	stats := meta["stats"].(map[string]interface{})
+	for _, k := range []string{"total_tokens", "input_tokens", "output_tokens", "duration_ms", "tool_calls"} {
+		if _, ok := stats[k]; !ok {
+			t.Errorf("stats.%s missing — Paymaster may undercount", k)
+		}
 	}
-	if stats["totalTokens"].(float64) != 150 {
-		t.Errorf("totalTokens lost: %v", stats["totalTokens"])
+	if meta["is_error"].(bool) {
+		t.Errorf("is_error should be false for status=success")
 	}
 }
 
-// TestParseGemini_Error covers the documented error event.
+// TestParseGemini_ResultErrorStatus — when status is "error", flag the result.
+func TestParseGemini_ResultErrorStatus(t *testing.T) {
+	line := []byte(`{"type":"result","status":"error","stats":{}}`)
+	var got []AgentEvent
+	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	meta := got[0].Metadata.(map[string]interface{})
+	if !meta["is_error"].(bool) {
+		t.Errorf("is_error must be true when status=error")
+	}
+}
+
 func TestParseGemini_Error(t *testing.T) {
 	line := []byte(`{"type":"error","error":"quota exhausted"}`)
 	var got []AgentEvent
@@ -94,12 +131,11 @@ func TestParseGemini_Error(t *testing.T) {
 	}
 }
 
-// TestParseGemini_NilHandler must not panic.
 func TestParseGemini_NilHandler(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("nil handler panicked: %v", r)
 		}
 	}()
-	parseGeminiStreamJSON([]byte(`{"type":"message","text":"x"}`), nil)
+	parseGeminiStreamJSON([]byte(`{"type":"message","content":"x"}`), nil)
 }

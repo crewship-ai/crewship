@@ -511,16 +511,22 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 
-	// Write MCP server configuration file.
-	// Primary path: merge crew + agent raw .mcp.json configs (new simplified model).
-	// Fallback: build from resolved MCPServerConfig entries (legacy per-binding model).
-	if err := setupMCPConfig(ctx, o.container, req.ContainerID, req.AgentSlug, req.CrewMCPConfigJSON, req.AgentMCPConfigJSON, req.MCPServers, o.logger); err != nil {
-		hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
-		if hasMCP {
-			o.updateRunStatus(ctx, runState.ID, "error")
-			return fmt.Errorf("inject MCP config: %w", err)
+	// Write MCP server configuration via the per-CLI adapter. Each adapter
+	// knows its own file path + format (Claude .mcp.json, Codex
+	// .codex/config.toml, Gemini .gemini/settings.json, OpenCode opencode.json
+	// under "mcp" key, Cursor .cursor/mcp.json, Droid .factory/mcp.json).
+	// Adapters that don't support MCP (currently none after the multi-CLI
+	// wave; unknownAdapter only) make this a no-op.
+	mcpAdapter := getAdapter(req.CLIAdapter)
+	if mcpAdapter.SupportsMCP() {
+		if err := mcpAdapter.WriteMCPConfig(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
+			hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
+			if hasMCP {
+				o.updateRunStatus(ctx, runState.ID, "error")
+				return fmt.Errorf("inject MCP config (%s): %w", req.CLIAdapter, err)
+			}
+			o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
 		}
-		o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID)
 	}
 
 	// Inject OAuth token files for MCP servers that need them.

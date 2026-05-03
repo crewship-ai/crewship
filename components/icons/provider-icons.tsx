@@ -78,6 +78,8 @@ export const PROVIDER_ICONS: Record<string, React.ComponentType<IconProps>> = {
   OPENAI: OpenAIIcon,
   GOOGLE: GeminiIcon,
   CURSOR: CursorIcon,
+  // Factory Droid uses a placeholder icon until we ship a dedicated SVG.
+  FACTORY: AnthropicIcon,
   GITHUB: GitHubIcon,
   GITLAB: GitLabIcon,
   VERCEL: VercelIcon,

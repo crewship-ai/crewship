@@ -66,6 +66,16 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 			mustHave:         []string{"-p", "--output-format", "stream-json", "--force", "--stream-partial-output"},
 			pinnedNpmVersion: "(curl https://cursor.com/install)",
 		},
+		{
+			adapter: "FACTORY_DROID",
+			docURL:  "https://docs.factory.ai/reference/cli-reference",
+			// `droid exec --auto <level> -o stream-json` is the documented
+			// non-interactive form. Without -o stream-json the orchestrator
+			// only sees raw text — Paymaster gets nothing, Crow's Nest sees
+			// no tool events.
+			mustHave:         []string{"exec", "--auto", "-o", "stream-json"},
+			pinnedNpmVersion: "(curl https://app.factory.ai/cli)",
+		},
 	}
 
 	for _, tc := range cases {
@@ -108,12 +118,12 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 // regressions that shipping break the chat UI.
 func TestAdapterParserUsesStreamJSON_MatchesAdapterCommand(t *testing.T) {
 	expectStream := map[string]bool{
-		"CLAUDE_CODE":   true,  // --output-format stream-json
-		"CODEX_CLI":     true,  // --json
-		"GEMINI_CLI":    true,  // --output-format stream-json
-		"OPENCODE":      true,  // --format json (single envelope, but parsed)
-		"CURSOR_CLI":    true,  // --output-format stream-json
-		"FACTORY_DROID": false, // no JSON mode plumbed yet
+		"CLAUDE_CODE":   true, // --output-format stream-json
+		"CODEX_CLI":     true, // --json
+		"GEMINI_CLI":    true, // --output-format stream-json
+		"OPENCODE":      true, // --format json (JSONL Part stream)
+		"CURSOR_CLI":    true, // --output-format stream-json
+		"FACTORY_DROID": true, // -o stream-json
 	}
 
 	for name, want := range expectStream {
@@ -140,6 +150,7 @@ func TestAdapterEnvVarMatchesProvider(t *testing.T) {
 		{"GEMINI_CLI", "GEMINI_API_KEY"}, // canonical AI Studio var
 		{"OPENCODE", "OPENAI_API_KEY"},   // BYOK includes OpenAI
 		{"CURSOR_CLI", "CURSOR_API_KEY"},
+		{"FACTORY_DROID", "FACTORY_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.adapter, func(t *testing.T) {

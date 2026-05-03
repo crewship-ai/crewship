@@ -65,6 +65,17 @@ func (claudeCodeAdapter) SetupSystemPrompt(
 
 func (claudeCodeAdapter) SupportsMCP() bool { return true }
 
+func (claudeCodeAdapter) WriteMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	return writeMCPClaude(ctx, container, containerID, req, workDir, logger)
+}
+
 // parseClaudeCodeStreamJSON parses one line of Claude Code stream-json output
 // and emits zero-or-more AgentEvents. Extracted from Orchestrator.handleStreamJSONLine
 // so the adapter is stateless and easy to unit-test without a full Orchestrator.

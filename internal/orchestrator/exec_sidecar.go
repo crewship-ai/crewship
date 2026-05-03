@@ -382,6 +382,8 @@ func credTypeToProvider(c Credential) string {
 		return "GOOGLE"
 	case "CURSOR_API_KEY":
 		return "CURSOR"
+	case "FACTORY_API_KEY":
+		return "FACTORY"
 	default:
 		return ""
 	}

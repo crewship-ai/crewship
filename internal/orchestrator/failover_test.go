@@ -223,27 +223,27 @@ func TestBuildCLICommand(t *testing.T) {
 			// See exec.go FACTORY_DROID case for the rationale.
 			"factory droid default (no profile) is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", UserMessage: "fix the bug"},
-			[]string{"droid", "exec", "--auto", "medium", "fix the bug"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "fix the bug"},
 		},
 		{
 			"factory droid coding profile is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CODING", UserMessage: "ship the feature"},
-			[]string{"droid", "exec", "--auto", "medium", "ship the feature"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "ship the feature"},
 		},
 		{
 			"factory droid minimal profile downgrades to low",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", UserMessage: "audit only"},
-			[]string{"droid", "exec", "--auto", "low", "audit only"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "audit only"},
 		},
 		{
 			"factory droid consultative profile downgrades to low",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CONSULTATIVE", UserMessage: "advise"},
-			[]string{"droid", "exec", "--auto", "low", "advise"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "advise"},
 		},
 		{
 			"factory droid with model",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", LLMModel: "claude-sonnet-4-6", UserMessage: "review"},
-			[]string{"droid", "exec", "--auto", "low", "--model", "claude-sonnet-4-6", "review"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--model", "claude-sonnet-4-6", "review"},
 		},
 		{
 			"unknown defaults to claude",

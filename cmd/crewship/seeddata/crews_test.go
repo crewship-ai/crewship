@@ -39,20 +39,37 @@ func TestCrewDevcontainerConfigIsValidJSON(t *testing.T) {
 	}
 }
 
-// TestPostCreateCommandInstallsAllFourNewCLIs pins that the multi-CLI install
-// script references each of the four CLIs we want available alongside Claude
+// TestPostCreateCommandInstallsAllFiveNewCLIs pins that the multi-CLI install
+// script references each of the five CLIs we want available alongside Claude
 // Code. If anyone removes one to "save provisioning time" without updating
 // docs/UI, this test fails loudly.
-func TestPostCreateCommandInstallsAllFourNewCLIs(t *testing.T) {
+func TestPostCreateCommandInstallsAllFiveNewCLIs(t *testing.T) {
 	expected := []string{
 		"@openai/codex",
 		"@google/gemini-cli",
 		"opencode-ai",
 		"cursor.com/install",
+		"app.factory.ai/cli", // Droid installer
 	}
 	for _, want := range expected {
 		if !strings.Contains(baseCLIPostCreate, want) {
 			t.Errorf("baseCLIPostCreate missing reference to %q — CLI would not be installed", want)
+		}
+	}
+}
+
+// TestPostCreateCommandInstallsContainerDeps pins the apt packages the CLIs
+// need to function (Droid needs xdg-utils, Cursor benefits from system
+// ripgrep, all CLIs may shell out to python3).
+func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
+	expected := []string{
+		"xdg-utils", // Droid Linux requirement
+		"ripgrep",   // Cursor safety net + faster grep tool
+		"python3",   // tool-sandbox runtime
+	}
+	for _, want := range expected {
+		if !strings.Contains(baseCLIPostCreate, want) {
+			t.Errorf("baseCLIPostCreate missing apt package %q", want)
 		}
 	}
 }

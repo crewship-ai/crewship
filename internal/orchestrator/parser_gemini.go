@@ -6,37 +6,48 @@ import (
 )
 
 // parseGeminiStreamJSON parses one stdout line from `gemini -p X
-// --output-format stream-json`. Schema documented at
-// geminicli.com/docs/cli/headless — JSONL with these event types:
+// --output-format stream-json`. Schema verified against
+// google-gemini/gemini-cli PR #10883 + geminicli.com/docs/cli/headless.
 //
-//   - init        — session bootstrap (model, version)
-//   - message     — assistant text delta or full message
-//   - tool_use    — tool invocation request
-//   - tool_result — tool response
-//   - error       — recoverable / fatal error from CLI
-//   - result      — terminal envelope (response, stats, optional error)
+// Event types (discriminator: "type"):
 //
-// We coerce the gemini-specific fields into the same AgentEvent kinds the
-// Claude Code parser emits so the chat UI doesn't fork per provider.
+//   - init        — { timestamp, session_id, model }
+//   - message     — { role, content, timestamp, delta? }
+//     (delta carries streaming text when --output-format
+//     stream-json — easy to miss; without reading delta the
+//     parser silently drops streaming output)
+//   - tool_use    — { tool_name, tool_id, parameters, timestamp }
+//     (NOT name/id/input — the snake_case names are canonical)
+//   - tool_result — { tool_id, status, output, timestamp }
+//     (tool_id, NOT tool_use_id; status carries success/error)
+//   - error       — partially-documented error envelope
+//   - result      — { status, stats:{ total_tokens, input_tokens,
+//     output_tokens, duration_ms,
+//     tool_calls }, timestamp }
 type geminiStreamMessage struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype,omitempty"`
-	// init
-	Model     string `json:"model,omitempty"`
+	Type      string `json:"type"`
+	Subtype   string `json:"subtype,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	Model     string `json:"model,omitempty"`
+
 	// message
-	Text    string `json:"text,omitempty"`
 	Role    string `json:"role,omitempty"`
 	Content string `json:"content,omitempty"`
-	// tool_use
-	ToolName string          `json:"name,omitempty"`
-	ToolID   string          `json:"id,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	Delta   string `json:"delta,omitempty"`
+	Text    string `json:"text,omitempty"` // some builds use text instead of content
+
+	// tool_use — note canonical snake_case field names from PR #10883
+	ToolName   string          `json:"tool_name,omitempty"`
+	ToolID     string          `json:"tool_id,omitempty"`
+	Parameters json.RawMessage `json:"parameters,omitempty"`
+
 	// tool_result
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Output    string `json:"output,omitempty"`
+	Output string `json:"output,omitempty"`
+	Status string `json:"status,omitempty"`
+
 	// error
 	Error string `json:"error,omitempty"`
+
 	// result
 	Response string          `json:"response,omitempty"`
 	Stats    json.RawMessage `json:"stats,omitempty"`
@@ -67,12 +78,17 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 		})
 
 	case "message":
-		// Gemini's "message" carries assistant text — sometimes a delta, sometimes
-		// the full payload depending on streaming. Either text/content field may
-		// hold it; favour text since it's the documented field for stream-json.
-		body := msg.Text
+		// Order of preference: delta (streaming), then content (full message),
+		// then text (some pre-PR-10883 builds). Without checking delta first
+		// we silently drop streamed token output — PR #10883 added it
+		// specifically for incremental UX and gemini-cli started using it
+		// over `content` in stream-json mode.
+		body := msg.Delta
 		if body == "" {
 			body = msg.Content
+		}
+		if body == "" {
+			body = msg.Text
 		}
 		if body != "" {
 			handler(AgentEvent{Type: "text", Content: body, Timestamp: time.Now()})
@@ -80,8 +96,8 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 
 	case "tool_use":
 		var input any
-		if len(msg.Input) > 0 {
-			_ = json.Unmarshal(msg.Input, &input)
+		if len(msg.Parameters) > 0 {
+			_ = json.Unmarshal(msg.Parameters, &input)
 		}
 		handler(AgentEvent{
 			Type:    "tool_call",
@@ -99,13 +115,16 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 			Type:    "tool_result",
 			Content: msg.Output,
 			Metadata: map[string]interface{}{
-				"tool_use_id": msg.ToolUseID,
+				// Internal name kept as tool_use_id (matches Claude Code +
+				// Cursor for chat-bridge correlation), value comes from
+				// Gemini's tool_id field.
+				"tool_use_id": msg.ToolID,
+				"status":      msg.Status,
 			},
 			Timestamp: time.Now(),
 		})
 
 	case "error":
-		// Recoverable error — surface to chat as an error event.
 		handler(AgentEvent{
 			Type:      "error",
 			Content:   msg.Error,
@@ -114,10 +133,6 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 		})
 
 	case "result":
-		// Terminal envelope. Stats schema is documented as { totalTokens,
-		// inputTokens, outputTokens, cachedInputTokens, ... } — we hand the
-		// raw blob to Paymaster (downstream) without strongly typing it here
-		// so future fields don't require parser updates.
 		var stats map[string]interface{}
 		if len(msg.Stats) > 0 {
 			_ = json.Unmarshal(msg.Stats, &stats)
@@ -127,7 +142,8 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 			Content: msg.Response,
 			Metadata: map[string]interface{}{
 				"stats":    stats,
-				"is_error": msg.Error != "",
+				"status":   msg.Status,
+				"is_error": msg.Status == "error" || msg.Error != "",
 			},
 			Timestamp: time.Now(),
 		})

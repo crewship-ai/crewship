@@ -75,4 +75,18 @@ func (geminiAdapter) SetupSystemPrompt(
 	return nil
 }
 
-func (geminiAdapter) SupportsMCP() bool { return false }
+// SupportsMCP returns true: gemini-cli auto-discovers MCP servers from
+// .gemini/settings.json regardless of headless / TTY mode (the headless docs
+// explicitly preserve MCP behaviour).
+func (geminiAdapter) SupportsMCP() bool { return true }
+
+func (geminiAdapter) WriteMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	return writeMCPGemini(ctx, container, containerID, req, workDir, logger)
+}

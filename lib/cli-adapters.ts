@@ -65,6 +65,15 @@ const CURSOR_MODELS: ModelOption[] = [
   { value: "o3", label: "o3 (Cursor)" },
 ]
 
+// Factory Droid multiplexes too — model strings here mirror what `droid exec
+// --model` accepts as of the 2026-05 release.
+const DROID_MODELS: ModelOption[] = [
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Droid)" },
+  { value: "claude-opus-4-7", label: "Claude Opus 4.7 (Droid)" },
+  { value: "gpt-5", label: "GPT-5 (Droid)" },
+  { value: "o3", label: "o3 (Droid)" },
+]
+
 /** Registry of all supported CLI adapters with their provider, models, and icon. */
 export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
   CLAUDE_CODE: {
@@ -112,6 +121,15 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     defaultModel: "claude-sonnet-4-6",
     description: "Cursor's headless agent",
   },
+  FACTORY_DROID: {
+    label: "Factory Droid",
+    icon: AnthropicIcon, // TODO: ship a dedicated FactoryIcon SVG
+    provider: "FACTORY",
+    envVar: "FACTORY_API_KEY",
+    models: DROID_MODELS,
+    defaultModel: "claude-sonnet-4-6",
+    description: "Factory's autonomous coding agent",
+  },
 }
 
 /** All CLI adapter keys (e.g. "CLAUDE_CODE", "OPENCODE"). */
@@ -134,6 +152,7 @@ export function getProviderLabel(provider: string): string {
     OPENAI: "OpenAI",
     GOOGLE: "Google",
     CURSOR: "Cursor",
+    FACTORY: "Factory",
     NONE: "--",
   }
   return labels[provider] ?? provider

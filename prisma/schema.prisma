@@ -160,6 +160,7 @@ enum CredentialProvider {
   OPENAI
   GOOGLE
   CURSOR
+  FACTORY
   NONE
 }
 

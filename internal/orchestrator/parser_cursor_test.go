@@ -86,10 +86,11 @@ func TestParseCursor_ToolCall(t *testing.T) {
 }
 
 // TestParseCursor_Result pins the terminal result envelope. duration_ms /
-// is_error / session_id all need to round-trip into metadata so Paymaster
-// can read them.
+// is_error / session_id / request_id all need to round-trip into metadata.
+// request_id specifically is what Cursor support asks for when debugging — if
+// we drop it, users cannot file actionable tickets.
 func TestParseCursor_Result(t *testing.T) {
-	line := []byte(`{"type":"result","subtype":"success","duration_ms":1234,"duration_api_ms":987,"is_error":false,"result":"done","session_id":"s-1"}`)
+	line := []byte(`{"type":"result","subtype":"success","duration_ms":1234,"duration_api_ms":987,"is_error":false,"result":"done","session_id":"s-1","request_id":"req-abc"}`)
 	var got []AgentEvent
 	parseCursorStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
 
@@ -105,6 +106,32 @@ func TestParseCursor_Result(t *testing.T) {
 	}
 	if meta["is_error"].(bool) != false {
 		t.Errorf("is_error lost: %v", meta["is_error"])
+	}
+	if meta["request_id"] != "req-abc" {
+		t.Errorf("request_id lost — users cannot file Cursor support tickets without it: %v", meta["request_id"])
+	}
+}
+
+// TestParseCursor_AssistantWithModelCallID verifies that streaming assistant
+// deltas carry model_call_id + timestamp_ms metadata so the chat-bridge can
+// dedup duplicates after a connection reconnect (Cursor forum #157593).
+func TestParseCursor_AssistantWithModelCallID(t *testing.T) {
+	line := []byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]},"model_call_id":"mc-1","timestamp_ms":1700000000000}`)
+	var got []AgentEvent
+	parseCursorStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "hi" {
+		t.Fatalf("want text 'hi', got %+v", got)
+	}
+	meta, ok := got[0].Metadata.(map[string]interface{})
+	if !ok {
+		t.Fatalf("metadata not attached to streaming delta — chat-bridge cannot dedup")
+	}
+	if meta["model_call_id"] != "mc-1" {
+		t.Errorf("model_call_id lost: %v", meta["model_call_id"])
+	}
+	if meta["timestamp_ms"].(float64) != 1700000000000 {
+		t.Errorf("timestamp_ms lost: %v", meta["timestamp_ms"])
 	}
 }
 

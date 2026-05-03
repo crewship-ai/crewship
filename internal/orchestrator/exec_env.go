@@ -280,6 +280,8 @@ func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 		}
 	case "CURSOR_CLI":
 		return map[string]struct{}{"CURSOR_API_KEY": {}}
+	case "FACTORY_DROID":
+		return map[string]struct{}{"FACTORY_API_KEY": {}}
 	default:
 		// CLAUDE_CODE, FACTORY_DROID, unknown — no overrides; sidecar handles
 		// Anthropic, Droid is out of scope this wave.

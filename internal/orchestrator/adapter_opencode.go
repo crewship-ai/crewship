@@ -63,8 +63,19 @@ func (opencodeAdapter) SetupSystemPrompt(
 	return writeFileViaContainer(ctx, container, containerID, workDir, "AGENTS.md", systemPrompt, logger)
 }
 
-// SupportsMCP returns false for now. OpenCode reads MCP servers from
-// opencode.json under the `mcp` key — a follow-up commit (see plan
-// t-m-ukulem-bude-purring-cray.md krok 7) generates that file via
-// exec_mcp_opencode.go. Until that lands, this adapter ships without MCP.
-func (opencodeAdapter) SupportsMCP() bool { return false }
+// SupportsMCP returns true. OpenCode reads opencode.json with MCP servers
+// under the `mcp` key. Schema differs significantly from Claude Code:
+// type:local|remote, command is array, env field is "environment", env-var
+// syntax is {env:VAR}. writeMCPOpenCode handles all the translation.
+func (opencodeAdapter) SupportsMCP() bool { return true }
+
+func (opencodeAdapter) WriteMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	return writeMCPOpenCode(ctx, container, containerID, req, workDir, logger)
+}

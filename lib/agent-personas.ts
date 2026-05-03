@@ -14,8 +14,8 @@
 // emits these strings to /api/v1/agents.
 export type ToolProfile = "MINIMAL" | "CODING" | "MESSAGING" | "FULL"
 export type AgentRole = "AGENT" | "LEAD" | "COORDINATOR"
-export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "CURSOR" | "OLLAMA"
-export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI" | "CURSOR_CLI"
+export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "CURSOR" | "FACTORY" | "OLLAMA"
+export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI" | "CURSOR_CLI" | "FACTORY_DROID"
 export type PersonaCategory = "engineering" | "research" | "quality" | "writing" | "devops" | "coordinator" | "custom"
 
 export interface AgentPersona {

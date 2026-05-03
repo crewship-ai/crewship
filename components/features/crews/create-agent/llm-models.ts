@@ -32,6 +32,13 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
     "gpt-5-mini",
     "o3",
   ],
+  FACTORY: [
+    // Factory Droid multiplexes too; mirror Cursor's lineup.
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+    "gpt-5",
+    "o3",
+  ],
   OLLAMA: [
     // Whatever the user has pulled locally. List the most-common starters;
     // the actual catalog is whatever `ollama list` returns. Defaulting to a

@@ -21,12 +21,12 @@ type CrewDef struct {
 const baseFeatures = `"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false},"ghcr.io/devcontainers-extra/features/claude-code:2":{}`
 
 // Multi-CLI install script. Run as the agent user via postCreateCommand;
-// installs the four non-Claude CLIs the orchestrator currently dispatches
-// (Codex, Gemini, OpenCode, Cursor) into /home/agent/.local so a non-root
-// user can write the binaries. Each tool is installed independently with
-// `|| true` so a single upstream outage does not poison the whole provision
-// — the missing CLI just won't be available; the orchestrator will surface
-// "command not found" at first invocation.
+// installs the five non-Claude CLIs the orchestrator dispatches (Codex,
+// Gemini, OpenCode, Cursor, Factory Droid) into /home/agent/.local so a
+// non-root user can write the binaries. Each tool is installed independently
+// with `|| true` so a single upstream outage does not poison the whole
+// provision — the missing CLI just won't be available; the orchestrator will
+// surface "command not found" at first invocation.
 //
 //   - @openai/codex: npm wrapper that downloads the Rust binary into the
 //     package's bin dir during `npm install -g`.
@@ -35,15 +35,30 @@ const baseFeatures = `"ghcr.io/devcontainers/features/common-utils:2":{"username
 //   - opencode-ai: sst.dev's OpenCode CLI; BYOK across providers.
 //   - cursor-agent: shipped via cursor.com/install shell script (no npm
 //     package). Installs into ~/.local/bin by default.
+//   - droid (Factory): native binary via app.factory.ai/cli installer.
+//     Requires xdg-utils on Linux (added below) — the installer otherwise
+//     errors during the post-install step.
+//
+// Container-level apt installs (run before the npm/curl steps via the same
+// postCreateCommand chain because we can't easily target two phases):
+//   - xdg-utils — Droid Linux requirement
+//   - ripgrep   — Cursor "rg ENOENT" safety net + faster grep tool for all CLIs
+//   - python3 + python3-pip — Codex/Claude Code tool sandboxes occasionally
+//     invoke Python; cheap to pre-stage
+//
+// The apt step uses `sudo` because the agent user is not root; common-utils
+// devcontainer feature configures passwordless sudo for it.
 //
 // PATH is extended in containerEnv so the agent user can call the binaries
 // without needing to source any shell rc file.
-const baseCLIPostCreate = `mkdir -p $HOME/.local && ` +
+const baseCLIPostCreate = `(sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends xdg-utils ripgrep python3 python3-pip 2>&1 | tail -3) || true && ` +
+	`mkdir -p $HOME/.local && ` +
 	`npm config set prefix $HOME/.local 2>/dev/null || true && ` +
 	`npm install -g @openai/codex 2>&1 | tail -5 || true && ` +
 	`npm install -g @google/gemini-cli 2>&1 | tail -5 || true && ` +
 	`npm install -g opencode-ai 2>&1 | tail -5 || true && ` +
-	`(curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh && bash /tmp/cursor-install.sh -y 2>&1 | tail -5) || true`
+	`(curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh && bash /tmp/cursor-install.sh -y 2>&1 | tail -5) || true && ` +
+	`(curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh && bash /tmp/droid-install.sh 2>&1 | tail -5) || true`
 
 // baseContainerEnv extends PATH so the per-user install dirs from
 // baseCLIPostCreate are reachable for both interactive shells and the

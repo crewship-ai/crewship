@@ -73,4 +73,18 @@ func (codexAdapter) SetupSystemPrompt(
 	return nil
 }
 
-func (codexAdapter) SupportsMCP() bool { return false }
+// SupportsMCP returns true: Codex Rust port reads .codex/config.toml at session
+// start and registers MCP servers automatically (no flag required, per
+// developers.openai.com/codex). HTTP and stdio transports both supported.
+func (codexAdapter) SupportsMCP() bool { return true }
+
+func (codexAdapter) WriteMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	return writeMCPCodex(ctx, container, containerID, req, workDir, logger)
+}

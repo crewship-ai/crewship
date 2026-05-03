@@ -77,4 +77,22 @@ func (cursorAdapter) SetupSystemPrompt(
 	return writeFileViaContainer(ctx, container, containerID, workDir, "AGENTS.md", systemPrompt, logger)
 }
 
-func (cursorAdapter) SupportsMCP() bool { return false }
+// SupportsMCP returns true *with caveat*. Cursor docs claim MCP support in
+// CLI, and we write .cursor/mcp.json. HOWEVER multiple community reports
+// (forum #143045, #148397) confirm the MCP servers are NOT invoked when
+// cursor-agent runs in --print / non-interactive mode — only the interactive
+// TUI honours them. We write the file anyway for parity (so the moment
+// upstream fixes the bug nothing else changes), but the user-visible effect
+// today is "no MCP tools surface in chat for Cursor agents".
+func (cursorAdapter) SupportsMCP() bool { return true }
+
+func (cursorAdapter) WriteMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	return writeMCPCursor(ctx, container, containerID, req, workDir, logger)
+}

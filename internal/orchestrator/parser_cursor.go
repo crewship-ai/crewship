@@ -36,6 +36,16 @@ type cursorStreamMessage struct {
 	// result fields
 	DurationMs    float64 `json:"duration_ms,omitempty"`
 	DurationAPIMs float64 `json:"duration_api_ms,omitempty"`
+	// RequestID surfaces in the result envelope (success or error). Captured
+	// for error correlation when reporting issues to Cursor support.
+	RequestID string `json:"request_id,omitempty"`
+	// ModelCallID + TimestampMs ride along assistant deltas when
+	// --stream-partial-output is on. Useful for delta dedup on the chat-bridge
+	// side if the connection reconnects mid-turn (Cursor's known
+	// tool_call:completed loss bug, forum #157593, can also drop assistant
+	// deltas on reconnect — chat-bridge can use these to skip duplicates).
+	ModelCallID string  `json:"model_call_id,omitempty"`
+	TimestampMs float64 `json:"timestamp_ms,omitempty"`
 	// tool_call fields (subtype-dependent shape — keep raw for forward-compat)
 	ToolCall json.RawMessage `json:"tool_call,omitempty"`
 }
@@ -84,13 +94,25 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 		// Assistant text. With --stream-partial-output enabled, deltas arrive
 		// as multiple assistant messages with incremental text payloads — we
 		// emit each as its own text event so the UI can render token-by-token
-		// without buffering.
+		// without buffering. model_call_id + timestamp_ms ride along for
+		// chat-bridge dedup across reconnects (Cursor forum #157593).
 		if msg.Message == nil {
 			return
 		}
+		meta := map[string]interface{}{}
+		if msg.ModelCallID != "" {
+			meta["model_call_id"] = msg.ModelCallID
+		}
+		if msg.TimestampMs != 0 {
+			meta["timestamp_ms"] = msg.TimestampMs
+		}
 		for _, block := range msg.Message.Content {
 			if block.Type == "text" && block.Text != "" {
-				handler(AgentEvent{Type: "text", Content: block.Text, Timestamp: time.Now()})
+				ev := AgentEvent{Type: "text", Content: block.Text, Timestamp: time.Now()}
+				if len(meta) > 0 {
+					ev.Metadata = meta
+				}
+				handler(ev)
 			}
 		}
 
@@ -129,6 +151,8 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 	case "result":
 		// Terminal event with usage + duration. Mirrors Claude Code's "result"
 		// shape so Paymaster can read both providers through one code path.
+		// request_id captured for error correlation when filing Cursor support
+		// tickets — without it the user has nothing to give the support team.
 		handler(AgentEvent{
 			Type:    "result",
 			Content: msg.Result,
@@ -138,6 +162,7 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 				"duration_api_ms": msg.DurationAPIMs,
 				"is_error":        msg.IsError,
 				"session_id":      msg.SessionID,
+				"request_id":      msg.RequestID,
 			},
 			Timestamp: time.Now(),
 		})

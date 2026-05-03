@@ -56,10 +56,31 @@ type CLIAdapter interface {
 
 	// SupportsMCP indicates whether this adapter has working MCP server
 	// injection wired up. Used by orchestrator_run.go to decide whether to
-	// call setupMCPConfig at all. Currently true only for CLAUDE_CODE and
-	// OPENCODE; the other CLIs either lack upstream MCP support or have a
-	// different config shape we have not implemented yet.
+	// call WriteMCPConfig at all.
 	SupportsMCP() bool
+
+	// WriteMCPConfig writes the per-CLI MCP server config file into the
+	// container. Each CLI has its own file path + format:
+	//   - Claude:   /crew/agents/<slug>/.mcp.json (mcpServers, JSON)
+	//   - Codex:    <workdir>/.codex/config.toml ([mcp_servers.X], TOML!)
+	//   - Gemini:   <workdir>/.gemini/settings.json (mcpServers, JSON)
+	//   - OpenCode: <workdir>/opencode.json (mcp key, type:local/remote)
+	//   - Cursor:   <workdir>/.cursor/mcp.json (mcpServers, broken in -p mode
+	//               but we write it anyway for parity)
+	//   - Droid:    <workdir>/.factory/mcp.json (mcpServers, type:stdio/http)
+	//
+	// req.MCPServers + req.CrewMCPConfigJSON + req.AgentMCPConfigJSON are the
+	// inputs; the writer picks whichever is non-empty in the priority order
+	// the original setupMCPConfig used (raw JSON > resolved server list).
+	// Adapters that return SupportsMCP()==false should make this a no-op.
+	WriteMCPConfig(
+		ctx context.Context,
+		container provider.ContainerProvider,
+		containerID string,
+		req AgentRunRequest,
+		workDir string,
+		logger *slog.Logger,
+	) error
 }
 
 // adapterRegistry maps the CLIAdapter enum value (as stored on
@@ -123,6 +144,17 @@ func (unknownAdapter) SetupSystemPrompt(
 }
 
 func (unknownAdapter) SupportsMCP() bool { return false }
+
+func (unknownAdapter) WriteMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	return nil
+}
 
 // writeFileViaContainer is a small helper used by adapters that need to drop
 // a single text file (system prompt, config) into the container before the CLI
