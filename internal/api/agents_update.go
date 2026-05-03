@@ -110,6 +110,24 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate cli_adapter if being updated
+	if v, ok := body["cli_adapter"]; ok {
+		s, _ := v.(string)
+		if s != "" && !validCLIAdapters[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be one of CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID"})
+			return
+		}
+	}
+
+	// Validate tool_profile if being updated
+	if v, ok := body["tool_profile"]; ok {
+		s, _ := v.(string)
+		if s != "" && !validToolProfiles[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
+			return
+		}
+	}
+
 	// Validate mcp_config_json if being updated
 	if mcpVal, ok := body["mcp_config_json"]; ok {
 		if mcpStr, ok := mcpVal.(string); ok && mcpStr != "" {

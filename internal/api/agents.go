@@ -102,6 +102,25 @@ var validLeadModes = map[string]bool{
 	"passive": true,
 }
 
+// validCLIAdapters mirrors the dispatch table in
+// internal/orchestrator/exec.go. Public API rejects anything outside
+// this set so the orchestrator never receives an adapter it cannot run.
+var validCLIAdapters = map[string]bool{
+	"CLAUDE_CODE":   true,
+	"OPENCODE":      true,
+	"CODEX_CLI":     true,
+	"GEMINI_CLI":    true,
+	"CURSOR_CLI":    true,
+	"FACTORY_DROID": true,
+}
+
+// validToolProfiles mirrors the gating in internal/orchestrator/exec.go.
+var validToolProfiles = map[string]bool{
+	"MINIMAL": true,
+	"CODING":  true,
+	"FULL":    true,
+}
+
 type agentCrewInfo struct {
 	Name        string  `json:"name"`
 	Slug        string  `json:"slug"`

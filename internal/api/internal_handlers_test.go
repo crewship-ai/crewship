@@ -1638,7 +1638,6 @@ func TestAdmin_ListWorkspaces_Forbidden(t *testing.T) {
 	}
 }
 
-
 // ============================================================================
 // templates.go
 // ============================================================================
@@ -2199,7 +2198,6 @@ func TestStaticFileHandler_DirectoryIndex(t *testing.T) {
 		t.Errorf("body = %q", w.Body.String())
 	}
 }
-
 
 // ============================================================================
 // cuid.go

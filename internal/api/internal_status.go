@@ -11,7 +11,7 @@ import (
 )
 
 // nilIfEmpty returns nil for empty strings, otherwise a pointer to the string.
-// Used when inserting nullable columns that should hold NULL rather than ''.
+// Used when inserting nullable columns that should hold NULL rather than ”.
 func nilIfEmpty(s string) *string {
 	if s == "" {
 		return nil
@@ -20,10 +20,7 @@ func nilIfEmpty(s string) *string {
 }
 
 // ListCrews handles GET /api/v1/internal/crews?workspace_id=...
-// Used by the sidecar on behalf of COORDINATOR agents.
-//
-// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
-// backward compat; see file header.
+// Used by the sidecar on behalf of agents discovering workspace topology.
 func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -58,10 +55,7 @@ func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateCrew handles POST /api/v1/internal/crews?workspace_id=...
-// Allows COORDINATOR agents (via sidecar) to create a new crew in the workspace.
-//
-// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
-// backward compat; see file header.
+// Allows LEAD agents (via sidecar) to create a new crew in the workspace.
 func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -137,10 +131,7 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateAgent handles POST /api/v1/internal/agents?workspace_id=...
-// Allows COORDINATOR agents (via sidecar) to create a new agent within a crew.
-//
-// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
-// backward compat; see file header.
+// Allows LEAD agents (via sidecar) to create a new agent within a crew.
 func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -243,11 +234,8 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListCrewConnections handles GET /api/v1/internal/crew-connections?workspace_id=...&crew_id=...
-// Used by the sidecar on behalf of COORDINATOR agents.
+// Used by the sidecar on behalf of agents discovering crew topology.
 // When crew_id is provided, only connections involving that crew are returned.
-//
-// Deprecated: primary caller (COORDINATOR role) is deprecated. Retained for
-// backward compat; see file header.
 func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {

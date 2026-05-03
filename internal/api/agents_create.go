@@ -117,8 +117,16 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.CLIAdapter == "" {
 		req.CLIAdapter = "CLAUDE_CODE"
 	}
+	if !validCLIAdapters[req.CLIAdapter] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be one of CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID"})
+		return
+	}
 	if req.ToolProfile == "" {
 		req.ToolProfile = "CODING"
+	}
+	if !validToolProfiles[req.ToolProfile] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
+		return
 	}
 	if req.TimeoutSeconds == 0 {
 		req.TimeoutSeconds = 1800

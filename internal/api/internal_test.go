@@ -785,4 +785,3 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 		t.Errorf("run status = %q, want CANCELLED", got)
 	}
 }
-

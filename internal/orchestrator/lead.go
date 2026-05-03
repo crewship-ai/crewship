@@ -122,4 +122,3 @@ func BuildLeadContext(members []CrewMember) string {
 	b.WriteString(leadContextStaticTail)
 	return b.String()
 }
-

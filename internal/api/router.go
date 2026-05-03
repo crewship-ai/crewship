@@ -41,24 +41,24 @@ func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map
 }
 
 type Router struct {
-	mux              *http.ServeMux
-	db               *sql.DB
-	logger           *slog.Logger
-	authMw           *AuthMiddleware
-	sessionsStore    sessions.Store
-	socketPath       string
-	internalToken    string
-	internalBaseURL  string
-	hub              *ws.Hub
-	orch             *orchestrator.Orchestrator
-	keeperGK         gatekeeper.Evaluator
-	keeperSecrets    SecretGetter
-	keeperContainer  provider.ContainerProvider
-	keeperConfig     *config.KeeperConfig
-	keeperConvReader ConversationReader
-	missionCallback  MissionCallback
-	scheduleUpdater  ScheduleUpdater
-	logWriter        *logcollector.Writer
+	mux                   *http.ServeMux
+	db                    *sql.DB
+	logger                *slog.Logger
+	authMw                *AuthMiddleware
+	sessionsStore         sessions.Store
+	socketPath            string
+	internalToken         string
+	internalBaseURL       string
+	hub                   *ws.Hub
+	orch                  *orchestrator.Orchestrator
+	keeperGK              gatekeeper.Evaluator
+	keeperSecrets         SecretGetter
+	keeperContainer       provider.ContainerProvider
+	keeperConfig          *config.KeeperConfig
+	keeperConvReader      ConversationReader
+	missionCallback       MissionCallback
+	scheduleUpdater       ScheduleUpdater
+	logWriter             *logcollector.Writer
 	allowSignup           bool
 	googleClientID        string
 	googleSecret          string

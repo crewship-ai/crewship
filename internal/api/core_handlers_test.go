@@ -2183,7 +2183,6 @@ func TestResolveAgent_LeadAgentWithCrewMembers(t *testing.T) {
 	}
 }
 
-
 func TestResolveAgent_NotFound(t *testing.T) {
 	ensureEncryptionKey(t)
 	db := setupTestDB(t)

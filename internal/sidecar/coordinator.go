@@ -20,8 +20,7 @@ import (
 )
 
 // handleListCrews proxies GET /crews to the crewshipd internal API.
-// Used by COORDINATOR agents to discover all workspace crews.
-// Deprecated: see file-level notice.
+// Used by AGENT and LEAD agents to discover all workspace crews.
 func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
@@ -31,7 +30,7 @@ func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListCrewConnections proxies GET /crew-connections to the crewshipd API.
-// Used by COORDINATOR agents to discover crew connection topology.
+// Used by AGENT and LEAD agents to discover crew connection topology.
 func (s *Server) handleListCrewConnections(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
@@ -48,7 +47,7 @@ func (s *Server) handleListCrewConnections(w http.ResponseWriter, r *http.Reques
 // reference implementation from git history at that point.
 
 // handleListCredentials proxies GET /credentials to the crewshipd internal API.
-// Used by COORDINATOR agents to discover available credentials for assignment.
+// Used by AGENT and LEAD agents to discover available credentials for assignment.
 func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
@@ -58,7 +57,7 @@ func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAssignAgentCredential proxies POST /agent-credentials to the crewshipd internal API.
-// Used by COORDINATOR agents to assign a credential to a newly created agent.
+// Used by LEAD agents to assign a credential to a newly created agent.
 func (s *Server) handleAssignAgentCredential(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
@@ -68,7 +67,7 @@ func (s *Server) handleAssignAgentCredential(w http.ResponseWriter, r *http.Requ
 }
 
 // handleCreateCrewConnection proxies POST /crew-connections to the crewshipd internal API.
-// Used by COORDINATOR agents to connect a new crew to existing ones.
+// Used by LEAD agents to connect a new crew to existing ones.
 func (s *Server) handleCreateCrewConnection(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
@@ -78,7 +77,7 @@ func (s *Server) handleCreateCrewConnection(w http.ResponseWriter, r *http.Reque
 }
 
 // handleCreateCrew proxies POST /crew/create to the crewshipd internal API.
-// Allows COORDINATOR agents to create new crews in the workspace.
+// Allows LEAD agents to create new crews in the workspace.
 func (s *Server) handleCreateCrew(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
@@ -88,7 +87,7 @@ func (s *Server) handleCreateCrew(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCreateAgent proxies POST /agent/create to the crewshipd internal API.
-// Allows COORDINATOR agents to create new agents within a crew.
+// Allows LEAD agents to create new agents within a crew.
 func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})

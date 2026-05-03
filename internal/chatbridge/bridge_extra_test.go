@@ -378,7 +378,6 @@ func TestHandleChatMessageColdStartStatusEvents(t *testing.T) {
 	}
 }
 
-
 // Container provider that reports the cached container as stopped — the bridge
 // must invalidate the cache and recreate.
 type stoppedThenStartedContainer struct {
