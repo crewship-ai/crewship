@@ -2,11 +2,6 @@ package api
 
 // File: internal_status.go — internal API handlers used by the sidecar on
 // behalf of agents for workspace-level operations.
-//
-// NOTE: Most handlers in this file were designed for the COORDINATOR role
-// (deprecated 2026-04-16). They remain callable by any agent via sidecar for
-// backward compatibility. See docs/guides/coordinator.mdx and
-// internal/orchestrator/lead.go (BuildCoordinatorContext).
 
 import (
 	"encoding/json"
@@ -14,6 +9,15 @@ import (
 	"net/http"
 	"time"
 )
+
+// nilIfEmpty returns nil for empty strings, otherwise a pointer to the string.
+// Used when inserting nullable columns that should hold NULL rather than ''.
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
 
 // ListCrews handles GET /api/v1/internal/crews?workspace_id=...
 // Used by the sidecar on behalf of COORDINATOR agents.

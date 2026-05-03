@@ -101,7 +101,6 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(configCmd)
-	rootCmd.AddCommand(proposalCmd)
 	rootCmd.AddCommand(escalationCmd)
 	rootCmd.AddCommand(exposeCmd)
 	rootCmd.AddCommand(templateCmd)
