@@ -6,6 +6,49 @@ import (
 	"strings"
 )
 
+// BuildEnvVars constructs the environment variables for a container exec,
+// including agent identity, credentials (when sidecar is not used), and
+// provider-specific settings. Lives in exec_env.go since the multi-CLI
+// adapter refactor (the per-CLI command building moved to adapter_*.go);
+// this function is provider-neutral and stays here next to its sidecar
+// counterpart BuildEnvVarsSidecar.
+func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
+	env := []string{
+		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
+		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
+		"CREWSHIP_AGENT_ID=" + req.AgentID,
+		"CREWSHIP_CREW_ID=" + req.CrewID,
+		"CREWSHIP_CHAT_ID=" + req.ChatID,
+		"CREWSHIP_CREW_SHARED=/crew/shared",
+	}
+
+	if activeCred != nil {
+		envVar := resolveEnvVar(activeCred)
+		env = append(env, envVar+"="+activeCred.PlainValue)
+	}
+
+	for _, cred := range req.Credentials {
+		if activeCred != nil && cred.ID == activeCred.ID {
+			continue
+		}
+		if cred.EnvVarName != "" && cred.PlainValue != "" {
+			envVar := resolveEnvVar(&cred)
+			alreadySet := false
+			for _, e := range env {
+				if len(e) > len(envVar) && e[:len(envVar)+1] == envVar+"=" {
+					alreadySet = true
+					break
+				}
+			}
+			if !alreadySet {
+				env = append(env, envVar+"="+cred.PlainValue)
+			}
+		}
+	}
+
+	return env
+}
+
 func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
 	// Collect env var names referenced in crew/agent MCP configs
 	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
