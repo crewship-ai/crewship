@@ -3,6 +3,7 @@ import {
   OpenAIIcon,
   GeminiIcon,
   OpenCodeIcon,
+  CursorIcon,
 } from "@/components/icons/provider-icons"
 import type { ComponentType, SVGProps } from "react"
 
@@ -38,6 +39,8 @@ const ANTHROPIC_MODELS: ModelOption[] = [
 ]
 
 const OPENAI_MODELS: ModelOption[] = [
+  { value: "gpt-5", label: "GPT-5" },
+  { value: "gpt-5-mini", label: "GPT-5 mini" },
   { value: "o3", label: "o3" },
   { value: "o3-mini", label: "o3-mini" },
   { value: "o4-mini", label: "o4-mini" },
@@ -48,7 +51,18 @@ const OPENAI_MODELS: ModelOption[] = [
 const GOOGLE_MODELS: ModelOption[] = [
   { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
   { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
   { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+]
+
+// Cursor's headless agent multiplexes across providers; user picks the model
+// in the Cursor account UI. The values here are the strings cursor-agent
+// accepts via -m, mirroring what the IDE exposes as of 2026-05.
+const CURSOR_MODELS: ModelOption[] = [
+  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Cursor)" },
+  { value: "gpt-5", label: "GPT-5 (Cursor)" },
+  { value: "gpt-5-mini", label: "GPT-5 mini (Cursor)" },
+  { value: "o3", label: "o3 (Cursor)" },
 ]
 
 /** Registry of all supported CLI adapters with their provider, models, and icon. */
@@ -89,6 +103,15 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
     defaultModel: "gemini-2.5-pro",
     description: "Google's coding agent",
   },
+  CURSOR_CLI: {
+    label: "Cursor CLI",
+    icon: CursorIcon,
+    provider: "CURSOR",
+    envVar: "CURSOR_API_KEY",
+    models: CURSOR_MODELS,
+    defaultModel: "claude-sonnet-4-6",
+    description: "Cursor's headless agent",
+  },
 }
 
 /** All CLI adapter keys (e.g. "CLAUDE_CODE", "OPENCODE"). */
@@ -110,6 +133,7 @@ export function getProviderLabel(provider: string): string {
     ANTHROPIC: "Anthropic",
     OPENAI: "OpenAI",
     GOOGLE: "Google",
+    CURSOR: "Cursor",
     NONE: "--",
   }
   return labels[provider] ?? provider

@@ -8,13 +8,14 @@ import {
 } from "@/lib/cli-adapters"
 
 describe("CLI_ADAPTERS registry", () => {
-  it("exports all four supported adapters", () => {
+  it("exports all five supported adapters", () => {
     // Spread before sort — .sort() mutates in place, and CLI_ADAPTER_KEYS
     // is a shared module-level export. Mutating it would leak ordering
     // changes into other tests that import the same array.
     expect([...CLI_ADAPTER_KEYS].sort()).toEqual([
       "CLAUDE_CODE",
       "CODEX_CLI",
+      "CURSOR_CLI",
       "GEMINI_CLI",
       "OPENCODE",
     ])
@@ -53,6 +54,11 @@ describe("CLI_ADAPTERS registry", () => {
   it("GEMINI_CLI uses GOOGLE provider + key", () => {
     expect(CLI_ADAPTERS.GEMINI_CLI.provider).toBe("GOOGLE")
     expect(CLI_ADAPTERS.GEMINI_CLI.envVar).toBe("GOOGLE_API_KEY")
+  })
+
+  it("CURSOR_CLI uses CURSOR provider + key", () => {
+    expect(CLI_ADAPTERS.CURSOR_CLI.provider).toBe("CURSOR")
+    expect(CLI_ADAPTERS.CURSOR_CLI.envVar).toBe("CURSOR_API_KEY")
   })
 
   it("OPENCODE bundles both Anthropic + OpenAI model lists", () => {
@@ -98,6 +104,7 @@ describe("getProviderLabel", () => {
     expect(getProviderLabel("ANTHROPIC")).toBe("Anthropic")
     expect(getProviderLabel("OPENAI")).toBe("OpenAI")
     expect(getProviderLabel("GOOGLE")).toBe("Google")
+    expect(getProviderLabel("CURSOR")).toBe("Cursor")
     expect(getProviderLabel("NONE")).toBe("--")
   })
 

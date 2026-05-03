@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 
 // Must match internal/sidecar/allowlist.go DefaultAllowedDomains
-const DEFAULT_DOMAINS = ["api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com", "api.factory.ai"]
+const DEFAULT_DOMAINS = ["api.anthropic.com", "api.openai.com", "generativelanguage.googleapis.com", "api.factory.ai", "api.cursor.sh"]
 
 interface CrewNetworkPolicyProps {
   networkMode: string

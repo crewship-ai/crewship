@@ -7,12 +7,15 @@ import (
 )
 
 // DefaultAllowedDomains contains the LLM API domains that the sidecar
-// will forward requests to. All other domains are blocked.
+// will forward requests to. All other domains are blocked. Mirrors the
+// frontend list in components/features/crews/crew-network-policy.tsx —
+// keep both lists in sync.
 var DefaultAllowedDomains = []string{
 	"api.anthropic.com",
 	"api.openai.com",
 	"generativelanguage.googleapis.com",
 	"api.factory.ai",
+	"api.cursor.sh", // cursor-agent CLI talks here for headless agent runs.
 }
 
 // DomainAllowlist controls which outbound domains the agent is allowed to reach.

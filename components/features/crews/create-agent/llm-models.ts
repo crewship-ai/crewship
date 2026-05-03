@@ -25,6 +25,13 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
     "gemini-2.5-flash-lite",
     "gemini-1.5-pro",
   ],
+  CURSOR: [
+    // Cursor multiplexes; these are the model strings cursor-agent -m accepts.
+    "claude-sonnet-4-6",
+    "gpt-5",
+    "gpt-5-mini",
+    "o3",
+  ],
   OLLAMA: [
     // Whatever the user has pulled locally. List the most-common starters;
     // the actual catalog is whatever `ollama list` returns. Defaulting to a

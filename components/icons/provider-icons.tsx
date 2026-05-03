@@ -29,6 +29,14 @@ export function GeminiIcon(props: IconProps) {
 
 export const OpenCodeIcon = Code
 
+export function CursorIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path d="M12 2.4 2.4 7.998v8.004L12 21.6l9.6-5.598V7.998Zm0 1.85 8 4.667v.001L12 13.586 4 8.917v-.001Zm-9 6.06 8.45 4.928v8.012L3 17.337Zm18 0v7.027l-8.45 4.913v-8.012Z" />
+    </svg>
+  )
+}
+
 export function GitHubIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -69,6 +77,7 @@ export const PROVIDER_ICONS: Record<string, React.ComponentType<IconProps>> = {
   ANTHROPIC: AnthropicIcon,
   OPENAI: OpenAIIcon,
   GOOGLE: GeminiIcon,
+  CURSOR: CursorIcon,
   GITHUB: GitHubIcon,
   GITLAB: GitLabIcon,
   VERCEL: VercelIcon,
