@@ -138,9 +138,9 @@ For the full 2-stage breakdown, see [Architecture > System Prompt Assembly](/arc
 5. [SKILLS AVAILABLE] (injected skill playbooks)
 6. [CREW CONTEXT] (Lead only: crew member list + API docs)
 7. [PEER CONTEXT] (non-Lead agents: peer communication)
-9. [CONVERSATION HISTORY] (recent messages, 60% of remaining token budget)
-10. [AGENT MEMORY] (persistent memory, 40% of remaining token budget)
-11. [MEMORY INSTRUCTIONS] (how to write/read memory files)
+8. [CONVERSATION HISTORY] (recent messages, 60% of remaining token budget)
+9. [AGENT MEMORY] (persistent memory, 40% of remaining token budget)
+10. [MEMORY INSTRUCTIONS] (how to write/read memory files)
 ```
 
 The token budget is managed with a 60/40 split: 60% for conversation history, 40% for memory context. The maximum system prompt token budget is defined in `internal/tokenutil/`.

@@ -59,7 +59,7 @@ Crewship is a **self-hosted runtime for AI coding agents**. Every crew gets its 
 | **Team-based organization** | Group agents into crews with shared context |
 | **Credential vault** | AES-256-GCM encrypted keys with priority-based failover |
 | **Isolated execution** | Every crew runs in its own Docker container |
-| **Workspace membership** | Owner / Member roles today; full RBAC tiers (Admin, Manager, Viewer) on the v0.2 roadmap |
+| **Role-based access** | 5-tier RBAC: Owner, Admin, Manager, Member, Viewer (server-side enforcement; UI for tier assignment lands in v0.2) |
 | **Real-time logs** | JSONL streaming via WebSocket |
 | **4-tier memory with FTS5** | Agent, crew, workspace, and session memory with sub-ms SQLite FTS5 search — no embeddings, no vector DB |
 | **Devcontainer provisioning** | `devcontainer.json` + mise-based crew runtimes with shared cache images and 24 h registry-digest checks |

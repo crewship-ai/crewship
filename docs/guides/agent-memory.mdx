@@ -152,14 +152,14 @@ The orchestrator allocates a character budget (default 15,000 chars) across memo
 |------------|------------|-------------------|
 | **Lead** (in crew) | 40% | rest |
 | **Agent** (in crew) | 40% | rest |
-| **Solo agent** | -- | 100% |
+| **Single-agent crew** | -- | 100% |
 
 <Accordion title="Budget examples">
 **Lead with small crew memory:**
 - Crew: 2,000 chars (actual content, under 40% cap)
 - Agent: 13,000 chars (reclaimed from crew)
 
-**Solo agent (no crew):**
+**Single-agent crew (no peers, empty crew memory):**
 - Agent: 15,000 chars (full budget)
 </Accordion>
 
@@ -250,9 +250,6 @@ crewship memory reindex -p /path/to/agents/lead/.memory -S agent
 # Search crew shared memory
 crewship memory search "deployment" -p /path/to/crew-root -S crew
 
-# Check workspace memory status
-crewship memory status -p ~/.crewship/memory/ws-123 -S workspace
-
 # JSON output for scripting
 crewship memory search "PostgreSQL" -p /path -S crew -F json
 ```
@@ -260,7 +257,7 @@ crewship memory search "PostgreSQL" -p /path -S crew -F json
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--path` | `-p` | Base path (meaning depends on scope) |
-| `--scope` | `-S` | `agent`, `crew`, `workspace`, or `all` |
+| `--scope` | `-S` | `agent` or `crew` (workspace scope ships in v0.2) |
 | `--limit` | `-l` | Max results (search only, default 10) |
 | `--format` | `-F` | `table` or `json` (search only) |
 

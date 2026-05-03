@@ -260,13 +260,13 @@ Invalid provider values cause a startup error with a descriptive message.
   <Tab title="Production (Distributed) — v0.2 roadmap">
     ```yaml
     # Distributed deployment is on the v0.2 roadmap. The pattern is
-    # Docker-on-multiple-VMs with a unique container.prefix per host,
-    # plus S3 storage and a PostgreSQL state provider — none of which
-    # ship in v0.1.
+    # Docker-on-multiple-VMs with a unique container.container_prefix per
+    # host, plus S3 storage and a PostgreSQL state provider — none of
+    # which ship in v0.1.
     container:
       provider: "docker"
       default_runtime: "runsc"
-      prefix: "host-a"
+      container_prefix: "host-a"
       sidecar_enabled: true
     storage:
       provider: "s3"

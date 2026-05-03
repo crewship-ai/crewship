@@ -7,7 +7,7 @@ icon: "database"
 # Episodic Memory
 
 <Note>
-**Roadmap (v0.2).** The episodic package ships in v0.1 but the embed-on-write hook into the journal writer is not yet wired. Vector recall queries return empty results until v0.2. Manual indexing via API works for evaluation purposes.
+**Roadmap (v0.2).** The episodic package ships in v0.1 but the embed-on-write hook into the journal writer is not yet wired, so journal entries are *not* indexed automatically. Manual indexing via the API works today for evaluation; vector recall queries only return results for entries that were indexed manually until the auto-wire ships in v0.2.
 </Note>
 
 Episodic is a narrow vector-recall layer over the [Crew Journal](/guides/crew-journal). It embeds a **selective** subset of journal entries and serves top-K similarity queries to agents planning new work.

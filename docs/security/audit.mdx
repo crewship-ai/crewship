@@ -57,7 +57,7 @@ CREATE TABLE audit_logs (
 | `id` | `TEXT` | Random hex ID (32 chars) |
 | `workspace_id` | `TEXT` | Workspace the action occurred in |
 | `user_id` | `TEXT` | User who performed the action (null for system actions) |
-| `action` | `TEXT` | Action type (create, update, delete) |
+| `action` | `TEXT` | Action type — CRUD verbs (`create`, `update`, `delete`) for entity mutations, `credential` / `execute` for Keeper decisions |
 | `entity_type` | `TEXT` | Entity type (AGENT, CREW, MISSION, etc.) |
 | `entity_id` | `TEXT` | ID of the affected entity |
 | `metadata` | `TEXT` | JSON object with action-specific details |

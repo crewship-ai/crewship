@@ -10,12 +10,12 @@ icon: "layers"
 **Roadmap (v0.2).** The Consolidate package ships in v0.1 but is not auto-scheduled. Manual trigger via API/CLI works today; automatic scheduling and the "supervisor crew" pattern are planned for v0.2.
 </Note>
 
-Two background workers run against the [Crew Journal](/guides/crew-journal) on a schedule:
+Two background workers can run against the [Crew Journal](/guides/crew-journal). v0.1 ships them as on-demand tools — v0.2 wires them onto the cadences described below.
 
-1. **Consolidator** -- every 6h, walks recent journal entries per crew and produces a set of learned rules appended to `.memory/topics/learned-YYYY-MM-DD.md`. Emits `memory.consolidated`.
-2. **Compactor** -- daily at 03:00 UTC, rolls up low-signal entries older than 30 days into a single `system.compaction` entry and deletes the originals. `warn`/`error` rows are preserved indefinitely.
+1. **Consolidator** — designed cadence: every 6h. Walks recent journal entries per crew and produces a set of learned rules appended to `.memory/topics/learned-YYYY-MM-DD.md`. Emits `memory.consolidated`.
+2. **Compactor** — designed cadence: daily at 03:00 UTC. Rolls up low-signal entries older than 30 days into a single `system.compaction` entry and deletes the originals. `warn`/`error` rows are preserved indefinitely.
 
-Both are optional (no summarizer = no rules; no Compactor window = no compaction). Manual trigger is available via the API and CLI.
+Both are optional (no summarizer = no rules; no Compactor window = no compaction). In v0.1 you trigger them manually via the API and CLI.
 
 ## Candidate entry types
 
