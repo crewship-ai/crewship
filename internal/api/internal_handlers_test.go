@@ -2068,7 +2068,14 @@ func TestOnboarding_ResolveLLMProvider(t *testing.T) {
 		{"CURSOR", "CURSOR", "CURSOR_API_KEY", true},
 		{"FACTORY", "FACTORY", "FACTORY_API_KEY", true},
 		{"ANTHROPIC", "ANTHROPIC", "ANTHROPIC_API_KEY", true},
+		// OLLAMA: provider accepted, env var empty (local models, no auth).
+		// Pin this row so future "tighten the wizard" passes don't silently
+		// re-introduce the inconsistency CR round 2 caught (onboarding
+		// rejected OLLAMA while agents_create accepted it).
+		{"OLLAMA", "OLLAMA", "", true},
+		{"ollama", "OLLAMA", "", true},
 		{"", "ANTHROPIC", "ANTHROPIC_API_KEY", true},
+		{"  ", "ANTHROPIC", "ANTHROPIC_API_KEY", true}, // whitespace trimmed
 		// Unknown providers are now rejected (used to coerce to ANTHROPIC,
 		// which silently provisioned the wrong credential under the wrong
 		// env var name).

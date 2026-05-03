@@ -43,16 +43,27 @@ describe("LLM models per provider", () => {
   })
 
   describe("defaultModelForProvider", () => {
-    it("returns the first model in each provider's list (newest)", () => {
-      expect(defaultModelForProvider("ANTHROPIC")).toBe(MODELS_BY_PROVIDER.ANTHROPIC[0])
-      expect(defaultModelForProvider("OPENAI")).toBe(MODELS_BY_PROVIDER.OPENAI[0])
-      expect(defaultModelForProvider("GOOGLE")).toBe(MODELS_BY_PROVIDER.GOOGLE[0])
+    it("uses each adapter's explicit defaultModel when one matches the provider", () => {
+      // Pinned to the adapter's defaultModel field (cli-adapters.ts) rather
+      // than positional MODELS_BY_PROVIDER[0], so reordering models[]
+      // can't silently shift the UI default. The literal values mirror
+      // CLI_ADAPTERS[*].defaultModel exactly — update both files together.
+      expect(defaultModelForProvider("ANTHROPIC")).toBe("claude-sonnet-4-6")
+      expect(defaultModelForProvider("OPENAI")).toBe("gpt-5.5")
+      expect(defaultModelForProvider("GOOGLE")).toBe("gemini-2.5-pro")
+      expect(defaultModelForProvider("CURSOR")).toBe("composer")
+      expect(defaultModelForProvider("FACTORY")).toBe("claude-sonnet-4-6")
+    })
+
+    it("falls back to first MODELS_BY_PROVIDER entry for providers without a matching adapter", () => {
+      // OLLAMA has no dedicated CLI adapter (served via OpenCode prefix),
+      // so the array-order fallback kicks in.
       expect(defaultModelForProvider("OLLAMA")).toBe(MODELS_BY_PROVIDER.OLLAMA[0])
     })
 
-    it("ANTHROPIC default is the most recent Claude (Opus or Sonnet 4-7)", () => {
-      // Newer-first ordering matters — defaulting to a stale model on every
-      // provider switch would silently downgrade users.
+    it("ANTHROPIC default is a current Claude (Opus or Sonnet, not legacy 4-1)", () => {
+      // Defaulting to a stale model on every provider switch would silently
+      // downgrade users. Pin to the 4-x family.
       expect(defaultModelForProvider("ANTHROPIC")).toMatch(/^claude-(opus|sonnet)-4-/)
     })
   })

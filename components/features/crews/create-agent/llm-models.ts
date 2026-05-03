@@ -72,10 +72,23 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
   ],
 }
 
-/** Default model for a provider (first entry in its list). Used when the
- *  user toggles provider — we auto-pick the newest model unless they had a
- *  custom one already selected. */
+/** Default model for a provider. Used when the user toggles provider — we
+ *  auto-pick a sensible model unless they had a custom one already selected.
+ *
+ *  Resolution order:
+ *    1. CLI_ADAPTERS[*].defaultModel for the adapter whose `provider` matches
+ *       — this is the explicit, intentional choice (e.g. ANTHROPIC →
+ *       claude-sonnet-4-6 set in cli-adapters.ts). Reordering models[] does
+ *       not silently shift the UI default.
+ *    2. First entry of MODELS_BY_PROVIDER[provider] as a last-resort
+ *       fallback for providers without a matching adapter (currently OLLAMA,
+ *       which is served via OpenCode rather than its own adapter). */
 export function defaultModelForProvider(provider: LLMProvider): string {
+  for (const adapter of Object.values(CLI_ADAPTERS)) {
+    if (adapter.provider === provider && adapter.defaultModel) {
+      return adapter.defaultModel
+    }
+  }
   return MODELS_BY_PROVIDER[provider][0]
 }
 

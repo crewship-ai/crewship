@@ -32,6 +32,13 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 		"--dangerously-skip-permissions",
 		"--verbose",
 		"--bare",
+		// --setting-sources "" disables user/global settings discovery.
+		// --bare alone does NOT do this — Anthropic's CLI reference is
+		// explicit that user-level ~/.claude/settings.json still loads
+		// without this flag. Pre-fix the doc claimed isolation but the
+		// flag was absent — a stray ~/.claude mount in a customer
+		// container would silently inject behaviour.
+		"--setting-sources", "",
 		"--strict-mcp-config",
 		"--no-session-persistence",
 	}
