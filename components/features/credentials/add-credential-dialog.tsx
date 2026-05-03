@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { Eye, EyeOff, Loader2, Bot, Key, Lock, Terminal, CheckCircle2, XCircle, FlaskConical, Check, ChevronsUpDown } from "lucide-react"
-import { AnthropicIcon, OpenAIIcon, GeminiIcon, GitHubIcon, GitLabIcon, VercelIcon, AWSIcon, CustomCLIIcon } from "@/components/icons/provider-icons"
+import { AnthropicIcon, OpenAIIcon, GeminiIcon, CursorIcon, FactoryIcon, GitHubIcon, GitLabIcon, VercelIcon, AWSIcon, CustomCLIIcon } from "@/components/icons/provider-icons"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET"
-type CredentialProvider = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
+type CredentialProvider = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "CURSOR" | "FACTORY" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
 
 interface Team {
   id: string
@@ -46,6 +46,8 @@ const PROVIDER_ENV_NAMES: Record<string, string> = {
   ANTHROPIC: "ANTHROPIC_API_KEY",
   OPENAI: "OPENAI_API_KEY",
   GOOGLE: "GOOGLE_API_KEY",
+  CURSOR: "CURSOR_API_KEY",
+  FACTORY: "FACTORY_API_KEY",
   GITHUB: "GH_TOKEN",
   GITLAB: "GITLAB_TOKEN",
   VERCEL: "VERCEL_TOKEN",
@@ -291,6 +293,20 @@ export function AddCredentialDialog({
                       <SelectItem value="GOOGLE">
                         <span className="flex items-center gap-2"><GeminiIcon className="h-4 w-4" /> Google (Gemini)</span>
                       </SelectItem>
+                      {/* Cursor + Factory only support raw API keys, not the
+                          Claude-specific setup-token / OAuth flow rendered by
+                          AI_CLI_TOKEN — gate them to API_KEY so users don't
+                          land on the wrong helper text. */}
+                      {type === "API_KEY" && (
+                        <>
+                          <SelectItem value="CURSOR">
+                            <span className="flex items-center gap-2"><CursorIcon className="h-4 w-4" /> Cursor</span>
+                          </SelectItem>
+                          <SelectItem value="FACTORY">
+                            <span className="flex items-center gap-2"><FactoryIcon className="h-4 w-4" /> Factory (Droid)</span>
+                          </SelectItem>
+                        </>
+                      )}
                     </>
                   )}
                   {type === "CLI_TOKEN" && (

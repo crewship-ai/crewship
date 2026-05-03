@@ -1,0 +1,101 @@
+---
+title: "Codex CLI"
+description: "OpenAI's coding agent (CODEX_CLI adapter)"
+---
+
+`@openai/codex` (Rust port, v0.128.0+). Distributed as an npm package wrapping a per-platform Rust binary.
+
+## Install
+
+```bash
+npm install -g @openai/codex
+```
+
+Pre-installed in every seeded crew container via Crewship's
+`baseCLIPostCreate` provisioning script.
+
+## Auth
+
+API key only (BYO). Subscription path (ChatGPT Plus/Pro via `codex login`) not yet wired in Crewship.
+
+| Type | Env var | Format |
+|---|---|---|
+| API key | `OPENAI_API_KEY` | `sk-…` |
+| Service account | `OPENAI_API_KEY` | `sk-svcacct-…` |
+
+Crewship's sidecar passes the real `OPENAI_API_KEY` directly into the agent container env — Codex talks to `api.openai.com` over HTTPS CONNECT through the sidecar (sidecar reverse-proxy is wired only for Anthropic).
+
+## Models
+
+Codex CLI is a STRICT subset of OpenAI's general API — only the GPT-5.x coding-tuned family is accepted:
+
+| API string | Tier |
+|---|---|
+| `gpt-5.5` | frontier — Crewship default |
+| `gpt-5.4` | frontier |
+| `gpt-5.4-mini` | fast |
+| `gpt-5.3-codex` | frontier (coding-specialised) |
+| `gpt-5.3-codex-spark` | reasoning preview |
+
+Codex CLI rejects `o3`, `o4-mini`, `gpt-4o` etc. — those are general-API only.
+
+## Command shape
+
+```bash
+codex exec --json --sandbox <mode> --model <m> -- "[SYSTEM]\n<preamble>\n\n[USER]\n<msg>"
+```
+
+- `exec` — non-interactive subcommand (NOT `--quiet`, that flag doesn't exist)
+- `--json` — newline-delimited JSON events on stdout
+- `--sandbox` — `read-only` (MINIMAL/CONSULTATIVE profile) | `workspace-write` (CODING) | `danger-full-access` (never opted into)
+- `--` separator prevents user message dash-prefixed tokens from being parsed as flags
+- System prompt is folded into the user message body with `[SYSTEM]/[USER]` delimiters because Codex `exec` has no system-prompt flag
+
+## MCP
+
+Codex uses TOML, not JSON. Crewship writes `/crew/agents/<slug>/.codex/config.toml` (HOME, NOT workdir — Codex requires interactive trust ceremony for project-scoped configs).
+
+```toml
+[mcp_servers.linear]
+url = "https://mcp.linear.app/sse"
+bearer_token_env_var = "LINEAR_TOKEN"
+
+[mcp_servers.fs]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/work"]
+# env = { LINEAR_TOKEN = "${VAR}" } intentionally NOT written —
+# Codex doesn't interpolate ${VAR} so writing it would override the
+# inherited container env with the literal string.
+```
+
+`Authorization: Bearer ${TOKEN}` headers are translated to `bearer_token_env_var = "TOKEN"`. Generic `X-API-Key: ${KEY}` headers go to `env_http_headers = { "X-API-Key" = "KEY" }`. Literal headers go to `http_headers = { ... }`.
+
+## Memory
+
+Canonical memory file set written to `/output/<slug>/AGENTS.md` (Codex's
+auto-discovered file). Plus the cross-CLI parity files for an agent
+swapping CLI mid-mission. First-turn parity: system prompt is also
+prepended to the user message via `[SYSTEM]/[USER]` delimiters since
+Codex doesn't load `AGENTS.md` until the second invocation.
+
+## Output stream
+
+Per [developers.openai.com/codex/cli/reference](https://developers.openai.com/codex/cli/reference), Codex emits an envelope-and-item model (NOT the Agents SDK schema):
+
+| Event | Payload |
+|---|---|
+| `thread.started` | session bootstrap; `thread_id`, `model` |
+| `turn.started` | turn boundary (no payload) |
+| `turn.completed` | `usage.{input_tokens, cached_input_tokens, output_tokens, reasoning_output_tokens}` |
+| `turn.failed` | error envelope with usage |
+| `item.started/updated/completed` | nested `item.type` discriminator |
+
+Item subtypes: `agent_message`, `reasoning`, `command_execution` (uses `aggregated_output` + `exit_code`, NOT `output`), `file_change`, `mcp_tool_call` (uses `server`/`tool`/`arguments`/`result`), `web_search`, `plan_update`, `todo_list`, `collab_tool_call`.
+
+## Troubleshooting
+
+**`codex: not found`** — npm install failed in container. Check `journalctl -u crewship-prod | grep codex`.
+
+**`unknown flag: --quiet`** — adapter regression; ensure orchestrator pinned to current schema (see `cli_adapter_versions_test.go`).
+
+**MCP server returns 401** — verify `bearer_token_env_var` references a credential present in the container env. See `crewship agent <slug> --resolved` to dump the exec env.

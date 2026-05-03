@@ -1,0 +1,95 @@
+---
+title: "Cursor CLI"
+description: "Cursor's headless agent (CURSOR_CLI adapter)"
+---
+
+`cursor-agent` (also exposed as `agent`). Curl-installer from cursor.com.
+
+## Install
+
+```bash
+curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh && bash /tmp/cursor-install.sh -y
+```
+
+Pre-installed via Crewship's `baseCLIPostCreate` provisioning.
+
+## Auth
+
+| Env var | Notes |
+|---|---|
+| `CURSOR_API_KEY` (`cur_*`) | Requires Cursor subscription with API access enabled |
+
+API access is a paid-plan feature — there's no free BYOK. If Cursor returns 401 after credential test, verify the API toggle at cursor.com/account.
+
+## Models
+
+Cursor multiplexes: `cursor-agent -m` accepts underlying provider model IDs plus their in-house Composer:
+
+| API string | Tier |
+|---|---|
+| `composer` | frontier — Cursor's in-house, Crewship default |
+| `claude-opus-4-7` / `claude-sonnet-4-6` / `claude-haiku-4-5` | Anthropic via Cursor |
+| `gpt-5.5` / `gpt-5.4` / `gpt-5.3-codex` | OpenAI via Cursor |
+| `gemini-3.1-pro-preview` / `gemini-2.5-pro` | Google via Cursor |
+| `grok-4.1-fast` | xAI via Cursor |
+
+## Command shape
+
+```bash
+cursor-agent -p --output-format stream-json --stream-partial-output \
+             --force [--approve-mcps] [-m <model>] -- <message>
+```
+
+- `-p` — print (non-interactive) mode
+- `--output-format stream-json` — JSONL events
+- `--stream-partial-output` — token-level deltas
+- `--force` — REQUIRED in headless mode; without it write tools hang on permission prompts
+- `--approve-mcps` — added when MCP source is configured (otherwise MCP servers are listed but never invoked, see forum #143045)
+
+## MCP
+
+Configured at `/output/<slug>/.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "url": "https://mcp.linear.app/sse",
+      "headers": {"Authorization": "Bearer ${env:LINEAR_TOKEN}"}
+    },
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"],
+      "env": {"FOO": "${env:FOO}"}
+    }
+  }
+}
+```
+
+Cursor-specific env-var syntax: `${env:VAR}` (NOT `${VAR}`). Crewship's writer translates the standard `${VAR}` form on write.
+
+## Memory
+
+Cursor reads `.cursor/rules/`, `AGENTS.md`, AND `CLAUDE.md` (merged). Crewship writes the full canonical set including `.cursor/rules/crewship.md` (Cursor priority path).
+
+## Output stream
+
+JSONL per [cursor.com/docs/cli/reference/output-format](https://cursor.com/docs/cli/reference/output-format):
+
+| Event | Discriminators |
+|---|---|
+| `system` | `subtype: init` — `apiKeySource`, `cwd`, `session_id`, `model`, `permissionMode` |
+| `user` | echoed user message (Crewship suppresses) |
+| `assistant` | `message.content[].text` — multiple events form one message under `--stream-partial-output` |
+| `tool_call` | `subtype: started/completed`, `call_id` (lifted to `tool_use_id` for cross-CLI correlation) |
+| `result` | `duration_ms`, `is_error`, `request_id`, `usage` (token counts, since Feb 2026) |
+
+## Troubleshooting
+
+**`cur_…` key but 401** — Cursor subscription doesn't have API access toggle on. Visit cursor.com/account.
+
+**Write tool hangs forever** — `--force` flag missing from adapter command (regression check `cli_adapter_versions_test.go`).
+
+**MCP servers listed but never invoke** — `--approve-mcps` missing when MCP configured. The adapter only adds it when `req.MCPServers` or `req.CrewMCPConfigJSON` is non-empty.
+
+**`tool_call:completed` events lost on reconnect** — known upstream regression (forum #157593). `model_call_id` + `timestamp_ms` are captured by parser to enable chat-bridge dedup.

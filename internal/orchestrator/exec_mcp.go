@@ -246,6 +246,11 @@ func injectMCPOAuthTokens(
 // mcpNameUnsafeRE matches characters that must be stripped from MCP server/package
 // names. Hoisted to package level so it compiles once at init, not per call.
 
+// setupSystemPromptFiles dispatches to the adapter's SetupSystemPrompt method.
+// Each adapter knows whether it needs to drop AGENTS.md / .cursor/rules /
+// CLAUDE.md into the working directory or whether it accepts the system prompt
+// via a CLI flag (Claude Code, Gemini). Kept as a free function so the call
+// site in orchestrator_run.go does not need to look up the adapter itself.
 func setupSystemPromptFiles(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -254,35 +259,5 @@ func setupSystemPromptFiles(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	systemPrompt := crewshipSystemPreamble + req.SystemPrompt
-
-	var script string
-
-	switch req.CLIAdapter {
-	case "OPENCODE":
-		// OpenCode reads AGENTS.md from the project root / CWD for instructions.
-		// Use base64 encoding to avoid heredoc delimiter injection.
-		encoded := base64.StdEncoding.EncodeToString([]byte(systemPrompt))
-		script = fmt.Sprintf("echo %s | base64 -d > AGENTS.md", encoded)
-
-	default:
-		return nil
-	}
-
-	cfg := provider.ExecConfig{
-		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", script},
-		WorkingDir:  workDir,
-		User:        "1001:1001",
-	}
-
-	result, err := container.Exec(ctx, cfg)
-	if err != nil {
-		return fmt.Errorf("write system prompt files for %s: %w", req.CLIAdapter, err)
-	}
-	io.Copy(io.Discard, result.Reader)
-	result.Reader.Close()
-
-	logger.Debug("system prompt files written", "cli_adapter", req.CLIAdapter, "container_id", containerID[:min(12, len(containerID))])
-	return nil
+	return getAdapter(req.CLIAdapter).SetupSystemPrompt(ctx, container, containerID, req, workDir, logger)
 }

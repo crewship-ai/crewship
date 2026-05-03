@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"thr-abc123","model":"gpt-5.5"}
+{"type":"turn.started"}
+{"type":"item.updated","item":{"type":"agent_message","id":"itm-1","delta":"Hello"}}
+{"type":"item.updated","item":{"type":"agent_message","id":"itm-1","delta":" world"}}
+{"type":"item.completed","item":{"type":"agent_message","id":"itm-1","text":"Hello world"}}
+{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0}}

@@ -12,6 +12,49 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
+// execBinaryInScript reports whether `bin` appears in `script` as a standalone
+// command name (i.e. as the first non-space token after the start-of-string
+// or one of the common shell delimiters: space, semicolon, ampersand, pipe,
+// newline, equals-sign-after-env-var-block). Used by the test mock to spot
+// CLI invocations buried inside `sh -c "tmux new-session ... claude ..."`
+// wrappers, which are the actual production shape RunAgent emits.
+func execBinaryInScript(script, bin string) bool {
+	if bin == "" {
+		return false
+	}
+	// Cheap pre-check.
+	idx := 0
+	for {
+		hit := strings.Index(script[idx:], bin)
+		if hit < 0 {
+			return false
+		}
+		pos := idx + hit
+		// Left boundary: start, or a delimiter that means "next token".
+		left := byte(0)
+		if pos > 0 {
+			left = script[pos-1]
+		}
+		switch left {
+		case 0, ' ', '\t', '\n', ';', '&', '|', '"', '\'', '`':
+			// Right boundary: end, or a delimiter that means "token over".
+			endPos := pos + len(bin)
+			right := byte(0)
+			if endPos < len(script) {
+				right = script[endPos]
+			}
+			switch right {
+			case 0, ' ', '\t', '\n', ';', '&', '|', '"', '\'', '`':
+				return true
+			}
+		}
+		idx = pos + len(bin)
+		if idx >= len(script) {
+			return false
+		}
+	}
+}
+
 // in-memory state mock
 type memState struct {
 	data map[string]map[string][]byte
@@ -82,12 +125,53 @@ func (m *mockContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provi
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
+	// AGENT CLI CALL: when cmd[0..N] contains a known CLI binary
+	// (claude/codex/...) the call is the actual agent exec. Always return
+	// the LAST entry in execResults — that's where tests put the real
+	// stream reader. This decouples tests from the exact number of setup
+	// calls (mkdir, manifest, MCP, canonical memory writes, etc.) so
+	// adding new setup steps doesn't shift the agent exec out of bounds.
+	//
+	// Detection has TWO paths because RunAgent wraps the real CLI in a
+	// `sh -c "tmux new-session ... claude ..."` so the binary name only
+	// appears as a substring of an `sh -c` argument, never as a standalone
+	// argv[0]. Without the substring scan, exit-code / cancelled-context
+	// tests would skip the agent reader and pass for the wrong reason.
+	cliBinaries := []string{
+		"claude", "codex", "gemini", "opencode", "cursor-agent", "droid",
+	}
+	cliBinarySet := map[string]bool{}
+	for _, b := range cliBinaries {
+		cliBinarySet[b] = true
+	}
+	if len(m.execResults) > 0 {
+		// Path A: standalone binary in argv[0..5].
+		for i := 0; i < len(cfg.Cmd) && i < 6; i++ {
+			if cliBinarySet[cfg.Cmd[i]] {
+				return m.execResults[len(m.execResults)-1], nil
+			}
+		}
+		// Path B: shell-wrapped (sh -c "... <binary> ...") — scan the script
+		// body for any CLI binary name. Match on word boundaries via simple
+		// substring + delimiter check so "claude" doesn't accidentally hit
+		// "claudemock" or similar.
+		if len(cfg.Cmd) >= 3 && cfg.Cmd[0] == "sh" && cfg.Cmd[1] == "-c" {
+			script := cfg.Cmd[2]
+			for _, bin := range cliBinaries {
+				if execBinaryInScript(script, bin) {
+					return m.execResults[len(m.execResults)-1], nil
+				}
+			}
+		}
+	}
+	// SETUP CALLS (sh -c "..." for file writes etc.) — return noop. Tests
+	// that need to assert specific setup-call results should use execFn
+	// callback mode instead of the positional execResults FIFO.
 	idx := m.execCallIdx
 	m.execCallIdx++
-	if idx < len(m.execResults) {
+	if idx < len(m.execResults)-1 {
 		return m.execResults[idx], nil
 	}
-	// fallback: return a no-op result for mkdir etc.
 	return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
 func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
@@ -159,22 +243,22 @@ func TestRunAgentExecError(t *testing.T) {
 }
 
 func TestRunAgentSuccess(t *testing.T) {
-	r, w := io.Pipe()
-	go func() {
-		w.Write([]byte("hello output\n"))
-		w.Close()
-	}()
-
+	// SetupSystemPrompt now writes 5 canonical memory files, plus various
+	// other setup execs (mkdir, manifest, claude config, tmux check). Use
+	// execFn callback to deterministically detect the agent exec by looking
+	// for "--print" arg (Claude Code's signature flag), regardless of how
+	// many setup execs come before.
+	// orchestrator_run.go wraps the agent CLI in tmux: the actual
+	// `claude --print ...` ends up inside /tmp/agent-<slug>.sh and the
+	// outer cfg.Cmd is `[sh -c "tmux new-session ... 'sh /tmp/...sh' ..."]`.
+	// Detect the agent exec by its tmux session-name signature.
 	mc := &mockContainer{
-		execResults: []*provider.ExecResult{
-			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-args", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-env", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-script", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+			joined := strings.Join(cfg.Cmd, " ")
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
+				return &provider.ExecResult{ExecID: "exec-1", Reader: io.NopCloser(strings.NewReader("hello output\n"))}, nil
+			}
+			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 		},
 		inspectResult: struct {
 			running  bool
@@ -406,23 +490,18 @@ func TestRecoverFromCrashTransientInspectError(t *testing.T) {
 }
 
 func TestRunAgentScrubsCredentials(t *testing.T) {
-	r, w := io.Pipe()
-	go func() {
-		// Agent outputs a line containing an Anthropic API key
-		w.Write([]byte("Found key: sk-ant-api03-secretkey1234567890\n"))
-		w.Close()
-	}()
-
+	// Detect agent CLI exec by tmux-session signature; see TestRunAgentSuccess
+	// for the rationale (canonical-memory writes shifted indexing).
 	mc := &mockContainer{
-		execResults: []*provider.ExecResult{
-			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-args", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-env", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-script", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+			joined := strings.Join(cfg.Cmd, " ")
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
+				return &provider.ExecResult{
+					ExecID: "exec-1",
+					Reader: io.NopCloser(strings.NewReader("Found key: sk-ant-api03-secretkey1234567890\n")),
+				}, nil
+			}
+			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 		},
 		inspectResult: struct {
 			running  bool
@@ -474,17 +553,12 @@ func TestRunAgentWithSidecar(t *testing.T) {
 	}()
 
 	mc := &mockContainer{
-		execResults: []*provider.ExecResult{
-			{ExecID: "health-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "sidecar-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-args", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-env", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-script", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+			joined := strings.Join(cfg.Cmd, " ")
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
+				return &provider.ExecResult{ExecID: "exec-1", Reader: r}, nil
+			}
+			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 		},
 		inspectResult: struct {
 			running  bool
@@ -626,5 +700,88 @@ func TestInjectMCPCredentialEnvVarsRespectsLiteralValues(t *testing.T) {
 	}
 	if !sawHostInjected {
 		t.Errorf("explicit ${GH_HOST} reference should still resolve from credentials: env=%v", got)
+	}
+}
+
+// TestInjectMCP_HTTPHeaderBearerToken pins the production-blocking gap from
+// the third validation wave: HTTP MCP servers like Linear use Authorization:
+// Bearer ${TOKEN} headers, which the pre-fix collectMCPEnvRefs did not scan
+// — the bearer token was never injected and every HTTP MCP server hit
+// upstream with literal "${TOKEN}" as the credential, returning 401.
+func TestInjectMCP_HTTPHeaderBearerToken(t *testing.T) {
+	crewJSON := `{"mcpServers":{"linear":{"type":"http","url":"https://mcp.linear.app/sse","headers":{"Authorization":"Bearer ${LINEAR_TOKEN}"}}}}`
+	req := AgentRunRequest{
+		CrewMCPConfigJSON: crewJSON,
+		Credentials: []Credential{
+			{ID: "c1", EnvVarName: "LINEAR_TOKEN", PlainValue: "lin_real_secret"},
+		},
+	}
+	got := injectMCPCredentialEnvVars(req, nil)
+
+	found := false
+	for _, e := range got {
+		if e == "LINEAR_TOKEN=lin_real_secret" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("LINEAR_TOKEN must be injected — Authorization header reference was missed by the pre-fix prefix-only scanner. env=%v", got)
+	}
+}
+
+// TestInjectMCP_CursorEnvSyntax — Cursor uses ${env:VAR} (not ${VAR}). The
+// scanner must accept that form so credentials referenced in Cursor MCP
+// configs get injected.
+func TestInjectMCP_CursorEnvSyntax(t *testing.T) {
+	cfg := `{"mcpServers":{"linear":{"type":"http","url":"https://mcp.linear.app/sse","headers":{"Authorization":"Bearer ${env:LINEAR_TOKEN}"}}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["LINEAR_TOKEN"] {
+		t.Errorf("Cursor ${env:VAR} syntax not picked up — refs=%v", refs)
+	}
+}
+
+// TestInjectMCP_BareDollarVar — bare $VAR form (no curlies) must also be
+// scanned, otherwise terse env values break.
+func TestInjectMCP_BareDollarVar(t *testing.T) {
+	cfg := `{"mcpServers":{"x":{"command":"npx","env":{"FOO":"$BAR"}}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["BAR"] {
+		t.Errorf("bare $VAR not picked up — refs=%v", refs)
+	}
+}
+
+// TestInjectMCP_MultipleRefsInOneValue — value like "Bearer ${A} for ${B}"
+// must extract BOTH names.
+func TestInjectMCP_MultipleRefsInOneValue(t *testing.T) {
+	cfg := `{"mcpServers":{"x":{"type":"http","url":"https://example.com","headers":{"Authorization":"Bearer ${A} for ${B}"}}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["A"] || !refs["B"] {
+		t.Errorf("multiple env refs in one value not picked up — refs=%v", refs)
+	}
+}
+
+// TestInjectMCP_URLEnvRef — ${VAR} embedded in the url field (rare but seen).
+func TestInjectMCP_URLEnvRef(t *testing.T) {
+	cfg := `{"mcpServers":{"x":{"type":"http","url":"https://${TENANT}.example.com/mcp"}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["TENANT"] {
+		t.Errorf("env ref in url field not scanned — refs=%v", refs)
+	}
+}
+
+// TestExtractEnvRefs_NoFalsePositives — literal strings without env refs must
+// return nothing. Silent injection of literal strings would be a security
+// problem (we'd add credentials to env when none were requested).
+func TestExtractEnvRefs_NoFalsePositives(t *testing.T) {
+	cases := []string{
+		"literal-token-value",
+		"sk-ant-api03-12345",
+		"$",                   // dangling dollar with nothing after
+		"text $1 placeholder", // shell positional, NOT an env var
+	}
+	for _, c := range cases {
+		if refs := extractEnvRefs(c); len(refs) != 0 {
+			t.Errorf("false positive on %q: %v", c, refs)
+		}
 	}
 }

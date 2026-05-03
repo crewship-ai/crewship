@@ -37,12 +37,23 @@ interface AssignCredentialDialogProps {
 }
 
 const ENV_VAR_PRESETS = [
+  // Multi-CLI provider keys (mirror lib/cli-adapters.ts CLI_ADAPTERS).
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "CURSOR_API_KEY",
+  "FACTORY_API_KEY",
+  // OpenCode multi-provider routing (apiKeyEnvVarsForAdapter("OPENCODE")).
+  "OPENROUTER_API_KEY",
+  "XAI_API_KEY",
+  "GROQ_API_KEY",
+  "DEEPSEEK_API_KEY",
+  // Common CLI tool tokens (referenced by stdio MCP servers).
   "GH_TOKEN",
   "GITLAB_TOKEN",
   "VERCEL_TOKEN",
+  "LINEAR_TOKEN",
 ]
 
 export function AssignCredentialDialog({

@@ -210,16 +210,27 @@ describe("agent draft", () => {
 
     it("every entry has a valid LLM provider + non-empty model", () => {
       for (const p of BUILTIN_PERSONAS) {
-        expect(["ANTHROPIC", "OPENAI", "GOOGLE", "OLLAMA"]).toContain(p.llmProvider)
+        // Multi-CLI wave added CURSOR + FACTORY providers; personas are
+        // intentionally diversified across all 6 adapters so the catalog
+        // demos multi-CLI capability instead of being all-Anthropic.
+        expect(["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"]).toContain(p.llmProvider)
         expect(p.llmModel.length).toBeGreaterThan(0)
       }
     })
 
     it("every entry has a CLI adapter from the canonical enum", () => {
-      const validAdapters = new Set(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"])
+      const validAdapters = new Set(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"])
       for (const p of BUILTIN_PERSONAS) {
         expect(validAdapters.has(p.cliAdapter)).toBe(true)
       }
+    })
+
+    it("BUILTIN_PERSONAS demonstrate multi-CLI by using at least 4 different adapters", () => {
+      // Pre-multi-CLI wave: every persona was CLAUDE_CODE — catalog gave
+      // zero hint that other CLIs were supported. After diversification we
+      // showcase Codex/Cursor/Gemini/Droid/OpenCode alongside Claude Code.
+      const adapters = new Set(BUILTIN_PERSONAS.map((p) => p.cliAdapter))
+      expect(adapters.size).toBeGreaterThanOrEqual(4)
     })
 
     it("every entry has a tool profile from the canonical enum", () => {

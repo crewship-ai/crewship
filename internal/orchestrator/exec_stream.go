@@ -31,10 +31,21 @@ type streamJSONMessage struct {
 	ModelUsage   json.RawMessage `json:"modelUsage,omitempty"`
 	Errors       []string        `json:"errors,omitempty"`
 	// For "system" type with subtype "init"
-	Model    string          `json:"model,omitempty"`
-	Tools    []string        `json:"tools,omitempty"`
-	CWD      string          `json:"cwd,omitempty"`
-	MCPSrvrs json.RawMessage `json:"mcp_servers,omitempty"`
+	Model        string          `json:"model,omitempty"`
+	Tools        []string        `json:"tools,omitempty"`
+	CWD          string          `json:"cwd,omitempty"`
+	MCPSrvrs     json.RawMessage `json:"mcp_servers,omitempty"`
+	Plugins      json.RawMessage `json:"plugins,omitempty"`
+	PluginErrors json.RawMessage `json:"plugin_errors,omitempty"`
+	// For "system" type with subtype "api_retry" (Anthropic 2.1.x ships this
+	// as a separate event when auth/rate/billing/server retries kick in).
+	// Surface to journal so backoff investigations have data; pre-fix parser
+	// dropped these to the default branch and Crow's Nest never saw them.
+	Attempt      int     `json:"attempt,omitempty"`
+	MaxRetries   int     `json:"max_retries,omitempty"`
+	RetryDelayMs float64 `json:"retry_delay_ms,omitempty"`
+	ErrorStatus  int     `json:"error_status,omitempty"`
+	ErrorMessage string  `json:"error,omitempty"`
 	// For stream_event type (--include-partial-messages)
 	Event *streamEvent `json:"event,omitempty"`
 }
@@ -90,7 +101,8 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	scanner := bufio.NewScanner(result.Reader)
 	scanner.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
 
-	useStreamJSON := req.CLIAdapter == "CLAUDE_CODE"
+	adapter := getAdapter(req.CLIAdapter)
+	useStreamJSON := adapter.UseStreamJSON()
 
 	// Crow's Nest: capture the first 16 KB of raw stdout+stderr so the live
 	// terminal panel can show a replayable snapshot. We deliberately do NOT
@@ -131,7 +143,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		}
 
 		if useStreamJSON {
-			o.handleStreamJSONLine(line, handler)
+			adapter.ParseStreamLine(line, handler)
 		} else {
 			if handler != nil {
 				handler(AgentEvent{
@@ -209,156 +221,10 @@ func emitImageBlock(block contentBlock, handler EventHandler) {
 	}
 }
 
+// handleStreamJSONLine kept as a thin wrapper around parseClaudeCodeStreamJSON
+// so existing tests in exec_test.go that call o.handleStreamJSONLine directly
+// keep working unchanged. The actual per-adapter dispatch happens in
+// streamOutput above via adapter.ParseStreamLine.
 func (o *Orchestrator) handleStreamJSONLine(line []byte, handler EventHandler) {
-	if handler == nil {
-		return
-	}
-
-	var msg streamJSONMessage
-	if err := json.Unmarshal(line, &msg); err != nil {
-		// Not valid JSON -- emit as plain text (fallback). Convert to string
-		// here so we don't alias the scanner buffer after this return.
-		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
-		return
-	}
-
-	// Claude Code wraps content in message.content; extract if top-level content is empty
-	if len(msg.Content) == 0 && len(msg.Message) > 0 {
-		var nested nestedMessage
-		if json.Unmarshal(msg.Message, &nested) == nil && len(nested.Content) > 0 {
-			msg.Content = nested.Content
-		}
-	}
-
-	switch msg.Type {
-	case "stream_event":
-		// Token-level streaming (when --include-partial-messages is used)
-		if msg.Event != nil && msg.Event.Delta != nil {
-			switch msg.Event.Delta.Type {
-			case "text_delta":
-				handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Timestamp: time.Now()})
-			case "thinking_delta":
-				handler(AgentEvent{
-					Type:      "thinking",
-					Content:   msg.Event.Delta.Thinking,
-					Metadata:  map[string]interface{}{"streaming": true},
-					Timestamp: time.Now(),
-				})
-			}
-		}
-
-	case "assistant":
-		// Complete assistant message with content blocks.
-		// When --include-partial-messages is active (always for Claude Code),
-		// text and thinking were already streamed via stream_event deltas.
-		// We only emit tool_use and tool_result blocks here to avoid duplication.
-		for _, block := range msg.Content {
-			switch block.Type {
-			case "thinking":
-				// Already delivered via thinking_delta stream events — skip.
-			case "text":
-				// Already delivered via text_delta stream events — skip.
-			case "tool_use":
-				name := block.Name
-				if name == "" {
-					name = "tool"
-				}
-				handler(AgentEvent{
-					Type:    "tool_call",
-					Content: name,
-					Metadata: map[string]interface{}{
-						"tool_name": name,
-						"tool_id":   block.ID,
-						"input":     block.Input,
-					},
-					Timestamp: time.Now(),
-				})
-			case "tool_result":
-				emitToolResultBlock(block, handler)
-			case "image":
-				emitImageBlock(block, handler)
-			}
-		}
-
-	case "tool", "user":
-		// Claude Code emits tool results as "tool" or "user" type messages
-		for _, block := range msg.Content {
-			switch block.Type {
-			case "tool_result":
-				emitToolResultBlock(block, handler)
-			case "image":
-				emitImageBlock(block, handler)
-			}
-		}
-
-	case "result":
-		// Emit run result metadata (cost, usage, duration) as a dedicated event.
-		// The text is NOT re-emitted (already delivered via "assistant" blocks).
-		meta := map[string]interface{}{
-			"subtype":         msg.Subtype,
-			"duration_ms":     msg.DurationMs,
-			"duration_api_ms": msg.DurationAPI,
-			"total_cost_usd":  msg.TotalCostUSD,
-			"num_turns":       msg.NumTurns,
-			"is_error":        msg.IsError,
-		}
-		if len(msg.Usage) > 0 {
-			var usage map[string]interface{}
-			if json.Unmarshal(msg.Usage, &usage) == nil {
-				meta["usage"] = usage
-			}
-		}
-		if len(msg.ModelUsage) > 0 {
-			var mu map[string]interface{}
-			if json.Unmarshal(msg.ModelUsage, &mu) == nil {
-				meta["model_usage"] = mu
-			}
-		}
-		if len(msg.Errors) > 0 {
-			meta["errors"] = msg.Errors
-		}
-		handler(AgentEvent{
-			Type:      "result",
-			Content:   msg.Result,
-			Metadata:  meta,
-			Timestamp: time.Now(),
-		})
-
-	case "system":
-		// Session init or compact boundary events
-		meta := map[string]interface{}{
-			"subtype": msg.Subtype,
-		}
-		if msg.Subtype == "init" {
-			if msg.Model != "" {
-				meta["model"] = msg.Model
-			}
-			if len(msg.Tools) > 0 {
-				meta["tools"] = msg.Tools
-			}
-			if msg.CWD != "" {
-				meta["cwd"] = msg.CWD
-			}
-			if len(msg.MCPSrvrs) > 0 {
-				var servers []json.RawMessage
-				if json.Unmarshal(msg.MCPSrvrs, &servers) == nil {
-					meta["mcp_servers"] = servers
-				}
-			}
-		}
-		handler(AgentEvent{
-			Type:      "system",
-			Content:   msg.Subtype,
-			Metadata:  meta,
-			Timestamp: time.Now(),
-		})
-
-	default:
-		// Unknown type -- emit raw content if any text content blocks exist
-		for _, block := range msg.Content {
-			if block.Text != "" {
-				handler(AgentEvent{Type: "text", Content: block.Text, Timestamp: time.Now()})
-			}
-		}
-	}
+	parseClaudeCodeStreamJSON(line, handler)
 }

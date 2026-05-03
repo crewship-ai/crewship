@@ -113,19 +113,47 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate cli_adapter if being updated.
+	// Validate cli_adapter / llm_provider / tool_profile when present in the
+	// update body. These are required enum columns — the create path rejects
+	// empty/null, and an update that sends "" or null would silently clear
+	// the column to a value the runtime dispatch can't handle (getAdapter
+	// would fall back to a minimal `claude --print` for an empty
+	// cli_adapter, etc.). Reject:
+	//   - non-string types (numbers, objects, arrays, bool)
+	//   - explicit nil  (key present, value json null)
+	//   - empty string  (would blank a required column)
+	//   - any string outside the validated enum set
+	// The `ok` from the map lookup means "key present in body" — if the
+	// caller wants to leave the column untouched they simply omit the key.
 	if v, ok := body["cli_adapter"]; ok {
 		s, isStr := v.(string)
-		if !isStr || !validCLIAdapters[s] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be one of CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID"})
+		if !isStr || s == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID"})
+			return
+		}
+		if !validCLIAdapters[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID"})
 			return
 		}
 	}
-
-	// Validate tool_profile if being updated.
+	if v, ok := body["llm_provider"]; ok {
+		s, isStr := v.(string)
+		if !isStr || s == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+			return
+		}
+		if !validLLMProviders[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+			return
+		}
+	}
 	if v, ok := body["tool_profile"]; ok {
 		s, isStr := v.(string)
-		if !isStr || !validToolProfiles[s] {
+		if !isStr || s == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
+			return
+		}
+		if !validToolProfiles[s] {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
 			return
 		}

@@ -19,14 +19,41 @@ type llmProviderInfo struct {
 	envVarName string
 }
 
-func resolveLLMProvider(provider string) llmProviderInfo {
-	switch strings.ToUpper(provider) {
+// resolveLLMProvider maps a user-supplied provider string to its canonical
+// (provider, envVarName) pair. Mirrors the validLLMProviders registry in
+// internal/api/agents.go (and lib/cli-adapters.ts on the frontend) — the
+// accepted set MUST stay aligned across onboarding, agent create, and
+// agent update; otherwise users hit the "wizard accepted my provider but
+// the agent endpoint rejects it" inconsistency CR called out.
+//
+// Empty input yields the Anthropic default (matches the wizard's
+// pre-multi-CLI behaviour for the unset case). Explicit but unknown
+// values return ok=false so the caller can return 400 instead of silently
+// provisioning the wrong provider — that bug used to store keys under
+// ANTHROPIC_API_KEY for any typo'd provider value, masking the real
+// failure until first agent run.
+//
+// OLLAMA is a special case: there is no API key (local models, no auth)
+// so envVarName is "" — credential creation is skipped by the onboarding
+// service when envVarName is empty.
+func resolveLLMProvider(provider string) (llmProviderInfo, bool) {
+	switch strings.ToUpper(strings.TrimSpace(provider)) {
+	case "":
+		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}, true
+	case "ANTHROPIC":
+		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}, true
 	case "OPENAI":
-		return llmProviderInfo{provider: "OPENAI", envVarName: "OPENAI_API_KEY"}
+		return llmProviderInfo{provider: "OPENAI", envVarName: "OPENAI_API_KEY"}, true
 	case "GOOGLE":
-		return llmProviderInfo{provider: "GOOGLE", envVarName: "GOOGLE_API_KEY"}
+		return llmProviderInfo{provider: "GOOGLE", envVarName: "GOOGLE_API_KEY"}, true
+	case "CURSOR":
+		return llmProviderInfo{provider: "CURSOR", envVarName: "CURSOR_API_KEY"}, true
+	case "FACTORY":
+		return llmProviderInfo{provider: "FACTORY", envVarName: "FACTORY_API_KEY"}, true
+	case "OLLAMA":
+		return llmProviderInfo{provider: "OLLAMA", envVarName: ""}, true
 	default:
-		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}
+		return llmProviderInfo{}, false
 	}
 }
 
@@ -187,7 +214,11 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	if cliAdapter == "" {
 		cliAdapter = "CLAUDE_CODE"
 	}
-	llm := resolveLLMProvider(req.LlmProvider)
+	llm, ok := resolveLLMProvider(req.LlmProvider)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+		return
+	}
 	credName := req.CredentialName
 	if credName == "" && req.CredentialValue != "" {
 		credName = "API Key"

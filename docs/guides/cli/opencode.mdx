@@ -1,0 +1,107 @@
+---
+title: "OpenCode"
+description: "sst.dev's BYOK multi-provider CLI (OPENCODE adapter)"
+---
+
+`opencode-ai` (v1.14.33+). Active upstream is `github.com/anomalyco/opencode` (sst/opencode redirects there).
+
+## Install
+
+```bash
+npm install -g opencode-ai
+```
+
+## Auth (BYOK across 75+ providers)
+
+OpenCode reads provider credentials from env vars based on which `provider/model` you pick. Crewship's `apiKeyEnvVarsForAdapter("OPENCODE")` accepts:
+
+| Env var | Provider |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `OPENAI_API_KEY` | OpenAI |
+| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | Google |
+| `OPENROUTER_API_KEY` | OpenRouter |
+| `XAI_API_KEY` | xAI / Grok |
+| `GROQ_API_KEY` | Groq |
+| `DEEPSEEK_API_KEY` | DeepSeek |
+
+Add any of the above as a `SECRET`-type credential and assign to your OpenCode agent.
+
+## Models
+
+OpenCode requires `provider/model` namespaced strings (NOT bare IDs). Curated picker entries:
+
+```
+anthropic/claude-opus-4-7 | anthropic/claude-sonnet-4-6 | anthropic/claude-haiku-4-5
+openai/gpt-5.5 | openai/gpt-5.4 | openai/gpt-5.4-mini | openai/gpt-5.3-codex
+google/gemini-3.1-pro-preview | google/gemini-2.5-pro | google/gemini-2.5-flash
+xai/grok-4.1-fast | xai/grok-4
+deepseek/deepseek-v4-flash | deepseek/deepseek-r1
+groq/llama-3.3-70b-versatile | groq/qwen-2.5-coder-32b
+moonshotai/kimi-k2.6 | zai/glm-5.1
+openrouter/anthropic/claude-sonnet-4-6
+```
+
+## Command shape
+
+```bash
+opencode run --format json --model <provider/model> -- <user message>
+```
+
+`--format json` (NOT `--output-format`) emits JSONL events.
+
+## MCP
+
+Configured at `/output/<slug>/opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "fs": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/work"],
+      "environment": {"FOO": "{env:FOO}"},
+      "enabled": true
+    },
+    "linear": {
+      "type": "remote",
+      "url": "https://mcp.linear.app/sse",
+      "headers": {"Authorization": "Bearer {env:LINEAR_TOKEN}"},
+      "enabled": true
+    }
+  }
+}
+```
+
+OpenCode-specific:
+- Top key is `mcp` (NOT `mcpServers`)
+- `type: local` (stdio) or `remote` (HTTP/SSE)
+- `command` is an ARRAY (binary + args together)
+- env field is `environment` (NOT `env`)
+- Env-var syntax is `{env:VAR}` (NOT `${VAR}`) — Crewship translates standard `${VAR}` form on write
+
+## Memory
+
+`AGENTS.md` is OpenCode's auto-discovered system instructions file. Crewship writes it as part of the canonical memory set.
+
+## Output stream
+
+Flat JSONL per `packages/opencode/src/cli/cmd/run.ts`:
+
+```
+{type: "text", sessionID: "...", part: {id, text}}
+{type: "reasoning", part: {text}}
+{type: "tool_use", part: {id, tool, state: {status, input, output}}}
+{type: "step_start", part: {}}
+{type: "step_finish", part: {tokens, cost, providerID, modelID}}
+{type: "error", error: "..."}
+```
+
+Note `type` IS the part type at top level — NOT a nested `message.part.updated` envelope. `step_finish` (snake_case, NOT hyphen).
+
+## Troubleshooting
+
+**Bare model rejected** — use `provider/model` form (`anthropic/claude-sonnet-4-6` not `claude-sonnet-4-6`).
+
+**MCP server uses literal `${VAR}` token** — Cursor/Claude `${VAR}` syntax incompatible; ensure Crewship's writer translated to `{env:VAR}`. Check by `cat /output/<slug>/opencode.json`.

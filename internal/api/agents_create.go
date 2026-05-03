@@ -118,7 +118,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.CLIAdapter = "CLAUDE_CODE"
 	}
 	if !validCLIAdapters[req.CLIAdapter] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be one of CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, FACTORY_DROID"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID"})
+		return
+	}
+	if req.LLMProvider != nil && *req.LLMProvider != "" && !validLLMProviders[*req.LLMProvider] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
 		return
 	}
 	if req.ToolProfile == "" {

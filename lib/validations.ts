@@ -40,7 +40,13 @@ export const createAgentSchema = z.object({
   agent_role: z.enum(["AGENT", "LEAD"]).default("AGENT"),
   lead_mode: z.enum(["active", "passive"]).default("active").optional(),
   cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"]).default("CLAUDE_CODE"),
-  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
+  // CURSOR + FACTORY are first-class llm_provider values because Cursor and
+  // Factory route credentials separately (CURSOR_API_KEY / FACTORY_API_KEY)
+  // even though the model the user picks is often a re-hosted Anthropic /
+  // OpenAI model. Without distinct provider values the credential dialog
+  // can't surface the right env-var preset and the sidecar would mis-route
+  // the bearer token.
+  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).default(1800),
@@ -77,7 +83,9 @@ export const updateAgentSchema = z.object({
   agent_role: z.enum(["AGENT", "LEAD"]).optional(),
   lead_mode: z.enum(["active", "passive"]).optional(),
   cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"]).optional(),
-  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
+  // Mirror of createAgentSchema.llm_provider — CURSOR + FACTORY kept for
+  // credential routing parity (see comment above).
+  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).optional(),
@@ -97,8 +105,11 @@ export const updateAgentSchema = z.object({
 /** Allowed credential type discriminators. */
 export const credentialTypeValues = ["AI_CLI_TOKEN", "API_KEY", "SECRET"] as const
 
-/** Allowed credential provider discriminators. */
-export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "NONE"] as const
+/** Allowed credential provider discriminators. Mirrors prisma/schema.prisma
+ *  CredentialProvider enum + the multi-CLI wave additions (CURSOR, FACTORY).
+ *  When OpenCode users need OpenRouter/xAI/Groq/DeepSeek keys, they add them
+ *  as SECRET type with the env var name set manually. */
+export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "NONE"] as const
 
 /**
  * Zod schema for creating a credential with scope validation.

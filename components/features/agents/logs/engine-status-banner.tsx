@@ -13,6 +13,7 @@ import { StatusBadge } from "@/components/ui/status-badge"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { DebugData } from "@/lib/types/agent"
+import { CLI_ADAPTERS } from "@/lib/cli-adapters"
 
 function StatusIcon({ ok }: { ok: boolean }) {
   return ok
@@ -169,7 +170,7 @@ export function EngineStatusBanner() {
             >
               <PropertyRow label="Status"><StatusBadge status={runtimeStatus.toUpperCase()} label={runtimeStatus} /></PropertyRow>
               <PropertyRow label="DB"><StatusBadge status={data.agent.db_status.toUpperCase()} label={data.agent.db_status} /></PropertyRow>
-              <PropertyRow label="Adapter"><span className="font-mono text-micro">{data.agent.cli_adapter}</span></PropertyRow>
+              <PropertyRow label="Adapter"><span className="text-micro">{CLI_ADAPTERS[data.agent.cli_adapter]?.label ?? data.agent.cli_adapter}</span></PropertyRow>
               {data.runtime.container_id && (
                 <PropertyRow label="Container"><code className="font-mono text-micro truncate" title={data.runtime.container_id}>{data.runtime.container_id.slice(0, 12)}</code></PropertyRow>
               )}
