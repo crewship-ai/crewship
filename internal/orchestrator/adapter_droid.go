@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -35,9 +36,17 @@ func (droidAdapter) BuildCommand(req AgentRunRequest) []string {
 	if req.LLMModel != "" {
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
+	// Droid exec has no --system-prompt flag; same turn-1 strategy as Codex
+	// — fold the system prompt + memory into the user message so the first
+	// invocation has context, then SetupSystemPrompt drops AGENTS.md +
+	// .factory/AGENTS.md for turn-2+ via Droid's discovery.
+	prompt := req.UserMessage
+	if sys := strings.TrimSpace(crewshipSystemPreamble + req.SystemPrompt); sys != "" {
+		prompt = "[SYSTEM]\n" + sys + "\n\n[USER]\n" + req.UserMessage
+	}
 	// `--` separator: see adapter_codex.go for rationale (user-message
 	// dash-prefix safety).
-	cmd = append(cmd, "--", req.UserMessage)
+	cmd = append(cmd, "--", prompt)
 	return cmd
 }
 
@@ -59,7 +68,7 @@ func (droidAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return nil
+	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
 }
 
 // SupportsMCP returns true. Droid auto-discovers .factory/mcp.json at session

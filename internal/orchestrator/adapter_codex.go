@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -45,11 +46,23 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
 
+	// Codex exec has NO --system-prompt flag and AGENTS.md is only read on
+	// the second turn (the first invocation hits the model before the file
+	// is loaded into context). To guarantee turn-1 parity with Claude Code
+	// we prepend the system prompt + memory directly into the user message
+	// using [SYSTEM]/[USER] delimiters — the same strategy adapter_gemini.go
+	// uses for the same reason. SetupSystemPrompt also drops AGENTS.md so
+	// turn-2+ has the persistent context via the CLI's own discovery path.
+	prompt := req.UserMessage
+	if sys := strings.TrimSpace(crewshipSystemPreamble + req.SystemPrompt); sys != "" {
+		prompt = "[SYSTEM]\n" + sys + "\n\n[USER]\n" + req.UserMessage
+	}
+
 	// `--` separator stops Codex from re-parsing user message tokens that
 	// happen to start with `-` (e.g. "--help") as flags. Without this a
 	// user prompt of "describe --force option" would crash with "unknown
 	// flag: --force" before reaching the model.
-	cmd = append(cmd, "--", req.UserMessage)
+	cmd = append(cmd, "--", prompt)
 	return cmd
 }
 
@@ -64,8 +77,12 @@ func (codexAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseCodexStreamJSON(line, handler)
 }
 
-// SetupSystemPrompt is a no-op for Codex: exec mode has no documented system
-// prompt flag, so the crewship preamble is prepended to UserMessage upstream.
+// SetupSystemPrompt drops the canonical memory blob to AGENTS.md (Codex's
+// auto-discovery path) plus the cross-CLI parity files. Combined with the
+// turn-1 prepend in BuildCommand above, Codex agents now see the same memory
+// every other CLI sees regardless of session number. Pre-fix this was a
+// no-op + a doc lie ("prepended upstream" was never true) — Codex agents had
+// zero memory or persona context.
 func (codexAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -74,7 +91,7 @@ func (codexAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return nil
+	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
 }
 
 // SupportsMCP returns true: Codex Rust port reads .codex/config.toml at session

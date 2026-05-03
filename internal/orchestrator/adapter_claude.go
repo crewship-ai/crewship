@@ -65,8 +65,14 @@ func (claudeCodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseClaudeCodeStreamJSON(line, handler)
 }
 
-// SetupSystemPrompt is a no-op for Claude Code: the system prompt is passed
-// via --system-prompt, not via a file in the container.
+// SetupSystemPrompt drops canonical memory files even though Claude Code
+// receives its prompt via --system-prompt. Reasoning: --bare suppresses
+// CLAUDE.md auto-discovery for *us*, but a future change disabling --bare
+// (per-agent toggle, or upstream default change — Anthropic has signalled
+// it'll go default for -p) would silently drop our memory. Writing the
+// canonical files unconditionally also means a customer SSH-ing into the
+// container sees the same context the agent operates under — useful for
+// debugging.
 func (claudeCodeAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -75,7 +81,7 @@ func (claudeCodeAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return nil
+	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
 }
 
 func (claudeCodeAdapter) SupportsMCP() bool { return true }

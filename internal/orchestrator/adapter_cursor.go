@@ -72,8 +72,11 @@ func (cursorAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseCursorStreamJSON(line, handler)
 }
 
-// SetupSystemPrompt drops AGENTS.md into the working directory. Cursor reads
-// it as the agent persona at session start.
+// SetupSystemPrompt drops the full canonical memory file set. Cursor reads
+// .cursor/rules/, AGENTS.md, AND CLAUDE.md (Cursor merges all three) — the
+// unified writer covers all three plus parity files. Pre-fix only AGENTS.md
+// was written; .cursor/rules/ users were silently overriding our memory
+// because Cursor prioritises .cursor/rules over AGENTS.md.
 func (cursorAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -82,8 +85,7 @@ func (cursorAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	systemPrompt := crewshipSystemPreamble + req.SystemPrompt
-	return writeFileViaContainer(ctx, container, containerID, workDir, "AGENTS.md", systemPrompt, logger)
+	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
 }
 
 // SupportsMCP returns true *with caveat*. Cursor docs claim MCP support in

@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// codexDroidPrompt builds the [SYSTEM]/[USER]-delimited prompt that
+// adapter_codex.go and adapter_droid.go produce for any non-empty system
+// prompt. Mirrors the TrimSpace-then-wrap logic in those adapters so test
+// expectations stay in sync with the actual adapter output.
+func codexDroidPrompt(userMsg string) string {
+	sys := strings.TrimSpace(crewshipSystemPreamble) // SystemPrompt empty in these tests
+	return "[SYSTEM]\n" + sys + "\n\n[USER]\n" + userMsg
+}
+
 func TestCooldownManager(t *testing.T) {
 	cm := NewCooldownManager()
 
@@ -167,17 +176,17 @@ func TestBuildCLICommand(t *testing.T) {
 			// a value (workspace-write default for CODING profile).
 			"codex cli default (CODING-equivalent → workspace-write)",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", UserMessage: "hello"},
-			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--", "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--", codexDroidPrompt("hello")},
 		},
 		{
 			"codex cli minimal profile downgrades sandbox to read-only",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", ToolProfile: "MINIMAL", UserMessage: "audit"},
-			[]string{"codex", "exec", "--json", "--sandbox", "read-only", "--", "audit"},
+			[]string{"codex", "exec", "--json", "--sandbox", "read-only", "--", codexDroidPrompt("audit")},
 		},
 		{
 			"codex cli with model override",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", LLMModel: "gpt-5", UserMessage: "hello"},
-			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "--", "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "--", codexDroidPrompt("hello")},
 		},
 		{
 			// gemini-cli has no documented --system-instruction flag in
@@ -185,6 +194,8 @@ func TestBuildCLICommand(t *testing.T) {
 			// with [SYSTEM] / [USER] delimiters.
 			"gemini cli default",
 			AgentRunRequest{CLIAdapter: "GEMINI_CLI", UserMessage: "hello"},
+			// Gemini adapter does NOT TrimSpace the preamble (only Codex+Droid do)
+			// because gemini-cli passes via -p flag and trailing whitespace is fine.
 			[]string{"gemini", "-p", "[SYSTEM]\n" + crewshipSystemPreamble + "\n\n[USER]\nhello", "--output-format", "stream-json"},
 		},
 		{
@@ -231,27 +242,27 @@ func TestBuildCLICommand(t *testing.T) {
 			// See exec.go FACTORY_DROID case for the rationale.
 			"factory droid default (no profile) is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", UserMessage: "fix the bug"},
-			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", "fix the bug"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", codexDroidPrompt("fix the bug")},
 		},
 		{
 			"factory droid coding profile is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CODING", UserMessage: "ship the feature"},
-			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", "ship the feature"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", codexDroidPrompt("ship the feature")},
 		},
 		{
 			"factory droid minimal profile downgrades to low",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", UserMessage: "audit only"},
-			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", "audit only"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", codexDroidPrompt("audit only")},
 		},
 		{
 			"factory droid consultative profile downgrades to low",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CONSULTATIVE", UserMessage: "advise"},
-			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", "advise"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", codexDroidPrompt("advise")},
 		},
 		{
 			"factory droid with model",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", LLMModel: "claude-sonnet-4-6", UserMessage: "review"},
-			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--model", "claude-sonnet-4-6", "--", "review"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--model", "claude-sonnet-4-6", "--", codexDroidPrompt("review")},
 		},
 		{
 			"unknown defaults to claude",

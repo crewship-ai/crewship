@@ -6,10 +6,11 @@ import (
 )
 
 // parseOpenCodeStreamJSON parses one stdout line from `opencode run --format
-// json`. Schema verified against the active upstream
-// github.com/anomalyco/opencode (NOTE: sst/opencode no longer exists; the
-// pre-2026 opencode-ai/opencode is archived). The current emitter is
-// packages/opencode/src/cli/cmd/run.ts which writes JSON.stringify({
+// json`. Schema verified against the active upstream — github.com/sst/opencode
+// (pre-2026) NOW REDIRECTS 301 → github.com/anomalyco/opencode and the
+// pre-2026 opencode-ai/opencode npm package is archived. Either repo URL
+// resolves; the npm `latest` tag remains opencode-ai@1.14.x. Current emitter
+// is packages/opencode/src/cli/cmd/run.ts which writes JSON.stringify({
 // type, timestamp, sessionID, ...data }) — a FLAT envelope, not a
 // nested {part: {type: ...}} shape.
 //

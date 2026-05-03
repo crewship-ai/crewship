@@ -61,9 +61,10 @@ func (geminiAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseGeminiStreamJSON(line, handler)
 }
 
-// SetupSystemPrompt is a no-op. Gemini's headless mode has no documented
-// system-instruction CLI flag, so the system prompt is folded into the user
-// message upstream (see adapter doc comment above).
+// SetupSystemPrompt drops canonical memory files including GEMINI.md (which
+// Gemini CLI auto-discovers per upstream docs). Combined with the [SYSTEM]/
+// [USER] prepend in BuildCommand, Gemini agents have turn-1 context AND
+// turn-2+ persistent memory parity with the rest of the adapters.
 func (geminiAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -72,7 +73,7 @@ func (geminiAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	return nil
+	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
 }
 
 // SupportsMCP returns true: gemini-cli auto-discovers MCP servers from

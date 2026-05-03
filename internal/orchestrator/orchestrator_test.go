@@ -82,12 +82,29 @@ func (m *mockContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provi
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
+	// AGENT CLI CALL: when cmd[0..N] contains a known CLI binary
+	// (claude/codex/...) the call is the actual agent exec. Always return
+	// the LAST entry in execResults — that's where tests put the real
+	// stream reader. This decouples tests from the exact number of setup
+	// calls (mkdir, manifest, MCP, canonical memory writes, etc.) so
+	// adding new setup steps doesn't shift the agent exec out of bounds.
+	cliBinaries := map[string]bool{
+		"claude": true, "codex": true, "gemini": true,
+		"opencode": true, "cursor-agent": true, "droid": true,
+	}
+	for i := 0; i < len(cfg.Cmd) && i < 6; i++ {
+		if cliBinaries[cfg.Cmd[i]] && len(m.execResults) > 0 {
+			return m.execResults[len(m.execResults)-1], nil
+		}
+	}
+	// SETUP CALLS (sh -c "..." for file writes etc.) — return noop. Tests
+	// that need to assert specific setup-call results should use execFn
+	// callback mode instead of the positional execResults FIFO.
 	idx := m.execCallIdx
 	m.execCallIdx++
-	if idx < len(m.execResults) {
+	if idx < len(m.execResults)-1 {
 		return m.execResults[idx], nil
 	}
-	// fallback: return a no-op result for mkdir etc.
 	return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
 func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
@@ -159,22 +176,22 @@ func TestRunAgentExecError(t *testing.T) {
 }
 
 func TestRunAgentSuccess(t *testing.T) {
-	r, w := io.Pipe()
-	go func() {
-		w.Write([]byte("hello output\n"))
-		w.Close()
-	}()
-
+	// SetupSystemPrompt now writes 5 canonical memory files, plus various
+	// other setup execs (mkdir, manifest, claude config, tmux check). Use
+	// execFn callback to deterministically detect the agent exec by looking
+	// for "--print" arg (Claude Code's signature flag), regardless of how
+	// many setup execs come before.
+	// orchestrator_run.go wraps the agent CLI in tmux: the actual
+	// `claude --print ...` ends up inside /tmp/agent-<slug>.sh and the
+	// outer cfg.Cmd is `[sh -c "tmux new-session ... 'sh /tmp/...sh' ..."]`.
+	// Detect the agent exec by its tmux session-name signature.
 	mc := &mockContainer{
-		execResults: []*provider.ExecResult{
-			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-args", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-env", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-script", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+			joined := strings.Join(cfg.Cmd, " ")
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
+				return &provider.ExecResult{ExecID: "exec-1", Reader: io.NopCloser(strings.NewReader("hello output\n"))}, nil
+			}
+			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 		},
 		inspectResult: struct {
 			running  bool
@@ -406,23 +423,18 @@ func TestRecoverFromCrashTransientInspectError(t *testing.T) {
 }
 
 func TestRunAgentScrubsCredentials(t *testing.T) {
-	r, w := io.Pipe()
-	go func() {
-		// Agent outputs a line containing an Anthropic API key
-		w.Write([]byte("Found key: sk-ant-api03-secretkey1234567890\n"))
-		w.Close()
-	}()
-
+	// Detect agent CLI exec by tmux-session signature; see TestRunAgentSuccess
+	// for the rationale (canonical-memory writes shifted indexing).
 	mc := &mockContainer{
-		execResults: []*provider.ExecResult{
-			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-args", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-env", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-script", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+			joined := strings.Join(cfg.Cmd, " ")
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
+				return &provider.ExecResult{
+					ExecID: "exec-1",
+					Reader: io.NopCloser(strings.NewReader("Found key: sk-ant-api03-secretkey1234567890\n")),
+				}, nil
+			}
+			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 		},
 		inspectResult: struct {
 			running  bool
@@ -474,17 +486,12 @@ func TestRunAgentWithSidecar(t *testing.T) {
 	}()
 
 	mc := &mockContainer{
-		execResults: []*provider.ExecResult{
-			{ExecID: "health-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "sidecar-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-check", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-args", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-env", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "tmux-script", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+			joined := strings.Join(cfg.Cmd, " ")
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
+				return &provider.ExecResult{ExecID: "exec-1", Reader: r}, nil
+			}
+			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 		},
 		inspectResult: struct {
 			running  bool

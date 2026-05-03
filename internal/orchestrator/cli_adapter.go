@@ -156,6 +156,63 @@ func (unknownAdapter) WriteMCPConfig(
 	return nil
 }
 
+// writeCanonicalMemoryFiles drops the assembled system prompt + persistent
+// agent memory blob into every memory file each CLI auto-discovers. This is
+// the user's hard requirement: "memory must be the same for all agents in a
+// workspace, no matter which CLI runs them" — without this every Codex /
+// Droid / Gemini agent runs with zero memory access by default because their
+// CLIs read AGENTS.md / GEMINI.md / .factory/AGENTS.md respectively, none of
+// which the orchestrator wrote pre-fix.
+//
+// The canonical body is the same string that Claude Code receives via its
+// --system-prompt flag (crewshipSystemPreamble + req.SystemPrompt, where
+// SystemPrompt has already been merged with persistent + crew-shared memory
+// upstream in orchestrator_run.go). By writing it to ALL discovery paths
+// regardless of which adapter we're serving, an agent swapping its
+// cli_adapter from CLAUDE_CODE to CODEX_CLI sees the same context next turn.
+//
+// Discovery paths covered:
+//   - AGENTS.md           — OpenCode, Cursor, Codex, Droid auto-discover this
+//   - CLAUDE.md           — Cursor; Claude Code skips it under --bare (we still
+//     emit so a user disabling --bare gets parity)
+//   - GEMINI.md           — Gemini CLI auto-discovers
+//   - .cursor/rules/crewship.md — Cursor priority path, takes precedence
+//     over AGENTS.md for that CLI
+//   - .factory/AGENTS.md  — Factory Droid alternate path
+//
+// Each path is written best-effort — a failure on one file does not abort the
+// others, because partial parity is still better than none. Errors collect
+// into a single returned error so the caller can log details.
+func writeCanonicalMemoryFiles(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	body := crewshipSystemPreamble + req.SystemPrompt
+	targets := []string{
+		"AGENTS.md",
+		"CLAUDE.md",
+		"GEMINI.md",
+		".cursor/rules/crewship.md",
+		".factory/AGENTS.md",
+	}
+	var firstErr error
+	for _, t := range targets {
+		if err := writeFileViaContainer(ctx, container, containerID, workDir, t, body, logger); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			if logger != nil {
+				logger.Warn("canonical memory file write failed", "path", t, "error", err)
+			}
+		}
+	}
+	return firstErr
+}
+
 // writeFileViaContainer is a small helper used by adapters that need to drop
 // a single text file (system prompt, config) into the container before the CLI
 // runs. The content is base64-encoded over the shell to avoid any quoting or

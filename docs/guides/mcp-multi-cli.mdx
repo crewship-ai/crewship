@@ -1,0 +1,96 @@
+---
+title: "MCP across all 6 CLIs"
+description: "Side-by-side MCP config schema reference for every Crewship CLI adapter"
+---
+
+Every CLI adapter implements MCP (Model Context Protocol) differently. Crewship's per-adapter `WriteMCPConfig` translates a single canonical MCP config into each CLI's expected file path + format. This page documents the per-CLI schema so operators can debug MCP issues directly.
+
+## Quick reference
+
+| CLI | Config file | Top-level key | Env-var syntax | Bearer token field | Approve flag |
+|---|---|---|---|---|---|
+| Claude Code | `/crew/agents/<slug>/.mcp.json` | `mcpServers` | `${VAR}` | (in `headers`) | none |
+| Codex | `/crew/agents/<slug>/.codex/config.toml` | `[mcp_servers.X]` | TOML literal | `bearer_token_env_var = "VAR"` | none |
+| Gemini | `/output/<slug>/.gemini/settings.json` | `mcpServers` | `${VAR}` or `$VAR` | (in `headers`) | none |
+| OpenCode | `/output/<slug>/opencode.json` | `mcp` | `{env:VAR}` | (in `headers`) | none |
+| Cursor | `/output/<slug>/.cursor/mcp.json` | `mcpServers` | `${env:VAR}` | (in `headers`) | `--approve-mcps` |
+| Factory Droid | `/output/<slug>/.factory/mcp.json` | `mcpServers` | `${VAR}` | (in `headers`) | none |
+
+## Schema differences
+
+### Stdio servers (local subprocess)
+
+**Claude / Cursor / Gemini / Droid** — separate `command` + `args`:
+```json
+{"command": "npx", "args": ["-y", "@scope/pkg"], "env": {"FOO": "${VAR}"}}
+```
+
+**OpenCode** — `command` is an array (binary + args together), env field is `environment`:
+```json
+{"type": "local", "command": ["npx", "-y", "@scope/pkg"], "environment": {"FOO": "{env:VAR}"}}
+```
+
+**Codex** (TOML):
+```toml
+[mcp_servers.fs]
+command = "npx"
+args = ["-y", "@scope/pkg"]
+# env block omitted when values are ${VAR} refs — Codex doesn't interpolate
+```
+
+### HTTP servers (remote)
+
+**Claude / Cursor / Droid** — `url` + `headers`:
+```json
+{"type": "http", "url": "https://mcp.example.com", "headers": {"Authorization": "Bearer ${TOKEN}"}}
+```
+
+**Gemini** — preferred `httpUrl` (current) or legacy `url` (SSE):
+```json
+{"httpUrl": "https://mcp.example.com", "headers": {"Authorization": "Bearer ${TOKEN}"}}
+```
+
+**OpenCode** — `type: remote`:
+```json
+{"type": "remote", "url": "https://mcp.example.com", "headers": {"Authorization": "Bearer {env:TOKEN}"}}
+```
+
+**Codex** — narrower schema, uses dedicated env-var fields:
+```toml
+[mcp_servers.linear]
+url = "https://mcp.example.com"
+bearer_token_env_var = "TOKEN"
+# Optional generic headers:
+env_http_headers = { "X-API-Key" = "API_KEY_VAR" }   # ${VAR} headers
+http_headers = { "X-Custom" = "literal-value" }      # literal headers
+```
+
+## Common pitfalls
+
+### 1. Cursor `--approve-mcps`
+
+Without it, MCP servers are LISTED in `cursor-agent mcp list` but NEVER INVOKED in `--print` mode (forum #143045 + #148397). Crewship's adapter adds the flag automatically when any MCP source is configured.
+
+### 2. Codex doesn't interpolate `${VAR}`
+
+If you write `env = { LINEAR_TOKEN = "${LINEAR_TOKEN}" }` to Codex's config, Codex passes the LITERAL string `"${LINEAR_TOKEN}"` as the env var to spawned MCP servers — they get the raw `${LINEAR_TOKEN}` string instead of the secret. Crewship's writer omits `${VAR}`-style entries from the env block; Codex inherits container env instead.
+
+### 3. OpenCode `{env:VAR}` syntax
+
+Cursor's `${env:VAR}` and Anthropic's `${VAR}` are NOT recognised by OpenCode. Crewship's `translateEnvRefsToOpenCode` converts standard forms — including substrings like `"Bearer ${LINEAR_TOKEN}"` (the dominant Authorization header pattern).
+
+### 4. Codex config in `$HOME`, not project root
+
+Codex's project-scoped `.codex/config.toml` is only loaded for "trusted" projects, with trust established interactively. Headless invocations skip it. Crewship writes to `/crew/agents/<slug>/.codex/config.toml` (HOME) so Codex picks it up unconditionally.
+
+## Verifying MCP config
+
+```bash
+crewship agent mcp <agent-slug> --resolved
+```
+
+Dumps the resolved MCP config that the adapter writes. Useful for spot-checking env-var translation, file paths, and per-CLI schema differences before exec.
+
+## Adding an MCP server
+
+Crew settings → MCP Servers → Add. Crewship merges crew + agent configs and writes per-adapter via `mcp_writers.go`. Standard input format is the Anthropic/Claude shape — every other adapter's format is generated from it via the shared `normaliseMCPInputs` helper.

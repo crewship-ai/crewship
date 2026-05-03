@@ -49,9 +49,10 @@ func (opencodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
 	parseOpenCodeStreamJSON(line, handler)
 }
 
-// SetupSystemPrompt writes AGENTS.md into the working directory. OpenCode
-// reads it on startup as the agent persona. Bit-for-bit preserved from the
-// pre-refactor setupSystemPromptFiles switch.
+// SetupSystemPrompt drops the canonical memory file set instead of just
+// AGENTS.md. OpenCode auto-discovers AGENTS.md primarily, but the unified
+// writer keeps memory parity with every other adapter — a Cursor agent
+// switching to OpenCode mid-mission sees the same context.
 func (opencodeAdapter) SetupSystemPrompt(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -60,8 +61,7 @@ func (opencodeAdapter) SetupSystemPrompt(
 	workDir string,
 	logger *slog.Logger,
 ) error {
-	systemPrompt := crewshipSystemPreamble + req.SystemPrompt
-	return writeFileViaContainer(ctx, container, containerID, workDir, "AGENTS.md", systemPrompt, logger)
+	return writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger)
 }
 
 // SupportsMCP returns true. OpenCode reads opencode.json with MCP servers
