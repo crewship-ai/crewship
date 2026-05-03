@@ -10,6 +10,7 @@ import {
 import type { AgentPersona, PersonaCategory } from "@/lib/agent-personas"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
+import { getModelLabel } from "@/lib/cli-adapters"
 import type { PersonaSource } from "./types"
 
 const CATEGORY_LABELS: Record<PersonaCategory, string> = {
@@ -212,7 +213,7 @@ function PersonaRow({
         </div>
         <div className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{persona.blurb}</div>
         <div className="flex gap-1 flex-wrap mt-1.5">
-          <Pill>{persona.llmModel.replace("claude-", "").replace("-4-5", "").replace("-4-6", "")}</Pill>
+          <Pill>{getModelLabel(persona.llmModel)}</Pill>
           <Pill>{persona.toolProfile.toLowerCase()}</Pill>
           {persona.agentRole === "LEAD" && <Pill>lead</Pill>}
         </div>

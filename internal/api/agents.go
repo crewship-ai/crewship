@@ -102,9 +102,10 @@ var validLeadModes = map[string]bool{
 	"passive": true,
 }
 
-// validCLIAdapters mirrors the dispatch table in
-// internal/orchestrator/exec.go. Public API rejects anything outside
-// this set so the orchestrator never receives an adapter it cannot run.
+// validCLIAdapters mirrors lib/validations.ts cli_adapter enum + the
+// orchestrator's adapter registry (internal/orchestrator/cli_adapter.go init).
+// Pre-fix: API endpoints accepted any string, allowing typos / schema-migration
+// drift to silently land in DB and only fail at getAdapter() runtime dispatch.
 var validCLIAdapters = map[string]bool{
 	"CLAUDE_CODE":   true,
 	"OPENCODE":      true,
@@ -114,7 +115,23 @@ var validCLIAdapters = map[string]bool{
 	"FACTORY_DROID": true,
 }
 
-// validToolProfiles mirrors the gating in internal/orchestrator/exec.go.
+// validLLMProviders mirrors lib/validations.ts llm_provider enum. CURSOR
+// and FACTORY are first-class for credential routing (see validations.ts
+// comment) — their CLI adapters auth via CURSOR_API_KEY / FACTORY_API_KEY
+// rather than the underlying model provider's key.
+var validLLMProviders = map[string]bool{
+	"ANTHROPIC": true,
+	"OPENAI":    true,
+	"GOOGLE":    true,
+	"CURSOR":    true,
+	"FACTORY":   true,
+	"OLLAMA":    true,
+}
+
+// validToolProfiles mirrors lib/validations.ts tool_profile enum.
+// MESSAGING was retired in pre-beta hygiene (#261) — only the three
+// profiles below are accepted; the orchestrator's gating in exec.go was
+// updated to drop the MESSAGING branch at the same time.
 var validToolProfiles = map[string]bool{
 	"MINIMAL": true,
 	"CODING":  true,

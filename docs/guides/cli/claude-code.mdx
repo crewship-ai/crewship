@@ -1,0 +1,98 @@
+---
+title: "Claude Code"
+description: "Anthropic's coding agent (CLAUDE_CODE adapter)"
+---
+
+`@anthropic-ai/claude-code` (v2.1.126+). Production-ready in Crewship since
+day one; the canonical reference for what every other adapter targets for
+parity.
+
+## Install
+
+Pre-installed in every seeded crew via the `ghcr.io/devcontainers-extra/features/claude-code:2` devcontainer feature. To pull manually:
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+## Auth
+
+Two modes, both supported:
+
+| Type | Env var | Format |
+|---|---|---|
+| API key | `ANTHROPIC_API_KEY` | `sk-ant-api03-…` |
+| OAuth (Claude Pro / Max) | `CLAUDE_CODE_OAUTH_TOKEN` | `sk-ant-oat01-…` |
+
+Crewship's sidecar reverse-proxy injects the API key into `api.anthropic.com` requests so the agent container never sees the raw token. OAuth tokens flow through the HTTPS CONNECT tunnel directly (sidecar passes through, Claude Code sets `Authorization: Bearer` itself).
+
+## Models
+
+| API string | Tier | Notes |
+|---|---|---|
+| `claude-opus-4-7` | frontier | Default for complex reasoning |
+| `claude-sonnet-4-6` | frontier | Best speed/intelligence balance — Crewship default |
+| `claude-haiku-4-5-20251001` | fast | 200k ctx |
+
+Legacy `claude-opus-4-6 / 4-5 / 4-1`, `claude-sonnet-4-5`, `claude-opus-4-5` still selectable. Claude 4 (`claude-*-4-20250514`) retires 2026-06-15.
+
+## Command shape
+
+Crewship's adapter builds:
+
+```bash
+claude --print --output-format stream-json --include-partial-messages \
+       --dangerously-skip-permissions --verbose \
+       --bare --strict-mcp-config --no-session-persistence \
+       --model <model> --system-prompt <preamble+persona> \
+       --max-turns 50 \
+       [--mcp-config /crew/agents/<slug>/.mcp.json] \
+       -- <user message>
+```
+
+`--bare` is recommended by Anthropic for SDK use (will become the `-p` default). It disables auto-discovery of `~/.claude/CLAUDE.md`, plugins, hooks, skills, MCP — Crewship sets these explicitly via flags.
+
+## MCP
+
+Configured at `/crew/agents/<slug>/.mcp.json`. Standard schema:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/sse",
+      "headers": {"Authorization": "Bearer ${LINEAR_TOKEN}"}
+    },
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"],
+      "env": {"FOO": "${FOO}"}
+    }
+  }
+}
+```
+
+Env-var refs `${VAR}` resolve from the agent container's process env at MCP server spawn time. Crewship's `injectMCPCredentialEnvVars` populates them from workspace credentials.
+
+## Memory
+
+Same canonical memory file set as every other adapter — `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/crewship.md`, `.factory/AGENTS.md` — written to `/output/<slug>/`. Even though `--bare` skips Claude Code's own `CLAUDE.md` discovery (system prompt arrives via `--system-prompt`), Crewship writes the file so a customer SSH-ing into the container sees the same context the agent operates on.
+
+## Output stream
+
+JSONL events documented at [code.claude.com/docs/en/cli-reference](https://code.claude.com/docs/en/cli-reference). Crewship parses every documented type:
+
+- `system` (subtype `init` / `api_retry`)
+- `stream_event` (text / thinking deltas)
+- `assistant` (tool_use, tool_result blocks)
+- `tool` / `user` (tool result blocks)
+- `result` (terminal envelope with usage + cost)
+
+## Troubleshooting
+
+**`claude: not found`** — devcontainer feature didn't install; check crew `devcontainer_config` for `ghcr.io/devcontainers-extra/features/claude-code:2`.
+
+**401 from Anthropic** — credential not assigned to agent. Check `crewship credential assign <name> <agent>` and verify the credential has `type=API_KEY` or `type=AI_CLI_TOKEN` with `provider=ANTHROPIC`.
+
+**Model retires 2026-06-15** — UI shows a badge on retiring models (claude-3.5-*, claude-*-4-20250514). Migrate to `claude-sonnet-4-6` or `claude-opus-4-7`.

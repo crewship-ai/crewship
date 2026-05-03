@@ -150,6 +150,8 @@ enum CredentialProvider {
   ANTHROPIC
   OPENAI
   GOOGLE
+  CURSOR
+  FACTORY
   NONE
 }
 

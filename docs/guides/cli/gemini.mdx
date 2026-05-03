@@ -1,0 +1,92 @@
+---
+title: "Gemini CLI"
+description: "Google's coding agent (GEMINI_CLI adapter)"
+---
+
+`@google/gemini-cli` (v0.40.1+).
+
+## Install
+
+```bash
+npm install -g @google/gemini-cli
+```
+
+## Auth
+
+| Env var | Source |
+|---|---|
+| `GEMINI_API_KEY` | AI Studio (canonical) |
+| `GOOGLE_API_KEY` | Vertex AI (also accepted) |
+
+Crewship's `apiKeyEnvVarsForAdapter("GEMINI_CLI")` accepts either; both are mirrored to the container env so any version of `gemini-cli` finds its key.
+
+## Models
+
+| API string | Tier |
+|---|---|
+| `gemini-3-1-pro` | frontier |
+| `gemini-3-1-flash` | fast |
+| `gemini-3-1-flash-lite` | cheap |
+| `gemini-2-5-pro` | frontier — Crewship default (stable GA) |
+| `gemini-2-5-flash` | fast |
+| `gemini-2-5-flash-lite` | cheap |
+
+`gemini-2.0-flash` and `gemini-1.5-pro` are not available in the current Gemini API catalog — removed from picker. Note the dash-separated ID format (`gemini-3-1-pro`, not `gemini-3.1-pro`); Google's `models.list` endpoint returns this canonical form.
+
+## Command shape
+
+```bash
+gemini -p "[SYSTEM]\n<preamble>\n\n[USER]\n<msg>" --output-format stream-json -m <model>
+```
+
+- `-p` — non-interactive prompt mode
+- `--output-format stream-json` — JSONL events (PR #10883)
+- `-m` — model selector
+- System prompt folded into prompt body since headless mode has no `--system-instruction` flag
+
+## MCP
+
+Configured at `/output/<slug>/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "httpUrl": "https://mcp.linear.app/sse",
+      "headers": {"Authorization": "Bearer ${LINEAR_TOKEN}"}
+    },
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"],
+      "env": {"FOO": "${FOO}"}
+    }
+  }
+}
+```
+
+Crewship prefers `httpUrl` (HTTP streaming, current) over `url` (SSE, legacy). Env-var syntax `${VAR}` or `$VAR` (POSIX); both expanded by gemini-cli at MCP spawn.
+
+## Memory
+
+Canonical memory set including `GEMINI.md` (Gemini's auto-discovery path) at `/output/<slug>/`.
+
+## Output stream
+
+JSONL per [geminicli.com/docs/cli/headless](https://geminicli.com/docs/cli/headless):
+
+| Event | Notes |
+|---|---|
+| `init` | session bootstrap |
+| `message` | assistant text — `delta` for streaming, `content` for full |
+| `tool_use` | `tool_name`, `tool_id`, `parameters` (snake_case canonical, NOT `name`/`id`/`input`) |
+| `tool_result` | `tool_id` (NOT `tool_use_id`), `status`, `output` |
+| `error` | `severity: warning` demoted to system event, `severity: error` is fatal |
+| `result` | `stats.{total_tokens, input_tokens, output_tokens, duration_ms, tool_calls}` |
+
+## Troubleshooting
+
+**`gemini: not found`** — npm install failed.
+
+**Auth precedence trap** — if both `GEMINI_API_KEY` (AI Studio) and `GOOGLE_API_KEY` (Cloud) are in the env, GOOGLE wins silently. Use one or the other.
+
+**Exit code 52 with no JSON** — auth failure (issue #20183). Orchestrator detects exit-without-result and surfaces as run error.

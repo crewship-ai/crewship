@@ -6,6 +6,15 @@ import (
 	"time"
 )
 
+// codexDroidPrompt builds the [SYSTEM]/[USER]-delimited prompt that
+// adapter_codex.go and adapter_droid.go produce for any non-empty system
+// prompt. Mirrors the TrimSpace-then-wrap logic in those adapters so test
+// expectations stay in sync with the actual adapter output.
+func codexDroidPrompt(userMsg string) string {
+	sys := strings.TrimSpace(crewshipSystemPreamble) // SystemPrompt empty in these tests
+	return "[SYSTEM]\n" + sys + "\n\n[USER]\n" + userMsg
+}
+
 func TestCooldownManager(t *testing.T) {
 	cm := NewCooldownManager()
 
@@ -149,47 +158,83 @@ func TestBuildCLICommand(t *testing.T) {
 		{
 			"claude code default",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--max-turns", "50", "--", "hello"},
 		},
 		{
 			"claude code with system prompt",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble + "be helpful", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble + "be helpful", "--max-turns", "50", "--", "hello"},
 		},
 		{
 			"claude code minimal profile",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", ToolProfile: "MINIMAL", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--bare", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "--max-turns", "50", "--", "hello"},
 		},
 		{
-			"codex cli",
+			// Codex Rust port (npm @openai/codex 0.128.x): non-interactive
+			// is `codex exec --json`, NOT `codex --quiet`. --sandbox needs
+			// a value (workspace-write default for CODING profile).
+			"codex cli default (CODING-equivalent → workspace-write)",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", UserMessage: "hello"},
-			[]string{"codex", "--quiet", "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--", codexDroidPrompt("hello")},
 		},
 		{
-			"gemini cli",
+			"codex cli minimal profile downgrades sandbox to read-only",
+			AgentRunRequest{CLIAdapter: "CODEX_CLI", ToolProfile: "MINIMAL", UserMessage: "audit"},
+			[]string{"codex", "exec", "--json", "--sandbox", "read-only", "--", codexDroidPrompt("audit")},
+		},
+		{
+			"codex cli with model override",
+			AgentRunRequest{CLIAdapter: "CODEX_CLI", LLMModel: "gpt-5", UserMessage: "hello"},
+			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "--", codexDroidPrompt("hello")},
+		},
+		{
+			// gemini-cli has no documented --system-instruction flag in
+			// headless mode — the preamble is folded into the prompt body
+			// with [SYSTEM] / [USER] delimiters.
+			"gemini cli default",
 			AgentRunRequest{CLIAdapter: "GEMINI_CLI", UserMessage: "hello"},
-			[]string{"gemini", "--system-instruction", crewshipSystemPreamble, "-p", "hello"},
+			// Gemini adapter does NOT TrimSpace the preamble (only Codex+Droid do)
+			// because gemini-cli passes via -p flag and trailing whitespace is fine.
+			[]string{"gemini", "-p", "[SYSTEM]\n" + crewshipSystemPreamble + "\n\n[USER]\nhello", "--output-format", "stream-json"},
 		},
 		{
-			"gemini cli with system prompt",
-			AgentRunRequest{CLIAdapter: "GEMINI_CLI", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"gemini", "--system-instruction", crewshipSystemPreamble + "be helpful", "-p", "hello"},
+			"gemini cli with system prompt + model",
+			AgentRunRequest{CLIAdapter: "GEMINI_CLI", SystemPrompt: "be helpful", LLMModel: "gemini-2.5-pro", UserMessage: "hello"},
+			[]string{"gemini", "-p", "[SYSTEM]\n" + crewshipSystemPreamble + "be helpful" + "\n\n[USER]\nhello", "--output-format", "stream-json", "-m", "gemini-2.5-pro"},
 		},
 		{
-			"opencode",
+			// opencode flag is --format (NOT --output-format), values
+			// "default" or "json". Adapter passes --format json.
+			"opencode default",
 			AgentRunRequest{CLIAdapter: "OPENCODE", UserMessage: "hello"},
-			[]string{"opencode", "run", "hello"},
+			[]string{"opencode", "run", "--format", "json", "--", codexDroidPrompt("hello")},
 		},
 		{
-			"cursor cli default",
+			"opencode with provider/model namespaced model",
+			AgentRunRequest{CLIAdapter: "OPENCODE", LLMModel: "anthropic/claude-sonnet-4-6", UserMessage: "hello"},
+			[]string{"opencode", "run", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "--", codexDroidPrompt("hello")},
+		},
+		{
+			// Cursor headless: --force prevents the agent from blocking on
+			// permission prompts in print mode (otherwise file edits hang).
+			// --stream-partial-output produces incremental deltas.
+			// --approve-mcps NOT added here because no MCP source configured.
+			"cursor cli default (no MCP)",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello"},
-			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--", "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--", codexDroidPrompt("hello")},
 		},
 		{
-			"cursor cli with model override",
+			"cursor cli with model override (no MCP)",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", LLMModel: "gpt-5.5", UserMessage: "hello"},
-			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "-m", "gpt-5.5", "--", "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "-m", "gpt-5.5", "--", codexDroidPrompt("hello")},
+		},
+		{
+			// When MCP is configured, --approve-mcps is needed or Cursor's
+			// -p mode silently skips MCP servers (forum #143045 + #148397).
+			"cursor cli with MCP gets --approve-mcps",
+			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello", CrewMCPConfigJSON: `{"mcpServers":{"x":{"command":"npx"}}}`},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--approve-mcps", "--", codexDroidPrompt("hello")},
 		},
 		{
 			// Default policy is medium because the API normalises empty
@@ -197,27 +242,27 @@ func TestBuildCLICommand(t *testing.T) {
 			// See exec.go FACTORY_DROID case for the rationale.
 			"factory droid default (no profile) is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", UserMessage: "fix the bug"},
-			[]string{"droid", "exec", "--auto", "medium", "fix the bug"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", codexDroidPrompt("fix the bug")},
 		},
 		{
 			"factory droid coding profile is medium",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CODING", UserMessage: "ship the feature"},
-			[]string{"droid", "exec", "--auto", "medium", "ship the feature"},
+			[]string{"droid", "exec", "--auto", "medium", "-o", "stream-json", "--", codexDroidPrompt("ship the feature")},
 		},
 		{
 			"factory droid minimal profile downgrades to low",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", UserMessage: "audit only"},
-			[]string{"droid", "exec", "--auto", "low", "audit only"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--", codexDroidPrompt("audit only")},
 		},
 		{
-			"factory droid consultative profile downgrades to low",
-			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "CONSULTATIVE", UserMessage: "advise"},
-			[]string{"droid", "exec", "--auto", "low", "advise"},
+			"factory droid full profile escalates to high",
+			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "FULL", UserMessage: "ship it"},
+			[]string{"droid", "exec", "--auto", "high", "-o", "stream-json", "--", codexDroidPrompt("ship it")},
 		},
 		{
 			"factory droid with model",
 			AgentRunRequest{CLIAdapter: "FACTORY_DROID", ToolProfile: "MINIMAL", LLMModel: "claude-sonnet-4-6", UserMessage: "review"},
-			[]string{"droid", "exec", "--auto", "low", "--model", "claude-sonnet-4-6", "review"},
+			[]string{"droid", "exec", "--auto", "low", "-o", "stream-json", "--model", "claude-sonnet-4-6", "--", codexDroidPrompt("review")},
 		},
 		{
 			"unknown defaults to claude",

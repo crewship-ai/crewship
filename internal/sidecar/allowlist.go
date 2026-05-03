@@ -7,12 +7,33 @@ import (
 )
 
 // DefaultAllowedDomains contains the LLM API domains that the sidecar
-// will forward requests to. All other domains are blocked.
+// will forward requests to. All other domains are blocked. Mirrors the
+// frontend list in components/features/crews/crew-network-policy.tsx —
+// keep both lists in sync.
+//
+// Each entry exists for a specific CLI; comments document which.
 var DefaultAllowedDomains = []string{
-	"api.anthropic.com",
-	"api.openai.com",
-	"generativelanguage.googleapis.com",
-	"api.factory.ai",
+	// Anthropic
+	"api.anthropic.com",     // Claude Code (API key + OAuth)
+	"console.anthropic.com", // Claude Code OAuth refresh callback
+
+	// OpenAI / Codex
+	"api.openai.com",  // Codex CLI (API key)
+	"auth.openai.com", // Codex CLI ChatGPT-subscription login flow
+	"chatgpt.com",     // Codex CLI subscription routing
+
+	// Google / Gemini
+	"generativelanguage.googleapis.com", // Gemini CLI (AI Studio path)
+	"oauth2.googleapis.com",             // Gemini CLI OAuth flow
+	"accounts.google.com",               // Gemini CLI OAuth UI redirect
+
+	// Cursor
+	"api.cursor.sh",  // Cursor CLI auth/billing
+	"api2.cursor.sh", // Cursor CLI primary model gateway (since 2026-Q1)
+
+	// Factory Droid
+	"api.factory.ai", // Factory Droid (legacy)
+	"app.factory.ai", // Factory Droid CLI installer + API base
 }
 
 // DomainAllowlist controls which outbound domains the agent is allowed to reach.

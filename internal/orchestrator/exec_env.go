@@ -3,22 +3,69 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
+// BuildEnvVars constructs the environment variables for a container exec,
+// including agent identity, credentials (when sidecar is not used), and
+// provider-specific settings. Lives in exec_env.go since the multi-CLI
+// adapter refactor (the per-CLI command building moved to adapter_*.go);
+// this function is provider-neutral and stays here next to its sidecar
+// counterpart BuildEnvVarsSidecar.
+func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
+	env := []string{
+		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
+		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
+		"CREWSHIP_AGENT_ID=" + req.AgentID,
+		"CREWSHIP_CREW_ID=" + req.CrewID,
+		"CREWSHIP_CHAT_ID=" + req.ChatID,
+		"CREWSHIP_CREW_SHARED=/crew/shared",
+	}
+
+	if activeCred != nil {
+		envVar := resolveEnvVar(activeCred)
+		env = append(env, envVar+"="+activeCred.PlainValue)
+	}
+
+	for _, cred := range req.Credentials {
+		if activeCred != nil && cred.ID == activeCred.ID {
+			continue
+		}
+		if cred.EnvVarName != "" && cred.PlainValue != "" {
+			envVar := resolveEnvVar(&cred)
+			alreadySet := false
+			for _, e := range env {
+				if len(e) > len(envVar) && e[:len(envVar)+1] == envVar+"=" {
+					alreadySet = true
+					break
+				}
+			}
+			if !alreadySet {
+				env = append(env, envVar+"="+cred.PlainValue)
+			}
+		}
+	}
+
+	return env
+}
+
 func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
-	// Collect env var names referenced in crew/agent MCP configs
+	// Collect env var names referenced anywhere in the MCP config — env
+	// blocks, headers, top-level URL strings, and (for Codex) the
+	// bearer_token_env_var TOML key referenced indirectly via Authorization
+	// headers. Substring match on regex so "Bearer ${LINEAR_TOKEN}" gets
+	// picked up — the pre-fix prefix-suffix check missed every header in
+	// every adapter, causing all HTTP MCP servers to 401 in production.
 	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
 
 	// Also collect from table-based MCPServers (after JSON blob migration).
-	// Only add the var name when the value is an explicit ${VAR}
-	// reference. A literal value like Env: {"GH_TOKEN": "abc123"} is the
-	// caller's authoritative choice; we must not silently shadow it with
-	// a same-named credential below.
+	// Substring-aware scan covers values like "Bearer ${TOKEN}" and bare
+	// $VAR, not just whole-string ${VAR} as before.
 	for _, srv := range req.MCPServers {
 		for _, v := range srv.Env {
-			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
-				mcpEnvRefs[v[2:len(v)-1]] = true
+			for _, name := range extractEnvRefs(v) {
+				mcpEnvRefs[name] = true
 			}
 		}
 	}
@@ -53,8 +100,47 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
 	return env
 }
 
+// envRefScanRE matches ${VAR}, $VAR (POSIX), and ${env:VAR} (Cursor) — all
+// three forms our writers may emit. Anywhere in the value, not just at start
+// or end. Hoisted to package level so we compile once.
+var envRefScanRE = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// extractEnvRefs returns every env-var name referenced anywhere in the input
+// string. Handles three forms a CLI's MCP config might emit:
+//   - ${VAR}        (POSIX curly form, used by Claude / Gemini / Cursor /
+//     Droid / Codex)
+//   - $VAR          (POSIX bare form, also accepted by most CLIs)
+//   - ${env:VAR}    (Cursor-specific syntax)
+//
+// Substring-aware so headers like "Bearer ${LINEAR_TOKEN}" (the dominant real
+// world case) get picked up.
+func extractEnvRefs(s string) []string {
+	matches := envRefScanRE.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		// Submatches: [1]=Cursor env: form, [2]=curly form, [3]=bare form
+		for i := 1; i < len(m); i++ {
+			if m[i] != "" {
+				out = append(out, m[i])
+				break
+			}
+		}
+	}
+	return out
+}
+
 // collectMCPEnvRefs parses MCP config JSONs and returns env var names
-// referenced as ${VAR} in the "env" blocks of server definitions.
+// referenced ANYWHERE in the server definitions: env blocks, headers blocks,
+// url strings (rare but possible). Substring-aware.
+//
+// Pre-fix scope was env blocks only with prefix-suffix matching — meaning
+// every HTTP MCP server's Authorization header (like "Bearer ${LINEAR_TOKEN}")
+// was silently missed and the bearer token never got injected, so all HTTP
+// MCP servers hit upstream with literal "${LINEAR_TOKEN}" as the credential.
+// Production-blocking gap; this rewrite closes it.
 func collectMCPEnvRefs(configs ...string) map[string]bool {
 	refs := make(map[string]bool)
 	for _, cfg := range configs {
@@ -63,18 +149,31 @@ func collectMCPEnvRefs(configs ...string) map[string]bool {
 		}
 		var wrapper struct {
 			MCPServers map[string]struct {
-				Env map[string]string `json:"env"`
+				Env     map[string]string `json:"env"`
+				Headers map[string]string `json:"headers"`
+				URL     string            `json:"url"`
+				HTTPURL string            `json:"httpUrl"`
 			} `json:"mcpServers"`
 		}
 		if err := json.Unmarshal([]byte(cfg), &wrapper); err != nil {
 			continue
 		}
 		for _, srv := range wrapper.MCPServers {
-			for _, val := range srv.Env {
-				// Match ${VAR_NAME} pattern
-				if len(val) > 3 && val[0] == '$' && val[1] == '{' && val[len(val)-1] == '}' {
-					refs[val[2:len(val)-1]] = true
+			for _, v := range srv.Env {
+				for _, name := range extractEnvRefs(v) {
+					refs[name] = true
 				}
+			}
+			for _, v := range srv.Headers {
+				for _, name := range extractEnvRefs(v) {
+					refs[name] = true
+				}
+			}
+			for _, name := range extractEnvRefs(srv.URL) {
+				refs[name] = true
+			}
+			for _, name := range extractEnvRefs(srv.HTTPURL) {
+				refs[name] = true
 			}
 		}
 	}
@@ -154,6 +253,41 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		)
 	}
 
+	// Multi-CLI BYO API key path. The sidecar reverse-proxy is wired only for
+	// api.anthropic.com today; Codex/Gemini/OpenCode/Cursor talk to their
+	// upstream over HTTPS CONNECT through the sidecar (no x-api-key
+	// injection). Override the dummy provider keys above with real values
+	// from req.Credentials — but only for env vars that THIS adapter's CLI
+	// actually reads. This preserves the sidecar isolation guarantee for
+	// cross-adapter scenarios (e.g. a Claude Code agent in a workspace that
+	// also has an OpenAI key configured — that key stays out of env).
+	//
+	// Future work: extend the sidecar reverse-proxy to api.openai.com,
+	// generativelanguage.googleapis.com and api.cursor.sh so this leak path
+	// can collapse back into the same x-api-key injection model the Anthropic
+	// path uses today. Tracked in plan: t-m-ukulem-bude-purring-cray.md.
+	allowed := apiKeyEnvVarsForAdapter(req.CLIAdapter)
+	if len(allowed) > 0 {
+		for _, cred := range req.Credentials {
+			if cred.PlainValue == "" {
+				continue
+			}
+			if _, ok := allowed[cred.EnvVarName]; !ok {
+				continue
+			}
+			env = overrideEnv(env, cred.EnvVarName, cred.PlainValue)
+			// gemini-cli reads either GOOGLE_API_KEY or GEMINI_API_KEY; mirror
+			// the value into both so config differences across versions don't
+			// stop authentication.
+			if cred.EnvVarName == "GOOGLE_API_KEY" {
+				env = overrideEnv(env, "GEMINI_API_KEY", cred.PlainValue)
+			}
+			if cred.EnvVarName == "GEMINI_API_KEY" {
+				env = overrideEnv(env, "GOOGLE_API_KEY", cred.PlainValue)
+			}
+		}
+	}
+
 	// CLI_TOKEN credentials: injected as direct env vars (agent sees them).
 	// CLI tools (gh, glab, vercel...) read credentials from env vars, not HTTP proxy.
 	// The sidecar proxy cannot inject credentials into HTTPS CONNECT tunnels.
@@ -175,6 +309,67 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	}
 
 	return env
+}
+
+// apiKeyEnvVarsForAdapter returns the set of env-var names whose presence the
+// given CLI adapter's binary genuinely needs in order to authenticate. Used
+// by BuildEnvVarsSidecar to decide which dummy provider keys to overwrite with
+// real values from req.Credentials.
+//
+// Returning an empty / nil map means "this adapter relies on the sidecar
+// reverse-proxy to inject credentials" — Claude Code's path. Returning a
+// populated map means "this CLI talks directly to its upstream over HTTPS
+// CONNECT and needs the real key in env".
+func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
+	switch adapter {
+	case "CODEX_CLI":
+		return map[string]struct{}{"OPENAI_API_KEY": {}}
+	case "GEMINI_CLI":
+		return map[string]struct{}{"GOOGLE_API_KEY": {}, "GEMINI_API_KEY": {}}
+	case "OPENCODE":
+		// OpenCode is BYOK across 75+ providers via models.dev. Accept all
+		// the common provider env vars so users can route to whichever
+		// upstream their opencode.json chose without us blocking the cred at
+		// the sidecar layer. The list is the union of the most-deployed
+		// providers in the wild — Anthropic, OpenAI, Google, plus the
+		// alternative model gateways (OpenRouter, xAI, Groq, DeepSeek) and
+		// Cursor's BYO key for users routing through Cursor.
+		return map[string]struct{}{
+			"ANTHROPIC_API_KEY":  {},
+			"OPENAI_API_KEY":     {},
+			"GOOGLE_API_KEY":     {},
+			"GEMINI_API_KEY":     {},
+			"OPENROUTER_API_KEY": {},
+			"XAI_API_KEY":        {},
+			"GROQ_API_KEY":       {},
+			"DEEPSEEK_API_KEY":   {},
+		}
+	case "CURSOR_CLI":
+		return map[string]struct{}{"CURSOR_API_KEY": {}}
+	case "FACTORY_DROID":
+		return map[string]struct{}{"FACTORY_API_KEY": {}}
+	default:
+		// CLAUDE_CODE — sidecar's Anthropic reverse-proxy handles credential
+		// injection (the dummy ANTHROPIC_API_KEY in env never reaches
+		// api.anthropic.com; the proxy swaps it for the real value mid-flight).
+		// Unknown adapters (e.g. malformed agent record) — defensive nil so
+		// stale credentials don't leak into env.
+		return nil
+	}
+}
+
+// overrideEnv replaces (or appends) `key=value` in env, returning the updated
+// slice. Used by BuildEnvVarsSidecar to swap dummy provider keys for the real
+// values when a BYO API key is present in req.Credentials.
+func overrideEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
 
 // resolveEnvVar returns the correct env var name for a credential.

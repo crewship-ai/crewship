@@ -14,7 +14,9 @@
 // emits these strings to /api/v1/agents.
 export type ToolProfile = "MINIMAL" | "CODING" | "FULL"
 export type AgentRole = "AGENT" | "LEAD"
-export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "OLLAMA"
+// CURSOR + FACTORY are first-class providers for credential routing — see
+// the comment on createAgentSchema.llm_provider in lib/validations.ts.
+export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "CURSOR" | "FACTORY" | "OLLAMA"
 export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI" | "CURSOR_CLI" | "FACTORY_DROID"
 export type PersonaCategory = "engineering" | "research" | "quality" | "writing" | "devops" | "custom"
 
@@ -303,7 +305,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Methodical lead. Plans first, doubles-checks results, no exclamation marks.",
     avatarStyle: "bottts-neutral",
     systemPrompt: TOMAS,
-    llmProvider: "ANTHROPIC", llmModel: "claude-sonnet-4-5", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-sonnet-4-6", cliAdapter: "CLAUDE_CODE",
     toolProfile: "FULL", timeoutSeconds: 3600, memoryEnabled: true,
   },
   {
@@ -312,7 +314,8 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Fast and terse. Skips preamble, says 'Done.' and moves on. One-liners preferred.",
     avatarStyle: "adventurer",
     systemPrompt: VIKTOR,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    // Codex-flavoured persona: gpt-5.4 mini matches Viktor's terse style.
+    llmProvider: "OPENAI", llmModel: "gpt-5.4-mini", cliAdapter: "CODEX_CLI",
     toolProfile: "CODING", timeoutSeconds: 1800, memoryEnabled: true,
   },
   {
@@ -321,7 +324,8 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Cheerful, friendly explanations. Adds nice formatting and creative filenames.",
     avatarStyle: "lorelei",
     systemPrompt: NELA,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    // Cursor's Composer is tuned for frontend / IDE-flavoured agents.
+    llmProvider: "CURSOR", llmModel: "composer", cliAdapter: "CURSOR_CLI",
     toolProfile: "CODING", timeoutSeconds: 1800, memoryEnabled: true,
   },
   {
@@ -330,7 +334,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Grumpy but excellent. Sarcastic remarks, dry commentary, reliable output.",
     avatarStyle: "bottts-neutral",
     systemPrompt: MARTIN,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
     toolProfile: "CODING", timeoutSeconds: 2400, memoryEnabled: true,
   },
   {
@@ -339,7 +343,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Strict teacher. Demands excellence, explains WHY, never accepts 'good enough'.",
     avatarStyle: "notionists",
     systemPrompt: EVA,
-    llmProvider: "ANTHROPIC", llmModel: "claude-sonnet-4-5", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-sonnet-4-6", cliAdapter: "CLAUDE_CODE",
     toolProfile: "FULL", timeoutSeconds: 3600, memoryEnabled: true,
   },
   {
@@ -348,7 +352,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Paranoid skeptic. 'But what if it fails?' Edge cases, error handling, suspicion.",
     avatarStyle: "adventurer",
     systemPrompt: DANIEL,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
     toolProfile: "MINIMAL", timeoutSeconds: 1800, memoryEnabled: true,
   },
   {
@@ -357,7 +361,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Methodical scientist. Hypothesis → test → result → conclusion. Data-driven.",
     avatarStyle: "lorelei",
     systemPrompt: PETRA,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
     toolProfile: "CODING", timeoutSeconds: 2400, memoryEnabled: true,
   },
   {
@@ -366,7 +370,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Laid-back minimalist. Less is more, one-liners, clean and simple.",
     avatarStyle: "bottts-neutral",
     systemPrompt: JAKUB,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
     toolProfile: "MINIMAL", timeoutSeconds: 2400, memoryEnabled: true,
   },
   {
@@ -375,7 +379,8 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Curious explorer. Excited by discoveries, asks questions, finds patterns.",
     avatarStyle: "notionists",
     systemPrompt: LUCIE,
-    llmProvider: "ANTHROPIC", llmModel: "claude-sonnet-4-5", cliAdapter: "CLAUDE_CODE",
+    // Gemini 2.5 Pro's 1M context fits Lucie's "explore everything" mandate.
+    llmProvider: "GOOGLE", llmModel: "gemini-2.5-pro", cliAdapter: "GEMINI_CLI",
     toolProfile: "FULL", timeoutSeconds: 3600, memoryEnabled: true,
   },
   {
@@ -384,7 +389,7 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Dry comedian. Deadpan humor in code comments, witty variable names.",
     avatarStyle: "adventurer",
     systemPrompt: FILIP,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5-20251001", cliAdapter: "CLAUDE_CODE",
     toolProfile: "CODING", timeoutSeconds: 1800, memoryEnabled: true,
   },
   {
@@ -393,7 +398,8 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Dramatic storyteller. Mundane tasks become epic quests. Servers are fortresses.",
     avatarStyle: "bottts-neutral",
     systemPrompt: ONDREJ,
-    llmProvider: "ANTHROPIC", llmModel: "claude-sonnet-4-5", cliAdapter: "CLAUDE_CODE",
+    // Factory Droid's high autonomy + multi-model multiplexing fits SRE Lead.
+    llmProvider: "FACTORY", llmModel: "claude-sonnet-4-6", cliAdapter: "FACTORY_DROID",
     toolProfile: "FULL", timeoutSeconds: 3600, memoryEnabled: true,
   },
   {
@@ -402,7 +408,8 @@ export const BUILTIN_PERSONAS: AgentPersona[] = [
     blurb: "Silent executor. Barely speaks. Commands do the talking. 'Done.' on success.",
     avatarStyle: "bottts-neutral",
     systemPrompt: RADEK,
-    llmProvider: "ANTHROPIC", llmModel: "claude-haiku-4-5", cliAdapter: "CLAUDE_CODE",
+    // OpenCode is BYOK — Radek routes through OpenRouter for its hot-failover.
+    llmProvider: "ANTHROPIC", llmModel: "anthropic/claude-haiku-4-5", cliAdapter: "OPENCODE",
     toolProfile: "FULL", timeoutSeconds: 2400, memoryEnabled: true,
   },
 ]

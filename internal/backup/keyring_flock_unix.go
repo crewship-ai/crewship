@@ -59,4 +59,3 @@ func (l *fileLock) Unlock() error {
 	}
 	return nil
 }
-

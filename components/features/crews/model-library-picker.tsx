@@ -61,9 +61,11 @@ interface ModelEntry {
  * Google via Gemini CLI only.
  */
 const PROVIDER_ADAPTERS: Record<string, string[]> = {
-  ANTHROPIC: ["CLAUDE_CODE", "OPENCODE"],
-  OPENAI: ["CODEX_CLI", "OPENCODE"],
-  GOOGLE: ["GEMINI_CLI"],
+  ANTHROPIC: ["CLAUDE_CODE", "OPENCODE", "CURSOR_CLI", "FACTORY_DROID"],
+  OPENAI: ["CODEX_CLI", "OPENCODE", "CURSOR_CLI", "FACTORY_DROID"],
+  GOOGLE: ["GEMINI_CLI", "OPENCODE", "CURSOR_CLI", "FACTORY_DROID"],
+  CURSOR: ["CURSOR_CLI"],
+  FACTORY: ["FACTORY_DROID"],
 }
 
 function buildModelLibrary(): ModelEntry[] {

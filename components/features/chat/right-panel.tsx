@@ -24,6 +24,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { CLI_ADAPTERS, getModelLabel, getProviderLabel } from "@/lib/cli-adapters"
 
 import {
   ChatTreeRow,
@@ -280,8 +281,13 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
           </div>
           {agent.description && <p className="text-label text-muted-foreground line-clamp-2">{agent.description}</p>}
           <div className="flex flex-wrap gap-2 text-micro text-muted-foreground">
-            {agent.llm_provider && <span className="flex items-center gap-1"><Cpu className="h-3 w-3" />{agent.llm_provider}/{agent.llm_model ?? "default"}</span>}
-            {agent.cli_adapter && <span className="flex items-center gap-1"><Terminal className="h-3 w-3" />{agent.cli_adapter}</span>}
+            {(agent.llm_provider || agent.llm_model) && (
+              <span className="flex items-center gap-1">
+                <Cpu className="h-3 w-3" />
+                {agent.llm_provider ? getProviderLabel(agent.llm_provider) : "—"} · {agent.llm_model ? getModelLabel(agent.llm_model) : "default"}
+              </span>
+            )}
+            {agent.cli_adapter && <span className="flex items-center gap-1"><Terminal className="h-3 w-3" />{CLI_ADAPTERS[agent.cli_adapter]?.label ?? agent.cli_adapter}</span>}
             {agent.tool_profile && <span className="flex items-center gap-1"><Shield className="h-3 w-3" />{agent.tool_profile}</span>}
           </div>
         </div>

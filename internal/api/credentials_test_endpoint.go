@@ -121,6 +121,60 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
 		}
 
+	case "CURSOR":
+		// Cursor token validation: ping the auth endpoint with the token.
+		// 401 → invalid; 200 → valid; 403 → API access not enabled on the
+		// subscription (a Cursor-specific gotcha worth surfacing distinctly).
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://api2.cursor.sh/v0/me", nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+body.Value)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		case http.StatusUnauthorized:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid Cursor API key"})
+		case http.StatusForbidden:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Cursor subscription does not have API access enabled — visit cursor.com/account"})
+		default:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
+	case "FACTORY":
+		// Factory Droid token validation: ping app.factory.ai with the API key.
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://app.factory.ai/api/cli/auth/whoami", nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+body.Value)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		case http.StatusUnauthorized:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid Factory API key"})
+		default:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
 	case "GITHUB":
 		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
 		if err != nil {

@@ -11,6 +11,15 @@ const (
 	ProviderAnthropic ProviderType = "ANTHROPIC"
 	ProviderOpenAI    ProviderType = "OPENAI"
 	ProviderGoogle    ProviderType = "GOOGLE"
+	// ProviderCursor — added with the multi-CLI adapter wave. The sidecar
+	// reverse-proxy currently only injects keys for Anthropic; Cursor (and
+	// OpenAI/Google) are routed via direct env-var injection in
+	// BuildEnvVarsSidecar instead. ProviderCursor exists so credstore can
+	// still report counts and so future proxy wiring has a stable identifier.
+	ProviderCursor ProviderType = "CURSOR"
+	// ProviderFactory — Factory Droid (droid exec). Same direct-env-var
+	// injection model as Cursor; sidecar reverse-proxy not wired yet.
+	ProviderFactory ProviderType = "FACTORY"
 )
 
 // Credential holds a decrypted credential for injection into outbound requests.

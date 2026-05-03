@@ -5,16 +5,19 @@ import {
   getAdapterConfig,
   getModelsForAdapter,
   getProviderLabel,
+  getModelLabel,
 } from "@/lib/cli-adapters"
 
 describe("CLI_ADAPTERS registry", () => {
-  it("exports all four supported adapters", () => {
+  it("exports all six supported adapters", () => {
     // Spread before sort — .sort() mutates in place, and CLI_ADAPTER_KEYS
     // is a shared module-level export. Mutating it would leak ordering
     // changes into other tests that import the same array.
     expect([...CLI_ADAPTER_KEYS].sort()).toEqual([
       "CLAUDE_CODE",
       "CODEX_CLI",
+      "CURSOR_CLI",
+      "FACTORY_DROID",
       "GEMINI_CLI",
       "OPENCODE",
     ])
@@ -55,11 +58,25 @@ describe("CLI_ADAPTERS registry", () => {
     expect(CLI_ADAPTERS.GEMINI_CLI.envVar).toBe("GOOGLE_API_KEY")
   })
 
-  it("OPENCODE bundles both Anthropic + OpenAI model lists", () => {
+  it("CURSOR_CLI uses CURSOR provider + key", () => {
+    expect(CLI_ADAPTERS.CURSOR_CLI.provider).toBe("CURSOR")
+    expect(CLI_ADAPTERS.CURSOR_CLI.envVar).toBe("CURSOR_API_KEY")
+  })
+
+  it("FACTORY_DROID uses FACTORY provider + key", () => {
+    expect(CLI_ADAPTERS.FACTORY_DROID.provider).toBe("FACTORY")
+    expect(CLI_ADAPTERS.FACTORY_DROID.envVar).toBe("FACTORY_API_KEY")
+  })
+
+  it("OPENCODE uses provider/model namespaced strings", () => {
+    // OpenCode requires "provider/model" form (anthropic/claude-..., openai/gpt-...)
+    // — bare model IDs are rejected by the CLI. Pre-fix our list mixed bare
+    // and namespaced; this test pins the canonical convention.
     const values = CLI_ADAPTERS.OPENCODE.models.map((m) => m.value)
-    expect(values).toContain("claude-sonnet-4-6")
-    expect(values).toContain("o3")
-    expect(values).toContain("gpt-4o")
+    expect(values).toContain("anthropic/claude-sonnet-4-6")
+    expect(values).toContain("openai/gpt-5.5")
+    expect(values).toContain("openai/o3")
+    expect(values).toContain("google/gemini-2.5-pro")
   })
 
   it("frontier Anthropic models are present in CLAUDE_CODE", () => {
@@ -98,6 +115,8 @@ describe("getProviderLabel", () => {
     expect(getProviderLabel("ANTHROPIC")).toBe("Anthropic")
     expect(getProviderLabel("OPENAI")).toBe("OpenAI")
     expect(getProviderLabel("GOOGLE")).toBe("Google")
+    expect(getProviderLabel("CURSOR")).toBe("Cursor")
+    expect(getProviderLabel("FACTORY")).toBe("Factory")
     expect(getProviderLabel("NONE")).toBe("--")
   })
 
@@ -108,5 +127,98 @@ describe("getProviderLabel", () => {
 
   it("does NOT lowercase or modify unknown labels", () => {
     expect(getProviderLabel("custom-provider")).toBe("custom-provider")
+  })
+})
+
+describe("getModelLabel", () => {
+  it("translates Anthropic API IDs to friendly labels", () => {
+    expect(getModelLabel("claude-sonnet-4-6")).toBe("Claude Sonnet 4.6")
+    expect(getModelLabel("claude-opus-4-7")).toBe("Claude Opus 4.7")
+    expect(getModelLabel("claude-haiku-4-5-20251001")).toBe("Claude Haiku 4.5")
+  })
+
+  it("translates OpenAI API IDs to friendly labels", () => {
+    expect(getModelLabel("gpt-5.5")).toBe("GPT-5.5")
+    expect(getModelLabel("gpt-5.4")).toBe("GPT-5.4")
+    expect(getModelLabel("gpt-5.3-codex")).toBe("GPT-5.3 Codex")
+  })
+
+  it("translates Google API IDs to friendly labels", () => {
+    expect(getModelLabel("gemini-2.5-pro")).toBe("Gemini 2.5 Pro")
+    expect(getModelLabel("gemini-3.1-pro-preview")).toBe("Gemini 3.1 Pro (Preview)")
+  })
+
+  it("returns OpenCode 'provider/model' label", () => {
+    expect(getModelLabel("anthropic/claude-sonnet-4-6")).toBe("Anthropic / Claude Sonnet 4.6")
+    expect(getModelLabel("openai/gpt-5.5")).toBe("OpenAI / GPT-5.5")
+  })
+
+  it("returns input unchanged for unknown / custom models", () => {
+    expect(getModelLabel("custom-fine-tune-v3")).toBe("custom-fine-tune-v3")
+    expect(getModelLabel("not-a-real-model")).toBe("not-a-real-model")
+  })
+
+  it("returns empty string for empty input", () => {
+    expect(getModelLabel("")).toBe("")
+  })
+})
+
+describe("model catalog completeness", () => {
+  it("each adapter's defaultModel is present in its models[] list", () => {
+    for (const [name, cfg] of Object.entries(CLI_ADAPTERS)) {
+      const found = cfg.models.some((m) => m.value === cfg.defaultModel)
+      expect(found, `${name}: defaultModel "${cfg.defaultModel}" not in models list`).toBe(true)
+    }
+  })
+
+  it("each model has a non-empty label", () => {
+    for (const [name, cfg] of Object.entries(CLI_ADAPTERS)) {
+      for (const m of cfg.models) {
+        expect(m.label, `${name}: model "${m.value}" has empty label`).toBeTruthy()
+      }
+    }
+  })
+
+  it("no duplicate model values within an adapter", () => {
+    for (const [name, cfg] of Object.entries(CLI_ADAPTERS)) {
+      const values = cfg.models.map((m) => m.value)
+      expect(new Set(values).size, `${name}: duplicate model values`).toBe(values.length)
+    }
+  })
+
+  it("CODEX_CLI lists ONLY GPT-5.x family (Codex CLI rejects o-series)", () => {
+    const values = CLI_ADAPTERS.CODEX_CLI.models.map((m) => m.value)
+    for (const v of values) {
+      expect(v.startsWith("gpt-"), `CODEX_CLI model "${v}" must be gpt-* family`).toBe(true)
+    }
+    expect(values).not.toContain("o3")
+    expect(values).not.toContain("o4-mini")
+  })
+
+  it("CURSOR_CLI default 'composer' is Cursor's in-house model", () => {
+    expect(CLI_ADAPTERS.CURSOR_CLI.defaultModel).toBe("composer")
+  })
+
+  it("FACTORY_DROID accepts bare provider model IDs (no prefix)", () => {
+    const values = CLI_ADAPTERS.FACTORY_DROID.models.map((m) => m.value)
+    // Droid does NOT use anthropic/ or openai/ prefix per docs.factory.ai
+    for (const v of values) {
+      expect(v.includes("/"), `FACTORY_DROID model "${v}" must NOT have provider prefix`).toBe(false)
+    }
+  })
+
+  it("OPENCODE models all use provider/model namespaced form", () => {
+    const values = CLI_ADAPTERS.OPENCODE.models.map((m) => m.value)
+    for (const v of values) {
+      expect(v.includes("/"), `OPENCODE model "${v}" MUST be namespaced (e.g. anthropic/claude-...)`).toBe(true)
+    }
+  })
+
+  it("ANTHROPIC list excludes deprecated Claude 3.5 / -20250514 models", () => {
+    const values = CLI_ADAPTERS.CLAUDE_CODE.models.map((m) => m.value)
+    expect(values).not.toContain("claude-3-5-sonnet-20241022")
+    expect(values).not.toContain("claude-3-5-haiku-20241022")
+    expect(values).not.toContain("claude-sonnet-4-20250514") // retiring 2026-06-15
+    expect(values).not.toContain("claude-opus-4-20250514")
   })
 })

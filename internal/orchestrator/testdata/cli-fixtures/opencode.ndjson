@@ -1,0 +1,3 @@
+{"type":"text","sessionID":"ses-1","part":{"id":"p1","text":"Hello"}}
+{"type":"text","sessionID":"ses-1","part":{"id":"p2","text":" world"}}
+{"type":"step_finish","sessionID":"ses-1","part":{"tokens":{"input":10,"output":2},"cost":0.00002,"providerID":"anthropic","modelID":"claude-sonnet-4-6"}}

@@ -1,0 +1,96 @@
+---
+title: "Factory Droid"
+description: "Factory's autonomous coding agent (FACTORY_DROID adapter)"
+---
+
+`droid` CLI from Factory. Curl-installer from app.factory.ai.
+
+## Install
+
+```bash
+curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh && bash /tmp/droid-install.sh
+```
+
+Pre-installed via Crewship's `baseCLIPostCreate`. Linux requires `xdg-utils` (also installed by Crewship's apt step).
+
+## Auth
+
+| Env var | Format |
+|---|---|
+| `FACTORY_API_KEY` | `fact_…` / `factory_…` |
+
+Get the key from app.factory.ai/settings/api-keys. Free tier exists.
+
+`droid login` (browser OAuth) is NOT yet wired in Crewship — API key only.
+
+## Models
+
+Bare provider model IDs (no namespace prefix). Droid multiplexes across providers:
+
+| API string | Tier | Notes |
+|---|---|---|
+| `claude-opus-4-7` / `claude-opus-4-6` / `claude-sonnet-4-6` | frontier | 1.2x–2x multiplier |
+| `claude-opus-4-6-fast` | frontier | 12x premium tier |
+| `gpt-5.5` / `gpt-5.4` / `gpt-5.3-codex` | frontier | Plus `-fast` variants |
+| `gemini-3.1-pro-preview` / `gemini-3-flash-preview` | frontier/fast | 0.2x-0.8x |
+| `glm-5.1` / `kimi-k2.6` / `minimax-m2.7` | open-weight | Cheap tiers |
+
+## Command shape
+
+```bash
+droid exec --auto <low|medium> -o stream-json --model <m> -- <message>
+```
+
+- `exec` — non-interactive subcommand
+- `--auto low` (read-only, MINIMAL/CONSULTATIVE profile) | `medium` (file edits, default)
+- `--auto high` is intentionally NOT exposed (bypasses workspace boundary)
+- `-o stream-json` — JSONL events
+- `--mission` is NOT used — fails in headless containers per Factory issue #794
+
+## MCP
+
+Configured at `/output/<slug>/.factory/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "type": "http",
+      "url": "https://mcp.linear.app/sse",
+      "headers": {"Authorization": "Bearer ${LINEAR_TOKEN}"}
+    },
+    "fs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"]
+    }
+  }
+}
+```
+
+Droid REQUIRES `type: stdio | http` discriminator on every server (Crewship's writer always emits it).
+
+## Memory
+
+Canonical memory set including `AGENTS.md` (Droid's primary discovery) and `.factory/AGENTS.md` (Droid alternate path).
+
+## Output stream
+
+JSONL per [docs.factory.ai/cli/droid-exec/overview](https://docs.factory.ai/cli/droid-exec/overview). Note camelCase / snake_case inconsistency — Crewship's parser accepts both:
+
+| Event | Fields |
+|---|---|
+| `system` (`subtype: init`) | `cwd`, `session_id`, `tools`, `model` |
+| `message` | `role`, `id`, `text` |
+| `tool_call` | camelCase: `toolName`, `parameters`, `toolId`, `messageId` |
+| `tool_result` | camelCase: `value` (NOT `output`), `isError` |
+| `completion` | camelCase: `finalText`, `numTurns`, `durationMs` |
+| `result` | snake_case: `result`, `num_turns`, `duration_ms`, `is_error` |
+
+## Troubleshooting
+
+**`droid: not found`** — installer needs `xdg-utils` on Linux. Check `apt list --installed | grep xdg-utils`.
+
+**`Failed to start factoryd`** — happens when running `droid exec --mission` headless (issue #794). Crewship's adapter never passes `--mission` so this should not occur.
+
+**Empty tool_result** — pre-fix parser used `output` field; Droid emits `value`. Verify orchestrator on current schema (parser_droid_test.go).

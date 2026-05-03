@@ -99,6 +99,91 @@ func TestSecuritySidecarEnvHasNOPROXY(t *testing.T) {
 	}
 }
 
+// --- Multi-CLI BYO API key isolation boundaries ---
+
+// TestSidecarInjectsRealKeyOnlyForOwnAdapter verifies that when sidecar mode is
+// on and the agent's CLIAdapter explicitly declares a non-Anthropic provider
+// CLI (Codex/Gemini/OpenCode/Cursor), the real provider API key from
+// req.Credentials is exported into env. Other providers' keys stay dummied,
+// preserving cross-adapter isolation.
+func TestSidecarInjectsRealKeyOnlyForOwnAdapter(t *testing.T) {
+	openaiKey := "sk-real-openai-" + strings.Repeat("X", 24)
+	googleKey := "AIzaSy-real-google-" + strings.Repeat("X", 16)
+	cursorKey := "cur_real-" + strings.Repeat("X", 16)
+
+	creds := []Credential{
+		{ID: "c-oa", EnvVarName: "OPENAI_API_KEY", PlainValue: openaiKey, Priority: 1},
+		{ID: "c-go", EnvVarName: "GOOGLE_API_KEY", PlainValue: googleKey, Priority: 1},
+		{ID: "c-cu", EnvVarName: "CURSOR_API_KEY", PlainValue: cursorKey, Priority: 1},
+	}
+
+	cases := []struct {
+		adapter   string
+		wantKey   string // env var name that must equal its real value
+		wantValue string
+		denyKeys  []string // env var names that must NOT contain real values
+	}{
+		{"CODEX_CLI", "OPENAI_API_KEY", openaiKey, []string{"GOOGLE_API_KEY", "CURSOR_API_KEY"}},
+		{"GEMINI_CLI", "GOOGLE_API_KEY", googleKey, []string{"OPENAI_API_KEY", "CURSOR_API_KEY"}},
+		{"CURSOR_CLI", "CURSOR_API_KEY", cursorKey, []string{"OPENAI_API_KEY", "GOOGLE_API_KEY"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.adapter, func(t *testing.T) {
+			req := AgentRunRequest{
+				AgentID: "a1", CrewID: "crew1", ChatID: "chat1",
+				CLIAdapter:  tc.adapter,
+				Credentials: creds,
+			}
+			env := BuildEnvVarsSidecar(req, true)
+
+			envMap := make(map[string]string)
+			for _, e := range env {
+				parts := strings.SplitN(e, "=", 2)
+				if len(parts) == 2 {
+					envMap[parts[0]] = parts[1]
+				}
+			}
+
+			if envMap[tc.wantKey] != tc.wantValue {
+				t.Fatalf("%s: want %s=%s, got %q", tc.adapter, tc.wantKey, tc.wantValue, envMap[tc.wantKey])
+			}
+			for _, deny := range tc.denyKeys {
+				if val, ok := envMap[deny]; ok && (val == openaiKey || val == googleKey || val == cursorKey) {
+					t.Fatalf("%s: cross-adapter leak — %s contains real key %q", tc.adapter, deny, val)
+				}
+			}
+		})
+	}
+}
+
+// TestSidecarClaudeCodeAdapterDoesNotLeakOtherProviderKeys re-asserts the
+// historical isolation guarantee for Claude Code: even when a workspace has
+// OpenAI / Google / Cursor credentials configured, an agent on CLAUDE_CODE
+// must NOT see those values in env (the sidecar reverse-proxy is the only
+// path for credential injection in that mode).
+func TestSidecarClaudeCodeAdapterDoesNotLeakOtherProviderKeys(t *testing.T) {
+	openaiKey := "sk-leak-openai-" + strings.Repeat("X", 24)
+	googleKey := "AIzaSy-leak-google-" + strings.Repeat("X", 16)
+	cursorKey := "cur_leak-" + strings.Repeat("X", 16)
+
+	req := AgentRunRequest{
+		AgentID: "a1", CrewID: "c1", ChatID: "ch1",
+		CLIAdapter: "CLAUDE_CODE",
+		Credentials: []Credential{
+			{ID: "c-oa", EnvVarName: "OPENAI_API_KEY", PlainValue: openaiKey},
+			{ID: "c-go", EnvVarName: "GOOGLE_API_KEY", PlainValue: googleKey},
+			{ID: "c-cu", EnvVarName: "CURSOR_API_KEY", PlainValue: cursorKey},
+		},
+	}
+	env := BuildEnvVarsSidecar(req, true)
+	for _, e := range env {
+		if strings.Contains(e, openaiKey) || strings.Contains(e, googleKey) || strings.Contains(e, cursorKey) {
+			t.Fatalf("Claude Code agent leaked non-anthropic key: %s", e)
+		}
+	}
+}
+
 // --- Shell injection in startSidecar ---
 
 func TestSecurityStartSidecarShellInjection(t *testing.T) {

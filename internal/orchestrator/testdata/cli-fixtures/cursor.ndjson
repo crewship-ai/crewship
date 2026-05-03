@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","apiKeySource":"env","cwd":"/output/test","session_id":"cur-1","model":"composer","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"say hello"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]},"model_call_id":"mc-1","timestamp_ms":1700000000000}
+{"type":"result","subtype":"success","duration_ms":1100,"duration_api_ms":850,"is_error":false,"result":"Hello world","session_id":"cur-1","request_id":"req-x"}
