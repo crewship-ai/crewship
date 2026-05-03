@@ -208,12 +208,12 @@ func TestBuildCLICommand(t *testing.T) {
 			// "default" or "json". Adapter passes --format json.
 			"opencode default",
 			AgentRunRequest{CLIAdapter: "OPENCODE", UserMessage: "hello"},
-			[]string{"opencode", "run", "--format", "json", "--", "hello"},
+			[]string{"opencode", "run", "--format", "json", "--", codexDroidPrompt("hello")},
 		},
 		{
 			"opencode with provider/model namespaced model",
 			AgentRunRequest{CLIAdapter: "OPENCODE", LLMModel: "anthropic/claude-sonnet-4-6", UserMessage: "hello"},
-			[]string{"opencode", "run", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "--", "hello"},
+			[]string{"opencode", "run", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "--", codexDroidPrompt("hello")},
 		},
 		{
 			// Cursor headless: --force prevents the agent from blocking on
@@ -222,19 +222,19 @@ func TestBuildCLICommand(t *testing.T) {
 			// --approve-mcps NOT added here because no MCP source configured.
 			"cursor cli default (no MCP)",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello"},
-			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--", "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--", codexDroidPrompt("hello")},
 		},
 		{
 			"cursor cli with model override (no MCP)",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", LLMModel: "gpt-5.5", UserMessage: "hello"},
-			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "-m", "gpt-5.5", "--", "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "-m", "gpt-5.5", "--", codexDroidPrompt("hello")},
 		},
 		{
 			// When MCP is configured, --approve-mcps is needed or Cursor's
 			// -p mode silently skips MCP servers (forum #143045 + #148397).
 			"cursor cli with MCP gets --approve-mcps",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello", CrewMCPConfigJSON: `{"mcpServers":{"x":{"command":"npx"}}}`},
-			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--approve-mcps", "--", "hello"},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--approve-mcps", "--", codexDroidPrompt("hello")},
 		},
 		{
 			// Default policy is medium because the API normalises empty

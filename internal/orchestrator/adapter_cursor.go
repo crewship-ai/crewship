@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -60,7 +61,17 @@ func (cursorAdapter) BuildCommand(req AgentRunRequest) []string {
 	if req.LLMModel != "" {
 		cmd = append(cmd, "-m", req.LLMModel)
 	}
-	cmd = append(cmd, "--", req.UserMessage)
+	// Turn-1 parity: Cursor's headless mode has no --system-prompt flag and
+	// the .cursor/rules + AGENTS.md + CLAUDE.md files SetupSystemPrompt drops
+	// are read by the CLI between invocations, NOT before the first user
+	// message in a fresh container. Without prepending, a cold-start Cursor
+	// agent sees zero preamble / persona / memory on turn 1 — drift across
+	// the same conversation. Same fix Codex/Droid/Gemini already use.
+	prompt := req.UserMessage
+	if sys := strings.TrimSpace(crewshipSystemPreamble + req.SystemPrompt); sys != "" {
+		prompt = "[SYSTEM]\n" + sys + "\n\n[USER]\n" + req.UserMessage
+	}
+	cmd = append(cmd, "--", prompt)
 	return cmd
 }
 

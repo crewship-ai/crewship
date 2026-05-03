@@ -102,6 +102,38 @@ var validLeadModes = map[string]bool{
 	"passive": true,
 }
 
+// validCLIAdapters mirrors lib/validations.ts cli_adapter enum + the
+// orchestrator's adapter registry (internal/orchestrator/cli_adapter.go init).
+// Pre-fix: API endpoints accepted any string, allowing typos / schema-migration
+// drift to silently land in DB and only fail at getAdapter() runtime dispatch.
+var validCLIAdapters = map[string]bool{
+	"CLAUDE_CODE":   true,
+	"OPENCODE":      true,
+	"CODEX_CLI":     true,
+	"GEMINI_CLI":    true,
+	"CURSOR_CLI":    true,
+	"FACTORY_DROID": true,
+}
+
+// validLLMProviders mirrors lib/validations.ts llm_provider enum.
+var validLLMProviders = map[string]bool{
+	"ANTHROPIC": true,
+	"OPENAI":    true,
+	"GOOGLE":    true,
+	"CURSOR":    true,
+	"FACTORY":   true,
+	"OLLAMA":    true,
+}
+
+// validToolProfiles mirrors lib/validations.ts tool_profile enum.
+var validToolProfiles = map[string]bool{
+	"MINIMAL":      true,
+	"CODING":       true,
+	"MESSAGING":    true,
+	"FULL":         true,
+	"CONSULTATIVE": true,
+}
+
 type agentCrewInfo struct {
 	Name        string  `json:"name"`
 	Slug        string  `json:"slug"`

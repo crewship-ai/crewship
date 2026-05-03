@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -34,8 +35,17 @@ func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 		// errors out with a clear message — better than us guessing the prefix.
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
+	// Turn-1 parity: OpenCode reads AGENTS.md between invocations but the
+	// first user message in a fresh container has no system context. Prepend
+	// the system prompt with [SYSTEM]/[USER] delimiters so the model sees
+	// preamble + persona + memory on turn 1. Same fix every other non-Claude
+	// adapter uses.
+	prompt := req.UserMessage
+	if sys := strings.TrimSpace(crewshipSystemPreamble + req.SystemPrompt); sys != "" {
+		prompt = "[SYSTEM]\n" + sys + "\n\n[USER]\n" + req.UserMessage
+	}
 	// `--` separator: see adapter_codex.go for rationale.
-	cmd = append(cmd, "--", req.UserMessage)
+	cmd = append(cmd, "--", prompt)
 	return cmd
 }
 

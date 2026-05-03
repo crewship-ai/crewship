@@ -110,6 +110,32 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate cli_adapter if being updated. Pre-fix any string passed
+	// validation, allowing typos to land in DB and only fail at runtime
+	// dispatch (getAdapter falls back to a minimal claude command for
+	// unknown adapters — silent regression).
+	if v, ok := body["cli_adapter"]; ok {
+		s, _ := v.(string)
+		if s != "" && !validCLIAdapters[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID"})
+			return
+		}
+	}
+	if v, ok := body["llm_provider"]; ok {
+		s, _ := v.(string)
+		if s != "" && !validLLMProviders[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+			return
+		}
+	}
+	if v, ok := body["tool_profile"]; ok {
+		s, _ := v.(string)
+		if s != "" && !validToolProfiles[s] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, MESSAGING, FULL, or CONSULTATIVE"})
+			return
+		}
+	}
+
 	// Validate mcp_config_json if being updated
 	if mcpVal, ok := body["mcp_config_json"]; ok {
 		if mcpStr, ok := mcpVal.(string); ok && mcpStr != "" {

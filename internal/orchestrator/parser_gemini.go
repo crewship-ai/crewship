@@ -27,6 +27,7 @@ import (
 type geminiStreamMessage struct {
 	Type      string `json:"type"`
 	Subtype   string `json:"subtype,omitempty"`
+	Severity  string `json:"severity,omitempty"` // PR #26262: warning/error on error envelopes
 	SessionID string `json:"session_id,omitempty"`
 	Model     string `json:"model,omitempty"`
 
@@ -126,12 +127,14 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 
 	case "error":
 		// PR #26262 (gemini-cli 0.40.1, 2026-04-30) added a `severity` field
-		// to error envelopes. severity="warning" means the model surface a
+		// to error envelopes. severity="warning" means the model surfaced a
 		// soft block / advisory (e.g. AgentExecutionBlocked) — NOT a hard
 		// failure. Demote those to a system event so chat UI doesn't render
 		// them in red and the orchestrator doesn't mark the run as failed.
+		// (Pre-fix bug: previous parser checked msg.Subtype against "warning"
+		// which is a different field — the demote was dead code.)
 		eventType := "error"
-		if msg.Subtype == "warning" {
+		if msg.Severity == "warning" {
 			eventType = "system"
 		}
 		handler(AgentEvent{
@@ -139,7 +142,7 @@ func parseGeminiStreamJSON(line []byte, handler EventHandler) {
 			Content: msg.Error,
 			Metadata: map[string]interface{}{
 				"subtype":  msg.Subtype,
-				"severity": msg.Subtype,
+				"severity": msg.Severity,
 			},
 			Timestamp: time.Now(),
 		})

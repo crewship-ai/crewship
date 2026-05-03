@@ -131,6 +131,42 @@ func TestParseGemini_Error(t *testing.T) {
 	}
 }
 
+// TestParseGemini_ErrorSeverityWarningDemoted pins the PR #26262 contract.
+// Pre-fix parser checked msg.Subtype but the JSON field is `severity` —
+// the demote was dead code, every warning surfaced as red error. Real
+// upstream emits severity:"warning" for AgentExecutionBlocked etc.
+func TestParseGemini_ErrorSeverityWarningDemoted(t *testing.T) {
+	line := []byte(`{"type":"error","severity":"warning","error":"AgentExecutionBlocked: filter triggered"}`)
+	var got []AgentEvent
+	parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 {
+		t.Fatalf("want 1 event, got %d", len(got))
+	}
+	if got[0].Type != "system" {
+		t.Errorf("severity:warning must demote to system event (was: %s) — chat UI would render as red error and orchestrator would mark run failed", got[0].Type)
+	}
+	meta := got[0].Metadata.(map[string]interface{})
+	if meta["severity"] != "warning" {
+		t.Errorf("severity field lost: %v", meta["severity"])
+	}
+}
+
+// TestParseGemini_ErrorSeverityErrorStaysError — explicit severity="error"
+// (or no severity field) keeps the fatal classification.
+func TestParseGemini_ErrorSeverityErrorStaysError(t *testing.T) {
+	for _, line := range [][]byte{
+		[]byte(`{"type":"error","severity":"error","error":"hard fail"}`),
+		[]byte(`{"type":"error","error":"no severity field at all"}`),
+	} {
+		var got []AgentEvent
+		parseGeminiStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+		if len(got) != 1 || got[0].Type != "error" {
+			t.Errorf("input %s: want fatal error, got %+v", line, got)
+		}
+	}
+}
+
 func TestParseGemini_NilHandler(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {

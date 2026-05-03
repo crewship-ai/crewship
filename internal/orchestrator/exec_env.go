@@ -349,8 +349,11 @@ func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 	case "FACTORY_DROID":
 		return map[string]struct{}{"FACTORY_API_KEY": {}}
 	default:
-		// CLAUDE_CODE, FACTORY_DROID, unknown — no overrides; sidecar handles
-		// Anthropic, Droid is out of scope this wave.
+		// CLAUDE_CODE — sidecar's Anthropic reverse-proxy handles credential
+		// injection (the dummy ANTHROPIC_API_KEY in env never reaches
+		// api.anthropic.com; the proxy swaps it for the real value mid-flight).
+		// Unknown adapters (e.g. malformed agent record) — defensive nil so
+		// stale credentials don't leak into env.
 		return nil
 	}
 }
