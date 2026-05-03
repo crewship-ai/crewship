@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -50,18 +51,21 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 }
 
 func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
-	// Collect env var names referenced in crew/agent MCP configs
+	// Collect env var names referenced anywhere in the MCP config — env
+	// blocks, headers, top-level URL strings, and (for Codex) the
+	// bearer_token_env_var TOML key referenced indirectly via Authorization
+	// headers. Substring match on regex so "Bearer ${LINEAR_TOKEN}" gets
+	// picked up — the pre-fix prefix-suffix check missed every header in
+	// every adapter, causing all HTTP MCP servers to 401 in production.
 	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
 
 	// Also collect from table-based MCPServers (after JSON blob migration).
-	// Only add the var name when the value is an explicit ${VAR}
-	// reference. A literal value like Env: {"GH_TOKEN": "abc123"} is the
-	// caller's authoritative choice; we must not silently shadow it with
-	// a same-named credential below.
+	// Substring-aware scan covers values like "Bearer ${TOKEN}" and bare
+	// $VAR, not just whole-string ${VAR} as before.
 	for _, srv := range req.MCPServers {
 		for _, v := range srv.Env {
-			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
-				mcpEnvRefs[v[2:len(v)-1]] = true
+			for _, name := range extractEnvRefs(v) {
+				mcpEnvRefs[name] = true
 			}
 		}
 	}
@@ -96,8 +100,47 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
 	return env
 }
 
+// envRefScanRE matches ${VAR}, $VAR (POSIX), and ${env:VAR} (Cursor) — all
+// three forms our writers may emit. Anywhere in the value, not just at start
+// or end. Hoisted to package level so we compile once.
+var envRefScanRE = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}|\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// extractEnvRefs returns every env-var name referenced anywhere in the input
+// string. Handles three forms a CLI's MCP config might emit:
+//   - ${VAR}        (POSIX curly form, used by Claude / Gemini / Cursor /
+//     Droid / Codex)
+//   - $VAR          (POSIX bare form, also accepted by most CLIs)
+//   - ${env:VAR}    (Cursor-specific syntax)
+//
+// Substring-aware so headers like "Bearer ${LINEAR_TOKEN}" (the dominant real
+// world case) get picked up.
+func extractEnvRefs(s string) []string {
+	matches := envRefScanRE.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		// Submatches: [1]=Cursor env: form, [2]=curly form, [3]=bare form
+		for i := 1; i < len(m); i++ {
+			if m[i] != "" {
+				out = append(out, m[i])
+				break
+			}
+		}
+	}
+	return out
+}
+
 // collectMCPEnvRefs parses MCP config JSONs and returns env var names
-// referenced as ${VAR} in the "env" blocks of server definitions.
+// referenced ANYWHERE in the server definitions: env blocks, headers blocks,
+// url strings (rare but possible). Substring-aware.
+//
+// Pre-fix scope was env blocks only with prefix-suffix matching — meaning
+// every HTTP MCP server's Authorization header (like "Bearer ${LINEAR_TOKEN}")
+// was silently missed and the bearer token never got injected, so all HTTP
+// MCP servers hit upstream with literal "${LINEAR_TOKEN}" as the credential.
+// Production-blocking gap; this rewrite closes it.
 func collectMCPEnvRefs(configs ...string) map[string]bool {
 	refs := make(map[string]bool)
 	for _, cfg := range configs {
@@ -106,18 +149,31 @@ func collectMCPEnvRefs(configs ...string) map[string]bool {
 		}
 		var wrapper struct {
 			MCPServers map[string]struct {
-				Env map[string]string `json:"env"`
+				Env     map[string]string `json:"env"`
+				Headers map[string]string `json:"headers"`
+				URL     string            `json:"url"`
+				HTTPURL string            `json:"httpUrl"`
 			} `json:"mcpServers"`
 		}
 		if err := json.Unmarshal([]byte(cfg), &wrapper); err != nil {
 			continue
 		}
 		for _, srv := range wrapper.MCPServers {
-			for _, val := range srv.Env {
-				// Match ${VAR_NAME} pattern
-				if len(val) > 3 && val[0] == '$' && val[1] == '{' && val[len(val)-1] == '}' {
-					refs[val[2:len(val)-1]] = true
+			for _, v := range srv.Env {
+				for _, name := range extractEnvRefs(v) {
+					refs[name] = true
 				}
+			}
+			for _, v := range srv.Headers {
+				for _, name := range extractEnvRefs(v) {
+					refs[name] = true
+				}
+			}
+			for _, name := range extractEnvRefs(srv.URL) {
+				refs[name] = true
+			}
+			for _, name := range extractEnvRefs(srv.HTTPURL) {
+				refs[name] = true
 			}
 		}
 	}
@@ -271,12 +327,22 @@ func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 	case "GEMINI_CLI":
 		return map[string]struct{}{"GOOGLE_API_KEY": {}, "GEMINI_API_KEY": {}}
 	case "OPENCODE":
-		// OpenCode is BYOK across providers — accept any of the three so the
-		// user can route via whichever provider their opencode.json chose.
+		// OpenCode is BYOK across 75+ providers via models.dev. Accept all
+		// the common provider env vars so users can route to whichever
+		// upstream their opencode.json chose without us blocking the cred at
+		// the sidecar layer. The list is the union of the most-deployed
+		// providers in the wild — Anthropic, OpenAI, Google, plus the
+		// alternative model gateways (OpenRouter, xAI, Groq, DeepSeek) and
+		// Cursor's BYO key for users routing through Cursor.
 		return map[string]struct{}{
-			"ANTHROPIC_API_KEY": {},
-			"OPENAI_API_KEY":    {},
-			"GOOGLE_API_KEY":    {},
+			"ANTHROPIC_API_KEY":  {},
+			"OPENAI_API_KEY":     {},
+			"GOOGLE_API_KEY":     {},
+			"GEMINI_API_KEY":     {},
+			"OPENROUTER_API_KEY": {},
+			"XAI_API_KEY":        {},
+			"GROQ_API_KEY":       {},
+			"DEEPSEEK_API_KEY":   {},
 		}
 	case "CURSOR_CLI":
 		return map[string]struct{}{"CURSOR_API_KEY": {}}

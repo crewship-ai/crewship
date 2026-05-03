@@ -112,6 +112,68 @@ func TestParseCursor_Result(t *testing.T) {
 	}
 }
 
+// TestParseCursor_ToolCallLiftsCallID — call_id is lifted to tool_use_id so
+// cross-CLI correlation in Crow's Nest can use one key everywhere. Pre-fix
+// behaviour kept call_id only inside the raw tool_call blob (preserved by the
+// JSON unmarshal but never lifted to the canonical metadata key).
+func TestParseCursor_ToolCallLiftsCallID(t *testing.T) {
+	line := []byte(`{"type":"tool_call","subtype":"started","call_id":"tc-123","tool_call":{"readToolCall":{"path":"main.go"}}}`)
+	var got []AgentEvent
+	parseCursorStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 {
+		t.Fatalf("want 1 event, got %d: %+v", len(got), got)
+	}
+	meta := got[0].Metadata.(map[string]interface{})
+	if meta["tool_use_id"] != "tc-123" {
+		t.Errorf("call_id not lifted to tool_use_id (cross-CLI canonical key): %v", meta["tool_use_id"])
+	}
+	if meta["call_id"] != "tc-123" {
+		t.Errorf("call_id key not preserved for back-compat: %v", meta["call_id"])
+	}
+}
+
+// TestParseCursor_ResultWithUsage — Feb 2026 forum #146980 added usage block
+// to result events; Paymaster reads it.
+func TestParseCursor_ResultWithUsage(t *testing.T) {
+	line := []byte(`{"type":"result","subtype":"success","duration_ms":1234,"is_error":false,"result":"done","usage":{"input_tokens":100,"output_tokens":50}}`)
+	var got []AgentEvent
+	parseCursorStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 || got[0].Type != "result" {
+		t.Fatalf("result event wrong: %+v", got)
+	}
+	meta := got[0].Metadata.(map[string]interface{})
+	usage, ok := meta["usage"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("usage block lost — Paymaster will undercount: %v", meta["usage"])
+	}
+	if usage["input_tokens"].(float64) != 100 {
+		t.Errorf("usage.input_tokens lost: %v", usage["input_tokens"])
+	}
+}
+
+// TestParseCursor_MCPToolCall — stub for the regression-paused mcpToolCall
+// event type (forum #158988). Currently unreachable in production output but
+// the case is in place so the moment Cursor restores it nothing else needs
+// changing.
+func TestParseCursor_MCPToolCall(t *testing.T) {
+	line := []byte(`{"type":"mcpToolCall","providerIdentifier":"linear","toolName":"create_issue","arguments":{"title":"bug"}}`)
+	var got []AgentEvent
+	parseCursorStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 || got[0].Type != "tool_call" || got[0].Content != "create_issue" {
+		t.Fatalf("mcpToolCall event wrong: %+v", got)
+	}
+	meta := got[0].Metadata.(map[string]interface{})
+	if meta["transport"] != "mcp" {
+		t.Errorf("mcp transport tag lost")
+	}
+	if meta["provider_identifier"] != "linear" {
+		t.Errorf("provider_identifier lost: %v", meta["provider_identifier"])
+	}
+}
+
 // TestParseCursor_AssistantWithModelCallID verifies that streaming assistant
 // deltas carry model_call_id + timestamp_ms metadata so the chat-bridge can
 // dedup duplicates after a connection reconnect (Cursor forum #157593).

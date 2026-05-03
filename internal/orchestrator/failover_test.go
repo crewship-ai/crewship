@@ -208,14 +208,22 @@ func TestBuildCLICommand(t *testing.T) {
 			// Cursor headless: --force prevents the agent from blocking on
 			// permission prompts in print mode (otherwise file edits hang).
 			// --stream-partial-output produces incremental deltas.
-			"cursor cli default",
+			// --approve-mcps NOT added here because no MCP source configured.
+			"cursor cli default (no MCP)",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello"},
 			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--", "hello"},
 		},
 		{
-			"cursor cli with model override",
+			"cursor cli with model override (no MCP)",
 			AgentRunRequest{CLIAdapter: "CURSOR_CLI", LLMModel: "gpt-5.5", UserMessage: "hello"},
 			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "-m", "gpt-5.5", "--", "hello"},
+		},
+		{
+			// When MCP is configured, --approve-mcps is needed or Cursor's
+			// -p mode silently skips MCP servers (forum #143045 + #148397).
+			"cursor cli with MCP gets --approve-mcps",
+			AgentRunRequest{CLIAdapter: "CURSOR_CLI", UserMessage: "hello", CrewMCPConfigJSON: `{"mcpServers":{"x":{"command":"npx"}}}`},
+			[]string{"cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output", "--force", "--approve-mcps", "--", "hello"},
 		},
 		{
 			// Default policy is medium because the API normalises empty

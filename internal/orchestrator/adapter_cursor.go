@@ -48,6 +48,15 @@ func (cursorAdapter) BuildCommand(req AgentRunRequest) []string {
 	// boundary (chroot, --cap-drop=ALL, secrets in /secrets/) is the
 	// authoritative permission layer; per-tool prompts are redundant.
 	cmd = append(cmd, "--force")
+	// --approve-mcps unblocks MCP tool calls in --print mode. The Cursor
+	// docs page implies MCP "just works" headlessly; in practice (forum
+	// #143045 + #148397) MCP servers are listed but their tools never
+	// invoked unless this flag is on. Add it whenever the agent has any
+	// MCP source configured so MCP-equipped agents actually use their
+	// servers; omit otherwise to keep the command shape minimal.
+	if len(req.MCPServers) > 0 || req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" {
+		cmd = append(cmd, "--approve-mcps")
+	}
 	if req.LLMModel != "" {
 		cmd = append(cmd, "-m", req.LLMModel)
 	}

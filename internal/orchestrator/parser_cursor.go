@@ -48,6 +48,13 @@ type cursorStreamMessage struct {
 	TimestampMs float64 `json:"timestamp_ms,omitempty"`
 	// tool_call fields (subtype-dependent shape — keep raw for forward-compat)
 	ToolCall json.RawMessage `json:"tool_call,omitempty"`
+	// CallID is the canonical correlation identifier on tool_call envelopes
+	// (lifted to tool_use_id metadata for cross-CLI correlation, mirroring
+	// Claude/Codex/Gemini conventions).
+	CallID string `json:"call_id,omitempty"`
+	// Usage block was added to result events Feb 2026 (forum #146980).
+	// Surface to Paymaster.
+	Usage json.RawMessage `json:"usage,omitempty"`
 }
 
 type cursorMessage struct {
@@ -128,7 +135,9 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 		// for completed so the UI can show the lifecycle. The raw tool_call
 		// blob carries the per-tool details (file path for read/write, args
 		// for function calls); we attach it as metadata for the chat-bridge
-		// to render however it likes.
+		// to render however it likes. call_id is lifted to tool_use_id (and
+		// kept under "call_id" too for back-compat) so cross-CLI tool
+		// correlation in Crow's Nest can use the same key everywhere.
 		var meta map[string]interface{}
 		if len(msg.ToolCall) > 0 {
 			_ = json.Unmarshal(msg.ToolCall, &meta)
@@ -137,6 +146,10 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 			meta = map[string]interface{}{}
 		}
 		meta["subtype"] = msg.Subtype
+		if msg.CallID != "" {
+			meta["tool_use_id"] = msg.CallID
+			meta["call_id"] = msg.CallID
+		}
 		eventType := "tool_call"
 		if msg.Subtype == "completed" {
 			eventType = "tool_result"
@@ -148,11 +161,35 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 			Timestamp: time.Now(),
 		})
 
+	case "mcpToolCall":
+		// Top-level MCP tool call event. Cursor regression: silently stopped
+		// emitting these in 2026-04-17 (forum #158988). Stub case ready for
+		// when upstream restores it. Shape (per the pre-regression docs):
+		// {type:"mcpToolCall", providerIdentifier, toolName, arguments}.
+		var raw map[string]interface{}
+		if err := json.Unmarshal(line, &raw); err == nil {
+			handler(AgentEvent{
+				Type:    "tool_call",
+				Content: cursorString(raw["toolName"]),
+				Metadata: map[string]interface{}{
+					"transport":           "mcp",
+					"provider_identifier": raw["providerIdentifier"],
+					"input":               raw["arguments"],
+				},
+				Timestamp: time.Now(),
+			})
+		}
+
 	case "result":
 		// Terminal event with usage + duration. Mirrors Claude Code's "result"
 		// shape so Paymaster can read both providers through one code path.
 		// request_id captured for error correlation when filing Cursor support
 		// tickets — without it the user has nothing to give the support team.
+		// usage block (added Feb 2026 per forum #146980) carries token counts.
+		var usage map[string]interface{}
+		if len(msg.Usage) > 0 {
+			_ = json.Unmarshal(msg.Usage, &usage)
+		}
 		handler(AgentEvent{
 			Type:    "result",
 			Content: msg.Result,
@@ -163,6 +200,7 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 				"is_error":        msg.IsError,
 				"session_id":      msg.SessionID,
 				"request_id":      msg.RequestID,
+				"usage":           usage,
 			},
 			Timestamp: time.Now(),
 		})
@@ -173,4 +211,13 @@ func parseCursorStreamJSON(line []byte, handler EventHandler) {
 		// new event types between releases.
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 	}
+}
+
+// cursorString safely coerces an interface{} (from a json.Unmarshal into
+// map[string]interface{}) to a string. Returns "" for nil or non-string types.
+func cursorString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }

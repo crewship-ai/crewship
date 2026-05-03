@@ -628,3 +628,86 @@ func TestInjectMCPCredentialEnvVarsRespectsLiteralValues(t *testing.T) {
 		t.Errorf("explicit ${GH_HOST} reference should still resolve from credentials: env=%v", got)
 	}
 }
+
+// TestInjectMCP_HTTPHeaderBearerToken pins the production-blocking gap from
+// the third validation wave: HTTP MCP servers like Linear use Authorization:
+// Bearer ${TOKEN} headers, which the pre-fix collectMCPEnvRefs did not scan
+// — the bearer token was never injected and every HTTP MCP server hit
+// upstream with literal "${TOKEN}" as the credential, returning 401.
+func TestInjectMCP_HTTPHeaderBearerToken(t *testing.T) {
+	crewJSON := `{"mcpServers":{"linear":{"type":"http","url":"https://mcp.linear.app/sse","headers":{"Authorization":"Bearer ${LINEAR_TOKEN}"}}}}`
+	req := AgentRunRequest{
+		CrewMCPConfigJSON: crewJSON,
+		Credentials: []Credential{
+			{ID: "c1", EnvVarName: "LINEAR_TOKEN", PlainValue: "lin_real_secret"},
+		},
+	}
+	got := injectMCPCredentialEnvVars(req, nil)
+
+	found := false
+	for _, e := range got {
+		if e == "LINEAR_TOKEN=lin_real_secret" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("LINEAR_TOKEN must be injected — Authorization header reference was missed by the pre-fix prefix-only scanner. env=%v", got)
+	}
+}
+
+// TestInjectMCP_CursorEnvSyntax — Cursor uses ${env:VAR} (not ${VAR}). The
+// scanner must accept that form so credentials referenced in Cursor MCP
+// configs get injected.
+func TestInjectMCP_CursorEnvSyntax(t *testing.T) {
+	cfg := `{"mcpServers":{"linear":{"type":"http","url":"https://mcp.linear.app/sse","headers":{"Authorization":"Bearer ${env:LINEAR_TOKEN}"}}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["LINEAR_TOKEN"] {
+		t.Errorf("Cursor ${env:VAR} syntax not picked up — refs=%v", refs)
+	}
+}
+
+// TestInjectMCP_BareDollarVar — bare $VAR form (no curlies) must also be
+// scanned, otherwise terse env values break.
+func TestInjectMCP_BareDollarVar(t *testing.T) {
+	cfg := `{"mcpServers":{"x":{"command":"npx","env":{"FOO":"$BAR"}}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["BAR"] {
+		t.Errorf("bare $VAR not picked up — refs=%v", refs)
+	}
+}
+
+// TestInjectMCP_MultipleRefsInOneValue — value like "Bearer ${A} for ${B}"
+// must extract BOTH names.
+func TestInjectMCP_MultipleRefsInOneValue(t *testing.T) {
+	cfg := `{"mcpServers":{"x":{"type":"http","url":"https://example.com","headers":{"Authorization":"Bearer ${A} for ${B}"}}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["A"] || !refs["B"] {
+		t.Errorf("multiple env refs in one value not picked up — refs=%v", refs)
+	}
+}
+
+// TestInjectMCP_URLEnvRef — ${VAR} embedded in the url field (rare but seen).
+func TestInjectMCP_URLEnvRef(t *testing.T) {
+	cfg := `{"mcpServers":{"x":{"type":"http","url":"https://${TENANT}.example.com/mcp"}}}`
+	refs := collectMCPEnvRefs(cfg)
+	if !refs["TENANT"] {
+		t.Errorf("env ref in url field not scanned — refs=%v", refs)
+	}
+}
+
+// TestExtractEnvRefs_NoFalsePositives — literal strings without env refs must
+// return nothing. Silent injection of literal strings would be a security
+// problem (we'd add credentials to env when none were requested).
+func TestExtractEnvRefs_NoFalsePositives(t *testing.T) {
+	cases := []string{
+		"literal-token-value",
+		"sk-ant-api03-12345",
+		"$",                   // dangling dollar with nothing after
+		"text $1 placeholder", // shell positional, NOT an env var
+	}
+	for _, c := range cases {
+		if refs := extractEnvRefs(c); len(refs) != 0 {
+			t.Errorf("false positive on %q: %v", c, refs)
+		}
+	}
+}

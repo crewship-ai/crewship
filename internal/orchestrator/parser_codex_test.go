@@ -121,10 +121,12 @@ func TestParseCodex_Reasoning(t *testing.T) {
 }
 
 // TestParseCodex_CommandExecution — shell commands fan into tool_call
-// (started) + tool_result (completed) so the UI can show the lifecycle.
+// (started) + tool_result (completed). Pins the canonical field name
+// `aggregated_output` (NOT `output`) and the `exit_code` field, both of which
+// the pre-fix parser silently dropped.
 func TestParseCodex_CommandExecution(t *testing.T) {
 	started := []byte(`{"type":"item.started","item":{"type":"command_execution","id":"cmd-1","command":"ls /tmp"}}`)
-	completed := []byte(`{"type":"item.completed","item":{"type":"command_execution","id":"cmd-1","output":"a.txt\nb.txt","status":"success"}}`)
+	completed := []byte(`{"type":"item.completed","item":{"type":"command_execution","id":"cmd-1","aggregated_output":"a.txt\nb.txt","exit_code":0,"status":"success"}}`)
 
 	var got []AgentEvent
 	parseCodexStreamJSON(started, func(e AgentEvent) { got = append(got, e) })
@@ -143,28 +145,120 @@ func TestParseCodex_CommandExecution(t *testing.T) {
 	}
 
 	if got[1].Type != "tool_result" || got[1].Content != "a.txt\nb.txt" {
-		t.Errorf("completed event wrong: %+v", got[1])
+		t.Errorf("completed event content lost — aggregated_output field rename regression? %+v", got[1])
 	}
 	completedMeta := got[1].Metadata.(map[string]interface{})
 	if completedMeta["status"] != "success" {
 		t.Errorf("status lost: %v", completedMeta["status"])
 	}
+	// metadata isn't JSON-roundtripped, so int stays int
+	if exitCode, ok := completedMeta["exit_code"].(int); !ok || exitCode != 0 {
+		t.Errorf("exit_code lost: %v (type %T)", completedMeta["exit_code"], completedMeta["exit_code"])
+	}
 }
 
-// TestParseCodex_MCPToolCall — first-class MCP support in Codex. Tool name is
-// "server.tool" form; transport metadata flagged as "mcp" so the chat-bridge
-// can render a different icon for MCP vs built-in tools.
+// TestParseCodex_MCPToolCall pins the canonical mcp_tool_call schema:
+// upstream emits separate `server` + `tool` + `arguments` + `result` fields,
+// NOT a combined `name` + `args`. Pre-fix parser silently dropped both
+// directions because field names didn't match.
 func TestParseCodex_MCPToolCall(t *testing.T) {
-	started := []byte(`{"type":"item.started","item":{"type":"mcp_tool_call","id":"mcp-1","name":"linear.create_issue","args":{"title":"bug"}}}`)
+	started := []byte(`{"type":"item.started","item":{"type":"mcp_tool_call","id":"mcp-1","server":"linear","tool":"create_issue","arguments":{"title":"bug"}}}`)
+	completed := []byte(`{"type":"item.completed","item":{"type":"mcp_tool_call","id":"mcp-1","server":"linear","tool":"create_issue","result":"created issue #42"}}`)
+
 	var got []AgentEvent
 	parseCodexStreamJSON(started, func(e AgentEvent) { got = append(got, e) })
+	parseCodexStreamJSON(completed, func(e AgentEvent) { got = append(got, e) })
 
-	if len(got) != 1 || got[0].Type != "tool_call" || got[0].Content != "linear.create_issue" {
-		t.Fatalf("want mcp tool_call, got %+v", got)
+	if len(got) != 2 {
+		t.Fatalf("want 2 events, got %d: %+v", len(got), got)
+	}
+	// Started event — composite display name, mcp_server + mcp_tool surfaced
+	// separately for chat UI.
+	if got[0].Type != "tool_call" || got[0].Content != "linear.create_issue" {
+		t.Fatalf("started event wrong: %+v", got[0])
+	}
+	startedMeta := got[0].Metadata.(map[string]interface{})
+	if startedMeta["transport"] != "mcp" {
+		t.Errorf("transport tag lost")
+	}
+	if startedMeta["mcp_server"] != "linear" {
+		t.Errorf("mcp_server lost (server field): %v", startedMeta["mcp_server"])
+	}
+	if startedMeta["mcp_tool"] != "create_issue" {
+		t.Errorf("mcp_tool lost (tool field): %v", startedMeta["mcp_tool"])
+	}
+	input := startedMeta["input"].(map[string]interface{})
+	if input["title"] != "bug" {
+		t.Errorf("arguments → input mapping lost: %v", startedMeta["input"])
+	}
+
+	// Completed event — result field carries the response.
+	if got[1].Type != "tool_result" || got[1].Content != "created issue #42" {
+		t.Errorf("completed event wrong (result field rename regression?): %+v", got[1])
+	}
+}
+
+// TestParseCodex_TodoList — plan/todo as system meta event.
+func TestParseCodex_TodoList(t *testing.T) {
+	line := []byte(`{"type":"item.completed","item":{"type":"todo_list","items":[{"text":"Write tests","completed":true},{"text":"Ship","completed":false}]}}`)
+	var got []AgentEvent
+	parseCodexStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 || got[0].Type != "system" {
+		t.Fatalf("todo_list wrong: %+v", got)
 	}
 	meta := got[0].Metadata.(map[string]interface{})
-	if meta["transport"] != "mcp" {
-		t.Errorf("transport tag lost — UI cannot distinguish MCP from native tools")
+	if meta["subtype"] != "todo_list" {
+		t.Errorf("subtype lost: %v", meta["subtype"])
+	}
+	items := meta["items"].([]interface{})
+	if len(items) != 2 {
+		t.Errorf("items count lost: %v", items)
+	}
+}
+
+// TestParseCodex_CollabToolCall — multi-agent peer handoff feature.
+func TestParseCodex_CollabToolCall(t *testing.T) {
+	line := []byte(`{"type":"item.started","item":{"type":"collab_tool_call","sender_thread_id":"thr-1","receiver_thread_ids":["thr-2"],"prompt":"review my work","tool":"peer.escalate"}}`)
+	var got []AgentEvent
+	parseCodexStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 || got[0].Type != "system" {
+		t.Fatalf("collab_tool_call wrong: %+v", got)
+	}
+	meta := got[0].Metadata.(map[string]interface{})
+	if meta["sender_thread_id"] != "thr-1" {
+		t.Errorf("sender_thread_id lost: %v", meta["sender_thread_id"])
+	}
+	if meta["prompt"] != "review my work" {
+		t.Errorf("prompt lost: %v", meta["prompt"])
+	}
+}
+
+// TestParseCodex_ItemError — item-level error must NOT bubble as fatal error
+// (would mis-fail healthy runs per upstream issue #19689). Should surface as
+// a warning system event.
+func TestParseCodex_ItemError(t *testing.T) {
+	line := []byte(`{"type":"item.completed","item":{"type":"error","id":"err-1","message":"upstream backpressure"}}`)
+	var got []AgentEvent
+	parseCodexStreamJSON(line, func(e AgentEvent) { got = append(got, e) })
+
+	if len(got) != 1 {
+		t.Fatalf("want 1 event, got %d: %+v", len(got), got)
+	}
+	// MUST NOT be type:error (that would mark the run failed in chat UI).
+	if got[0].Type == "error" {
+		t.Errorf("item-level error must NOT promote to fatal error event — would mis-fail otherwise-healthy runs")
+	}
+	if got[0].Type != "system" {
+		t.Errorf("want system warning, got %s", got[0].Type)
+	}
+	if got[0].Content != "upstream backpressure" {
+		t.Errorf("error message lost: %q", got[0].Content)
+	}
+	meta := got[0].Metadata.(map[string]interface{})
+	if meta["subtype"] != "warning" {
+		t.Errorf("subtype must be warning, got %v", meta["subtype"])
 	}
 }
 

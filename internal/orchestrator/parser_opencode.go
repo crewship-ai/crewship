@@ -6,45 +6,34 @@ import (
 )
 
 // parseOpenCodeStreamJSON parses one stdout line from `opencode run --format
-// json`. Surprise from upstream docs validation (May 2026): this is NOT a
-// single buffered JSON object — it's a JSONL stream of message-part events,
-// one per line, modelled on OpenCode's internal Part type.
+// json`. Schema verified against the active upstream
+// github.com/anomalyco/opencode (NOTE: sst/opencode no longer exists; the
+// pre-2026 opencode-ai/opencode is archived). The current emitter is
+// packages/opencode/src/cli/cmd/run.ts which writes JSON.stringify({
+// type, timestamp, sessionID, ...data }) — a FLAT envelope, not a
+// nested {part: {type: ...}} shape.
 //
-// Top-level event envelope:
+// Top-level "type" values seen in the wild:
 //
-//	{
-//	  "type":      "message.part.updated",
-//	  "timestamp": "2026-05-03T...",
-//	  "sessionID": "ses-abc",   // CAMELCASE — not session_id
-//	  "messageID": "msg-1",
-//	  "partID":    "prt-1",
-//	  "part":      { "type": "<part-type>", ... }
-//	}
+//   - text          — assistant text chunk;       data has `part`
+//   - reasoning     — chain-of-thought;           data has `part`
+//   - tool_use      — tool invocation;            data has `part` (with state)
+//   - step_start    — model turn boundary begin;  data has `part`
+//   - step_finish   — model turn boundary end +   data has `part` (tokens, cost)
+//     usage / cost
+//   - error         — fatal error;                data has `error` string
 //
-// Part types (discriminator inside `part.type`):
-//
-//   - text          — assistant text chunk
-//   - reasoning     — chain-of-thought
-//   - tool          — tool invocation (with nested .state.status started/completed)
-//   - file          — file read/write summary
-//   - subtask       — subagent call
-//   - step-start    — model turn boundary begin
-//   - step-finish   — model turn boundary end + token counts
-//   - snapshot      — workspace snapshot ref (for fork/restore)
-//   - patch         — file patch payload
-//   - agent         — agent metadata
-//   - retry         — retry attempt notice
-//   - compaction    — context compaction event
+// IDs: messageID and partID live INSIDE part (part.id), not at envelope
+// level. The envelope only carries sessionID.
 type opencodeEnvelope struct {
 	Type      string        `json:"type"`
 	SessionID string        `json:"sessionID,omitempty"`
-	MessageID string        `json:"messageID,omitempty"`
-	PartID    string        `json:"partID,omitempty"`
 	Part      *opencodePart `json:"part,omitempty"`
+	Error     string        `json:"error,omitempty"`
 }
 
 type opencodePart struct {
-	Type     string          `json:"type,omitempty"`
+	ID       string          `json:"id,omitempty"`
 	Text     string          `json:"text,omitempty"`
 	ToolName string          `json:"tool,omitempty"`
 	State    *opencodeState  `json:"state,omitempty"`
@@ -53,7 +42,6 @@ type opencodePart struct {
 	Cost     float64         `json:"cost,omitempty"`
 	Provider string          `json:"providerID,omitempty"`
 	Model    string          `json:"modelID,omitempty"`
-	Error    string          `json:"error,omitempty"`
 }
 
 type opencodeState struct {
@@ -74,30 +62,18 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 		return
 	}
 
-	// Some events (e.g. session.idle, message.completed) carry no Part;
-	// surface them as system events for the journal but don't fan out.
-	if msg.Part == nil {
-		handler(AgentEvent{
-			Type:    "system",
-			Content: msg.Type,
-			Metadata: map[string]interface{}{
-				"subtype":    msg.Type,
-				"session_id": msg.SessionID,
-				"message_id": msg.MessageID,
-			},
-			Timestamp: time.Now(),
-		})
-		return
-	}
-
-	switch msg.Part.Type {
+	switch msg.Type {
 	case "text":
-		if msg.Part.Text != "" {
+		// Assistant text. Each event is one chunk; multiple events form the
+		// full message.
+		if msg.Part != nil && msg.Part.Text != "" {
 			handler(AgentEvent{Type: "text", Content: msg.Part.Text, Timestamp: time.Now()})
 		}
 
 	case "reasoning":
-		if msg.Part.Text != "" {
+		// Chain-of-thought routes to "thinking" so the UI can render it in
+		// the collapsible reasoning pane.
+		if msg.Part != nil && msg.Part.Text != "" {
 			handler(AgentEvent{
 				Type:      "thinking",
 				Content:   msg.Part.Text,
@@ -106,10 +82,14 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 			})
 		}
 
-	case "tool":
-		// state.status drives tool_call vs tool_result. "completed" / "error"
-		// emit the result envelope; everything else (pending/running) emits
-		// a tool_call so the UI shows the lifecycle.
+	case "tool_use":
+		// Tool invocation. state.status drives tool_call vs tool_result;
+		// "completed"/"error" emit a result envelope, everything else
+		// (pending/running) emits a tool_call so the UI shows lifecycle.
+		// part.id is the correlation id (NOT envelope-level).
+		if msg.Part == nil {
+			return
+		}
 		state := msg.Part.State
 		if state == nil {
 			state = &opencodeState{}
@@ -120,7 +100,7 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 				Type:    "tool_result",
 				Content: state.Output,
 				Metadata: map[string]interface{}{
-					"tool_use_id": msg.PartID,
+					"tool_use_id": msg.Part.ID,
 					"tool_name":   msg.Part.ToolName,
 					"status":      state.Status,
 					"error":       state.Error,
@@ -137,17 +117,20 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 				Content: msg.Part.ToolName,
 				Metadata: map[string]interface{}{
 					"tool_name": msg.Part.ToolName,
-					"tool_id":   msg.PartID,
+					"tool_id":   msg.Part.ID,
 					"input":     input,
 				},
 				Timestamp: time.Now(),
 			})
 		}
 
-	case "step-finish":
-		// Per-turn usage envelope. Emit as result so Paymaster can read it.
-		// On a multi-turn run there will be multiple step-finish events; the
-		// chat-bridge can sum or take the last.
+	case "step_finish":
+		// Per-turn usage envelope. Note the underscore name — older docs +
+		// this codebase's previous parser assumed "step-finish" with hyphen.
+		// Real upstream uses snake_case.
+		if msg.Part == nil {
+			return
+		}
 		var tokens map[string]interface{}
 		if len(msg.Part.Tokens) > 0 {
 			_ = json.Unmarshal(msg.Part.Tokens, &tokens)
@@ -155,7 +138,7 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 		handler(AgentEvent{
 			Type: "result",
 			Metadata: map[string]interface{}{
-				"subtype":  "step-finish",
+				"subtype":  "step_finish",
 				"tokens":   tokens,
 				"cost_usd": msg.Part.Cost,
 				"provider": msg.Part.Provider,
@@ -165,44 +148,27 @@ func parseOpenCodeStreamJSON(line []byte, handler EventHandler) {
 			Timestamp: time.Now(),
 		})
 
-	case "step-start":
+	case "step_start":
 		// Quiet — boundary marker only.
 		return
 
-	case "file":
-		// Summary that a file was read/written. Surface as a tool_result-ish
-		// event so the Files panel + Crow's Nest can log it.
+	case "error":
+		// Fatal error envelope (data.error is a string, not nested).
 		handler(AgentEvent{
-			Type:    "tool_result",
-			Content: msg.Part.Path,
-			Metadata: map[string]interface{}{
-				"tool_use_id": msg.PartID,
-				"tool_name":   "file",
-				"path":        msg.Part.Path,
-			},
-			Timestamp: time.Now(),
-		})
-
-	case "subtask", "agent", "snapshot", "patch", "retry", "compaction":
-		// Not chat-relevant; record as system meta for the journal.
-		handler(AgentEvent{
-			Type:    "system",
-			Content: msg.Part.Type,
-			Metadata: map[string]interface{}{
-				"subtype":    msg.Part.Type,
-				"session_id": msg.SessionID,
-				"part_id":    msg.PartID,
-			},
+			Type:      "error",
+			Content:   msg.Error,
 			Timestamp: time.Now(),
 		})
 
 	default:
-		// Unknown part.type — preserve in journal.
+		// Forward-compat: unknown top-level type preserved as system meta so
+		// the journal sees it without polluting chat. Examples we may see in
+		// future: session.idle, message.completed.
 		handler(AgentEvent{
 			Type:    "system",
-			Content: msg.Part.Type,
+			Content: msg.Type,
 			Metadata: map[string]interface{}{
-				"subtype":    msg.Part.Type,
+				"subtype":    msg.Type,
 				"session_id": msg.SessionID,
 			},
 			Timestamp: time.Now(),

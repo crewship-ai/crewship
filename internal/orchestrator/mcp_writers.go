@@ -152,14 +152,15 @@ func writeMCPClaude(
 }
 
 // writeMCPCursor writes <workdir>/.cursor/mcp.json. Cursor reuses Anthropic's
-// schema verbatim (mcpServers map + command/args/env or url/headers), so we
-// can serialise our normalised form directly without per-field renaming.
+// schema for fields (mcpServers map + command/args/env or url/headers) BUT
+// uses ${env:VAR} (NOT ${VAR}) for env-var interpolation. We translate the
+// canonical ${VAR} form in env + headers values into Cursor's syntax so user
+// configs written in the standard form still resolve at runtime.
 //
-// Caveat: per cursor.com community reports (forum #143045 + #148397), MCP is
-// currently broken in cursor-agent's --print / non-interactive mode — the
-// servers are listed but never invoked. We still write the file so the moment
-// upstream fixes the bug nothing else changes; until then the user-visible
-// effect is "no MCP tools surface in chat".
+// Headless MCP works in --print mode when paired with cursor-agent's
+// --approve-mcps flag (set by adapter_cursor.go BuildCommand when any MCP
+// source is configured) — a non-obvious requirement that several community
+// forum threads (#143045, #148397) called out as "MCP doesn't work in CLI".
 func writeMCPCursor(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -176,10 +177,38 @@ func writeMCPCursor(
 		MCPServers map[string]any `json:"mcpServers"`
 	}{MCPServers: map[string]any{}}
 	for _, s := range specs {
-		out.MCPServers[s.Name] = anthropicShapeServer(s)
+		entry := anthropicShapeServer(s)
+		// Translate ${VAR} → ${env:VAR} in env + headers values so Cursor
+		// expands them at runtime instead of seeing the literal token.
+		if envMap, ok := entry["env"].(map[string]string); ok {
+			entry["env"] = translateEnvRefsToCursor(envMap)
+		}
+		if hdrMap, ok := entry["headers"].(map[string]string); ok {
+			entry["headers"] = translateEnvRefsToCursor(hdrMap)
+		}
+		out.MCPServers[s.Name] = entry
 	}
 	body, _ := json.MarshalIndent(out, "", "  ")
 	return writeFileViaContainer(ctx, container, containerID, workDir, ".cursor/mcp.json", string(body), logger)
+}
+
+// translateEnvRefsToCursor rewrites ${VAR} and $VAR placeholders to Cursor's
+// ${env:VAR} syntax — including substrings inside header values like
+// "Bearer ${LINEAR_TOKEN}" which is the dominant real-world case.
+// translateEnvRefsToOpenCode's existing test coverage is mirrored.
+func translateEnvRefsToCursor(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = envRefRE.ReplaceAllStringFunc(v, func(match string) string {
+			parts := envRefRE.FindStringSubmatch(match)
+			name := parts[1]
+			if name == "" {
+				name = parts[2]
+			}
+			return "${env:" + name + "}"
+		})
+	}
+	return out
 }
 
 // writeMCPDroid writes <workdir>/.factory/mcp.json. Schema is again Anthropic-
@@ -316,15 +345,27 @@ func writeMCPOpenCode(
 	return writeFileViaContainer(ctx, container, containerID, workDir, "opencode.json", string(body), logger)
 }
 
-// writeMCPCodex writes <workdir>/.codex/config.toml with [mcp_servers.X]
-// sections. Codex is the only adapter using TOML — we hand-serialise rather
-// than pull in a TOML library because the surface area is tiny (six possible
-// keys per server) and the format is simple line-based.
+// writeMCPCodex writes Codex's MCP config. Two important realities discovered
+// during third-wave validation:
 //
-// HTTP servers are configured via url + bearer_token_env_var (NOT a Headers
-// map) — Codex's config schema is narrower than Claude's. We pull a Bearer
-// token out of an "Authorization" header if present and translate it; other
-// headers are not representable and get dropped with a warn log.
+//  1. **File location**: Codex's project-scoped config (.codex/config.toml in
+//     cwd) is only loaded for "trusted" projects, and trust is established
+//     interactively. Headless invocations skip it silently. We write to
+//     /crew/agents/<slug>/.codex/config.toml (HOME) so Codex picks it up
+//     without needing trust ceremony.
+//
+//  2. **Env interpolation**: Codex does NOT expand ${VAR} placeholders in
+//     env blocks — emitting `env = { LINEAR_TOKEN = "${LINEAR_TOKEN}" }`
+//     OVERRIDES the inherited container env with the literal string
+//     "${LINEAR_TOKEN}", causing 401 from MCP servers. We omit env entries
+//     whose values are pure ${VAR} references so Codex inherits them from
+//     the parent process env (where injectMCPCredentialEnvVars puts them).
+//     Literal env values (set by user, not references) are still written.
+//
+// HTTP servers use bearer_token_env_var for ${VAR}-style auth and
+// http_headers / env_http_headers for everything else. Generic header
+// support added in this revision; the previous behaviour silently dropped
+// non-Bearer headers with a warn log.
 func writeMCPCodex(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -333,6 +374,7 @@ func writeMCPCodex(
 	workDir string,
 	logger *slog.Logger,
 ) error {
+	_ = workDir // unused — Codex MCP config goes to HOME, not workDir
 	specs, err := normaliseMCPInputs(req)
 	if err != nil || len(specs) == 0 {
 		return err
@@ -341,7 +383,6 @@ func writeMCPCodex(
 	b.WriteString("# Generated by Crewship orchestrator. Do not edit by hand.\n\n")
 	for _, s := range specs {
 		fmt.Fprintf(&b, "[mcp_servers.%s]\n", tomlSafeKey(s.Name))
-		b.WriteString("enabled = true\n")
 		if s.Command != "" {
 			fmt.Fprintf(&b, "command = %s\n", tomlString(s.Command))
 			if len(s.Args) > 0 {
@@ -354,10 +395,18 @@ func writeMCPCodex(
 				}
 				b.WriteString("]\n")
 			}
-			if len(s.Env) > 0 {
+			// Only emit env entries with LITERAL values. ${VAR} references
+			// must NOT be written — they would override the inherited env.
+			literalEnv := map[string]string{}
+			for k, v := range s.Env {
+				if len(extractEnvRefs(v)) == 0 {
+					literalEnv[k] = v
+				}
+			}
+			if len(literalEnv) > 0 {
 				b.WriteString("env = { ")
-				keys := make([]string, 0, len(s.Env))
-				for k := range s.Env {
+				keys := make([]string, 0, len(literalEnv))
+				for k := range literalEnv {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
@@ -365,27 +414,75 @@ func writeMCPCodex(
 					if i > 0 {
 						b.WriteString(", ")
 					}
-					fmt.Fprintf(&b, "%s = %s", tomlSafeKey(k), tomlString(s.Env[k]))
+					fmt.Fprintf(&b, "%s = %s", tomlSafeKey(k), tomlString(literalEnv[k]))
 				}
 				b.WriteString(" }\n")
 			}
 		} else if s.URL != "" {
 			fmt.Fprintf(&b, "url = %s\n", tomlString(s.URL))
-			if auth := s.Headers["Authorization"]; auth != "" {
-				// Try to extract "Bearer ${VAR}" → bearer_token_env_var = "VAR"
-				if v, ok := bearerEnvVarFromHeader(auth); ok {
-					fmt.Fprintf(&b, "bearer_token_env_var = %s\n", tomlString(v))
-				} else {
-					if logger != nil {
-						logger.Warn("codex MCP cannot represent literal Authorization header; user must set bearer_token_env_var manually",
-							"server", s.Name)
+			// Two header-handling paths:
+			//   - Authorization: Bearer ${VAR}  → bearer_token_env_var = "VAR"
+			//   - X-API-Key: ${VAR}  → env_http_headers = { "X-API-Key" = "VAR" }
+			//   - X-Foo: literal     → http_headers = { "X-Foo" = "literal" }
+			envHeaders := map[string]string{}
+			literalHeaders := map[string]string{}
+			for k, v := range s.Headers {
+				if k == "Authorization" {
+					if envName, ok := bearerEnvVarFromHeader(v); ok {
+						fmt.Fprintf(&b, "bearer_token_env_var = %s\n", tomlString(envName))
+						continue
 					}
 				}
+				// Generic env-header path: ${VAR} → env_http_headers entry.
+				refs := extractEnvRefs(v)
+				switch {
+				case len(refs) == 1:
+					envHeaders[k] = refs[0]
+				case len(refs) == 0:
+					literalHeaders[k] = v
+				default:
+					if logger != nil {
+						logger.Warn("codex MCP HTTP header has multiple env refs; not representable",
+							"server", s.Name, "header", k)
+					}
+				}
+			}
+			if len(envHeaders) > 0 {
+				b.WriteString("env_http_headers = { ")
+				keys := make([]string, 0, len(envHeaders))
+				for k := range envHeaders {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for i, k := range keys {
+					if i > 0 {
+						b.WriteString(", ")
+					}
+					fmt.Fprintf(&b, "%s = %s", tomlString(k), tomlString(envHeaders[k]))
+				}
+				b.WriteString(" }\n")
+			}
+			if len(literalHeaders) > 0 {
+				b.WriteString("http_headers = { ")
+				keys := make([]string, 0, len(literalHeaders))
+				for k := range literalHeaders {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for i, k := range keys {
+					if i > 0 {
+						b.WriteString(", ")
+					}
+					fmt.Fprintf(&b, "%s = %s", tomlString(k), tomlString(literalHeaders[k]))
+				}
+				b.WriteString(" }\n")
 			}
 		}
 		b.WriteString("\n")
 	}
-	return writeFileViaContainer(ctx, container, containerID, workDir, ".codex/config.toml", b.String(), logger)
+	// HOME-relative path so Codex loads it without project-trust ceremony.
+	homeDir := fmt.Sprintf("/crew/agents/%s", req.AgentSlug)
+	return writeFileViaContainer(ctx, container, containerID, homeDir, ".codex/config.toml", b.String(), logger)
 }
 
 // anthropicShapeServer renders the canonical mcpSpec back to Claude/Cursor's

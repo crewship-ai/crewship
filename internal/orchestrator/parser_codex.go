@@ -42,20 +42,50 @@ type codexEnvelope struct {
 	Model    string          `json:"model,omitempty"`
 }
 
-// codexItem is the nested payload for item.* events. Only fields we surface
-// are typed; the rest is preserved via Raw for forward-compat (Codex adds new
-// item subtypes between releases).
+// codexItem is the nested payload for item.* events. Field names verified
+// against codex-rs/exec/src/exec_events.rs (May 2026). Several fields the
+// pre-fix parser assumed do not exist in real upstream output:
+//   - command_execution emits `aggregated_output` + `exit_code` (NOT `output`)
+//   - mcp_tool_call    emits `server` + `tool` + `arguments` + `result`
+//     (NOT `name` + `args`)
+//   - error item       emits `message` for the error text
 type codexItem struct {
-	ID      string          `json:"id,omitempty"`
-	Type    string          `json:"type,omitempty"`
-	Text    string          `json:"text,omitempty"`
-	Delta   string          `json:"delta,omitempty"`
-	Command string          `json:"command,omitempty"`
-	Path    string          `json:"path,omitempty"`
-	Output  string          `json:"output,omitempty"`
-	Status  string          `json:"status,omitempty"`
-	Name    string          `json:"name,omitempty"` // mcp_tool_call: server.tool name
-	Args    json.RawMessage `json:"args,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Type string `json:"type,omitempty"`
+
+	// agent_message / reasoning
+	Text  string `json:"text,omitempty"`
+	Delta string `json:"delta,omitempty"`
+
+	// command_execution
+	Command          string `json:"command,omitempty"`
+	AggregatedOutput string `json:"aggregated_output,omitempty"`
+	ExitCode         int    `json:"exit_code,omitempty"`
+	Status           string `json:"status,omitempty"`
+
+	// file_change
+	Path string `json:"path,omitempty"`
+
+	// mcp_tool_call — canonical field names from codex-rs upstream
+	Server    string          `json:"server,omitempty"`
+	Tool      string          `json:"tool,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Result    string          `json:"result,omitempty"`
+
+	// error item
+	Message string `json:"message,omitempty"`
+
+	// web_search / generic args fallback (some Codex builds use `args`)
+	Args json.RawMessage `json:"args,omitempty"`
+
+	// todo_list
+	Items json.RawMessage `json:"items,omitempty"`
+
+	// collab_tool_call (multi-agent peer handoff)
+	SenderThreadID    string          `json:"sender_thread_id,omitempty"`
+	ReceiverThreadIDs json.RawMessage `json:"receiver_thread_ids,omitempty"`
+	Prompt            string          `json:"prompt,omitempty"`
+	AgentsStates      json.RawMessage `json:"agents_states,omitempty"`
 }
 
 func parseCodexStreamJSON(line []byte, handler EventHandler) {
@@ -178,6 +208,9 @@ func handleCodexItem(envelopeType string, item *codexItem, handler EventHandler)
 
 	case "command_execution":
 		// Shell command. item.started → tool_call, item.completed → tool_result.
+		// Output lives in `aggregated_output` (NOT `output`) per upstream
+		// codex-rs schema; the previous parser silently produced empty
+		// tool_result content for every shell call.
 		switch envelopeType {
 		case "item.started":
 			handler(AgentEvent{
@@ -193,10 +226,11 @@ func handleCodexItem(envelopeType string, item *codexItem, handler EventHandler)
 		case "item.completed":
 			handler(AgentEvent{
 				Type:    "tool_result",
-				Content: item.Output,
+				Content: item.AggregatedOutput,
 				Metadata: map[string]interface{}{
 					"tool_use_id": item.ID,
 					"status":      item.Status,
+					"exit_code":   item.ExitCode,
 				},
 				Timestamp: time.Now(),
 			})
@@ -217,28 +251,47 @@ func handleCodexItem(envelopeType string, item *codexItem, handler EventHandler)
 		}
 
 	case "mcp_tool_call":
-		// MCP-routed tool call; item.Name is "server.tool".
+		// MCP-routed tool call. Upstream emits separate `server` + `tool`
+		// fields (NOT a combined `name`); we render them as "server.tool" for
+		// the chat UI display name. Arguments live in `arguments` (NOT `args`)
+		// and the response in `result` (NOT `output`). The previous parser's
+		// field assumptions were inherited from the (different) tool.call
+		// shape and silently dropped both directions.
+		toolDisplay := item.Tool
+		if item.Server != "" {
+			toolDisplay = item.Server + "." + item.Tool
+		}
 		switch envelopeType {
 		case "item.started":
 			var input any
-			if len(item.Args) > 0 {
+			if len(item.Arguments) > 0 {
+				_ = json.Unmarshal(item.Arguments, &input)
+			} else if len(item.Args) > 0 {
+				// fallback for older Codex builds
 				_ = json.Unmarshal(item.Args, &input)
 			}
 			handler(AgentEvent{
 				Type:    "tool_call",
-				Content: item.Name,
+				Content: toolDisplay,
 				Metadata: map[string]interface{}{
-					"tool_name": item.Name,
-					"tool_id":   item.ID,
-					"input":     input,
-					"transport": "mcp",
+					"tool_name":  toolDisplay,
+					"tool_id":    item.ID,
+					"input":      input,
+					"transport":  "mcp",
+					"mcp_server": item.Server,
+					"mcp_tool":   item.Tool,
 				},
 				Timestamp: time.Now(),
 			})
 		case "item.completed":
+			body := item.Result
+			if body == "" {
+				// some builds still use "output" — accept both
+				body = item.AggregatedOutput
+			}
 			handler(AgentEvent{
 				Type:    "tool_result",
-				Content: item.Output,
+				Content: body,
 				Metadata: map[string]interface{}{
 					"tool_use_id": item.ID,
 					"transport":   "mcp",
@@ -246,6 +299,66 @@ func handleCodexItem(envelopeType string, item *codexItem, handler EventHandler)
 				Timestamp: time.Now(),
 			})
 		}
+
+	case "todo_list":
+		// Codex's plan/todo emit. Surface as system meta so the UI can render
+		// it in the timeline without hijacking chat. Items shape is
+		// `[{text, completed}]` per upstream.
+		var items any
+		if len(item.Items) > 0 {
+			_ = json.Unmarshal(item.Items, &items)
+		}
+		handler(AgentEvent{
+			Type:    "system",
+			Content: "todo_list",
+			Metadata: map[string]interface{}{
+				"subtype": "todo_list",
+				"items":   items,
+			},
+			Timestamp: time.Now(),
+		})
+
+	case "collab_tool_call":
+		// Multi-agent peer handoff (Codex SDK's parallel agent feature).
+		// Crewship's peer-orchestration would benefit from rendering this
+		// in Crow's Nest, but for now just preserve the metadata.
+		var receivers, agentStates any
+		if len(item.ReceiverThreadIDs) > 0 {
+			_ = json.Unmarshal(item.ReceiverThreadIDs, &receivers)
+		}
+		if len(item.AgentsStates) > 0 {
+			_ = json.Unmarshal(item.AgentsStates, &agentStates)
+		}
+		handler(AgentEvent{
+			Type:    "system",
+			Content: "collab_tool_call",
+			Metadata: map[string]interface{}{
+				"subtype":             "collab_tool_call",
+				"tool":                item.Tool,
+				"sender_thread_id":    item.SenderThreadID,
+				"receiver_thread_ids": receivers,
+				"prompt":              item.Prompt,
+				"agents_states":       agentStates,
+				"status":              item.Status,
+			},
+			Timestamp: time.Now(),
+		})
+
+	case "error":
+		// Item-level error envelope (NOT the top-level "type":"error"). Codex
+		// emits these for non-fatal warnings like backpressure or transient
+		// upstream failures inside a turn. Classifying as a hard error would
+		// mis-fail otherwise-healthy runs (issue #19689) — surface as warning
+		// so the UI shows it but the orchestrator doesn't bail.
+		handler(AgentEvent{
+			Type:    "system",
+			Content: item.Message,
+			Metadata: map[string]interface{}{
+				"subtype": "warning",
+				"item_id": item.ID,
+			},
+			Timestamp: time.Now(),
+		})
 
 	case "web_search":
 		if envelopeType == "item.started" {
