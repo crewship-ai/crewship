@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
 
 /** Connection status of the crewshipd backend engine. */
 export type EngineStatus = "connected" | "disconnected" | "checking"
@@ -27,7 +28,11 @@ export function useEngineStatus(workspaceId: string | null) {
       controllerRef.current = controller
 
       try {
-        const res = await fetch(`/api/v1/crewshipd?workspace_id=${encodeURIComponent(workspaceId!)}`, {
+        // apiFetch — without it, an expired session 401s every 10s
+        // and the toolbar shows "Offline" while never redirecting to
+        // /login. apiFetch refreshes the access cookie or surfaces
+        // session-expired so the AuthProvider can hard-redirect.
+        const res = await apiFetch(`/api/v1/crewshipd?workspace_id=${encodeURIComponent(workspaceId!)}`, {
           signal: controller.signal,
           cache: "no-store",
         })
