@@ -1,11 +1,11 @@
 ---
 title: "Crewship Documentation"
-description: "Self-hosted runtime for AI coding agents. Each agent gets its own Linux container with full tooling, the whole environment runs on your hardware and is backed up by default — code, data, conversations, AI cost ledger, all of it."
+description: "Self-hosted runtime for AI coding agents. Every crew gets its own Linux container with full tooling, the whole environment runs on your hardware and is backed up by default — code, data, conversations, AI cost ledger, all of it."
 ---
 
 # Welcome to Crewship
 
-Crewship is a **self-hosted runtime for AI coding agents**. Each agent gets its own Linux container — a real machine where it can install services, run databases, mount volumes, and build a complete working system. The whole environment runs on **your hardware** and is packaged into portable, encrypted backups, so nothing your agents create ever disappears. Scale your Claude Code, Gemini, or OpenCode session into a fleet of governed agents with cost budgets, approval gates, and audit logs built in.
+Crewship is a **self-hosted runtime for AI coding agents**. Every crew gets its own Linux container — a real machine where its agents can install services, run databases, mount volumes, and build a complete working system together. The whole environment runs on **your hardware** and is packaged into portable, encrypted backups, so nothing your agents create ever disappears. Scale your Claude Code, Gemini, or OpenCode session into a fleet of governed agents with cost budgets, approval gates, and audit logs built in.
 
 <CardGroup cols={2}>
   <Card title="Quick Start" icon="rocket" href="/quickstart">
@@ -41,7 +41,7 @@ Crewship is a **self-hosted runtime for AI coding agents**. Each agent gets its 
     AES-256-GCM encrypted API keys with priority-based failover.
   </Card>
   <Card title="Skills" icon="puzzle-piece" href="/guides/skills">
-    Reusable capabilities from the marketplace or custom-built.
+    Reusable capabilities — local imports today, marketplace coming soon.
   </Card>
   <Card title="Missions" icon="flag" href="/guides/orchestration">
     Project-level work broken into tasks and assigned to agents.
@@ -59,7 +59,7 @@ Crewship is a **self-hosted runtime for AI coding agents**. Each agent gets its 
 | **Team-based organization** | Group agents into crews with shared context |
 | **Credential vault** | AES-256-GCM encrypted keys with priority-based failover |
 | **Isolated execution** | Every crew runs in its own Docker container |
-| **Role-based access** | 5-tier RBAC: Owner, Admin, Manager, Member, Viewer |
+| **Workspace membership** | Owner / Member roles today; full RBAC tiers (Admin, Manager, Viewer) on the v0.2 roadmap |
 | **Real-time logs** | JSONL streaming via WebSocket |
 | **4-tier memory with FTS5** | Agent, crew, workspace, and session memory with sub-ms SQLite FTS5 search — no embeddings, no vector DB |
 | **Devcontainer provisioning** | `devcontainer.json` + mise-based crew runtimes with shared cache images and 24 h registry-digest checks |
@@ -76,6 +76,6 @@ Crewship is a **self-hosted runtime for AI coding agents**. Each agent gets its 
 | Backend | Go single binary (REST API + WebSocket + embedded UI) |
 | UI | Next.js 16, React 19, Tailwind CSS 4, shadcn/ui |
 | Auth | NextAuth.js v5 (Auth.js) compatible, JWE tokens |
-| Database | SQLite (default) or PostgreSQL |
-| Containers | Docker, Apple Containers (macOS 26+), Kubernetes (planned) |
+| Database | SQLite (PostgreSQL on the v0.2 roadmap) |
+| Containers | Docker, Apple Containers (macOS 26+); Kubernetes on the v0.2 roadmap |
 | Agent runtime | CLI adapters in isolated containers with sidecar proxy |

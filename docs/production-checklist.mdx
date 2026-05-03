@@ -89,7 +89,7 @@ The questions are:
 | Secrets vault | ✅ | AES-256-GCM versioned encryption, never injected as env vars; agents fetch via the [Keeper](/guides/keeper) gatekeeper, which decides per-request whether to grant access using a local LLM. |
 | Container isolation | ✅ | One Docker container per crew, sidecar UID 1002 vs agent UID 1001 boundary, internal network, optional persistent volumes, AGE-encrypted backup. See [Container Isolation](/security/container-isolation) and [Backup](/guides/backup). |
 
-Crewship is **6 of 6 by default** — every requirement is there in the open-source release, not gated behind an enterprise tier. The `ee/` directory adds marketplace and federation features, but the production checklist itself is fully covered by the Apache-2.0 core.
+Crewship is **6 of 6 by default** — every requirement is there in the open-source release. v0.1 ships as fully Apache-2.0 with no enterprise tier gating; the marketplace and federation features are on the v0.2 roadmap.
 
 ## How other stacks compare
 

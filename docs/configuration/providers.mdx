@@ -1,6 +1,6 @@
 ---
 title: "Providers"
-description: "Container, storage, and state provider options including Docker, Apple Containers, BoltDB, and PostgreSQL."
+description: "Container, storage, and state provider options including Docker, Apple Containers, and BoltDB."
 icon: "server"
 ---
 
@@ -166,15 +166,9 @@ type containerJSON struct {
 
 Auto-detection tries Docker first, then falls back to Apple Containers. Useful for development environments where the runtime may vary.
 
-### Kubernetes Provider — Planned
+### Kubernetes Provider — v0.2 roadmap
 
-**Config key:** `container.provider: "k8s"`
-
-<Warning>
-  The `k8s` value passes config validation but **no Kubernetes provider is wired in `cmd/crewship/cmd_start.go`** today. The startup switch only branches on `docker` and `apple`; selecting `k8s` falls through to an error. This is forward-declared scaffolding, not a usable backend.
-</Warning>
-
-A Kubernetes provider that runs each crew as a pod (or job) is on the roadmap for distributed deployments. Until it lands, production-at-scale runs use Docker on a dedicated host or a small fleet of VMs with the `prefix` field set to keep container names from colliding. Track progress and design discussion in the project's GitHub issues; do not put `k8s` into a real config file expecting the server to start.
+A Kubernetes provider that runs each crew as a pod (or job) is on the v0.2 roadmap for distributed deployments. Until it lands, production-at-scale runs use Docker on a dedicated host or a small fleet of VMs with the `prefix` field set to keep container names from colliding.
 
 ## Storage Providers
 
@@ -196,8 +190,7 @@ The state provider stores ephemeral agent run states (running, completed, failed
 
 | Provider | Config Value | Best For |
 |----------|-------------|----------|
-| **BoltDB** | `bbolt` | Single-server deployments, development |
-| **PostgreSQL** | `postgres` | Multi-server, high-throughput deployments |
+| **BoltDB** | `bbolt` | All v0.1 deployments |
 
 ```yaml
 state:
@@ -207,12 +200,9 @@ state:
 
 BoltDB is an embedded key-value store that requires no external dependencies. It stores state in a single file.
 
-For PostgreSQL:
-```yaml
-state:
-  provider: "postgres"
-  # Connection configured via DATABASE_URL or equivalent
-```
+<Note>
+  A PostgreSQL state provider is on the v0.2 roadmap for multi-server, high-throughput deployments.
+</Note>
 
 ## Provider Validation
 
@@ -221,13 +211,13 @@ At startup, the config validates all provider selections:
 ```go
 var (
     validContainerProviders = map[string]bool{
-        "docker": true, "apple": true, "auto": true, "k8s": true, // k8s passes validation but is not wired
+        "docker": true, "apple": true, "auto": true,
     }
     validStorageProviders = map[string]bool{
         "localfs": true, "s3": true,
     }
     validStateProviders = map[string]bool{
-        "bbolt": true, "postgres": true,
+        "bbolt": true,
     }
     validContainerRuntimes = map[string]bool{
         "runc": true, "runsc": true, "kata-runtime": true, "sysbox-runc": true,
@@ -267,21 +257,22 @@ Invalid provider values cause a startup error with a descriptive message.
     Enhanced security with gVisor. Sidecar enabled for credential injection.
   </Tab>
 
-  <Tab title="Production (Distributed)">
+  <Tab title="Production (Distributed) — v0.2 roadmap">
     ```yaml
-    # Distributed deployment is currently a Docker-on-multiple-VMs pattern
-    # with a unique container.prefix per host. The k8s provider is planned
-    # but not yet wired — see "Kubernetes Provider — Planned" above.
+    # Distributed deployment is on the v0.2 roadmap. The pattern is
+    # Docker-on-multiple-VMs with a unique container.prefix per host,
+    # plus S3 storage and a PostgreSQL state provider — none of which
+    # ship in v0.1.
     container:
       provider: "docker"
       default_runtime: "runsc"
-      prefix: "host-a"          # set per host to avoid name collisions
+      prefix: "host-a"
       sidecar_enabled: true
     storage:
       provider: "s3"
     state:
       provider: "postgres"
     ```
-    Docker on a fleet of VMs with per-host prefixes, S3 for shared storage, PostgreSQL for state.
+    Roadmap target: Docker on a fleet of VMs with per-host prefixes, S3 for shared storage, PostgreSQL for state.
   </Tab>
 </Tabs>
