@@ -77,3 +77,7 @@ internal/orchestrator/data/
 .claude/
 /entrypoint.sh
 coverage_log.md
+
+# Internal — not for public repo
+CLAUDE.md
+internal-docs/
