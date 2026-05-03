@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Crewship — Create Agent Dialog Variants</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --card: #12151c;
+      --card-2: #171b24;
+      --card-3: #1c2029;
+      --border: rgba(255,255,255,0.08);
+      --border-10: rgba(255,255,255,0.10);
+      --border-20: rgba(255,255,255,0.20);
+      --fg: #e6e7eb;
+      --fg-80: rgba(230,231,235,0.80);
+      --fg-60: rgba(230,231,235,0.60);
+      --fg-50: rgba(230,231,235,0.50);
+      --fg-40: rgba(230,231,235,0.40);
+      --fg-30: rgba(230,231,235,0.30);
+      --blue: #60a5fa;
+      --blue-bg: rgba(96,165,250,0.10);
+      --blue-border: rgba(96,165,250,0.45);
+      --emerald: #34d399;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --violet: #a78bfa;
+      --cyan: #22d3ee;
+      --fuchsia: #e879f9;
+      --orange: #fb923c;
+      --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; font-size: 14px; }
+    button { font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; padding: 0; }
+    input, textarea, select { font: inherit; color: inherit; }
+
+    /* ===== Page shell ===== */
+    .page { max-width: 1280px; margin: 0 auto; padding: 32px 28px 80px; }
+    .page-h1 { font-size: 26px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; }
+    .page-lead { color: var(--fg-60); margin: 0 0 28px; font-size: 14px; max-width: 760px; }
+    .page-lead code { background: #11141a; border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; font-family: var(--mono); font-size: 12.5px; }
+
+    /* ===== Variant cards ===== */
+    .variant {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 0;
+      margin: 0 0 28px;
+      overflow: hidden;
+    }
+    .variant-head {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    }
+    .variant-tag {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; border-radius: 8px;
+      font-weight: 700; font-size: 13px;
+      background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border);
+    }
+    .variant-tag.b { background: rgba(167,139,250,0.10); color: var(--violet); border-color: rgba(167,139,250,0.45); }
+    .variant-tag.c { background: rgba(52,211,153,0.10); color: var(--emerald); border-color: rgba(52,211,153,0.45); }
+    .variant-title { font-size: 18px; font-weight: 600; margin: 0; }
+    .variant-summary { color: var(--fg-60); font-size: 13px; margin: 0; flex: 1; min-width: 280px; }
+    .variant-pill { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--card-3); border: 1px solid var(--border); color: var(--fg-80); }
+    .variant-pill.rec { background: rgba(96,165,250,0.10); color: var(--blue); border-color: var(--blue-border); }
+
+    /* faux app background to anchor dialogs */
+    .stage {
+      position: relative;
+      padding: 32px;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(96,165,250,0.04), transparent 40%),
+        radial-gradient(circle at 80% 70%, rgba(167,139,250,0.04), transparent 40%),
+        var(--bg);
+      min-height: 540px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ===== Dialog skin (matches Radix Dialog look) ===== */
+    .dlg {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.02);
+      width: 100%;
+      max-width: 560px;
+      overflow: hidden;
+    }
+    .dlg.wide { max-width: 720px; }
+    .dlg-head { padding: 18px 22px 14px; border-bottom: 1px solid var(--border); }
+    .dlg-h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+    .dlg-h2 .muted { color: var(--fg-50); font-weight: 400; font-size: 14px; }
+    .dlg-desc { margin: 0; color: var(--fg-60); font-size: 12.5px; }
+    .dlg-body { padding: 18px 22px; }
+    .dlg-foot {
+      padding: 12px 22px;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 8px; align-items: center;
+    }
+    .dlg-foot .left { margin-right: auto; color: var(--fg-50); font-size: 12px; }
+
+    /* form bits */
+    .lbl { display: block; font-size: 11px; color: var(--fg-50); margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .row { display: flex; gap: 10px; }
+    .row > * { flex: 1; }
+    .input, .select, .ta {
+      width: 100%;
+      background: #0a0c11;
+      border: 1px solid var(--border-20);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 13px;
+      color: var(--fg);
+      outline: none;
+      font-family: inherit;
+    }
+    .input:focus, .select:focus, .ta:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(96,165,250,0.15); }
+    .input.mono { font-family: var(--mono); font-size: 12.5px; }
+    .ta { resize: none; min-height: 92px; line-height: 1.5; }
+    .field + .field { margin-top: 14px; }
+    .field-help { color: var(--fg-40); font-size: 11px; margin: 4px 0 0; }
+    .grouped { background: var(--card-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .grouped + .grouped { margin-top: 12px; }
+    .group-h { font-size: 12px; font-weight: 600; color: var(--fg-80); margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+    .group-h .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--card-3); border: 1px solid var(--border); color: var(--fg-50); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* avatar bits */
+    .avatar-row { display: flex; align-items: center; gap: 14px; }
+    .avatar {
+      width: 64px; height: 64px; border-radius: 14px;
+      background: linear-gradient(135deg, #2a3344, #161a23);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; position: relative;
+      border: 1px solid var(--border-10);
+      cursor: pointer;
+      overflow: hidden;
+    }
+    .avatar svg { width: 100%; height: 100%; }
+    .avatar:hover { border-color: var(--blue-border); }
+    .avatar-edit {
+      position: absolute; bottom: -4px; right: -4px;
+      width: 22px; height: 22px;
+      background: var(--blue); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      color: #001028; font-weight: 700; font-size: 13px;
+      box-shadow: 0 0 0 2px var(--card);
+    }
+    .avatar-meta { flex: 1; min-width: 0; }
+
+    /* role + crew chips */
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .chip {
+      padding: 5px 10px; border-radius: 999px;
+      font-size: 12px;
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      color: var(--fg-80);
+      cursor: pointer;
+    }
+    .chip.active { background: var(--blue-bg); border-color: var(--blue-border); color: var(--blue); }
+    .chip svg { vertical-align: -2px; margin-right: 4px; }
+
+    /* buttons */
+    .btn { padding: 7px 14px; border-radius: 7px; font-size: 13px; font-weight: 500; transition: all .12s; }
+    .btn-primary { background: var(--blue); color: #001028; }
+    .btn-primary:hover { background: #7bb6fb; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: var(--fg-60); padding: 7px 12px; }
+    .btn-ghost:hover { color: var(--fg); }
+    .btn-outline { background: transparent; border: 1px solid var(--border-20); color: var(--fg-80); padding: 6px 12px; }
+    .btn-outline:hover { border-color: var(--border-20); background: var(--card-2); color: var(--fg); }
+
+    /* trigger button (the "+ Agent" pill) */
+    .trigger-bar {
+      position: absolute;
+      top: 16px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; align-items: center;
+      padding: 6px 10px;
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 11.5px;
+      color: var(--fg-50);
+    }
+    .trigger-pill {
+      padding: 4px 10px; border-radius: 999px;
+      background: var(--blue); color: #001028;
+      font-weight: 600; font-size: 11.5px;
+    }
+
+    /* ─────────────── A: WIZARD ─────────────── */
+    .wiz-steps {
+      display: flex; align-items: center; gap: 0;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card-2);
+    }
+    .wiz-step {
+      display: flex; align-items: center; gap: 8px;
+      flex: 1;
+      font-size: 12.5px;
+    }
+    .wiz-step .num {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--card-3); border: 1px solid var(--border);
+      font-size: 11px; color: var(--fg-50); font-weight: 600;
+    }
+    .wiz-step.done .num { background: rgba(52,211,153,0.15); border-color: rgba(52,211,153,0.45); color: var(--emerald); }
+    .wiz-step.active .num { background: var(--blue-bg); border-color: var(--blue-border); color: var(--blue); }
+    .wiz-step.active { color: var(--fg); }
+    .wiz-step .lbl-step { color: inherit; font-weight: 500; }
+    .wiz-step .sub { color: var(--fg-40); font-size: 10.5px; }
+    .wiz-line {
+      height: 1px; flex: 0 0 24px; margin: 0 8px;
+      background: var(--border);
+    }
+    .wiz-step.done + .wiz-line { background: rgba(52,211,153,0.45); }
+
+    /* template gallery card */
+    .tpl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tpl-card {
+      padding: 10px 12px;
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-align: left;
+      display: flex; gap: 10px; align-items: flex-start;
+      cursor: pointer;
+    }
+    .tpl-card:hover { border-color: var(--border-20); background: var(--card-3); }
+    .tpl-card.active { border-color: var(--blue-border); background: var(--blue-bg); }
+    .tpl-icon {
+      width: 30px; height: 30px; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      background: rgba(96,165,250,0.15); color: var(--blue);
+      font-size: 14px;
+    }
+    .tpl-card .name { font-size: 12.5px; font-weight: 600; color: var(--fg); margin: 0 0 2px; }
+    .tpl-card .desc { font-size: 11px; color: var(--fg-50); line-height: 1.4; margin: 0; }
+    .tpl-divider {
+      display: flex; align-items: center; gap: 12px;
+      margin: 14px 0 12px;
+      color: var(--fg-40); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .tpl-divider::before, .tpl-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+    /* ─────────────── B: TALL FORM ─────────────── */
+    .tall-body { max-height: 420px; overflow-y: auto; padding: 14px 22px 18px; }
+    .tall-body::-webkit-scrollbar { width: 8px; }
+    .tall-body::-webkit-scrollbar-thumb { background: var(--border-20); border-radius: 4px; }
+    .collapsible {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card-2);
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    .collapsible-h {
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+      cursor: pointer; user-select: none;
+      font-size: 12px; color: var(--fg-80);
+    }
+    .collapsible-h .chev { color: var(--fg-40); transition: transform .15s; }
+    .collapsible.open .collapsible-h .chev { transform: rotate(90deg); }
+    .collapsible-body { padding: 0 14px 14px; display: none; }
+    .collapsible.open .collapsible-body { display: block; }
+
+    /* ─────────────── C: TEMPLATE-FIRST ─────────────── */
+    .tpl-grid-large { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .tpl-card-large {
+      padding: 14px;
+      background: var(--card-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      text-align: left;
+      transition: all .12s;
+    }
+    .tpl-card-large:hover { transform: translateY(-2px); border-color: var(--border-20); }
+    .tpl-card-large .row1 { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .tpl-card-large .icon-l {
+      width: 36px; height: 36px; border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .tpl-card-large .h { font-size: 13px; font-weight: 600; }
+    .tpl-card-large .role { font-size: 10.5px; color: var(--fg-50); margin: 1px 0 0; }
+    .tpl-card-large .desc { color: var(--fg-60); font-size: 11.5px; line-height: 1.5; }
+    .tpl-card-large .meta { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+    .tpl-card-large .meta-pill { font-size: 9.5px; padding: 2px 7px; border-radius: 4px; background: var(--card-3); color: var(--fg-50); font-family: var(--mono); }
+    .tpl-blank {
+      padding: 14px; text-align: center;
+      background: transparent;
+      border: 1px dashed var(--border-20);
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--fg-50); font-size: 12px;
+    }
+    .tpl-blank:hover { border-color: var(--blue-border); color: var(--blue); }
+
+    .toggle {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 5px 0; font-size: 12px;
+    }
+    .toggle .switch {
+      width: 30px; height: 18px; background: var(--card-3); border-radius: 999px;
+      position: relative;
+      transition: background .15s;
+      flex-shrink: 0;
+    }
+    .toggle .switch::after {
+      content: ""; position: absolute; top: 2px; left: 2px;
+      width: 14px; height: 14px; background: var(--fg-50); border-radius: 50%;
+      transition: all .15s;
+    }
+    .toggle.on .switch { background: var(--blue); }
+    .toggle.on .switch::after { left: 14px; background: white; }
+
+    .legend {
+      display: flex; gap: 10px; margin: 0 0 14px;
+      padding: 10px 12px;
+      background: var(--card-2); border: 1px solid var(--border); border-radius: 8px;
+      font-size: 11.5px; color: var(--fg-60); align-items: flex-start;
+    }
+    .legend strong { color: var(--fg); font-weight: 600; }
+
+    /* simple svg-ish avatars */
+    .av-bot {
+      background:
+        radial-gradient(circle at 30% 30%, #ff6b9d 0%, transparent 40%),
+        radial-gradient(circle at 70% 35%, #6bb9ff 0%, transparent 40%),
+        radial-gradient(circle at 50% 75%, #ffb86b 0%, transparent 50%),
+        linear-gradient(135deg, #1a1f2b, #0f1218);
+    }
+    .av-bot::before {
+      content: "🤖"; font-size: 30px; line-height: 1;
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      filter: grayscale(0.2);
+    }
+    .av-em::before { content: "😎"; font-size: 30px; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+    .av-px { background: repeating-linear-gradient(45deg, #2a3344 0 8px, #1a2030 8px 16px); }
+    .av-px::before { content: "👾"; font-size: 26px; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+
+    /* misc layout */
+    .h-mute { color: var(--fg-50); font-weight: 400; }
+    .right { margin-left: auto; }
+    .grow { flex: 1; }
+    .gap-2 { gap: 8px; }
+    .mt-3 { margin-top: 12px; }
+    .mt-4 { margin-top: 16px; }
+    .mt-6 { margin-top: 24px; }
+    .mb-2 { margin-bottom: 8px; }
+    .row-tight { display: flex; gap: 8px; align-items: center; }
+
+    .intro-side {
+      display: flex; gap: 8px; align-items: flex-start;
+      padding: 12px 14px;
+      background: rgba(96,165,250,0.06); border: 1px solid rgba(96,165,250,0.20);
+      border-radius: 8px;
+      font-size: 12px; color: var(--fg-80);
+      margin-bottom: 14px;
+    }
+    .intro-side .pill {
+      flex-shrink: 0;
+      font-size: 9.5px; padding: 2px 6px; border-radius: 4px;
+      background: var(--blue); color: #001028; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+
+    /* footer summary table */
+    .compare {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 18px;
+    }
+    .compare th, .compare td { padding: 10px 12px; text-align: left; font-size: 12.5px; border-bottom: 1px solid var(--border); }
+    .compare th { color: var(--fg-50); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; background: var(--card-2); }
+    .compare td.dim { color: var(--fg-50); }
+    .compare td .yes { color: var(--emerald); }
+    .compare td .no { color: var(--red); }
+    .compare td .partial { color: var(--amber); }
+    .compare tr:last-child td { border-bottom: 0; }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <h1 class="page-h1">Create Agent — Dialog Variants</h1>
+    <p class="page-lead">
+      Současný dialog (<code>components/features/crews/create-agent-dialog.tsx</code>) přijímá jen <code>name</code>, <code>slug</code>, <code>agent_role</code>, <code>crew_id</code> — backend (<code>POST /api/v1/agents</code>) ale podporuje 13+ polí včetně <strong>avataru</strong>, <strong>persony / system_promptu</strong> ("SOUL"), LLM provideru/modelu, tool profilu a memory toggle. Tři návrhy, jak to vystavit přátelsky.
+    </p>
+
+    <!-- ====================== VARIANT A — WIZARD ====================== -->
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-tag">A</span>
+        <h2 class="variant-title">Step-up wizard</h2>
+        <span class="variant-pill rec">doporučeno</span>
+        <p class="variant-summary">3 kroky v jednom dialogu: <strong>Identity → Persona → Runtime</strong>. Každý krok má <em>Skip → use defaults</em>, takže rychlí uživatelé proletí enterem, pomalí dostanou kompletní onboarding.</p>
+      </div>
+      <div class="stage">
+        <div class="trigger-bar"><span>crews · sub-bar</span><span class="trigger-pill">+ Agent</span></div>
+
+        <!-- Wizard dialog: STEP 2 (Persona) — most expressive screen -->
+        <div class="dlg wide">
+          <div class="dlg-head">
+            <h3 class="dlg-h2">New agent <span class="muted">— in <strong style="color:var(--fg-80)">Engineering</strong></span></h3>
+            <p class="dlg-desc">Pick a persona template or write your own. You can always edit on the canvas later.</p>
+          </div>
+
+          <div class="wiz-steps">
+            <div class="wiz-step done">
+              <span class="num">✓</span>
+              <div><div class="lbl-step">Identity</div><div class="sub">Filip · @filip · Engineer</div></div>
+            </div>
+            <div class="wiz-line"></div>
+            <div class="wiz-step active">
+              <span class="num">2</span>
+              <div><div class="lbl-step">Persona</div><div class="sub">SOUL · the system prompt</div></div>
+            </div>
+            <div class="wiz-line"></div>
+            <div class="wiz-step">
+              <span class="num">3</span>
+              <div><div class="lbl-step">Runtime</div><div class="sub">LLM, tools, memory</div></div>
+            </div>
+          </div>
+
+          <div class="dlg-body">
+            <div class="intro-side">
+              <span class="pill">SOUL</span>
+              <span><strong>Persona = <code style="font-family:var(--mono);font-size:11.5px;background:rgba(0,0,0,0.3);padding:1px 5px;border-radius:3px">system_prompt</code></strong> in DB. This is who your agent <em>is</em> — their personality, scope, working style. Templates are real <code style="font-family:var(--mono);font-size:11.5px;background:rgba(0,0,0,0.3);padding:1px 5px;border-radius:3px">/api/v1/templates</code> presets, fully editable after creation.</span>
+            </div>
+
+            <label class="lbl">Start from a template</label>
+            <div class="tpl-grid">
+              <button class="tpl-card active" type="button">
+                <span class="tpl-icon" style="background:rgba(96,165,250,0.15);color:var(--blue)">🔬</span>
+                <div>
+                  <div class="name">Data Analyst — dry humor</div>
+                  <div class="desc">Scrape, parse, report. Deadpan one-liners. Python + bash.</div>
+                </div>
+              </button>
+              <button class="tpl-card" type="button">
+                <span class="tpl-icon" style="background:rgba(167,139,250,0.15);color:var(--violet)">⚙️</span>
+                <div>
+                  <div class="name">Backend Engineer</div>
+                  <div class="desc">REST/gRPC services, migrations, tracing. Go-first.</div>
+                </div>
+              </button>
+              <button class="tpl-card" type="button">
+                <span class="tpl-icon" style="background:rgba(52,211,153,0.15);color:var(--emerald)">🧪</span>
+                <div>
+                  <div class="name">QA / Test Writer</div>
+                  <div class="desc">Edge cases, table-driven tests, regression hunts.</div>
+                </div>
+              </button>
+              <button class="tpl-card" type="button">
+                <span class="tpl-icon" style="background:rgba(251,191,36,0.15);color:var(--amber)">📝</span>
+                <div>
+                  <div class="name">Tech Writer</div>
+                  <div class="desc">Docs, changelogs, READMEs. Plain English.</div>
+                </div>
+              </button>
+            </div>
+
+            <div class="tpl-divider">or</div>
+
+            <label class="lbl">Custom persona <span style="text-transform:none;letter-spacing:0;color:var(--fg-40);font-size:11px">(optional — markdown)</span></label>
+            <textarea class="ta" placeholder="You are Filip, a Data Analyst in the Research crew.
+PERSONALITY: Dry comedian — deadpan one-liners in code comments…
+RESPONSIBILITIES: …"></textarea>
+            <p class="field-help">Leave empty to use the template's prompt. After create you can edit this anytime in the agent canvas.</p>
+          </div>
+
+          <div class="dlg-foot">
+            <span class="left">Step 2 of 3 · Cmd+Enter to continue</span>
+            <button class="btn btn-ghost">Back</button>
+            <button class="btn btn-outline">Skip</button>
+            <button class="btn btn-primary">Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== VARIANT B — TALL FORM ====================== -->
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-tag b">B</span>
+        <h2 class="variant-title">Single tall form</h2>
+        <p class="variant-summary">Všechno na jedné obrazovce ve čtyřech sekcích: <strong>Identity · Persona · Runtime · Advanced</strong>. Advanced je sbalené. Power-user friendly, vizuálně hustší.</p>
+      </div>
+      <div class="stage">
+        <div class="trigger-bar"><span>crews · sub-bar</span><span class="trigger-pill">+ Agent</span></div>
+
+        <div class="dlg" style="max-width: 560px;">
+          <div class="dlg-head">
+            <h3 class="dlg-h2">New agent</h3>
+            <p class="dlg-desc">Configure all the basics in one go. Skip what you don't need — defaults are fine for most.</p>
+          </div>
+
+          <div class="tall-body">
+            <!-- IDENTITY -->
+            <div class="grouped">
+              <div class="group-h">Identity <span class="badge">required</span></div>
+              <div class="avatar-row">
+                <div class="avatar av-bot"><span class="avatar-edit">✎</span></div>
+                <div class="avatar-meta">
+                  <div class="row">
+                    <div class="field" style="margin:0;flex:2">
+                      <label class="lbl">Name</label>
+                      <input class="input" placeholder="Filip" value="Filip" />
+                    </div>
+                    <div class="field" style="margin:0;flex:1">
+                      <label class="lbl">Slug</label>
+                      <input class="input mono" placeholder="filip" value="filip" />
+                    </div>
+                  </div>
+                  <div class="row mt-3">
+                    <div class="field" style="margin:0;flex:1">
+                      <label class="lbl">Role</label>
+                      <select class="select">
+                        <option>Agent</option>
+                        <option>Lead (1 per crew)</option>
+                        <option>Coordinator (workspace-wide)</option>
+                      </select>
+                    </div>
+                    <div class="field" style="margin:0;flex:1">
+                      <label class="lbl">Crew</label>
+                      <select class="select">
+                        <option>Engineering</option>
+                        <option>Research</option>
+                        <option>QA</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="field mt-3" style="margin-top:12px">
+                    <label class="lbl">Role title <span style="text-transform:none;letter-spacing:0;color:var(--fg-40);font-size:11px">— optional, e.g. "Senior Backend"</span></label>
+                    <input class="input" placeholder="Data Analyst" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- PERSONA -->
+            <div class="grouped">
+              <div class="group-h">
+                Persona <span class="badge">SOUL</span>
+                <span class="right" style="font-size:11px;color:var(--fg-40);font-weight:400">= system_prompt</span>
+              </div>
+              <div class="row gap-2 mb-2">
+                <button class="chip active" type="button">📝 Custom prompt</button>
+                <button class="chip" type="button">📂 Use template</button>
+              </div>
+              <textarea class="ta" placeholder="You are Filip, a Data Analyst…"></textarea>
+              <p class="field-help">Optional — defaults to a generic helpful assistant prompt.</p>
+            </div>
+
+            <!-- RUNTIME -->
+            <div class="grouped">
+              <div class="group-h">Runtime <span class="badge">defaults OK</span></div>
+              <div class="row">
+                <div class="field" style="margin:0;flex:1">
+                  <label class="lbl">CLI adapter</label>
+                  <select class="select">
+                    <option>Claude Code</option>
+                    <option>Codex</option>
+                    <option>Aider</option>
+                  </select>
+                </div>
+                <div class="field" style="margin:0;flex:1">
+                  <label class="lbl">Tool profile</label>
+                  <select class="select">
+                    <option>Coding</option>
+                    <option>Research</option>
+                    <option>Writing</option>
+                    <option>Custom</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row mt-3">
+                <div class="field" style="margin:0;flex:1">
+                  <label class="lbl">LLM provider</label>
+                  <select class="select">
+                    <option>Anthropic</option>
+                    <option>OpenAI</option>
+                    <option>Local (Ollama)</option>
+                  </select>
+                </div>
+                <div class="field" style="margin:0;flex:1">
+                  <label class="lbl">Model</label>
+                  <select class="select">
+                    <option>claude-opus-4-7</option>
+                    <option>claude-sonnet-4-6</option>
+                    <option>claude-haiku-4-5</option>
+                  </select>
+                </div>
+              </div>
+              <div class="mt-3 toggle on">
+                <span class="switch"></span>
+                <span><strong>Memory enabled</strong> — agent gets persistent ~/.memory/AGENT.md across sessions</span>
+              </div>
+            </div>
+
+            <!-- ADVANCED (collapsed) -->
+            <div class="collapsible">
+              <div class="collapsible-h">
+                <span class="chev">▶</span>
+                <span><strong>Advanced</strong> <span style="color:var(--fg-40)">— temperature, max_tokens, timeout, delegation caps</span></span>
+              </div>
+              <div class="collapsible-body">
+                <div class="row">
+                  <div class="field" style="margin:0;flex:1">
+                    <label class="lbl">Temperature</label>
+                    <input class="input mono" value="0.7" />
+                  </div>
+                  <div class="field" style="margin:0;flex:1">
+                    <label class="lbl">Max tokens</label>
+                    <input class="input mono" placeholder="(none)" />
+                  </div>
+                  <div class="field" style="margin:0;flex:1">
+                    <label class="lbl">Timeout (s)</label>
+                    <input class="input mono" value="1800" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="dlg-foot">
+            <span class="left">↵ to create · Esc to close</span>
+            <button class="btn btn-ghost">Cancel</button>
+            <button class="btn btn-primary">Create agent</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== VARIANT C — TEMPLATE-FIRST ====================== -->
+    <div class="variant">
+      <div class="variant-head">
+        <span class="variant-tag c">C</span>
+        <h2 class="variant-title">Template-first gallery</h2>
+        <p class="variant-summary">Otevře gallery s předdefinovanými agenty (z <code style="font-family:var(--mono);font-size:11.5px;background:rgba(0,0,0,0.3);padding:1px 5px;border-radius:3px">/api/v1/templates</code>). Klik = okamžité vytvoření s defaultním slugem; "Build custom" otevře plnou variantu B.</p>
+      </div>
+      <div class="stage">
+        <div class="trigger-bar"><span>crews · sub-bar</span><span class="trigger-pill">+ Agent</span></div>
+
+        <div class="dlg wide" style="max-width: 760px;">
+          <div class="dlg-head">
+            <h3 class="dlg-h2">Pick an agent <span class="muted">— or build from scratch</span></h3>
+            <p class="dlg-desc">Templates are real, editable presets. Click → instant agent in <strong>Engineering</strong>. Avatar + slug auto-generated; tweak everything on the canvas.</p>
+          </div>
+
+          <div class="dlg-body">
+            <div class="tpl-grid-large">
+              <button class="tpl-card-large" type="button">
+                <div class="row1">
+                  <div class="icon-l" style="background:rgba(96,165,250,0.15);color:var(--blue)">🔬</div>
+                  <div>
+                    <div class="h">Filip</div>
+                    <div class="role">Data Analyst · Dry humor</div>
+                  </div>
+                </div>
+                <div class="desc">Scrapes, parses APIs, writes Python. Deadpan one-liner comments.</div>
+                <div class="meta">
+                  <span class="meta-pill">claude-sonnet</span>
+                  <span class="meta-pill">research</span>
+                  <span class="meta-pill">+memory</span>
+                </div>
+              </button>
+
+              <button class="tpl-card-large" type="button">
+                <div class="row1">
+                  <div class="icon-l" style="background:rgba(167,139,250,0.15);color:var(--violet)">⚙️</div>
+                  <div>
+                    <div class="h">Marek</div>
+                    <div class="role">Backend Engineer</div>
+                  </div>
+                </div>
+                <div class="desc">Go services, REST/gRPC, migrations. Test-first, rigorous.</div>
+                <div class="meta">
+                  <span class="meta-pill">claude-opus</span>
+                  <span class="meta-pill">coding</span>
+                  <span class="meta-pill">+memory</span>
+                </div>
+              </button>
+
+              <button class="tpl-card-large" type="button">
+                <div class="row1">
+                  <div class="icon-l" style="background:rgba(52,211,153,0.15);color:var(--emerald)">🧪</div>
+                  <div>
+                    <div class="h">Eva</div>
+                    <div class="role">QA / Test Writer</div>
+                  </div>
+                </div>
+                <div class="desc">Edge cases, table-driven tests, regression hunts. Adversarial.</div>
+                <div class="meta">
+                  <span class="meta-pill">claude-sonnet</span>
+                  <span class="meta-pill">testing</span>
+                </div>
+              </button>
+
+              <button class="tpl-card-large" type="button">
+                <div class="row1">
+                  <div class="icon-l" style="background:rgba(251,191,36,0.15);color:var(--amber)">📝</div>
+                  <div>
+                    <div class="h">Anička</div>
+                    <div class="role">Tech Writer</div>
+                  </div>
+                </div>
+                <div class="desc">Docs, changelogs, READMEs. Plain English, dry style.</div>
+                <div class="meta">
+                  <span class="meta-pill">claude-haiku</span>
+                  <span class="meta-pill">writing</span>
+                </div>
+              </button>
+
+              <button class="tpl-card-large" type="button">
+                <div class="row1">
+                  <div class="icon-l" style="background:rgba(34,211,238,0.15);color:var(--cyan)">🎯</div>
+                  <div>
+                    <div class="h">Captain</div>
+                    <div class="role">Coordinator · workspace-wide</div>
+                  </div>
+                </div>
+                <div class="desc">Routes work across crews. Strategic, no hands-on coding.</div>
+                <div class="meta">
+                  <span class="meta-pill">claude-opus</span>
+                  <span class="meta-pill">coordinator</span>
+                </div>
+              </button>
+
+              <button class="tpl-blank" type="button">
+                + Build custom from scratch
+                <div style="font-size:10.5px;margin-top:4px;color:var(--fg-40)">Empty agent — set everything yourself</div>
+              </button>
+            </div>
+          </div>
+
+          <div class="dlg-foot">
+            <span class="left">5 templates · 12 crew templates available · search by skill in canvas</span>
+            <button class="btn btn-ghost">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================== COMPARISON ====================== -->
+    <h2 style="font-size:18px;margin:36px 0 4px;font-weight:600">Tradeoffs at a glance</h2>
+    <p style="color:var(--fg-60);font-size:13px;margin:0 0 14px">Které pole je v každé variantě dostupné při vytváření.</p>
+    <table class="compare">
+      <thead>
+        <tr>
+          <th style="width:36%">Field</th>
+          <th>A · Wizard</th>
+          <th>B · Tall form</th>
+          <th>C · Template-first</th>
+          <th class="dim">Today</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>name + slug + role + crew</td><td><span class="yes">✓ Step 1</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓ auto</span></td><td><span class="yes">✓</span></td></tr>
+        <tr><td>avatar (live preview)</td><td><span class="yes">✓ Step 1</span></td><td><span class="yes">✓ inline</span></td><td><span class="yes">✓ from template</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>description / role_title</td><td><span class="yes">✓ Step 1</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓ from template</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>persona / system_prompt (SOUL)</td><td><span class="yes">✓ Step 2 + templates</span></td><td><span class="yes">✓ + tab</span></td><td><span class="yes">✓ from template</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>LLM provider + model</td><td><span class="yes">✓ Step 3</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓ from template</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>tool profile + CLI adapter</td><td><span class="yes">✓ Step 3</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓ from template</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>memory_enabled</td><td><span class="yes">✓ Step 3</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓ from template</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>temperature, max_tokens, timeout</td><td><span class="partial">⚠ Step 3 advanced</span></td><td><span class="partial">⚠ Advanced section</span></td><td><span class="no">✗ canvas only</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>delegation caps</td><td><span class="no">✗ canvas only</span></td><td><span class="partial">⚠ Advanced</span></td><td><span class="no">✗ canvas only</span></td><td><span class="no">✗</span></td></tr>
+        <tr><td>skills assignment</td><td><span class="no">✗ canvas only</span></td><td><span class="no">✗ canvas only</span></td><td><span class="yes">✓ from template</span></td><td><span class="no">✗</span></td></tr>
+      </tbody>
+    </table>
+
+    <h2 style="font-size:18px;margin:32px 0 8px;font-weight:600">My read</h2>
+    <ul style="margin:0;padding-left:20px;color:var(--fg-80);font-size:13px;line-height:1.7">
+      <li><strong>A (wizard)</strong> je nejlepší pro zachycení nováčků a stále rychlé pro power-userů (Skip + Enter). Nese nejvíc edukace ("SOUL" badge, persona = system_prompt).</li>
+      <li><strong>B (tall form)</strong> je nejrychlejší pro někoho, kdo přesně ví, co dělá. Vizuálně náročnější.</li>
+      <li><strong>C (template-first)</strong> je nejlepší <em>jako vstupní bod</em>, ale "Build custom" musí někam vést — typicky do <strong>B</strong>. Dohromady = "C → fallback to B" je pravděpodobně reálná final podoba.</li>
+    </ul>
+
+    <p style="margin-top:18px;color:var(--fg-60);font-size:13px">Říkáš, kterou jdeme stavět — A, B, nebo kombo C+B?</p>
+  </div>
+</body>
+</html>

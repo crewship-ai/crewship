@@ -110,13 +110,13 @@ GET /api/v1/agents?workspace_id={workspaceId}
 | Field | Type | Description |
 |---|---|---|
 | `id` | string | Agent ID |
-| `crew_id` | string? | Parent crew ID (null for COORDINATOR agents) |
+| `crew_id` | string | Parent crew ID |
 | `workspace_id` | string | Workspace ID |
 | `name` | string | Display name |
 | `slug` | string | URL-safe identifier |
 | `description` | string? | Agent description |
 | `role_title` | string? | Human-readable role title |
-| `agent_role` | string | `AGENT`, `LEAD`, or `COORDINATOR` |
+| `agent_role` | string | `AGENT` or `LEAD` |
 | `lead_mode` | string? | `"active"` or `"passive"` (LEAD agents only) |
 | `status` | string | `IDLE`, `RUNNING`, or `ERROR` |
 | `cli_adapter` | string | CLI tool used to run the agent |
@@ -154,10 +154,10 @@ POST /api/v1/agents?workspace_id={workspaceId}
 |---|---|---|---|---|
 | `name` | string | Yes | -- | Display name (2-100 characters) |
 | `slug` | string | Yes | -- | URL-safe identifier (2-50 chars) |
-| `crew_id` | string | Conditional | `null` | Required for `AGENT` and `LEAD` roles; forbidden for `COORDINATOR` |
+| `crew_id` | string | Yes | -- | Parent crew ID |
 | `description` | string | No | `null` | Agent description |
 | `role_title` | string | No | `null` | Human-readable role title |
-| `agent_role` | string | No | `"AGENT"` | `AGENT`, `LEAD`, or `COORDINATOR` |
+| `agent_role` | string | No | `"AGENT"` | `AGENT` or `LEAD` |
 | `lead_mode` | string | No | `"active"` | `"active"` or `"passive"` (LEAD agents only) |
 | `cli_adapter` | string | No | `"CLAUDE_CODE"` | CLI adapter |
 | `llm_provider` | string | No | `null` | LLM provider |
@@ -188,11 +188,10 @@ POST /api/v1/agents?workspace_id={workspaceId}
 |---|---|---|
 | `AGENT` | Worker that executes tasks | Yes |
 | `LEAD` | Crew leader that plans and delegates | Yes (max 1 per crew) |
-| `COORDINATOR` *(deprecated 2026-04-16)* | Cross-crew orchestrator | No (must NOT have crew_id) |
 
-**CLI Adapters:** `CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`
+**CLI Adapters:** `CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`
 
-**Tool Profiles:** `MINIMAL`, `CODING`, `MESSAGING`, `FULL`
+**Tool Profiles:** `MINIMAL`, `CODING`, `FULL`
 
 **Response:** `201 Created` -- returns the created agent object.
 

@@ -8,7 +8,7 @@ icon: "package"
 
 Endpoints that drive the [Devcontainers](/guides/devcontainers) pipeline: discover available features and runtimes, trigger or rebuild a crew's cached image, and inspect the local cache. All routes require auth and are workspace-scoped where they touch crew rows.
 
-Implementation lives in `internal/api/provisioning_handler.go`; the underlying provisioner is in `internal/devcontainer/`.
+Implementation lives in `internal/api/crew_provisioning_jobs.go` and `internal/api/crew_provisioning_cache.go`; the underlying provisioner is in `internal/devcontainer/`.
 
 ---
 

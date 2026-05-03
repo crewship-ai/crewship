@@ -33,7 +33,7 @@ ipc:
 
 # Container provider
 container:
-  provider: "docker"            # "docker" | "apple" | "auto" | "k8s"
+  provider: "docker"            # "docker" | "apple" | "auto"
   runtime_image: "debian:bookworm-slim"
   default_runtime: "runc"       # "runc" | "runsc" | "kata-runtime" | "sysbox-runc"
   network: "crewship-agents"    # Docker bridge network name
@@ -55,7 +55,7 @@ storage:
 
 # State store (agent run states)
 state:
-  provider: "bbolt"             # "bbolt" | "postgres"
+  provider: "bbolt"             # "bbolt" (postgres on the v0.2 roadmap)
   bolt_path: "/var/lib/crewship/state.db"
 
 # Logging
@@ -121,7 +121,8 @@ container:
   | `docker` | Standard Docker (auto-detects Docker, Podman, Colima, OrbStack, Rancher) |
   | `apple` | Apple Containers on macOS Tahoe+ (lightweight VMs) |
   | `auto` | Auto-detect between docker and apple |
-  | `k8s` | Kubernetes pods |
+
+  Kubernetes provider is on the v0.2 roadmap.
 </Accordion>
 
 <Accordion title="Runtime options">
@@ -156,13 +157,7 @@ state:
   bolt_path: "/var/lib/crewship/state.db"
 ```
 
-BoltDB is the default state store for agent run tracking. For high-throughput deployments, switch to PostgreSQL:
-
-```yaml
-state:
-  provider: "postgres"
-  # Connection string via DATABASE_URL env var
-```
+BoltDB is the default state store for agent run tracking. A PostgreSQL state provider for high-throughput deployments is on the v0.2 roadmap.
 
 ### Auth
 
@@ -248,7 +243,8 @@ storage:
   log_path: "/var/log/crewship"
 
 state:
-  provider: "postgres"
+  provider: "bbolt"
+  bolt_path: "/var/lib/crewship/state.db"
 
 logging:
   level: "info"

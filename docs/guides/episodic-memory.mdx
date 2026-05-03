@@ -6,6 +6,10 @@ icon: "database"
 
 # Episodic Memory
 
+<Note>
+**Roadmap (v0.2).** The episodic package ships in v0.1 but the embed-on-write hook into the journal writer is not yet wired, so journal entries are *not* indexed automatically. Manual indexing via the API works today for evaluation; vector recall queries only return results for entries that were indexed manually until the auto-wire ships in v0.2.
+</Note>
+
 Episodic is a narrow vector-recall layer over the [Crew Journal](/guides/crew-journal). It embeds a **selective** subset of journal entries and serves top-K similarity queries to agents planning new work.
 
 The "selective" part is load-bearing. Per 2025-2026 multi-agent memory research, indexing every event causes catastrophic drift: high-volume low-signal types (`exec.output_chunk`, `container.metrics`, `network.*`) drown the embedding space and dilute recall. Episodic refuses to embed those types and ingests only escalations, summaries, terminal mission status, denied keeper calls, eval regressions, and operator-tagged entries.
@@ -129,7 +133,6 @@ const (
 |---|---|
 | `AGENT` (default) | `own` |
 | `LEAD` | `crew_shared` |
-| `COORDINATOR` | `crew_shared` |
 
 **Workspace isolation is always enforced** at the query boundary -- a cross-workspace recall is impossible even with a misconfigured scope.
 
@@ -295,7 +298,7 @@ The composite `score` is reported with three colour bands:
 | Yellow | `50–75` | Functional but with at least one weak metric. Watch the dashboard. |
 | Green | `≥ 75` | All metrics in healthy range. |
 
-Health is computed by `internal/episodic/health.go`'s `ComputeSnapshot`. The daily consolidator job calls it after `IndexNew`; operators can call it on demand via:
+Health is exposed by `internal/api/memory_health_handler.go` over scores derived in `internal/episodic/`. The daily consolidator job recomputes it after `IndexNew`; operators can call it on demand via:
 
 - HTTP — `GET /api/v1/memory/health[?crew_id=<slug>]`. See [Memory API](/api-reference/memory).
 - CLI — `crewship memory health [--crew <slug>]`. See [`crewship memory health`](/cli/memory#health).
@@ -337,4 +340,3 @@ Only entries whose type survives the coarse SQL filter (the `EmbeddableEntryType
 
 - [Crew Journal](/guides/crew-journal) -- source of entries.
 - [Consolidate](/guides/consolidate) -- runs `IndexNew` on the daily tick.
-- [Reflection](/guides/reflection) -- emits `summary.generated` entries that land in the index.

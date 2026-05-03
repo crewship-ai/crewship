@@ -17,7 +17,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
-	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -42,28 +41,24 @@ func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map
 }
 
 type Router struct {
-	mux              *http.ServeMux
-	db               *sql.DB
-	logger           *slog.Logger
-	authMw           *AuthMiddleware
-	sessionsStore    sessions.Store
-	socketPath       string
-	internalToken    string
-	internalBaseURL  string
-	hub              *ws.Hub
-	orch             *orchestrator.Orchestrator
-	keeperGK         gatekeeper.Evaluator
-	keeperSecrets    SecretGetter
-	keeperContainer  provider.ContainerProvider
-	keeperConfig     *config.KeeperConfig
-	keeperConvReader ConversationReader
-	missionCallback  MissionCallback
-	scheduleUpdater  ScheduleUpdater
-	logWriter        *logcollector.Writer
-	// Deprecated: Captain feature is deprecated (see captain.go).
-	// Fields retained so the router continues to wire Captain for backward compat.
-	captainLLM            llm.Provider
-	captainMissionEngine  MissionStarter
+	mux                   *http.ServeMux
+	db                    *sql.DB
+	logger                *slog.Logger
+	authMw                *AuthMiddleware
+	sessionsStore         sessions.Store
+	socketPath            string
+	internalToken         string
+	internalBaseURL       string
+	hub                   *ws.Hub
+	orch                  *orchestrator.Orchestrator
+	keeperGK              gatekeeper.Evaluator
+	keeperSecrets         SecretGetter
+	keeperContainer       provider.ContainerProvider
+	keeperConfig          *config.KeeperConfig
+	keeperConvReader      ConversationReader
+	missionCallback       MissionCallback
+	scheduleUpdater       ScheduleUpdater
+	logWriter             *logcollector.Writer
 	allowSignup           bool
 	googleClientID        string
 	googleSecret          string

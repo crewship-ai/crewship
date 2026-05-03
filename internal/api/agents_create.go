@@ -66,18 +66,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.AgentRole = "AGENT"
 	}
 	if !validAgentRoles[req.AgentRole] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT, LEAD, or COORDINATOR"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT or LEAD"})
 		return
 	}
 
 	// LEAD requires crew_id
 	if req.AgentRole == "LEAD" && (req.CrewID == nil || *req.CrewID == "") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "LEAD role requires crew_id"})
-		return
-	}
-	// COORDINATOR must NOT have crew_id
-	if req.AgentRole == "COORDINATOR" && req.CrewID != nil && *req.CrewID != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "COORDINATOR role must not have crew_id"})
 		return
 	}
 
@@ -134,7 +129,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.ToolProfile = "CODING"
 	}
 	if !validToolProfiles[req.ToolProfile] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, MESSAGING, or FULL"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
 		return
 	}
 	if req.TimeoutSeconds == 0 {

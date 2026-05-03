@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { apiFetch } from "@/lib/api-fetch"
 import type { Notification } from "@/lib/types/mission"
 
 const ACTION_LABELS: Record<string, string> = {
@@ -38,7 +39,7 @@ export function NotificationBell() {
     if (!workspaceId) return
     const seq = ++countRequestSeq.current
     try {
-      const res = await fetch(`/api/v1/notifications/count?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const res = await apiFetch(`/api/v1/notifications/count?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok && seq === countRequestSeq.current) {
         const data = await res.json()
         setUnreadCount(data.unread ?? data.count ?? 0)
@@ -54,7 +55,7 @@ export function NotificationBell() {
     const seq = ++listRequestSeq.current
     setLoading(true)
     try {
-      const res = await fetch(`/api/v1/notifications?workspace_id=${encodeURIComponent(workspaceId)}&limit=20`)
+      const res = await apiFetch(`/api/v1/notifications?workspace_id=${encodeURIComponent(workspaceId)}&limit=20`)
       if (res.ok && seq === listRequestSeq.current) {
         const data = await res.json()
         setNotifications(Array.isArray(data) ? data : data.notifications ?? [])
@@ -86,7 +87,7 @@ export function NotificationBell() {
     async (notificationId: string) => {
       if (!workspaceId) return
       try {
-        const res = await fetch(`/api/v1/notifications/${encodeURIComponent(notificationId)}/read?workspace_id=${encodeURIComponent(workspaceId)}`, {
+        const res = await apiFetch(`/api/v1/notifications/${encodeURIComponent(notificationId)}/read?workspace_id=${encodeURIComponent(workspaceId)}`, {
           method: "POST",
         })
         if (!res.ok) return
@@ -104,7 +105,7 @@ export function NotificationBell() {
   const markAllRead = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/notifications/read-all?workspace_id=${encodeURIComponent(workspaceId)}`, {
+      const res = await apiFetch(`/api/v1/notifications/read-all?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
       })
       if (!res.ok) return

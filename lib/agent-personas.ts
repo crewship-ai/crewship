@@ -12,11 +12,13 @@
 
 // Canonical enum values — must match prisma/schema.prisma. The wizard only
 // emits these strings to /api/v1/agents.
-export type ToolProfile = "MINIMAL" | "CODING" | "MESSAGING" | "FULL"
-export type AgentRole = "AGENT" | "LEAD" | "COORDINATOR"
+export type ToolProfile = "MINIMAL" | "CODING" | "FULL"
+export type AgentRole = "AGENT" | "LEAD"
+// CURSOR + FACTORY are first-class providers for credential routing — see
+// the comment on createAgentSchema.llm_provider in lib/validations.ts.
 export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "CURSOR" | "FACTORY" | "OLLAMA"
 export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI" | "CURSOR_CLI" | "FACTORY_DROID"
-export type PersonaCategory = "engineering" | "research" | "quality" | "writing" | "devops" | "coordinator" | "custom"
+export type PersonaCategory = "engineering" | "research" | "quality" | "writing" | "devops" | "custom"
 
 export interface AgentPersona {
   /** Stable id for tracking. `b_*` = built-in, `tpl_*` = workspace, `cmf_*` = marketplace. */
@@ -27,7 +29,7 @@ export interface AgentPersona {
   suggestedSlug: string
   /** Job title shown under the name. */
   roleTitle: string
-  /** Lead vs Agent vs Coordinator. Drives crew requirement on Step 1. */
+  /** Lead vs Agent. Drives crew requirement on Step 1. */
   agentRole: AgentRole
   /** Crew this persona was authored for (purely a hint — user picks crew separately). */
   defaultCrewSlug: string

@@ -33,13 +33,13 @@ func (codexAdapter) Name() string { return "CODEX_CLI" }
 func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	cmd := []string{"codex", "exec", "--json"}
 
-	// Sandbox policy: agents that should mutate code get workspace-write,
-	// the read-only profiles (MINIMAL, MESSAGING) cannot touch the FS.
-	// danger-full-access is never opted into automatically — it bypasses
-	// the workspace boundary.
+	// Sandbox policy: MINIMAL profile is read-only, all other profiles get
+	// workspace-write so the agent can edit code. danger-full-access is
+	// never opted into automatically — it bypasses the workspace boundary.
+	// MESSAGING was retired in #261; only the three remaining profiles
+	// flow through here now.
 	sandbox := "workspace-write"
-	switch req.ToolProfile {
-	case "MINIMAL", "MESSAGING":
+	if req.ToolProfile == "MINIMAL" {
 		sandbox = "read-only"
 	}
 	cmd = append(cmd, "--sandbox", sandbox)

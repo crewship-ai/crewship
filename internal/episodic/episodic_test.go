@@ -342,11 +342,10 @@ func TestEmbedTruncatesAtRuneBoundary(t *testing.T) {
 
 func TestScopeForRole(t *testing.T) {
 	tests := map[string]Scope{
-		"LEAD":        ScopeCrewShared,
-		"COORDINATOR": ScopeCrewShared,
-		"AGENT":       ScopeOwn,
-		"":            ScopeOwn,
-		"unknown":     ScopeOwn,
+		"LEAD":    ScopeCrewShared,
+		"AGENT":   ScopeOwn,
+		"":        ScopeOwn,
+		"unknown": ScopeOwn,
 	}
 	for role, want := range tests {
 		if got := ScopeForRole(role); got != want {

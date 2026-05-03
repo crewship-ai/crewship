@@ -19,6 +19,10 @@ datasource db {
 // ENUMS — SQLite stores as strings, PostgreSQL as native enums
 // ============================================================
 
+// OrgRole: v0.1 enforces only OWNER and MEMBER. ADMIN/MANAGER/VIEWER are
+// reserved for the v0.2 RBAC tier system; the enum keeps them so existing
+// rows with those values still parse, but no v0.1 code path grants them
+// distinct permissions.
 enum OrgRole {
   OWNER
   ADMIN
@@ -41,24 +45,27 @@ enum LLMProvider {
   OLLAMA
 }
 
+// CLIAdapter: CURSOR_CLI and FACTORY_DROID are wired in the Go
+// orchestrator (internal/orchestrator/exec.go) but not yet listed here
+// because Prisma stays in sync with the legacy enum surface.
 enum CLIAdapter {
   CLAUDE_CODE
   OPENCODE
   CODEX_CLI
   GEMINI_CLI
+  CURSOR_CLI
+  FACTORY_DROID
 }
 
 enum ToolProfile {
   MINIMAL
   CODING
-  MESSAGING
   FULL
 }
 
 enum AgentRole {
   AGENT
   LEAD
-  COORDINATOR
 }
 
 enum AssignmentStatus {
@@ -79,7 +86,6 @@ enum SkillSource {
 
 enum SkillCategory {
   CODING
-  MESSAGING
   AUTOMATION
   DATA
   DEVOPS
@@ -127,21 +133,6 @@ enum RunTrigger {
   CRON
   AGENT
   SYSTEM
-}
-
-enum SubscriptionStatus {
-  ACTIVE
-  PAST_DUE
-  CANCELLED
-  TRIALING
-  INCOMPLETE
-}
-
-enum PlanTier {
-  FREE
-  PRO
-  TEAM
-  ENTERPRISE
 }
 
 enum CredentialScope {
@@ -271,8 +262,6 @@ model Workspace {
   chats          Chat[]
   runs           AgentRun[]
   audit_logs     AuditLog[]
-  subscription   Subscription?
-  flag_overrides FeatureFlagOverride[]
   assignments    Assignment[]
 
   @@map("workspaces")
@@ -715,92 +704,14 @@ model AuditLog {
 }
 
 // ============================================================
-// 15. SUBSCRIPTION
+// Removed in v0.1: Subscription, Plan, FeatureFlag, FeatureFlagOverride
+// models. The Stripe-billing tier system and the in-DB feature-flag
+// store are both v0.2 roadmap items. The matching DB tables stay as
+// orphans created by old migrations until v0.2 drops them cleanly.
 // ============================================================
 
-model Subscription {
-  id                     String             @id @default(cuid())
-  workspace_id           String             @unique
-  plan_id                String
-  stripe_customer_id     String?            @unique
-  stripe_subscription_id String?            @unique
-  status                 SubscriptionStatus @default(ACTIVE)
-  current_period_start   DateTime?
-  current_period_end     DateTime?
-  cancel_at              DateTime?
-  created_at             DateTime           @default(now())
-  updated_at             DateTime           @default(now()) @updatedAt
-
-  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  plan      Plan      @relation(fields: [plan_id], references: [id])
-
-  @@index([plan_id], name: "idx_subscription_plan")
-  @@map("subscriptions")
-}
-
 // ============================================================
-// 16. PLAN
-// ============================================================
-
-model Plan {
-  id              String   @id @default(cuid())
-  tier            PlanTier @unique
-  display_name    String
-  stripe_price_id String?  @unique
-  max_agents      Int
-  max_crews       Int
-  max_skills      Int
-  max_credentials Int
-  max_members     Int
-  features        Json?
-  price_monthly   Int      @default(0)
-  created_at      DateTime @default(now())
-  updated_at      DateTime @default(now()) @updatedAt
-
-  subscriptions Subscription[]
-
-  @@map("plans")
-}
-
-// ============================================================
-// 17. FEATURE FLAG
-// ============================================================
-
-model FeatureFlag {
-  id          String   @id @default(cuid())
-  key         String   @unique
-  description String?
-  enabled     Boolean  @default(false)
-  percentage  Int      @default(0)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @default(now()) @updatedAt
-
-  overrides FeatureFlagOverride[]
-
-  @@map("feature_flags")
-}
-
-// ============================================================
-// 18. FEATURE FLAG OVERRIDE
-// ============================================================
-
-model FeatureFlagOverride {
-  id           String   @id @default(cuid())
-  flag_id      String
-  workspace_id String
-  enabled      Boolean
-  created_at   DateTime @default(now())
-
-  flag      FeatureFlag @relation(fields: [flag_id], references: [id], onDelete: Cascade)
-  workspace Workspace   @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-
-  @@unique([flag_id, workspace_id], name: "uq_flag_override")
-  @@index([workspace_id], name: "idx_feature_flag_override_ws")
-  @@map("feature_flag_overrides")
-}
-
-// ============================================================
-// 19. AGENT CONFIG HISTORY (Phase 2)
+// AGENT CONFIG HISTORY (Phase 2)
 // ============================================================
 
 model AgentConfigHistory {

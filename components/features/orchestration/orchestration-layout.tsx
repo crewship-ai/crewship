@@ -17,8 +17,7 @@ import { MissionTimeline } from "@/components/features/orchestration/mission-tim
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
 // TemplateGallery removed — workflow templates not needed in orchestration UI yet
 // MissionControlBar replaced by inline info strip in unified toolbar
-// CrewConnections moved to Settings (CRE-105)
-import { ProposalReview } from "@/components/features/orchestration/proposal-review"
+// CrewConnections moved to Settings
 import { type DetailContext } from "@/components/features/orchestration/context-detail-panel"
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
@@ -63,7 +62,6 @@ const ORCH_TABS = [
   { id: "graph", label: "Graph", icon: Workflow },
   { id: "timeline", label: "Timeline", icon: Clock },
   { id: "activity", label: "Activity", icon: Activity },
-  { id: "proposals", label: "Approvals", icon: FileText },
 ] as const
 
 export function OrchestrationLayout({
@@ -652,13 +650,6 @@ export function OrchestrationLayout({
             {activeTab === "activity" && (
               <motion.div key="activity" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
                 <OrchestrationActivity missions={filteredMissions} highlightSlugs={highlightSlugs} />
-              </motion.div>
-            )}
-
-
-            {activeTab === "proposals" && (
-              <motion.div key="proposals" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <ProposalReview workspaceId={workspaceId} />
               </motion.div>
             )}
 

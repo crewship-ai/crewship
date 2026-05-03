@@ -55,7 +55,7 @@ export interface CreateAgentDialogProps {
 const INPUT_CLASS =
   "w-full bg-zinc-950 border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
 
-const TOOL_PROFILES = ["MINIMAL", "CODING", "MESSAGING", "FULL"] as const
+const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"] as const
 const LLM_PROVIDERS = ["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"] as const
 
@@ -132,7 +132,7 @@ export function CreateAgentDialog({
 
   const seed = draft.avatarSeed || draft.slug || draft.name || "agent"
   const avatarUrl = getAgentAvatarUrl(seed, draft.avatarStyle)
-  const requiresCrew = draft.agentRole !== "COORDINATOR"
+  const requiresCrew = true
   const finalPrompt = resolveFinalPrompt(draft)
   const isPromptFromTemplate =
     draft.selectedPersona !== null &&
@@ -424,15 +424,12 @@ export function CreateAgentDialog({
                   <select
                     value={draft.agentRole}
                     onChange={(e) => {
-                      const next = { ...draft, agentRole: e.target.value as typeof draft.agentRole }
-                      if (next.agentRole === "COORDINATOR") next.crewSlug = ""
-                      setDraft(next)
+                      setDraft({ ...draft, agentRole: e.target.value as typeof draft.agentRole })
                     }}
                     className={INPUT_CLASS}
                   >
                     <option value="AGENT">Agent</option>
                     <option value="LEAD">Lead (1 per crew)</option>
-                    <option value="COORDINATOR">Coordinator (workspace-wide, no crew)</option>
                   </select>
                 </FieldShell>
               </div>

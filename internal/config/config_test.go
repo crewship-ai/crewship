@@ -40,7 +40,7 @@ server:
 logging:
   level: "debug"
 container:
-  provider: "k8s"
+  provider: "apple"
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yml")
@@ -62,8 +62,8 @@ container:
 	if cfg.Logging.Level != "debug" {
 		t.Errorf("expected debug level, got %s", cfg.Logging.Level)
 	}
-	if cfg.Container.Provider != "k8s" {
-		t.Errorf("expected k8s provider, got %s", cfg.Container.Provider)
+	if cfg.Container.Provider != "apple" {
+		t.Errorf("expected apple provider, got %s", cfg.Container.Provider)
 	}
 	// Defaults preserved for unset fields
 	if cfg.Storage.Provider != "localfs" {
@@ -73,7 +73,7 @@ container:
 
 func TestEnvOverrides(t *testing.T) {
 	t.Setenv("CREWSHIP_PORT", "7777")
-	t.Setenv("CREWSHIP_CONTAINER_PROVIDER", "k8s")
+	t.Setenv("CREWSHIP_CONTAINER_PROVIDER", "apple")
 	t.Setenv("CREWSHIP_LOG_LEVEL", "warn")
 	t.Setenv("CREWSHIP_NEXTJS_URL", "http://nextjs:3000")
 
@@ -85,8 +85,8 @@ func TestEnvOverrides(t *testing.T) {
 	if cfg.Server.Port != 7777 {
 		t.Errorf("expected port 7777, got %d", cfg.Server.Port)
 	}
-	if cfg.Container.Provider != "k8s" {
-		t.Errorf("expected k8s, got %s", cfg.Container.Provider)
+	if cfg.Container.Provider != "apple" {
+		t.Errorf("expected apple, got %s", cfg.Container.Provider)
 	}
 	if cfg.Logging.Level != "warn" {
 		t.Errorf("expected warn, got %s", cfg.Logging.Level)

@@ -61,16 +61,6 @@ describe("agent draft", () => {
       expect(isIdentityValid({ ...base, agentRole: "AGENT", crewSlug: "eng" })).toBe(true)
     })
 
-    it("does NOT require crewSlug for COORDINATOR", () => {
-      const d = {
-        ...initialAgentDraft(null),
-        name: "Coord",
-        slug: "coord",
-        agentRole: "COORDINATOR" as const,
-      }
-      expect(isIdentityValid(d)).toBe(true)
-    })
-
     it("rejects slugs with invalid characters (dots, spaces, slashes)", () => {
       const base = { ...initialAgentDraft("eng"), name: "Test" }
       expect(isIdentityValid({ ...base, slug: "te.st" })).toBe(false)
@@ -244,7 +234,7 @@ describe("agent draft", () => {
     })
 
     it("every entry has a tool profile from the canonical enum", () => {
-      const validProfiles = new Set(["MINIMAL", "CODING", "MESSAGING", "FULL"])
+      const validProfiles = new Set(["MINIMAL", "CODING", "FULL"])
       for (const p of BUILTIN_PERSONAS) {
         expect(validProfiles.has(p.toolProfile)).toBe(true)
       }

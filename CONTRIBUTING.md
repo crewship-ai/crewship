@@ -1,8 +1,7 @@
 # Contributing to Crewship
 
 Thanks for considering a contribution. This file is the short-form
-workflow; the substantive rules and anti-patterns live in
-[CLAUDE.md](CLAUDE.md) — please skim it before opening a PR.
+workflow.
 
 ## Before you start
 
@@ -39,8 +38,6 @@ feature correctness.
 
 ## House rules (the short list)
 
-The full set with rationale is in [CLAUDE.md](CLAUDE.md). Highlights:
-
 - **`pnpm` only** — never `npm` or `yarn`.
 - **Migrations are Go-side** in `internal/database/migrate.go`.
   **Never run `prisma migrate`** — Prisma is TypeScript types only.
@@ -69,14 +66,13 @@ at review time.
 Common types: `feat`, `fix`, `docs`, `refactor`, `chore`, `test`, `ci`,
 `perf`. Scopes mirror top-level package or feature names — `api`,
 `keeper`, `sidecar`, `lookout`, `journal`, `orchestrator`, `cli`,
-`crews`, `chat`, `memory`, `deps`, `claude.md`. Skim `git log` to see
-the in-flight conventions before introducing a new scope.
+`crews`, `chat`, `memory`, `deps`. Skim `git log` to see the in-flight
+conventions before introducing a new scope.
 
 Examples from the actual log:
 
 - `feat(keeper): add L1 fast-path for low-risk credential requests`
 - `fix(api): canRole was silently 403-ing on update + delete actions`
-- `docs(claude.md): document prod VM, NEXTAUTH_SECRET trap`
 
 Avoid: `update stuff`, `WIP`, `fix typo`. Squash fixups before pushing.
 
@@ -89,8 +85,8 @@ tick the boxes that apply and remove rows that don't.
 - Keep PR titles under 70 characters; put the why in the body.
 - Reference the issue in the PR body (`Fixes #123`, `Refs #123`).
 - Update or add tests when behaviour changes.
-- Update `CLAUDE.md` (and this file) when you change something a
-  future contributor would otherwise have to re-discover.
+- Update this file when you change something a future contributor would
+  otherwise have to re-discover.
 
 CI (`ci.yml`) runs `pnpm lint && pnpm build` and
 `go test ./... && go vet ./...` on every PR against `main`. The
@@ -123,10 +119,6 @@ accepted under the same terms — by opening a PR you agree that:
   the patent grant in section 3 of the license.
 - You retain copyright on your contribution; the license is what
   governs use.
-
-If your change touches the `ee/` directory it is governed by the
-enterprise license in that subtree — open an issue first if you are
-not sure which side a change belongs on.
 
 We do not currently require a CLA or DCO sign-off. If that changes,
 we will say so here and in the PR template.

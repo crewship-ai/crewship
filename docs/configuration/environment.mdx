@@ -25,7 +25,7 @@ All Crewship configuration can be set via environment variables. These override 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_CONTAINER_PROVIDER` | `docker` | Container provider: `docker`, `apple`, `auto`, `k8s` |
+| `CREWSHIP_CONTAINER_PROVIDER` | `docker` | Container provider: `docker`, `apple`, `auto` (Kubernetes provider on the v0.2 roadmap) |
 | `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge network name |
 | `CREWSHIP_CONTAINER_PREFIX` | (empty) | Container name prefix for multi-instance isolation |
 | `CREWSHIP_RUNTIME_IMAGE` | `debian:bookworm-slim` | Default agent runtime image for crews without an explicit `runtime_image`. Any glibc-based Linux image works — Crewship bind-mounts the sidecar and entrypoint at runtime. |
@@ -50,7 +50,7 @@ All Crewship configuration can be set via environment variables. These override 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_STATE_PROVIDER` | `bbolt` | State store: `bbolt` or `postgres` |
+| `CREWSHIP_STATE_PROVIDER` | `bbolt` | State store: `bbolt` (postgres on the v0.2 roadmap) |
 | `CREWSHIP_BOLT_PATH` | `/var/lib/crewship/state.db` | BoltDB file path |
 
 ## Logging
@@ -216,8 +216,8 @@ The config is validated at startup (`Config.Validate`). These constraints are en
 |-------|-----------|
 | `server.port` | 1-65535 |
 | `ipc.socket_path` | Non-empty |
-| `container.provider` | `docker`, `apple`, `auto`, or `k8s` |
+| `container.provider` | `docker`, `apple`, or `auto` |
 | `storage.provider` | `localfs` or `s3` |
-| `state.provider` | `bbolt` or `postgres` |
+| `state.provider` | `bbolt` |
 | `container.default_runtime` | `runc`, `runsc`, `kata-runtime`, or `sysbox-runc` (if set) |
 | `auth.nextjs_url` | Non-empty |

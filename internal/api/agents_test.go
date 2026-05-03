@@ -33,7 +33,7 @@ func TestCreateAgent_RoleValidation(t *testing.T) {
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "COORDINATOR with crew_id returns 400",
+			name:       "COORDINATOR role rejected (retired in v0.1)",
 			body:       `{"name":"CEO","slug":"ceo","agent_role":"COORDINATOR","crew_id":"` + crewID + `"}`,
 			wantStatus: http.StatusBadRequest,
 		},

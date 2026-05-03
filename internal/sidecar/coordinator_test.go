@@ -1,7 +1,6 @@
 package sidecar
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -37,31 +36,6 @@ func coordHandlerCases() []coordHandlerCase {
 			handler:    func(s *Server) http.HandlerFunc { return s.handleListCrewConnections },
 			method:     http.MethodGet,
 			wantPath:   "/api/v1/internal/crew-connections",
-			wantQuery:  "workspace_id=ws-1",
-			wantMethod: http.MethodGet,
-		},
-		{
-			name:       "CreateProposal",
-			handler:    func(s *Server) http.HandlerFunc { return s.handleCreateProposal },
-			method:     http.MethodPost,
-			body:       `{"title":"Migrate auth"}`,
-			wantPath:   "/api/v1/internal/mission-proposals",
-			wantQuery:  "workspace_id=ws-1",
-			wantMethod: http.MethodPost,
-		},
-		{
-			name:       "ListProposals",
-			handler:    func(s *Server) http.HandlerFunc { return s.handleListProposals },
-			method:     http.MethodGet,
-			wantPath:   "/api/v1/internal/mission-proposals",
-			wantQuery:  "workspace_id=ws-1",
-			wantMethod: http.MethodGet,
-		},
-		{
-			name:       "ListAllMissions",
-			handler:    func(s *Server) http.HandlerFunc { return s.handleListAllMissions },
-			method:     http.MethodGet,
-			wantPath:   "/api/v1/missions",
 			wantQuery:  "workspace_id=ws-1",
 			wantMethod: http.MethodGet,
 		},
@@ -191,150 +165,6 @@ func TestCoordinatorHandlers_Forward(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// --- handleAllMissionsSummary ---
-
-func TestHandleAllMissionsSummary_NoIPC(t *testing.T) {
-	srv := newQueryServer(t, nil, nil)
-	req := httptest.NewRequest(http.MethodGet, "/missions/summary", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleAllMissionsSummary(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
-	}
-}
-
-func TestHandleAllMissionsSummary_AggregatesCounts(t *testing.T) {
-	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Sanity: handler hits /api/v1/missions with workspace_id and limit=100.
-		if r.URL.Path != "/api/v1/missions" {
-			http.Error(w, "wrong path", http.StatusBadRequest)
-			return
-		}
-		if !strings.Contains(r.URL.RawQuery, "workspace_id=ws-1") {
-			http.Error(w, "missing workspace_id", http.StatusBadRequest)
-			return
-		}
-		if !strings.Contains(r.URL.RawQuery, "limit=100") {
-			http.Error(w, "missing limit", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`[
-			{"status":"PLANNING"},
-			{"status":"PLANNING"},
-			{"status":"IN_PROGRESS"},
-			{"status":"REVIEW"},
-			{"status":"COMPLETED"},
-			{"status":"COMPLETED"},
-			{"status":"COMPLETED"},
-			{"status":"FAILED"},
-			{"status":"CANCELLED"},
-			{"status":"WEIRD_STATUS"}
-		]`))
-	}))
-	defer mock.Close()
-
-	srv := newQueryServer(t, &IPCConfig{
-		BaseURL: mock.URL, Token: "tok", WorkspaceID: "ws-1",
-	}, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/missions/summary", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleAllMissionsSummary(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
-	}
-	var got map[string]int
-	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	wantPairs := map[string]int{
-		"total":       10, // includes the unknown status
-		"planning":    2,
-		"in_progress": 1,
-		"review":      1,
-		"completed":   3,
-		"failed":      1,
-		"cancelled":   1,
-	}
-	for k, want := range wantPairs {
-		if got[k] != want {
-			t.Errorf("summary[%q] = %d, want %d", k, got[k], want)
-		}
-	}
-}
-
-func TestHandleAllMissionsSummary_EmptyList(t *testing.T) {
-	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`[]`))
-	}))
-	defer mock.Close()
-
-	srv := newQueryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok", WorkspaceID: "ws"}, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/missions/summary", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleAllMissionsSummary(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	var got map[string]int
-	json.NewDecoder(w.Body).Decode(&got)
-	if got["total"] != 0 {
-		t.Errorf("expected total=0 for empty list, got %d", got["total"])
-	}
-	// All status buckets present even when zero.
-	for _, k := range []string{"planning", "in_progress", "review", "completed", "failed", "cancelled"} {
-		if _, ok := got[k]; !ok {
-			t.Errorf("expected key %q present in summary even at zero", k)
-		}
-	}
-}
-
-func TestHandleAllMissionsSummary_UpstreamUnreachable(t *testing.T) {
-	srv := newQueryServer(t, &IPCConfig{
-		BaseURL: "http://127.0.0.1:1", Token: "tok", WorkspaceID: "ws",
-	}, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/missions/summary", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleAllMissionsSummary(w, req)
-
-	if w.Code != http.StatusBadGateway {
-		t.Errorf("expected 502 on unreachable upstream, got %d", w.Code)
-	}
-}
-
-func TestHandleAllMissionsSummary_InvalidUpstreamJSON(t *testing.T) {
-	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`not-json-array`))
-	}))
-	defer mock.Close()
-
-	srv := newQueryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok", WorkspaceID: "ws"}, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/missions/summary", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleAllMissionsSummary(w, req)
-
-	if w.Code != http.StatusBadGateway {
-		t.Errorf("expected 502 on invalid upstream JSON, got %d", w.Code)
 	}
 }
 

@@ -87,14 +87,14 @@ func (h *AgentHandler) CrewsStatus(w http.ResponseWriter, r *http.Request) {
 
 // validAgentRoles lists all accepted agent_role values.
 //
-// NOTE: "COORDINATOR" is deprecated (2026-04-16). See
-// [BuildCoordinatorContext] in internal/orchestrator/lead.go and
-// docs/guides/coordinator.mdx. Retained for backward compatibility with
-// existing COORDINATOR agents. Do not create new COORDINATOR agents.
+// COORDINATOR was a workspace-level cross-crew role. It was deprecated
+// 2026-04-16 and removed from the accepted set in v0.1. The orchestrator
+// branches that handled it remain in the codebase but are unreachable
+// from the public API. v0.2 will replace cross-crew orchestration with a
+// crew-to-crew handoff primitive.
 var validAgentRoles = map[string]bool{
-	"AGENT":       true,
-	"LEAD":        true,
-	"COORDINATOR": true, // Deprecated — see comment above.
+	"AGENT": true,
+	"LEAD":  true,
 }
 
 var validLeadModes = map[string]bool{
@@ -115,7 +115,10 @@ var validCLIAdapters = map[string]bool{
 	"FACTORY_DROID": true,
 }
 
-// validLLMProviders mirrors lib/validations.ts llm_provider enum.
+// validLLMProviders mirrors lib/validations.ts llm_provider enum. CURSOR
+// and FACTORY are first-class for credential routing (see validations.ts
+// comment) — their CLI adapters auth via CURSOR_API_KEY / FACTORY_API_KEY
+// rather than the underlying model provider's key.
 var validLLMProviders = map[string]bool{
 	"ANTHROPIC": true,
 	"OPENAI":    true,
@@ -126,11 +129,13 @@ var validLLMProviders = map[string]bool{
 }
 
 // validToolProfiles mirrors lib/validations.ts tool_profile enum.
+// MESSAGING was retired in pre-beta hygiene (#261) — only the three
+// profiles below are accepted; the orchestrator's gating in exec.go was
+// updated to drop the MESSAGING branch at the same time.
 var validToolProfiles = map[string]bool{
-	"MINIMAL":   true,
-	"CODING":    true,
-	"MESSAGING": true,
-	"FULL":      true,
+	"MINIMAL": true,
+	"CODING":  true,
+	"FULL":    true,
 }
 
 type agentCrewInfo struct {

@@ -4,14 +4,6 @@ description: "Multi-agent missions with task dependencies, retry loops, deadlock
 icon: "sitemap"
 ---
 
-<Note>
-  Sections below covering **Coordinator** (proposal workflow, `/proposal`,
-  `/missions/all`, `[COORDINATOR CONTEXT]`) describe the **deprecated**
-  COORDINATOR role (see [Coordinator guide](/guides/coordinator)). Missions,
-  tasks, leads, and assignments are **not** deprecated. Retained here for
-  reference while existing COORDINATOR agents remain supported.
-</Note>
-
 # Orchestration
 
 Crewship's orchestration system manages multi-agent missions through the `MissionEngine` (`internal/orchestrator/mission.go`). It handles task scheduling, dependency resolution, failure recovery, and cross-crew coordination.
@@ -110,7 +102,7 @@ The allocation works as follows:
 6. Inject memory context (up to memTokenBudget)
 ```
 
-After conversation and memory injection, the orchestrator appends additional context blocks in order: lead crew context (for LEAD agents), coordinator context (for COORDINATOR agents), peer communication context (for crew AGENT members).
+After conversation and memory injection, the orchestrator appends additional context blocks in order: lead crew context (for LEAD agents), peer communication context (for crew AGENT members).
 
 ## Mission Brief Construction
 
@@ -398,28 +390,9 @@ The confidence value (`low`, `medium`, `high`) feeds into the approval gate. Whe
 
 Mission tasks can reference agents from connected crews. The system auto-routes assignments to the correct crew container. Crew connections must be established by workspace admins before use.
 
-The Coordinator role can:
-- See all crews and their agents
-- Create cross-crew missions
-- Submit proposals for human approval
-- Monitor all workspace missions
-
-## Coordinator Proposal Workflow
-
-For multi-crew objectives, the recommended flow is:
-
-```
-Coordinator creates proposal
-    |
-    v
-Human reviews and approves/rejects
-    |
-    v (on approval)
-Missions auto-created from proposal plan
-    |
-    v
-Mission engine schedules tasks
-```
+<Note>
+  Crew-to-crew handoff with critique exchange (e.g. backend crew hands a draft to a testing crew for review) is on the v0.2 roadmap.
+</Note>
 
 ## Sidecar API for Orchestration
 
@@ -436,11 +409,8 @@ Lead agents interact with the orchestration system through the sidecar proxy at 
 | `/mission/{id}` | GET | Check mission status |
 | `/mission/{id}/start` | POST | Start a mission |
 | `/mission/templates` | GET | List available workflow templates |
-| `/missions/all` | GET | List all missions (Coordinator) |
-| `/proposal` | POST | Submit a proposal (Coordinator) |
 
 ## What's Next
 
-- [Captain](/guides/captain) *(deprecated 2026-04-16)* -- natural language crew and agent management
 - [Keeper](/guides/keeper) -- persistent agent memory across sessions
 - [Scheduling](/guides/scheduling) -- cron-based automated agent runs

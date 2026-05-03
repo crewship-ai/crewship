@@ -28,13 +28,12 @@ type droidAdapter struct{}
 func (droidAdapter) Name() string { return "FACTORY_DROID" }
 
 func (droidAdapter) BuildCommand(req AgentRunRequest) []string {
-	// Map validated tool_profile (lib/validations.ts: MINIMAL/CODING/MESSAGING/FULL)
-	// onto Droid's --auto autonomy: low/medium/high. MESSAGING is the lowest-
-	// permission "talk only" profile, so it shares low with MINIMAL. FULL gets
-	// high; CODING (default) stays at medium so the bulk of agents see no change.
+	// Map validated tool_profile (lib/validations.ts: MINIMAL/CODING/FULL)
+	// onto Droid's --auto autonomy: low/medium/high. MESSAGING was retired
+	// in #261 — the three remaining profiles map straight through.
 	autonomy := "medium"
 	switch req.ToolProfile {
-	case "MINIMAL", "MESSAGING":
+	case "MINIMAL":
 		autonomy = "low"
 	case "FULL":
 		autonomy = "high"

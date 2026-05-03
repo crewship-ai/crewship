@@ -52,7 +52,7 @@ GET /api/v1/presence/roster?crew_id=<optional>
 | Field | Type | Description |
 |---|---|---|
 | `rows[].agent_id` | string | Agent identifier. |
-| `rows[].crew_id` | string? | Crew containing the agent; omitted for solo/coordinator agents. |
+| `rows[].crew_id` | string? | Crew containing the agent. Omitted when not yet associated with a crew. |
 | `rows[].status` | string | `online`, `busy`, `blocked`, or `offline`. |
 | `rows[].since` | string | RFC3339Nano. Wall-clock time of the last status write. |
 | `rows[].details` | object? | Status-specific metadata. Omitted when empty. |

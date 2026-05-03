@@ -147,10 +147,6 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		// Non-fatal: continue with empty members
 	}
 
-	// resolveCoordinatorCrews is deprecated (COORDINATOR role deprecated 2026-04-16);
-	// returns nil for non-COORDINATOR agents, so this is a cheap no-op for the common path.
-	allCrews := h.resolveCoordinatorCrews(r, data)
-
 	networkMode, allowedDomains := h.resolveNetworkPolicy(data)
 
 	memoryMB, cpus, ttlHours := h.resolveContainerResources(data)
@@ -231,38 +227,6 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		"mise_config":           data.crewMiseConfig.String,
 		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
-	}
-	if len(allCrews) > 0 {
-		resp["all_crews"] = allCrews
-
-		// Load active missions for COORDINATOR context.
-		// Deprecated: COORDINATOR role is deprecated; branch retained for backward compat.
-		missionRows, err := h.db.QueryContext(r.Context(), `
-			SELECT m.id, c.slug, m.title, m.status
-			FROM missions m
-			JOIN crews c ON c.id = m.crew_id
-			WHERE m.workspace_id = ? AND m.status IN ('PLANNING', 'IN_PROGRESS', 'REVIEW')
-			ORDER BY m.created_at DESC LIMIT 20`,
-			data.wsID)
-		if err == nil {
-			defer missionRows.Close()
-			type missionEntry struct {
-				ID       string `json:"id"`
-				CrewSlug string `json:"crew_slug"`
-				Title    string `json:"title"`
-				Status   string `json:"status"`
-			}
-			var activeMissions []missionEntry
-			for missionRows.Next() {
-				var me missionEntry
-				if err := missionRows.Scan(&me.ID, &me.CrewSlug, &me.Title, &me.Status); err == nil {
-					activeMissions = append(activeMissions, me)
-				}
-			}
-			if len(activeMissions) > 0 {
-				resp["active_missions"] = activeMissions
-			}
-		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
