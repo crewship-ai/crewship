@@ -15,7 +15,7 @@
 export type ToolProfile = "MINIMAL" | "CODING" | "FULL"
 export type AgentRole = "AGENT" | "LEAD"
 export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "OLLAMA"
-export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI"
+export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI" | "CURSOR_CLI" | "FACTORY_DROID"
 export type PersonaCategory = "engineering" | "research" | "quality" | "writing" | "devops" | "custom"
 
 export interface AgentPersona {

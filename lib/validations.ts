@@ -28,9 +28,8 @@ export const updateCrewSchema = createCrewSchema.partial()
  * Zod schema for creating an agent with CLI adapter, LLM config, role, and resource settings.
  *
  * Role-based crew_id rules (match backend validation in internal/api/agents.go):
- *   - LEAD         → crew_id is REQUIRED
- *   - COORDINATOR  → crew_id MUST NOT be present (workspace-level agent)
- *   - AGENT        → crew_id is required by convention (workers live in a crew)
+ *   - LEAD   → crew_id is REQUIRED
+ *   - AGENT  → crew_id is required by convention (workers live in a crew)
  */
 export const createAgentSchema = z.object({
   name: z.string().min(2).max(100),
@@ -38,11 +37,9 @@ export const createAgentSchema = z.object({
   crew_id: z.string().min(1).optional(),
   description: z.string().max(1000).optional(),
   role_title: z.string().max(100).optional(),
-  // COORDINATOR role is deprecated (2026-04-16); see docs/guides/coordinator.mdx.
-  // Kept in the enum for backward compat so existing agents still validate.
-  agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).default("AGENT"),
+  agent_role: z.enum(["AGENT", "LEAD"]).default("AGENT"),
   lead_mode: z.enum(["active", "passive"]).default("active").optional(),
-  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"]).default("CLAUDE_CODE"),
+  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"]).default("CLAUDE_CODE"),
   llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
@@ -54,13 +51,6 @@ export const createAgentSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["crew_id"],
       message: "LEAD role requires crew_id",
-    })
-  }
-  if (data.agent_role === "COORDINATOR" && data.crew_id) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["crew_id"],
-      message: "COORDINATOR role must not have crew_id",
     })
   }
   if (data.agent_role === "AGENT" && !data.crew_id) {
@@ -84,9 +74,9 @@ export const updateAgentSchema = z.object({
   crew_id: z.string().min(1).optional(),
   description: z.string().max(1000).optional(),
   role_title: z.string().max(100).optional(),
-  agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).optional(),
+  agent_role: z.enum(["AGENT", "LEAD"]).optional(),
   lead_mode: z.enum(["active", "passive"]).optional(),
-  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"]).optional(),
+  cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"]).optional(),
   llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
@@ -100,13 +90,6 @@ export const updateAgentSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["crew_id"],
       message: "LEAD role requires crew_id",
-    })
-  }
-  if (data.agent_role === "COORDINATOR" && data.crew_id) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["crew_id"],
-      message: "COORDINATOR role must not have crew_id",
     })
   }
 })

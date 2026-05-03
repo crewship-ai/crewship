@@ -95,7 +95,6 @@ func TestBuildEthosBlock(t *testing.T) {
 	}{
 		{"AGENT", "[CREWSHIP ETHOS]", "part of a crew"},
 		{"LEAD", "[CREWSHIP ETHOS]", "orchestration"},
-		{"COORDINATOR", "[CREWSHIP ETHOS]", "coordination"},
 		{"UNKNOWN", "[CREWSHIP ETHOS]", "part of a crew"}, // default branch
 		{"", "[CREWSHIP ETHOS]", "part of a crew"},
 	}

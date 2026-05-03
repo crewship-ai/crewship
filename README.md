@@ -29,7 +29,7 @@ Crewship is a self-hosted runtime for AI coding agents. Every crew gets its own 
 - **Real Linux containers** — one container per crew; databases, queues, file stores, mounted volumes — anything your AI team needs to build a complete working system
 - **Self-hosted** — runs on your own hardware; your data, your perimeter, your control
 - **Backup & restore** — portable, AGE-encrypted bundles capture an entire workspace or crew (code, data, conversations, AI cost ledger) so nothing your agents create ever disappears
-- **Fleet mode for any AI coding CLI** — scale a Claude Code, Gemini, Codex, or OpenCode session into a coordinated fleet of governed agents
+- **Fleet mode for any AI coding CLI** — scale a Claude Code, Codex, Gemini, OpenCode, Cursor, or Factory Droid session into a coordinated fleet of governed agents
 - **Cost budgets & audit log** — Crew Journal records every LLM call, tool use, and decision; budgets enforced hierarchically (workspace → crew → mission → agent)
 - **Approval gates** — risky actions pause for human sign-off (sync or async)
 - **Credential vault + Keeper** — AES-256-GCM encrypted keys; agent-side access guarded by a local LLM (Ollama)
@@ -45,7 +45,7 @@ Crewship is a self-hosted runtime for AI coding agents. Every crew gets its own 
 | Auth | NextAuth.js v5 (Auth.js) |
 | Database | SQLite via `modernc.org/sqlite` (PostgreSQL on the v0.2 roadmap) |
 | Backend | Go (`crewshipd`) — WebSocket, Docker orchestration, Crew Journal, embedded UI |
-| Agent runtime | Docker containers with CLI adapters (Claude Code, OpenCode, Gemini CLI; Codex on the v0.2 roadmap) |
+| Agent runtime | Docker containers with CLI adapters (Claude Code, Codex CLI, Gemini CLI, OpenCode, Cursor CLI, Factory Droid) |
 | IPC | HTTP-over-Unix-socket on `/tmp/crewship.sock` (X-Internal-Token auth) |
 
 > **Prisma is TypeScript-types only** — all DB migrations are Go-side in `internal/database/migrate.go`. Never run `prisma migrate`.

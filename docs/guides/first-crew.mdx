@@ -55,11 +55,10 @@ Every agent has one of two roles that determines their capabilities:
     - **Name and slug:** Identity (e.g., "Viktor" / `viktor`)
     - **Role title:** Human-readable role (e.g., "Backend Engineer")
     - **Agent role:** `AGENT` or `LEAD`
-    - **CLI adapter:** Which coding CLI to use (`CLAUDE_CODE`, `OPENCODE`, `GEMINI_CLI`; Codex on the v0.2 roadmap)
+    - **CLI adapter:** Which coding CLI to use (`CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`)
     - **Tool profile:** Controls available tools:
       - `MINIMAL` -- Read, Search, Grep only
       - `CODING` -- Full coding tools
-      - `MESSAGING` -- Communication-focused
       - `FULL` -- All tools available
     - **System prompt:** The agent's persona and instructions
     - **Memory enabled:** Toggle persistent memory across sessions

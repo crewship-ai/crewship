@@ -45,13 +45,16 @@ enum LLMProvider {
   OLLAMA
 }
 
-// CLIAdapter: CODEX_CLI is reserved for the v0.2 Codex adapter; the Go
-// orchestrator only switches on CLAUDE_CODE / GEMINI_CLI / OPENCODE today.
+// CLIAdapter: CURSOR_CLI and FACTORY_DROID are wired in the Go
+// orchestrator (internal/orchestrator/exec.go) but not yet listed here
+// because Prisma stays in sync with the legacy enum surface.
 enum CLIAdapter {
   CLAUDE_CODE
   OPENCODE
   CODEX_CLI
   GEMINI_CLI
+  CURSOR_CLI
+  FACTORY_DROID
 }
 
 enum ToolProfile {

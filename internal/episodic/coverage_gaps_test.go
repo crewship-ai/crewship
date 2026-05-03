@@ -92,14 +92,13 @@ func TestEmbeddableEntryTypes_AlignsWithShouldEmbed(t *testing.T) {
 }
 
 // TestScopeForRole_AllRoles covers the full role-to-scope mapping. The
-// invariant: only LEAD and COORDINATOR get crew_shared.
+// invariant: only LEAD gets crew_shared.
 func TestScopeForRole_AllRoles(t *testing.T) {
 	tests := []struct {
 		role string
 		want Scope
 	}{
 		{"LEAD", ScopeCrewShared},
-		{"COORDINATOR", ScopeCrewShared},
 		{"AGENT", ScopeOwn},
 		{"MEMBER", ScopeOwn},
 		{"", ScopeOwn},

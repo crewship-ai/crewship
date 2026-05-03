@@ -282,8 +282,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// Build IPC config for agents in a crew so the sidecar can forward
 		// assignment requests (LEAD), peer queries, and escalations (all roles)
 		var ipcCfg *SidecarIPCConfig
-		// COORDINATOR branch is deprecated (see [BuildCoordinatorContext]); retained for backward compat.
-		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || req.AgentRole == "COORDINATOR" || len(req.CrewMembers) > 0) {
+		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
 				Token:       ipcToken,
