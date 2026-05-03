@@ -93,15 +93,31 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
  *  silent default-shift bug is exactly the kind of thing that surfaces
  *  during a future bundler upgrade and not in CI. */
 export function defaultModelForProvider(provider: LLMProvider): string {
-  const known = MODELS_BY_PROVIDER[provider]
+  const known = MODELS_BY_PROVIDER[provider] ?? []
   const knownSet = new Set<string>(known)
+  // First pass: explicit adapter default that is *also* in the curated list.
   for (const key of Object.keys(CLI_ADAPTERS).sort()) {
     const adapter = CLI_ADAPTERS[key]
     if (adapter.provider === provider && adapter.defaultModel && knownSet.has(adapter.defaultModel)) {
       return adapter.defaultModel
     }
   }
-  return known[0]
+  if (known.length > 0) {
+    return known[0]
+  }
+  // Last resort: empty MODELS_BY_PROVIDER entry (a future provider added to
+  // the LLMProvider union without populating its model list). Return the
+  // first matching adapter's defaultModel even though it isn't in `known`,
+  // so the caller still gets a real string. This preserves the function's
+  // contract (always returns string) — better to render an out-of-list model
+  // and let the user override than to crash the picker with undefined.
+  for (const key of Object.keys(CLI_ADAPTERS).sort()) {
+    const adapter = CLI_ADAPTERS[key]
+    if (adapter.provider === provider && adapter.defaultModel) {
+      return adapter.defaultModel
+    }
+  }
+  return ""
 }
 
 /** True if the given model string is one of the provider's curated entries.
