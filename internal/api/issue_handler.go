@@ -11,9 +11,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// MissionStarter starts a mission that has been inserted in PLANNING/IN_PROGRESS
+// state and approves task completions. *orchestrator.MissionEngine satisfies it.
+type MissionStarter interface {
+	StartMission(ctx context.Context, missionID string) error
+	ApproveTask(ctx context.Context, taskID, userID string, approved bool, notes string) error
+}
+
 // IssueHandler implements endpoints for the issue tracker (Linear-like).
-// Uses MissionStarter interface, declared in captain.go (Captain is deprecated
-// 2026-04-16, but the interface itself is general-purpose and retained here).
 type IssueHandler struct {
 	db            *sql.DB
 	hub           *ws.Hub

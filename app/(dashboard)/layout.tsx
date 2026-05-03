@@ -10,10 +10,6 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
-// Captain UI is deprecated (2026-04-16) — see components/features/captain/captain-panel.tsx
-// and docs/guides/captain.mdx. Kept mounted for backward compatibility.
-import { CaptainBubble } from "@/components/features/captain/captain-bubble"
-import { CaptainPanel } from "@/components/features/captain/captain-panel"
 
 export default function DashboardLayout({
   children,
@@ -51,8 +47,6 @@ export default function DashboardLayout({
         </SidebarInset>
       </SidebarProvider>
       <RealtimeToasts />
-      <CaptainBubble />
-      <CaptainPanel />
     </RealtimeProvider>
   )
 }

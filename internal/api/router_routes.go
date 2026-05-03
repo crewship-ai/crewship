@@ -458,24 +458,6 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/oauth/discover", authed(http.HandlerFunc(oauth.Discover)))
 	r.mux.Handle("POST /api/v1/oauth/auto-connect", authed(wsCtx(http.HandlerFunc(oauth.AutoConnect))))
 
-	// Captain (require auth + workspace context)
-	//
-	// Deprecated: Captain routes back the deprecated Captain feature (see
-	// internal/api/captain.go). Kept registered for backward compatibility
-	// with existing UI/CLI clients. Do not add new routes here.
-	captain := NewCaptainHandler(r.db, r.logger)
-	captain.SetJournal(r.Journal())
-	if r.captainLLM != nil {
-		captain.SetProvider(r.captainLLM)
-	}
-	if r.captainMissionEngine != nil {
-		captain.SetMissionEngine(r.captainMissionEngine)
-	}
-	r.mux.Handle("POST /api/v1/captain/chat", authed(wsCtx(http.HandlerFunc(captain.Chat))))
-	r.mux.Handle("GET /api/v1/captain/context", authed(wsCtx(http.HandlerFunc(captain.Context))))
-	r.mux.Handle("GET /api/v1/captain/history", authed(wsCtx(http.HandlerFunc(captain.History))))
-	r.mux.Handle("DELETE /api/v1/captain/history", authed(wsCtx(http.HandlerFunc(captain.ClearHistory))))
-
 	// Onboarding (require auth, no workspace context needed)
 	onboardingSvc := services.NewOnboardingService(r.db, r.logger, generateCUID)
 	onboarding := NewOnboardingHandler(r.db, onboardingSvc, r.logger)
