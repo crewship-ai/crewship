@@ -149,6 +149,7 @@ func (r *Router) registerRoutes() {
 
 	// Crew Templates (blueprints)
 	crewTmpl := NewCrewTemplateHandler(r.db, r.logger)
+	crewTmpl.SetJournal(r.Journal())
 	r.mux.Handle("GET /api/v1/crew-templates", authed(wsCtx(http.HandlerFunc(crewTmpl.List))))
 	r.mux.Handle("GET /api/v1/crew-templates/{slug}", authed(wsCtx(http.HandlerFunc(crewTmpl.Get))))
 	r.mux.Handle("POST /api/v1/crew-templates/{slug}/deploy", authed(wsCtx(http.HandlerFunc(crewTmpl.Deploy))))

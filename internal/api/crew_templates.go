@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // errTemplateNotFound is returned by deployCrewTemplate when the slug doesn't exist.
@@ -33,7 +34,11 @@ type deployCrewResult struct {
 // (deprecated) Captain tool executors. CrewTemplateHandler is the primary caller;
 // the Captain executor is retained for backward compat only (Captain deprecated 2026-04-16).
 // crewSlugInput may be empty — if so, it is derived from crewName via slugify.
-func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
+//
+// Pass a journal.Emitter (callers' h.journal — already defaulted to noopEmitter
+// when nothing is wired up) so the template/Captain auto-assign trail lands in
+// the canonical event stream alongside server logs.
+func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j journal.Emitter, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
 	crewSlug := crewSlugInput
 	if crewSlug == "" {
 		crewSlug = slugify(crewName)
@@ -112,7 +117,7 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, cre
 
 	// Auto-assign workspace AI credentials to all new agents (best-effort, after commit).
 	for _, agentID := range agentIDs {
-		autoAssignCredentials(ctx, db, wsID, agentID, now)
+		autoAssignCredentials(ctx, db, logger, j, wsID, agentID, now)
 	}
 
 	return &deployCrewResult{
@@ -125,38 +130,144 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, cre
 }
 
 // autoAssignCredentials assigns all workspace-scoped AI credentials (API_KEY, AI_CLI_TOKEN)
-// from Anthropic to the given agent. Errors are silently ignored since this is a best-effort
-// convenience — the agent can still be manually assigned credentials later.
-func autoAssignCredentials(ctx context.Context, db *sql.DB, wsID, agentID, now string) {
+// from Anthropic to the given agent. Best-effort: failures land both in the server log
+// (logger.Warn — operators tail this for live debugging) AND in the canonical journal
+// stream as `credential.auto_assign_failed` / `credential.auto_assign_empty` entries
+// (so the workspace timeline shows why a freshly-deployed agent "runs but says nothing").
+// Callers can still finish the parent operation and surface 201.
+//
+// j is required and called without nil-checks per project convention — pass
+// noopEmitter{} in tests when journaling is irrelevant. Pass nil logger only in tests.
+func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger, j journal.Emitter, wsID, agentID, now string) {
+	emitFailure := func(reason, credID string, err error) {
+		payload := map[string]any{
+			"workspace_id": wsID,
+			"agent_id":     agentID,
+			"reason":       reason,
+		}
+		if credID != "" {
+			payload["credential_id"] = credID
+		}
+		if err != nil {
+			payload["error"] = err.Error()
+		}
+		if _, emitErr := j.Emit(ctx, journal.Entry{
+			WorkspaceID: wsID,
+			AgentID:     agentID,
+			Type:        journal.EntryCredentialAutoAssignFailed,
+			Severity:    journal.SeverityWarn,
+			ActorType:   journal.ActorSystem,
+			Summary:     fmt.Sprintf("auto-assign credential failed (%s)", reason),
+			Payload:     payload,
+		}); emitErr != nil && logger != nil {
+			logger.Warn("autoAssignCredentials: journal emit failed",
+				"workspace_id", wsID, "agent_id", agentID, "error", emitErr)
+		}
+	}
+
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name FROM credentials
 		WHERE workspace_id = ? AND type IN ('API_KEY', 'AI_CLI_TOKEN')
 		  AND provider = 'ANTHROPIC' AND deleted_at IS NULL
 		ORDER BY created_at ASC`, wsID)
 	if err != nil {
+		if logger != nil {
+			logger.Warn("autoAssignCredentials: list query failed",
+				"workspace_id", wsID, "agent_id", agentID, "error", err)
+		}
+		emitFailure("list_query", "", err)
 		return
 	}
 	defer rows.Close()
+	// credentialsFound flips on the first successful Scan, so it stays
+	// false ONLY when the workspace has zero matching credential rows.
+	// We deliberately don't track "assigned count" for the empty-event
+	// gate: if rows existed but every insert failed, those are already
+	// covered by per-row credential.auto_assign_failed entries — firing
+	// the "empty" entry there too would misreport "no credentials"
+	// when really there were credentials we just couldn't link.
+	credentialsFound := false
 	for rows.Next() {
 		var credID, credName string
 		if err := rows.Scan(&credID, &credName); err != nil {
+			if logger != nil {
+				logger.Warn("autoAssignCredentials: scan failed",
+					"workspace_id", wsID, "agent_id", agentID, "error", err)
+			}
+			emitFailure("scan", "", err)
 			continue
 		}
-		_, _ = db.ExecContext(ctx, `
+		credentialsFound = true
+		if _, err := db.ExecContext(ctx, `
 			INSERT OR IGNORE INTO agent_credentials (agent_id, credential_id, env_var_name, created_at)
-			VALUES (?, ?, ?, ?)`, agentID, credID, credName, now)
+			VALUES (?, ?, ?, ?)`, agentID, credID, credName, now); err != nil {
+			if logger != nil {
+				logger.Warn("autoAssignCredentials: insert failed",
+					"workspace_id", wsID, "agent_id", agentID,
+					"credential_id", credID, "error", err)
+			}
+			emitFailure("insert", credID, err)
+			continue
+		}
+	}
+	// Surface late cursor failures (network blip, conn drop mid-iteration)
+	// — without this, partial assignments could be reported as success.
+	if err := rows.Err(); err != nil {
+		if logger != nil {
+			logger.Warn("autoAssignCredentials: row iteration error",
+				"workspace_id", wsID, "agent_id", agentID, "error", err)
+		}
+		emitFailure("row_iteration", "", err)
+	}
+	if !credentialsFound {
+		// Most common cause of "agent created but chat returns empty":
+		// no Anthropic creds in the workspace yet. Log so operators
+		// know to add a credential, and surface in the journal so it
+		// shows up alongside the agent.created entry in the timeline.
+		if logger != nil {
+			logger.Warn("autoAssignCredentials: no Anthropic credentials available — agent will need manual assignment to chat",
+				"workspace_id", wsID, "agent_id", agentID)
+		}
+		if _, err := j.Emit(ctx, journal.Entry{
+			WorkspaceID: wsID,
+			AgentID:     agentID,
+			Type:        journal.EntryCredentialAutoAssignEmpty,
+			Severity:    journal.SeverityWarn,
+			ActorType:   journal.ActorSystem,
+			Summary:     "no Anthropic credentials available — agent will need manual assignment",
+			Payload: map[string]any{
+				"workspace_id": wsID,
+				"agent_id":     agentID,
+			},
+		}); err != nil && logger != nil {
+			logger.Warn("autoAssignCredentials: journal emit failed",
+				"workspace_id", wsID, "agent_id", agentID, "error", err)
+		}
 	}
 }
 
 // CrewTemplateHandler provides endpoints for listing and applying crew templates.
 type CrewTemplateHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
 }
 
 // NewCrewTemplateHandler creates a CrewTemplateHandler with the given database and logger.
+// Journal emitter defaults to noopEmitter — call SetJournal to wire up the real one.
 func NewCrewTemplateHandler(db *sql.DB, logger *slog.Logger) *CrewTemplateHandler {
-	return &CrewTemplateHandler{db: db, logger: logger}
+	return &CrewTemplateHandler{db: db, logger: logger, journal: noopEmitter{}}
+}
+
+// SetJournal attaches the canonical event-stream emitter; credential auto-assign
+// failures from this handler land in `journal_entries` so the workspace timeline
+// reflects them. Defaults to noopEmitter when not called (e.g. tests).
+func (h *CrewTemplateHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 type crewTemplateResponse struct {
@@ -268,7 +379,7 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := deployCrewTemplate(r.Context(), h.db, wsID, slug, body.CrewName, body.CrewSlug)
+	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug)
 	if err != nil {
 		if errors.Is(err, errTemplateNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")

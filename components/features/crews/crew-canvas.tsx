@@ -134,7 +134,6 @@ export interface CrewCanvasProps {
   onCrewChanged: () => void
   onSelectAgent: (slug: string) => void
   onOpenFiles: () => void
-  onAddAgent: (defaultCrewSlug: string) => void
 }
 
 /**
@@ -154,7 +153,6 @@ export function CrewCanvas({
   onCrewChanged,
   onSelectAgent,
   onOpenFiles,
-  onAddAgent,
 }: CrewCanvasProps) {
   const [crew, setCrew] = useState<CrewRecord | null>(null)
   const [loading, setLoading] = useState(true)
@@ -403,14 +401,6 @@ export function CrewCanvas({
             <Files className="h-3.5 w-3.5" />
             Files
           </button>
-          <button
-            type="button"
-            onClick={() => onAddAgent(crew.slug)}
-            className="px-3.5 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white text-sm font-medium flex items-center gap-1.5"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add agent
-          </button>
         </div>
       </header>
 
@@ -526,11 +516,6 @@ export function CrewCanvas({
               onClick={onOpenFiles}
             />
             <QuickAction
-              icon={<Plus className="h-3.5 w-3.5" />}
-              label="Add agent"
-              onClick={() => onAddAgent(crew.slug)}
-            />
-            <QuickAction
               icon={<RotateCcw className="h-3.5 w-3.5" />}
               label="Apply avatar style"
               onClick={() => applyAvatarStyle(false)}
@@ -554,18 +539,10 @@ export function CrewCanvas({
               <h2 className="text-lg font-semibold">
                 Agents <span className="text-muted-foreground text-sm font-normal ml-1">{agentsForCrew.length}</span>
               </h2>
-              <button
-                type="button"
-                onClick={() => onAddAgent(crew.slug)}
-                className="text-xs px-2.5 py-1 rounded bg-blue-500 hover:bg-blue-400 text-white flex items-center gap-1.5"
-              >
-                <Plus className="h-3 w-3" />
-                Add agent
-              </button>
             </div>
             {agentsForCrew.length === 0 ? (
               <div className="rounded-xl border border-white/8 bg-card p-6 text-center text-xs text-muted-foreground">
-                No agents in this crew. Click <strong className="text-foreground/80">Add agent</strong> to start.
+                No agents in this crew. Use <strong className="text-foreground/80">+ Agent</strong> in the toolbar to add one.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

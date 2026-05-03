@@ -105,6 +105,16 @@ const (
 	EntrySystemHookToggled            EntryType = "system.hook_toggled"
 	EntrySystemConsolidationTriggered EntryType = "system.consolidation_triggered"
 	EntrySystemConsolidationCompleted EntryType = "system.consolidation_completed"
+
+	// Credentials
+	// EntryCredentialAutoAssignFailed: a single autoAssignCredentials step failed
+	// (list/scan/insert). Operators see this when a template/Captain/internal
+	// flow tried to wire workspace AI credentials and one row didn't make it.
+	EntryCredentialAutoAssignFailed EntryType = "credential.auto_assign_failed"
+	// EntryCredentialAutoAssignEmpty: autoAssignCredentials ran but found zero
+	// Anthropic credentials in the workspace, so the agent will need a manual
+	// assignment before it can chat. Most common cause of "silent run" reports.
+	EntryCredentialAutoAssignEmpty EntryType = "credential.auto_assign_empty"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI
