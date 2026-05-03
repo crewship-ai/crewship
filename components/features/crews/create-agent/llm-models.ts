@@ -77,19 +77,31 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
  *
  *  Resolution order:
  *    1. CLI_ADAPTERS[*].defaultModel for the adapter whose `provider` matches
- *       — this is the explicit, intentional choice (e.g. ANTHROPIC →
- *       claude-sonnet-4-6 set in cli-adapters.ts). Reordering models[] does
- *       not silently shift the UI default.
+ *       AND whose default is actually present in MODELS_BY_PROVIDER[provider].
+ *       Both checks matter: the picker's "custom mode" toggle keys off
+ *       isKnownModel(), so returning a default that isn't in the curated
+ *       list would flip new agents into custom mode on first render.
  *    2. First entry of MODELS_BY_PROVIDER[provider] as a last-resort
- *       fallback for providers without a matching adapter (currently OLLAMA,
- *       which is served via OpenCode rather than its own adapter). */
+ *       fallback (currently the only path for OLLAMA, which has no
+ *       dedicated adapter — it's served via OpenCode prefixes).
+ *
+ *  Adapter iteration order is forced to sorted-keys so two adapters that
+ *  both claim the same provider (today: CLAUDE_CODE + OPENCODE both have
+ *  provider="ANTHROPIC") resolve deterministically. Without the sort,
+ *  Object.values returns insertion order which is engine-defined for
+ *  string keys — fine in V8 today but not guaranteed by spec, so a
+ *  silent default-shift bug is exactly the kind of thing that surfaces
+ *  during a future bundler upgrade and not in CI. */
 export function defaultModelForProvider(provider: LLMProvider): string {
-  for (const adapter of Object.values(CLI_ADAPTERS)) {
-    if (adapter.provider === provider && adapter.defaultModel) {
+  const known = MODELS_BY_PROVIDER[provider]
+  const knownSet = new Set<string>(known)
+  for (const key of Object.keys(CLI_ADAPTERS).sort()) {
+    const adapter = CLI_ADAPTERS[key]
+    if (adapter.provider === provider && adapter.defaultModel && knownSet.has(adapter.defaultModel)) {
       return adapter.defaultModel
     }
   }
-  return MODELS_BY_PROVIDER[provider][0]
+  return known[0]
 }
 
 /** True if the given model string is one of the provider's curated entries.

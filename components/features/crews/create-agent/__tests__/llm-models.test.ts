@@ -30,7 +30,11 @@ describe("LLM models per provider", () => {
     const fingerprints: { needle: RegExp; provider: string }[] = [
       { needle: /^claude-/, provider: "ANTHROPIC" },
       { needle: /^gpt-\d/, provider: "OPENAI" },
-      { needle: /^o\d-/, provider: "OPENAI" }, // o3, o4 family
+      // o-series reasoning models: o3, o3-pro, o4-mini etc. The boundary
+      // is hyphen OR end-of-string so bare "o3" is not silently exempted
+      // — without the (?:-|$) the regex required a hyphen and failed to
+      // catch a future "o3" entry mis-parented under e.g. ANTHROPIC.
+      { needle: /^o\d(?:-|$)/, provider: "OPENAI" },
       { needle: /^gemini-/, provider: "GOOGLE" },
     ]
     for (const { provider, model } of allCombined) {
