@@ -31,7 +31,7 @@ type AgentRunRequest struct {
 	LLMModel           string // optional model override (e.g. claude-haiku-4-5-20251001)
 	SystemPrompt       string
 	UserMessage        string
-	ToolProfile        string // MINIMAL, CODING, MESSAGING, FULL
+	ToolProfile        string // MINIMAL, CODING, FULL
 	Credentials        []Credential
 	TimeoutSecs        int
 	MemoryEnabled      bool

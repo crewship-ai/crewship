@@ -1,16 +1,14 @@
 package sidecar
 
-// File: coordinator.go — sidecar handlers used by the deprecated COORDINATOR
-// agent role to reach workspace-wide crewshipd endpoints.
+// File: coordinator.go — sidecar handlers that proxy workspace-wide
+// crewshipd endpoints (crews, crew-connections, credentials, agent
+// creation, issue creation). Lead and AGENT agents reach these via the
+// sidecar so they don't need direct network access to the host API.
 //
-// DEPRECATED (2026-04-16): COORDINATOR role is no longer actively developed.
-// The role has no autonomous behavior — it activates only when a user
-// explicitly chats with a coordinator agent or includes it in a mission.
-// Its workspace-level context has ~98% overlap with normal AGENT role.
-// New cross-crew orchestration should use the scheduler pattern with AGENT
-// role or rely on external MCP clients for workspace queries.
-// See docs/guides/coordinator.mdx for migration notes.
-// Handlers retained for backward compatibility.
+// Historical note: the file is named after the now-removed COORDINATOR
+// role, which originally drove these endpoints. The proposal +
+// missions/all proxy handlers that were COORDINATOR-only have been
+// removed. Rename pending — kept as-is in v0.1 to keep the diff focused.
 
 import (
 	"bytes"
@@ -42,89 +40,12 @@ func (s *Server) handleListCrewConnections(w http.ResponseWriter, r *http.Reques
 	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crew-connections?workspace_id="+s.ipc.WorkspaceID)
 }
 
-// handleCreateProposal proxies POST /proposal to the crewshipd API.
-// Used by COORDINATOR agents to submit mission proposals for human review.
-func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/mission-proposals?workspace_id="+s.ipc.WorkspaceID)
-}
-
-// handleListProposals proxies GET /proposals to the crewshipd API.
-func (s *Server) handleListProposals(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/mission-proposals?workspace_id="+s.ipc.WorkspaceID)
-}
-
-// handleListAllMissions proxies GET /missions/all to the crewshipd API.
-func (s *Server) handleListAllMissions(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/missions?workspace_id="+s.ipc.WorkspaceID)
-}
-
-// handleAllMissionsSummary returns an aggregated status summary of all workspace missions.
-func (s *Server) handleAllMissionsSummary(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	url := s.ipc.BaseURL + "/api/v1/missions?workspace_id=" + s.ipc.WorkspaceID + "&limit=100"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
-		return
-	}
-	req.Header.Set("X-Internal-Token", s.ipc.Token)
-
-	resp, err := ipcClient.Do(req)
-	if err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "crewshipd request failed"})
-		return
-	}
-	defer resp.Body.Close()
-
-	var missions []struct {
-		Status string `json:"status"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&missions); err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response"})
-		return
-	}
-
-	summary := map[string]int{
-		"total": len(missions), "planning": 0, "in_progress": 0,
-		"review": 0, "completed": 0, "failed": 0, "cancelled": 0,
-	}
-	for _, m := range missions {
-		switch m.Status {
-		case "PLANNING":
-			summary["planning"]++
-		case "IN_PROGRESS":
-			summary["in_progress"]++
-		case "REVIEW":
-			summary["review"]++
-		case "COMPLETED":
-			summary["completed"]++
-		case "FAILED":
-			summary["failed"]++
-		case "CANCELLED":
-			summary["cancelled"]++
-		}
-	}
-	writeJSONResponse(w, http.StatusOK, summary)
-}
+// COORDINATOR-only proposal + cross-mission proxy handlers were removed in
+// v0.1 (handleCreateProposal, handleListProposals, handleListAllMissions,
+// handleAllMissionsSummary). The matching public + internal API routes are
+// also gone — see internal/api/proposals.go deletion. v0.2 will replace
+// the proposal flow with a crew-to-crew handoff primitive; recover the
+// reference implementation from git history at that point.
 
 // handleListCredentials proxies GET /credentials to the crewshipd internal API.
 // Used by COORDINATOR agents to discover available credentials for assignment.

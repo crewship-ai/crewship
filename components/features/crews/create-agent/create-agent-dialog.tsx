@@ -55,7 +55,7 @@ export interface CreateAgentDialogProps {
 const INPUT_CLASS =
   "w-full bg-zinc-950 border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-400/15"
 
-const TOOL_PROFILES = ["MINIMAL", "CODING", "MESSAGING", "FULL"] as const
+const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"] as const
 const LLM_PROVIDERS = ["ANTHROPIC", "OPENAI", "GOOGLE", "OLLAMA"] as const
 

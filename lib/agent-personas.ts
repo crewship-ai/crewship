@@ -12,7 +12,7 @@
 
 // Canonical enum values — must match prisma/schema.prisma. The wizard only
 // emits these strings to /api/v1/agents.
-export type ToolProfile = "MINIMAL" | "CODING" | "MESSAGING" | "FULL"
+export type ToolProfile = "MINIMAL" | "CODING" | "FULL"
 export type AgentRole = "AGENT" | "LEAD"
 export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "OLLAMA"
 export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI"

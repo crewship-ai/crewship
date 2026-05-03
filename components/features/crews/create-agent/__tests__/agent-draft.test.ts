@@ -233,7 +233,7 @@ describe("agent draft", () => {
     })
 
     it("every entry has a tool profile from the canonical enum", () => {
-      const validProfiles = new Set(["MINIMAL", "CODING", "MESSAGING", "FULL"])
+      const validProfiles = new Set(["MINIMAL", "CODING", "FULL"])
       for (const p of BUILTIN_PERSONAS) {
         expect(validProfiles.has(p.toolProfile)).toBe(true)
       }

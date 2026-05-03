@@ -456,7 +456,6 @@ export function SettingsPageClient() {
                   <SelectContent>
                     <SelectItem value="MINIMAL">Minimal — read-only ops</SelectItem>
                     <SelectItem value="CODING">Coding — files + shell</SelectItem>
-                    <SelectItem value="MESSAGING">Messaging — peers + status</SelectItem>
                     <SelectItem value="FULL">Full — everything available</SelectItem>
                   </SelectContent>
                 </Select>

@@ -47,7 +47,7 @@ export const createAgentSchema = z.object({
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).default(1800),
-  tool_profile: z.enum(["MINIMAL", "CODING", "MESSAGING", "FULL"]).default("CODING"),
+  tool_profile: z.enum(["MINIMAL", "CODING", "FULL"]).default("CODING"),
 }).superRefine((data, ctx) => {
   if (data.agent_role === "LEAD" && !data.crew_id) {
     ctx.addIssue({
@@ -91,7 +91,7 @@ export const updateAgentSchema = z.object({
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).optional(),
-  tool_profile: z.enum(["MINIMAL", "CODING", "MESSAGING", "FULL"]).optional(),
+  tool_profile: z.enum(["MINIMAL", "CODING", "FULL"]).optional(),
 }).superRefine((data, ctx) => {
   // Only validate role ↔ crew_id when agent_role is being changed.
   // Partial updates that omit agent_role rely on backend re-validation.
