@@ -118,7 +118,7 @@ pnpm lint && pnpm build                    # Frontend — must pass for UI chang
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [CLAUDE.md](CLAUDE.md) for project rules and anti-patterns. Please open an issue first to discuss what you'd like to change.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, house rules, and commit conventions. Please open an issue first to discuss what you'd like to change.
 
 Security issues: see [SECURITY.md](SECURITY.md).
 
