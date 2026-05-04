@@ -78,20 +78,28 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
   // pass/fail with the recomputed checksum visible. The mutation hook
   // does not auto-invalidate the list (verify is read-only) so the
   // surrounding state stays stable while the toast renders.
+  //
+  // Backend response is {valid, size_bytes, manifest, error}. valid=true
+  // and error="" together mean the bundle's payload SHA matches the
+  // manifest. Any other shape is a failure mode the operator needs to
+  // see verbatim.
   async function onVerify(entry: BackupListEntry) {
     try {
       const result = await verify.mutateAsync(entry.path)
-      if (result.ok) {
+      if (result.valid && !result.error) {
+        const checksum = result.manifest?.checksums?.payload_sha256 ?? ""
         toast.success(
           `Verified · ${entry.file_name}`,
-          { description: `sha256 ${result.payload_sha256.slice(0, 16)}…` },
+          {
+            description: checksum
+              ? `sha256 ${checksum.replace(/^sha256:/, "").slice(0, 16)}… · ${formatBytes(result.size_bytes)}`
+              : formatBytes(result.size_bytes),
+          },
         )
       } else {
         toast.error(
-          `Checksum mismatch · ${entry.file_name}`,
-          {
-            description: `Expected ${result.payload_sha256.slice(0, 16)}…, got ${result.recomputed_sha256.slice(0, 16)}…`,
-          },
+          `Verify failed · ${entry.file_name}`,
+          { description: result.error || "checksum mismatch" },
         )
       }
     } catch (err) {
@@ -200,9 +208,9 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                       >
                         {verify.isPending && verify.variables === row.path ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : verify.data?.ok && verify.variables === row.path ? (
+                        ) : verify.data?.valid && verify.variables === row.path ? (
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                        ) : verify.data && !verify.data.ok && verify.variables === row.path ? (
+                        ) : verify.data && !verify.data.valid && verify.variables === row.path ? (
                           <XCircle className="h-3.5 w-3.5 text-destructive" />
                         ) : (
                           <ShieldCheck className="h-3.5 w-3.5" />

@@ -9,26 +9,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import {
-  useRotateBackups,
-  type BackupScope,
-  type RotateBackupResponse,
-} from "@/hooks/use-backups"
+import { useRotateBackups, type RotateBackupResponse } from "@/hooks/use-backups"
 
 interface RetentionCardProps {
   workspaceId: string | undefined
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  const units = ["KB", "MB", "GB", "TB"]
-  let v = n / 1024
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(1)} ${units[i]}`
 }
 
 /**
@@ -54,30 +38,35 @@ export function BackupRetentionCard({ workspaceId }: RetentionCardProps) {
 
   const [keepLast, setKeepLast] = useState<number>(14)
   const [keepDays, setKeepDays] = useState<number>(30)
-  const [scope, setScope] = useState<"all" | BackupScope>("all")
   const [previewSeen, setPreviewSeen] = useState(false)
   const [lastResult, setLastResult] = useState<RotateBackupResponse | null>(null)
+
+  // Backend returns `deleted: string[] | null` (null when nothing was
+  // eligible) and has no per-bundle size info or scope filter — this
+  // helper centralises the null normalisation so the JSX doesn't have
+  // to repeat `?? []` everywhere.
+  function deletedCount(r: RotateBackupResponse | null): number {
+    return r?.deleted?.length ?? 0
+  }
 
   async function run(dry: boolean) {
     try {
       const res = await rotate.mutateAsync({
-        scope: scope === "all" ? undefined : scope,
         keep_last: keepLast,
         keep_days: keepDays,
         dry_run: dry,
       })
       setLastResult(res)
+      const n = deletedCount(res)
       if (dry) {
         setPreviewSeen(true)
-        toast.success(
-          `Preview · ${res.deleted.length} bundle(s) eligible`,
-          { description: `Would reclaim ${formatBytes(res.bytes_reclaimed)}` },
-        )
+        toast.success(`Preview · ${n} bundle(s) eligible`, {
+          description: n === 0
+            ? "Retention thresholds keep all current bundles."
+            : "Click Apply to delete.",
+        })
       } else {
-        toast.success(
-          `Rotation applied · ${res.deleted.length} deleted`,
-          { description: `Reclaimed ${formatBytes(res.bytes_reclaimed)}` },
-        )
+        toast.success(`Rotation applied · ${n} deleted`)
         // Apply consumed the preview consent — require a fresh look
         // before the next destructive run.
         setPreviewSeen(false)
@@ -97,7 +86,7 @@ export function BackupRetentionCard({ workspaceId }: RetentionCardProps) {
         </span>
       </div>
       <div className="p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="retention-keep-last" className="text-xs">
               Keep last (count)
@@ -129,21 +118,6 @@ export function BackupRetentionCard({ workspaceId }: RetentionCardProps) {
             <p className="text-[11px] text-muted-foreground">
               Bundles older than N days are eligible
             </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="retention-scope" className="text-xs">
-              Scope filter
-            </Label>
-            <select
-              id="retention-scope"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as typeof scope)}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-            >
-              <option value="all">All bundles</option>
-              <option value="workspace">Workspace only</option>
-              <option value="crew">Crew only</option>
-            </select>
           </div>
         </div>
 
@@ -204,19 +178,15 @@ export function BackupRetentionCard({ workspaceId }: RetentionCardProps) {
                     {lastResult.dry_run ? "Preview" : "Applied"}
                   </span>
                   <span className="text-foreground/80">
-                    {lastResult.scanned} bundles scanned ·{" "}
-                    {lastResult.deleted.length} {lastResult.dry_run ? "eligible" : "deleted"} ·{" "}
-                    {formatBytes(lastResult.bytes_reclaimed)} reclaimed
+                    {deletedCount(lastResult)}{" "}
+                    {lastResult.dry_run ? "eligible for deletion" : "deleted"}
                   </span>
                 </div>
-                {lastResult.deleted.length > 0 ? (
+                {deletedCount(lastResult) > 0 ? (
                   <ul className="font-mono text-[11px] text-muted-foreground space-y-0.5 max-h-40 overflow-y-auto">
-                    {lastResult.deleted.map((d) => (
-                      <li key={d.path} className="flex justify-between gap-3">
-                        <span className="truncate">− {d.path.split("/").pop() ?? d.path}</span>
-                        <span className="shrink-0 text-foreground/60">
-                          {d.age_days}d · {formatBytes(d.size_bytes)}
-                        </span>
+                    {(lastResult.deleted ?? []).map((p) => (
+                      <li key={p} className="truncate">
+                        − {p.split("/").pop() ?? p}
                       </li>
                     ))}
                   </ul>

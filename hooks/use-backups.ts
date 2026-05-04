@@ -264,43 +264,75 @@ export function useDeleteBackup(workspaceId: string | undefined) {
 // per-bundle integrity verify, direct download, end-to-end self-test,
 // recovery from a stuck lock, and live success/fail metrics.
 
+// Wire-format types kept aligned with the Go server (see
+// internal/api/backup_query.go + backup_admin.go + backup/metrics.go +
+// backup/selftest.go). Earlier drafts of these types were guessed; a
+// QA pass against the live dev3 API found every one mis-shaped, so
+// these now mirror the actual JSON wire.
+
 export interface VerifyBackupResponse {
-  path: string
-  ok: boolean
-  payload_sha256: string
-  recomputed_sha256: string
+  // Whether the bundle's SHA matches what the manifest recorded.
+  valid: boolean
   size_bytes: number
+  // Parsed manifest (same shape as useInspectBackup), echoed back so
+  // a caller can show details without a second round-trip.
+  manifest: BackupManifest
+  // Empty string on success; populated on parse / decrypt / hash
+  // failure with the reason text.
+  error: string
 }
 
 export interface RotateBackupRequest {
-  scope?: BackupScope
+  // 0 disables that rule. At least one must be > 0; backend rejects
+  // both-zero with a 400.
   keep_last?: number
   keep_days?: number
   dry_run?: boolean
 }
 
 export interface RotateBackupResponse {
-  scanned: number
-  deleted: Array<{ path: string; size_bytes: number; age_days: number }>
-  bytes_reclaimed: number
+  // Backend returns null (not [] !) when nothing was eligible. The
+  // hook + components treat null and [] as equivalent.
+  deleted: string[] | null
   dry_run: boolean
+}
+
+export interface SelfTestRequest {
+  // Self-test is per-crew (not workspace-wide): the backend writes a
+  // canary file inside the named crew's container, snapshots it,
+  // mutates it, then restores from the snapshot to verify the loop.
+  // Caller must pick a provisioned crew; un-provisioned crews return
+  // ok=false with error="container not found".
+  crew_id: string
 }
 
 export interface SelfTestResponse {
   ok: boolean
-  duration_ms: number
-  trace_id?: string
-  steps: Array<{ name: string; ok: boolean; duration_ms: number; error?: string }>
+  crew_id: string
+  crew_slug: string
+  // Path of the canary file inside the container (e.g. /workspace/CANARY-<hex>.txt).
+  canary_path: string
+  canary_bytes: number
+  bundle_bytes: number
+  elapsed_ms: number
+  // Empty string when ok=true; populated with reason on failure
+  // (e.g. "container not found (is the crew provisioned?)").
+  error?: string
 }
 
 export interface BackupMetricsResponse {
-  total_bundles: number
-  total_size_bytes: number
-  encrypted_count: number
-  oldest_at?: string
-  newest_at?: string
-  successes_24h: number
-  failures_24h: number
+  created_total: number
+  created_by_scope: Record<string, number>
+  failed_total: number
+  failed_by_reason: Record<string, number>
+  restored_total: number
+  size_bytes_total: number
+  duration_seconds_p50: number
+  duration_seconds_p95: number
+  duration_seconds_mean: number
+  // Map of workspace_id → seconds the lock has been held (for
+  // dashboards that monitor stuck locks across many workspaces).
+  lock_held_seconds_by_workspace: Record<string, number>
 }
 
 export interface CrewLite {
@@ -357,8 +389,10 @@ export function useRotateBackups(workspaceId: string | undefined) {
     },
     onSuccess: (result) => {
       // Only invalidate the list when we actually deleted something —
-      // dry runs leave disk state untouched, so a refetch would be wasted.
-      if (!result.dry_run && result.deleted.length > 0) {
+      // dry runs leave disk state untouched, so a refetch would be
+      // wasted. Backend returns null (not []) when nothing eligible;
+      // the ?? [] normalises both shapes.
+      if (!result.dry_run && (result.deleted ?? []).length > 0) {
         qc.invalidateQueries({ queryKey: ["backups", workspaceId] })
       }
     },
@@ -366,17 +400,27 @@ export function useRotateBackups(workspaceId: string | undefined) {
 }
 
 /**
- * Canary backup → destroy → restore → verify round-trip against an
- * isolated test workspace. Validates the backup pipeline is wired
- * correctly without touching real data. Run on demand (button) or on a
- * future schedule (quarterly recommendation per Supabase).
+ * Canary backup → mutate → restore → verify round-trip against a SINGLE
+ * provisioned crew. The backend writes a sentinel file inside the
+ * crew's container, snapshots it through the full backup pipeline,
+ * overwrites the file, and restores from the snapshot to assert the
+ * pipeline produced bit-identical content. Quick (~50ms on a small
+ * crew) and safe — the canary file is the only filesystem mutation.
+ *
+ * The mutation argument is a SelfTestRequest carrying the crew_id;
+ * earlier drafts of this hook took no body and the endpoint 400'd.
+ * Surface the picker requirement to the UI: a self-test card has to
+ * choose which crew to exercise (un-provisioned crews return ok=false
+ * with error="container not found").
  */
 export function useBackupSelfTest(workspaceId: string | undefined) {
-  return useMutation<SelfTestResponse, Error, void>({
-    mutationFn: async () => {
+  return useMutation<SelfTestResponse, Error, SelfTestRequest>({
+    mutationFn: async (req) => {
       const ws = requireWorkspaceId(workspaceId)
       const res = await fetch(withQuery("/api/v1/admin/backups/self-test", ws), {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
       })
       return asJSON<SelfTestResponse>(res)
     },
@@ -409,10 +453,18 @@ export function useForceUnlock(workspaceId: string | undefined) {
 }
 
 /**
- * Process-wide backup counters (success/fail in last 24h, total bundles
- * on disk, encrypted percentage, oldest/newest). Cheap call, polled
- * every 30s while the backups tab is mounted to keep the metrics row
- * live without spamming the endpoint.
+ * Process-wide backup counters (created/failed/restored totals,
+ * size_bytes_total, p50/p95/mean durations). Polled every 30s while
+ * the backups tab is mounted.
+ *
+ * Backend gates this endpoint on `IsInstanceOwner` (env-var
+ * CREWSHIP_INSTANCE_OWNER_EMAIL match). Workspace owners who are NOT
+ * the instance owner get a 403; the hook lets that surface as a
+ * normal error so the UI can render a small "metrics require instance
+ * owner" hint instead of a blank silent failure. (Metrics are
+ * process-global, so showing them to non-instance-owners would leak
+ * other workspaces' counters in a multi-tenant deployment — the
+ * gate is intentional.)
  */
 export function useBackupMetrics(workspaceId: string | undefined) {
   return useQuery<BackupMetricsResponse>({
@@ -424,6 +476,10 @@ export function useBackupMetrics(workspaceId: string | undefined) {
     enabled: Boolean(workspaceId),
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
+    // Do NOT retry the 403 — instance-owner gating is a permission,
+    // not a transient failure. Without this, the row spams the
+    // endpoint every retry interval.
+    retry: false,
   })
 }
 

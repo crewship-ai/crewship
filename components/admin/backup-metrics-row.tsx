@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "motion/react"
-import { Activity, AlertTriangle, HardDrive, Clock } from "lucide-react"
+import { Activity, AlertTriangle, HardDrive, Timer, Lock } from "lucide-react"
 
 import { useBackupMetrics } from "@/hooks/use-backups"
 import { cn } from "@/lib/utils"
@@ -18,18 +18,12 @@ function formatBytes(n: number): string {
   return `${v.toFixed(1)} ${units[i]}`
 }
 
-function formatRelative(iso: string | undefined): string {
-  if (!iso) return "—"
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return "—"
-  const delta = Math.max(0, Date.now() - t)
-  const min = Math.floor(delta / 60_000)
-  if (min < 1) return "just now"
-  if (min < 60) return `${min}m ago`
-  const hr = Math.floor(min / 60)
-  if (hr < 24) return `${hr}h ago`
-  const d = Math.floor(hr / 24)
-  return `${d}d ago`
+function formatSeconds(s: number): string {
+  if (!s || s < 1) return "—"
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  return rem >= 1 ? `${m}m ${rem.toFixed(0)}s` : `${m}m`
 }
 
 interface MetricsRowProps {
@@ -37,55 +31,95 @@ interface MetricsRowProps {
 }
 
 /**
- * Live metrics row at the top of the Backups tab. Polled every 30s
- * (configured in the hook) so an admin who leaves the tab open sees
- * the success/fail counters tick up after each scheduled run finishes.
+ * Process-wide backup counters. Backend gates this endpoint on the
+ * CREWSHIP_INSTANCE_OWNER_EMAIL env var; in self-hosted multi-tenant
+ * deployments the metrics show ALL workspaces' counters, so a
+ * workspace owner can't see them by design.
  *
- * Designed to silently render zeros if the metrics endpoint is missing
- * (older self-hosted servers): the row never throws, never blocks the
- * rest of the tab. The endpoint is so cheap that the polling cost is
- * negligible even on a 30s interval.
+ * UX policy: render an explanatory chip when the gate refuses us
+ * rather than silently no-op. Operators who DO have instance-owner
+ * email get the full counter row; everyone else sees one line
+ * explaining how to enable it.
  */
 export function BackupMetricsRow({ workspaceId }: MetricsRowProps) {
-  const { data, isLoading, isError } = useBackupMetrics(workspaceId)
+  const { data, isLoading, isError, error } = useBackupMetrics(workspaceId)
 
-  // Hidden until first load completes — saves a flash of empty placeholders
-  // and avoids competing for attention with the status banner above us.
   if (isLoading) return null
-  if (isError || !data) return null
 
-  // The four metrics are colour-coded by category (success/failure/disk/age)
-  // so the operator can scan in O(1). Tailwind colours match the rest of
-  // the admin palette (emerald = good, amber = warn, sky = neutral info).
+  if (isError) {
+    // Surface the gate explicitly so a workspace owner who notices the
+    // missing row understands WHY rather than assuming the feature is
+    // broken. Other errors (network, 5xx) get a generic line.
+    const msg = error instanceof Error ? error.message : ""
+    const isGated = /instance owner/i.test(msg)
+    return (
+      <div className="px-3 py-2 rounded-md border border-border/60 bg-muted/30 text-[11px] text-muted-foreground flex items-center gap-2">
+        <AlertTriangle className="h-3 w-3 shrink-0 opacity-60" />
+        {isGated ? (
+          <span>
+            Process-wide backup metrics are visible only to the instance owner — set{" "}
+            <code className="font-mono text-foreground/80">CREWSHIP_INSTANCE_OWNER_EMAIL</code>{" "}
+            in the server's <code className="font-mono text-foreground/80">.env.local</code> to
+            your email and restart.
+          </span>
+        ) : (
+          <span>Couldn't load backup metrics: {msg || "unknown error"}</span>
+        )}
+      </div>
+    )
+  }
+
+  if (!data) return null
+
   const stats = [
     {
-      label: "Successful (24h)",
-      value: data.successes_24h,
+      label: "Created",
+      value: data.created_total.toLocaleString(),
       icon: Activity,
       tone: "text-emerald-500",
+      sub: data.created_by_scope
+        ? Object.entries(data.created_by_scope)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ")
+        : "",
     },
     {
-      label: "Failed (24h)",
-      value: data.failures_24h,
+      label: "Failed",
+      value: data.failed_total.toLocaleString(),
       icon: AlertTriangle,
-      tone: data.failures_24h > 0 ? "text-amber-500" : "text-muted-foreground",
+      tone: data.failed_total > 0 ? "text-amber-500" : "text-muted-foreground",
+      sub: data.failed_by_reason
+        ? Object.entries(data.failed_by_reason)
+            .slice(0, 2)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ")
+        : "",
     },
     {
-      label: "Bundles on disk",
-      value: `${data.total_bundles} · ${formatBytes(data.total_size_bytes)}`,
-      icon: HardDrive,
+      label: "Restored",
+      value: data.restored_total.toLocaleString(),
+      icon: Lock,
       tone: "text-sky-400",
+      sub: "",
     },
     {
-      label: "Latest backup",
-      value: formatRelative(data.newest_at),
-      icon: Clock,
+      label: "Total bytes",
+      value: formatBytes(data.size_bytes_total),
+      icon: HardDrive,
+      tone: "text-violet-400",
+      sub: "",
+    },
+    {
+      label: "Duration p50",
+      value: formatSeconds(data.duration_seconds_p50),
+      icon: Timer,
       tone: "text-muted-foreground",
+      sub: data.duration_seconds_p95 ? `p95 ${formatSeconds(data.duration_seconds_p95)}` : "",
     },
   ]
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
       {stats.map((s, i) => {
         const Icon = s.icon
         return (
@@ -102,6 +136,11 @@ export function BackupMetricsRow({ workspaceId }: MetricsRowProps) {
                 {s.label}
               </div>
               <div className="text-sm font-mono mt-0.5 truncate">{s.value}</div>
+              {s.sub ? (
+                <div className="text-[10px] text-muted-foreground mt-0.5 font-mono truncate">
+                  {s.sub}
+                </div>
+              ) : null}
             </div>
           </motion.div>
         )
