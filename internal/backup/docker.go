@@ -132,6 +132,15 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 // path-resolves through the container's live mount table (so named
 // volumes like /home/agent are visible) and bypasses Docker's
 // archive-API rootfs check entirely.
+//
+// Concurrency note: stdout/stderr MUST be drained concurrently with
+// stdin pumping. Sequential drain (write all → close → drain) deadlocks
+// once the daemon's hijacked-conn output buffer fills, because the
+// daemon stops reading our stdin until we read its stdout. Multi-GB
+// volumes (mise + pyenv + node_modules) hit this trivially. Verified
+// on dev3: a 477 MiB bundle hung tar with stdin blocked at ~1 MB
+// transferred. The goroutine here pumps output continuously so back
+// pressure flows correctly.
 func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
 	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd:          []string{"tar", "-xf", "-", "-C", dstPath},
@@ -148,30 +157,50 @@ func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath s
 		return fmt.Errorf("backup: exec-tar attach %s:%s: %w", containerID, dstPath, err)
 	}
 	defer resp.Close()
-	// Pump the tar stream into the exec's stdin; close the write side
-	// so tar sees EOF and exits.
-	if _, err := io.Copy(resp.Conn, content); err != nil {
-		return fmt.Errorf("backup: exec-tar stdin %s:%s: %w", containerID, dstPath, err)
+
+	// Drain stdout/stderr concurrently so the daemon's output buffer
+	// can never fill and back-pressure the input pump. Buffer captured
+	// for inclusion in any non-zero-exit error message.
+	type drainResult struct {
+		out []byte
+		err error
 	}
-	if err := resp.CloseWrite(); err != nil {
-		return fmt.Errorf("backup: exec-tar close-write %s:%s: %w", containerID, dstPath, err)
+	drainCh := make(chan drainResult, 1)
+	go func() {
+		var combined bytes.Buffer
+		_, err := stdcopy.StdCopy(&combined, &combined, resp.Reader)
+		drainCh <- drainResult{out: combined.Bytes(), err: err}
+	}()
+
+	// Pump the tar stream into the exec's stdin; CloseWrite so tar
+	// sees EOF and exits.
+	pumpErr := func() error {
+		if _, err := io.Copy(resp.Conn, content); err != nil {
+			return fmt.Errorf("backup: exec-tar stdin %s:%s: %w", containerID, dstPath, err)
+		}
+		if err := resp.CloseWrite(); err != nil {
+			return fmt.Errorf("backup: exec-tar close-write %s:%s: %w", containerID, dstPath, err)
+		}
+		return nil
+	}()
+
+	// Wait for the drain goroutine even if pump failed — the deferred
+	// resp.Close would otherwise race with StdCopy and produce
+	// confusing errors.
+	drained := <-drainCh
+	if pumpErr != nil {
+		return pumpErr
 	}
-	// Drain stdout/stderr so the daemon doesn't block. tar -xf is
-	// silent on success; any output here is a problem the operator
-	// should see in the wrapped error.
-	var combined bytes.Buffer
-	if _, err := stdcopy.StdCopy(&combined, &combined, resp.Reader); err != nil {
-		return fmt.Errorf("backup: exec-tar drain %s:%s: %w", containerID, dstPath, err)
+	if drained.err != nil && !errors.Is(drained.err, io.EOF) {
+		return fmt.Errorf("backup: exec-tar drain %s:%s: %w", containerID, dstPath, drained.err)
 	}
-	// Inspect to get the exit code — non-zero means tar failed and we
-	// need to surface that as a hard error rather than silently
-	// dropping a section.
+
 	insp, err := m.Client.ContainerExecInspect(ctx, exec.ID)
 	if err != nil {
 		return fmt.Errorf("backup: exec-tar inspect %s:%s: %w", containerID, dstPath, err)
 	}
 	if insp.ExitCode != 0 {
-		return fmt.Errorf("backup: exec-tar to %s:%s exited %d: %s", containerID, dstPath, insp.ExitCode, strings.TrimSpace(combined.String()))
+		return fmt.Errorf("backup: exec-tar to %s:%s exited %d: %s", containerID, dstPath, insp.ExitCode, strings.TrimSpace(string(drained.out)))
 	}
 	return nil
 }
