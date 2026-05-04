@@ -82,6 +82,7 @@ enum SkillSource {
   MANAGED
   MARKETPLACE
   CUSTOM
+  GENERATED
 }
 
 enum SkillCategory {
@@ -91,7 +92,35 @@ enum SkillCategory {
   DEVOPS
   SUPPORT
   SALES
+  WRITING
+  RESEARCH
+  PM
+  DESIGN
+  SECURITY
+  FINANCE
+  OPS
   CUSTOM
+}
+
+enum SkillRuntime {
+  INSTRUCTIONS
+  SCRIPT
+  MCP
+  HYBRID
+}
+
+enum SkillMaturity {
+  OFFICIAL
+  CURATED
+  COMMUNITY
+  EXPERIMENTAL
+}
+
+enum SkillScanStatus {
+  UNSCANNED
+  CLEAN
+  FLAGGED
+  BLOCKED
 }
 
 enum VerificationStatus {
@@ -477,6 +506,14 @@ model Skill {
   tool_count            Int?
   defer_loading         Boolean            @default(false)
 
+  vendor              String?
+  homepage            String?
+  spdx_license        String?
+  runtime             SkillRuntime       @default(INSTRUCTIONS)
+  maturity            SkillMaturity      @default(COMMUNITY)
+  scan_status         SkillScanStatus    @default(UNSCANNED)
+  description_quality String?
+
   verification      VerificationStatus @default(UNVERIFIED)
   security_score    Int?
   security_report   Json?
@@ -504,6 +541,9 @@ model Skill {
   @@index([verification], name: "idx_skill_verification")
   @@index([featured], name: "idx_skill_featured")
   @@index([author_id], name: "idx_skill_author")
+  @@index([vendor], name: "idx_skill_vendor")
+  @@index([maturity], name: "idx_skill_maturity")
+  @@index([runtime], name: "idx_skill_runtime")
   @@map("skills")
 }
 
