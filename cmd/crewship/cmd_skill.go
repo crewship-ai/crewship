@@ -34,22 +34,29 @@ var skillListCmd = &cobra.Command{
 		}
 
 		var skills []struct {
-			ID       string `json:"id"`
-			Slug     string `json:"slug"`
-			Name     string `json:"display_name"`
-			Category string `json:"category"`
-			Version  string `json:"version"`
-			Source   string `json:"source"`
+			ID         string  `json:"id"`
+			Slug       string  `json:"slug"`
+			Name       string  `json:"display_name"`
+			Category   string  `json:"category"`
+			Version    string  `json:"version"`
+			Source     string  `json:"source"`
+			Vendor     *string `json:"vendor"`
+			Maturity   string  `json:"maturity"`
+			ScanStatus string  `json:"scan_status"`
 		}
 		if err := cli.ReadJSON(resp, &skills); err != nil {
 			return err
 		}
 
 		f := newFormatter()
-		headers := []string{"SLUG", "NAME", "CATEGORY", "VERSION", "SOURCE"}
+		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN"}
 		var rows [][]string
 		for _, s := range skills {
-			rows = append(rows, []string{s.Slug, s.Name, s.Category, s.Version, s.Source})
+			vendor := "—"
+			if s.Vendor != nil && *s.Vendor != "" {
+				vendor = *s.Vendor
+			}
+			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus})
 		}
 		return f.Auto(skills, headers, rows)
 	},
