@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
+import { CreateSkillDialog } from "@/components/features/skills/create-skill-dialog"
 import { SkillCard, type SkillCardData } from "@/components/features/skills/skill-card"
 import { SkillsDetailPanel } from "@/components/features/skills/skills-detail-panel"
 
@@ -289,8 +290,13 @@ export function SkillsBrowser() {
   // react-resizable-panels v4 dropped autoSaveId in favour of a layout
   // hook + storage handle. Wiring localStorage by hand keeps the same
   // "panel widths persist across reloads" UX the user asked for.
+  //
+  // Bumped key to v3 to invalidate every previously-persisted layout —
+  // the v1/v2 saved states from earlier sprints were cropping the rail
+  // and detail to unreadable widths on re-mount because the min was
+  // too lenient.
   const persistedLayout = useDefaultLayout({
-    id: "crewship.skills.browser.layout.v1",
+    id: "crewship.skills.browser.layout.v3",
     panelIds: ["skills-rail", "skills-grid", "skills-detail"],
     storage: typeof window !== "undefined" ? window.localStorage : undefined,
   })
@@ -323,13 +329,7 @@ export function SkillsBrowser() {
 
         {workspaceId && (
           <>
-            <button
-              type="button"
-              className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-            >
-              <Sparkles className="h-3 w-3" />
-              Create Skill
-            </button>
+            <CreateSkillDialog workspaceId={workspaceId} onCreated={reload} />
             <ImportSkillDialog
               workspaceId={workspaceId}
               onImported={reload}
@@ -355,7 +355,7 @@ export function SkillsBrowser() {
       {/* LEFT — filter rail. autoSaveId persists user-dragged size to
           localStorage across reloads, like the user asked. minSize keeps
           the rail readable; maxSize prevents accidental fullscreen drag. */}
-      <Panel defaultSize={18} minSize={13} maxSize={32} id="skills-rail">
+      <Panel defaultSize={20} minSize={17} maxSize={32} id="skills-rail">
         <aside className="flex flex-col h-full bg-card border-r border-white/[0.1] overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
@@ -455,7 +455,7 @@ export function SkillsBrowser() {
       <PanelResizeHandle className="w-px bg-white/[0.08] hover:bg-blue-500/40 hover:w-0.5 data-[resize-handle-active]:bg-blue-500/60 transition-colors" />
 
       {/* CENTER — toolbar + chips + grid */}
-      <Panel defaultSize={55} minSize={32} id="skills-grid">
+      <Panel defaultSize={52} minSize={36} id="skills-grid">
         <main className="flex flex-col h-full bg-card/40 min-h-0">
           <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/[0.05] shrink-0">
             <div className="text-[12px] text-white/55">
@@ -529,7 +529,7 @@ export function SkillsBrowser() {
       <PanelResizeHandle className="w-px bg-white/[0.08] hover:bg-blue-500/40 hover:w-0.5 data-[resize-handle-active]:bg-blue-500/60 transition-colors" />
 
       {/* RIGHT — detail panel */}
-      <Panel defaultSize={27} minSize={20} maxSize={50} id="skills-detail">
+      <Panel defaultSize={28} minSize={22} maxSize={45} id="skills-detail">
         <aside className="flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
           <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
         </aside>

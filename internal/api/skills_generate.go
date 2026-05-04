@@ -244,14 +244,21 @@ func nullableString(v interface{}) string {
 
 func (h *SkillGenerateHandler) resolveAnthropicProvider(ctx context.Context, wsID string) (llm.Provider, error) {
 	var encryptedValue string
+	// Accept both API_KEY (admin-provisioned) and AI_CLI_TOKEN (the
+	// flavour the seed flow + login wizard write). Real workspaces in
+	// practice only ever have AI_CLI_TOKEN, so a strict API_KEY filter
+	// here returned 412 on every install — caught only after running
+	// the CLI on dev1. Type ordering favours API_KEY when both exist
+	// because admin-provisioned keys carry more headroom than the
+	// per-developer CLI tokens.
 	err := h.db.QueryRowContext(ctx, `
 		SELECT encrypted_value FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = 'ANTHROPIC'
-		  AND type = 'API_KEY'
+		  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
-		ORDER BY created_at ASC
+		ORDER BY CASE type WHEN 'API_KEY' THEN 0 ELSE 1 END, created_at ASC
 		LIMIT 1`, wsID).Scan(&encryptedValue)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
