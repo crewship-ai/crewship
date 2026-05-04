@@ -179,6 +179,40 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
+	// 2. Reconcile each crew's ContainerID against the Docker daemon.
+	// LoadX populates ContainerID purely from the slug→name function,
+	// which means crews that have never been provisioned (no container
+	// ever created) still get an ID. Trying to pause a non-existent
+	// container later produces the cryptic "No such container" error
+	// instead of a clean skip — and that fails the WHOLE backup, not
+	// just the missing crew. Probe upfront and clear ContainerID for
+	// any crew whose container doesn't exist; CollectCrew already
+	// no-ops on empty ContainerID, so DB rows still backup correctly
+	// while the live filesystem section is simply absent for those
+	// crews. Probe is cheap (single Docker /containers/$name/json
+	// call per crew) and runs in serial — workspaces with hundreds of
+	// crews would want batching, but that's not a v1 concern.
+	if opts.DockerOps != nil {
+		for i := range target.CrewTargets {
+			c := &target.CrewTargets[i]
+			if c.ContainerID == "" {
+				continue
+			}
+			exists, exErr := opts.DockerOps.ContainerExists(ctx, c.ContainerID)
+			if exErr != nil {
+				// Probe failed (Docker daemon issue, network glitch).
+				// Don't fail the backup — clear the ID so collection
+				// is skipped for this crew, and let the operator see
+				// it via the manifest's WorkspaceIncluded=false flag.
+				c.ContainerID = ""
+				continue
+			}
+			if !exists {
+				c.ContainerID = ""
+			}
+		}
+	}
+
 	// 2a. Acquire the in-process workspace guard BEFORE the DB lock.
 	// This closes the TOCTOU race with mission-start: without it, a
 	// request already past refuseIfBackupInProgress could register a
