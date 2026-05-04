@@ -175,16 +175,16 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []skillResponse{}
 	}
 
-	// Populate installed_on only when the caller asked for the
-	// Installed view — the join would double-roundtrip the Browse list
-	// for a feature only one tab uses. One query collects every
-	// agent_skills row across the result set in one pass; we then
-	// fan it out into the per-skill arrays in Go.
-	if installedFlag || installedForAgent != "" {
-		if err := h.populateInstalledOn(r, result); err != nil {
-			h.logger.Warn("populate installed_on", "error", err)
-			// Non-fatal — the cards will render without avatars.
-		}
+	// Always populate installed_on so the Browse tab can also surface
+	// 'already installed somewhere' badges per the user request — a
+	// skill the user has on three agents reads very differently from
+	// one that's pristine and the card needs to show that. The query
+	// is a single IN-clause keyed on the result IDs (one round-trip
+	// regardless of result-set size), so the cost is bounded and
+	// acceptable on Browse too.
+	if err := h.populateInstalledOn(r, result); err != nil {
+		h.logger.Warn("populate installed_on", "error", err)
+		// Non-fatal — the cards will render without avatars.
 	}
 
 	writeJSON(w, http.StatusOK, result)
