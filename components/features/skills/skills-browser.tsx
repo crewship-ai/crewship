@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
-import { CreateSkillDialog } from "@/components/features/skills/create-skill-dialog"
 import { SkillCard, type SkillCardData } from "@/components/features/skills/skill-card"
 import { SkillsDetailPanel } from "@/components/features/skills/skills-detail-panel"
 
@@ -327,21 +326,23 @@ export function SkillsBrowser() {
         <div className="flex-1" />
 
         {workspaceId && (
-          <>
-            <CreateSkillDialog workspaceId={workspaceId} onCreated={reload} />
-            <ImportSkillDialog
-              workspaceId={workspaceId}
-              onImported={reload}
-              triggerVariant="outline"
-              triggerSize="sm"
-              triggerLabel={
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                  <Plus className="h-3 w-3" />
-                  Import
-                </span>
-              }
-            />
-          </>
+          // Skill authoring is CLI-only by design (crewship skill create).
+          // The UI button lived here briefly but the LLM-authoring flow
+          // has too many environment-level prerequisites (workspace
+          // ANTHROPIC API_KEY etc.) to surface as a one-click action;
+          // CLI-first is the v0.1 stance the user picked.
+          <ImportSkillDialog
+            workspaceId={workspaceId}
+            onImported={reload}
+            triggerVariant="outline"
+            triggerSize="sm"
+            triggerLabel={
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                <Plus className="h-3 w-3" />
+                Import
+              </span>
+            }
+          />
         )}
       </div>
 

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 import {
   Copy, Check, X, ShieldCheck, BadgeCheck, Lock, Dot, Sparkles,
-  AlertTriangle, Loader2,
+  AlertTriangle, Loader2, Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -34,6 +34,13 @@ interface AgentRow {
   slug: string
   crew_id: string | null
   crew?: { id: string; name: string; slug: string } | null
+}
+
+interface AgentSkillRow {
+  id: string  // agent_skills row id
+  agent_id: string
+  skill_id: string
+  enabled: boolean
 }
 
 interface CrewRow {
@@ -169,6 +176,7 @@ export function SkillsDetailPanel({
       <footer className="border-t border-white/[0.08] p-3 flex items-center gap-2 text-xs shrink-0">
         <InstallToAgentDialog skill={skill} workspaceId={workspaceId} onInstalled={onChanged} />
         <AssignToCrewDialog skill={skill} workspaceId={workspaceId} onAssigned={onChanged} />
+        <UninstallSkillDialog skill={skill} workspaceId={workspaceId} onUninstalled={onChanged} />
       </footer>
     </div>
   )
@@ -362,6 +370,193 @@ function InstallToAgentDialog({
 // current agent roster. New agents added later won't auto-receive the
 // skill — documented in the dialog body so the user knows the
 // limitation.
+// UninstallSkillDialog opens a multi-select of every agent that
+// currently has this skill installed. Submitting fires DELETE
+// /api/v1/agents/{agentId}/skills/{skillId}?workspace_id=… for each
+// selected agent. Idempotent: 404 is treated as success because the
+// row may have been removed in another tab.
+//
+// We resolve "agents that have this skill" by fetching the workspace
+// agent list and the skill detail's agent_count proxy, then probe
+// each agent's skill list. That's N requests on dialog open which is
+// fine at v0.1 scale (≤50 agents per workspace); a dedicated
+// /skills/{id}/agents endpoint will collapse this once the row count
+// climbs.
+function UninstallSkillDialog({
+  skill,
+  workspaceId,
+  onUninstalled,
+}: {
+  skill: SkillCardData
+  workspaceId: string | null
+  onUninstalled?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [installed, setInstalled] = useState<AgentRow[]>([])
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || !workspaceId) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    // Two requests: list of agents in workspace, then per-agent skill
+    // list. Probing in parallel keeps the dialog open-time tolerable
+    // even at the worst-case 50 agents.
+    fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
+      .then(async (agents: AgentRow[]) => {
+        const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
+        const checks = await Promise.all(
+          agents.map(async (a) => {
+            const res = await fetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`)
+            if (!res.ok) return { agent: a, has: false }
+            const rows = (await res.json().catch(() => [])) as AgentSkillRow[]
+            return { agent: a, has: rows.some((r) => r.skill_id === skill.id) }
+          }),
+        )
+        if (cancelled) return
+        setInstalled(checks.filter((c) => c.has).map((c) => c.agent))
+      })
+      .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "load failed"))
+      .finally(() => !cancelled && setLoading(false))
+    return () => {
+      cancelled = true
+    }
+  }, [open, workspaceId, skill.id])
+
+  async function handleUninstall() {
+    if (picked.size === 0 || !workspaceId) return
+    setSubmitting(true)
+    setError(null)
+    const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
+    const errors: string[] = []
+    for (const agentId of picked) {
+      try {
+        const res = await fetch(
+          `/api/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skill.id)}?${wsParam}`,
+          { method: "DELETE" },
+        )
+        // 404 = row already gone → treat as success (concurrent unassign in another tab).
+        if (!res.ok && res.status !== 404) {
+          const body = await res.text().catch(() => res.statusText)
+          let detail = body
+          try {
+            const parsed = JSON.parse(body) as { detail?: string; error?: string }
+            detail = parsed.detail ?? parsed.error ?? body
+          } catch {
+            // raw body
+          }
+          errors.push(`${agentId}: ${detail || res.statusText}`)
+        }
+      } catch {
+        errors.push(`${agentId}: network error`)
+      }
+    }
+    setSubmitting(false)
+    if (errors.length > 0) {
+      setError(`Failed for ${errors.length} of ${picked.size}: ${errors[0]}`)
+      return
+    }
+    setOpen(false)
+    setPicked(new Set())
+    onUninstalled?.()
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v)
+        if (!v) {
+          setPicked(new Set())
+          setError(null)
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="sm" variant="ghost" className="px-2 text-red-300 hover:text-red-200 hover:bg-red-500/[0.08]" aria-label="Uninstall this skill from agents">
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Uninstall {skill.display_name ?? skill.name}</DialogTitle>
+          <DialogDescription>
+            Remove this skill from selected agents. The SKILL.md row in the workspace catalog stays — only the per-agent assignment is removed. Idempotent: re-running on an agent that already lost the row is a no-op.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
+          {loading ? (
+            <div className="p-4 text-center text-xs text-white/45">
+              <Loader2 className="h-3 w-3 inline mr-1 animate-spin" />
+              Looking up agents that have this skill installed…
+            </div>
+          ) : installed.length === 0 ? (
+            <div className="p-4 text-center text-xs text-white/45">
+              No agents currently have this skill installed.
+            </div>
+          ) : (
+            installed.map((a) => {
+              const selected = picked.has(a.id)
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() =>
+                    setPicked((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(a.id)) next.delete(a.id)
+                      else next.add(a.id)
+                      return next
+                    })
+                  }
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                    selected ? "bg-red-500/[0.12]" : "hover:bg-white/[0.04]"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3 w-3 rounded border ${
+                      selected ? "border-red-400 bg-red-500" : "border-white/20"
+                    }`}
+                  />
+                  <span className="font-medium text-white/90 flex-1 truncate">{a.name}</span>
+                  {a.crew && (
+                    <span className="text-[10px] text-white/45 truncate">{a.crew.name}</span>
+                  )}
+                </button>
+              )
+            })
+          )}
+        </div>
+
+        {error && (
+          <div className="text-xs text-red-300 flex items-start gap-1">
+            <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleUninstall}
+            disabled={picked.size === 0 || submitting}
+            variant="destructive"
+          >
+            {submitting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Trash2 className="h-3 w-3 mr-1" />}
+            Uninstall ({picked.size})
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AssignToCrewDialog({
   skill,
   workspaceId,
