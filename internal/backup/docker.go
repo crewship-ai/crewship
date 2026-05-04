@@ -142,8 +142,27 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 // transferred. The goroutine here pumps output continuously so back
 // pressure flows correctly.
 func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	// Tar flags rationale (verified against dev3 GNU tar 1.34 inside
+	// devcontainer base image):
+	//   --overwrite        replace existing files (volume keeps state
+	//                      across restarts; default tar refuses)
+	//   --no-same-owner    don't chown — running as root means tar
+	//                      tries to apply uid:gid from the archive,
+	//                      but the volume's filesystem may not
+	//                      permit it ("Operation not permitted")
+	//   --no-same-permissions   keep destination's perms; avoids
+	//                           Operation-not-permitted on bind mounts
+	//   --touch            don't restore mtimes (utime fails on the
+	//                      volume root for the same fs reason)
+	// Together these reduce restore to "land file contents at correct
+	// paths" — exactly what the user wants and what survives the
+	// permission constraints of bind-mounted volumes.
 	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd:          []string{"tar", "-xf", "-", "-C", dstPath},
+		Cmd: []string{
+			"tar", "-x",
+			"--overwrite", "--no-same-owner", "--no-same-permissions", "--touch",
+			"-f", "-", "-C", dstPath,
+		},
 		User:         "0:0",
 		AttachStdin:  true,
 		AttachStdout: true,
