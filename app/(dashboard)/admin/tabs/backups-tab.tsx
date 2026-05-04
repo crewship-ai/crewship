@@ -1,6 +1,6 @@
 "use client"
 
-import { Plus, Database } from "lucide-react"
+import { Plus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { BackupCreateDialog } from "@/components/admin/backup-create-dialog"
@@ -17,11 +17,13 @@ export function BackupsTab({ workspaceId }: { workspaceId: string | undefined })
   const openCreate = useBackupStore((s) => s.openCreate)
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Database className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Backups</h2>
-        </div>
+      {/*
+       * No local "Backups" header — admin/page.tsx already renders the
+       * activeItem header (icon + name) above renderContent(). Dropping
+       * this duplicate also restores the Create button position to the
+       * top-right of the section, matching every other admin tab.
+       */}
+      <div className="flex items-center justify-end">
         <Button size="sm" onClick={openCreate} data-testid="backup-create-btn">
           <Plus className="h-3.5 w-3.5 mr-1" />
           Create Backup
