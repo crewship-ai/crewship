@@ -757,6 +757,29 @@ ALTER TABLE credentials ADD COLUMN last_used_at TEXT;
 ALTER TABLE credentials ADD COLUMN last_used_ips TEXT;
 CREATE INDEX IF NOT EXISTS idx_credentials_last_used ON credentials(last_used_at);
 `},
+	// v66 adds mcp_tool_bindings for the per-tool enable/disable feature
+	// (Cursor parity, biggest MVP differentiator vs. Cursor/Continue per
+	// CONNECTIONS.md §3.1). One MCP server publishes N tools via
+	// mcp/list-tools; agents bound to that server see the union of
+	// enabled tools. mcp_server_id+mcp_server_scope mirrors the
+	// agent_mcp_bindings discriminator pattern (workspace_mcp_servers vs
+	// crew_mcp_servers live in separate ID spaces). description is
+	// optional — populated when the sidecar refreshes from the live
+	// server, NULL when the row was created manually.
+	{version: 66, name: "add_mcp_tool_bindings", sql: `
+CREATE TABLE IF NOT EXISTS mcp_tool_bindings (
+	id TEXT PRIMARY KEY,
+	mcp_server_id TEXT NOT NULL,
+	mcp_server_scope TEXT NOT NULL CHECK(mcp_server_scope IN ('workspace','crew')),
+	tool_name TEXT NOT NULL,
+	description TEXT,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(mcp_server_id, mcp_server_scope, tool_name)
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_bindings_server ON mcp_tool_bindings(mcp_server_id, mcp_server_scope);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

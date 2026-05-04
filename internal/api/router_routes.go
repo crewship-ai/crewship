@@ -131,6 +131,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
+	// Per-tool granularity (Cursor parity, CONNECTIONS.md §3.1)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools", authed(wsCtx(http.HandlerFunc(integrations.ListCrewIntegrationTools))))
+	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegrationTool))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh", authed(wsCtx(http.HandlerFunc(integrations.RefreshCrewIntegrationTools))))
 	// Agent MCP bindings
 	r.mux.Handle("GET /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.ListAgentBindings))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.CreateAgentBinding))))
