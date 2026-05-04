@@ -144,26 +144,38 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
 	// Tar flags rationale (verified against dev3 GNU tar 1.34 inside
 	// devcontainer base image):
-	//   --overwrite        replace existing files (volume keeps state
-	//                      across restarts; default tar refuses)
-	//   --no-same-owner    don't chown — running as root means tar
-	//                      tries to apply uid:gid from the archive,
-	//                      but the volume's filesystem may not
-	//                      permit it ("Operation not permitted")
-	//   --no-same-permissions   keep destination's perms; avoids
-	//                           Operation-not-permitted on bind mounts
-	//   --touch            don't restore mtimes (utime fails on the
-	//                      volume root for the same fs reason)
-	// Together these reduce restore to "land file contents at correct
-	// paths" — exactly what the user wants and what survives the
-	// permission constraints of bind-mounted volumes.
+	//   --recursive-unlink  delete each file/dir before writing the
+	//                       new copy — defeats "Cannot open: File
+	//                       exists" on volumes the container has
+	//                       been writing to between backup and
+	//                       restore (mise + pyenv state is the worst
+	//                       offender). Pairs with --overwrite below
+	//                       so dirs get cleared too.
+	//   --overwrite         replace existing files outright
+	//   --no-same-owner     don't chown — running as the agent user
+	//                       (uid 1001) we can't chown to other uids
+	//                       and don't want to preserve archive uids
+	//                       across restored crew identities anyway
+	//   --no-same-permissions   trust destination's defaults; avoids
+	//                           EPERM on filesystems that refuse mode
+	//                           changes
+	//   --touch             don't restore mtimes (utime would fail on
+	//                       volume root with EPERM)
+	//
+	// Runs as the AGENT user (1001:1001) rather than root because the
+	// volume's existing files were created by agent and root inside
+	// the container often lacks write to user-owned files due to the
+	// filesystem driver's uid remapping. Tar fails open with
+	// "Permission denied" when root tries to overwrite an
+	// agent-owned file under those conditions.
 	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd: []string{
 			"tar", "-x",
-			"--overwrite", "--no-same-owner", "--no-same-permissions", "--touch",
+			"--recursive-unlink", "--overwrite",
+			"--no-same-owner", "--no-same-permissions", "--touch",
 			"-f", "-", "-C", dstPath,
 		},
-		User:         "0:0",
+		User:         "1001:1001",
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
