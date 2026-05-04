@@ -33,6 +33,7 @@ import {
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { AddCredentialWizard } from "@/components/features/credentials/add-credential-wizard"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
+import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
 import { EditCredentialDialog } from "@/components/features/credentials/edit-credential-dialog"
 import type { CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatDate, formatRelativeTime } from "@/lib/time"
@@ -179,6 +180,8 @@ export default function CredentialsPage() {
   const [collapsedProviders, setCollapsedProviders] = React.useState<Set<string>>(new Set())
   const [detailCredential, setDetailCredential] = React.useState<Credential | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
+  const [rotateCredential, setRotateCredential] = React.useState<Credential | null>(null)
+  const [rotateOpen, setRotateOpen] = React.useState(false)
 
   const fetchWorkspace = React.useCallback(async () => {
     try {
@@ -683,9 +686,20 @@ export default function CredentialsPage() {
           onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailCredential(null) }}
           onRefresh={handleRefresh}
           onRotate={(c) => {
-            // Rotation dialog wiring lands in EPIC 4.1; for now stub.
-            console.log("Rotate requested:", c.id)
+            setRotateCredential(c as unknown as Credential)
+            setRotateOpen(true)
           }}
+        />
+      )}
+
+      {workspaceId && rotateCredential && (
+        <RotationDialog
+          workspaceId={workspaceId}
+          credentialId={rotateCredential.id}
+          credentialName={rotateCredential.name}
+          open={rotateOpen}
+          onOpenChange={(o) => { setRotateOpen(o); if (!o) setRotateCredential(null) }}
+          onRotated={handleRefresh}
         />
       )}
 
