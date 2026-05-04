@@ -117,7 +117,9 @@ func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		if errors.Is(err, errNoActiveAnthropicCredential) {
 			writeProblem(w, r, http.StatusPreconditionFailed,
-				"workspace has no active Anthropic API key — add one under /settings/credentials and retry")
+				"skill generation needs an Anthropic API key (provider=ANTHROPIC, type=API_KEY). "+
+					"Workspaces with only an AI_CLI_TOKEN (OAuth from Claude Code login) won't work — that token is a Bearer for claude.ai, not the Messages API. "+
+					"Add an x-api-key (sk-ant-…) under Settings › Credentials and retry.")
 			return
 		}
 		h.logger.Error("resolve anthropic provider", "error", err, "ws_id", wsID)
@@ -244,21 +246,21 @@ func nullableString(v interface{}) string {
 
 func (h *SkillGenerateHandler) resolveAnthropicProvider(ctx context.Context, wsID string) (llm.Provider, error) {
 	var encryptedValue string
-	// Accept both API_KEY (admin-provisioned) and AI_CLI_TOKEN (the
-	// flavour the seed flow + login wizard write). Real workspaces in
-	// practice only ever have AI_CLI_TOKEN, so a strict API_KEY filter
-	// here returned 412 on every install — caught only after running
-	// the CLI on dev1. Type ordering favours API_KEY when both exist
-	// because admin-provisioned keys carry more headroom than the
-	// per-developer CLI tokens.
+	// Strict API_KEY only — the AI_CLI_TOKEN type stores an OAuth
+	// bearer issued by the Claude Code auth flow, which is a
+	// different shape from the x-api-key the Messages API expects.
+	// Sending an OAuth token as x-api-key returns 401 from upstream,
+	// surfacing as a confusing "invalid API key" 502 to the user.
+	// Better to fail at the credential lookup with a clear error
+	// telling the user to add a real API key.
 	err := h.db.QueryRowContext(ctx, `
 		SELECT encrypted_value FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = 'ANTHROPIC'
-		  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
+		  AND type = 'API_KEY'
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
-		ORDER BY CASE type WHEN 'API_KEY' THEN 0 ELSE 1 END, created_at ASC
+		ORDER BY created_at ASC
 		LIMIT 1`, wsID).Scan(&encryptedValue)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
