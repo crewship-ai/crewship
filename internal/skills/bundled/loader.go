@@ -65,27 +65,37 @@ var vendors = map[string]vendorMeta{
 
 // skillManifest enriches a single bundled skill with metadata that is not
 // in upstream frontmatter — the category each skill belongs to in our
-// 12-domain taxonomy, and any per-skill overrides. Keys are
-// "<vendor>/<slug>".
+// 12-domain taxonomy, plus an optional "note" prepended to the content
+// for skills whose upstream copy references companion scripts/references
+// folders that we do not embed (size budget). Keys are "<vendor>/<slug>".
 type skillManifest struct {
 	category string
 	icon     string
+	note     string
 }
 
+const incompleteBundleNote = "" +
+	"> ℹ️ **Bundled subset.** This skill ships with Crewship as a verbatim copy of\n" +
+	"> [anthropics/skills](https://github.com/anthropics/skills/tree/main/skills/%s)\n" +
+	"> (Apache-2.0). The upstream repo includes `scripts/` and `references/`\n" +
+	"> directories that are **not embedded** in this v0.1 bundle. Instructions\n" +
+	"> below that reference those paths will not work as-is — fetch the full\n" +
+	"> skill via `crewship skill import` to get the companion files.\n\n"
+
 var manifests = map[string]skillManifest{
-	"anthropic/skill-creator":         {category: "CODING", icon: "sparkles"},
-	"anthropic/mcp-builder":           {category: "CODING", icon: "plug"},
-	"anthropic/claude-api":            {category: "CODING", icon: "code-2"},
+	"anthropic/skill-creator":         {category: "CODING", icon: "sparkles", note: incompleteBundleNote},
+	"anthropic/mcp-builder":           {category: "CODING", icon: "plug", note: incompleteBundleNote},
+	"anthropic/claude-api":            {category: "CODING", icon: "code-2", note: incompleteBundleNote},
 	"anthropic/frontend-design":       {category: "DESIGN", icon: "palette"},
-	"anthropic/web-artifacts-builder": {category: "CODING", icon: "blocks"},
-	"anthropic/webapp-testing":        {category: "CODING", icon: "flask-conical"},
+	"anthropic/web-artifacts-builder": {category: "CODING", icon: "blocks", note: incompleteBundleNote},
+	"anthropic/webapp-testing":        {category: "CODING", icon: "flask-conical", note: incompleteBundleNote},
 	"anthropic/doc-coauthoring":       {category: "WRITING", icon: "file-text"},
 	"anthropic/internal-comms":        {category: "WRITING", icon: "megaphone"},
 	"anthropic/brand-guidelines":      {category: "DESIGN", icon: "swatch-book"},
-	"anthropic/canvas-design":         {category: "DESIGN", icon: "frame"},
-	"anthropic/theme-factory":         {category: "DESIGN", icon: "paintbrush"},
-	"anthropic/algorithmic-art":       {category: "DESIGN", icon: "shapes"},
-	"anthropic/slack-gif-creator":     {category: "DESIGN", icon: "image"},
+	"anthropic/canvas-design":         {category: "DESIGN", icon: "frame", note: incompleteBundleNote},
+	"anthropic/theme-factory":         {category: "DESIGN", icon: "paintbrush", note: incompleteBundleNote},
+	"anthropic/algorithmic-art":       {category: "DESIGN", icon: "shapes", note: incompleteBundleNote},
+	"anthropic/slack-gif-creator":     {category: "DESIGN", icon: "image", note: incompleteBundleNote},
 }
 
 // Install upserts every embedded SKILL.md into the skills table. Idempotent:
@@ -96,7 +106,6 @@ var manifests = map[string]skillManifest{
 func Install(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	installed := 0
-	skipped := 0
 	for vendor, vmeta := range vendors {
 		root := vendor
 		entries, err := fs.ReadDir(bundledFS, root)
@@ -125,6 +134,13 @@ func Install(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 			if man.category == "" {
 				man.category = "CUSTOM"
 			}
+			// Prepend the bundle-incomplete note so users see the limitation
+			// before they hit an instruction that references a file we don't
+			// ship. Note is rendered into the same content blob the model
+			// reads, so it surfaces in chat too — not just the UI.
+			if man.note != "" {
+				parsed.Content = fmt.Sprintf(man.note, slug) + parsed.Content
+			}
 			if err := upsert(ctx, db, parsed, vendor, slug, vmeta, man, now); err != nil {
 				logger.Warn("upsert bundled skill", "key", key, "error", err)
 				continue
@@ -132,7 +148,7 @@ func Install(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 			installed++
 		}
 	}
-	logger.Info("bundled skills installed", "count", installed, "skipped", skipped)
+	logger.Info("bundled skills installed", "count", installed)
 	return nil
 }
 

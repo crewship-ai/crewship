@@ -99,12 +99,16 @@ func TestInstall_Idempotent(t *testing.T) {
 		t.Fatalf("install 1: %v", err)
 	}
 	var first int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM skills WHERE vendor = 'anthropic'`).Scan(&first)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM skills WHERE vendor = 'anthropic'`).Scan(&first); err != nil {
+		t.Fatalf("count after first install: %v", err)
+	}
 	if err := bundled.Install(context.Background(), db, logger); err != nil {
 		t.Fatalf("install 2: %v", err)
 	}
 	var second int
-	_ = db.QueryRow(`SELECT COUNT(*) FROM skills WHERE vendor = 'anthropic'`).Scan(&second)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM skills WHERE vendor = 'anthropic'`).Scan(&second); err != nil {
+		t.Fatalf("count after second install: %v", err)
+	}
 	if first != second {
 		t.Errorf("idempotency broken: %d -> %d", first, second)
 	}
