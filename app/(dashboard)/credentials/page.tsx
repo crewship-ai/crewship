@@ -550,6 +550,9 @@ export default function CredentialsPage() {
                               const derived = deriveStatus(cred)
                               const showStatus = cred.type !== "SECRET"
                               const lastUsed = cred.last_used_at ? formatRelativeTime(cred.last_used_at) : null
+                              const expiresIn = cred.token_expires_at
+                                ? Math.floor((new Date(cred.token_expires_at).getTime() - Date.now()) / (24 * 3600 * 1000))
+                                : null
                               return (
                                 <TableRow
                                   key={cred.id}
@@ -570,7 +573,18 @@ export default function CredentialsPage() {
                                     <div className="flex items-center gap-2">
                                       <TypeIcon className={cn("h-4 w-4 shrink-0", typeColor)} />
                                       <div className="min-w-0">
-                                        <p className="font-medium font-mono text-body">{cred.name}</p>
+                                        <p className="font-medium font-mono text-body flex items-center gap-1.5">
+                                          {cred.name}
+                                          {expiresIn !== null && expiresIn >= 0 && expiresIn <= 30 && (
+                                            <Badge
+                                              variant="outline"
+                                              className="text-[9px] h-4 px-1 border-amber-400/40 text-amber-300 font-mono"
+                                              title={`Expires ${formatDate(cred.token_expires_at!)}`}
+                                            >
+                                              expires in {expiresIn}d
+                                            </Badge>
+                                          )}
+                                        </p>
                                         {cred.account_label && (
                                           <p className="text-label text-muted-foreground">{cred.account_label}</p>
                                         )}
