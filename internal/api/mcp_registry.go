@@ -119,13 +119,39 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 	}
 	defer tx.Rollback()
 
+	// ON CONFLICT(name) DO UPDATE excludes trust_tier and is_featured
+	// from the update set — those are admin-curation fields owned
+	// locally (CONNECTIONS.md §5.6 trust tiers + DO-NOT-BUILD #4 no
+	// faked install counts → featured is our manual signal). A fresh
+	// INSERT seeds them with sane defaults via the schema (`'community'`
+	// and `0`) but the v67 backfill promotes anything historically
+	// flagged is_verified=1 to trust_tier='anthropic'. Future syncs
+	// must never silently demote a curated entry.
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT OR REPLACE INTO mcp_registry_servers
+		INSERT INTO mcp_registry_servers
 			(id, name, display_name, description, icon, transport,
 			 homepage_url, source_url, package_name, package_registry,
 			 command, endpoint, auth_type, env_vars_json, category,
 			 is_verified, synced_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			display_name = excluded.display_name,
+			description = excluded.description,
+			icon = excluded.icon,
+			transport = excluded.transport,
+			homepage_url = excluded.homepage_url,
+			source_url = excluded.source_url,
+			package_name = excluded.package_name,
+			package_registry = excluded.package_registry,
+			command = excluded.command,
+			endpoint = excluded.endpoint,
+			auth_type = excluded.auth_type,
+			env_vars_json = excluded.env_vars_json,
+			category = excluded.category,
+			is_verified = excluded.is_verified,
+			synced_at = excluded.synced_at
+			-- intentionally NOT touched: trust_tier, is_featured
+		`)
 	if err != nil {
 		return fmt.Errorf("prepare upsert statement: %w", err)
 	}
@@ -329,35 +355,84 @@ type mcpRegistryServerRow struct {
 	AuthType        string `json:"auth_type"`
 	EnvVarsJSON     string `json:"env_vars_json"`
 	Category        string `json:"category"`
-	IsVerified      bool   `json:"is_verified"`
-	SyncedAt        string `json:"synced_at"`
+	// IsVerified is the legacy binary flag kept for back-compat with
+	// callers that already render it. Prefer TrustTier for new code —
+	// it carries the 3-tier signal (anthropic / crewship / community).
+	IsVerified bool   `json:"is_verified"`
+	TrustTier  string `json:"trust_tier"`
+	IsFeatured bool   `json:"is_featured"`
+	SyncedAt   string `json:"synced_at"`
 }
 
 func scanRegistryRow(rows *sql.Rows) (mcpRegistryServerRow, error) {
 	var s mcpRegistryServerRow
-	var isVerified int
+	var isVerified, isFeatured int
 	err := rows.Scan(
 		&s.ID, &s.Name, &s.DisplayName, &s.Description, &s.Icon,
 		&s.Transport, &s.HomepageURL, &s.SourceURL,
 		&s.PackageName, &s.PackageRegistry, &s.Command,
 		&s.Endpoint, &s.AuthType, &s.EnvVarsJSON,
-		&s.Category, &isVerified, &s.SyncedAt,
+		&s.Category, &isVerified, &s.TrustTier, &isFeatured, &s.SyncedAt,
 	)
 	s.IsVerified = isVerified != 0
+	s.IsFeatured = isFeatured != 0
 	return s, err
 }
 
 const registrySelectCols = `id, name, display_name, description, icon, transport,
 	homepage_url, source_url, package_name, package_registry, command,
-	endpoint, auth_type, env_vars_json, category, is_verified, synced_at`
+	endpoint, auth_type, env_vars_json, category, is_verified, trust_tier, is_featured, synced_at`
+
+// validTrustTiers gates the ?trust_tier= query param against arbitrary
+// strings — without this any user-supplied value would flow into the
+// SQL fragment and break the prepared-statement contract.
+var validTrustTiers = map[string]struct{}{
+	"anthropic": {},
+	"crewship":  {},
+	"community": {},
+}
+
+// registryFilters captures the optional ?trust_tier= and ?featured=
+// query params shared by List and Search. Returns the WHERE clause
+// fragment (without leading WHERE/AND) and the bind args that match
+// its placeholders, so callers can splice them onto whatever fixed
+// predicate they already have.
+func parseRegistryFilters(r *http.Request) (clause string, args []any) {
+	parts := []string{}
+	if t := strings.TrimSpace(r.URL.Query().Get("trust_tier")); t != "" {
+		if _, ok := validTrustTiers[t]; ok {
+			parts = append(parts, "trust_tier = ?")
+			args = append(args, t)
+		}
+	}
+	if f := strings.TrimSpace(r.URL.Query().Get("featured")); f == "true" || f == "1" {
+		parts = append(parts, "is_featured = 1")
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return strings.Join(parts, " AND "), args
+}
 
 // List handles GET /api/v1/mcp-registry — returns paginated list.
+// Optional filters: ?trust_tier=anthropic|crewship|community, ?featured=true.
 func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r, 50, 200)
 
-	rows, err := h.db.QueryContext(r.Context(),
-		fmt.Sprintf(`SELECT %s FROM mcp_registry_servers ORDER BY name ASC LIMIT ? OFFSET ?`, registrySelectCols),
-		limit, offset)
+	whereClause, whereArgs := parseRegistryFilters(r)
+	where := ""
+	if whereClause != "" {
+		where = " WHERE " + whereClause
+	}
+
+	// Featured rows surface first, then alphabetical — matches the
+	// CONNECTIONS.md §5.3 wireframe (featured row sits above the grid).
+	query := fmt.Sprintf(
+		`SELECT %s FROM mcp_registry_servers%s ORDER BY is_featured DESC, name ASC LIMIT ? OFFSET ?`,
+		registrySelectCols, where)
+	args := append(append([]any{}, whereArgs...), limit, offset)
+
+	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list MCP registry", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
@@ -376,7 +451,8 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var total int
-	if err := h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM mcp_registry_servers").Scan(&total); err != nil {
+	countQuery := "SELECT COUNT(*) FROM mcp_registry_servers" + where
+	if err := h.db.QueryRowContext(r.Context(), countQuery, whereArgs...).Scan(&total); err != nil {
 		h.logger.Error("count mcp registry servers", "error", err)
 	}
 
@@ -399,16 +475,29 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r, 50, 200)
 	pattern := "%" + q + "%"
 
+	// Compose the LIKE predicate with optional trust_tier / featured
+	// filters so a search can be narrowed to e.g. only Anthropic-
+	// verified servers from the marketplace UI.
+	filterClause, filterArgs := parseRegistryFilters(r)
+	likeClause := "(name LIKE ? OR description LIKE ? OR category LIKE ? OR display_name LIKE ?)"
+	whereClause := likeClause
+	if filterClause != "" {
+		whereClause = likeClause + " AND " + filterClause
+	}
+	likeArgs := []any{pattern, pattern, pattern, pattern}
+
+	queryArgs := append(append([]any{}, likeArgs...), filterArgs...)
+	queryArgs = append(queryArgs, pattern, limit, offset)
+
 	rows, err := h.db.QueryContext(r.Context(),
 		fmt.Sprintf(`SELECT %s FROM mcp_registry_servers
-			WHERE name LIKE ? OR description LIKE ? OR category LIKE ? OR display_name LIKE ?
+			WHERE %s
 			ORDER BY
+				is_featured DESC,
 				CASE WHEN name LIKE ? THEN 0 ELSE 1 END,
 				name ASC
-			LIMIT ? OFFSET ?`, registrySelectCols),
-		pattern, pattern, pattern, pattern,
-		pattern,
-		limit, offset)
+			LIMIT ? OFFSET ?`, registrySelectCols, whereClause),
+		queryArgs...)
 	if err != nil {
 		h.logger.Error("search MCP registry", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
@@ -427,10 +516,10 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var total int
+	countArgs := append(append([]any{}, likeArgs...), filterArgs...)
 	h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM mcp_registry_servers
-		 WHERE name LIKE ? OR description LIKE ? OR category LIKE ? OR display_name LIKE ?`,
-		pattern, pattern, pattern, pattern).Scan(&total)
+		fmt.Sprintf(`SELECT COUNT(*) FROM mcp_registry_servers WHERE %s`, whereClause),
+		countArgs...).Scan(&total)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"servers": servers,

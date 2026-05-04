@@ -780,6 +780,25 @@ CREATE TABLE IF NOT EXISTS mcp_tool_bindings (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_tool_bindings_server ON mcp_tool_bindings(mcp_server_id, mcp_server_scope);
 `},
+	// v67 promotes the existing binary is_verified flag on
+	// mcp_registry_servers (added in v36) to the 3-tier trust model
+	// from CONNECTIONS.md §5.6: anthropic / crewship / community.
+	// is_featured is a curation-only flag (DO-NOT-BUILD #4: install
+	// counts must be real or absent — featured replaces them as a
+	// trust signal we control without faking metrics). The sync
+	// worker (SyncMCPRegistry) treats both columns as locally-owned
+	// and never overwrites them on upsert, so manual curation
+	// survives every sync cycle. Backfill: every existing entry
+	// synced from the upstream Anthropic registry gets
+	// trust_tier='anthropic' (that's what is_verified meant before),
+	// and is_featured stays 0 until an admin promotes it.
+	{version: 67, name: "add_mcp_registry_trust_tier", sql: `
+ALTER TABLE mcp_registry_servers ADD COLUMN trust_tier TEXT NOT NULL DEFAULT 'community';
+ALTER TABLE mcp_registry_servers ADD COLUMN is_featured INTEGER NOT NULL DEFAULT 0;
+UPDATE mcp_registry_servers SET trust_tier = 'anthropic' WHERE is_verified = 1;
+CREATE INDEX IF NOT EXISTS idx_mcp_registry_trust_tier ON mcp_registry_servers(trust_tier);
+CREATE INDEX IF NOT EXISTS idx_mcp_registry_featured ON mcp_registry_servers(is_featured) WHERE is_featured = 1;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
