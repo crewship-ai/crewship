@@ -285,11 +285,21 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		if opts.DockerOps == nil || opts.ContainerFor == nil {
 			return nil
 		}
-		// Preflight: every target container must exist before we start
-		// writing. Without this, a missing crew container surfaces as
-		// "No such container" from deep inside CopyTo, after other
-		// crews have already been mutated — partial restore state.
+		// Preflight: every target container that ACTUALLY HAS DATA in
+		// the bundle must exist before we start writing. Crews whose
+		// manifest entries report WorkspaceIncluded=false AND
+		// MemoryIncluded=false have no per-crew filesystem section to
+		// restore — typically because they were never provisioned at
+		// backup time — so requiring their containers to exist now is
+		// useless friction (no data would land there anyway). Without
+		// this skip, a brand-new restore target that hasn't yet
+		// provisioned every crew refuses to restore the ones it CAN
+		// land, even though the DB rows + the one running crew's
+		// filesystem would all apply cleanly.
 		for _, c := range manifest.Contents.Crews {
+			if !c.WorkspaceIncluded && !c.MemoryIncluded {
+				continue
+			}
 			containerID := opts.ContainerFor(c.Slug)
 			if containerID == "" {
 				continue
@@ -299,10 +309,15 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				return fmt.Errorf("backup: preflight crew %s: %w", c.Slug, err)
 			}
 			if !exists {
-				return fmt.Errorf("backup: crew %q container %q is not provisioned on this instance; run `crewship crew provision %s` then re-run restore", c.Slug, containerID, c.Slug)
+				return fmt.Errorf("backup: crew %q has filesystem data in the bundle but container %q is not provisioned on this instance; run `crewship crew provision %s` then re-run restore", c.Slug, containerID, c.Slug)
 			}
 		}
 		for _, c := range manifest.Contents.Crews {
+			if !c.WorkspaceIncluded && !c.MemoryIncluded {
+				// Bundle has nothing to land for this crew (DB rows
+				// already restored above). Skip silently.
+				continue
+			}
 			containerID := opts.ContainerFor(c.Slug)
 			if containerID == "" {
 				continue
