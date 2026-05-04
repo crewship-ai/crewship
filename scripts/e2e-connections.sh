@@ -213,11 +213,15 @@ else
   echo "$INSTALL" | jq -c '.'
 fi
 
-# Verify credentials reused on second install
+# Verify credentials reused on second install (research-crew shares
+# ANTHROPIC_API_KEY with code-review-crew but adds BRAVE_API_KEY).
+RESEARCH_BODY=$(jq -n '{
+  credential_values: { BRAVE_API_KEY: "BSA-e2e-fake-brave-key" }
+}')
 INSTALL2=$(curl -sS -b "$COOKIE_JAR" \
   -X POST \
   -H "Content-Type: application/json" \
-  -d "$RECIPE_BODY" \
+  -d "$RESEARCH_BODY" \
   "${BASE}/api/v1/recipes/research-crew/install?workspace_id=${WS_ID}" || echo "{}")
 REUSED=$(echo "$INSTALL2" | jq -r '.credentials_reused | length')
 if [ "$REUSED" -ge "1" ]; then
