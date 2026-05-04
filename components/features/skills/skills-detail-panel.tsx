@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
+import Link from "next/link"
 import {
   Copy, Check, X, ShieldCheck, BadgeCheck, Lock, Dot, Sparkles,
-  AlertTriangle, Loader2, Trash2,
+  AlertTriangle, Loader2, Trash2, ExternalLink,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -127,7 +128,19 @@ export function SkillsDetailPanel({
       <header className="border-b border-white/[0.08] p-3 space-y-2 shrink-0">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[11px] text-white/45 truncate">{vendor}/</div>
+            {/* Top 'proklik' — vendor/slug doubles as a link to the
+                full-page skill view. Cursor-pointer + hover underline
+                so it reads as clickable next to the static heading
+                below. The full page route is registered in
+                app/(dashboard)/skills/[skillId]/page.tsx. */}
+            <Link
+              href={`/skills/${skill.id}`}
+              className="group inline-flex items-center gap-1 text-[11px] text-white/55 hover:text-white/90 transition-colors"
+              title="Open full page view"
+            >
+              <span className="truncate">{vendor}/{skill.slug}</span>
+              <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100" />
+            </Link>
             <h2 className="text-base font-semibold text-white/95 truncate">
               {skill.display_name ?? skill.name}
             </h2>
@@ -138,7 +151,7 @@ export function SkillsDetailPanel({
               {sourceCfg.label}
             </Badge>
             {onClose && (
-              <Button variant="ghost" size="icon" onClick={onClose} className="h-7 w-7 xl:hidden" aria-label="Close skill detail">
+              <Button variant="ghost" size="icon" onClick={onClose} className="h-7 w-7" aria-label="Close skill detail">
                 <X className="h-4 w-4" />
               </Button>
             )}

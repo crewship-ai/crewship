@@ -97,12 +97,64 @@ export function SkillsBrowser() {
   const [activeTab, setActiveTab] = useState<SkillsTab>("browse")
   const isMobile = useIsMobile()
   // Rail collapse state — fixed-pixel grid template (orchestration
-  // pattern), no drag handles. Auto-collapse on mobile so the centre
-  // grid has breathing room; user can re-open via the toggle.
+  // pattern). Auto-collapse on mobile so the centre grid has breathing
+  // room; user can re-open via the toggle.
   const [railCollapsed, setRailCollapsed] = useState(false)
   useEffect(() => {
     if (isMobile) setRailCollapsed(true)
   }, [isMobile])
+
+  // Detail panel resizable width — drag handle on the panel's left
+  // edge, persisted via localStorage so the user's preferred width
+  // sticks across reloads. Min/max keep it readable yet capped to
+  // a reasonable share of viewport on small screens.
+  const [detailWidth, setDetailWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 380
+    const stored = window.localStorage.getItem("crewship.skills.detail.width.v1")
+    const parsed = stored ? parseInt(stored, 10) : NaN
+    if (!Number.isNaN(parsed) && parsed >= 280 && parsed <= 720) return parsed
+    return 380
+  })
+  const detailDragRef = useRef<{ startX: number; startW: number } | null>(null)
+  const onDetailDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    detailDragRef.current = { startX: e.clientX, startW: detailWidth }
+    const onMove = (ev: MouseEvent) => {
+      if (!detailDragRef.current) return
+      // Drag-left increases width because the handle is on the
+      // panel's LEFT edge — pulling left makes the right column
+      // wider.
+      const delta = detailDragRef.current.startX - ev.clientX
+      const next = Math.min(720, Math.max(280, detailDragRef.current.startW + delta))
+      setDetailWidth(next)
+    }
+    const onUp = () => {
+      detailDragRef.current = null
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+      // Persist the final width once on release rather than every
+      // mousemove tick so the storage write isn't on the hot path.
+      try {
+        window.localStorage.setItem("crewship.skills.detail.width.v1", String(detailWidth))
+      } catch {
+        // localStorage may be unavailable (private mode etc.); the
+        // in-memory state still holds for the session.
+      }
+    }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+  }, [detailWidth])
+
+  // Re-persist whenever detailWidth lands a new value (handles direct
+  // setState calls outside the drag handler too — e.g. future reset
+  // button or keyboard shortcuts).
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("crewship.skills.detail.width.v1", String(detailWidth))
+    } catch {
+      // ignore — see comment in onDetailDragStart
+    }
+  }, [detailWidth])
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const oramaIndex = useRef<AnyOrama | null>(null)
   const [searchHits, setSearchHits] = useState<Set<string> | null>(null)
@@ -354,11 +406,11 @@ export function SkillsBrowser() {
            opens only when a card is selected, so the centre owns
            more breathing room by default. */}
       <div
-        className="flex-1 min-h-0 grid transition-all duration-200 relative overflow-hidden"
+        className="flex-1 min-h-0 grid relative overflow-hidden"
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${railCollapsed ? "44px" : "260px"} 1fr ${selected ? "380px" : "0px"}`,
+            : `${railCollapsed ? "44px" : "260px"} 1fr ${selected ? `${detailWidth}px` : "0px"}`,
         }}
       >
         <aside data-panel-id="skills-rail" className={cn(
@@ -533,7 +585,13 @@ export function SkillsBrowser() {
             ) : (
               <VirtuosoGrid
                 data={filtered}
-                listClassName="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-3"
+                // auto-rows-fr makes every row stretch to match the
+                // tallest card in that row, so the install-count line
+                // anchors at the same vertical position across the grid
+                // — addresses the 'rozhodí se výška karet' from the
+                // round-12 user feedback.
+                listClassName="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 auto-rows-fr gap-3 p-3"
+                itemClassName="min-h-[180px]"
                 itemContent={(_, skill) => (
                   <SkillCard
                     skill={skill}
@@ -549,9 +607,19 @@ export function SkillsBrowser() {
         </main>
 
         {/* RIGHT — detail panel. Only mounted when a card is
-            selected so the centre grid has full width otherwise. */}
+            selected so the centre grid has full width otherwise. The
+            left edge has a drag handle (1px hit zone widens to 4px on
+            hover) that resizes the panel; orchestration uses the same
+            pattern via the bottom drawer separator. */}
         {selected && (
-          <aside data-panel-id="skills-detail" className="flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
+          <aside data-panel-id="skills-detail" className="relative flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
+            <div
+              role="separator"
+              aria-label="Resize detail panel"
+              aria-orientation="vertical"
+              className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+              onMouseDown={onDetailDragStart}
+            />
             <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
           </aside>
         )}
