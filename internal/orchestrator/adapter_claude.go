@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -19,29 +20,44 @@ func (claudeCodeAdapter) Name() string { return "CLAUDE_CODE" }
 
 func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// --bare: skips auto-discovery of hooks/skills/plugins/MCP/CLAUDE.md.
-	// Anthropic docs explicitly recommend it for scripted/SDK calls and say
-	// it will become the default for -p in a future release. Crewship runs
-	// in a clean container so discovery is pure overhead — and a stray
-	// ~/.claude mount could silently inject behaviour. Combined with
-	// --setting-sources (no value) and --strict-mcp-config we get clean
-	// belt-and-suspenders isolation.
+	// Anthropic docs recommend it for scripted/SDK calls. BUT — Claude
+	// Code 2.x changed --bare's auth contract: it now strictly requires
+	// ANTHROPIC_API_KEY (or apiKeyHelper via --settings) and IGNORES
+	// CLAUDE_CODE_OAUTH_TOKEN. Workspaces seeded with OAuth (Claude
+	// Code login flow → AI_CLI_TOKEN) would otherwise fail with
+	// "Not logged in · Please run /login" the moment the binary starts.
+	//
+	// Detect OAuth credentials on the run request and drop --bare in
+	// that case — let Claude's normal auth flow pick up
+	// CLAUDE_CODE_OAUTH_TOKEN (set by BuildEnvVarsSidecar). API_KEY
+	// runs keep --bare for the isolation win.
+	hasOAuth := false
+	for _, cred := range req.Credentials {
+		if cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat") {
+			hasOAuth = true
+			break
+		}
+	}
+
 	cmd := []string{
 		"claude", "--print",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
 		"--dangerously-skip-permissions",
 		"--verbose",
-		"--bare",
+	}
+	if !hasOAuth {
+		cmd = append(cmd, "--bare")
+	}
+	cmd = append(cmd,
 		// --setting-sources "" disables user/global settings discovery.
-		// --bare alone does NOT do this — Anthropic's CLI reference is
-		// explicit that user-level ~/.claude/settings.json still loads
-		// without this flag. Pre-fix the doc claimed isolation but the
-		// flag was absent — a stray ~/.claude mount in a customer
-		// container would silently inject behaviour.
+		// Independent of --bare — Anthropic's CLI reference is explicit
+		// that user-level ~/.claude/settings.json still loads without
+		// this flag, so we keep it on both auth paths.
 		"--setting-sources", "",
 		"--strict-mcp-config",
 		"--no-session-persistence",
-	}
+	)
 	if req.LLMModel != "" {
 		cmd = append(cmd, "--model", req.LLMModel)
 	}
