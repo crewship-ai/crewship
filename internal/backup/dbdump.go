@@ -227,18 +227,25 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		table string
 		where string
 		args  []any
+		// requiresCol, if non-empty, must be present on the target
+		// table for the filter to apply. Lets us declare workspace-
+		// scoped filters on tables (e.g. skills) that may have been
+		// reorganized into a global namespace in newer schemas — the
+		// pre-flight column probe matches DumpWorkspace's behavior so
+		// crew dumps don't crash on a perfectly-valid global table.
+		requiresCol string
 	}
 	filters := []filter{
-		{"workspaces", "id = ?", []any{workspaceID}},
-		{"crews", "id = ?", []any{crewID}},
-		{"agents", "crew_id = ?", []any{crewID}},
-		{"skills", "workspace_id = ?", []any{workspaceID}},
-		{"crew_members", "crew_id = ?", []any{crewID}},
-		{"crew_integrations", "crew_id = ?", []any{crewID}},
-		{"mcp_bindings", "crew_id = ?", []any{crewID}},
-		{"agent_chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
-		{"memory_backups", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
-		{"crew_memory", "crew_id = ?", []any{crewID}},
+		{"workspaces", "id = ?", []any{workspaceID}, ""},
+		{"crews", "id = ?", []any{crewID}, ""},
+		{"agents", "crew_id = ?", []any{crewID}, ""},
+		{"skills", "workspace_id = ?", []any{workspaceID}, "workspace_id"},
+		{"crew_members", "crew_id = ?", []any{crewID}, ""},
+		{"crew_integrations", "crew_id = ?", []any{crewID}, ""},
+		{"mcp_bindings", "crew_id = ?", []any{crewID}, ""},
+		{"agent_chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"memory_backups", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"crew_memory", "crew_id = ?", []any{crewID}, ""},
 	}
 	for _, f := range filters {
 		exists, err := tableExists(ctx, tx, f.table)
@@ -247,6 +254,18 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		}
 		if !exists {
 			continue
+		}
+		if f.requiresCol != "" {
+			hasCol, err := tableHasColumn(ctx, tx, f.table, f.requiresCol)
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe column on %s: %w", f.table, err)
+			}
+			if !hasCol {
+				// Table exists but the scoping column doesn't — the table
+				// is shared across the instance (skills became global at
+				// some point). Skip silently rather than crash.
+				continue
+			}
 		}
 		rows, err := tx.QueryContext(ctx,
 			fmt.Sprintf("SELECT * FROM %s WHERE %s", f.table, f.where),
