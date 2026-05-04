@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { create as createOrama, insertMultiple, search as oramaSearch } from "@orama/orama"
 import type { AnyOrama } from "@orama/orama"
 import { VirtuosoGrid } from "react-virtuoso"
-import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels"
 import {
   Search, Sparkles, Plus, X, ChevronDown, ChevronRight,
   Package, RefreshCw, ShieldCheck, BadgeCheck, Lock, Dot, AlertTriangle, Loader2,
-  Library, CheckSquare,
+  Library, CheckSquare, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -96,6 +96,14 @@ export function SkillsBrowser() {
   const [selected, setSelected] = useState<SkillCardData | null>(null)
   const [searchInput, setSearchInput] = useState("")
   const [activeTab, setActiveTab] = useState<SkillsTab>("browse")
+  const isMobile = useIsMobile()
+  // Rail collapse state — fixed-pixel grid template (orchestration
+  // pattern), no drag handles. Auto-collapse on mobile so the centre
+  // grid has breathing room; user can re-open via the toggle.
+  const [railCollapsed, setRailCollapsed] = useState(false)
+  useEffect(() => {
+    if (isMobile) setRailCollapsed(true)
+  }, [isMobile])
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const oramaIndex = useRef<AnyOrama | null>(null)
   const [searchHits, setSearchHits] = useState<Set<string> | null>(null)
@@ -332,19 +340,45 @@ export function SkillsBrowser() {
         )}
       </div>
 
-      <PanelGroup
-        orientation="horizontal"
-        className="flex-1 min-h-0 flex"
+      {/* ---- 3-panel grid: rail / centre / detail. Fixed-pixel
+           template (orchestration pattern) instead of resizable
+           because pixel widths render reliably across viewports;
+           react-resizable-panels was collapsing rail to 0px on
+           desktop on this layout (Sprint 7.4 finding). Detail
+           opens only when a card is selected, so the centre owns
+           more breathing room by default. */}
+      <div
+        className="flex-1 min-h-0 grid transition-all duration-200 relative overflow-hidden"
+        style={{
+          gridTemplateColumns: isMobile
+            ? "1fr"
+            : `${railCollapsed ? "44px" : "260px"} 1fr ${selected ? "380px" : "0px"}`,
+        }}
       >
-      {/* LEFT — filter rail. autoSaveId persists user-dragged size to
-          localStorage across reloads, like the user asked. minSize keeps
-          the rail readable; maxSize prevents accidental fullscreen drag. */}
-      <Panel defaultSize={20} minSize={17} maxSize={32} id="skills-rail">
-        <aside className="flex flex-col h-full bg-card border-r border-white/[0.1] overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Skills
-            </span>
+        <aside data-panel-id="skills-rail" className={cn(
+          "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 overflow-hidden",
+          isMobile && railCollapsed && "hidden",
+        )}>
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
+            {!railCollapsed && (
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Skills · {skills.length}
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
+              onClick={() => setRailCollapsed((v) => !v)}
+              aria-label={railCollapsed ? "Expand filter rail" : "Collapse filter rail"}
+            >
+              {railCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+            </Button>
+          </div>
+
+          {!railCollapsed && (
+          <>
+          <div style={{ display: "none" }}>
             <span className="text-[10px] font-medium text-muted-foreground/60 tabular-nums">
               {skills.length}
             </span>
@@ -433,14 +467,12 @@ export function SkillsBrowser() {
               })}
             </FacetSection>
           </div>
+          </>
+          )}
         </aside>
-      </Panel>
 
-      <PanelResizeHandle className="w-px bg-white/[0.08] hover:bg-blue-500/40 hover:w-0.5 data-[resize-handle-active]:bg-blue-500/60 transition-colors" />
-
-      {/* CENTER — toolbar + chips + grid */}
-      <Panel defaultSize={52} minSize={36} id="skills-grid">
-        <main className="flex flex-col h-full bg-card/40 min-h-0">
+        {/* CENTER — toolbar + chips + grid */}
+        <main data-panel-id="skills-grid" className="flex flex-col h-full bg-card/40 min-h-0 overflow-hidden">
           <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/[0.05] shrink-0">
             <div className="text-[12px] text-white/55">
               <span className="text-white/35">Skills</span> ›{" "}
@@ -508,17 +540,15 @@ export function SkillsBrowser() {
 
           <BottomStrip bundledCount={bundledCount} />
         </main>
-      </Panel>
 
-      <PanelResizeHandle className="w-px bg-white/[0.08] hover:bg-blue-500/40 hover:w-0.5 data-[resize-handle-active]:bg-blue-500/60 transition-colors" />
-
-      {/* RIGHT — detail panel */}
-      <Panel defaultSize={28} minSize={22} maxSize={45} id="skills-detail">
-        <aside className="flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
-          <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
-        </aside>
-      </Panel>
-      </PanelGroup>
+        {/* RIGHT — detail panel. Only mounted when a card is
+            selected so the centre grid has full width otherwise. */}
+        {selected && (
+          <aside data-panel-id="skills-detail" className="flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
+            <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
+          </aside>
+        )}
+      </div>
     </div>
   )
 }
