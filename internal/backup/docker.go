@@ -37,6 +37,16 @@ type DockerOps interface {
 	// must already exist — docker does not create parent directories.
 	CopyTo(ctx context.Context, containerID, dstPath string, content io.Reader) error
 
+	// CopyToVolume extracts a tar stream into a destination INSIDE the
+	// container by piping it through `tar -x` over an exec session. Used
+	// for destinations that Docker's CopyToContainer rejects with
+	// "container rootfs is marked read-only" or "Could not find the
+	// file <path>" — typically named-volume mountpoints (/home/agent,
+	// /opt/crew-tools) where Docker's archive-API checks the rootfs
+	// layer rather than the live mount table. tar must be on PATH
+	// inside the container; devcontainer base images ship it.
+	CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error
+
 	// ContainerExists reports whether a container with the given ID or
 	// name is known to the daemon. Used by restore preflight so CopyTo
 	// does not fail with a cryptic "No such container" mid-stream.
@@ -113,6 +123,55 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 		CopyUIDGID:                true,
 	}); err != nil {
 		return fmt.Errorf("backup: docker cp to %s:%s: %w", containerID, dstPath, err)
+	}
+	return nil
+}
+
+// CopyToVolume implements DockerOps. Uses an exec session running
+// `tar -xf - -C <dst>` with the tar stream attached to stdin. This
+// path-resolves through the container's live mount table (so named
+// volumes like /home/agent are visible) and bypasses Docker's
+// archive-API rootfs check entirely.
+func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+		Cmd:          []string{"tar", "-xf", "-", "-C", dstPath},
+		User:         "0:0",
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		return fmt.Errorf("backup: exec-tar create %s:%s: %w", containerID, dstPath, err)
+	}
+	resp, err := m.Client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
+	if err != nil {
+		return fmt.Errorf("backup: exec-tar attach %s:%s: %w", containerID, dstPath, err)
+	}
+	defer resp.Close()
+	// Pump the tar stream into the exec's stdin; close the write side
+	// so tar sees EOF and exits.
+	if _, err := io.Copy(resp.Conn, content); err != nil {
+		return fmt.Errorf("backup: exec-tar stdin %s:%s: %w", containerID, dstPath, err)
+	}
+	if err := resp.CloseWrite(); err != nil {
+		return fmt.Errorf("backup: exec-tar close-write %s:%s: %w", containerID, dstPath, err)
+	}
+	// Drain stdout/stderr so the daemon doesn't block. tar -xf is
+	// silent on success; any output here is a problem the operator
+	// should see in the wrapped error.
+	var combined bytes.Buffer
+	if _, err := stdcopy.StdCopy(&combined, &combined, resp.Reader); err != nil {
+		return fmt.Errorf("backup: exec-tar drain %s:%s: %w", containerID, dstPath, err)
+	}
+	// Inspect to get the exit code — non-zero means tar failed and we
+	// need to surface that as a hard error rather than silently
+	// dropping a section.
+	insp, err := m.Client.ContainerExecInspect(ctx, exec.ID)
+	if err != nil {
+		return fmt.Errorf("backup: exec-tar inspect %s:%s: %w", containerID, dstPath, err)
+	}
+	if insp.ExitCode != 0 {
+		return fmt.Errorf("backup: exec-tar to %s:%s exited %d: %s", containerID, dstPath, insp.ExitCode, strings.TrimSpace(combined.String()))
 	}
 	return nil
 }

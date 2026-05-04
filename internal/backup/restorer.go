@@ -496,32 +496,35 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			continue
 		}
 		parent := path.Dir(s.dest)
-		// Container root "/" is mounted read-only by default — Docker
-		// CopyTo with dst="/" fails with "container rootfs is marked
-		// read-only" before it ever touches the bind-mounted child. So
-		// for top-level section roots (/workspace, /output) we MUST go
-		// straight to the section dir; the SDK is happy because the
-		// dst itself is the bind-mounted writable target.
+		// Two restore strategies, picked by where the section lands:
 		//
-		// For nested roots (/home/agent, /opt/crew-tools) the SDK's
-		// "Could not find the file" quirk forces us to copy into the
-		// writable parent (/home, /opt) with a rewrapped tar that
-		// restores the basename onto every entry.
+		//   parent == "/" (e.g. /workspace, /output): Docker's archive
+		//     API works fine because the dst itself is a bind-mounted
+		//     writable target, not a read-only rootfs path. Use the
+		//     SDK's CopyTo directly — it's faster and doesn't require
+		//     `tar` to be installed in the container.
+		//
+		//   parent != "/" (e.g. /home/agent, /opt/crew-tools): these
+		//     are typically NAMED VOLUMES whose mountpoint sits inside
+		//     a read-only rootfs path (/home, /opt). Docker's archive
+		//     API rejects ANY CopyTo into them with "rootfs is marked
+		//     read-only" (when dst=parent) or "Could not find the file"
+		//     (when dst=mountpoint, because the API checks the rootfs
+		//     view rather than the live mount table). Pipe the tar
+		//     into `tar -x -C <dst>` over an exec session instead —
+		//     that runs INSIDE the container, sees the live mounts,
+		//     and lands files on the volume properly.
 		if parent == "/" {
-			if err := ops.CopyTo(ctx, containerID, s.dest, r); err != nil {
-				_ = r.Close()
+			err := ops.CopyTo(ctx, containerID, s.dest, r)
+			_ = r.Close()
+			if err != nil {
 				return fmt.Errorf("backup: restore %s %s: %w", s.name, crewSlug, err)
 			}
-			_ = r.Close()
 			continue
 		}
-		basename := path.Base(s.dest)
-		rewrapped, rwErr := rewrapTarUnder(r, basename)
+		err = ops.CopyToVolume(ctx, containerID, s.dest, r)
 		_ = r.Close()
-		if rwErr != nil {
-			return fmt.Errorf("backup: rewrap %s %s: %w", s.name, crewSlug, rwErr)
-		}
-		if err := ops.CopyTo(ctx, containerID, parent, rewrapped); err != nil {
+		if err != nil {
 			return fmt.Errorf("backup: restore %s %s: %w", s.name, crewSlug, err)
 		}
 	}

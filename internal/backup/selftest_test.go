@@ -104,6 +104,14 @@ func (f *fakeDockerOps) workspaceTar() []byte {
 	return buf.Bytes()
 }
 
+// CopyToVolume mirrors CopyTo for the test fake — selftest only
+// touches /workspace, so volume-targeted traffic is silently consumed
+// (in production CopyToVolume execs `tar -x` inside the container,
+// which we don't model here).
+func (f *fakeDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	return f.CopyTo(ctx, containerID, dstPath, content)
+}
+
 // CopyTo merges incoming tar entries into the workspace map.
 //
 // Models two callers:
