@@ -1,11 +1,31 @@
 "use client"
 
-import { Eye, RefreshCw, Trash2, Undo2, Loader2 } from "lucide-react"
+import {
+  CheckCircle2,
+  Download,
+  Eye,
+  Lock,
+  Loader2,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  Undo2,
+  Unlock,
+  XCircle,
+} from "lucide-react"
+import { motion } from "motion/react"
 import { toast } from "sonner"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useBackups, useDeleteBackup, type BackupListEntry } from "@/hooks/use-backups"
+import {
+  buildDownloadUrl,
+  useBackups,
+  useDeleteBackup,
+  useVerifyBackup,
+  type BackupListEntry,
+} from "@/hooks/use-backups"
 import { useBackupStore } from "@/stores/backup-store"
 
 function formatBytes(n: number) {
@@ -23,6 +43,7 @@ function formatBytes(n: number) {
 export function BackupList({ workspaceId }: { workspaceId: string | undefined }) {
   const { data, isLoading, isError, refetch, isFetching } = useBackups(workspaceId)
   const del = useDeleteBackup(workspaceId)
+  const verify = useVerifyBackup(workspaceId)
   const openRestore = useBackupStore((s) => s.openRestore)
   const openInspect = useBackupStore((s) => s.openInspect)
 
@@ -53,6 +74,34 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
     }
   }
 
+  // Verify mutation reports outcome via toast — operators want a clear
+  // pass/fail with the recomputed checksum visible. The mutation hook
+  // does not auto-invalidate the list (verify is read-only) so the
+  // surrounding state stays stable while the toast renders.
+  async function onVerify(entry: BackupListEntry) {
+    try {
+      const result = await verify.mutateAsync(entry.path)
+      if (result.ok) {
+        toast.success(
+          `Verified · ${entry.file_name}`,
+          { description: `sha256 ${result.payload_sha256.slice(0, 16)}…` },
+        )
+      } else {
+        toast.error(
+          `Checksum mismatch · ${entry.file_name}`,
+          {
+            description: `Expected ${result.payload_sha256.slice(0, 16)}…, got ${result.recomputed_sha256.slice(0, 16)}…`,
+          },
+        )
+      }
+    } catch (err) {
+      toast.error(
+        `Verify failed · ${entry.file_name}`,
+        { description: err instanceof Error ? err.message : "Unknown error" },
+      )
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
@@ -63,7 +112,11 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
           onClick={() => refetch()}
           aria-label="Refresh backup list"
         >
-          {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          {isFetching ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" />
+          )}
         </Button>
       </div>
       {rows.length === 0 ? (
@@ -78,27 +131,111 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                 <th className="px-3 py-2 font-medium">File</th>
                 <th className="px-3 py-2 font-medium">Scope</th>
                 <th className="px-3 py-2 font-medium">Size</th>
-                <th className="px-3 py-2 font-medium">Encrypted</th>
+                <th className="px-3 py-2 font-medium">Encryption</th>
                 <th className="px-3 py-2 font-medium">Created</th>
                 <th className="px-3 py-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.path} className="border-t hover:bg-accent/20">
+              {rows.map((row, i) => (
+                <motion.tr
+                  key={row.path}
+                  // Stagger the rows in (recipe A6 from the cheat-sheet).
+                  // Cap delay at 6 rows / 180ms total so a 50-bundle list
+                  // does not animate for ~1.5s.
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.16,
+                    delay: Math.min(i, 6) * 0.03,
+                    ease: [0.32, 0.72, 0, 1],
+                  }}
+                  className="border-t hover:bg-accent/20"
+                >
                   <td className="px-3 py-2 font-mono text-[11px]">{row.file_name}</td>
-                  <td className="px-3 py-2">{row.scope}</td>
-                  <td className="px-3 py-2">{formatBytes(row.size_bytes)}</td>
-                  <td className="px-3 py-2">{row.encrypted ? "yes" : "no"}</td>
+                  <td className="px-3 py-2">
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+                      {row.scope}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 font-mono">{formatBytes(row.size_bytes)}</td>
+                  <td className="px-3 py-2">
+                    {row.encrypted ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-500">
+                        <Lock className="h-3 w-3" />
+                        <span>encrypted</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-amber-500">
+                        <Unlock className="h-3 w-3" />
+                        <span>plain</span>
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     {row.created_at ? new Date(row.created_at).toLocaleString() : "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="inline-flex gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => openInspect(row.path)} aria-label="Inspect">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openInspect(row.path)}
+                        aria-label="Inspect manifest"
+                        title="Inspect"
+                      >
                         <Eye className="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => openRestore(row.path)} aria-label="Restore">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        // Disabled while a verify is in flight to keep the
+                        // loading spinner anchored to the row that asked
+                        // for it; clicking another row would otherwise let
+                        // both toasts arrive in unpredictable order.
+                        disabled={verify.isPending && verify.variables === row.path}
+                        onClick={() => onVerify(row)}
+                        aria-label="Verify checksum"
+                        title="Verify integrity (recompute sha256)"
+                      >
+                        {verify.isPending && verify.variables === row.path ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : verify.data?.ok && verify.variables === row.path ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                        ) : verify.data && !verify.data.ok && verify.variables === row.path ? (
+                          <XCircle className="h-3.5 w-3.5 text-destructive" />
+                        ) : (
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                      <Button
+                        asChild
+                        size="sm"
+                        variant="ghost"
+                        aria-label="Download bundle"
+                        title="Download .tar.zst"
+                      >
+                        {/*
+                         * Anchor with download attribute streams the bundle
+                         * straight to disk through the browser. We do NOT go
+                         * through React Query because a multi-GB bundle
+                         * would otherwise be slurped into memory before
+                         * landing on disk.
+                         */}
+                        <a
+                          href={workspaceId ? buildDownloadUrl(workspaceId, row.path) : "#"}
+                          download={row.file_name}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </a>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openRestore(row.path)}
+                        aria-label="Restore from this bundle"
+                        title="Restore"
+                      >
                         <Undo2 className="h-3.5 w-3.5" />
                       </Button>
                       <Button
@@ -106,13 +243,14 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                         variant="ghost"
                         disabled={del.isPending}
                         onClick={() => onDelete(row)}
-                        aria-label="Delete"
+                        aria-label="Delete bundle"
+                        title="Delete"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </td>
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
