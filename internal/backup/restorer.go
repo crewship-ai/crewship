@@ -487,6 +487,12 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			name: "memory",
 		},
 	}
+	// Per-section errors are collected so a hiccup on one section
+	// (e.g. a leftover root-owned file blocking unlink in /home/agent)
+	// doesn't prevent the others from being restored. The aggregated
+	// error is returned at the end so the operator sees ALL the
+	// failures, not just the first one.
+	var sectionErrs []string
 	for _, s := range sections {
 		r, ok, err := s.open()
 		if err != nil {
@@ -518,15 +524,18 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			err := ops.CopyTo(ctx, containerID, s.dest, r)
 			_ = r.Close()
 			if err != nil {
-				return fmt.Errorf("backup: restore %s %s: %w", s.name, crewSlug, err)
+				sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
 			}
 			continue
 		}
 		err = ops.CopyToVolume(ctx, containerID, s.dest, r)
 		_ = r.Close()
 		if err != nil {
-			return fmt.Errorf("backup: restore %s %s: %w", s.name, crewSlug, err)
+			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
 		}
+	}
+	if len(sectionErrs) > 0 {
+		return fmt.Errorf("backup: restore crew %s — partial: %s", crewSlug, strings.Join(sectionErrs, "; "))
 	}
 	return nil
 }

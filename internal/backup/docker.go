@@ -358,6 +358,17 @@ func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
 			continue
 		}
 		newName := prefix + trimmed
+		// Strip the wrapper from Linkname too — hardlink targets in
+		// Docker's CopyFrom output reference paths like
+		// "agent/.local/.../foo" (the same wrapper as entry names).
+		// If we leave them prefixed, restore tries to hardlink to a
+		// non-existent path and fails the whole extraction. Symlinks
+		// are usually relative-to-entry-dir so this strip is a no-op
+		// for them, but applies harmlessly.
+		newLinkname := hdr.Linkname
+		if wrapper != "" && newLinkname != "" {
+			newLinkname = strings.TrimPrefix(newLinkname, wrapper)
+		}
 		if hdr.Typeflag != tar.TypeReg {
 			// Non-regular entries (dirs, symlinks) pass through with an
 			// empty body; rely on the outer writer for regular-file
@@ -367,7 +378,7 @@ func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
 				Mode:     hdr.Mode,
 				ModTime:  hdr.ModTime,
 				Typeflag: hdr.Typeflag,
-				Linkname: hdr.Linkname,
+				Linkname: newLinkname,
 				Uid:      hdr.Uid,
 				Gid:      hdr.Gid,
 			}); err != nil {
