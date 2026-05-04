@@ -205,16 +205,39 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 
 		// Defence-in-depth against a tampered bundle: a tar entry that
 		// climbs above the intended prefix (e.g. "../../etc/shadow")
-		// or carries a symlink target would, when later handed to
-		// docker CopyTo, write into unexpected parts of the container
-		// rootfs. Docker enforces its own containment but we reject
-		// the entry up front so the failure mode is "bad bundle", not
-		// "unexpected file where it should not be".
+		// or carries an unsafe symlink target would, when later handed
+		// to docker CopyTo, write into unexpected parts of the
+		// container rootfs. Docker enforces its own containment but
+		// we reject the entry up front so the failure mode is "bad
+		// bundle", not "unexpected file where it should not be".
 		if strings.Contains(name, "..") {
 			return nil, fmt.Errorf("%w: payload entry %q contains parent reference", ErrInvalidManifest, hdr.Name)
 		}
-		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
-			return nil, fmt.Errorf("%w: payload entry %q is a symlink", ErrInvalidManifest, hdr.Name)
+		// Symlinks: tooling like mise + pyenv legitimately ships hundreds
+		// of internal symlinks (e.g. shim → real binary) that are
+		// essential for the restored container to function. Rejecting all
+		// of them broke restore of any crew that had ever provisioned a
+		// language runtime. Allow symlinks whose target is RELATIVE and
+		// does NOT contain ".." (i.e. only links to peer files within
+		// the bundle's own tree). Reject absolute targets and parent
+		// traversal so a tampered bundle still can't smuggle "/etc/shadow"
+		// or "../../etc/passwd" links into the container rootfs.
+		// Hardlinks (TypeLink) are still rejected outright — they're rare
+		// in container exports and safe handling would need full target
+		// tracking we don't do today.
+		if hdr.Typeflag == tar.TypeLink {
+			return nil, fmt.Errorf("%w: payload entry %q is a hardlink", ErrInvalidManifest, hdr.Name)
+		}
+		if hdr.Typeflag == tar.TypeSymlink {
+			if path.IsAbs(hdr.Linkname) {
+				return nil, fmt.Errorf("%w: payload entry %q symlink target %q is absolute", ErrInvalidManifest, hdr.Name, hdr.Linkname)
+			}
+			if strings.Contains(hdr.Linkname, "..") {
+				return nil, fmt.Errorf("%w: payload entry %q symlink target %q contains parent reference", ErrInvalidManifest, hdr.Name, hdr.Linkname)
+			}
+			// Safe symlink — pass it through unchanged. The repackIntoSink
+			// helpers preserve TypeSymlink + Linkname so docker CopyTo
+			// recreates the link inside the container faithfully.
 		}
 
 		switch {
