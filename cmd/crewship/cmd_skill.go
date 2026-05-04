@@ -143,8 +143,20 @@ var skillGetCmd = &cobra.Command{
 }
 
 var skillImportCmd = &cobra.Command{
-	Use:   "import <url>",
-	Short: "Import a skill from URL or local file",
+	Use:   "import [url]",
+	Short: "Import skill(s): a single SKILL.md from URL/file, or a whole repo with --repo",
+	Long: `Import skill(s) into the workspace.
+
+Single SKILL.md from a URL or local file:
+  crewship skill import https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md
+  crewship skill import --file ./SKILL.md
+
+Whole git repo (walks for **/SKILL.md, license-gated):
+  crewship skill import --repo https://github.com/anthropics/skills
+  crewship skill import --repo https://github.com/vercel-labs/agent-skills --paths 'skills/*' --dry-run
+  crewship skill import --repo https://github.com/foo/private --unsafe-license
+
+The --repo flow shells out to git on the server with --depth 1 --filter=blob:none. Each SKILL.md is parsed, license-checked against the SPDX allowlist (MIT, Apache-2.0, BSD-2/3, ISC, CC0-1.0, MPL-2.0, Unlicense, 0BSD), and then written. --unsafe-license overrides the allowlist for one batch. --dry-run reports what would import without writing rows.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -154,6 +166,12 @@ var skillImportCmd = &cobra.Command{
 		}
 
 		fileFlag, _ := cmd.Flags().GetString("file")
+		repoFlag, _ := cmd.Flags().GetString("repo")
+		refFlag, _ := cmd.Flags().GetString("ref")
+		pathsFlag, _ := cmd.Flags().GetStringSlice("paths")
+		vendorFlag, _ := cmd.Flags().GetString("vendor")
+		unsafeFlag, _ := cmd.Flags().GetBool("unsafe-license")
+		dryFlag, _ := cmd.Flags().GetBool("dry-run")
 
 		client := newAPIClient()
 		wsID := client.GetWorkspaceID()
@@ -161,8 +179,62 @@ var skillImportCmd = &cobra.Command{
 			return fmt.Errorf("workspace ID could not be resolved")
 		}
 
-		body := map[string]interface{}{}
+		// --repo path takes priority — single-skill flags are ignored
+		// when --repo is set so the caller can't accidentally do both.
+		if repoFlag != "" {
+			body := map[string]interface{}{
+				"git_url":              repoFlag,
+				"git_ref":              refFlag,
+				"paths":                pathsFlag,
+				"vendor":               vendorFlag,
+				"allow_unsafe_license": unsafeFlag,
+				"dry_run":              dryFlag,
+			}
+			resp, err := client.Post("/api/v1/workspaces/"+wsID+"/skills/bulk-import", body)
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			var result struct {
+				Source        string `json:"source"`
+				TotalFound    int    `json:"total_found"`
+				TotalImported int    `json:"total_imported"`
+				Imported      []struct {
+					SkillID string `json:"skill_id"`
+					Slug    string `json:"slug"`
+					Created bool   `json:"created"`
+				} `json:"imported"`
+				Skipped []struct {
+					Path   string `json:"path"`
+					Slug   string `json:"slug"`
+					Reason string `json:"reason"`
+				} `json:"skipped"`
+			}
+			if err := cli.ReadJSON(resp, &result); err != nil {
+				return err
+			}
+			fmt.Printf("Source: %s\n", result.Source)
+			fmt.Printf("Found %d SKILL.md files; imported %d\n", result.TotalFound, result.TotalImported)
+			for _, s := range result.Imported {
+				verb := "updated"
+				if s.Created {
+					verb = "created"
+				}
+				fmt.Printf("  + %s %s (%s)\n", verb, s.Slug, s.SkillID)
+			}
+			if len(result.Skipped) > 0 {
+				fmt.Printf("Skipped (%d):\n", len(result.Skipped))
+				for _, s := range result.Skipped {
+					fmt.Printf("  - %s — %s\n", s.Path, s.Reason)
+				}
+			}
+			cli.PrintSuccess(fmt.Sprintf("Bulk import complete: %d/%d", result.TotalImported, result.TotalFound))
+			return nil
+		}
 
+		body := map[string]interface{}{}
 		if fileFlag != "" {
 			data, err := os.ReadFile(fileFlag)
 			if err != nil {
@@ -174,7 +246,7 @@ var skillImportCmd = &cobra.Command{
 			body["url"] = args[0]
 			body["source"] = "url"
 		} else {
-			return fmt.Errorf("provide a URL argument or --file flag")
+			return fmt.Errorf("provide a URL argument, --file, or --repo")
 		}
 
 		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/skills/import", body)
@@ -387,7 +459,13 @@ Example:
 }
 
 func init() {
-	skillImportCmd.Flags().String("file", "", "Path to local SKILL.md file")
+	skillImportCmd.Flags().String("file", "", "Path to local SKILL.md file (single skill)")
+	skillImportCmd.Flags().String("repo", "", "Git URL to clone and walk for **/SKILL.md (bulk import)")
+	skillImportCmd.Flags().String("ref", "", "Git ref (branch/tag) — only with --repo; defaults to repo's default branch")
+	skillImportCmd.Flags().StringSlice("paths", nil, "Glob filters relative to repo root — only with --repo")
+	skillImportCmd.Flags().String("vendor", "", "Override vendor namespace for imported skills (defaults to 'community')")
+	skillImportCmd.Flags().Bool("unsafe-license", false, "Skip the SPDX license allowlist (use with caution)")
+	skillImportCmd.Flags().Bool("dry-run", false, "Walk and parse but don't write to DB")
 
 	skillCreateCmd.Flags().String("slug", "", "Skill slug (kebab-case identifier)")
 	skillCreateCmd.Flags().String("prompt", "", "Free-form description of what the skill should do")

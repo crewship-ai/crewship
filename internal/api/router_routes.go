@@ -301,6 +301,8 @@ func (r *Router) registerRoutes() {
 	// pattern is {workspaceId} everywhere else in the API, and changing
 	// it broke the workspace lookup on this route in the prior commit.
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/generate", authed(wsCtx(http.HandlerFunc(skillGen.Generate))))
+	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/bulk-import", authed(wsCtx(http.HandlerFunc(skillBulk.Import))))
 
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
