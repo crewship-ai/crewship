@@ -29,9 +29,22 @@ type ImportResult = z.infer<typeof ImportResultSchema>
 interface ImportSkillDialogProps {
   workspaceId: string
   onImported?: (result: ImportResult) => void
+  // The 3-panel skills browser passes a custom trigger label/variant so
+  // the Import CTA can sit in the left rail without looking like a top
+  // toolbar action. Defaults preserve the previous "Import Skill" CTA
+  // for callers that haven't migrated.
+  triggerLabel?: React.ReactNode
+  triggerVariant?: "default" | "outline" | "secondary" | "ghost"
+  triggerSize?: "default" | "sm" | "lg" | "icon"
 }
 
-export function ImportSkillDialog({ workspaceId, onImported }: ImportSkillDialogProps) {
+export function ImportSkillDialog({
+  workspaceId,
+  onImported,
+  triggerLabel,
+  triggerVariant = "outline",
+  triggerSize = "sm",
+}: ImportSkillDialogProps) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<"url" | "content">("url")
   const [url, setUrl] = useState("")
@@ -79,9 +92,13 @@ export function ImportSkillDialog({ workspaceId, onImported }: ImportSkillDialog
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Upload className="mr-2 h-4 w-4" />
-          Import Skill
+        <Button variant={triggerVariant} size={triggerSize}>
+          {triggerLabel ?? (
+            <>
+              <Upload className="mr-2 h-4 w-4" />
+              Import Skill
+            </>
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
