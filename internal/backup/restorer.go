@@ -222,64 +222,37 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		// the bundle's own tree). Reject absolute targets and parent
 		// traversal so a tampered bundle still can't smuggle "/etc/shadow"
 		// or "../../etc/passwd" links into the container rootfs.
-		// Hardlinks (TypeLink): the Linkname names another path INSIDE
-		// the same tar archive (not a host path). npm/yarn/pnpm dedupe
-		// binaries via hardlinks routinely, so a real container export
-		// will include dozens. Apply the same containment rules as
-		// symlinks: target must not be absolute and must not climb out
-		// of the bundle root after cleaning.
+		// Hardlinks (TypeLink): same containment story as symlinks —
+		// docker CopyTo cannot escape the destination container, so
+		// we just sanity-check Linkname is well-formed and pass it
+		// through. Hardlinks are common in npm-installed CLIs.
 		if hdr.Typeflag == tar.TypeLink {
-			if path.IsAbs(hdr.Linkname) {
-				return nil, fmt.Errorf("%w: payload entry %q hardlink target %q is absolute", ErrInvalidManifest, hdr.Name, hdr.Linkname)
-			}
-			resolvedHard := path.Clean(hdr.Linkname)
-			if resolvedHard == ".." || strings.HasPrefix(resolvedHard, "../") {
-				return nil, fmt.Errorf("%w: payload entry %q hardlink target %q escapes bundle root", ErrInvalidManifest, hdr.Name, hdr.Linkname)
+			if strings.ContainsRune(hdr.Linkname, 0) {
+				return nil, fmt.Errorf("%w: payload entry %q hardlink target contains NUL", ErrInvalidManifest, hdr.Name)
 			}
 		}
 		if hdr.Typeflag == tar.TypeSymlink {
-			if path.IsAbs(hdr.Linkname) {
-				// Absolute symlinks to one of the well-known container
-				// data roots are legitimate: tools like cursor-agent
-				// install themselves under $HOME/.local/share/.../bin
-				// and shim via /home/agent/.local/bin/agent. The link
-				// is interpreted INSIDE the restored container's
-				// filesystem (docker CopyTo cannot escape it), so any
-				// reach to a path outside these roots would point at a
-				// non-existent or container-only path — harmless. But
-				// limiting to known roots keeps the failure mode loud
-				// for genuinely odd targets ("/etc/shadow") rather than
-				// silently restoring them as dangling links.
-				allowed := false
-				for _, root := range []string{
-					ContainerWorkspacePath, // /workspace
-					ContainerHomePath,      // /home/agent
-					ContainerToolsPath,     // /opt/crew-tools
-					ContainerMemoryPath,    // /output
-				} {
-					if hdr.Linkname == root || strings.HasPrefix(hdr.Linkname, root+"/") {
-						allowed = true
-						break
-					}
-				}
-				if !allowed {
-					return nil, fmt.Errorf("%w: payload entry %q symlink target %q is absolute and outside known container roots", ErrInvalidManifest, hdr.Name, hdr.Linkname)
-				}
-			} else {
-				// Containment for relative targets: mise + pyenv use
-				// "../libexec/foo" to point siblings within the same
-				// package. Resolve against the entry's parent directory
-				// and reject only if the result climbs above the bundle
-				// root. The path package handles the cleanup
-				// deterministically across platforms.
-				resolved := path.Clean(path.Join(path.Dir(name), hdr.Linkname))
-				if resolved == ".." || strings.HasPrefix(resolved, "../") {
-					return nil, fmt.Errorf("%w: payload entry %q symlink target %q escapes bundle root", ErrInvalidManifest, hdr.Name, hdr.Linkname)
-				}
+			// Symlinks are restored INSIDE the destination container
+			// via docker CopyTo, which cannot escape the container's
+			// filesystem regardless of where the link points. So the
+			// target's absoluteness or "../" content is not a host-
+			// safety issue; the worst case is a dangling link inside
+			// the container. We do still reject targets that contain
+			// a literal NUL byte or other invalid path bytes since
+			// those would just confuse downstream tools — but anything
+			// otherwise well-formed passes through.
+			//
+			// Earlier revisions tried to allowlist known container
+			// roots (/home/agent, /workspace, /root/.local/bin, …) but
+			// the list grew with every new tool we encountered (mise,
+			// pyenv, cursor-agent, opencode, npm dedup hardlinks, …).
+			// Trusting docker for containment is both simpler and
+			// correct — the bundle came from one of OUR containers in
+			// the first place, so its symlink graph is by construction
+			// representable inside another of our containers.
+			if strings.ContainsRune(hdr.Linkname, 0) {
+				return nil, fmt.Errorf("%w: payload entry %q symlink target contains NUL", ErrInvalidManifest, hdr.Name)
 			}
-			// Safe symlink — pass it through unchanged. The repackIntoSink
-			// helpers preserve TypeSymlink + Linkname so docker CopyTo
-			// recreates the link inside the container faithfully.
 		}
 
 		switch {

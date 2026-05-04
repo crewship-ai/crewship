@@ -73,27 +73,39 @@ func TestExtractPayload_RejectsParentTraversal(t *testing.T) {
 	}
 }
 
-func TestExtractPayload_RejectsSymlink(t *testing.T) {
+// TestExtractPayload_AcceptsSymlinkToHostLooking demonstrates the
+// post-fix contract: symlinks pointing to absolute paths (e.g.
+// "/etc/passwd") are NOT rejected at preflight. They restore inside
+// the destination container's filesystem via docker CopyTo, which
+// itself enforces containment — the symlink would dangle (the
+// container has no /etc/passwd at the time of restore, or it has its
+// own copy) but it never reaches the host. Earlier preflight rejection
+// blocked legitimate language-tooling layouts (mise, pyenv,
+// cursor-agent shims) where the only safe alternative was an
+// allowlist that grew with every new tool we encountered.
+func TestExtractPayload_AcceptsSymlinkToHostLooking(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "/etc/passwd")
-	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
-	if err == nil {
-		t.Fatal("expected ExtractPayload to reject a symlink entry")
-	}
-	if !errors.Is(err, ErrInvalidManifest) {
-		t.Errorf("expected ErrInvalidManifest, got %v", err)
+	if _, err := ExtractPayload(t.Context(), bytes.NewReader(payload)); err != nil {
+		t.Fatalf("symlink to absolute target should pass preflight; got %v", err)
 	}
 }
 
-func TestExtractPayload_RejectsHardLink(t *testing.T) {
-	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "/etc/passwd")
-	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
-	if err == nil {
-		t.Fatal("expected ExtractPayload to reject a hardlink entry")
-	}
-	if !errors.Is(err, ErrInvalidManifest) {
-		t.Errorf("expected ErrInvalidManifest, got %v", err)
+func TestExtractPayload_AcceptsHardLink(t *testing.T) {
+	// npm/yarn/pnpm dedupe binaries via hardlinks. The link's target
+	// names another path INSIDE the same archive, so the worst case is
+	// a missing target which is detected at extraction time, not
+	// preflight.
+	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "workspace/my-crew/file.txt")
+	if _, err := ExtractPayload(t.Context(), bytes.NewReader(payload)); err != nil {
+		t.Fatalf("contained hardlink should pass preflight; got %v", err)
 	}
 }
+
+// NUL-in-linkname is a defensive guard. The standard library's tar
+// writer refuses to encode such a header, so we can't construct the
+// pathological input from clean Go code — manual tar construction
+// would be required. Keeping the check in code as a belt-and-braces
+// measure but no test fixture exercises it.
 
 func TestExtractPayload_AcceptsValidLayout(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/file.txt", tar.TypeReg, "")
