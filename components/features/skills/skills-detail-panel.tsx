@@ -200,7 +200,7 @@ function InstallToAgentDialog({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+    fetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return
@@ -226,20 +226,36 @@ function InstallToAgentDialog({
 
   async function handleInstall() {
     if (picked.size === 0) return
+    if (!workspaceId) {
+      setError("workspace not loaded — refresh the page and retry")
+      return
+    }
     setSubmitting(true)
     setError(null)
     const errors: string[] = []
+    // The agents/{id}/skills endpoint runs through wsCtx middleware
+    // which requires ?workspace_id=… in the query string. Without it
+    // the server returns 400 'workspace_id is required' (caught
+    // when the user clicked Install on dev1).
+    const wsParam = `?workspace_id=${encodeURIComponent(workspaceId)}`
     for (const agentId of picked) {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}/skills`, {
+        const res = await fetch(`/api/v1/agents/${agentId}/skills${wsParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skill_id: skill.id }),
         })
         if (!res.ok && res.status !== 409) {
-          // 409 = already installed; treat as success so bulk runs are idempotent
-          const body = await res.text()
-          errors.push(`${agentId}: ${body || res.statusText}`)
+          // 409 = already installed; treat as success so bulk runs are idempotent.
+          const body = await res.text().catch(() => res.statusText)
+          let detail = body
+          try {
+            const parsed = JSON.parse(body) as { detail?: string; error?: string }
+            detail = parsed.detail ?? parsed.error ?? body
+          } catch {
+            // not JSON; use raw body
+          }
+          errors.push(`${agentId}: ${detail || res.statusText}`)
         }
       } catch {
         errors.push(`${agentId}: network error`)
@@ -367,7 +383,7 @@ function AssignToCrewDialog({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+    fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         if (cancelled) return
@@ -384,8 +400,9 @@ function AssignToCrewDialog({
     if (!pickedCrew || !workspaceId) return
     setSubmitting(true)
     setError(null)
+    const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
     try {
-      const agentsRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${pickedCrew}`)
+      const agentsRes = await fetch(`/api/v1/agents?${wsParam}&crew_id=${encodeURIComponent(pickedCrew)}`)
       if (!agentsRes.ok) {
         setError("Failed to load crew agents")
         setSubmitting(false)
@@ -399,14 +416,26 @@ function AssignToCrewDialog({
         return
       }
       const errors: string[] = []
+      // Each per-agent POST also needs ?workspace_id — same wsCtx
+      // middleware requirement as the single-install path. Surface
+      // the JSON detail when the body is RFC7807 so the user sees
+      // 'agent not in workspace X' instead of 'Bad Request'.
       for (const a of targets) {
-        const res = await fetch(`/api/v1/agents/${a.id}/skills`, {
+        const res = await fetch(`/api/v1/agents/${encodeURIComponent(a.id)}/skills?${wsParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skill_id: skill.id }),
         })
         if (!res.ok && res.status !== 409) {
-          errors.push(`${a.slug}: ${res.statusText}`)
+          const body = await res.text().catch(() => res.statusText)
+          let detail = body
+          try {
+            const parsed = JSON.parse(body) as { detail?: string; error?: string }
+            detail = parsed.detail ?? parsed.error ?? body
+          } catch {
+            // raw body; use as-is
+          }
+          errors.push(`${a.slug}: ${detail || res.statusText}`)
         }
       }
       if (errors.length > 0) {
