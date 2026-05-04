@@ -496,6 +496,25 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			continue
 		}
 		parent := path.Dir(s.dest)
+		// Container root "/" is mounted read-only by default — Docker
+		// CopyTo with dst="/" fails with "container rootfs is marked
+		// read-only" before it ever touches the bind-mounted child. So
+		// for top-level section roots (/workspace, /output) we MUST go
+		// straight to the section dir; the SDK is happy because the
+		// dst itself is the bind-mounted writable target.
+		//
+		// For nested roots (/home/agent, /opt/crew-tools) the SDK's
+		// "Could not find the file" quirk forces us to copy into the
+		// writable parent (/home, /opt) with a rewrapped tar that
+		// restores the basename onto every entry.
+		if parent == "/" {
+			if err := ops.CopyTo(ctx, containerID, s.dest, r); err != nil {
+				_ = r.Close()
+				return fmt.Errorf("backup: restore %s %s: %w", s.name, crewSlug, err)
+			}
+			_ = r.Close()
+			continue
+		}
 		basename := path.Base(s.dest)
 		rewrapped, rwErr := rewrapTarUnder(r, basename)
 		_ = r.Close()
