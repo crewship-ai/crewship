@@ -131,6 +131,8 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
+	// Credential audit timeline (CONNECTIONS.md §4.3 inline drawer)
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/audit", authed(wsCtx(http.HandlerFunc(creds.AuditTimeline))))
 	// Per-tool granularity (Cursor parity, CONNECTIONS.md §3.1)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools", authed(wsCtx(http.HandlerFunc(integrations.ListCrewIntegrationTools))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegrationTool))))

@@ -799,6 +799,35 @@ UPDATE mcp_registry_servers SET trust_tier = 'anthropic' WHERE is_verified = 1;
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_trust_tier ON mcp_registry_servers(trust_tier);
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_featured ON mcp_registry_servers(is_featured) WHERE is_featured = 1;
 `},
+	// v68 backs the inline audit drawer (CONNECTIONS.md §4.3 Audit
+	// tab — Doppler pattern: per-row slide-out > separate audit page).
+	// Each event captures who used the credential, from which IP, and
+	// the outcome. event_type is open-ended (USE / ROTATE / TEST /
+	// REVOKE / DETECTED) — a CHECK constraint here would force a
+	// schema migration every time we add a new event class, so we
+	// validate at the Go layer instead. metadata_json carries
+	// event-specific context (e.g. {"old_status":"ACTIVE",
+	// "new_status":"ERROR","reason":"401 Unauthorized"}).
+	//
+	// agent_id is nullable: rotations and test-connection events
+	// originate from a user request, not an agent run.
+	//
+	// The (credential_id, occurred_at DESC) index is the hot path —
+	// the detail Sheet's Audit tab queries last 50 events per
+	// credential.
+	{version: 68, name: "add_credential_audit", sql: `
+CREATE TABLE IF NOT EXISTS credential_audit (
+	id TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	event_type TEXT NOT NULL,
+	agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+	ip_address TEXT,
+	metadata_json TEXT,
+	occurred_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_credential ON credential_audit(credential_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_occurred ON credential_audit(occurred_at);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
