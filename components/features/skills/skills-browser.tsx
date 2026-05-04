@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { create as createOrama, insertMultiple, search as oramaSearch } from "@orama/orama"
 import type { AnyOrama } from "@orama/orama"
 import { VirtuosoGrid } from "react-virtuoso"
-import { Group as PanelGroup, Panel, Separator as PanelResizeHandle, useDefaultLayout } from "react-resizable-panels"
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels"
 import {
   Search, Sparkles, Plus, X, ChevronDown, ChevronRight,
   Package, RefreshCw, ShieldCheck, BadgeCheck, Lock, Dot, AlertTriangle, Loader2,
@@ -287,20 +287,6 @@ export function SkillsBrowser() {
 
   const bundledCount = skills.filter((s) => s.source === "BUNDLED").length
 
-  // react-resizable-panels v4 dropped autoSaveId in favour of a layout
-  // hook + storage handle. Wiring localStorage by hand keeps the same
-  // "panel widths persist across reloads" UX the user asked for.
-  //
-  // Bumped key to v3 to invalidate every previously-persisted layout —
-  // the v1/v2 saved states from earlier sprints were cropping the rail
-  // and detail to unreadable widths on re-mount because the min was
-  // too lenient.
-  const persistedLayout = useDefaultLayout({
-    id: "crewship.skills.browser.layout.v3",
-    panelIds: ["skills-rail", "skills-grid", "skills-detail"],
-    storage: typeof window !== "undefined" ? window.localStorage : undefined,
-  })
-
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Toolbar: Tab navigation + actions (single row) — mirrors
@@ -348,8 +334,6 @@ export function SkillsBrowser() {
 
       <PanelGroup
         orientation="horizontal"
-        defaultLayout={persistedLayout.defaultLayout}
-        onLayoutChanged={persistedLayout.onLayoutChanged}
         className="flex-1 min-h-0 flex"
       >
       {/* LEFT — filter rail. autoSaveId persists user-dragged size to
