@@ -29,7 +29,13 @@ export function StepIdentity({ state, setState, workspaceId }: Props) {
     if (state.scope !== "CREW" || crews.length > 0) return
     setCrewLoading(true)
     fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
-      .then((r) => r.json())
+      .then((r) => {
+        // 4xx/5xx responses still resolve the promise; reject so the
+        // catch branch sets [] instead of trying to parse an error
+        // payload as Crew[] (CodeRabbit caught the silent failure).
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then((data: Crew[]) => setCrews(Array.isArray(data) ? data : []))
       .catch(() => setCrews([]))
       .finally(() => setCrewLoading(false))

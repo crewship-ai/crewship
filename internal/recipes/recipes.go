@@ -201,6 +201,18 @@ var builtins = []Recipe{
 				Label:      "Anthropic API key",
 				HelpURL:    "https://console.anthropic.com/settings/keys",
 			},
+			// Brave Search MCP needs an API key (free tier exists at
+			// brave.com/search/api). Required here so install collects
+			// it; otherwise the server provisions but produces 401s on
+			// every call. CodeRabbit caught the original "comment-only"
+			// declaration that left the server unauthenticated.
+			{
+				EnvVarName: "BRAVE_API_KEY",
+				Provider:   "NONE",
+				Type:       "API_KEY",
+				Label:      "Brave Search API key",
+				HelpURL:    "https://brave.com/search/api/",
+			},
 		},
 		MCPServers: []RecipeMCPServer{
 			{
@@ -210,13 +222,7 @@ var builtins = []Recipe{
 				Command:     "npx",
 				Args:        []string{"-y", "@modelcontextprotocol/server-brave-search"},
 				Icon:        "search",
-				// Brave Search MCP needs an API key but it's free —
-				// we ask the user for it during install with this
-				// optional/free-tier flag, NOT pre-listed in
-				// Credentials, since the recipe doesn't strictly
-				// require it (a follow-up commit promotes this when
-				// we add optional credentials).
-				EnvMapping: nil,
+				EnvMapping:  map[string]string{"BRAVE_API_KEY": "BRAVE_API_KEY"},
 			},
 		},
 	},

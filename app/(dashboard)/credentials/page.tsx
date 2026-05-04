@@ -453,9 +453,14 @@ export default function CredentialsPage() {
             />
           </div>
 
-          {/* Tab strip — All / Needs attention (CONNECTIONS.md §4.1) */}
-          <div className="flex items-center gap-0 border-b border-white/[0.08]">
+          {/* Tab strip — All / Needs attention (CONNECTIONS.md §4.1).
+              ARIA: role="tablist" + role="tab" + aria-selected so SR
+              users get standard tab-group semantics. */}
+          <div role="tablist" aria-label="Credential filter" className="flex items-center gap-0 border-b border-white/[0.08]">
             <button
+              role="tab"
+              aria-selected={activeTab === "all"}
+              tabIndex={activeTab === "all" ? 0 : -1}
               onClick={() => setActiveTab("all")}
               className={cn(
                 "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
@@ -468,6 +473,9 @@ export default function CredentialsPage() {
               <span className="text-[10px] font-mono opacity-60">{credentials.length}</span>
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === "needs"}
+              tabIndex={activeTab === "needs" ? 0 : -1}
               onClick={() => setActiveTab("needs")}
               className={cn(
                 "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
@@ -577,6 +585,7 @@ export default function CredentialsPage() {
                       <button
                         type="button"
                         onClick={() => toggleProviderCollapsed(provider)}
+                        aria-expanded={!isCollapsed}
                         className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-white/[0.02] transition-colors"
                       >
                         {isCollapsed ? (

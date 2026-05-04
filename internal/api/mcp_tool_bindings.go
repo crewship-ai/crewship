@@ -39,7 +39,7 @@ func (h *IntegrationHandler) ListCrewIntegrationTools(w http.ResponseWriter, r *
 	// Verify the crew + server pair belongs to this workspace before
 	// exposing tool data — same isolation check the CRUD handlers use.
 	if err := h.assertCrewServerExists(r, workspaceID, crewID, serverID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
+		h.respondCrewServerErr(w, err)
 		return
 	}
 
@@ -103,7 +103,7 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 	}
 
 	if err := h.assertCrewServerExists(r, workspaceID, crewID, serverID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
+		h.respondCrewServerErr(w, err)
 		return
 	}
 
@@ -119,12 +119,23 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Upsert via INSERT ... ON CONFLICT, the SQLite idiom; defaults
-	// match the schema (enabled = 1) so a partial body that only sets
-	// description still creates a sensible row on first write.
-	enabled := 1
-	if req.Enabled != nil && !*req.Enabled {
-		enabled = 0
+	// Upsert via INSERT ... ON CONFLICT. Both enabled and description
+	// flow as nullable params: when the request omits a field we pass
+	// SQL NULL and the COALESCE in the UPDATE branch falls back to
+	// the existing row's value, preserving prior toggles. The VALUES
+	// clause uses COALESCE(?, 1) so a fresh row defaults enabled=1.
+	//
+	// CodeRabbit caught the prior bug where enabled=1 was always
+	// supplied, so a description-only PATCH on a disabled tool would
+	// silently flip it back on (excluded.enabled = 1 -> COALESCE picks
+	// 1, not the existing 0).
+	var enabledArg any // sql NULL when nil
+	if req.Enabled != nil {
+		if *req.Enabled {
+			enabledArg = 1
+		} else {
+			enabledArg = 0
+		}
 	}
 	desc := sql.NullString{}
 	if req.Description != nil {
@@ -135,12 +146,12 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 	id := generateCUID()
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO mcp_tool_bindings (id, mcp_server_id, mcp_server_scope, tool_name, description, enabled, created_at, updated_at)
-		VALUES (?, ?, 'crew', ?, ?, ?, ?, ?)
+		VALUES (?, ?, 'crew', ?, ?, COALESCE(?, 1), ?, ?)
 		ON CONFLICT(mcp_server_id, mcp_server_scope, tool_name) DO UPDATE SET
-			enabled = COALESCE(excluded.enabled, mcp_tool_bindings.enabled),
+			enabled = COALESCE(?, mcp_tool_bindings.enabled),
 			description = COALESCE(excluded.description, mcp_tool_bindings.description),
 			updated_at = excluded.updated_at`,
-		id, serverID, toolName, desc, enabled, now, now)
+		id, serverID, toolName, desc, enabledArg, now, now, enabledArg)
 	if err != nil {
 		h.logger.Error("upsert mcp tool binding", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -203,7 +214,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 	serverID := r.PathValue("integrationId")
 
 	if err := h.assertCrewServerExists(r, workspaceID, crewID, serverID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
+		h.respondCrewServerErr(w, err)
 		return
 	}
 
@@ -238,15 +249,16 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 			desc.Valid = true
 			desc.String = *t.Description
 		}
-		// Keep enabled untouched on existing rows: COALESCE'ing on
-		// excluded.enabled would always overwrite with 1 from the
-		// VALUES clause. Selecting from the existing row preserves a
-		// previously toggled-off tool across refreshes.
+		// Keep enabled untouched on existing rows: enabled is NOT
+		// updated in the conflict branch, so a previously toggled-off
+		// tool stays off across refreshes. Description uses COALESCE
+		// so an entry without a description doesn't NULL out an
+		// existing one (CodeRabbit caught this).
 		res, err := tx.ExecContext(r.Context(), `
 			INSERT INTO mcp_tool_bindings (id, mcp_server_id, mcp_server_scope, tool_name, description, enabled, created_at, updated_at)
 			VALUES (?, ?, 'crew', ?, ?, 1, ?, ?)
 			ON CONFLICT(mcp_server_id, mcp_server_scope, tool_name) DO UPDATE SET
-				description = excluded.description,
+				description = COALESCE(excluded.description, mcp_tool_bindings.description),
 				updated_at = excluded.updated_at`,
 			generateCUID(), serverID, name, desc, now, now)
 		if err != nil {
@@ -293,7 +305,8 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 // assertCrewServerExists verifies that the (workspaceID, crewID,
 // serverID) triple identifies a live (non-soft-deleted) crew MCP
 // server. Returns sql.ErrNoRows on miss so callers can branch with
-// errors.Is.
+// errors.Is; any other error is a real DB failure (timeout, conn drop,
+// etc.) and must NOT be conflated with "not found".
 func (h *IntegrationHandler) assertCrewServerExists(r *http.Request, workspaceID, crewID, serverID string) error {
 	var exists string
 	err := h.db.QueryRowContext(r.Context(), `
@@ -303,4 +316,17 @@ func (h *IntegrationHandler) assertCrewServerExists(r *http.Request, workspaceID
 			AND cs.deleted_at IS NULL AND c.deleted_at IS NULL`,
 		serverID, crewID, workspaceID).Scan(&exists)
 	return err
+}
+
+// respondCrewServerErr discriminates "not found" from real DB failures.
+// CodeRabbit flagged the previous behaviour where every error from
+// assertCrewServerExists collapsed to 404 — that masks outages as
+// false 404s and makes ops blind to genuine issues.
+func (h *IntegrationHandler) respondCrewServerErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
+		return
+	}
+	h.logger.Error("assert crew server exists", "error", err)
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 }

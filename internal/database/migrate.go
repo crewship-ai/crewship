@@ -860,6 +860,34 @@ CREATE TABLE IF NOT EXISTS credential_rotations (
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
 `},
+	// v70 fixes the credential_rotations.rotated_by FK from
+	// "NOT NULL REFERENCES users(id)" (defaults to NO ACTION) to
+	// "REFERENCES users(id) ON DELETE SET NULL". The original v69
+	// would block deleting any user who has rotation history with a
+	// FK constraint error — incompatible with how credential_audit
+	// already nulls out agent_id on agent deletion.
+	//
+	// SQLite can't ALTER an existing FK, so this is the standard
+	// recreate dance: rename old → create new with fixed schema →
+	// copy rows → drop old. Indexes are recreated afterwards.
+	{version: 70, name: "fix_credential_rotations_rotated_by_fk", sql: `
+CREATE TABLE credential_rotations_new (
+	id TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	old_value TEXT NOT NULL,
+	grace_seconds INTEGER NOT NULL DEFAULT 0,
+	rotated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	rotated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+	status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','EXPIRED','CANCELLED'))
+);
+INSERT INTO credential_rotations_new (id, credential_id, old_value, grace_seconds, rotated_at, expires_at, rotated_by, status)
+	SELECT id, credential_id, old_value, grace_seconds, rotated_at, expires_at, rotated_by, status FROM credential_rotations;
+DROP TABLE credential_rotations;
+ALTER TABLE credential_rotations_new RENAME TO credential_rotations;
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

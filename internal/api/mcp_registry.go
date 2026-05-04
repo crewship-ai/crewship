@@ -397,21 +397,35 @@ var validTrustTiers = map[string]struct{}{
 // fragment (without leading WHERE/AND) and the bind args that match
 // its placeholders, so callers can splice them onto whatever fixed
 // predicate they already have.
-func parseRegistryFilters(r *http.Request) (clause string, args []any) {
+//
+// Returns a non-nil error when an unknown filter value is passed
+// (e.g. ?trust_tier=verified-by-mom or ?featured=maybe). Silently
+// dropping the predicate would broaden the result set unexpectedly,
+// which CodeRabbit flagged as a security smell — bad client requests
+// must surface as 400, not as oversized 200s.
+func parseRegistryFilters(r *http.Request) (clause string, args []any, err error) {
 	parts := []string{}
 	if t := strings.TrimSpace(r.URL.Query().Get("trust_tier")); t != "" {
-		if _, ok := validTrustTiers[t]; ok {
-			parts = append(parts, "trust_tier = ?")
-			args = append(args, t)
+		if _, ok := validTrustTiers[t]; !ok {
+			return "", nil, fmt.Errorf("invalid trust_tier %q (allowed: anthropic, crewship, community)", t)
+		}
+		parts = append(parts, "trust_tier = ?")
+		args = append(args, t)
+	}
+	if f := strings.TrimSpace(r.URL.Query().Get("featured")); f != "" {
+		switch f {
+		case "true", "1":
+			parts = append(parts, "is_featured = 1")
+		case "false", "0":
+			parts = append(parts, "is_featured = 0")
+		default:
+			return "", nil, fmt.Errorf("invalid featured %q (allowed: true, false, 1, 0)", f)
 		}
 	}
-	if f := strings.TrimSpace(r.URL.Query().Get("featured")); f == "true" || f == "1" {
-		parts = append(parts, "is_featured = 1")
-	}
 	if len(parts) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
-	return strings.Join(parts, " AND "), args
+	return strings.Join(parts, " AND "), args, nil
 }
 
 // List handles GET /api/v1/mcp-registry — returns paginated list.
@@ -419,7 +433,11 @@ func parseRegistryFilters(r *http.Request) (clause string, args []any) {
 func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r, 50, 200)
 
-	whereClause, whereArgs := parseRegistryFilters(r)
+	whereClause, whereArgs, err := parseRegistryFilters(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	where := ""
 	if whereClause != "" {
 		where = " WHERE " + whereClause
@@ -478,7 +496,11 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	// Compose the LIKE predicate with optional trust_tier / featured
 	// filters so a search can be narrowed to e.g. only Anthropic-
 	// verified servers from the marketplace UI.
-	filterClause, filterArgs := parseRegistryFilters(r)
+	filterClause, filterArgs, ferr := parseRegistryFilters(r)
+	if ferr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": ferr.Error()})
+		return
+	}
 	likeClause := "(name LIKE ? OR description LIKE ? OR category LIKE ? OR display_name LIKE ?)"
 	whereClause := likeClause
 	if filterClause != "" {
@@ -517,9 +539,16 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	countArgs := append(append([]any{}, likeArgs...), filterArgs...)
-	h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		fmt.Sprintf(`SELECT COUNT(*) FROM mcp_registry_servers WHERE %s`, whereClause),
-		countArgs...).Scan(&total)
+		countArgs...).Scan(&total); err != nil {
+		// Mirror the checked count handling in List — surface DB
+		// failures rather than silently returning total=0 with a 200
+		// response (CodeRabbit caught this).
+		h.logger.Error("count search results", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"servers": servers,

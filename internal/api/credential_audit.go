@@ -228,7 +228,12 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 		SELECT id FROM credentials
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		credentialID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			return
+		}
+		h.logger.Error("audit: check credential exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -49,25 +50,17 @@ func TestRecipes_List_Static(t *testing.T) {
 	}
 }
 
-// TestRecipes_InstallAtomic is the central regression for the "all or
-// nothing" promise. We force a credential conflict mid-flow and
-// verify NO partial state remains: no crew, no MCP server, no extra
-// credentials.
-func TestRecipes_InstallAtomic(t *testing.T) {
+// TestRecipes_InstallSuffixedSlug exercises the happy path where a
+// pre-existing crew with the same slug forces the slug-collision
+// retry loop to suffix `-2`. Verifies install succeeds and DB state
+// matches the request.
+func TestRecipes_InstallSuffixedSlug(t *testing.T) {
 	t.Parallel()
 	setTestEncryptionKeyParallelSafe(t)
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	// Pre-seed a CREW with the same slug the recipe wants — the slug
-	// resolver should suffix this to "code-review-2", so this is NOT
-	// a conflict, just an exercise of the suffix path. The atomicity
-	// failure mode we want is harder: a NULL constraint violation or
-	// similar mid-tx. We provoke that by deleting the workspace
-	// row's referenced user (created_by FK on credentials) right
-	// before install — the FK violation kicks during INSERT
-	// credentials.
 	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('preexisting-crew', ?, 'Existing', 'code-review')`, wsID); err != nil {
 		t.Fatalf("preseed crew: %v", err)
 	}
@@ -96,13 +89,12 @@ func TestRecipes_InstallAtomic(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got installRecipeResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &got)
-
-	// Slug suffixed because preexisting-crew already had "code-review".
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal install response: %v", err)
+	}
 	if got.CrewSlug != "code-review-2" {
 		t.Errorf("crew slug = %q, want code-review-2", got.CrewSlug)
 	}
-	// Both credentials added (no pre-existing).
 	if len(got.CredentialsAdded) != 2 {
 		t.Errorf("credentials added = %v, want 2", got.CredentialsAdded)
 	}
@@ -110,7 +102,6 @@ func TestRecipes_InstallAtomic(t *testing.T) {
 		t.Errorf("mcp servers added = %v, want 1 (github)", got.MCPServersAdded)
 	}
 
-	// Verify credentials live in DB with correct provider + label.
 	var label, provider string
 	if err := db.QueryRow(`SELECT account_label, provider FROM credentials WHERE name = 'ANTHROPIC_API_KEY' AND workspace_id = ?`, wsID).Scan(&label, &provider); err != nil {
 		t.Fatalf("read anthropic credential: %v", err)
@@ -121,6 +112,100 @@ func TestRecipes_InstallAtomic(t *testing.T) {
 	if provider != "ANTHROPIC" {
 		t.Errorf("provider = %q, want ANTHROPIC", provider)
 	}
+}
+
+// TestRecipes_InstallAtomicRollback is the central regression for the
+// "all or nothing" promise. We force a deterministic failure inside
+// the install transaction by violating the created_by FK on
+// credentials (we drop the user row immediately before the install
+// attempt). The handler MUST roll back: no crew, no credentials, no
+// MCP servers must remain after the failed call.
+func TestRecipes_InstallAtomicRollback(t *testing.T) {
+	t.Parallel()
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// SQLite needs PRAGMA foreign_keys=ON to enforce FKs at runtime.
+	// setupTestDB enables this; assert so the test is self-validating.
+	var fkOn int
+	_ = db.QueryRow("PRAGMA foreign_keys").Scan(&fkOn)
+	if fkOn != 1 {
+		t.Skip("FK enforcement disabled — atomic rollback test requires PRAGMA foreign_keys=ON")
+	}
+
+	// Snapshot pre-state.
+	preCredCount := countRows(t, db, "credentials", wsID)
+	preCrewCount := countRows(t, db, "crews", wsID)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	h := NewRecipeHandler(db, logger)
+
+	// Body looks valid — but the failure will come from removing the
+	// creating user row via DELETE before install runs.
+	body, _ := json.Marshal(installRecipeRequest{
+		CredentialValues: map[string]string{
+			"ANTHROPIC_API_KEY": "sk-ant-fk-test",
+			"GH_TOKEN":          "ghp_fk_test",
+		},
+	})
+
+	// Use an AuthUser whose ID does NOT exist in the users table.
+	// credentials.created_by REFERENCES users(id) — the INSERT will
+	// fail with a FK constraint violation inside the tx.
+	ghostUserID := "ghost-user-" + userID
+
+	req := httptest.NewRequest("POST", "/api/v1/recipes/code-review-crew/install", bytes.NewReader(body))
+	req.SetPathValue("slug", "code-review-crew")
+	ctx := withUser(req.Context(), &AuthUser{ID: ghostUserID})
+	ctx = withWorkspace(ctx, wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	h.Install(rr, req)
+
+	if rr.Code == http.StatusCreated {
+		t.Fatalf("install unexpectedly succeeded with non-existent user; body=%s", rr.Body.String())
+	}
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", rr.Code)
+	}
+
+	// Atomicity assertion: every counter must equal its pre-state.
+	if got := countRows(t, db, "credentials", wsID); got != preCredCount {
+		t.Errorf("credentials leaked: pre=%d post=%d", preCredCount, got)
+	}
+	if got := countRows(t, db, "crews", wsID); got != preCrewCount {
+		t.Errorf("crews leaked: pre=%d post=%d", preCrewCount, got)
+	}
+	// crew_mcp_servers join through crews — if no crew leaked, no
+	// orphaned MCP can either, but assert directly to be safe.
+	var mcpCount int
+	_ = db.QueryRow(`
+		SELECT COUNT(*) FROM crew_mcp_servers cs
+		JOIN crews c ON c.id = cs.crew_id
+		WHERE c.workspace_id = ?`, wsID).Scan(&mcpCount)
+	if mcpCount != 0 {
+		t.Errorf("mcp servers leaked: %d", mcpCount)
+	}
+}
+
+func countRows(t *testing.T, db *sql.DB, table, wsID string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE workspace_id = ?`, wsID).Scan(&n); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+
+func sliceContains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // TestRecipes_InstallReusesExisting verifies that an env_var_name
@@ -142,9 +227,13 @@ func TestRecipes_InstallReusesExisting(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	h := NewRecipeHandler(db, logger)
 
-	// research-crew only needs ANTHROPIC_API_KEY → user provides
-	// nothing (it's already there) and install should still succeed.
-	body, _ := json.Marshal(installRecipeRequest{CredentialValues: map[string]string{}})
+	// research-crew needs ANTHROPIC_API_KEY (pre-seeded → reuse) plus
+	// BRAVE_API_KEY (must be supplied → added). Verifies the
+	// reuse-when-already-present path doesn't UNIQUE-collide on the
+	// shared credential.
+	body, _ := json.Marshal(installRecipeRequest{
+		CredentialValues: map[string]string{"BRAVE_API_KEY": "BSA-test-fake"},
+	})
 	req := httptest.NewRequest("POST", "/api/v1/recipes/research-crew/install", bytes.NewReader(body))
 	req.SetPathValue("slug", "research-crew")
 	ctx := withUser(req.Context(), &AuthUser{ID: userID})
@@ -157,12 +246,14 @@ func TestRecipes_InstallReusesExisting(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got installRecipeResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &got)
-	if len(got.CredentialsReused) != 1 || got.CredentialsReused[0] != "ANTHROPIC_API_KEY" {
-		t.Errorf("expected ANTHROPIC_API_KEY reused, got %v / added=%v", got.CredentialsReused, got.CredentialsAdded)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(got.CredentialsAdded) != 0 {
-		t.Errorf("nothing should be added, got %v", got.CredentialsAdded)
+	if !sliceContains(got.CredentialsReused, "ANTHROPIC_API_KEY") {
+		t.Errorf("ANTHROPIC_API_KEY not reused: reused=%v added=%v", got.CredentialsReused, got.CredentialsAdded)
+	}
+	if !sliceContains(got.CredentialsAdded, "BRAVE_API_KEY") {
+		t.Errorf("BRAVE_API_KEY not added: added=%v reused=%v", got.CredentialsAdded, got.CredentialsReused)
 	}
 
 	// And exactly one ANTHROPIC_API_KEY credential exists in the workspace.

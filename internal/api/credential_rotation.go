@@ -214,7 +214,12 @@ func (h *CredentialHandler) ListRotations(w http.ResponseWriter, r *http.Request
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		credID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			return
+		}
+		h.logger.Error("rotations: check credential exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

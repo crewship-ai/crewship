@@ -106,14 +106,21 @@ func (h *RecipeHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Look up existing credentials by env_var_name (= credentials.name).
+	// Surface DB errors as 500 — silently treating a failed query as
+	// "missing credential" would let the user paste a value the FE
+	// already had, then 409 mid-install.
 	existing := map[string]bool{}
 	needed := []string{}
 	for _, c := range rec.Credentials {
 		var have int
-		_ = h.db.QueryRowContext(r.Context(), `
+		if err := h.db.QueryRowContext(r.Context(), `
 			SELECT COUNT(*) FROM credentials
 			WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL`,
-			workspaceID, c.EnvVarName).Scan(&have)
+			workspaceID, c.EnvVarName).Scan(&have); err != nil {
+			h.logger.Error("preview credential lookup", "error", err, "env_var", c.EnvVarName)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 		if have > 0 {
 			existing[c.EnvVarName] = true
 		} else {
@@ -169,9 +176,10 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate: every credential the user doesn't already have must
-	// be supplied. Reusing existing credentials is the supported
-	// path for "I've already connected GitHub once".
+	// First pass — quick "missing credential value" validation outside
+	// the tx so we can 400 cheap on bad input. Race-safe duplicate
+	// detection happens INSIDE the tx below; this preload is just an
+	// advisory check on the request shape.
 	credByName := map[string]string{}
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, name FROM credentials
@@ -207,13 +215,6 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resolvedSlug, _, err := resolveCrewSlug(r.Context(), h.db, workspaceID, rec.CrewSlug)
-	if err != nil {
-		h.logger.Error("resolve crew slug", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin install tx", "error", err)
@@ -228,57 +229,112 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	resp := installRecipeResponse{
-		CrewSlug:          resolvedSlug,
 		CredentialsAdded:  []string{},
 		CredentialsReused: []string{},
 		MCPServersAdded:   []string{},
 	}
 
-	// 1. Credentials — create new, capture IDs of reused.
+	// 1. Credentials — race-safe upsert via INSERT OR IGNORE + SELECT.
+	// Two concurrent installs of the same recipe on the same workspace
+	// must both converge on the same credential row rather than 500ing
+	// the loser on UNIQUE(workspace_id, name). INSERT OR IGNORE makes
+	// the loser a no-op; the follow-up SELECT then returns whichever
+	// id won the race (CodeRabbit-flagged race condition).
 	credIDByEnvVar := map[string]string{}
 	for _, c := range rec.Credentials {
-		if existingID, have := credByName[c.EnvVarName]; have {
+		raw := strings.TrimSpace(req.CredentialValues[c.EnvVarName])
+		// If the user already has this credential and didn't paste a
+		// new value, treat as pure reuse — no INSERT attempt.
+		if existingID, have := credByName[c.EnvVarName]; have && raw == "" {
 			credIDByEnvVar[c.EnvVarName] = existingID
 			resp.CredentialsReused = append(resp.CredentialsReused, c.EnvVarName)
 			continue
 		}
-		raw := strings.TrimSpace(req.CredentialValues[c.EnvVarName])
-		enc, err := encryption.Encrypt(raw)
-		if err != nil {
-			h.logger.Error("encrypt recipe credential", "error", err, "env_var", c.EnvVarName)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
-			return
+
+		// Otherwise we have a value (or didn't see the row in preload).
+		// Try to insert; if a conflict was racing us, the INSERT is
+		// silently skipped and we fall back to the existing row.
+		var encOpt string
+		if raw != "" {
+			enc, err := encryption.Encrypt(raw)
+			if err != nil {
+				h.logger.Error("encrypt recipe credential", "error", err, "env_var", c.EnvVarName)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
+				return
+			}
+			encOpt = enc
 		}
-		credID := generateCUID()
+		newID := generateCUID()
 		label := req.AccountLabels[c.EnvVarName]
 		if label == "" {
 			label = c.Label
 		}
-		if _, err := tx.ExecContext(r.Context(), `
-			INSERT INTO credentials (id, workspace_id, name, encrypted_value, scope, type, provider,
+		res, err := tx.ExecContext(r.Context(), `
+			INSERT OR IGNORE INTO credentials (id, workspace_id, name, encrypted_value, scope, type, provider,
 				account_label, status, created_by, created_at, updated_at)
 			VALUES (?, ?, ?, ?, 'WORKSPACE', ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
-			credID, workspaceID, c.EnvVarName, enc, c.Type, c.Provider, label,
-			user.ID, now, now); err != nil {
+			newID, workspaceID, c.EnvVarName, encOpt, c.Type, c.Provider, label,
+			user.ID, now, now)
+		if err != nil {
 			h.logger.Error("insert recipe credential", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
-		credIDByEnvVar[c.EnvVarName] = credID
-		resp.CredentialsAdded = append(resp.CredentialsAdded, c.EnvVarName)
+		// SELECT the canonical id — works whether we won the race
+		// (returns newID) or lost it (returns the racing inserter's id).
+		var canonicalID string
+		if err := tx.QueryRowContext(r.Context(), `
+			SELECT id FROM credentials
+			WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL`,
+			workspaceID, c.EnvVarName).Scan(&canonicalID); err != nil {
+			h.logger.Error("read canonical credential id", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		credIDByEnvVar[c.EnvVarName] = canonicalID
+		// RowsAffected == 1 means we successfully inserted; 0 means
+		// the conflict path was taken (reuse).
+		if n, _ := res.RowsAffected(); n == 1 && canonicalID == newID {
+			resp.CredentialsAdded = append(resp.CredentialsAdded, c.EnvVarName)
+		} else {
+			resp.CredentialsReused = append(resp.CredentialsReused, c.EnvVarName)
+		}
 	}
 
-	// 2. Crew — slug already resolved with collision suffix above.
+	// 2. Crew — retry on UNIQUE(workspace_id, slug) collision so
+	// concurrent installs deterministically converge to base, base-2,
+	// base-3... rather than racing into a 500. Slug is resolved INSIDE
+	// the tx so the existence check + insert see the same snapshot.
 	crewID := generateCUID()
-	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO crews (id, workspace_id, name, slug, icon, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, rec.Name, resolvedSlug, rec.Icon, rec.Color, now, now); err != nil {
-		h.logger.Error("insert recipe crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+	resolvedSlug := ""
+	for attempt := 0; attempt < 100; attempt++ {
+		candidate := rec.CrewSlug
+		if attempt > 0 {
+			candidate = fmt.Sprintf("%s-%d", rec.CrewSlug, attempt+1)
+		}
+		_, insertErr := tx.ExecContext(r.Context(), `
+			INSERT INTO crews (id, workspace_id, name, slug, icon, color, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			crewID, workspaceID, rec.Name, candidate, rec.Icon, rec.Color, now, now)
+		if insertErr == nil {
+			resolvedSlug = candidate
+			break
+		}
+		// SQLite reports collisions as "UNIQUE constraint failed".
+		// Anything else is a hard failure.
+		if !strings.Contains(insertErr.Error(), "UNIQUE constraint failed") {
+			h.logger.Error("insert recipe crew", "error", insertErr)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
+	if resolvedSlug == "" {
+		h.logger.Error("could not allocate crew slug after 100 attempts", "base", rec.CrewSlug)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Could not allocate crew slug"})
 		return
 	}
 	resp.CrewID = crewID
+	resp.CrewSlug = resolvedSlug
 
 	// 3. MCP servers — env_json maps the recipe's EnvMapping into
 	//    actual credential references. The integration handlers

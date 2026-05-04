@@ -139,7 +139,9 @@ func TestMCPToolBindings_UpdateUpserts(t *testing.T) {
 		t.Fatalf("second PATCH status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var got2 toolBindingResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &got2)
+	if err := json.Unmarshal(rr.Body.Bytes(), &got2); err != nil {
+		t.Fatalf("unmarshal second PATCH response: %v", err)
+	}
 	if got2.ID != got.ID {
 		t.Errorf("ID changed across upsert: %s -> %s (should be stable)", got.ID, got2.ID)
 	}
