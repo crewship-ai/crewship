@@ -279,6 +279,10 @@ export function SkillsBrowser() {
 
   const reload = useCallback(() => {
     if (!workspaceId) return
+    // Clear the previous error before the new fetch so a successful
+    // reload after a transient failure doesn't leave the centre panel
+    // stuck on the error state.
+    setError(null)
     fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then(async (json) => {
@@ -286,8 +290,7 @@ export function SkillsBrowser() {
         setSkills(data)
         // Rebuild the Orama index — without this, search would still
         // resolve hits to old row IDs that no longer exist or have
-        // been re-keyed. The previous version of reload() updated
-        // setSkills only, leaving searchHits stale.
+        // been re-keyed.
         oramaIndex.current = await buildIndex(data)
       })
       .catch(() => setError("Failed to reload skills"))
@@ -389,6 +392,7 @@ export function SkillsBrowser() {
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               <Input
                 placeholder="Search skills…"
+                aria-label="Search skills"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="h-7 pl-7 text-[12px] bg-white/[0.04] border-white/[0.1]"

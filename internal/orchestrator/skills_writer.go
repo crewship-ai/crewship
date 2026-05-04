@@ -61,6 +61,12 @@ func writeAgentSkills(
 	}
 	written := 0
 	skipped := 0
+	// firstWriteErr captures the first concrete write failure so the
+	// final "zero of N landed" error wraps a real root cause. Without
+	// this, callers with a nil logger had no signal at all (the
+	// per-path warnings were the only place the underlying reason
+	// showed up).
+	var firstWriteErr error
 	for _, skill := range skills {
 		if skill.Slug == "" || skill.Content == "" {
 			skipped++
@@ -79,6 +85,9 @@ func writeAgentSkills(
 		for _, root := range folderRoots {
 			rel := path.Join(root, skill.Slug, "SKILL.md")
 			if err := writeFileViaContainer(ctx, container, containerID, workDir, rel, skill.Content, logger); err != nil {
+				if firstWriteErr == nil {
+					firstWriteErr = err
+				}
 				if logger != nil {
 					logger.Warn("write skill failed", "skill", skill.Slug, "path", rel, "error", err)
 				}
@@ -92,6 +101,9 @@ func writeAgentSkills(
 		// SKILL.md body lands without conversion.
 		mdcPath := path.Join(".cursor/rules", skill.Slug+".mdc")
 		if err := writeFileViaContainer(ctx, container, containerID, workDir, mdcPath, skill.Content, logger); err != nil {
+			if firstWriteErr == nil {
+				firstWriteErr = err
+			}
 			if logger != nil {
 				logger.Warn("write skill failed", "skill", skill.Slug, "path", mdcPath, "error", err)
 			}
@@ -103,6 +115,9 @@ func writeAgentSkills(
 		logger.Debug("agent skills materialised", "written", written, "skipped", skipped, "skills", len(skills))
 	}
 	if written == 0 && len(skills) > 0 {
+		if firstWriteErr != nil {
+			return fmt.Errorf("write agent skills: zero of %d skills landed in any path: %w", len(skills), firstWriteErr)
+		}
 		return fmt.Errorf("write agent skills: zero of %d skills landed in any path", len(skills))
 	}
 	return nil

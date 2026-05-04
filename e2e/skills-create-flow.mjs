@@ -31,8 +31,11 @@ page.on("pageerror", (e) => console.log("PAGE ERROR:", e.message))
 await page.goto(`${URL}/login`, { waitUntil: "domcontentloaded" })
 await page.locator('input[type="email"]').first().fill(EMAIL)
 await page.locator('input[type="password"]').first().fill(PASSWORD)
+// Don't swallow the redirect timeout — if login never completes we
+// want this script to fail loudly rather than report a broken create
+// flow when auth is the real problem.
 await Promise.all([
-  page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 15000 }).catch(() => {}),
+  page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 15000 }),
   page.locator('button[type="submit"]').first().click(),
 ])
 console.log("✓ logged in")

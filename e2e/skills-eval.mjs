@@ -45,8 +45,11 @@ async function login(page) {
   await page.waitForSelector('input[type="email"], input[name="email"]', { timeout: 10000 })
   await page.locator('input[type="email"], input[name="email"]').first().fill(EMAIL)
   await page.locator('input[type="password"], input[name="password"]').first().fill(PASSWORD)
+  // Fail fast on login — a swallowed redirect timeout makes every
+  // viewport-level check report misleading "no Create button" errors
+  // when the real failure was that we never left /login.
   await Promise.all([
-    page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 15000 }).catch(() => {}),
+    page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 15000 }),
     page.locator('button[type="submit"]').first().click(),
   ])
 }
@@ -60,7 +63,9 @@ async function evalViewport(browser, vp) {
   await login(page)
 
   await page.goto(`${URL}/skills`, { waitUntil: "domcontentloaded" })
-  await page.waitForSelector('text=/Browse|Create Skill|Skills/', { timeout: 10000 }).catch(() => {})
+  // Fail the run if the page never reached its first paint marker —
+  // otherwise we'd carry on screenshotting a half-loaded shell.
+  await page.waitForSelector('text=/Browse|Create Skill|Skills/', { timeout: 10000 })
   await page.waitForTimeout(2000)
 
   const shotPath = join(SHOTS_DIR, `skills-${vp.name}.png`)

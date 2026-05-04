@@ -74,7 +74,11 @@ export function CreateSkillDialog({ workspaceId, onCreated, trigger }: CreateSki
     setStep("generating")
     try {
       const body: Record<string, string> = { slug: slug.trim(), prompt: prompt.trim() }
-      if (model) body.model = model
+      // Trim before truthiness check — a whitespace-only input is
+      // truthy as a string and would bypass the server's default-model
+      // fallback by sending "   " on the wire.
+      const trimmedModel = model.trim()
+      if (trimmedModel) body.model = trimmedModel
       const res = await fetch(`/api/v1/workspaces/${workspaceId}/skills/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -116,7 +120,18 @@ export function CreateSkillDialog({ workspaceId, onCreated, trigger }: CreateSki
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setTimeout(reset, 200) }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        // Block close while the LLM call is in flight — otherwise the
+        // pending fetch can resolve into the closed dialog, set step
+        // back to "preview", and the next open jumps straight into a
+        // stale skill body.
+        if (!v && step === "generating") return
+        setOpen(v)
+        if (!v) setTimeout(reset, 200)
+      }}
+    >
       <DialogTrigger asChild>
         {trigger ?? (
           <button
