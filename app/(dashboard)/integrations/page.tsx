@@ -27,6 +27,8 @@ import { cn } from "@/lib/utils"
 
 import { ExpandedPanel } from "@/components/features/integrations/expanded-panel"
 import { TemplatePopover } from "@/components/features/integrations/template-popover"
+import { Marketplace } from "@/components/features/integrations/marketplace"
+import { MCPLogo } from "@/components/icons/mcp-logos"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
 import type {
   AgentBinding,
@@ -56,6 +58,7 @@ export default function IntegrationsPage() {
 
   // UI state
   const [loading, setLoading] = React.useState(true)
+  const [activeTab, setActiveTab] = React.useState<"connected" | "marketplace">("connected")
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false)
   const [emptyPopoverOpen, setEmptyPopoverOpen] = React.useState(false)
@@ -476,6 +479,58 @@ export default function IntegrationsPage() {
         {headerActions}
       </div>
 
+      {/* ── Tab strip (CONNECTIONS.md §5.1) ────────────────────── */}
+      <div className="flex items-center gap-0 border-b border-white/[0.08]">
+        <button
+          onClick={() => setActiveTab("connected")}
+          className={cn(
+            "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
+            activeTab === "connected"
+              ? "border-blue-400 text-blue-400"
+              : "border-transparent text-muted-foreground hover:text-foreground/80",
+          )}
+        >
+          Connected
+          {servers.length > 0 && (
+            <span className="text-[10px] font-mono opacity-60">{servers.length}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("marketplace")}
+          className={cn(
+            "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
+            activeTab === "marketplace"
+              ? "border-blue-400 text-blue-400"
+              : "border-transparent text-muted-foreground hover:text-foreground/80",
+          )}
+        >
+          Marketplace
+          <span className="text-[10px] font-mono opacity-60">200+</span>
+        </button>
+      </div>
+
+      {activeTab === "marketplace" && workspaceId && (
+        <Marketplace
+          onAdd={async (entry) => {
+            // Map registry entry → handleAddServer template payload.
+            await handleAddServer({
+              name: entry.name,
+              label: entry.display_name || entry.name,
+              icon: entry.icon || entry.name,
+              transport: (entry.transport === "stdio" ? "stdio" : "streamable-http"),
+              command: entry.command || (entry.package_name ? "npx" : undefined),
+              args: entry.package_name && !entry.command ? `-y ${entry.package_name}` : undefined,
+              url: entry.endpoint || undefined,
+              envHint: undefined,
+            })
+            setActiveTab("connected")
+          }}
+        />
+      )}
+
+      {activeTab === "connected" && (
+        <>
+
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
         <KpiCard
@@ -578,12 +633,14 @@ export default function IntegrationsPage() {
                     )}
                   />
 
-                  {/* Transport icon */}
-                  {server.transport === "streamable-http" ? (
-                    <Globe className="h-3 w-3 text-muted-foreground/60 shrink-0" />
-                  ) : (
-                    <Terminal className="h-3 w-3 text-muted-foreground/60 shrink-0" />
-                  )}
+                  {/* Brand logo (CONNECTIONS.md §5.2) — replaces generic
+                      transport icon. Falls back to Globe/Terminal when
+                      no brand match. */}
+                  <MCPLogo
+                    name={server.icon || server.name}
+                    transport={server.transport}
+                    className="h-4 w-4 shrink-0 opacity-85"
+                  />
 
                   {/* Name + subtitle */}
                   <div className="min-w-0 flex-1">
@@ -664,6 +721,8 @@ export default function IntegrationsPage() {
         onOpenChange={setRegistryOpen}
         onAdd={handleRegistryAdd}
       />
+        </>
+      )}
     </div>
   )
 }
