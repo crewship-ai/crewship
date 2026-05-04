@@ -32,6 +32,7 @@ import { Marketplace } from "@/components/features/integrations/marketplace"
 import { MCPDetailSheet } from "@/components/features/integrations/mcp-detail-sheet"
 import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
 import { MCPLogo } from "@/components/icons/mcp-logos"
+import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
 import type {
   AgentBinding,
@@ -562,39 +563,38 @@ export default function IntegrationsPage() {
 
       {/* ── Servers list ───────────────────────────────────────── */}
       {servers.length === 0 ? (
-        <SettingsCard
-          title="MCP servers"
-          description="Connect MCP servers to give your agents access to external tools and services"
-        >
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
-              <Plug className="h-4 w-4 text-muted-foreground/60" />
-            </div>
-            <div className="text-sm font-medium text-foreground/80">No integrations yet</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
-              MCP servers expose tools (GitHub, Slack, databases, browsers) that your agents can call during tasks.
-            </div>
-            {canManage && (
-              <div className="mt-4">
-                <TemplatePopover
-                  open={emptyPopoverOpen}
-                  onOpenChange={setEmptyPopoverOpen}
-                  onSelect={handleAddServer}
-                  onBrowseRegistry={() => {
-                    setEmptyPopoverOpen(false)
-                    setRegistryOpen(true)
-                  }}
-                  trigger={
-                    <Button size="sm" className="h-7 px-2.5 text-xs">
-                      <Plus className="mr-1.5 h-3 w-3" />
-                      Add first MCP server
-                    </Button>
-                  }
-                />
+        <div className="space-y-4">
+          {workspaceId && (
+            <RecipesEmptyState
+              workspaceId={workspaceId}
+              onInstalled={() => { if (workspaceId) fetchAll(workspaceId) }}
+            />
+          )}
+          <SettingsCard
+            title="Or set up manually"
+            description="Pick from the marketplace or add a custom server"
+          >
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
+                <Plug className="h-4 w-4 text-muted-foreground/60" />
               </div>
-            )}
-          </div>
-        </SettingsCard>
+              <div className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
+                MCP servers expose tools (GitHub, Slack, databases, browsers) that your agents can call during tasks.
+              </div>
+              {canManage && (
+                <div className="mt-4 flex gap-2">
+                  <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => setActiveTab("marketplace")}>
+                    Browse Marketplace
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => setWizardOpen(true)}>
+                    <Plus className="mr-1.5 h-3 w-3" />
+                    Add MCP server
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SettingsCard>
+        </div>
       ) : (
         <SettingsCard
           title="Connected MCP servers"

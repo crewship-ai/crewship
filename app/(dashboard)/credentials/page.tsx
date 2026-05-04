@@ -4,8 +4,8 @@ import * as React from "react"
 import { motion } from "motion/react"
 import {
   Key, Plus, Pencil, Trash2, Search,
-  Bot, Lock, Terminal, CheckCircle, AlertTriangle, Clock, XCircle, ExternalLink,
-  ChevronDown, ChevronRight,
+  Bot, Lock, Terminal, CheckCircle, Clock, XCircle, ExternalLink,
+  ChevronDown, ChevronRight, AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageShell } from "@/components/layout/page-shell"
@@ -484,6 +484,30 @@ export default function CredentialsPage() {
               )}
             </button>
           </div>
+
+          {/* Active recommendation banner (CONNECTIONS.md §3.4 Detected
+              status, EPIC 5.3 — full sidecar wiring is a follow-up;
+              for MVP we surface "needs attention" credentials in a
+              banner so users see them even if they're on All tab). */}
+          {needsAttention.length > 0 && activeTab === "all" && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-md border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2.5 text-xs flex items-center gap-2"
+            >
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+              <span className="text-foreground/90">
+                <strong>{needsAttention.length}</strong> credential{needsAttention.length === 1 ? "" : "s"}
+                {" "}need attention &mdash; rotate, refresh, or revoke them before they break agent runs.
+              </span>
+              <button
+                onClick={() => setActiveTab("needs")}
+                className="ml-auto text-amber-300 hover:text-amber-200 font-medium"
+              >
+                Review →
+              </button>
+            </motion.div>
+          )}
 
           {/* Filter row */}
           <div className="flex items-center gap-2 flex-wrap">
