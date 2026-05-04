@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { create as createOrama, insertMultiple, search as oramaSearch } from "@orama/orama"
 import type { AnyOrama } from "@orama/orama"
 import { VirtuosoGrid } from "react-virtuoso"
+import { Group as PanelGroup, Panel, Separator as PanelResizeHandle, useDefaultLayout } from "react-resizable-panels"
 import {
   Search, Sparkles, Plus, X, ChevronDown, ChevronRight,
   Package, RefreshCw, ShieldCheck, BadgeCheck, Lock, Dot, AlertTriangle, Loader2,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
 import { SkillCard, type SkillCardData } from "@/components/features/skills/skill-card"
@@ -245,194 +245,228 @@ export function SkillsBrowser() {
 
   const bundledCount = skills.filter((s) => s.source === "BUNDLED").length
 
+  // react-resizable-panels v4 dropped autoSaveId in favour of a layout
+  // hook + storage handle. Wiring localStorage by hand keeps the same
+  // "panel widths persist across reloads" UX the user asked for.
+  const persistedLayout = useDefaultLayout({
+    id: "crewship.skills.browser.layout.v1",
+    panelIds: ["skills-rail", "skills-grid", "skills-detail"],
+    storage: typeof window !== "undefined" ? window.localStorage : undefined,
+  })
+
   return (
-    <div className="grid grid-cols-[260px_1fr_380px] gap-4 h-[calc(100vh-9rem)] min-h-0">
-      {/* LEFT — filter panel */}
-      <aside className="flex flex-col gap-3 overflow-y-auto rounded-lg border border-white/[0.08] bg-white/[0.02] p-4">
-        <div>
-          <div className="text-[10px] font-medium uppercase tracking-wider text-white/35">Crewship</div>
-          <h1 className="text-lg font-semibold text-white/95">Skills</h1>
-          <p className="text-xs text-white/45 tabular-nums">{skills.length} skills available</p>
-        </div>
+    <PanelGroup
+      orientation="horizontal"
+      defaultLayout={persistedLayout.defaultLayout}
+      onLayoutChanged={persistedLayout.onLayoutChanged}
+      className="h-full min-h-0 flex"
+    >
+      {/* LEFT — filter rail. autoSaveId persists user-dragged size to
+          localStorage across reloads, like the user asked. minSize keeps
+          the rail readable; maxSize prevents accidental fullscreen drag. */}
+      <Panel defaultSize={18} minSize={13} maxSize={32} id="skills-rail">
+        <aside className="flex flex-col h-full bg-card border-r border-white/[0.1] overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Skills
+            </span>
+            <span className="text-[10px] font-medium text-muted-foreground/60 tabular-nums">
+              {skills.length}
+            </span>
+          </div>
 
-        {workspaceId && (
-          <>
-            <Button size="sm" className="gap-1.5">
-              <Sparkles className="h-3.5 w-3.5" />
-              Create Skill
-            </Button>
-            <ImportSkillDialog
-              workspaceId={workspaceId}
-              onImported={reload}
-              triggerVariant="outline"
-              triggerSize="sm"
-              triggerLabel={
-                <span className="inline-flex items-center gap-1.5">
-                  <Plus className="h-3.5 w-3.5" />
-                  Import from URL/Repo
-                </span>
-              }
-            />
-          </>
-        )}
+          <div className="flex flex-col gap-2 px-2 py-2 shrink-0 border-b border-white/[0.05]">
+            {workspaceId && (
+              <>
+                <Button size="sm" variant="outline" className="h-7 justify-start gap-1.5 text-[12px] bg-white/[0.04] border-white/[0.1]">
+                  <Sparkles className="h-3 w-3" />
+                  Create Skill
+                </Button>
+                <ImportSkillDialog
+                  workspaceId={workspaceId}
+                  onImported={reload}
+                  triggerVariant="outline"
+                  triggerSize="sm"
+                  triggerLabel={
+                    <span className="inline-flex items-center gap-1.5 text-[12px]">
+                      <Plus className="h-3 w-3" />
+                      Import from URL/Repo
+                    </span>
+                  }
+                />
+              </>
+            )}
+          </div>
 
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-white/35" />
-          <Input
-            placeholder="Search skills…"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="pl-9 pr-12 bg-white/[0.04] border-white/[0.08]"
-          />
-          <kbd className="pointer-events-none absolute right-2 top-2 hidden text-[10px] font-medium text-white/35 bg-white/[0.04] border border-white/[0.08] rounded px-1 py-0.5 sm:inline-flex">⌘K</kbd>
-        </div>
-
-        <FacetSection title="Domain" defaultOpen>
-          {DOMAINS.map((d) => {
-            const c = counts.byDomain[d] ?? 0
-            return (
-              <FacetRow
-                key={d}
-                label={capitalise(d)}
-                count={c}
-                checked={filter.domains.has(d)}
-                onToggle={() => toggle("domains", d)}
-                disabled={c === 0 && !filter.domains.has(d)}
+          <div className="px-2 py-2 shrink-0 border-b border-white/[0.05]">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <Input
+                placeholder="Search skills…"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="h-7 pl-7 text-[12px] bg-white/[0.04] border-white/[0.1]"
               />
-            )
-          })}
-        </FacetSection>
+            </div>
+          </div>
 
-        <FacetSection title="Source" defaultOpen>
-          {SOURCES.map((s) => {
-            const c = counts.bySource[s.value] ?? 0
-            const Icon = s.icon
-            return (
-              <FacetRow
-                key={s.value}
-                label={
-                  <span className="inline-flex items-center gap-1.5">
-                    <Icon className="h-3 w-3" />
-                    {s.label}
-                  </span>
-                }
-                count={c}
-                checked={filter.sources.has(s.value)}
-                onToggle={() => toggle("sources", s.value)}
-                disabled={c === 0 && !filter.sources.has(s.value)}
-              />
-            )
-          })}
-        </FacetSection>
+          <div className="flex-1 overflow-y-auto px-2 py-1">
+            <FacetSection title="Domain" defaultOpen>
+              {DOMAINS.map((d) => {
+                const c = counts.byDomain[d] ?? 0
+                return (
+                  <FacetRow
+                    key={d}
+                    label={capitalise(d)}
+                    count={c}
+                    checked={filter.domains.has(d)}
+                    onToggle={() => toggle("domains", d)}
+                    disabled={c === 0 && !filter.domains.has(d)}
+                  />
+                )
+              })}
+            </FacetSection>
 
-        <FacetSection title="Runtime" defaultOpen>
-          {RUNTIMES.map((r) => {
-            const c = counts.byRuntime[r.value] ?? 0
-            return (
-              <FacetRow
-                key={r.value}
-                label={r.label}
-                count={c}
-                checked={filter.runtimes.has(r.value)}
-                onToggle={() => toggle("runtimes", r.value)}
-                disabled={c === 0 && !filter.runtimes.has(r.value)}
-              />
-            )
-          })}
-        </FacetSection>
+            <FacetSection title="Source" defaultOpen>
+              {SOURCES.map((s) => {
+                const c = counts.bySource[s.value] ?? 0
+                const Icon = s.icon
+                return (
+                  <FacetRow
+                    key={s.value}
+                    label={
+                      <span className="inline-flex items-center gap-1.5">
+                        <Icon className="h-3 w-3" />
+                        {s.label}
+                      </span>
+                    }
+                    count={c}
+                    checked={filter.sources.has(s.value)}
+                    onToggle={() => toggle("sources", s.value)}
+                    disabled={c === 0 && !filter.sources.has(s.value)}
+                  />
+                )
+              })}
+            </FacetSection>
 
-        <FacetSection title="Maturity">
-          {MATURITIES.map((m) => {
-            const c = counts.byMaturity[m.value] ?? 0
-            return (
-              <FacetRow
-                key={m.value}
-                label={m.label}
-                count={c}
-                checked={filter.maturities.has(m.value)}
-                onToggle={() => toggle("maturities", m.value)}
-                disabled={c === 0 && !filter.maturities.has(m.value)}
-              />
-            )
-          })}
-        </FacetSection>
-      </aside>
+            <FacetSection title="Runtime">
+              {RUNTIMES.map((r) => {
+                const c = counts.byRuntime[r.value] ?? 0
+                return (
+                  <FacetRow
+                    key={r.value}
+                    label={r.label}
+                    count={c}
+                    checked={filter.runtimes.has(r.value)}
+                    onToggle={() => toggle("runtimes", r.value)}
+                    disabled={c === 0 && !filter.runtimes.has(r.value)}
+                  />
+                )
+              })}
+            </FacetSection>
+
+            <FacetSection title="Maturity">
+              {MATURITIES.map((m) => {
+                const c = counts.byMaturity[m.value] ?? 0
+                return (
+                  <FacetRow
+                    key={m.value}
+                    label={m.label}
+                    count={c}
+                    checked={filter.maturities.has(m.value)}
+                    onToggle={() => toggle("maturities", m.value)}
+                    disabled={c === 0 && !filter.maturities.has(m.value)}
+                  />
+                )
+              })}
+            </FacetSection>
+          </div>
+        </aside>
+      </Panel>
+
+      <PanelResizeHandle className="w-px bg-white/[0.08] hover:bg-blue-500/40 hover:w-0.5 data-[resize-handle-active]:bg-blue-500/60 transition-colors" />
 
       {/* CENTER — toolbar + chips + grid */}
-      <main className="flex flex-col gap-3 min-h-0">
-        <div className="flex items-center justify-between gap-2 px-1">
-          <div className="text-xs text-white/55">
-            <span className="text-white/35">Skills</span> ›{" "}
-            <span className="text-white/95 font-semibold">Browse</span>
+      <Panel defaultSize={55} minSize={32} id="skills-grid">
+        <main className="flex flex-col h-full bg-card/40 min-h-0">
+          <div className="flex items-center justify-between gap-2 px-4 py-2 border-b border-white/[0.05] shrink-0">
+            <div className="text-[12px] text-white/55">
+              <span className="text-white/35">Skills</span> ›{" "}
+              <span className="text-white/95 font-semibold">Browse</span>
+            </div>
+            <div className="text-[11px] text-white/45 tabular-nums">
+              {loading ? "Loading…" : `Showing ${filtered.length} of ${skills.length}`}
+            </div>
           </div>
-          <div className="text-xs text-white/45 tabular-nums">
-            {loading ? "Loading…" : `Showing ${filtered.length} of ${skills.length}`}
-          </div>
-        </div>
 
-        {activeChips.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 px-1">
-            {activeChips.map((c) => (
+          {activeChips.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-white/[0.05] shrink-0">
+              {activeChips.map((c) => (
+                <button
+                  key={c.key}
+                  onClick={c.onRemove}
+                  className="group inline-flex items-center gap-1 rounded-md bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 text-[11px] text-white/70 hover:bg-white/[0.1] transition-colors duration-150"
+                >
+                  {c.label}
+                  <X className="h-3 w-3 text-white/45 group-hover:text-white/85" />
+                </button>
+              ))}
               <button
-                key={c.key}
-                onClick={c.onRemove}
-                className="group inline-flex items-center gap-1 rounded-md bg-white/[0.06] border border-white/[0.08] px-2 py-0.5 text-[11px] text-white/70 hover:bg-white/[0.1]"
+                onClick={clearAll}
+                className="text-[11px] text-white/45 hover:text-white/85 underline-offset-2 hover:underline transition-colors duration-150"
               >
-                {c.label}
-                <X className="h-3 w-3 text-white/45 group-hover:text-white/85" />
+                Clear all
               </button>
-            ))}
-            <button
-              onClick={clearAll}
-              className="text-[11px] text-white/45 hover:text-white/85 underline-offset-2 hover:underline"
-            >
-              Clear all
-            </button>
-          </div>
-        )}
-
-        <div className="flex-1 min-h-0 overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.02]">
-          {loading ? (
-            <div className="flex h-full items-center justify-center text-white/45 text-sm">
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Loading skills…
             </div>
-          ) : error ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-red-300 text-sm">
-              <AlertTriangle className="h-5 w-5" />
-              {error}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45 text-sm">
-              <Package className="h-6 w-6" />
-              <div>No skills match the current filters.</div>
-              {activeChips.length > 0 && (
-                <Button variant="ghost" size="sm" onClick={clearAll}>Clear filters</Button>
-              )}
-            </div>
-          ) : (
-            <VirtuosoGrid
-              data={filtered}
-              listClassName="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-3"
-              itemContent={(_, skill) => (
-                <SkillCard
-                  skill={skill}
-                  selected={selected?.id === skill.id}
-                  onSelect={setSelected}
-                />
-              )}
-            />
           )}
-        </div>
 
-        <BottomStrip bundledCount={bundledCount} />
-      </main>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {loading ? (
+              <div className="flex h-full items-center justify-center text-white/45 text-sm">
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Loading skills…
+              </div>
+            ) : error ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-red-300 text-sm">
+                <AlertTriangle className="h-5 w-5" />
+                {error}
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-white/45 text-sm">
+                <Package className="h-6 w-6" />
+                <div>No skills match the current filters.</div>
+                {activeChips.length > 0 && (
+                  <Button variant="ghost" size="sm" onClick={clearAll}>Clear filters</Button>
+                )}
+              </div>
+            ) : (
+              <VirtuosoGrid
+                data={filtered}
+                listClassName="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-3"
+                itemContent={(_, skill) => (
+                  <SkillCard
+                    skill={skill}
+                    selected={selected?.id === skill.id}
+                    onSelect={setSelected}
+                  />
+                )}
+              />
+            )}
+          </div>
+
+          <BottomStrip bundledCount={bundledCount} />
+        </main>
+      </Panel>
+
+      <PanelResizeHandle className="w-px bg-white/[0.08] hover:bg-blue-500/40 hover:w-0.5 data-[resize-handle-active]:bg-blue-500/60 transition-colors" />
 
       {/* RIGHT — detail panel */}
-      <aside className="hidden xl:flex flex-col overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.02]">
-        <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} />
-      </aside>
-    </div>
+      <Panel defaultSize={27} minSize={15} maxSize={50} id="skills-detail">
+        <aside className="flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
+          <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
+        </aside>
+      </Panel>
+    </PanelGroup>
   )
 }
 

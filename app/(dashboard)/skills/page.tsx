@@ -1,13 +1,13 @@
 import { SkillsBrowser } from "@/components/features/skills/skills-browser"
 
-// Skills browser uses the orchestration-style 3-panel layout: left
-// filters / centre virtualised grid / right detail. PageShell from the
-// other dashboard pages would force a header bar that fights the
-// browser's own left-panel title row, so we render a minimal wrapper
-// instead. The browser owns its own scroll containers.
+// Full-bleed: skills browser owns its own panels (PanelGroup with auto-
+// saved sizes) and sits flush against the dashboard chrome — no padded
+// shell, no extra page header. Mirrors the layout chrome pattern of
+// CrewsLayout / OrchestrationLayout where the left rail butts up
+// against the screen edge.
 export default function SkillsPage() {
   return (
-    <div className="flex flex-col gap-3 p-4 md:p-6 h-full">
+    <div className="h-full min-h-0 flex flex-col">
       <SkillsBrowser />
     </div>
   )
