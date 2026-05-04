@@ -184,13 +184,31 @@ func WithPaused(ctx context.Context, ops DockerOps, containerID string, fn func(
 // RepackTar reads a tar stream from src (typically from CopyFrom) and
 // writes each entry to dst using the TarZstWriter. Entry names are
 // rewritten to live under prefix (e.g. "home/" so the final bundle
-// keeps sections separate). Returns the total bytes written to dst.
+// keeps sections separate).
+//
+// Strips the wrapper directory that Docker's CopyFromContainer adds
+// to the top of its output: a CopyFrom("/workspace") returns a tar
+// whose entries start with "workspace/<contents>". Without stripping,
+// the bundle layout doubles up — workspace/<slug>/workspace/ — and
+// restore lands files at /workspace/workspace/<file> instead of
+// /workspace/<file>. Each backup-restore cycle would otherwise nest
+// the data one level deeper (reproduced on dev3: /workspace/
+// workspace/workspace/workspace/... after three restores).
+//
+// Wrapper detection: the first directory entry whose name has no
+// internal slash is treated as the wrapper. Subsequent entries are
+// stripped of that prefix. If the input tar uses the alternate
+// "./<file>" layout (used by some test fixtures), no wrapper is
+// detected and entries are kept under prefix as-is.
+//
+// Returns the total bytes written to dst.
 func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
 	tr := tar.NewReader(src)
 	var total int64
+	var wrapper string // empty until the first top-level dir is seen
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -199,7 +217,28 @@ func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
 		if err != nil {
 			return total, fmt.Errorf("backup: repack tar: %w", err)
 		}
-		newName := prefix + strings.TrimPrefix(hdr.Name, "./")
+		trimmed := strings.TrimPrefix(strings.TrimPrefix(hdr.Name, "./"), "/")
+
+		// Detect wrapper from the first entry: Docker CopyFromContainer
+		// always emits the source dir as the very first entry, e.g. a
+		// TypeDir whose name is "workspace/" or "workspace". After we
+		// know the wrapper, strip it from every subsequent entry's name.
+		if wrapper == "" && hdr.Typeflag == tar.TypeDir {
+			noSlash := strings.TrimSuffix(trimmed, "/")
+			if noSlash != "" && !strings.Contains(noSlash, "/") {
+				wrapper = noSlash + "/"
+				// Skip the wrapper entry itself — restore reconstructs
+				// intermediate directories from descendant paths anyway.
+				continue
+			}
+		}
+		if wrapper != "" {
+			trimmed = strings.TrimPrefix(trimmed, wrapper)
+		}
+		if trimmed == "" {
+			continue
+		}
+		newName := prefix + trimmed
 		if hdr.Typeflag != tar.TypeReg {
 			// Non-regular entries (dirs, symlinks) pass through with an
 			// empty body; rely on the outer writer for regular-file
