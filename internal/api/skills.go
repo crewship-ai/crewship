@@ -24,33 +24,52 @@ func NewSkillHandler(db *sql.DB, logger *slog.Logger) *SkillHandler {
 }
 
 type skillResponse struct {
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	Slug               string   `json:"slug"`
-	DisplayName        string   `json:"display_name"`
-	Description        *string  `json:"description"`
-	Version            string   `json:"version"`
-	Author             *string  `json:"author"`
-	Category           string   `json:"category"`
-	Source             string   `json:"source"`
-	Icon               *string  `json:"icon"`
-	Verification       string   `json:"verification"`
-	Downloads          int      `json:"downloads"`
-	RatingAvg          *float64 `json:"rating_avg"`
-	RatingCount        int      `json:"rating_count"`
-	Tags               *string  `json:"tags"`
-	Featured           bool     `json:"featured"`
-	PricingTier        string   `json:"pricing_tier"`
-	ToolCount          *int     `json:"tool_count"`
-	Vendor             *string  `json:"vendor"`
-	Homepage           *string  `json:"homepage"`
-	SPDXLicense        *string  `json:"spdx_license"`
-	Runtime            string   `json:"runtime"`
-	Maturity           string   `json:"maturity"`
-	ScanStatus         string   `json:"scan_status"`
-	DescriptionQuality *string  `json:"description_quality"`
-	CreatedAt          string   `json:"created_at"`
-	UpdatedAt          string   `json:"updated_at"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Slug               string                 `json:"slug"`
+	DisplayName        string                 `json:"display_name"`
+	Description        *string                `json:"description"`
+	Version            string                 `json:"version"`
+	Author             *string                `json:"author"`
+	Category           string                 `json:"category"`
+	Source             string                 `json:"source"`
+	Icon               *string                `json:"icon"`
+	Verification       string                 `json:"verification"`
+	Downloads          int                    `json:"downloads"`
+	RatingAvg          *float64               `json:"rating_avg"`
+	RatingCount        int                    `json:"rating_count"`
+	Tags               *string                `json:"tags"`
+	Featured           bool                   `json:"featured"`
+	PricingTier        string                 `json:"pricing_tier"`
+	ToolCount          *int                   `json:"tool_count"`
+	Vendor             *string                `json:"vendor"`
+	Homepage           *string                `json:"homepage"`
+	SPDXLicense        *string                `json:"spdx_license"`
+	Runtime            string                 `json:"runtime"`
+	Maturity           string                 `json:"maturity"`
+	ScanStatus         string                 `json:"scan_status"`
+	DescriptionQuality *string                `json:"description_quality"`
+	CreatedAt          string                 `json:"created_at"`
+	UpdatedAt          string                 `json:"updated_at"`
+	// InstalledOn is populated only on the Installed list (?installed=1)
+	// — the Browse list omits it because the join would balloon the
+	// payload. Each entry is the agent + crew metadata the SkillCard
+	// needs to render stacked avatars.
+	InstalledOn []skillInstalledAgent `json:"installed_on,omitempty"`
+}
+
+type skillInstalledAgent struct {
+	AgentID         string  `json:"agent_id"`
+	AgentSlug       string  `json:"agent_slug"`
+	AgentName       string  `json:"agent_name"`
+	AvatarSeed      *string `json:"avatar_seed"`
+	AvatarStyle     *string `json:"avatar_style"`
+	CrewID          *string `json:"crew_id"`
+	CrewSlug        *string `json:"crew_slug"`
+	CrewName        *string `json:"crew_name"`
+	CrewColor       *string `json:"crew_color"`
+	CrewIcon        *string `json:"crew_icon"`
+	CrewAvatarStyle *string `json:"crew_avatar_style"`
 }
 
 // List returns all skills, optionally filtered by category, source, or search text.
@@ -155,7 +174,72 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []skillResponse{}
 	}
+
+	// Populate installed_on only when the caller asked for the
+	// Installed view — the join would double-roundtrip the Browse list
+	// for a feature only one tab uses. One query collects every
+	// agent_skills row across the result set in one pass; we then
+	// fan it out into the per-skill arrays in Go.
+	if installedFlag || installedForAgent != "" {
+		if err := h.populateInstalledOn(r, result); err != nil {
+			h.logger.Warn("populate installed_on", "error", err)
+			// Non-fatal — the cards will render without avatars.
+		}
+	}
+
 	writeJSON(w, http.StatusOK, result)
+}
+
+// populateInstalledOn fans out the agent_skills join into each row's
+// InstalledOn array. Single query keyed on the result IDs so the cost
+// is one round-trip regardless of result-set size. Order within each
+// skill follows agent.name for stable rendering — without an explicit
+// sort, the per-row order would shift between requests.
+func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(rows))
+	idx := make(map[string]int, len(rows))
+	for i, sr := range rows {
+		ids = append(ids, sr.ID)
+		idx[sr.ID] = i
+	}
+	placeholders := strings.Repeat("?,", len(ids)-1) + "?"
+	args := make([]interface{}, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	q := `
+		SELECT as2.skill_id, a.id, a.slug, a.name, a.avatar_seed, a.avatar_style,
+		       c.id, c.slug, c.name, c.color, c.icon, c.avatar_style
+		FROM agent_skills as2
+		JOIN agents a ON a.id = as2.agent_id
+		LEFT JOIN crews c ON c.id = a.crew_id
+		WHERE as2.enabled = 1 AND as2.skill_id IN (` + placeholders + `)
+		ORDER BY a.name`
+	queryRows, err := h.db.QueryContext(r.Context(), q, args...)
+	if err != nil {
+		return err
+	}
+	defer queryRows.Close()
+	for queryRows.Next() {
+		var skillID string
+		var ag skillInstalledAgent
+		if err := queryRows.Scan(
+			&skillID, &ag.AgentID, &ag.AgentSlug, &ag.AgentName,
+			&ag.AvatarSeed, &ag.AvatarStyle,
+			&ag.CrewID, &ag.CrewSlug, &ag.CrewName, &ag.CrewColor, &ag.CrewIcon, &ag.CrewAvatarStyle,
+		); err != nil {
+			return err
+		}
+		i, ok := idx[skillID]
+		if !ok {
+			continue
+		}
+		rows[i].InstalledOn = append(rows[i].InstalledOn, ag)
+	}
+	return queryRows.Err()
 }
 
 // Get handles GET /api/v1/skills/{skillId}

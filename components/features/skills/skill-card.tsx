@@ -1,12 +1,31 @@
 "use client"
 
+import Image from "next/image"
 import {
   Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
   Palette, ShieldCheck, BadgeCheck, Lock, Dot, Download, Clock,
-  AlertTriangle, FileText, Sparkles, Plug,
+  AlertTriangle, FileText, Sparkles, Plug, Users,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+
+// SkillInstalledAgent mirrors the backend skillInstalledAgent struct
+// — only populated on the Installed list (?installed=1) so the card
+// can show real avatars + crew badges of the agents using this skill.
+export interface SkillInstalledAgent {
+  agent_id: string
+  agent_slug: string
+  agent_name: string
+  avatar_seed: string | null
+  avatar_style: string | null
+  crew_id: string | null
+  crew_slug: string | null
+  crew_name: string | null
+  crew_color: string | null
+  crew_icon: string | null
+  crew_avatar_style: string | null
+}
 
 // SkillCardData mirrors the skillResponse JSON the backend emits after
 // the Sprint 1 v65 schema changes. New fields (vendor, maturity, runtime,
@@ -31,6 +50,7 @@ export interface SkillCardData {
   downloads: number | null
   featured: boolean
   updated_at?: string
+  installed_on?: SkillInstalledAgent[]
 }
 
 // Source badge — Composio's auth-method badge proved that a single
@@ -189,8 +209,78 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
               {formatRelative(skill.updated_at)}
             </span>
           </div>
+
+          {skill.installed_on && skill.installed_on.length > 0 && (
+            <InstalledAgents agents={skill.installed_on} />
+          )}
         </CardContent>
       </Card>
     </button>
+  )
+}
+
+// InstalledAgents renders the row of stacked agent avatars + unique
+// crew badges that the user asked for on the Installed tab. Avatars
+// stack with -ml overlap (max 5 visible, "+N" overflow); crew icons
+// dedupe so a skill installed on five agents from one crew shows one
+// badge, not five.
+function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
+  const visible = agents.slice(0, 5)
+  const overflow = agents.length - visible.length
+  // Dedupe crews by id so we don't render the same colour chip five
+  // times when a whole crew shares a skill.
+  const crews = new Map<string, { name: string; color: string | null; slug: string }>()
+  for (const a of agents) {
+    if (a.crew_id && !crews.has(a.crew_id)) {
+      crews.set(a.crew_id, { name: a.crew_name ?? a.crew_slug ?? "crew", color: a.crew_color, slug: a.crew_slug ?? "" })
+    }
+  }
+  return (
+    <div className="mt-3 pt-2 border-t border-white/[0.05] flex items-center gap-2">
+      <span className="inline-flex items-center gap-1 text-[10px] text-white/45 shrink-0">
+        <Users className="h-3 w-3" />
+        Installed on
+      </span>
+      <div className="flex -space-x-1.5 shrink-0">
+        {visible.map((a) => (
+          <Image
+            key={a.agent_id}
+            src={getAgentAvatarUrl(a.avatar_seed ?? a.agent_slug, a.avatar_style)}
+            alt={a.agent_name}
+            title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}
+            width={20}
+            height={20}
+            unoptimized
+            className="h-5 w-5 rounded-full ring-1 ring-black/40 bg-white/[0.04]"
+          />
+        ))}
+        {overflow > 0 && (
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-black/40 px-1 text-[9px] font-medium text-white/65 tabular-nums">
+            +{overflow}
+          </span>
+        )}
+      </div>
+      {crews.size > 0 && (
+        <div className="flex flex-wrap items-center gap-1 min-w-0">
+          {Array.from(crews.values()).slice(0, 2).map((c) => (
+            <span
+              key={c.slug}
+              title={c.name}
+              className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium border border-white/[0.08] bg-white/[0.03] text-white/65"
+              style={c.color ? { borderColor: c.color + "40", color: c.color } : undefined}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={c.color ? { backgroundColor: c.color } : { backgroundColor: "rgba(255,255,255,0.4)" }}
+              />
+              <span className="truncate max-w-[80px]">{c.name}</span>
+            </span>
+          ))}
+          {crews.size > 2 && (
+            <span className="text-[9px] text-white/45">+{crews.size - 2}</span>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
