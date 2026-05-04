@@ -91,6 +91,13 @@ func (claudeCodeAdapter) SetupSystemPrompt(
 	if err := writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger); err != nil {
 		return fmt.Errorf("claude adapter setup system prompt: %w", err)
 	}
+	if err := writeAgentSkills(ctx, container, containerID, workDir, req.Skills, logger); err != nil {
+		// Skill materialisation is non-fatal — the SKILLS AVAILABLE
+		// system-prompt block already gives the model in-context access
+		// via the canonical memory files. Native per-CLI skill paths are
+		// the discoverability win, not the only route.
+		logger.Warn("claude adapter write agent skills failed", "error", err)
+	}
 	return nil
 }
 

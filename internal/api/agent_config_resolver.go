@@ -198,6 +198,16 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		llmModelStr = data.llmModel.String
 	}
 
+	installedSkills, err := h.resolveInstalledSkills(r, agentID)
+	if err != nil {
+		// Skill materialisation is non-fatal. The [SKILLS AVAILABLE]
+		// system-prompt block already loaded skills inline above; the
+		// per-CLI on-disk paths are a discoverability bonus, not the
+		// primary route. Logging is enough.
+		h.logger.Warn("resolve installed skills", "agent_id", agentID, "error", err)
+		installedSkills = nil
+	}
+
 	resp := map[string]interface{}{
 		"agent_id":              agentID,
 		"agent_slug":            data.agentSlug,
@@ -227,6 +237,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		"mise_config":           data.crewMiseConfig.String,
 		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
+		"installed_skills":      installedSkills,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

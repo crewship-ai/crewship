@@ -71,6 +71,16 @@ type chatResolveResponse struct {
 	MCPServers         []mcpServerResponse      `json:"mcp_servers,omitempty"`
 	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
 	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
+	InstalledSkills    []installedSkillEntry    `json:"installed_skills,omitempty"`
+}
+
+// installedSkillEntry mirrors internal/api.installedSkillResponse.
+// Bridge-side decode of the resolver's per-skill payload that gets
+// turned into orchestrator.SkillBundle for the per-CLI writer.
+type installedSkillEntry struct {
+	Slug    string `json:"slug"`
+	Vendor  string `json:"vendor,omitempty"`
+	Content string `json:"content"`
 }
 
 type mcpServerResponse struct {
@@ -505,5 +515,27 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		MCPServers:         mcpServers,
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,
+		InstalledSkills:    convertInstalledSkills(data.InstalledSkills),
 	}, nil
+}
+
+// convertInstalledSkills lifts the resolver's wire-format skills into the
+// orchestrator's SkillBundle type. Empty slugs or content are dropped
+// here so the writer doesn't have to re-check.
+func convertInstalledSkills(in []installedSkillEntry) []orchestrator.SkillBundle {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]orchestrator.SkillBundle, 0, len(in))
+	for _, s := range in {
+		if s.Slug == "" || s.Content == "" {
+			continue
+		}
+		out = append(out, orchestrator.SkillBundle{
+			Slug:    s.Slug,
+			Vendor:  s.Vendor,
+			Content: s.Content,
+		})
+	}
+	return out
 }
