@@ -740,6 +740,23 @@ ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN locked_until TEXT;
 ALTER TABLE users ADD COLUMN last_failed_login_at TEXT;
 `},
+	// v65 backs the row-level "is this credential still in use?" signal
+	// copied from GitLab/GitHub/Stripe. last_checked_at already exists
+	// for health-check timestamps; last_used_at is distinct — it records
+	// real usage as observed by the sidecar and is the input for the
+	// computed Stale status (last_used_at < now - 90d) surfaced in the
+	// 5-state taxonomy from CONNECTIONS.md §3.4. last_used_ips holds a
+	// JSON array max 5 elements; the ringbuffer cap is enforced in Go,
+	// not the schema. We do NOT add a separate expires_at column —
+	// token_expires_at on credentials already covers that and adding a
+	// duplicate would split writes across two columns and rot one of
+	// them. PRD CONNECTIONS.md mentioned expires_at as shorthand; this
+	// migration formalises the column reuse decision.
+	{version: 65, name: "add_credential_audit_signal", sql: `
+ALTER TABLE credentials ADD COLUMN last_used_at TEXT;
+ALTER TABLE credentials ADD COLUMN last_used_ips TEXT;
+CREATE INDEX IF NOT EXISTS idx_credentials_last_used ON credentials(last_used_at);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
