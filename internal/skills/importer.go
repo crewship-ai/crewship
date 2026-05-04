@@ -316,7 +316,13 @@ func (imp *Importer) upsertEnriched(
 				?, ?,
 				?, ?
 			)`,
-			newID, slug, slug, displayName,
+			// name MUST match displayName for both INSERT and UPDATE
+			// branches — the bare upsert at line 182 uses displayName,
+			// and the GENERATED-source insert in skills_generate.go
+			// also wants displayName. Setting name=slug here (as the
+			// pre-fix code did) caused the column to silently diverge
+			// between create and edit flows.
+			newID, displayName, slug, displayName,
 			nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
 			category, nullableStr(parsed.Meta.Icon),
 			credReqJSON, tagsJSON, parsed.Content,

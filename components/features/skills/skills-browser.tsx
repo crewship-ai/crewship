@@ -8,7 +8,9 @@ import { Group as PanelGroup, Panel, Separator as PanelResizeHandle, useDefaultL
 import {
   Search, Sparkles, Plus, X, ChevronDown, ChevronRight,
   Package, RefreshCw, ShieldCheck, BadgeCheck, Lock, Dot, AlertTriangle, Loader2,
+  Library, CheckSquare,
 } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -61,6 +63,20 @@ const EMPTY_FILTER: FilterState = {
   query: "",
 }
 
+// SKILLS_TABS mirrors the orchestration page's tab strip pattern: a
+// horizontal row of named lenses across the top of the layout that
+// switches the centre grid's filtering — semantically the same axis
+// as Source but easier to reach than scrolling the rail facet open.
+// "Browse" is the unfiltered default; "Installed" applies a per-agent
+// flag once we wire it; "Generated" filters source=GENERATED.
+const SKILLS_TABS = [
+  { id: "browse", label: "Browse", icon: Library },
+  { id: "installed", label: "Installed", icon: CheckSquare },
+  { id: "generated", label: "Generated", icon: Sparkles },
+] as const
+
+type SkillsTab = (typeof SKILLS_TABS)[number]["id"]
+
 // SkillsBrowser is the 3-panel orchestration-style replacement for the
 // previous flat grid /skills page. Left panel hosts CTAs + faceted
 // filters; center panel renders a virtualised grid of SkillCard; right
@@ -78,9 +94,42 @@ export function SkillsBrowser() {
   const [filter, setFilter] = useState<FilterState>(EMPTY_FILTER)
   const [selected, setSelected] = useState<SkillCardData | null>(null)
   const [searchInput, setSearchInput] = useState("")
+  const [activeTab, setActiveTab] = useState<SkillsTab>("browse")
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const oramaIndex = useRef<AnyOrama | null>(null)
   const [searchHits, setSearchHits] = useState<Set<string> | null>(null)
+
+  // buildIndex creates a fresh Orama database from a skill list. v3 of
+  // the Orama API is async — both create() and insertMultiple() return
+  // promises that we MUST await, otherwise oramaIndex.current would
+  // hold an unresolved promise instead of a real index and the search
+  // would silently no-op. Extracted so reload() can call it after a
+  // refetch — without the rebuild, search returns stale results
+  // pointing at row IDs that no longer exist.
+  const buildIndex = useCallback(async (data: SkillCardData[]) => {
+    const db = await createOrama({
+      schema: {
+        id: "string",
+        slug: "string",
+        display_name: "string",
+        description: "string",
+        vendor: "string",
+        category: "string",
+      } as const,
+    })
+    await insertMultiple(
+      db,
+      data.map((s) => ({
+        id: s.id,
+        slug: s.slug,
+        display_name: s.display_name ?? s.name,
+        description: s.description ?? "",
+        vendor: s.vendor ?? "",
+        category: s.category,
+      })),
+    )
+    return db
+  }, [])
 
   // Initial load: fetch ALL skills (the workspace has at most a few
   // hundred installed today; pagination over the wire is a future
@@ -99,35 +148,11 @@ export function SkillsBrowser() {
         if (!res.ok) throw new Error("HTTP " + res.status)
         return res.json()
       })
-      .then((json) => {
+      .then(async (json) => {
         if (cancelled) return
         const data = (json as SkillCardData[]) ?? []
         setSkills(data)
-        // Build Orama index. Schema mirrors SkillCardData; we index
-        // the searchable text columns and store the id for cheap
-        // lookups back into the React state list.
-        const db = createOrama({
-          schema: {
-            id: "string",
-            slug: "string",
-            display_name: "string",
-            description: "string",
-            vendor: "string",
-            category: "string",
-          } as const,
-        })
-        insertMultiple(
-          db,
-          data.map((s) => ({
-            id: s.id,
-            slug: s.slug,
-            display_name: s.display_name ?? s.name,
-            description: s.description ?? "",
-            vendor: s.vendor ?? "",
-            category: s.category,
-          })),
-        )
-        oramaIndex.current = db
+        oramaIndex.current = await buildIndex(data)
       })
       .catch(() => {
         if (!cancelled) setError("Failed to load skills")
@@ -138,7 +163,7 @@ export function SkillsBrowser() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId, wsLoading])
+  }, [workspaceId, wsLoading, buildIndex])
 
   // Debounce search — Orama is fast enough that 150ms feels native.
   // Below that we'd be re-running the search on every keystroke which
@@ -175,6 +200,14 @@ export function SkillsBrowser() {
 
   const filtered = useMemo(() => {
     return skills.filter((s) => {
+      // Tab acts as an additional filter axis on top of the rail
+      // facets — the user can pick "Generated" up top and still
+      // narrow by Domain in the rail.
+      if (activeTab === "generated" && s.source !== "GENERATED") return false
+      // "Installed" tab shows only skills with at least one install
+      // count > 0 (the closest signal we have until we surface the
+      // currently-logged-in agent's installed list explicitly).
+      if (activeTab === "installed" && (s.downloads ?? 0) === 0) return false
       if (searchHits && !searchHits.has(s.id)) return false
       if (filter.domains.size > 0 && !filter.domains.has(s.category)) return false
       if (filter.sources.size > 0 && !filter.sources.has(s.source)) return false
@@ -182,7 +215,7 @@ export function SkillsBrowser() {
       if (filter.maturities.size > 0 && !filter.maturities.has(s.maturity ?? "COMMUNITY")) return false
       return true
     })
-  }, [skills, searchHits, filter])
+  }, [skills, searchHits, filter, activeTab])
 
   const counts = useMemo(() => {
     const byDomain: Record<string, number> = {}
@@ -238,10 +271,18 @@ export function SkillsBrowser() {
   const reload = useCallback(() => {
     if (!workspaceId) return
     fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
-      .then((res) => res.ok ? res.json() : Promise.reject())
-      .then((json) => setSkills((json as SkillCardData[]) ?? []))
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then(async (json) => {
+        const data = (json as SkillCardData[]) ?? []
+        setSkills(data)
+        // Rebuild the Orama index — without this, search would still
+        // resolve hits to old row IDs that no longer exist or have
+        // been re-keyed. The previous version of reload() updated
+        // setSkills only, leaving searchHits stale.
+        oramaIndex.current = await buildIndex(data)
+      })
       .catch(() => setError("Failed to reload skills"))
-  }, [workspaceId])
+  }, [workspaceId, buildIndex])
 
   const bundledCount = skills.filter((s) => s.source === "BUNDLED").length
 
@@ -255,12 +296,62 @@ export function SkillsBrowser() {
   })
 
   return (
-    <PanelGroup
-      orientation="horizontal"
-      defaultLayout={persistedLayout.defaultLayout}
-      onLayoutChanged={persistedLayout.onLayoutChanged}
-      className="h-full min-h-0 flex"
-    >
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+      {/* ---- Toolbar: Tab navigation + actions (single row) — mirrors
+           OrchestrationLayout's toolbar so the chrome reads consistent
+           across pages. Tabs are lenses over the same skill list; the
+           Create + Import buttons live here (not in the rail) so the
+           rail stays a pure filter surface. */}
+      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        {SKILLS_TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
+              activeTab === id
+                ? "border-blue-400 text-blue-400"
+                : "border-transparent text-muted-foreground hover:text-foreground/80",
+            )}
+          >
+            <Icon className="h-3 w-3 opacity-75" />
+            {label}
+          </button>
+        ))}
+
+        <div className="flex-1" />
+
+        {workspaceId && (
+          <>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+            >
+              <Sparkles className="h-3 w-3" />
+              Create Skill
+            </button>
+            <ImportSkillDialog
+              workspaceId={workspaceId}
+              onImported={reload}
+              triggerVariant="outline"
+              triggerSize="sm"
+              triggerLabel={
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                  <Plus className="h-3 w-3" />
+                  Import
+                </span>
+              }
+            />
+          </>
+        )}
+      </div>
+
+      <PanelGroup
+        orientation="horizontal"
+        defaultLayout={persistedLayout.defaultLayout}
+        onLayoutChanged={persistedLayout.onLayoutChanged}
+        className="flex-1 min-h-0 flex"
+      >
       {/* LEFT — filter rail. autoSaveId persists user-dragged size to
           localStorage across reloads, like the user asked. minSize keeps
           the rail readable; maxSize prevents accidental fullscreen drag. */}
@@ -273,29 +364,6 @@ export function SkillsBrowser() {
             <span className="text-[10px] font-medium text-muted-foreground/60 tabular-nums">
               {skills.length}
             </span>
-          </div>
-
-          <div className="flex flex-col gap-2 px-2 py-2 shrink-0 border-b border-white/[0.05]">
-            {workspaceId && (
-              <>
-                <Button size="sm" variant="outline" className="h-7 justify-start gap-1.5 text-[12px] bg-white/[0.04] border-white/[0.1]">
-                  <Sparkles className="h-3 w-3" />
-                  Create Skill
-                </Button>
-                <ImportSkillDialog
-                  workspaceId={workspaceId}
-                  onImported={reload}
-                  triggerVariant="outline"
-                  triggerSize="sm"
-                  triggerLabel={
-                    <span className="inline-flex items-center gap-1.5 text-[12px]">
-                      <Plus className="h-3 w-3" />
-                      Import from URL/Repo
-                    </span>
-                  }
-                />
-              </>
-            )}
           </div>
 
           <div className="px-2 py-2 shrink-0 border-b border-white/[0.05]">
@@ -461,12 +529,13 @@ export function SkillsBrowser() {
       <PanelResizeHandle className="w-px bg-white/[0.08] hover:bg-blue-500/40 hover:w-0.5 data-[resize-handle-active]:bg-blue-500/60 transition-colors" />
 
       {/* RIGHT — detail panel */}
-      <Panel defaultSize={27} minSize={15} maxSize={50} id="skills-detail">
+      <Panel defaultSize={27} minSize={20} maxSize={50} id="skills-detail">
         <aside className="flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
           <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
         </aside>
       </Panel>
-    </PanelGroup>
+      </PanelGroup>
+    </div>
   )
 }
 

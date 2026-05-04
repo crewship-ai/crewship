@@ -5,9 +5,19 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
+	"regexp"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+// safeSlugRe is the strict allowlist used to gate every slug before we
+// build a filesystem path from it. Skills are written to several
+// filesystem roots inside a multi-tenant container; an attacker-
+// controlled slug containing path separators or "../" would let a
+// malicious skill scribble outside its own folder. Match the slugify
+// rules from internal/skills/parser.go (lowercase letters, digits,
+// hyphen, underscore — kebab-case).
+var safeSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 
 // writeAgentSkills materialises every installed skill into the per-CLI
 // discovery paths inside the agent's container. Six of the eight CLIs
@@ -53,6 +63,16 @@ func writeAgentSkills(
 	skipped := 0
 	for _, skill := range skills {
 		if skill.Slug == "" || skill.Content == "" {
+			skipped++
+			continue
+		}
+		if !safeSlugRe.MatchString(skill.Slug) {
+			// Untrusted slug — refuse to build paths from it. This
+			// catches "../etc/passwd", "x/y/z", absolute paths, and
+			// non-ASCII shenanigans before they reach mkdir/echo.
+			if logger != nil {
+				logger.Warn("skill slug rejected by safety regex", "slug", skill.Slug)
+			}
 			skipped++
 			continue
 		}

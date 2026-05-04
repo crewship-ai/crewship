@@ -26,8 +26,8 @@ var allowedSPDX = map[string]bool{
 	"BSD-3-Clause": true,
 	"ISC":          true,
 	"CC0-1.0":      true,
-	"MPL-2.0":     true,
-	"Unlicense":   true,
+	"MPL-2.0":      true,
+	"Unlicense":    true,
 	"0BSD":         true,
 }
 

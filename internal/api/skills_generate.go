@@ -86,7 +86,7 @@ You will receive the user's intent in the next message. Respond with the SKILL.m
 // upserts it into the skills table. Errors are surfaced verbatim because the
 // CLI is the primary caller and a precise message saves a round-trip.
 func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) {
-	wsID := r.PathValue("wsID")
+	wsID := r.PathValue("workspaceId")
 	if wsID == "" {
 		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")
 		return
@@ -222,8 +222,24 @@ func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) 
 		Content:    rawSkill,
 		ScanStatus: scan.Status,
 		ScanReason: scan.Reason,
-		Quality:    parsed.DescriptionQuality,
+		// Echo the description_quality value we actually persisted —
+		// when scan flagged the skill we replaced descQuality with the
+		// scan reason; the client must see the same string so
+		// re-fetches don't show a different value than the create-time
+		// response.
+		Quality: nullableString(descQuality),
 	})
+}
+
+func nullableString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 func (h *SkillGenerateHandler) resolveAnthropicProvider(ctx context.Context, wsID string) (llm.Provider, error) {

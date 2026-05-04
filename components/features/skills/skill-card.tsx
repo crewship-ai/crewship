@@ -131,6 +131,8 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
     <button
       type="button"
       onClick={() => onSelect?.(skill)}
+      aria-label={`${vendor}/${skill.slug}: ${skill.description ?? "no description"}`}
+      aria-pressed={selected}
       className={`group w-full text-left rounded-lg border transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 ${
         selected
           ? "border-blue-400/60 bg-blue-500/[0.08]"

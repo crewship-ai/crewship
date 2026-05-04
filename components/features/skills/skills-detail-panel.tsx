@@ -131,7 +131,7 @@ export function SkillsDetailPanel({
               {sourceCfg.label}
             </Badge>
             {onClose && (
-              <Button variant="ghost" size="icon" onClick={onClose} className="h-7 w-7 xl:hidden">
+              <Button variant="ghost" size="icon" onClick={onClose} className="h-7 w-7 xl:hidden" aria-label="Close skill detail">
                 <X className="h-4 w-4" />
               </Button>
             )}

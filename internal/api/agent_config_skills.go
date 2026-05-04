@@ -65,6 +65,12 @@ func (h *InternalHandler) resolveInstalledSkills(r *http.Request, agentID string
 // metadata they expect. If the content already starts with a `---`
 // frontmatter delimiter we trust it as-is — bundled anthropic skills
 // arrive verbatim with their original frontmatter intact.
+//
+// Every scalar gets quoted via [yamlQuote] so embedded colons,
+// quotes, hashes, and other YAML metacharacters can't break the
+// frontmatter parse on the consuming CLI. display_name was previously
+// dropped on the floor — restored, since some CLIs expose it as the
+// human-readable label distinct from the slug.
 func reconstructSKILLMD(slug, vendor, displayName, description, body string) string {
 	trimmed := strings.TrimLeft(body, " \t\r\n")
 	if strings.HasPrefix(trimmed, "---") {
@@ -73,22 +79,47 @@ func reconstructSKILLMD(slug, vendor, displayName, description, body string) str
 
 	var sb strings.Builder
 	sb.WriteString("---\n")
-	if displayName != "" {
-		fmt.Fprintf(&sb, "name: %s\n", slug)
-	} else {
-		fmt.Fprintf(&sb, "name: %s\n", slug)
+	fmt.Fprintf(&sb, "name: %s\n", yamlQuote(slug))
+	if displayName != "" && displayName != slug {
+		fmt.Fprintf(&sb, "display_name: %s\n", yamlQuote(displayName))
 	}
 	if description != "" {
-		// Keep description on a single line; YAML block scalars would
-		// require care for embedded colons. SKILL.md spec caps the
-		// description at 1024 chars and forbids newlines anyway.
+		// SKILL.md spec caps description at 1024 chars and forbids
+		// newlines, so we collapse any stray CR/LF to spaces and trust
+		// the upstream cap (no truncation here — the parser already
+		// validated the field length on import).
 		oneLine := strings.ReplaceAll(strings.ReplaceAll(description, "\r", " "), "\n", " ")
-		fmt.Fprintf(&sb, "description: %s\n", oneLine)
+		fmt.Fprintf(&sb, "description: %s\n", yamlQuote(oneLine))
 	}
 	if vendor != "" {
-		fmt.Fprintf(&sb, "vendor: %s\n", vendor)
+		fmt.Fprintf(&sb, "vendor: %s\n", yamlQuote(vendor))
 	}
 	sb.WriteString("---\n\n")
 	sb.WriteString(body)
+	return sb.String()
+}
+
+// yamlQuote serialises a string as a YAML 1.2 double-quoted scalar.
+// Always quotes — the un-quoted plain scalar form has too many
+// pitfalls (colons, hashes, leading dashes, "true"/"false"/"null"
+// alias values) for an automated writer. Escapes \" and \\ per the
+// double-quoted spec; control chars are passed through (the SKILL.md
+// fields we serialise here come from a column that the parser
+// already cleaned).
+func yamlQuote(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s) + 2)
+	sb.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '"':
+			sb.WriteString(`\"`)
+		case '\\':
+			sb.WriteString(`\\`)
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	sb.WriteByte('"')
 	return sb.String()
 }
