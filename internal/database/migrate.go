@@ -828,6 +828,38 @@ CREATE TABLE IF NOT EXISTS credential_audit (
 CREATE INDEX IF NOT EXISTS idx_credential_audit_credential ON credential_audit(credential_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_credential_audit_occurred ON credential_audit(occurred_at);
 `},
+	// v69 backs the rotation-with-grace-overlap feature — biggest
+	// enterprise differentiator vs. GitLab's "original becomes
+	// inactive immediately" pattern (CONNECTIONS.md §7.1, MUST-add #1
+	// from project_credentials_integrations_strategy.md).
+	//
+	// On rotate: a row is inserted with both encrypted values. The
+	// credentials.encrypted_value column flips to the new value
+	// immediately (so all NEW agent runs use the new key) but the
+	// sidecar can fall back to old_value during the grace window if
+	// it hits a 401 — covers in-flight runs that had already cached
+	// the old value at start.
+	//
+	// status transitions: ACTIVE → EXPIRED (grace ran out, old_value
+	// scrubbed) or ACTIVE → CANCELLED (admin clicked "End grace
+	// early"). Both terminals scrub old_value to ''.
+	//
+	// The (expires_at, status) index supports the hourly cron that
+	// finds rotations to expire.
+	{version: 69, name: "add_credential_rotations", sql: `
+CREATE TABLE IF NOT EXISTS credential_rotations (
+	id TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	old_value TEXT NOT NULL,
+	grace_seconds INTEGER NOT NULL DEFAULT 0,
+	rotated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	rotated_by TEXT NOT NULL REFERENCES users(id),
+	status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','EXPIRED','CANCELLED'))
+);
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
