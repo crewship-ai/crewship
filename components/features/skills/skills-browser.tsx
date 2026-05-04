@@ -14,6 +14,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
 import { SkillCard, type SkillCardData } from "@/components/features/skills/skill-card"
 import { SkillsDetailPanel } from "@/components/features/skills/skills-detail-panel"
@@ -105,16 +106,14 @@ export function SkillsBrowser() {
   }, [isMobile])
 
   // Detail panel resizable width — drag handle on the panel's left
-  // edge, persisted via localStorage so the user's preferred width
-  // sticks across reloads. Min/max keep it readable yet capped to
-  // a reasonable share of viewport on small screens.
-  const [detailWidth, setDetailWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return 380
-    const stored = window.localStorage.getItem("crewship.skills.detail.width.v1")
-    const parsed = stored ? parseInt(stored, 10) : NaN
-    if (!Number.isNaN(parsed) && parsed >= 280 && parsed <= 720) return parsed
-    return 380
-  })
+  // edge, persisted PER USER via /api/v1/me/preferences. Browser-
+  // local fallback keeps first-paint snappy; the hook flushes the
+  // server-side value over local state on mount, so the same user on
+  // a different machine still gets their saved width.
+  const [detailWidth, setDetailWidth] = useUserPreference<number>(
+    "skills.detail.width",
+    380,
+  )
   const detailDragRef = useRef<{ startX: number; startW: number } | null>(null)
   const onDetailDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -132,29 +131,10 @@ export function SkillsBrowser() {
       detailDragRef.current = null
       window.removeEventListener("mousemove", onMove)
       window.removeEventListener("mouseup", onUp)
-      // Persist the final width once on release rather than every
-      // mousemove tick so the storage write isn't on the hot path.
-      try {
-        window.localStorage.setItem("crewship.skills.detail.width.v1", String(detailWidth))
-      } catch {
-        // localStorage may be unavailable (private mode etc.); the
-        // in-memory state still holds for the session.
-      }
     }
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup", onUp)
-  }, [detailWidth])
-
-  // Re-persist whenever detailWidth lands a new value (handles direct
-  // setState calls outside the drag handler too — e.g. future reset
-  // button or keyboard shortcuts).
-  useEffect(() => {
-    try {
-      window.localStorage.setItem("crewship.skills.detail.width.v1", String(detailWidth))
-    } catch {
-      // ignore — see comment in onDetailDragStart
-    }
-  }, [detailWidth])
+  }, [detailWidth, setDetailWidth])
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const oramaIndex = useRef<AnyOrama | null>(null)
   const [searchHits, setSearchHits] = useState<Set<string> | null>(null)
