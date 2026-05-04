@@ -31,7 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { AddCredentialDialog } from "@/components/features/credentials/add-credential-dialog"
+import { AddCredentialWizard } from "@/components/features/credentials/add-credential-wizard"
 import { EditCredentialDialog } from "@/components/features/credentials/edit-credential-dialog"
 import type { CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatDate, formatRelativeTime } from "@/lib/time"
@@ -660,7 +660,7 @@ export default function CredentialsPage() {
       )}
 
       {workspaceId && (
-        <AddCredentialDialog
+        <AddCredentialWizard
           workspaceId={workspaceId}
           open={addOpen}
           onOpenChange={setAddOpen}
