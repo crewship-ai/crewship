@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/table"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { AddCredentialWizard } from "@/components/features/credentials/add-credential-wizard"
+import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { EditCredentialDialog } from "@/components/features/credentials/edit-credential-dialog"
 import type { CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatDate, formatRelativeTime } from "@/lib/time"
@@ -176,6 +177,8 @@ export default function CredentialsPage() {
   const [filterScope, setFilterScope] = React.useState<string>("all")
   const [filterType, setFilterType] = React.useState<string>("all")
   const [collapsedProviders, setCollapsedProviders] = React.useState<Set<string>>(new Set())
+  const [detailCredential, setDetailCredential] = React.useState<Credential | null>(null)
+  const [detailOpen, setDetailOpen] = React.useState(false)
 
   const fetchWorkspace = React.useCallback(async () => {
     try {
@@ -545,7 +548,11 @@ export default function CredentialsPage() {
                               const showStatus = cred.type !== "SECRET"
                               const lastUsed = cred.last_used_at ? formatRelativeTime(cred.last_used_at) : null
                               return (
-                                <TableRow key={cred.id}>
+                                <TableRow
+                                  key={cred.id}
+                                  className="cursor-pointer hover:bg-white/[0.02]"
+                                  onClick={() => { setDetailCredential(cred); setDetailOpen(true) }}
+                                >
                                   <TableCell>
                                     <span
                                       className={cn(
@@ -622,7 +629,7 @@ export default function CredentialsPage() {
                                       <span className="text-label text-muted-foreground/60">never</span>
                                     )}
                                   </TableCell>
-                                  <TableCell className="text-right">
+                                  <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                                     <div className="flex items-center justify-end gap-1">
                                       <Button
                                         variant="ghost"
@@ -665,6 +672,20 @@ export default function CredentialsPage() {
           open={addOpen}
           onOpenChange={setAddOpen}
           onSuccess={handleRefresh}
+        />
+      )}
+
+      {workspaceId && (
+        <CredentialDetailSheet
+          workspaceId={workspaceId}
+          credential={detailCredential}
+          open={detailOpen}
+          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailCredential(null) }}
+          onRefresh={handleRefresh}
+          onRotate={(c) => {
+            // Rotation dialog wiring lands in EPIC 4.1; for now stub.
+            console.log("Rotate requested:", c.id)
+          }}
         />
       )}
 
