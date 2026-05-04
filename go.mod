@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/fsnotify/fsnotify v1.10.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/go-containerregistry v0.21.5
 	github.com/gorilla/websocket v1.5.3
@@ -28,7 +28,6 @@ require (
 	golang.org/x/crypto v0.50.0
 	golang.org/x/net v0.53.0
 	golang.org/x/oauth2 v0.36.0
-	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
 	golang.org/x/text v0.36.0
@@ -106,6 +105,7 @@ require (
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
