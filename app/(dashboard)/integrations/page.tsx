@@ -30,6 +30,7 @@ import { ExpandedPanel } from "@/components/features/integrations/expanded-panel
 import { TemplatePopover } from "@/components/features/integrations/template-popover"
 import { Marketplace } from "@/components/features/integrations/marketplace"
 import { MCPDetailSheet } from "@/components/features/integrations/mcp-detail-sheet"
+import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
 import type {
@@ -63,6 +64,7 @@ export default function IntegrationsPage() {
   const [activeTab, setActiveTab] = React.useState<"connected" | "marketplace">("connected")
   const [detailServer, setDetailServer] = React.useState<CrewIntegration | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
+  const [wizardOpen, setWizardOpen] = React.useState(false)
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false)
   const [emptyPopoverOpen, setEmptyPopoverOpen] = React.useState(false)
@@ -408,21 +410,10 @@ export default function IntegrationsPage() {
   // -------------------------------------------------------------------------
 
   const headerActions = canManage ? (
-    <TemplatePopover
-      open={templatePopoverOpen}
-      onOpenChange={setTemplatePopoverOpen}
-      onSelect={handleAddServer}
-      onBrowseRegistry={() => {
-        setTemplatePopoverOpen(false)
-        setRegistryOpen(true)
-      }}
-      trigger={
-        <Button size="sm" className="h-7 px-2.5 text-xs">
-          <Plus className="mr-1.5 h-3 w-3" />
-          Add MCP Server
-        </Button>
-      }
-    />
+    <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => setWizardOpen(true)}>
+      <Plus className="mr-1.5 h-3 w-3" />
+      Add MCP Server
+    </Button>
   ) : null
 
   // Computed KPIs from the already-loaded servers list — no extra API calls.
@@ -748,6 +739,15 @@ export default function IntegrationsPage() {
           open={detailOpen}
           onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailServer(null) }}
           onRefresh={() => { if (workspaceId) fetchAll(workspaceId) }}
+        />
+      )}
+
+      {workspaceId && (
+        <AddMCPWizard
+          workspaceId={workspaceId}
+          open={wizardOpen}
+          onOpenChange={setWizardOpen}
+          onAdded={() => { if (workspaceId) fetchAll(workspaceId) }}
         />
       )}
     </div>
