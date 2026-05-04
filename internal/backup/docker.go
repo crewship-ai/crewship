@@ -300,6 +300,64 @@ func WithPaused(ctx context.Context, ops DockerOps, containerID string, fn func(
 	return fn()
 }
 
+// volumeExclusions lists path patterns we DON'T back up because the
+// content is regeneratable cache that bloats the bundle without
+// adding restore value. Sized against dev3: /home/agent grew to
+// 1.6 GB after one provisioning cycle (mise tools + node_modules +
+// pyenv + cursor-agent installer); excluding these brings the bundle
+// from ~480 MiB to ~5-10 MiB while preserving everything an operator
+// would actually want restored (workspace files, output/memory, agent
+// configs, shell rc files, ssh/credentials).
+//
+// Patterns match against the wrapper-stripped path (i.e. "agent/" is
+// already gone for /home/agent entries). Wildcards: a trailing "/"
+// means "the dir AND everything under it". Bare strings match
+// path components anywhere in the path so node_modules deep in a
+// project tree is also caught.
+var volumeExclusions = []string{
+	// /home/agent caches + tool installations
+	".cache/",
+	".local/lib/",          // node_modules + python site-packages
+	".local/share/mise/",   // mise tool installations (re-fetchable)
+	".local/share/cursor-agent/",
+	".local/share/pnpm/",
+	".local/share/yarn/",
+	".local/state/",        // logs/state we don't need
+	".npm/",
+	".yarn/cache/",
+	// Anywhere in the tree
+	"node_modules/",
+	"__pycache__/",
+	".pytest_cache/",
+	".mypy_cache/",
+	".ruff_cache/",
+}
+
+// shouldExcludeFromBundle reports whether a path inside a volume
+// section should be skipped. Conservative — only excludes paths that
+// match one of the explicit patterns above so an operator can audit
+// the list and add their own. Path is always wrapper-stripped (e.g.
+// ".cache/mise/foo") not raw.
+func shouldExcludeFromBundle(p string) bool {
+	for _, pat := range volumeExclusions {
+		if strings.HasSuffix(pat, "/") {
+			// Directory pattern: match exact dir or any descendant
+			needle := strings.TrimSuffix(pat, "/")
+			if p == needle || strings.HasPrefix(p, pat) {
+				return true
+			}
+			// Also match the same dir name nested anywhere (e.g.
+			// node_modules under a project subdir)
+			if strings.Contains(p, "/"+pat) || strings.Contains(p, "/"+needle+"/") {
+				return true
+			}
+		} else if p == pat || strings.Contains(p, "/"+pat) {
+			return true
+		}
+	}
+	return false
+}
+
 // RepackTar reads a tar stream from src (typically from CopyFrom) and
 // writes each entry to dst using the TarZstWriter. Entry names are
 // rewritten to live under prefix (e.g. "home/" so the final bundle
@@ -319,6 +377,11 @@ func WithPaused(ctx context.Context, ops DockerOps, containerID string, fn func(
 // stripped of that prefix. If the input tar uses the alternate
 // "./<file>" layout (used by some test fixtures), no wrapper is
 // detected and entries are kept under prefix as-is.
+//
+// Filters out entries matching volumeExclusions (regeneratable caches:
+// node_modules, pyenv, mise installations, etc.) — the size win is
+// dramatic (1.6 GB → ~50 MB on dev3) and the excluded content can be
+// re-fetched by the agent's normal startup.
 //
 // Returns the total bytes written to dst.
 func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
@@ -355,6 +418,9 @@ func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
 			trimmed = strings.TrimPrefix(trimmed, wrapper)
 		}
 		if trimmed == "" {
+			continue
+		}
+		if shouldExcludeFromBundle(trimmed) {
 			continue
 		}
 		newName := prefix + trimmed
