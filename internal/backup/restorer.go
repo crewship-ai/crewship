@@ -222,11 +222,20 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		// the bundle's own tree). Reject absolute targets and parent
 		// traversal so a tampered bundle still can't smuggle "/etc/shadow"
 		// or "../../etc/passwd" links into the container rootfs.
-		// Hardlinks (TypeLink) are still rejected outright — they're rare
-		// in container exports and safe handling would need full target
-		// tracking we don't do today.
+		// Hardlinks (TypeLink): the Linkname names another path INSIDE
+		// the same tar archive (not a host path). npm/yarn/pnpm dedupe
+		// binaries via hardlinks routinely, so a real container export
+		// will include dozens. Apply the same containment rules as
+		// symlinks: target must not be absolute and must not climb out
+		// of the bundle root after cleaning.
 		if hdr.Typeflag == tar.TypeLink {
-			return nil, fmt.Errorf("%w: payload entry %q is a hardlink", ErrInvalidManifest, hdr.Name)
+			if path.IsAbs(hdr.Linkname) {
+				return nil, fmt.Errorf("%w: payload entry %q hardlink target %q is absolute", ErrInvalidManifest, hdr.Name, hdr.Linkname)
+			}
+			resolvedHard := path.Clean(hdr.Linkname)
+			if resolvedHard == ".." || strings.HasPrefix(resolvedHard, "../") {
+				return nil, fmt.Errorf("%w: payload entry %q hardlink target %q escapes bundle root", ErrInvalidManifest, hdr.Name, hdr.Linkname)
+			}
 		}
 		if hdr.Typeflag == tar.TypeSymlink {
 			if path.IsAbs(hdr.Linkname) {
