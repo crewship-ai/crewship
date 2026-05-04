@@ -302,12 +302,102 @@ func resolveSkillID(client *cli.Client, slugOrID string) (string, error) {
 	return "", fmt.Errorf("skill not found: %s", slugOrID)
 }
 
+var skillCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Generate a new skill via LLM authoring (skill-creator pattern)",
+	Long: `Generate a new SKILL.md from a free-form prompt.
+
+The server calls Anthropic with a condensed skill-creator system prompt
+(github.com/anthropics/skills/skills/skill-creator) and writes the
+result to the workspace skills table with source=GENERATED.
+
+Requires an active Anthropic API key credential in the workspace
+(provider=ANTHROPIC, type=API_KEY). Add one under Settings ›
+Credentials before running.
+
+Example:
+  crewship skill create --slug pdf-cleanup \
+    --prompt "Help users sanitise PDFs: strip metadata, remove embedded JS, flatten forms"`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		slug, _ := cmd.Flags().GetString("slug")
+		prompt, _ := cmd.Flags().GetString("prompt")
+		model, _ := cmd.Flags().GetString("model")
+		printOnly, _ := cmd.Flags().GetBool("print")
+
+		if slug == "" || prompt == "" {
+			return fmt.Errorf("--slug and --prompt are required")
+		}
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		if wsID == "" {
+			return fmt.Errorf("workspace ID could not be resolved")
+		}
+
+		body := map[string]interface{}{
+			"slug":   slug,
+			"prompt": prompt,
+		}
+		if model != "" {
+			body["model"] = model
+		}
+
+		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/skills/generate", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var result struct {
+			SkillID    string `json:"skill_id"`
+			Slug       string `json:"slug"`
+			Content    string `json:"content"`
+			ScanStatus string `json:"scan_status"`
+			ScanReason string `json:"scan_reason"`
+			Quality    string `json:"description_quality"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+
+		if printOnly {
+			fmt.Println(result.Content)
+			return nil
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Generated skill: %s (%s)", result.Slug, result.SkillID))
+		if result.Quality != "" {
+			fmt.Fprintf(os.Stderr, "Description quality: %s\n", result.Quality)
+		}
+		if result.ScanStatus == "FLAGGED" {
+			fmt.Fprintf(os.Stderr, "Scan status: FLAGGED — %s\n", result.ScanReason)
+			fmt.Fprintf(os.Stderr, "Review the skill body before assigning to an agent.\n")
+		}
+		return nil
+	},
+}
+
 func init() {
 	skillImportCmd.Flags().String("file", "", "Path to local SKILL.md file")
+
+	skillCreateCmd.Flags().String("slug", "", "Skill slug (kebab-case identifier)")
+	skillCreateCmd.Flags().String("prompt", "", "Free-form description of what the skill should do")
+	skillCreateCmd.Flags().String("model", "", "Override LLM model (default: claude-sonnet-4-6)")
+	skillCreateCmd.Flags().Bool("print", false, "Print generated SKILL.md to stdout instead of summary")
 
 	skillCmd.AddCommand(skillListCmd)
 	skillCmd.AddCommand(skillGetCmd)
 	skillCmd.AddCommand(skillImportCmd)
+	skillCmd.AddCommand(skillCreateCmd)
 	skillCmd.AddCommand(skillAssignCmd)
 	skillCmd.AddCommand(skillUnassignCmd)
 }

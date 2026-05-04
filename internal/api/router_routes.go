@@ -296,6 +296,8 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/import", authed(wsCtx(http.HandlerFunc(skills.Import))))
+	skillGen := NewSkillGenerateHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/workspaces/{wsID}/skills/generate", authed(wsCtx(http.HandlerFunc(skillGen.Generate))))
 
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))

@@ -231,6 +231,145 @@ func (imp *Importer) upsert(ctx context.Context, parsed *ParsedSkill) (*ImportRe
 	}, nil
 }
 
+// upsertEnriched is the v65-aware variant of upsert used by BulkImport
+// and the future single-skill-with-safety paths. It populates the
+// vendor / spdx_license / scan_status / description_quality columns
+// the bare upsert leaves NULL.
+//
+// Identity is still by slug — composite (vendor, slug) lookup is
+// future work once we have multi-source imports producing collisions.
+// For now bulk imports under different vendors are upserted by slug,
+// which means the LAST import wins on a conflict. The CLI surfaces
+// this via the "updated" flag in ImportResult so users can spot
+// shadowed skills.
+func (imp *Importer) upsertEnriched(
+	ctx context.Context,
+	parsed *ParsedSkill,
+	vendor string,
+	spdx string,
+	scan ScanResult,
+	homepage string,
+) (*ImportResult, error) {
+	slug := parsed.Meta.Name
+	displayName := parsed.Meta.DisplayName
+	if displayName == "" {
+		displayName = slug
+	}
+	version := parsed.Meta.Version
+	if version == "" {
+		version = "1.0.0"
+	}
+	category := parsed.Meta.Category
+	if category == "" {
+		category = "CUSTOM"
+	}
+
+	credReqJSON := "[]"
+	if len(parsed.Meta.CredentialRequirements) > 0 {
+		b, err := json.Marshal(parsed.Meta.CredentialRequirements)
+		if err != nil {
+			return nil, fmt.Errorf("marshal credential_requirements: %w", err)
+		}
+		credReqJSON = string(b)
+	}
+
+	tagsJSON := "[]"
+	if len(parsed.Meta.Tags) > 0 {
+		b, err := json.Marshal(parsed.Meta.Tags)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tags: %w", err)
+		}
+		tagsJSON = string(b)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	scanStatus := scan.Status
+	if scanStatus == "" {
+		scanStatus = "UNSCANNED"
+	}
+
+	descQuality := parsed.DescriptionQuality
+	if scan.Status == "FLAGGED" {
+		// Reuse description_quality column for the scan reason — keeps
+		// the schema slim and the UI surface single. If a skill has
+		// both a poor description AND an injection flag, the injection
+		// reason wins because it's the safety-relevant one.
+		descQuality = scan.Reason
+	}
+
+	var existingID string
+	err := imp.db.QueryRowContext(ctx, "SELECT id FROM skills WHERE slug = ?", slug).Scan(&existingID)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		newID := generateSkillID()
+		_, insertErr := imp.db.ExecContext(ctx, `
+			INSERT INTO skills (
+				id, name, slug, display_name, description, version, author,
+				category, source, icon, credential_requirements, tags, content,
+				vendor, homepage, spdx_license, runtime, maturity, scan_status,
+				description_quality, license,
+				created_at, updated_at
+			) VALUES (
+				?, ?, ?, ?, ?, ?, ?,
+				?, 'CUSTOM', ?, ?, ?, ?,
+				?, ?, ?, 'INSTRUCTIONS', 'COMMUNITY', ?,
+				?, ?,
+				?, ?
+			)`,
+			newID, slug, slug, displayName,
+			nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
+			category, nullableStr(parsed.Meta.Icon),
+			credReqJSON, tagsJSON, parsed.Content,
+			nullableStr(vendor), nullableStr(homepage), nullableStr(spdx), scanStatus,
+			nullableStr(descQuality), nullableStr(parsed.Meta.License),
+			now, now,
+		)
+		if insertErr != nil {
+			return nil, fmt.Errorf("insert skill: %w", insertErr)
+		}
+		return &ImportResult{
+			SkillID: newID,
+			Name:    displayName,
+			Slug:    slug,
+			Created: true,
+		}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("check skill existence: %w", err)
+	}
+
+	_, updateErr := imp.db.ExecContext(ctx, `
+		UPDATE skills SET
+			name = ?, display_name = ?, description = ?, version = ?, author = ?,
+			category = ?, icon = ?,
+			credential_requirements = ?, tags = ?, content = ?,
+			vendor = COALESCE(?, vendor),
+			homepage = COALESCE(?, homepage),
+			spdx_license = COALESCE(?, spdx_license),
+			scan_status = ?,
+			description_quality = ?,
+			license = COALESCE(?, license),
+			updated_at = ?
+		WHERE id = ?`,
+		displayName, displayName,
+		nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
+		category, nullableStr(parsed.Meta.Icon),
+		credReqJSON, tagsJSON, parsed.Content,
+		nullableStr(vendor), nullableStr(homepage), nullableStr(spdx), scanStatus,
+		nullableStr(descQuality), nullableStr(parsed.Meta.License),
+		now, existingID,
+	)
+	if updateErr != nil {
+		return nil, fmt.Errorf("update skill: %w", updateErr)
+	}
+	return &ImportResult{
+		SkillID: existingID,
+		Name:    displayName,
+		Slug:    slug,
+		Created: false,
+	}, nil
+}
+
 // nullableStr returns nil for an empty string, enabling NULL storage in SQLite.
 func nullableStr(s string) interface{} {
 	if s == "" {
