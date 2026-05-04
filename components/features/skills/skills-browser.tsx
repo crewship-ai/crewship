@@ -152,7 +152,11 @@ export function SkillsBrowser() {
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
+    // Switching to "Installed" pushes the filter server-side so we get
+    // the actual agent_skills join result rather than guessing from
+    // downloads. Other tabs use the unfiltered list.
+    const installedQuery = activeTab === "installed" ? "&installed=1" : ""
+    fetch(`/api/v1/skills?workspace_id=${workspaceId}${installedQuery}`)
       .then((res) => {
         if (!res.ok) throw new Error("HTTP " + res.status)
         return res.json()
@@ -172,7 +176,7 @@ export function SkillsBrowser() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId, wsLoading, buildIndex])
+  }, [workspaceId, wsLoading, buildIndex, activeTab])
 
   // Debounce search — Orama is fast enough that 150ms feels native.
   // Below that we'd be re-running the search on every keystroke which
@@ -211,12 +215,10 @@ export function SkillsBrowser() {
     return skills.filter((s) => {
       // Tab acts as an additional filter axis on top of the rail
       // facets — the user can pick "Generated" up top and still
-      // narrow by Domain in the rail.
+      // narrow by Domain in the rail. "Installed" comes from the
+      // /api/v1/skills?installed=1 narrowed list (handled in the
+      // load effect below) so this filter is a no-op for it.
       if (activeTab === "generated" && s.source !== "GENERATED") return false
-      // "Installed" tab shows only skills with at least one install
-      // count > 0 (the closest signal we have until we surface the
-      // currently-logged-in agent's installed list explicitly).
-      if (activeTab === "installed" && (s.downloads ?? 0) === 0) return false
       if (searchHits && !searchHits.has(s.id)) return false
       if (filter.domains.size > 0 && !filter.domains.has(s.category)) return false
       if (filter.sources.size > 0 && !filter.sources.has(s.source)) return false

@@ -2,8 +2,9 @@
 
 import { useState } from "react"
 import { z } from "zod"
-import { Upload } from "lucide-react"
+import { Upload, AlertTriangle, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,15 @@ const ImportResultSchema = z.object({
 })
 type ImportResult = z.infer<typeof ImportResultSchema>
 
+const BulkImportResultSchema = z.object({
+  source: z.string(),
+  total_found: z.number(),
+  total_imported: z.number(),
+  imported: z.array(z.object({ skill_id: z.string(), slug: z.string(), created: z.boolean() })),
+  skipped: z.array(z.object({ path: z.string(), slug: z.string().optional(), reason: z.string() })),
+})
+type BulkImportResult = z.infer<typeof BulkImportResultSchema>
+
 interface ImportSkillDialogProps {
   workspaceId: string
   onImported?: (result: ImportResult) => void
@@ -46,17 +56,74 @@ export function ImportSkillDialog({
   triggerSize = "sm",
 }: ImportSkillDialogProps) {
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<"url" | "content">("url")
+  const [tab, setTab] = useState<"url" | "content" | "repo">("url")
   const [url, setUrl] = useState("")
   const [content, setContent] = useState("")
+  const [repoUrl, setRepoUrl] = useState("")
+  const [repoRef, setRepoRef] = useState("")
+  const [repoVendor, setRepoVendor] = useState("")
+  const [unsafeLicense, setUnsafeLicense] = useState(false)
+  const [dryRun, setDryRun] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [bulkResult, setBulkResult] = useState<BulkImportResult | null>(null)
+
+  function reset() {
+    setError(null)
+    setBulkResult(null)
+    setUrl("")
+    setContent("")
+    setRepoUrl("")
+    setRepoRef("")
+    setRepoVendor("")
+    setUnsafeLicense(false)
+    setDryRun(false)
+  }
 
   async function handleImport() {
     setError(null)
+    setBulkResult(null)
     setLoading(true)
 
     try {
+      if (tab === "repo") {
+        const res = await fetch(
+          `/api/v1/workspaces/${workspaceId}/skills/bulk-import`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              git_url: repoUrl.trim(),
+              git_ref: repoRef.trim(),
+              vendor: repoVendor.trim(),
+              allow_unsafe_license: unsafeLicense,
+              dry_run: dryRun,
+            }),
+          },
+        )
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          setError(data.detail ?? data.error ?? `Bulk import failed (HTTP ${res.status})`)
+          return
+        }
+        const parsed = BulkImportResultSchema.parse(await res.json())
+        setBulkResult(parsed)
+        // Don't auto-close so the user sees the imported/skipped
+        // breakdown — the bulk flow is a real action with real
+        // skipped-license-and-such information that's worth a beat.
+        if (!dryRun && parsed.total_imported > 0) {
+          // Trigger the parent reload so the new skills appear in
+          // the grid; keep the dialog open until the user dismisses.
+          onImported?.({
+            skill_id: parsed.imported[0]?.skill_id ?? "",
+            name: parsed.imported[0]?.slug ?? "",
+            slug: parsed.imported[0]?.slug ?? "",
+            created: parsed.imported[0]?.created ?? true,
+          })
+        }
+        return
+      }
+
       const body =
         tab === "url"
           ? { url: url.trim() }
@@ -79,8 +146,7 @@ export function ImportSkillDialog({
 
       const result = ImportResultSchema.parse(await res.json())
       setOpen(false)
-      setUrl("")
-      setContent("")
+      reset()
       onImported?.(result)
     } catch {
       setError("Network error — please try again")
@@ -109,10 +175,13 @@ export function ImportSkillDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "url" | "content")}>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "url" | "content" | "repo")}>
           <TabsList className="w-full">
             <TabsTrigger value="url" className="flex-1">
               From URL
+            </TabsTrigger>
+            <TabsTrigger value="repo" className="flex-1">
+              From Repo
             </TabsTrigger>
             <TabsTrigger value="content" className="flex-1">
               Paste Content
@@ -136,6 +205,71 @@ export function ImportSkillDialog({
             </p>
           </TabsContent>
 
+          <TabsContent value="repo" className="mt-4 space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="repo-url">Git repository URL</Label>
+              <Input
+                id="repo-url"
+                placeholder="https://github.com/anthropics/skills"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                disabled={loading}
+              />
+              <p className="text-xs text-muted-foreground">
+                Server clones <code className="font-mono">--depth 1</code>, walks <code className="font-mono">**/SKILL.md</code>, and gates each by SPDX license (MIT, Apache-2.0, BSD-2/3, ISC, CC0-1.0, MPL-2.0, Unlicense, 0BSD).
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="repo-ref" className="text-xs">Ref (optional)</Label>
+                <Input id="repo-ref" placeholder="main" value={repoRef} onChange={(e) => setRepoRef(e.target.value)} disabled={loading} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="repo-vendor" className="text-xs">Vendor namespace</Label>
+                <Input id="repo-vendor" placeholder="community" value={repoVendor} onChange={(e) => setRepoVendor(e.target.value)} disabled={loading} />
+              </div>
+            </div>
+            <div className="flex items-center gap-4 pt-1">
+              <label className="flex items-center gap-2 text-xs">
+                <Checkbox checked={dryRun} onCheckedChange={(v) => setDryRun(v === true)} />
+                Dry run (preview only)
+              </label>
+              <label className="flex items-center gap-2 text-xs text-amber-300">
+                <Checkbox checked={unsafeLicense} onCheckedChange={(v) => setUnsafeLicense(v === true)} />
+                <span className="inline-flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Skip license gate
+                </span>
+              </label>
+            </div>
+            {bulkResult && (
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.06] p-2 text-xs space-y-1">
+                <div className="text-emerald-200 font-medium flex items-center gap-1">
+                  <Check className="h-3 w-3" />
+                  {dryRun ? "Dry run" : `Imported ${bulkResult.total_imported} of ${bulkResult.total_found}`}
+                </div>
+                {bulkResult.imported.slice(0, 5).map((s) => (
+                  <div key={s.skill_id} className="text-white/65 font-mono text-[11px]">
+                    + {s.created ? "created" : "updated"} {s.slug}
+                  </div>
+                ))}
+                {bulkResult.imported.length > 5 && (
+                  <div className="text-white/45 text-[11px]">…+{bulkResult.imported.length - 5} more</div>
+                )}
+                {bulkResult.skipped.length > 0 && (
+                  <details className="mt-1">
+                    <summary className="cursor-pointer text-amber-300">{bulkResult.skipped.length} skipped</summary>
+                    <ul className="mt-1 space-y-0.5 text-[11px] text-white/55">
+                      {bulkResult.skipped.slice(0, 8).map((s) => (
+                        <li key={s.path}><span className="font-mono">{s.path}</span>: {s.reason}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+          </TabsContent>
+
           <TabsContent value="content" className="mt-4 space-y-2">
             <Label htmlFor="skill-content">SKILL.md Content</Label>
             <Textarea
@@ -157,16 +291,21 @@ export function ImportSkillDialog({
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => setOpen(false)}
+            onClick={() => { setOpen(false); reset() }}
             disabled={loading}
           >
-            Cancel
+            {bulkResult ? "Close" : "Cancel"}
           </Button>
           <Button
             onClick={handleImport}
-            disabled={loading || (tab === "url" ? !url.trim() : !content.trim())}
+            disabled={
+              loading ||
+              (tab === "url" && !url.trim()) ||
+              (tab === "content" && !content.trim()) ||
+              (tab === "repo" && !repoUrl.trim())
+            }
           >
-            {loading ? "Importing…" : "Import"}
+            {loading ? "Importing…" : tab === "repo" ? (dryRun ? "Preview" : "Import repo") : "Import"}
           </Button>
         </DialogFooter>
       </DialogContent>

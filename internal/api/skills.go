@@ -63,6 +63,12 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	vendor := r.URL.Query().Get("vendor")
 	maturity := r.URL.Query().Get("maturity")
 	runtime := r.URL.Query().Get("runtime")
+	// installed_for_agent_id narrows the list to skills assigned to a
+	// specific agent (per-agent installed view); installed=1 alone
+	// returns any skill with at least one agent_skills row in the
+	// workspace (workspace-wide installed view).
+	installedForAgent := r.URL.Query().Get("installed_for_agent_id")
+	installedFlag := r.URL.Query().Get("installed") == "1"
 
 	query := `SELECT id, name, slug, display_name, description, version, author,
 		category, source, icon, verification, downloads, rating_avg, rating_count,
@@ -70,6 +76,14 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		runtime, maturity, scan_status, description_quality, created_at, updated_at
 		FROM skills WHERE 1=1`
 	var args []interface{}
+
+	switch {
+	case installedForAgent != "":
+		query += " AND id IN (SELECT skill_id FROM agent_skills WHERE agent_id = ? AND enabled = 1)"
+		args = append(args, installedForAgent)
+	case installedFlag:
+		query += " AND id IN (SELECT DISTINCT skill_id FROM agent_skills WHERE enabled = 1)"
+	}
 
 	if category != "" {
 		query += " AND category = ?"
