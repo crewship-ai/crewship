@@ -9,6 +9,7 @@ import {
   Users,
   ChevronRight,
   Bot,
+  Wrench,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -28,6 +29,7 @@ import { cn } from "@/lib/utils"
 import { ExpandedPanel } from "@/components/features/integrations/expanded-panel"
 import { TemplatePopover } from "@/components/features/integrations/template-popover"
 import { Marketplace } from "@/components/features/integrations/marketplace"
+import { MCPDetailSheet } from "@/components/features/integrations/mcp-detail-sheet"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
 import type {
@@ -59,6 +61,8 @@ export default function IntegrationsPage() {
   // UI state
   const [loading, setLoading] = React.useState(true)
   const [activeTab, setActiveTab] = React.useState<"connected" | "marketplace">("connected")
+  const [detailServer, setDetailServer] = React.useState<CrewIntegration | null>(null)
+  const [detailOpen, setDetailOpen] = React.useState(false)
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false)
   const [emptyPopoverOpen, setEmptyPopoverOpen] = React.useState(false)
@@ -666,6 +670,19 @@ export default function IntegrationsPage() {
                     </span>
                   )}
 
+                  {/* Tools chip — opens MCPDetailSheet on Tools tab.
+                      Stop propagation so we don't toggle the inline
+                      expand at the same time. */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setDetailServer(server); setDetailOpen(true) }}
+                    className="hidden md:inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground shrink-0 font-mono tabular-nums px-1.5 h-5 rounded border border-white/10 hover:border-blue-400/40 hover:bg-blue-500/[0.05] transition-colors"
+                    title="Manage tools"
+                  >
+                    <Wrench className="h-2.5 w-2.5" />
+                    Tools
+                  </button>
+
                   {/* Updated relative time */}
                   <span className="hidden lg:inline text-[10px] text-muted-foreground/60 font-mono shrink-0 w-[54px] text-right">
                     {formatRel(server.updated_at)}
@@ -722,6 +739,16 @@ export default function IntegrationsPage() {
         onAdd={handleRegistryAdd}
       />
         </>
+      )}
+
+      {workspaceId && detailServer && (
+        <MCPDetailSheet
+          workspaceId={workspaceId}
+          server={detailServer}
+          open={detailOpen}
+          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailServer(null) }}
+          onRefresh={() => { if (workspaceId) fetchAll(workspaceId) }}
+        />
       )}
     </div>
   )
