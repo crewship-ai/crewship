@@ -256,3 +256,194 @@ export function useDeleteBackup(workspaceId: string | undefined) {
     },
   })
 }
+
+// ─── Hooks for previously-unsurfaced backup endpoints ───────────────
+//
+// The Go backend has shipped these for a while but the UI never called
+// them. Surfacing here lets the admin panel offer retention rotation,
+// per-bundle integrity verify, direct download, end-to-end self-test,
+// recovery from a stuck lock, and live success/fail metrics.
+
+export interface VerifyBackupResponse {
+  path: string
+  ok: boolean
+  payload_sha256: string
+  recomputed_sha256: string
+  size_bytes: number
+}
+
+export interface RotateBackupRequest {
+  scope?: BackupScope
+  keep_last?: number
+  keep_days?: number
+  dry_run?: boolean
+}
+
+export interface RotateBackupResponse {
+  scanned: number
+  deleted: Array<{ path: string; size_bytes: number; age_days: number }>
+  bytes_reclaimed: number
+  dry_run: boolean
+}
+
+export interface SelfTestResponse {
+  ok: boolean
+  duration_ms: number
+  trace_id?: string
+  steps: Array<{ name: string; ok: boolean; duration_ms: number; error?: string }>
+}
+
+export interface BackupMetricsResponse {
+  total_bundles: number
+  total_size_bytes: number
+  encrypted_count: number
+  oldest_at?: string
+  newest_at?: string
+  successes_24h: number
+  failures_24h: number
+}
+
+export interface CrewLite {
+  id: string
+  slug: string
+  name: string
+}
+
+/**
+ * Verify recomputes the bundle's payload checksum and compares it to the
+ * value stored in the manifest. Cheap (one hash pass) and does not
+ * decrypt — safe to call without the passphrase. Surfaces tampering or
+ * disk-rot, NOT bad-passphrase / corrupted-after-decrypt.
+ */
+export function useVerifyBackup(workspaceId: string | undefined) {
+  return useMutation<VerifyBackupResponse, Error, string>({
+    mutationFn: async (path) => {
+      const ws = requireWorkspaceId(workspaceId)
+      const res = await fetch(
+        withQuery("/api/v1/admin/backups/verify", ws, { path }),
+      )
+      return asJSON<VerifyBackupResponse>(res)
+    },
+  })
+}
+
+/**
+ * Build the streaming-download URL for a bundle. The browser handles
+ * the actual download via an `<a href>` so the response can be a large
+ * file without it ever passing through React Query's cache. Returns a
+ * URL string the caller drops onto an anchor tag.
+ */
+export function buildDownloadUrl(workspaceId: string, path: string): string {
+  return withQuery("/api/v1/admin/backups/download", workspaceId, { path })
+}
+
+/**
+ * Apply the retention policy: deletes bundles older than `keep_days`
+ * UNLESS doing so would drop below `keep_last` total. dry_run=true
+ * returns what WOULD be deleted without touching disk — always offer
+ * this in the UI before the destructive call.
+ */
+export function useRotateBackups(workspaceId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation<RotateBackupResponse, Error, RotateBackupRequest>({
+    mutationFn: async (req) => {
+      const ws = requireWorkspaceId(workspaceId)
+      const res = await fetch(withQuery("/api/v1/admin/backups/rotate", ws), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      })
+      return asJSON<RotateBackupResponse>(res)
+    },
+    onSuccess: (result) => {
+      // Only invalidate the list when we actually deleted something —
+      // dry runs leave disk state untouched, so a refetch would be wasted.
+      if (!result.dry_run && result.deleted.length > 0) {
+        qc.invalidateQueries({ queryKey: ["backups", workspaceId] })
+      }
+    },
+  })
+}
+
+/**
+ * Canary backup → destroy → restore → verify round-trip against an
+ * isolated test workspace. Validates the backup pipeline is wired
+ * correctly without touching real data. Run on demand (button) or on a
+ * future schedule (quarterly recommendation per Supabase).
+ */
+export function useBackupSelfTest(workspaceId: string | undefined) {
+  return useMutation<SelfTestResponse, Error, void>({
+    mutationFn: async () => {
+      const ws = requireWorkspaceId(workspaceId)
+      const res = await fetch(withQuery("/api/v1/admin/backups/self-test", ws), {
+        method: "POST",
+      })
+      return asJSON<SelfTestResponse>(res)
+    },
+  })
+}
+
+/**
+ * Force-release the per-workspace backup lock. Emergency-only — used
+ * when a backup process crashed and left the lock held past its TTL,
+ * blocking new backups. Caller must confirm intent (the dialog asks
+ * the operator to type "force-unlock") to prevent accidental release
+ * during an actually-running backup.
+ */
+export function useForceUnlock(workspaceId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation<void, Error, void>({
+    mutationFn: async () => {
+      const ws = requireWorkspaceId(workspaceId)
+      const res = await fetch(withQuery("/api/v1/admin/backups/status", ws), {
+        method: "DELETE",
+      })
+      if (!res.ok) {
+        throw await asError(res)
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["backup-status", workspaceId] })
+    },
+  })
+}
+
+/**
+ * Process-wide backup counters (success/fail in last 24h, total bundles
+ * on disk, encrypted percentage, oldest/newest). Cheap call, polled
+ * every 30s while the backups tab is mounted to keep the metrics row
+ * live without spamming the endpoint.
+ */
+export function useBackupMetrics(workspaceId: string | undefined) {
+  return useQuery<BackupMetricsResponse>({
+    queryKey: ["backup-metrics", workspaceId],
+    queryFn: async () => {
+      const res = await fetch(withQuery("/api/v1/admin/backups/metrics", workspaceId!))
+      return asJSON<BackupMetricsResponse>(res)
+    },
+    enabled: Boolean(workspaceId),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+  })
+}
+
+/**
+ * Lightweight crew list used to populate the BackupCreateDialog's
+ * "crew" picker. Caches separately from the full /crews page query so
+ * navigating to that page does not invalidate the picker's list.
+ * Consumers receive the minimal shape they need (id/slug/name).
+ */
+export function useCrewsForBackup(workspaceId: string | undefined) {
+  return useQuery<CrewLite[]>({
+    queryKey: ["crews-lite", workspaceId],
+    queryFn: async () => {
+      const res = await fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId!)}`)
+      const body = await asJSON<{ data?: CrewLite[] } | CrewLite[]>(res)
+      // The /crews endpoint historically returned a bare array; the
+      // newer paginated handler wraps it under { data }. Accept both.
+      return Array.isArray(body) ? body : (body.data ?? [])
+    },
+    enabled: Boolean(workspaceId),
+    staleTime: 60_000,
+  })
+}
