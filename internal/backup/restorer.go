@@ -229,11 +229,22 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 			return nil, fmt.Errorf("%w: payload entry %q is a hardlink", ErrInvalidManifest, hdr.Name)
 		}
 		if hdr.Typeflag == tar.TypeSymlink {
+			// Reject absolute targets outright — a "/etc/shadow" link would
+			// resolve to the host's /etc/shadow inside the container's
+			// view, an obvious smuggling attempt.
 			if path.IsAbs(hdr.Linkname) {
 				return nil, fmt.Errorf("%w: payload entry %q symlink target %q is absolute", ErrInvalidManifest, hdr.Name, hdr.Linkname)
 			}
-			if strings.Contains(hdr.Linkname, "..") {
-				return nil, fmt.Errorf("%w: payload entry %q symlink target %q contains parent reference", ErrInvalidManifest, hdr.Name, hdr.Linkname)
+			// Containment check for relative targets: tools like mise +
+			// pyenv legitimately use "../libexec/pyenv" to point siblings
+			// at each other, which contains ".." but stays inside its
+			// own package. Resolve the target against the entry's parent
+			// directory and ensure the result is still inside the bundle
+			// tree (i.e. does not climb above the root). The path package
+			// handles the cleanup deterministically.
+			resolved := path.Clean(path.Join(path.Dir(name), hdr.Linkname))
+			if resolved == ".." || strings.HasPrefix(resolved, "../") {
+				return nil, fmt.Errorf("%w: payload entry %q symlink target %q escapes bundle root", ErrInvalidManifest, hdr.Name, hdr.Linkname)
 			}
 			// Safe symlink — pass it through unchanged. The repackIntoSink
 			// helpers preserve TypeSymlink + Linkname so docker CopyTo
