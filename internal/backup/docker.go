@@ -144,14 +144,13 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
 	// Tar flags rationale (verified against dev3 GNU tar 1.34 inside
 	// devcontainer base image):
-	//   --recursive-unlink  delete each file/dir before writing the
-	//                       new copy — defeats "Cannot open: File
-	//                       exists" on volumes the container has
-	//                       been writing to between backup and
-	//                       restore (mise + pyenv state is the worst
-	//                       offender). Pairs with --overwrite below
-	//                       so dirs get cleared too.
-	//   --overwrite         replace existing files outright
+	//   --overwrite         replace existing files outright. Critical
+	//                       to NOT pair with --recursive-unlink: that
+	//                       flag deletes parent dirs along with their
+	//                       contents, which clobbers anything the
+	//                       restore-side excludes (e.g. node_modules
+	//                       under .local/lib/) since the parent dir
+	//                       header still ships in the bundle.
 	//   --no-same-owner     don't chown — running as the agent user
 	//                       (uid 1001) we can't chown to other uids
 	//                       and don't want to preserve archive uids
@@ -171,7 +170,7 @@ func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath s
 	exec, err := m.Client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 		Cmd: []string{
 			"tar", "-x",
-			"--recursive-unlink", "--overwrite",
+			"--overwrite",
 			"--no-same-owner", "--no-same-permissions", "--touch",
 			"-f", "-", "-C", dstPath,
 		},
