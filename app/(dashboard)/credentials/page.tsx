@@ -31,6 +31,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { AddCredentialWizard } from "@/components/features/credentials/add-credential-wizard"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
@@ -182,6 +186,10 @@ export default function CredentialsPage() {
   const [detailOpen, setDetailOpen] = React.useState(false)
   const [rotateCredential, setRotateCredential] = React.useState<Credential | null>(null)
   const [rotateOpen, setRotateOpen] = React.useState(false)
+  const [deleteCredential, setDeleteCredential] = React.useState<Credential | null>(null)
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false)
+  const [bulkDeleting, setBulkDeleting] = React.useState(false)
 
   const fetchWorkspace = React.useCallback(async () => {
     try {
@@ -251,19 +259,49 @@ export default function CredentialsPage() {
     setEditOpen(true)
   }
 
-  async function handleDelete(credential: Credential) {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${credential.name}"? This action cannot be undone.`
-    )
-    if (!confirmed || !workspaceId) return
+  function handleDelete(credential: Credential) {
+    setDeleteCredential(credential)
+  }
 
+  async function confirmDeleteCredential() {
+    if (!deleteCredential || !workspaceId) return
     try {
-      const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
+      const res = await fetch(`/api/v1/credentials/${deleteCredential.id}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (res.ok) handleRefresh()
     } catch {
       // silently fail
+    } finally {
+      setDeleteCredential(null)
+    }
+  }
+
+  // Bulk operations
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function bulkDelete() {
+    if (!workspaceId) return
+    setBulkDeleting(true)
+    const ids = Array.from(selectedIds)
+    try {
+      // Sequential rather than parallel to keep error handling simple;
+      // workspaces with hundreds of credentials are rare.
+      for (const id of ids) {
+        await fetch(`/api/v1/credentials/${id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      }
+      handleRefresh()
+      setSelectedIds(new Set())
+      setBulkDeleteOpen(false)
+    } finally {
+      setBulkDeleting(false)
     }
   }
 
@@ -533,6 +571,7 @@ export default function CredentialsPage() {
                         <Table>
                           <TableHeader>
                             <TableRow>
+                              <TableHead className="w-[28px]"></TableHead>
                               <TableHead className="w-[36px]"></TableHead>
                               <TableHead>Name</TableHead>
                               <TableHead>Type</TableHead>
@@ -556,9 +595,17 @@ export default function CredentialsPage() {
                               return (
                                 <TableRow
                                   key={cred.id}
-                                  className="cursor-pointer hover:bg-white/[0.02]"
+                                  className={cn("cursor-pointer hover:bg-white/[0.02]", selectedIds.has(cred.id) && "bg-blue-500/[0.04]")}
                                   onClick={() => { setDetailCredential(cred); setDetailOpen(true) }}
                                 >
+                                  <TableCell onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedIds.has(cred.id)}
+                                      onChange={() => toggleSelected(cred.id)}
+                                      className="h-3.5 w-3.5 cursor-pointer accent-blue-500"
+                                    />
+                                  </TableCell>
                                   <TableCell>
                                     <span
                                       className={cn(
@@ -715,6 +762,67 @@ export default function CredentialsPage() {
           onOpenChange={(o) => { setRotateOpen(o); if (!o) setRotateCredential(null) }}
           onRotated={handleRefresh}
         />
+      )}
+
+      <AlertDialog open={!!deleteCredential} onOpenChange={(o) => !o && setDeleteCredential(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete credential?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-mono">{deleteCredential?.name}</span> will be permanently deleted.
+              Agents that use this credential will start failing immediately. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" onClick={confirmDeleteCredential}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} credential{selectedIds.size === 1 ? "" : "s"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              All selected credentials will be permanently deleted. Any agents using them will fail immediately.
+              This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={bulkDelete}
+              disabled={bulkDeleting}
+            >
+              {bulkDeleting ? "Deleting..." : `Delete ${selectedIds.size}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Floating bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-full border border-white/15 bg-zinc-950/95 backdrop-blur shadow-2xl px-4 py-2 flex items-center gap-3 text-xs">
+          <span className="font-medium">{selectedIds.size} selected</span>
+          <button
+            type="button"
+            onClick={() => setBulkDeleteOpen(true)}
+            className="text-red-400 hover:text-red-300"
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
       )}
 
       {workspaceId && editCredential && (
