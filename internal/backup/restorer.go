@@ -240,45 +240,33 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		if strings.Contains(name, "..") {
 			return nil, fmt.Errorf("%w: payload entry %q contains parent reference", ErrInvalidManifest, hdr.Name)
 		}
-		// Symlinks: tooling like mise + pyenv legitimately ships hundreds
-		// of internal symlinks (e.g. shim → real binary) that are
-		// essential for the restored container to function. Rejecting all
-		// of them broke restore of any crew that had ever provisioned a
-		// language runtime. Allow symlinks whose target is RELATIVE and
-		// does NOT contain ".." (i.e. only links to peer files within
-		// the bundle's own tree). Reject absolute targets and parent
-		// traversal so a tampered bundle still can't smuggle "/etc/shadow"
-		// or "../../etc/passwd" links into the container rootfs.
-		// Hardlinks (TypeLink): same containment story as symlinks —
-		// docker CopyTo cannot escape the destination container, so
-		// we just sanity-check Linkname is well-formed and pass it
-		// through. Hardlinks are common in npm-installed CLIs.
-		if hdr.Typeflag == tar.TypeLink {
+		// Hardlinks (TypeLink) and symlinks (TypeSymlink) get the same
+		// validation: NUL-free target, not absolute, no ".." escape.
+		// Docker's CopyTo bounds extraction to the dst container, so a
+		// rogue link cannot reach the host — but a tampered bundle
+		// could still smuggle a `/etc/shadow` or `../../etc/passwd`
+		// link INTO the restored container's rootfs (especially the
+		// uid-0 /var/lib path). Defence-in-depth: reject up front so
+		// the failure mode is "bad bundle", not "unexpected file
+		// inside the container".
+		//
+		// Legitimate `..`-bearing targets that crews actually ship
+		// (mise / pyenv / npm dedup) live under paths the collector
+		// already excludes (.local/share/mise/, .local/share/pnpm/,
+		// node_modules/, etc.), so this check does not regress real
+		// restores. If a future tool under a non-excluded path needs
+		// a parent-relative link, the collector exclusion list — not
+		// this safety check — is the right knob.
+		if hdr.Typeflag == tar.TypeLink || hdr.Typeflag == tar.TypeSymlink {
 			if strings.ContainsRune(hdr.Linkname, 0) {
-				return nil, fmt.Errorf("%w: payload entry %q hardlink target contains NUL", ErrInvalidManifest, hdr.Name)
+				return nil, fmt.Errorf("%w: payload entry %q link target contains NUL", ErrInvalidManifest, hdr.Name)
 			}
-		}
-		if hdr.Typeflag == tar.TypeSymlink {
-			// Symlinks are restored INSIDE the destination container
-			// via docker CopyTo, which cannot escape the container's
-			// filesystem regardless of where the link points. So the
-			// target's absoluteness or "../" content is not a host-
-			// safety issue; the worst case is a dangling link inside
-			// the container. We do still reject targets that contain
-			// a literal NUL byte or other invalid path bytes since
-			// those would just confuse downstream tools — but anything
-			// otherwise well-formed passes through.
-			//
-			// Earlier revisions tried to allowlist known container
-			// roots (/home/agent, /workspace, /root/.local/bin, …) but
-			// the list grew with every new tool we encountered (mise,
-			// pyenv, cursor-agent, opencode, npm dedup hardlinks, …).
-			// Trusting docker for containment is both simpler and
-			// correct — the bundle came from one of OUR containers in
-			// the first place, so its symlink graph is by construction
-			// representable inside another of our containers.
-			if strings.ContainsRune(hdr.Linkname, 0) {
-				return nil, fmt.Errorf("%w: payload entry %q symlink target contains NUL", ErrInvalidManifest, hdr.Name)
+			clean := path.Clean(hdr.Linkname)
+			if path.IsAbs(clean) {
+				return nil, fmt.Errorf("%w: payload entry %q link target is absolute (%q)", ErrInvalidManifest, hdr.Name, clean)
+			}
+			if clean == ".." || strings.HasPrefix(clean, "../") {
+				return nil, fmt.Errorf("%w: payload entry %q link target escapes via parent reference (%q)", ErrInvalidManifest, hdr.Name, clean)
 			}
 		}
 
@@ -554,7 +542,13 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 	for _, s := range sections {
 		r, ok, err := s.open()
 		if err != nil {
-			return err
+			// Aggregate Open* failures into the same partial-restore
+			// path as CopyTo failures below — a corrupt temp section
+			// for the home volume should not block restoring the
+			// workspace + memory the operator probably cares about
+			// more.
+			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
+			continue
 		}
 		if !ok {
 			continue

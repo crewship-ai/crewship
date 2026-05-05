@@ -13,7 +13,6 @@ import {
   Unlock,
   XCircle,
 } from "lucide-react"
-import { motion } from "motion/react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -171,19 +170,9 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => (
-                <motion.tr
+              {rows.map((row) => (
+                <tr
                   key={row.path}
-                  // Stagger the rows in (recipe A6 from the cheat-sheet).
-                  // Cap delay at 6 rows / 180ms total so a 50-bundle list
-                  // does not animate for ~1.5s.
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{
-                    duration: 0.16,
-                    delay: Math.min(i, 6) * 0.03,
-                    ease: [0.32, 0.72, 0, 1],
-                  }}
                   className="border-t hover:bg-accent/20"
                 >
                   <td className="px-3 py-2 font-mono text-[11px]">{row.file_name}</td>
@@ -267,27 +256,39 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                           <ShieldCheck className="h-3.5 w-3.5" />
                         )}
                       </Button>
-                      <Button
-                        asChild
-                        size="sm"
-                        variant="ghost"
-                        aria-label="Download bundle"
-                        title="Download .tar.zst"
-                      >
-                        {/*
-                         * Anchor with download attribute streams the bundle
-                         * straight to disk through the browser. We do NOT go
-                         * through React Query because a multi-GB bundle
-                         * would otherwise be slurped into memory before
-                         * landing on disk.
-                         */}
-                        <a
-                          href={workspaceId ? buildDownloadUrl(workspaceId, row.path) : "#"}
-                          download={row.file_name}
+                      {workspaceId ? (
+                        <Button
+                          asChild
+                          size="sm"
+                          variant="ghost"
+                          aria-label="Download bundle"
+                          title="Download .tar.zst"
+                        >
+                          {/*
+                           * Anchor with download attribute streams the
+                           * bundle straight to disk through the browser.
+                           * We do NOT go through React Query because a
+                           * multi-GB bundle would otherwise be slurped
+                           * into memory before landing on disk.
+                           */}
+                          <a
+                            href={buildDownloadUrl(workspaceId, row.path)}
+                            download={row.file_name}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </a>
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled
+                          aria-label="Download unavailable"
+                          title="Select a workspace first"
                         >
                           <Download className="h-3.5 w-3.5" />
-                        </a>
-                      </Button>
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -309,7 +310,7 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                       </Button>
                     </div>
                   </td>
-                </motion.tr>
+                </tr>
               ))}
             </tbody>
           </table>
