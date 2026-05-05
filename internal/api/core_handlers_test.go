@@ -2005,6 +2005,15 @@ func TestAgentSkills_AddListRemove(t *testing.T) {
 	if addRR.Code != http.StatusCreated {
 		t.Fatalf("add = %d, body: %s", addRR.Code, addRR.Body.String())
 	}
+	var addBody struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(addRR.Body).Decode(&addBody); err != nil {
+		t.Fatalf("add body decode: %v", err)
+	}
+	if addBody.ID == "" {
+		t.Fatal("add returned empty id")
+	}
 
 	// Add duplicate → idempotent 200 (re-running fan-out --to-crew over a
 	// crew where some agents already had the skill must not error out;
@@ -2024,8 +2033,18 @@ func TestAgentSkills_AddListRemove(t *testing.T) {
 	}
 	if err := json.NewDecoder(dup.Body).Decode(&dupBody); err != nil {
 		t.Errorf("dup body decode: %v", err)
-	} else if !dupBody.AlreadyAssigned {
-		t.Errorf("dup already_assigned = false, want true")
+	} else {
+		if !dupBody.AlreadyAssigned {
+			t.Errorf("dup already_assigned = false, want true")
+		}
+		// The whole point of idempotency is that the second call returns
+		// the SAME row, not a new one. A handler that silently inserted
+		// a fresh agent_skills row would also return 200 + already_assigned,
+		// so check the id matches what AddSkill gave us the first time.
+		if dupBody.ID != addBody.ID {
+			t.Errorf("dup id = %q, want existing %q (idempotent must return same row)",
+				dupBody.ID, addBody.ID)
+		}
 	}
 
 	// Add: missing skill_id

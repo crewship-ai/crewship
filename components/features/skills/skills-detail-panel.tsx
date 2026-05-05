@@ -259,27 +259,37 @@ function InstallToAgentDialog({
     // the server returns 400 'workspace_id is required' (caught
     // when the user clicked Install on dev1).
     const wsParam = `?workspace_id=${encodeURIComponent(workspaceId)}`
-    for (const agentId of picked) {
-      try {
-        const res = await fetch(`/api/v1/agents/${agentId}/skills${wsParam}`, {
+    // Install in parallel — each request is independent, hitting a
+    // different agent_id, and the previous sequential loop made an
+    // 8-agent install take 8× the latency. Promise.allSettled keeps
+    // the per-agent error reporting (we still want the user to see
+    // which 2 of 5 failed rather than a single first-failure).
+    const results = await Promise.allSettled(
+      Array.from(picked).map((agentId) =>
+        fetch(`/api/v1/agents/${agentId}/skills${wsParam}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ skill_id: skill.id }),
-        })
-        if (!res.ok && res.status !== 409) {
-          // 409 = already installed; treat as success so bulk runs are idempotent.
-          const body = await res.text().catch(() => res.statusText)
-          let detail = body
-          try {
-            const parsed = JSON.parse(body) as { detail?: string; error?: string }
-            detail = parsed.detail ?? parsed.error ?? body
-          } catch {
-            // not JSON; use raw body
-          }
-          errors.push(`${agentId}: ${detail || res.statusText}`)
+        }).then(async (res) => ({ agentId, res }))
+      ),
+    )
+    for (const r of results) {
+      if (r.status === "rejected") {
+        errors.push("network error")
+        continue
+      }
+      const { agentId, res } = r.value
+      if (!res.ok && res.status !== 409) {
+        // 409 = already installed; treat as success so bulk runs are idempotent.
+        const body = await res.text().catch(() => res.statusText)
+        let detail = body
+        try {
+          const parsed = JSON.parse(body) as { detail?: string; error?: string }
+          detail = parsed.detail ?? parsed.error ?? body
+        } catch {
+          // not JSON; use raw body
         }
-      } catch {
-        errors.push(`${agentId}: network error`)
+        errors.push(`${agentId}: ${detail || res.statusText}`)
       }
     }
     setSubmitting(false)

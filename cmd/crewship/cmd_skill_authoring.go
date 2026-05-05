@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -304,14 +305,11 @@ func assembleSkillMD(s struct {
 	if s.Icon != nil && *s.Icon != "" {
 		b.WriteString("icon: " + *s.Icon + "\n")
 	}
-	if s.Tags != nil && *s.Tags != "" && *s.Tags != "[]" {
-		// Tags is stored as JSON; pass it through as flow-style which
-		// YAML accepts. Avoids a full YAML marshalling dependency in
-		// the CLI just for this one path.
-		b.WriteString("tags: " + *s.Tags + "\n")
+	if list := decodeStringList(s.Tags); len(list) > 0 {
+		writeYAMLList(&b, "tags", list)
 	}
-	if s.CredentialRequirements != nil && *s.CredentialRequirements != "" && *s.CredentialRequirements != "[]" {
-		b.WriteString("credential_requirements: " + *s.CredentialRequirements + "\n")
+	if list := decodeStringList(s.CredentialRequirements); len(list) > 0 {
+		writeYAMLList(&b, "credential_requirements", list)
 	}
 	b.WriteString("---\n\n")
 	if s.Content != nil {
@@ -430,4 +428,66 @@ func init() {
 	skillCmd.AddCommand(skillInitCmd)
 	skillCmd.AddCommand(skillExportCmd)
 	skillCmd.AddCommand(skillDeleteCmd)
+}
+
+// decodeStringList parses the JSON-encoded list columns (tags,
+// credential_requirements) the API returns into a plain []string.
+// Returns nil for null / empty / "[]" / decode failure — the caller
+// only writes the YAML key when there's actually something to write.
+//
+// Why a separate decoder rather than passing the raw JSON through into
+// the YAML output: a tag containing `:` or YAML flow-syntax characters
+// (e.g. `pdf:cleanup`, `{x}`) would round-trip as broken YAML. Treating
+// the column as untyped JSON and re-emitting as a YAML block list is
+// the only way to keep the export shape stable for the import path.
+func decodeStringList(raw *string) []string {
+	if raw == nil || *raw == "" || *raw == "[]" {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(*raw), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// writeYAMLList emits `key:` followed by `  - <item>` lines, quoting
+// each item if YAML would otherwise mis-parse it (leading space, special
+// chars, looks-like-bool/null, etc.). Block style keeps the export
+// human-friendly and round-trips cleanly through ParseSKILLMD.
+func writeYAMLList(b *strings.Builder, key string, items []string) {
+	b.WriteString(key + ":\n")
+	for _, it := range items {
+		b.WriteString("  - " + yamlScalar(it) + "\n")
+	}
+}
+
+// yamlScalar returns the value as it should appear in a YAML scalar
+// position. Anything that could be misread (empty, leading/trailing
+// whitespace, contains special chars, parses as a YAML keyword) is
+// double-quoted with `"` escapes; everything else passes through bare.
+func yamlScalar(s string) string {
+	if s == "" {
+		return `""`
+	}
+	if s != strings.TrimSpace(s) {
+		return jsonQuote(s)
+	}
+	switch strings.ToLower(s) {
+	case "true", "false", "yes", "no", "null", "~":
+		return jsonQuote(s)
+	}
+	if strings.ContainsAny(s, ":#{}[],&*!|>'\"%@`\n\t") {
+		return jsonQuote(s)
+	}
+	return s
+}
+
+// jsonQuote leans on encoding/json for the escape table — `\"`, `\\`,
+// `\n`, `\t`, `\uXXXX` for control chars are all consistent with YAML's
+// double-quoted scalar grammar, so reusing the JSON encoder gives us a
+// safe quote without rolling our own escaper.
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }

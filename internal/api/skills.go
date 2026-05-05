@@ -466,7 +466,7 @@ func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	var source string
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT source FROM skills WHERE id = ?", skillID).Scan(&source)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		writeProblem(http.StatusNotFound, "skill not found")
 		return
 	}

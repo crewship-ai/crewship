@@ -272,18 +272,7 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
       {crews.size > 0 && (
         <div className="flex flex-wrap items-center gap-1 min-w-0">
           {Array.from(crews.values()).slice(0, 2).map((c) => (
-            <span
-              key={c.slug}
-              title={c.name}
-              className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium border border-white/[0.08] bg-white/[0.03] text-white/65"
-              style={c.color ? { borderColor: c.color + "40", color: c.color } : undefined}
-            >
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={c.color ? { backgroundColor: c.color } : { backgroundColor: "rgba(255,255,255,0.4)" }}
-              />
-              <span className="truncate max-w-[80px]">{c.name}</span>
-            </span>
+            <CrewChip key={c.slug} name={c.name} color={c.color} />
           ))}
           {crews.size > 2 && (
             <span className="text-[9px] text-white/45">+{crews.size - 2}</span>
@@ -291,5 +280,37 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
         </div>
       )}
     </div>
+  )
+}
+
+// CrewChip renders one tinted pill per crew. Crew colours are stored
+// per-row as user-configurable hex strings, so we cannot pre-generate
+// Tailwind utility classes — JIT cannot statically analyse runtime
+// values. The pattern Tailwind v4 documents for this case is to inject
+// the colour as a CSS custom property and reference it from arbitrary-
+// value utilities, which keeps the layout/state styling in className
+// and confines the dynamic injection to a single var. The fallback
+// classes apply when crew_color is null (default neutral chip).
+function CrewChip({ name, color }: { name: string; color: string | null }) {
+  if (!color) {
+    return (
+      <span
+        title={name}
+        className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-white/65"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
+        <span className="truncate max-w-[80px]">{name}</span>
+      </span>
+    )
+  }
+  return (
+    <span
+      title={name}
+      style={{ "--crew-color": color } as React.CSSProperties}
+      className="inline-flex items-center gap-1 rounded-full border border-[var(--crew-color)]/25 bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-[var(--crew-color)]"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--crew-color)]" />
+      <span className="truncate max-w-[80px]">{name}</span>
+    </span>
   )
 }
