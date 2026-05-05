@@ -24,33 +24,33 @@ func NewSkillHandler(db *sql.DB, logger *slog.Logger) *SkillHandler {
 }
 
 type skillResponse struct {
-	ID                 string                 `json:"id"`
-	Name               string                 `json:"name"`
-	Slug               string                 `json:"slug"`
-	DisplayName        string                 `json:"display_name"`
-	Description        *string                `json:"description"`
-	Version            string                 `json:"version"`
-	Author             *string                `json:"author"`
-	Category           string                 `json:"category"`
-	Source             string                 `json:"source"`
-	Icon               *string                `json:"icon"`
-	Verification       string                 `json:"verification"`
-	Downloads          int                    `json:"downloads"`
-	RatingAvg          *float64               `json:"rating_avg"`
-	RatingCount        int                    `json:"rating_count"`
-	Tags               *string                `json:"tags"`
-	Featured           bool                   `json:"featured"`
-	PricingTier        string                 `json:"pricing_tier"`
-	ToolCount          *int                   `json:"tool_count"`
-	Vendor             *string                `json:"vendor"`
-	Homepage           *string                `json:"homepage"`
-	SPDXLicense        *string                `json:"spdx_license"`
-	Runtime            string                 `json:"runtime"`
-	Maturity           string                 `json:"maturity"`
-	ScanStatus         string                 `json:"scan_status"`
-	DescriptionQuality *string                `json:"description_quality"`
-	CreatedAt          string                 `json:"created_at"`
-	UpdatedAt          string                 `json:"updated_at"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Slug               string   `json:"slug"`
+	DisplayName        string   `json:"display_name"`
+	Description        *string  `json:"description"`
+	Version            string   `json:"version"`
+	Author             *string  `json:"author"`
+	Category           string   `json:"category"`
+	Source             string   `json:"source"`
+	Icon               *string  `json:"icon"`
+	Verification       string   `json:"verification"`
+	Downloads          int      `json:"downloads"`
+	RatingAvg          *float64 `json:"rating_avg"`
+	RatingCount        int      `json:"rating_count"`
+	Tags               *string  `json:"tags"`
+	Featured           bool     `json:"featured"`
+	PricingTier        string   `json:"pricing_tier"`
+	ToolCount          *int     `json:"tool_count"`
+	Vendor             *string  `json:"vendor"`
+	Homepage           *string  `json:"homepage"`
+	SPDXLicense        *string  `json:"spdx_license"`
+	Runtime            string   `json:"runtime"`
+	Maturity           string   `json:"maturity"`
+	ScanStatus         string   `json:"scan_status"`
+	DescriptionQuality *string  `json:"description_quality"`
+	CreatedAt          string   `json:"created_at"`
+	UpdatedAt          string   `json:"updated_at"`
 	// InstalledOn is populated only on the Installed list (?installed=1)
 	// — the Browse list omits it because the join would balloon the
 	// payload. Each entry is the agent + crew metadata the SkillCard

@@ -16,8 +16,8 @@ import (
 // Injection points for tests. Production paths use exec.LookPath /
 // exec.Command directly; tests substitute deterministic stubs.
 var (
-	lookPath  = exec.LookPath
-	newJQCmd  = newJQCommand
+	lookPath = exec.LookPath
+	newJQCmd = newJQCommand
 )
 
 // jqRunner is a minimal interface over *exec.Cmd that lets tests stub out
@@ -45,8 +45,8 @@ func newJQCommand(jqPath, expr string) jqRunner {
 // printer, with the HTTP and formatting plumbing factored out here.
 //
 // Naming convention:
-//   - getJSON / postJSON / patchJSON / deleteJSON: one-liner request +
-//     decode with workspace-scoped paths and unified error formatting.
+//   - getJSON / postJSON / deleteJSON: one-liner request + decode with
+//     workspace-scoped paths and unified error formatting.
 //   - emitTable / emitListJSON: respect the --format flag uniformly.
 
 // getJSON sends a GET to `path` and decodes the response into `out`.
@@ -70,22 +70,6 @@ func getJSON(client *cli.Client, path string, out any) error {
 // postJSON sends a POST with body and decodes into out (if non-nil).
 func postJSON(client *cli.Client, path string, body any, out any) error {
 	resp, err := client.Post(path, body)
-	if err != nil {
-		return err
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return err
-	}
-	if out == nil {
-		_ = resp.Body.Close()
-		return nil
-	}
-	return cli.ReadJSON(resp, out)
-}
-
-// patchJSON sends a PATCH with body and decodes into out (if non-nil).
-func patchJSON(client *cli.Client, path string, body any, out any) error {
-	resp, err := client.Patch(path, body)
 	if err != nil {
 		return err
 	}
@@ -134,29 +118,6 @@ func queryString(pairs ...string) string {
 		return ""
 	}
 	return "?" + q.Encode()
-}
-
-// emitFormatted writes `data` honoring --format (table|json|yaml|quiet).
-//
-// For "table" callers must provide a non-nil tableFn that prints a
-// human-readable representation. For json/yaml/quiet the data slice is
-// dumped via the standard formatter.
-func emitFormatted(data any, tableFn func()) error {
-	f := newFormatter()
-	switch f.Format {
-	case "json":
-		return f.JSON(data)
-	case "yaml":
-		return f.YAML(data)
-	case "quiet":
-		// Minimal output — typically caller will pre-extract IDs and pass them.
-		return f.JSON(data)
-	default:
-		if tableFn != nil {
-			tableFn()
-		}
-		return nil
-	}
 }
 
 // requireAuthAndWorkspace gates commands that need a logged-in client and

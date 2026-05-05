@@ -72,7 +72,6 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 
 	root := req.LocalPath
 	source := root
-	cleanup := func() error { return nil }
 
 	if req.GitURL != "" {
 		if _, err := exec.LookPath("git"); err != nil {
@@ -85,8 +84,7 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 		if err != nil {
 			return nil, fmt.Errorf("create temp dir: %w", err)
 		}
-		cleanup = func() error { return os.RemoveAll(dir) }
-		defer cleanup()
+		defer func() { _ = os.RemoveAll(dir) }()
 
 		args := []string{
 			"clone", "--depth", "1",

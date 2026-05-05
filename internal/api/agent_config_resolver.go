@@ -60,17 +60,6 @@ type crewMemberEntry struct {
 	Integrations []memberIntegrationEntry `json:"integrations,omitempty"`
 }
 
-// crewInfoEntry describes a crew and its agents (used for COORDINATOR context).
-//
-// Deprecated: used only by the deprecated COORDINATOR role. See
-// [BuildCoordinatorContext] in internal/orchestrator/lead.go.
-type crewInfoEntry struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Slug    string            `json:"slug"`
-	Members []crewMemberEntry `json:"members"`
-}
-
 // mcpServerEntry describes a resolved MCP server for the agent.
 type mcpServerEntry struct {
 	ID          string            `json:"id"`
