@@ -7,20 +7,34 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
 // SkillHandler provides endpoints for listing, importing, and managing agent skills.
 type SkillHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
 	// SkipURLValidation disables SSRF checks on import URLs (testing only).
 	SkipURLValidation bool
 }
 
 // NewSkillHandler creates a SkillHandler with the given database and logger.
 func NewSkillHandler(db *sql.DB, logger *slog.Logger) *SkillHandler {
-	return &SkillHandler{db: db, logger: logger}
+	return &SkillHandler{db: db, logger: logger, journal: noopEmitter{}}
+}
+
+// SetJournal wires a journal emitter so skill registry actions land in
+// the workspace audit feed. Mirrors the pattern from InternalHandler;
+// nil is the harmless no-op so an unwired handler still functions in
+// tests and degraded modes.
+func (h *SkillHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 type skillResponse struct {
@@ -366,7 +380,53 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Audit trail. allow_unsafe_license is captured as a top-level
+	// payload flag so a compliance dashboard can list every override
+	// with a single SQL filter on payload->'unsafe_license' rather
+	// than parsing nested metadata.
+	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: wsID,
+		Type:        journal.EntrySkillImported,
+		Severity:    severityForUnsafe(req.AllowUnsafeLicense),
+		ActorType:   journal.ActorUser,
+		ActorID:     user.ID,
+		Summary:     "skill imported: " + result.Slug,
+		Payload: map[string]any{
+			"skill_id":       result.SkillID,
+			"slug":           result.Slug,
+			"created":        result.Created,
+			"source":         srcOfImport(req),
+			"unsafe_license": req.AllowUnsafeLicense,
+		},
+	}); jerr != nil {
+		h.logger.Warn("skill imported journal emit failed", "error", jerr)
+	}
+
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// severityForUnsafe escalates the journal severity when the operator
+// bypassed the SPDX gate so the audit feed shows it prominently
+// instead of folding into normal info-level imports.
+func severityForUnsafe(unsafe bool) journal.Severity {
+	if unsafe {
+		return journal.SeverityWarn
+	}
+	return journal.SeverityInfo
+}
+
+// srcOfImport names the user-facing path so the journal payload
+// disambiguates URL-fetch from pasted-content imports without the
+// reader having to decide from the absence of a field.
+func srcOfImport(req struct {
+	URL                string `json:"url"`
+	Content            string `json:"content"`
+	AllowUnsafeLicense bool   `json:"allow_unsafe_license"`
+}) string {
+	if req.URL != "" {
+		return "url"
+	}
+	return "content"
 }
 
 // Delete handles DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}.
@@ -377,6 +437,12 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 // startup, so deleting them is a churn no-op AND lets a malicious
 // operator briefly create a window where the official skill row
 // vanishes. Refuse the operation and tell the caller why.
+//
+// Authorisation: OWNER/ADMIN (canRole "manage"). Skills are global,
+// so a delete from one workspace removes the row for every workspace
+// that had it visible — destructive operations on shared registry
+// state get the higher tier. Mirrors `credentials.Delete` which uses
+// the same level for the same reason.
 func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeProblem := func(status int, detail string) {
 		writeJSON(w, status, map[string]interface{}{
@@ -386,7 +452,7 @@ func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
+	if !canRole(role, "manage") {
 		writeProblem(http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -426,6 +492,26 @@ func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if rows == 0 {
 		writeProblem(http.StatusNotFound, "skill not found")
 		return
+	}
+
+	wsID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	var actorID string
+	if user != nil {
+		actorID = user.ID
+	}
+	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: wsID,
+		Type:        journal.EntrySkillDeleted,
+		Severity:    journal.SeverityNotice,
+		ActorType:   journal.ActorUser,
+		ActorID:     actorID,
+		Summary:     "skill deleted: " + skillID,
+		Payload: map[string]any{
+			"skill_id": skillID,
+		},
+	}); jerr != nil {
+		h.logger.Warn("skill deleted journal emit failed", "error", jerr)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

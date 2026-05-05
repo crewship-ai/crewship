@@ -85,7 +85,19 @@ You will receive the user's intent in the next message. Respond with the SKILL.m
 // Generate handles the request, calls Anthropic, validates the output, and
 // upserts it into the skills table. Errors are surfaced verbatim because the
 // CLI is the primary caller and a precise message saves a round-trip.
+//
+// Authorisation: MANAGER+ (canRole "create"). LLM authoring spends real
+// Anthropic tokens against the workspace's API key on every call — an
+// unauthenticated MEMBER could rack up a non-trivial bill in a few
+// minutes of polling. Same role as `skill import` to keep the surface
+// uniform.
 func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	wsID := r.PathValue("workspaceId")
 	if wsID == "" {
 		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")

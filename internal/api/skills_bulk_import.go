@@ -57,7 +57,21 @@ type skillBulkSkippedItem struct {
 // Errors at the walker level (e.g. git clone failure) come back as 502;
 // per-skill rejections go in the response body's Skipped list rather
 // than failing the whole batch.
+//
+// Authorisation: requires the same MANAGER+ role as the single-import
+// endpoint (canRole "create"). An earlier revision skipped the role
+// check entirely, which meant any workspace member could trigger
+// arbitrary git clones through the server — both a credential-cost
+// vector (clones run on every retry) and a routing surface (the
+// orchestrator process makes outbound HTTPS calls on the operator's
+// behalf).
 func (h *SkillBulkImportHandler) Import(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
 	if r.PathValue("workspaceId") == "" {
 		writeProblem(w, r, http.StatusBadRequest, "workspace_id is required")
 		return
