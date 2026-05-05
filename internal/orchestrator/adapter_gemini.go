@@ -77,6 +77,9 @@ func (geminiAdapter) SetupSystemPrompt(
 	if err := writeCanonicalMemoryFiles(ctx, container, containerID, req, workDir, logger); err != nil {
 		return fmt.Errorf("gemini adapter setup system prompt: %w", err)
 	}
+	if err := writeAgentSkills(ctx, container, containerID, workDir, req.Skills, logger); err != nil {
+		logger.Warn("gemini adapter write agent skills failed", "error", err)
+	}
 	return nil
 }
 

@@ -36,6 +36,7 @@ func (r *Router) registerRoutes() {
 	if r.scheduleUpdater != nil {
 		agents.SetScheduler(r.scheduleUpdater)
 	}
+	agents.SetJournal(r.Journal())
 
 	if r.license != nil {
 		ws.SetLicense(r.license)
@@ -44,6 +45,7 @@ func (r *Router) registerRoutes() {
 	}
 	creds := NewCredentialHandler(r.db, r.logger)
 	skills := NewSkillHandler(r.db, r.logger)
+	skills.SetJournal(r.Journal())
 	runs := NewRunHandler(r.db, r.logger)
 	audit := NewAuditHandler(r.db, r.logger)
 	// Adapt the concrete Docker client to backup.DockerOps so the
@@ -313,6 +315,14 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/import", authed(wsCtx(http.HandlerFunc(skills.Import))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Delete))))
+	skillGen := NewSkillGenerateHandler(r.db, r.logger)
+	// Path param name MUST match what the wsCtx middleware reads — the
+	// pattern is {workspaceId} everywhere else in the API, and changing
+	// it broke the workspace lookup on this route in the prior commit.
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/generate", authed(wsCtx(http.HandlerFunc(skillGen.Generate))))
+	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/bulk-import", authed(wsCtx(http.HandlerFunc(skillBulk.Import))))
 
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))

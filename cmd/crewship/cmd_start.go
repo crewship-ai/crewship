@@ -23,6 +23,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/server"
+	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/crewship-ai/crewship/web"
 	"github.com/spf13/cobra"
@@ -94,6 +95,9 @@ var startCmd = &cobra.Command{
 		}
 		if err := database.SeedBundledSkills(context.Background(), db.DB, logger); err != nil {
 			logger.Warn("failed to seed bundled skills", "error", err)
+		}
+		if err := bundledSkills.Install(context.Background(), db.DB, logger); err != nil {
+			logger.Warn("failed to install bundled anthropic skills", "error", err)
 		}
 
 		lic := license.New()

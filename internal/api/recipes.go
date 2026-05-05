@@ -412,13 +412,9 @@ func resolveCrewSlug(ctx context.Context, db *sql.DB, workspaceID, base string) 
 	return "", false, errors.New("could not allocate crew slug after 100 tries")
 }
 
-// nullableString returns a sql.Null-ish string: empty input → empty
-// string (NOT NULL constraint compliant), non-empty preserved as-is.
-// Existing crew_mcp_servers columns are mostly TEXT NOT NULL with
-// empty defaults, so an empty string is the canonical zero value.
-func nullableString(s string) string {
-	return s
-}
+// nullableString lives in skills_generate.go — same semantic, same
+// package, single definition; recipes calls it directly with string
+// arguments which the interface{} signature accepts unchanged.
 
 // nullableJSON returns the JSON-encoded value or the fallback if the
 // raw bytes are empty (e.g. nil slice / map yields "null" not "[]" /

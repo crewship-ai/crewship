@@ -740,7 +740,49 @@ ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN locked_until TEXT;
 ALTER TABLE users ADD COLUMN last_failed_login_at TEXT;
 `},
-	// v65 backs the row-level "is this credential still in use?" signal
+	// v65 — from main (PR #267 skills bootstrap). Kept ahead of the
+	// connections migrations so the version sequence matches main; our
+	// connections migrations were renumbered v65→v73 during the
+	// feat/connections ↔ main merge to avoid the version-collision
+	// guard in Migrate().
+	//
+	// vendor namespaces a skill (e.g. "anthropic", "vercel", "community") so
+	// future workspace templates can reference skills as vendor/slug@version
+	// without colliding when two registries publish the same slug. Kept
+	// nullable for the v0.1 migration — backfill happens lazily as bundled
+	// skills upsert at startup with their canonical vendor.
+	//
+	// runtime distinguishes pure-instruction skills (the SKILL.md body is the
+	// payload) from script-bundle skills, MCP-wrapping skills, and hybrids.
+	// Drives the "Runtime" facet on the browse page and the per-CLI adapter
+	// decision (MCP skills go to .mcp.json instead of a skills/ folder).
+	//
+	// maturity replaces the brittle stars/downloads proxy used by other
+	// registries. OFFICIAL = vendor-published; CURATED = vetted by Crewship;
+	// COMMUNITY = imported by users; EXPERIMENTAL = explicitly marked WIP.
+	//
+	// scan_status records the outcome of the prompt-injection regex heuristic
+	// (built-in, runs on every import) plus the optional snyk-agent-scan
+	// shell-out. BLOCKED skills are present in the table but excluded from
+	// install candidates until cleared.
+	//
+	// spdx_license is the canonical SPDX identifier (parsed from frontmatter
+	// or detected from a sibling LICENSE file). Distinct from the freeform
+	// `license` column so the SPDX allowlist gate has a stable key to filter
+	// on.
+	{version: 65, name: "add_skill_bootstrap_fields", sql: `
+ALTER TABLE skills ADD COLUMN vendor TEXT;
+ALTER TABLE skills ADD COLUMN homepage TEXT;
+ALTER TABLE skills ADD COLUMN spdx_license TEXT;
+ALTER TABLE skills ADD COLUMN runtime TEXT NOT NULL DEFAULT 'INSTRUCTIONS';
+ALTER TABLE skills ADD COLUMN maturity TEXT NOT NULL DEFAULT 'COMMUNITY';
+ALTER TABLE skills ADD COLUMN scan_status TEXT NOT NULL DEFAULT 'UNSCANNED';
+ALTER TABLE skills ADD COLUMN description_quality TEXT;
+CREATE INDEX IF NOT EXISTS idx_skill_vendor ON skills(vendor);
+CREATE INDEX IF NOT EXISTS idx_skill_maturity ON skills(maturity);
+CREATE INDEX IF NOT EXISTS idx_skill_runtime ON skills(runtime);
+`},
+	// v66 backs the row-level "is this credential still in use?" signal
 	// copied from GitLab/GitHub/Stripe. last_checked_at already exists
 	// for health-check timestamps; last_used_at is distinct — it records
 	// real usage as observed by the sidecar and is the input for the
@@ -752,12 +794,12 @@ ALTER TABLE users ADD COLUMN last_failed_login_at TEXT;
 	// duplicate would split writes across two columns and rot one of
 	// them. PRD CONNECTIONS.md mentioned expires_at as shorthand; this
 	// migration formalises the column reuse decision.
-	{version: 65, name: "add_credential_audit_signal", sql: `
+	{version: 66, name: "add_credential_audit_signal", sql: `
 ALTER TABLE credentials ADD COLUMN last_used_at TEXT;
 ALTER TABLE credentials ADD COLUMN last_used_ips TEXT;
 CREATE INDEX IF NOT EXISTS idx_credentials_last_used ON credentials(last_used_at);
 `},
-	// v66 adds mcp_tool_bindings for the per-tool enable/disable feature
+	// v67 adds mcp_tool_bindings for the per-tool enable/disable feature
 	// (Cursor parity, biggest MVP differentiator vs. Cursor/Continue per
 	// CONNECTIONS.md §3.1). One MCP server publishes N tools via
 	// mcp/list-tools; agents bound to that server see the union of
@@ -766,7 +808,7 @@ CREATE INDEX IF NOT EXISTS idx_credentials_last_used ON credentials(last_used_at
 	// crew_mcp_servers live in separate ID spaces). description is
 	// optional — populated when the sidecar refreshes from the live
 	// server, NULL when the row was created manually.
-	{version: 66, name: "add_mcp_tool_bindings", sql: `
+	{version: 67, name: "add_mcp_tool_bindings", sql: `
 CREATE TABLE IF NOT EXISTS mcp_tool_bindings (
 	id TEXT PRIMARY KEY,
 	mcp_server_id TEXT NOT NULL,
@@ -780,7 +822,7 @@ CREATE TABLE IF NOT EXISTS mcp_tool_bindings (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_tool_bindings_server ON mcp_tool_bindings(mcp_server_id, mcp_server_scope);
 `},
-	// v67 promotes the existing binary is_verified flag on
+	// v68 promotes the existing binary is_verified flag on
 	// mcp_registry_servers (added in v36) to the 3-tier trust model
 	// from CONNECTIONS.md §5.6: anthropic / crewship / community.
 	// is_featured is a curation-only flag (DO-NOT-BUILD #4: install
@@ -792,14 +834,14 @@ CREATE INDEX IF NOT EXISTS idx_mcp_tool_bindings_server ON mcp_tool_bindings(mcp
 	// synced from the upstream Anthropic registry gets
 	// trust_tier='anthropic' (that's what is_verified meant before),
 	// and is_featured stays 0 until an admin promotes it.
-	{version: 67, name: "add_mcp_registry_trust_tier", sql: `
+	{version: 68, name: "add_mcp_registry_trust_tier", sql: `
 ALTER TABLE mcp_registry_servers ADD COLUMN trust_tier TEXT NOT NULL DEFAULT 'community';
 ALTER TABLE mcp_registry_servers ADD COLUMN is_featured INTEGER NOT NULL DEFAULT 0;
 UPDATE mcp_registry_servers SET trust_tier = 'anthropic' WHERE is_verified = 1;
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_trust_tier ON mcp_registry_servers(trust_tier);
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_featured ON mcp_registry_servers(is_featured) WHERE is_featured = 1;
 `},
-	// v68 backs the inline audit drawer (CONNECTIONS.md §4.3 Audit
+	// v69 backs the inline audit drawer (CONNECTIONS.md §4.3 Audit
 	// tab — Doppler pattern: per-row slide-out > separate audit page).
 	// Each event captures who used the credential, from which IP, and
 	// the outcome. event_type is open-ended (USE / ROTATE / TEST /
@@ -815,7 +857,7 @@ CREATE INDEX IF NOT EXISTS idx_mcp_registry_featured ON mcp_registry_servers(is_
 	// The (credential_id, occurred_at DESC) index is the hot path —
 	// the detail Sheet's Audit tab queries last 50 events per
 	// credential.
-	{version: 68, name: "add_credential_audit", sql: `
+	{version: 69, name: "add_credential_audit", sql: `
 CREATE TABLE IF NOT EXISTS credential_audit (
 	id TEXT PRIMARY KEY,
 	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
@@ -828,7 +870,7 @@ CREATE TABLE IF NOT EXISTS credential_audit (
 CREATE INDEX IF NOT EXISTS idx_credential_audit_credential ON credential_audit(credential_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_credential_audit_occurred ON credential_audit(occurred_at);
 `},
-	// v69 backs the rotation-with-grace-overlap feature — biggest
+	// v70 backs the rotation-with-grace-overlap feature — biggest
 	// enterprise differentiator vs. GitLab's "original becomes
 	// inactive immediately" pattern (CONNECTIONS.md §7.1, MUST-add #1
 	// from project_credentials_integrations_strategy.md).
@@ -846,7 +888,7 @@ CREATE INDEX IF NOT EXISTS idx_credential_audit_occurred ON credential_audit(occ
 	//
 	// The (expires_at, status) index supports the hourly cron that
 	// finds rotations to expire.
-	{version: 69, name: "add_credential_rotations", sql: `
+	{version: 70, name: "add_credential_rotations", sql: `
 CREATE TABLE IF NOT EXISTS credential_rotations (
 	id TEXT PRIMARY KEY,
 	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
@@ -860,9 +902,9 @@ CREATE TABLE IF NOT EXISTS credential_rotations (
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
 `},
-	// v70 fixes the credential_rotations.rotated_by FK from
+	// v71 fixes the credential_rotations.rotated_by FK from
 	// "NOT NULL REFERENCES users(id)" (defaults to NO ACTION) to
-	// "REFERENCES users(id) ON DELETE SET NULL". The original v69
+	// "REFERENCES users(id) ON DELETE SET NULL". The original v70
 	// would block deleting any user who has rotation history with a
 	// FK constraint error — incompatible with how credential_audit
 	// already nulls out agent_id on agent deletion.
@@ -870,7 +912,7 @@ CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotati
 	// SQLite can't ALTER an existing FK, so this is the standard
 	// recreate dance: rename old → create new with fixed schema →
 	// copy rows → drop old. Indexes are recreated afterwards.
-	{version: 70, name: "fix_credential_rotations_rotated_by_fk", sql: `
+	{version: 71, name: "fix_credential_rotations_rotated_by_fk", sql: `
 CREATE TABLE credential_rotations_new (
 	id TEXT PRIMARY KEY,
 	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
@@ -888,15 +930,15 @@ ALTER TABLE credential_rotations_new RENAME TO credential_rotations;
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
 `},
-	// v71 adds a free-form tag list to credentials so users can organise
+	// v72 adds a free-form tag list to credentials so users can organise
 	// secrets without our hardcoded provider enum getting in the way
 	// (Doppler / Vercel pattern). Stored as JSON TEXT — SQLite has no
 	// native array type, and pulling tags into a junction table is
 	// premature for a list that's typically 0–3 items per credential.
-	{version: 71, name: "add_credential_tags", sql: `
+	{version: 72, name: "add_credential_tags", sql: `
 ALTER TABLE credentials ADD COLUMN tags TEXT;
 `},
-	// v72 adds a composite index that backs the crew-scoped credential
+	// v73 adds a composite index that backs the crew-scoped credential
 	// visibility filter (credentialVisibilityFilter in
 	// internal/api/credentials_loaders.go). The existing
 	// idx_crew_member_user is sufficient for a probe by user_id, but
@@ -905,7 +947,7 @@ ALTER TABLE credentials ADD COLUMN tags TEXT;
 	// index-only at scale. Acceptable to skip on small workspaces, but
 	// the ordering of the existing single-column indexes already
 	// implies this access pattern, so we add it explicitly.
-	{version: 72, name: "add_crew_members_composite_index", sql: `
+	{version: 73, name: "add_crew_members_composite_index", sql: `
 CREATE INDEX IF NOT EXISTS idx_crew_member_user_crew ON crew_members(user_id, crew_id);
 `},
 }

@@ -124,7 +124,7 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 	// locally (CONNECTIONS.md §5.6 trust tiers + DO-NOT-BUILD #4 no
 	// faked install counts → featured is our manual signal). A fresh
 	// INSERT seeds them with sane defaults via the schema (`'community'`
-	// and `0`) but the v67 backfill promotes anything historically
+	// and `0`) but the v68 backfill promotes anything historically
 	// flagged is_verified=1 to trust_tier='anthropic'. Future syncs
 	// must never silently demote a curated entry.
 	stmt, err := tx.PrepareContext(ctx, `

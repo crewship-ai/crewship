@@ -1,0 +1,220 @@
+---
+title: "Author a Skill in 10 Minutes"
+description: "End-to-end walkthrough: idea → SKILL.md → import → assign → invoke."
+icon: "rocket"
+---
+
+# Author a custom skill in 10 minutes
+
+This walks through the canonical flow: scaffold a SKILL.md from the CLI,
+fill it in, upload, assign to an agent, invoke, and iterate. No browser,
+no API key required (for the offline path).
+
+## 1. Scaffold
+
+Pick a slug (kebab-case) and a category, then run `init`:
+
+```bash
+crewship skill init invoice-classifier \
+  --category FINANCE \
+  --description "Use when the user pastes an invoice and asks to categorise it (vendor, amount, account)."
+```
+
+This writes `./invoice-classifier/SKILL.md` with the canonical body
+sections and frontmatter. It is fully offline — no network round-trip,
+no credential needed.
+
+```
+✓ Scaffold written: invoice-classifier/SKILL.md
+
+Next steps:
+  1) Edit invoice-classifier/SKILL.md — start with the description trigger phrase.
+  2) Upload:  crewship skill import --file invoice-classifier/SKILL.md
+  3) Assign:  crewship skill assign invoice-classifier <agent-slug>
+```
+
+## 2. Edit
+
+Open the scaffold in your editor. Three things to focus on:
+
+**Description (frontmatter)** — the LLM uses this to decide if the skill
+is relevant. Make the trigger phrase concrete:
+
+```yaml
+description: Use when the user pastes invoice text and asks for vendor / amount / account-code categorisation.
+```
+
+**`## When to use`** — restate the trigger and add at least one near-miss
+the skill should NOT activate on. Without a negative example the agent
+over-fires.
+
+```markdown
+## When to use
+
+Activate when the user message contains a chunk of text that looks like
+an invoice (vendor name, line items, amount) AND asks for categorisation
+or "code this".
+
+Do NOT activate on:
+- Generic accounting questions ("what's the difference between ...").
+- Receipts (informal layout, single line item) — there's a separate
+  receipt-classifier skill for those.
+```
+
+**`## Steps`** — concrete, ordered actions:
+
+```markdown
+## Steps
+
+1. Extract: vendor name (longest top-of-document brand string), total
+   amount (largest currency token), invoice date.
+2. Classify: pick a chart-of-accounts code from the user's mapping.
+3. Output a YAML block with vendor / amount / date / account_code.
+```
+
+**`## Output format`** — be precise. The LLM follows whatever shape you
+spell out:
+
+```markdown
+## Output format
+
+```yaml
+vendor: <string>
+amount: <number>
+currency: <ISO 4217 code>
+date: <YYYY-MM-DD>
+account_code: <string>
+confidence: <low|medium|high>
+```
+```
+
+**`## Guardrails`** — at least one concrete negative:
+
+```markdown
+## Guardrails
+
+- Never invent an account code. If the user hasn't provided a mapping,
+  ask for one rather than guessing.
+- Never include the raw invoice body in the output — only the extracted
+  fields.
+```
+
+## 3. Upload
+
+```bash
+crewship skill import --file invoice-classifier/SKILL.md
+```
+
+Output:
+
+```
+Skill imported: invoice-classifier (sk_8a2f...)
+```
+
+The import gates run automatically: SPDX license check, prompt-injection
+scanner, body size cap, BUNDLED-overwrite refusal. If anything fails the
+import is rejected with a specific reason — no half-state.
+
+Verify:
+
+```bash
+crewship skill get invoice-classifier
+```
+
+You should see `scan_status: CLEAN`, `spdx_license: MIT`, and
+`maturity: COMMUNITY`.
+
+## 4. Assign
+
+For one agent:
+
+```bash
+crewship skill assign invoice-classifier viktor
+```
+
+For a whole crew:
+
+```bash
+crewship skill assign invoice-classifier --to-crew finance
+```
+
+After this, the next time the agent runs, the orchestrator:
+
+1. Renders the skill body into the agent's `[SKILLS AVAILABLE]` system-prompt block.
+2. Materialises `SKILL.md` at the right path for whichever CLI the agent uses (`.claude/skills/invoice-classifier/SKILL.md`, `.opencode/skills/...`, etc.).
+
+## 5. Invoke
+
+Trigger the skill from the user side via `crewship run`:
+
+```bash
+crewship run viktor "Code this:
+Acme Hosting Inc.
+Invoice #4711, 2026-04-30
+Cloud compute        $245.00
+Bandwidth             $12.40
+Total                $257.40"
+```
+
+If the trigger description matched, the agent's reply will follow the
+output-format YAML and stay within the guardrails you wrote. Use
+`--dry-run` to inspect the assembled prompt without spending tokens:
+
+```bash
+crewship run viktor --dry-run "Code this: ..."
+```
+
+## 6. Iterate
+
+Pull the current SKILL.md back from the registry, edit, re-upload:
+
+```bash
+crewship skill export invoice-classifier --output ./
+$EDITOR invoice-classifier.md
+crewship skill import --file invoice-classifier.md
+```
+
+The import path upserts by slug — re-importing keeps the same `id` and
+preserves every `agent_skills` row, so assigned agents pick up the new
+body on their next run with no re-assignment needed.
+
+## When to bump the version
+
+The `version` frontmatter field is currently informational — the upsert
+is "last write wins" by slug regardless of version. Bumping it is still
+useful for human reviewers. Plans for a future release: surface a
+warning when an import would replace a higher version with a lower one.
+
+## When to use `skill create` instead
+
+If you have an Anthropic API key (workspace credential type=`API_KEY`,
+not OAuth), you can ask the platform to draft the SKILL.md for you:
+
+```bash
+crewship skill create --slug invoice-classifier \
+  --prompt "Categorise pasted invoices into vendor, amount, account_code."
+```
+
+The server runs a condensed version of Anthropic's `skill-creator` system
+prompt against Sonnet. Output goes straight into the registry with
+`source=GENERATED`. Use this for first drafts, then `skill export` to
+edit + iterate normally.
+
+## Sharing a skill with another workspace
+
+There's no marketplace yet. The simplest pattern:
+
+```bash
+# Source workspace
+crewship skill export invoice-classifier --output ./shared/
+
+# Target workspace (after switching CREWSHIP_SERVER / workspace)
+crewship skill import --file ./shared/invoice-classifier.md
+```
+
+Or commit the SKILL.md to a git repo and bulk-import:
+
+```bash
+crewship skill import --repo https://github.com/your-org/skills \
+  --paths 'invoice-classifier/*'
+```

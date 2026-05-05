@@ -1,14 +1,37 @@
 "use client"
 
-import Link from "next/link"
+import Image from "next/image"
 import {
-  Blocks, Wrench, Star, Download, Users, ShieldCheck,
-  Code, Search, Hammer, Server, MessageCircle, Settings,
+  Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
+  Palette, ShieldCheck, BadgeCheck, Lock, Dot, Download, Clock,
+  AlertTriangle, FileText, Sparkles, Plug, Users,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
-interface SkillData {
+// SkillInstalledAgent mirrors the backend skillInstalledAgent struct
+// — only populated on the Installed list (?installed=1) so the card
+// can show real avatars + crew badges of the agents using this skill.
+export interface SkillInstalledAgent {
+  agent_id: string
+  agent_slug: string
+  agent_name: string
+  avatar_seed: string | null
+  avatar_style: string | null
+  crew_id: string | null
+  crew_slug: string | null
+  crew_name: string | null
+  crew_color: string | null
+  crew_icon: string | null
+  crew_avatar_style: string | null
+}
+
+// SkillCardData mirrors the skillResponse JSON the backend emits after
+// the Sprint 1 v65 schema changes. New fields (vendor, maturity, runtime,
+// scan_status) are optional in the type so the card still renders for
+// rows imported before the migration ran.
+export interface SkillCardData {
   id: string
   name: string
   slug: string
@@ -19,110 +42,277 @@ interface SkillData {
   category: string
   source: string
   icon: string | null
-  verification: string | null
+  vendor?: string | null
+  maturity?: string | null
+  runtime?: string | null
+  scan_status?: string | null
+  description_quality?: string | null
   downloads: number | null
-  rating_avg: number | null
-  rating_count: number | null
   featured: boolean
-  tool_count: number | null
+  updated_at?: string
+  installed_on?: SkillInstalledAgent[]
 }
 
-const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
-  BUILTIN: { label: "Built-in", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
-  BUNDLED: { label: "Bundled", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
-  CUSTOM: { label: "Custom", className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400" },
-  MARKETPLACE: { label: "Marketplace", className: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400" },
+// Source badge — Composio's auth-method badge proved that a single
+// trust glyph reads faster than a publisher avatar. Map the 5 source
+// enum values onto 4 visual treatments (MARKETPLACE / VERIFIED share).
+const SOURCE_BADGE: Record<string, { label: string; icon: React.ElementType; className: string }> = {
+  BUNDLED:   { label: "Official",  icon: ShieldCheck, className: "bg-blue-500/10 text-blue-300 border-blue-500/30" },
+  GENERATED: { label: "Generated", icon: Sparkles,    className: "bg-violet-500/10 text-violet-300 border-violet-500/30" },
+  MARKETPLACE: { label: "Verified", icon: BadgeCheck, className: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" },
+  CUSTOM:    { label: "Community", icon: Dot,         className: "bg-white/[0.05] text-white/55 border-white/10" },
+  MANAGED:   { label: "Managed",   icon: Lock,        className: "bg-white/[0.05] text-white/55 border-white/10" },
 }
 
-const CATEGORY_ICONS: Record<string, React.ElementType> = {
-  CODING: Code,
-  RESEARCH: Search,
-  DEVELOPMENT: Hammer,
-  DEVOPS: Server,
-  COMMUNICATION: MessageCircle,
-  CUSTOM: Settings,
+// Domain colour — single accent chip per card per the mockup
+// (.claude/mockups/skills-page.html). 12% bg keeps dense grid readable.
+const DOMAIN_COLORS: Record<string, string> = {
+  CODING:     "bg-blue-500/12 text-blue-300",
+  AUTOMATION: "bg-cyan-500/12 text-cyan-300",
+  DATA:       "bg-violet-500/12 text-violet-300",
+  DEVOPS:     "bg-orange-500/12 text-orange-300",
+  WRITING:    "bg-teal-500/12 text-teal-300",
+  RESEARCH:   "bg-amber-500/12 text-amber-300",
+  PM:         "bg-pink-500/12 text-pink-300",
+  DESIGN:     "bg-fuchsia-500/12 text-fuchsia-300",
+  SECURITY:   "bg-red-500/12 text-red-300",
+  SUPPORT:    "bg-cyan-500/12 text-cyan-300",
+  FINANCE:    "bg-emerald-500/12 text-emerald-300",
+  OPS:        "bg-indigo-500/12 text-indigo-300",
+  CUSTOM:     "bg-white/[0.06] text-white/65",
 }
 
-export function SkillCard({ skill }: { skill: SkillData }) {
-  const sourceCfg = SOURCE_STYLES[skill.source] ?? { label: skill.source, className: "" }
-  const CategoryIcon = CATEGORY_ICONS[skill.category] ?? Blocks
+const DOMAIN_ICONS: Record<string, React.ElementType> = {
+  CODING:     Code,
+  AUTOMATION: Plug,
+  DATA:       Search,
+  DEVOPS:     Server,
+  WRITING:    FileText,
+  RESEARCH:   Search,
+  PM:         Hammer,
+  DESIGN:     Palette,
+  SECURITY:   ShieldCheck,
+  SUPPORT:    MessageCircle,
+  FINANCE:    Settings,
+  OPS:        Server,
+  CUSTOM:     Settings,
+}
+
+// Maturity badge — rendered only when NOT OFFICIAL (which already
+// shows a source shield). Stable=COMMUNITY without a maturity badge
+// would be the silent default once we promote skills via review.
+const MATURITY_BADGE: Record<string, { label: string; className: string }> = {
+  EXPERIMENTAL: { label: "Experimental", className: "bg-violet-500/15 text-violet-300 border-violet-500/30" },
+  COMMUNITY:    { label: "Beta",         className: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30" },
+  CURATED:      { label: "Curated",      className: "bg-cyan-500/15 text-cyan-300 border-cyan-500/30" },
+}
+
+function formatRelative(iso?: string): string {
+  if (!iso) return ""
+  const ts = new Date(iso).getTime()
+  if (Number.isNaN(ts)) return ""
+  const days = Math.floor((Date.now() - ts) / 86_400_000)
+  if (days < 1) return "Updated today"
+  if (days === 1) return "Updated 1d ago"
+  if (days < 30) return `Updated ${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `Updated ${months}mo ago`
+  return `Updated ${Math.floor(months / 12)}y ago`
+}
+
+function formatCount(n: number | null | undefined): string {
+  if (n == null || n === 0) return "0 installs"
+  if (n < 1000) return `${n} installs`
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k installs`
+  return `${Math.round(n / 1000)}k installs`
+}
+
+interface SkillCardProps {
+  skill: SkillCardData
+  selected?: boolean
+  onSelect?: (skill: SkillCardData) => void
+}
+
+// SkillCard renders the 7-field layout from .claude/mockups/skills-page.html:
+// namespace+name, one-line description, domain chip, install count,
+// updated relative, source badge, maturity badge (only when non-OFFICIAL).
+// Plus a flag chip when scan_status=FLAGGED.
+export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
+  const sourceCfg = SOURCE_BADGE[skill.source] ?? SOURCE_BADGE.CUSTOM
+  const SourceIcon = sourceCfg.icon
+  const DomainIcon = DOMAIN_ICONS[skill.category] ?? Blocks
+  const domainCls = DOMAIN_COLORS[skill.category] ?? DOMAIN_COLORS.CUSTOM
+  const matCfg = skill.maturity && skill.maturity !== "OFFICIAL" ? MATURITY_BADGE[skill.maturity] : undefined
+  const flagged = skill.scan_status === "FLAGGED"
+  const vendor = skill.vendor || "community"
+  const displayName = skill.display_name ?? skill.name
 
   return (
-    <Link
-      href={`/skills/${skill.id}`}
-      className="rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
+    <button
+      type="button"
+      onClick={() => onSelect?.(skill)}
+      aria-label={`${vendor}/${skill.slug}: ${skill.description ?? "no description"}`}
+      aria-pressed={selected}
+      // h-full + flex column lets the card stretch to fill its grid
+      // cell. Combined with auto-rows-fr on the parent grid, every
+      // card in the same row matches its tallest sibling — fixes the
+      // visible "rozhodí se výška karet" the user pointed at.
+      className={`group w-full h-full text-left rounded-lg border transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 flex ${
+        selected
+          ? "border-blue-400/60 bg-blue-500/[0.08]"
+          : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.16] hover:bg-white/[0.06]"
+      }`}
     >
-      <Card className={`hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md ${skill.featured ? "ring-1 ring-primary/20" : ""}`}>
-        <CardContent className="p-4 sm:p-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
-              <CategoryIcon className="h-5 w-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-body font-semibold truncate">
-                  {skill.display_name ?? skill.name}
-                </h3>
-                <Badge variant="secondary" className={`text-micro shrink-0 ${sourceCfg.className}`}>
-                  {sourceCfg.label}
-                </Badge>
+      <Card className="border-0 bg-transparent shadow-none w-full flex flex-col">
+        <CardContent className="p-4 flex flex-col h-full">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-1 truncate">
+                <span className="text-xs text-white/45 truncate">{vendor}/</span>
+                <span className="text-sm font-semibold text-white/95 truncate">{displayName}</span>
               </div>
-              <p className="text-label text-muted-foreground mt-0.5 line-clamp-2 min-h-[2.5rem]">
-                {skill.description || <span className="italic">No description</span>}
-              </p>
             </div>
-          </div>
-
-          <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <Badge variant="outline" className="text-micro gap-1">
-              <CategoryIcon className="h-3 w-3" />
-              {skill.category.charAt(0) + skill.category.slice(1).toLowerCase()}
+            <Badge
+              variant="outline"
+              className={`shrink-0 gap-1 px-1.5 py-0 h-5 text-[10px] font-medium ${sourceCfg.className}`}
+            >
+              <SourceIcon className="h-3 w-3" />
+              {sourceCfg.label}
             </Badge>
-            {skill.version && (
-              <Badge variant="outline" className="text-micro text-muted-foreground">
-                v{skill.version}
-              </Badge>
+          </div>
+
+          <p className="mt-2 line-clamp-2 min-h-[2.4em] text-xs text-white/60 leading-relaxed">
+            {skill.description ?? <span className="italic text-white/35">No description</span>}
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${domainCls}`}>
+              <DomainIcon className="h-3 w-3" />
+              {skill.category.charAt(0) + skill.category.slice(1).toLowerCase()}
+            </span>
+            {matCfg && (
+              <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${matCfg.className}`}>
+                {matCfg.label}
+              </span>
             )}
-            {skill.verification && skill.verification !== "UNVERIFIED" && (
-              <Badge variant="outline" className="text-micro gap-1 text-emerald-700 dark:text-emerald-400">
-                <ShieldCheck className="h-3 w-3" />
-                Verified
-              </Badge>
-            )}
-            {skill.featured && (
-              <Badge variant="outline" className="text-micro gap-1 text-amber-600 dark:text-amber-400">
-                <Star className="h-3 w-3" />
-                Featured
-              </Badge>
+            {flagged && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-300">
+                <AlertTriangle className="h-3 w-3" />
+                Flagged
+              </span>
             )}
           </div>
 
-          <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground">
+          {/* Spacer keeps the install-count + updated row anchored to
+              the bottom of the card so cards in the same row align
+              even when descriptions are different lengths. */}
+          <div className="flex-1" />
+
+          <div className="mt-3 flex items-center gap-3 text-[11px] text-white/45 tabular-nums">
             <span className="flex items-center gap-1">
-              <Wrench className="h-3 w-3" />
-              {skill.tool_count ?? 0} tools
+              <Download className="h-3 w-3" />
+              {formatCount(skill.downloads)}
             </span>
-            {skill.author && (
-              <span className="flex items-center gap-1 truncate">
-                <Users className="h-3 w-3 shrink-0" />
-                {skill.author}
-              </span>
-            )}
-            {(skill.downloads ?? 0) > 0 && (
-              <span className="flex items-center gap-1 ml-auto">
-                <Download className="h-3 w-3" />
-                {skill.downloads}
-              </span>
-            )}
-            {skill.rating_avg != null && skill.rating_avg > 0 && (
+            {skill.updated_at && (
               <span className="flex items-center gap-1">
-                <Star className="h-3 w-3" />
-                {skill.rating_avg.toFixed(1)}
+                <Clock className="h-3 w-3" />
+                {formatRelative(skill.updated_at)}
               </span>
             )}
           </div>
+
+          {skill.installed_on && skill.installed_on.length > 0 && (
+            <InstalledAgents agents={skill.installed_on} />
+          )}
         </CardContent>
       </Card>
-    </Link>
+    </button>
+  )
+}
+
+// InstalledAgents renders the row of stacked agent avatars + unique
+// crew badges that the user asked for on the Installed tab. Avatars
+// stack with -ml overlap (max 5 visible, "+N" overflow); crew icons
+// dedupe so a skill installed on five agents from one crew shows one
+// badge, not five.
+function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
+  const visible = agents.slice(0, 5)
+  const overflow = agents.length - visible.length
+  // Dedupe crews by id so we don't render the same colour chip five
+  // times when a whole crew shares a skill.
+  const crews = new Map<string, { name: string; color: string | null; slug: string }>()
+  for (const a of agents) {
+    if (a.crew_id && !crews.has(a.crew_id)) {
+      crews.set(a.crew_id, { name: a.crew_name ?? a.crew_slug ?? "crew", color: a.crew_color, slug: a.crew_slug ?? "" })
+    }
+  }
+  return (
+    <div className="mt-3 pt-2 border-t border-white/[0.05] flex items-center gap-2">
+      <span className="inline-flex items-center gap-1 text-[10px] text-white/45 shrink-0">
+        <Users className="h-3 w-3" />
+        Installed on
+      </span>
+      <div className="flex -space-x-1.5 shrink-0">
+        {visible.map((a) => (
+          <Image
+            key={a.agent_id}
+            src={getAgentAvatarUrl(a.avatar_seed ?? a.agent_slug, a.avatar_style)}
+            alt={a.agent_name}
+            title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}
+            width={20}
+            height={20}
+            unoptimized
+            className="h-5 w-5 rounded-full ring-1 ring-black/40 bg-white/[0.04]"
+          />
+        ))}
+        {overflow > 0 && (
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-black/40 px-1 text-[9px] font-medium text-white/65 tabular-nums">
+            +{overflow}
+          </span>
+        )}
+      </div>
+      {crews.size > 0 && (
+        <div className="flex flex-wrap items-center gap-1 min-w-0">
+          {Array.from(crews.values()).slice(0, 2).map((c) => (
+            <CrewChip key={c.slug} name={c.name} color={c.color} />
+          ))}
+          {crews.size > 2 && (
+            <span className="text-[9px] text-white/45">+{crews.size - 2}</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// CrewChip renders one tinted pill per crew. Crew colours are stored
+// per-row as user-configurable hex strings, so we cannot pre-generate
+// Tailwind utility classes — JIT cannot statically analyse runtime
+// values. The pattern Tailwind v4 documents for this case is to inject
+// the colour as a CSS custom property and reference it from arbitrary-
+// value utilities, which keeps the layout/state styling in className
+// and confines the dynamic injection to a single var. The fallback
+// classes apply when crew_color is null (default neutral chip).
+function CrewChip({ name, color }: { name: string; color: string | null }) {
+  if (!color) {
+    return (
+      <span
+        title={name}
+        className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-white/65"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
+        <span className="truncate max-w-[80px]">{name}</span>
+      </span>
+    )
+  }
+  return (
+    <span
+      title={name}
+      style={{ "--crew-color": color } as React.CSSProperties}
+      className="inline-flex items-center gap-1 rounded-full border border-[var(--crew-color)]/25 bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-[var(--crew-color)]"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-[var(--crew-color)]" />
+      <span className="truncate max-w-[80px]">{name}</span>
+    </span>
   )
 }

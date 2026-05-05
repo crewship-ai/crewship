@@ -19,13 +19,13 @@ import (
 //
 // Output layout:
 //
-//   <out>/
-//     run.json       — runMetadata + window
-//     prompt.md      — first user message recovered from chat
-//     response.md    — concatenated assistant text from chat messages
-//     messages.json  — full chat message list (raw)
-//     journal.json   — journal entries (oldest-first)
-//     timeline.txt   — same entries, human-readable
+//	<out>/
+//	  run.json       — runMetadata + window
+//	  prompt.md      — first user message recovered from chat
+//	  response.md    — concatenated assistant text from chat messages
+//	  messages.json  — full chat message list (raw)
+//	  journal.json   — journal entries (oldest-first)
+//	  timeline.txt   — same entries, human-readable
 //
 // We deliberately emit a folder rather than a tarball so users can grep
 // it, edit it, and commit pieces selectively. Wrapping in `tar` is a

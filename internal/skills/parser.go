@@ -12,14 +12,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// validCategories defines the allowed skill categories.
+// validCategories enumerates the SkillCategory values accepted both by the
+// frontmatter parser and the v65 SQL schema. Kept in sync with the
+// SkillCategory enum in prisma/schema.prisma — adding a value here without
+// the matching schema change will fail at INSERT.
 var validCategories = map[string]bool{
-	"CODING":        true,
-	"RESEARCH":      true,
-	"DEVELOPMENT":   true,
-	"DEVOPS":        true,
-	"COMMUNICATION": true,
-	"CUSTOM":        true,
+	"CODING":     true,
+	"AUTOMATION": true,
+	"DATA":       true,
+	"DEVOPS":     true,
+	"SUPPORT":    true,
+	"SALES":      true,
+	"WRITING":    true,
+	"RESEARCH":   true,
+	"PM":         true,
+	"DESIGN":     true,
+	"SECURITY":   true,
+	"FINANCE":    true,
+	"OPS":        true,
+	"CUSTOM":     true,
+}
+
+// validRuntimes mirrors the SkillRuntime enum.
+var validRuntimes = map[string]bool{
+	"INSTRUCTIONS": true,
+	"SCRIPT":       true,
+	"MCP":          true,
+	"HYBRID":       true,
+}
+
+// validMaturities mirrors the SkillMaturity enum.
+var validMaturities = map[string]bool{
+	"OFFICIAL":     true,
+	"CURATED":      true,
+	"COMMUNITY":    true,
+	"EXPERIMENTAL": true,
 }
 
 // ValidCategory returns true if the category is in the allowed set.
@@ -27,23 +54,55 @@ func ValidCategory(cat string) bool {
 	return validCategories[cat]
 }
 
+// ValidRuntime returns true if the runtime is in the allowed set.
+func ValidRuntime(rt string) bool {
+	return validRuntimes[rt]
+}
+
+// ValidMaturity returns true if the maturity is in the allowed set.
+func ValidMaturity(m string) bool {
+	return validMaturities[m]
+}
+
 // SkillMeta holds parsed YAML frontmatter from a SKILL.md file.
+//
+// Vendor namespaces the skill within the registry (e.g. "anthropic",
+// "vercel", "community"). When absent in frontmatter, callers default to
+// the import source ("community" for user-imported skills, the embedder's
+// vendor for bundled skills).
+//
+// Runtime / Maturity are optional — Crewship infers safe defaults
+// (INSTRUCTIONS / COMMUNITY) when frontmatter omits them. License is the
+// SPDX identifier; we accept the freeform field name `license` for
+// compatibility with anthropics/skills (license: Apache-2.0 etc.) and
+// surface it via the spdx_license column once SPDX-validated downstream.
 type SkillMeta struct {
 	Name                   string   `yaml:"name"`
 	DisplayName            string   `yaml:"display_name"`
 	Version                string   `yaml:"version"`
 	Author                 string   `yaml:"author"`
+	Vendor                 string   `yaml:"vendor"`
+	Homepage               string   `yaml:"homepage"`
+	License                string   `yaml:"license"`
 	Description            string   `yaml:"description"`
 	Category               string   `yaml:"category"`
+	Runtime                string   `yaml:"runtime"`
+	Maturity               string   `yaml:"maturity"`
 	Icon                   string   `yaml:"icon"`
 	CredentialRequirements []string `yaml:"credential_requirements"`
 	Tags                   []string `yaml:"tags"`
 }
 
 // ParsedSkill contains the parsed metadata and markdown body of a SKILL.md file.
+//
+// DescriptionQuality is the result of [LintDescription] applied to Meta —
+// "" means the description passes the v0.1 linter; otherwise a one-line
+// reason. Importers store this on the row so the UI can surface it
+// without re-running the linter.
 type ParsedSkill struct {
-	Meta    SkillMeta
-	Content string
+	Meta               SkillMeta
+	Content            string
+	DescriptionQuality string
 }
 
 // ParseSKILLMD parses a SKILL.md file string and returns a ParsedSkill.
@@ -93,21 +152,86 @@ func ParseSKILLMD(input string) (*ParsedSkill, error) {
 		return nil, fmt.Errorf("name is required")
 	}
 
-	// Normalize and validate category (if provided)
+	// Normalize and validate category (if provided). Unknown values fall
+	// back to CUSTOM rather than rejecting the whole skill — third-party
+	// registries use a long tail of category strings ("Tools", "MCP",
+	// language slugs) and a hard reject would block ~30% of imports we
+	// surveyed in the May 2026 ecosystem research.
 	if meta.Category != "" {
 		meta.Category = strings.ToUpper(meta.Category)
 		if !ValidCategory(meta.Category) {
-			return nil, fmt.Errorf("invalid category %q: must be one of CODING, RESEARCH, DEVELOPMENT, DEVOPS, COMMUNICATION, CUSTOM", meta.Category)
+			meta.Category = "CUSTOM"
+		}
+	}
+
+	if meta.Runtime != "" {
+		meta.Runtime = strings.ToUpper(meta.Runtime)
+		if !ValidRuntime(meta.Runtime) {
+			meta.Runtime = "INSTRUCTIONS"
+		}
+	}
+
+	if meta.Maturity != "" {
+		meta.Maturity = strings.ToUpper(meta.Maturity)
+		if !ValidMaturity(meta.Maturity) {
+			meta.Maturity = "COMMUNITY"
 		}
 	}
 
 	// Auto-slugify name
 	meta.Name = Slugify(meta.Name)
 
+	// Strip dynamic-context backtick syntax (e.g. !`git diff HEAD`) — Anthropic
+	// Claude Code executes these at load time on the host, which is wrong for a
+	// multi-tenant runtime. v0.2 will reintroduce with a per-skill allow-list;
+	// for now we silently remove so the rest of the body stays useful.
+	content = stripDynamicContext(content)
+
+	descQuality := LintDescription(meta.Description)
+
 	return &ParsedSkill{
-		Meta:    meta,
-		Content: content,
+		Meta:               meta,
+		Content:            content,
+		DescriptionQuality: descQuality,
 	}, nil
+}
+
+// dynamicContextRe matches !`...` blocks (single-line and multi-line bodies),
+// the exact syntax Claude Code expands by shelling out before sending the
+// skill body to the model. Stripped on import; see [ParseSKILLMD].
+var dynamicContextRe = regexp.MustCompile("(?s)!`[^`]*`")
+
+func stripDynamicContext(s string) string {
+	return dynamicContextRe.ReplaceAllString(s, "")
+}
+
+// triggerPhraseRe matches the phrasings that make a skill description
+// usable as an LLM trigger. The skill-creator workflow at
+// github.com/anthropics/skills/skills/skill-creator emphasises that
+// description is THE field the router matches on; without an explicit
+// trigger phrase the skill silently never activates. We accept the common
+// surfaces: "use when ...", "use this when ...", "use this skill when ...",
+// "useful for ...", "useful when ...", "for ...ing ..." (gerund), "to ...".
+var triggerPhraseRe = regexp.MustCompile(`(?i)\b(use\s+(this\s+)?(skill\s+)?when|useful\s+(for|when)|to\s+\w+|for\s+\w+ing)\b`)
+
+// LintDescription returns "" if the description passes the v0.1 linter,
+// otherwise a one-line reason explaining why it likely won't trigger
+// reliably. Linter is intentionally lenient — anything stricter blocks
+// real upstream skills (anthropics/skills uses short imperatives in some
+// SKILL.md frontmatter). Callers should record the reason on the row but
+// not refuse the import.
+func LintDescription(desc string) string {
+	desc = strings.TrimSpace(desc)
+	if desc == "" {
+		return "missing description"
+	}
+	if len(desc) < 30 {
+		return "description too short (<30 chars) — LLM router may not match it"
+	}
+	if !triggerPhraseRe.MatchString(desc) {
+		return "description has no trigger phrase (\"use when ...\", \"useful for ...\") — LLM router may not match it"
+	}
+	return ""
 }
 
 var multiHyphenRe = regexp.MustCompile(`-{2,}`)
