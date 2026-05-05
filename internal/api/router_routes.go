@@ -36,6 +36,7 @@ func (r *Router) registerRoutes() {
 	if r.scheduleUpdater != nil {
 		agents.SetScheduler(r.scheduleUpdater)
 	}
+	agents.SetJournal(r.Journal())
 
 	if r.license != nil {
 		ws.SetLicense(r.license)
@@ -44,6 +45,7 @@ func (r *Router) registerRoutes() {
 	}
 	creds := NewCredentialHandler(r.db, r.logger)
 	skills := NewSkillHandler(r.db, r.logger)
+	skills.SetJournal(r.Journal())
 	runs := NewRunHandler(r.db, r.logger)
 	audit := NewAuditHandler(r.db, r.logger)
 	// Adapt the concrete Docker client to backup.DockerOps so the
