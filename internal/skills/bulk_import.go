@@ -52,6 +52,12 @@ type BulkImportResult struct {
 	Skipped       []SkippedSkill
 	TotalFound    int
 	TotalImported int
+	// Truncated is set when the walk hit maxBulkSkills before
+	// completing. Callers must surface this — silently treating a
+	// truncated import as success means everything past the cap is
+	// silently dropped without the operator knowing they need to split
+	// the source repo or raise the limit.
+	Truncated bool
 }
 
 // SkippedSkill records a SKILL.md that was found but excluded — license
@@ -110,10 +116,23 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 		defer cancel()
 		cmd := exec.CommandContext(cloneCtx, "git", args...)
 		if out, err := cmd.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("git clone %q: %w (output: %s)", req.GitURL, err, strings.TrimSpace(string(out)))
+			// Don't echo git's stdout/stderr verbatim — it can include
+			// the full URL (with any embedded credentials we just
+			// rejected, but also Authorization: headers that the user
+			// configured via .gitconfig insteadOf rules) and absolute
+			// paths from the server's tempdir. The exit signal alone
+			// is enough for the API client to know "clone failed";
+			// operators who need the detail can read the server log,
+			// which gets the unredacted output.
+			imp.logger.Error("git clone failed",
+				"git_url", redactGitURL(req.GitURL),
+				"error", err,
+				"output", strings.TrimSpace(string(out)))
+			return nil, fmt.Errorf("git clone failed for %q (see server logs for detail)",
+				redactGitURL(req.GitURL))
 		}
 		root = dir
-		source = req.GitURL
+		source = redactGitURL(req.GitURL)
 	}
 
 	defaultVendor := req.Vendor
@@ -156,6 +175,7 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 		// real-world (anthropics/skills has 18); a repo above this is
 		// either pathological or being used as a DoS vector.
 		if out.TotalFound > maxBulkSkills {
+			out.Truncated = true
 			return fs.SkipAll
 		}
 
@@ -257,6 +277,17 @@ func validateGitURL(raw string) error {
 	if host == "" {
 		return fmt.Errorf("git URL missing host: %q", raw)
 	}
+	// Block userinfo. https://token@host/repo.git is a common shape
+	// for personal-access-token-authenticated clones, but accepting it
+	// here would (a) tempt operators to paste tokens through the API,
+	// (b) force us to redact in every error/log path, and (c) leak via
+	// every place we echo the URL back in responses or stack traces.
+	// If a private repo really needs auth, the right answer is a
+	// per-server credential helper (.gitconfig insteadOf), not a token
+	// in the URL.
+	if u.User != nil {
+		return fmt.Errorf("git URL must not embed credentials; got userinfo in %q", host)
+	}
 	if strings.EqualFold(host, "localhost") {
 		return fmt.Errorf("localhost git URLs are not allowed")
 	}
@@ -267,6 +298,21 @@ func validateGitURL(raw string) error {
 		}
 	}
 	return nil
+}
+
+// redactGitURL strips any userinfo segment from a URL so credentials
+// that somehow slipped through validateGitURL (or were added by a
+// future caller) cannot land in error messages or response bodies.
+// Best-effort: if parsing fails we fall back to the literal "<redacted>"
+// rather than the raw input — better to lose the URL in a log line
+// than to echo a token by accident.
+func redactGitURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "<redacted>"
+	}
+	u.User = nil
+	return u.String()
 }
 
 func pathMatchesAny(p string, globs []string) bool {

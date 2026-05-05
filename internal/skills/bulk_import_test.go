@@ -44,6 +44,14 @@ func TestValidateGitURL_SSRF(t *testing.T) {
 		// Multicast / unspecified — rejected.
 		{"multicast", "https://224.0.0.1/repo.git", true, "private/internal"},
 		{"unspecified", "https://0.0.0.0/repo.git", true, "private/internal"},
+
+		// Credential-bearing URLs — rejected. https://token@host/repo.git
+		// is the standard PAT-clone shape and is convenient, but it's
+		// also the easiest way to leak a secret into our error/log
+		// pipeline. Block at validation; force operators to use a
+		// credential helper.
+		{"userinfo token", "https://glpat_xxx@gitlab.com/group/project.git", true, "must not embed credentials"},
+		{"userinfo userpass", "https://user:pass@github.com/owner/repo.git", true, "must not embed credentials"},
 	}
 
 	for _, c := range cases {
@@ -59,6 +67,32 @@ func TestValidateGitURL_SSRF(t *testing.T) {
 				t.Fatalf("validateGitURL(%q) = %v, want substring %q", c.url, err, c.errSub)
 			}
 		})
+	}
+}
+
+// TestRedactGitURL_StripsUserinfo confirms our redaction helper
+// does not echo embedded credentials back out — even though
+// validateGitURL rejects them, callers from elsewhere in the package
+// (logger.Error, source field on the dump) must round-trip cleanly
+// for any URL shape we might one day accept.
+func TestRedactGitURL_StripsUserinfo(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"https://github.com/owner/repo", "https://github.com/owner/repo"},
+		{"https://token@github.com/owner/repo.git", "https://github.com/owner/repo.git"},
+		{"https://user:pass@gitlab.com/g/p.git", "https://gitlab.com/g/p.git"},
+		{"not a url", "<redacted>"},
+		{"", "<redacted>"},
+	}
+	for _, c := range cases {
+		got := redactGitURL(c.in)
+		if got != c.want {
+			t.Errorf("redactGitURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+		if strings.Contains(got, "token") || strings.Contains(got, "pass@") {
+			t.Errorf("redactGitURL(%q) leaked credential: %q", c.in, got)
+		}
 	}
 }
 
