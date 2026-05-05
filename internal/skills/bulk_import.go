@@ -5,12 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+)
+
+// Bulk-import safety envelopes. maxSkillFileBytes mirrors the
+// URL-fetch limit so a single SKILL.md cannot be larger than what
+// the URL path would have accepted; maxBulkSkills caps the matched
+// set so a runaway walk doesn't pin memory regardless of clone
+// depth.
+const (
+	maxSkillFileBytes = int64(512 * 1024)
+	maxBulkSkills     = 500
 )
 
 // BulkImportRequest specifies a directory or git repository to walk for
@@ -139,7 +150,34 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 		}
 		out.TotalFound++
 
+		// Hard cap on TotalFound so a malicious or accidentally huge
+		// repo (10k+ SKILL.md files) can't run the importer's response
+		// memory or wall time unbounded. 500 is well past anything
+		// real-world (anthropics/skills has 18); a repo above this is
+		// either pathological or being used as a DoS vector.
+		if out.TotalFound > maxBulkSkills {
+			return fs.SkipAll
+		}
+
 		fullPath := filepath.Join(root, p)
+		// Per-file size cap: SKILL.md is meant to be a few hundred lines
+		// of markdown. A 10MB+ "SKILL.md" is either a binary-blob attack
+		// or a packaging mistake; reading it would balloon the importer's
+		// memory and the eventual content column. Keep this aligned with
+		// the URL-fetch limit (512 KB) so single and bulk paths share the
+		// same envelope.
+		stat, statErr := os.Stat(fullPath)
+		if statErr != nil {
+			out.Skipped = append(out.Skipped, SkippedSkill{Path: p, Reason: "stat: " + statErr.Error()})
+			return nil
+		}
+		if stat.Size() > maxSkillFileBytes {
+			out.Skipped = append(out.Skipped, SkippedSkill{
+				Path:   p,
+				Reason: fmt.Sprintf("file %d bytes exceeds %d-byte SKILL.md limit", stat.Size(), maxSkillFileBytes),
+			})
+			return nil
+		}
 		body, readErr := os.ReadFile(fullPath)
 		if readErr != nil {
 			out.Skipped = append(out.Skipped, SkippedSkill{Path: p, Reason: "read: " + readErr.Error()})
@@ -193,8 +231,17 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 // validateGitURL rejects file:// and git@ shorthand URLs that would
 // allow arbitrary local-path or SSH-key-protected access from a
 // network-exposed importer endpoint. HTTPS to public registries is the
-// only intended surface; users can override via a CLI flag in the
-// future if a private-protocol path becomes load-bearing.
+// only intended surface.
+//
+// Also mirrors ValidateImportURL's SSRF guard: a literal IP host that
+// resolves to localhost / private / link-local space is rejected so a
+// malicious operator can't use the bulk-import endpoint to clone from
+// 169.254.169.254 (cloud metadata) or 10.0.0.0/8 (internal git servers).
+// Hostnames are not pre-resolved here — git itself does the DNS lookup
+// at clone time; a DNS rebinding attack against git is theoretically
+// possible but git's HTTP transport doesn't follow Host-overriding
+// redirects, so the practical exposure mirrors ValidateImportURL's
+// known limitation.
 func validateGitURL(raw string) error {
 	if strings.HasPrefix(raw, "file://") || strings.HasPrefix(raw, "git@") {
 		return fmt.Errorf("bulk import only supports https git URLs; got %q", raw)
@@ -206,8 +253,18 @@ func validateGitURL(raw string) error {
 	if u.Scheme != "https" {
 		return fmt.Errorf("bulk import requires https git URLs; got scheme %q", u.Scheme)
 	}
-	if u.Host == "" {
+	host := u.Hostname()
+	if host == "" {
 		return fmt.Errorf("git URL missing host: %q", raw)
+	}
+	if strings.EqualFold(host, "localhost") {
+		return fmt.Errorf("localhost git URLs are not allowed")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+			ip.IsUnspecified() || ip.IsMulticast() {
+			return fmt.Errorf("private/internal IP addresses are not allowed in git URL")
+		}
 	}
 	return nil
 }

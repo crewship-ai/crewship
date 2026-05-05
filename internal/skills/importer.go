@@ -219,8 +219,23 @@ func (imp *Importer) upsertEnriched(
 		descQuality = scan.Reason
 	}
 
-	var existingID string
-	err := imp.db.QueryRowContext(ctx, "SELECT id FROM skills WHERE slug = ?", slug).Scan(&existingID)
+	var existingID, existingSource string
+	err := imp.db.QueryRowContext(ctx,
+		"SELECT id, source FROM skills WHERE slug = ?", slug).Scan(&existingID, &existingSource)
+
+	// BUNDLED skills are the curated set we ship in the binary
+	// (anthropic/* under Apache-2.0). Letting an arbitrary import
+	// silently overwrite their content is a supply-chain footgun:
+	// the slug stays "official" in the UI but the body is whatever
+	// a user pasted. Block the upsert and tell the caller the
+	// concrete remediation — pick a different slug, or `crewship
+	// skill delete` first if they really meant to replace it.
+	if err == nil && existingSource == "BUNDLED" {
+		return nil, fmt.Errorf(
+			"skill %q is BUNDLED (curated, ships with the binary); "+
+				"refusing to overwrite. Pick a different slug, or delete the bundled "+
+				"row first if this is intentional.", slug)
+	}
 
 	if errors.Is(err, sql.ErrNoRows) {
 		newID := generateSkillID()
