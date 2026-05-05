@@ -120,6 +120,123 @@ func TestDumpWorkspace_UnknownTablesSkipped(t *testing.T) {
 	}
 }
 
+// TestRestoreDump_PurgesSoftDeletedTombstones verifies that a row
+// soft-deleted on the target (deleted_at set) does NOT block a
+// restore that re-asserts the same primary key. Without the purge,
+// INSERT OR IGNORE silently drops every bundle row whose ID
+// collides with a tombstone and the runner reports "0 rows
+// inserted" — an effective no-op restore.
+//
+// Mirrors the user-observed flow on dev3: DELETE /api/v1/crews/{id}
+// soft-deletes, admin restores from a backup of that crew, the
+// restore claimed success while landing nothing.
+func TestRestoreDump_PurgesSoftDeletedTombstones(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db"
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY, name TEXT, slug TEXT, deleted_at TEXT
+		);
+		CREATE TABLE crews (
+			id TEXT PRIMARY KEY, workspace_id TEXT REFERENCES workspaces(id),
+			name TEXT, slug TEXT, deleted_at TEXT
+		);
+		-- Tombstone in target: same PK as bundle row, but soft-deleted.
+		INSERT INTO workspaces (id, name, slug, deleted_at)
+			VALUES ('ws_1', 'old name', 'ws-one', '2026-05-04T20:00:00Z');
+		INSERT INTO crews (id, workspace_id, name, slug, deleted_at)
+			VALUES ('c_1', 'ws_1', 'old crew', 'old-slug', '2026-05-04T20:00:00Z');
+	`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+
+	dump := &DBDump{
+		WorkspaceID: "ws_1",
+		Tables: map[string][]map[string]any{
+			"workspaces": {{"id": "ws_1", "name": "restored name", "slug": "ws-one"}},
+			"crews":      {{"id": "c_1", "workspace_id": "ws_1", "name": "restored crew", "slug": "research"}},
+		},
+	}
+
+	stats, err := RestoreDumpTx(context.Background(), db, dump, func(_ context.Context) error { return nil })
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if stats.RowsInserted != 2 {
+		t.Errorf("rows_inserted: got %d, want 2 (tombstones must purge before insert)", stats.RowsInserted)
+	}
+
+	var name, slug string
+	if err := db.QueryRow(`SELECT name, slug FROM crews WHERE id='c_1'`).Scan(&name, &slug); err != nil {
+		t.Fatalf("post-restore query: %v", err)
+	}
+	if name != "restored crew" || slug != "research" {
+		t.Errorf("crew after restore: got name=%q slug=%q, want name=%q slug=%q", name, slug, "restored crew", "research")
+	}
+
+	// And no orphan tombstone left behind.
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM crews WHERE id='c_1' AND deleted_at IS NOT NULL AND deleted_at != ''`).Scan(&count); err != nil {
+		t.Fatalf("tombstone count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("tombstone survived purge: %d rows still soft-deleted", count)
+	}
+}
+
+// TestRestoreDump_LiveRowsUntouched verifies that rows WITHOUT a
+// tombstone (deleted_at NULL) are NOT purged. Restore must not
+// destroy live data, only resurrect rows the bundle wants to claim.
+func TestRestoreDump_LiveRowsUntouched(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db"
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	if _, err := db.Exec(`
+		CREATE TABLE crews (
+			id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, slug TEXT, deleted_at TEXT
+		);
+		-- Live row in target. Bundle wants to insert with same PK.
+		INSERT INTO crews (id, workspace_id, name, slug, deleted_at)
+			VALUES ('c_1', 'ws_1', 'live crew', 'live-slug', NULL);
+	`); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+
+	dump := &DBDump{
+		WorkspaceID: "ws_1",
+		Tables: map[string][]map[string]any{
+			"crews": {{"id": "c_1", "workspace_id": "ws_1", "name": "bundle wins?", "slug": "bundle-slug"}},
+		},
+	}
+
+	stats, err := RestoreDumpTx(context.Background(), db, dump, func(_ context.Context) error { return nil })
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	// INSERT OR IGNORE skips the live row; the no-op restore guard at
+	// runner_restore.go is the safety net there. The point of THIS test
+	// is to confirm we did NOT delete the live row.
+	if stats.RowsInserted != 0 {
+		t.Errorf("rows_inserted: got %d, want 0 (live PK must be preserved)", stats.RowsInserted)
+	}
+	var name string
+	if err := db.QueryRow(`SELECT name FROM crews WHERE id='c_1'`).Scan(&name); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if name != "live crew" {
+		t.Errorf("live row mutated: name=%q want 'live crew'", name)
+	}
+}
+
 func TestRestoreDump_RoundTrip(t *testing.T) {
 	// Dump from one DB, restore into a fresh one with the same schema,
 	// then re-dump and check row counts.

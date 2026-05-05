@@ -405,6 +405,17 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	if err != nil {
 		return stats, fmt.Errorf("backup: begin restore tx: %w", err)
 	}
+	// Defer FK checks until commit. Without this, the tombstone purge
+	// pass walks tables in BackupTables order (parents first), so
+	// deleting a soft-deleted `workspaces` row before its child
+	// `crews` rows fires "FOREIGN KEY constraint failed" — even
+	// though the bundle is about to re-INSERT both. defer_foreign_keys
+	// is per-transaction (vs PRAGMA foreign_keys which is connection-
+	// scoped) so it stays scoped to this restore and won't leak to
+	// other tx on the same connection.
+	if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys = ON`); err != nil {
+		return stats, fmt.Errorf("backup: defer FK enforcement: %w", err)
+	}
 	committed := false
 	defer func() {
 		if !committed {
@@ -430,6 +441,19 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		// Purge tombstones whose primary key collides with a bundle row.
+		// Without this, a row that was soft-deleted on the target (the
+		// admin removed a crew through the UI; the row stays with
+		// deleted_at set) silently shadows the bundle row at INSERT OR
+		// IGNORE time, and the whole restore reports zero rows inserted
+		// — see the "no-op restore detection" path in runner_restore.go.
+		// The semantic: a restore re-asserts the bundle's truth, so a
+		// tombstone with the same PK is overwritten on user request.
+		if allowed["id"] && allowed["deleted_at"] {
+			if err := purgeTombstonesTx(ctx, tx, table, rows); err != nil {
+				return stats, err
+			}
 		}
 		for _, row := range rows {
 			cols := make([]string, 0, len(row))
@@ -474,6 +498,49 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	}
 	committed = true
 	return stats, nil
+}
+
+// purgeTombstonesTx hard-deletes rows in table whose primary key
+// matches a bundle row AND whose deleted_at is set. table is from
+// the BackupTables allowlist (already quoteIdent-safe). rows are
+// the bundle rows about to be re-inserted.
+//
+// Bound on the number of placeholders per statement so SQLite does
+// not balk at the 999-variable default limit when a workspace has
+// thousands of crews / agents in the bundle.
+func purgeTombstonesTx(ctx context.Context, tx *sql.Tx, table string, rows []map[string]any) error {
+	const chunkSize = 500
+	ids := make([]any, 0, len(rows))
+	for _, row := range rows {
+		v, ok := row["id"]
+		if !ok || v == nil {
+			continue
+		}
+		ids = append(ids, v)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	for start := 0; start < len(ids); start += chunkSize {
+		end := start + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		placeholders := make([]string, len(batch))
+		for i := range batch {
+			placeholders[i] = "?"
+		}
+		query := fmt.Sprintf(
+			"DELETE FROM %s WHERE deleted_at IS NOT NULL AND deleted_at != '' AND id IN (%s)",
+			quoteIdent(table),
+			strings.Join(placeholders, ","),
+		)
+		if _, err := tx.ExecContext(ctx, query, batch...); err != nil {
+			return fmt.Errorf("backup: purge tombstones in %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // tableExistsTx is like tableExists but runs on an already-open tx.
