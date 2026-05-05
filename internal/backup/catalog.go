@@ -22,6 +22,7 @@ type CatalogEntry struct {
 	ID            string
 	FilePath      string
 	Scope         string
+	ScopeLevel    string
 	Slug          string
 	WorkspaceID   string
 	CreatedAt     time.Time
@@ -47,13 +48,18 @@ func UpsertCatalogEntry(ctx context.Context, db *sql.DB, e CatalogEntry) error {
 		}
 		e.ID = id
 	}
+	scopeLevel := e.ScopeLevel
+	if scopeLevel == "" {
+		scopeLevel = string(DefaultScopeLevel)
+	}
 	_, err := db.ExecContext(ctx, `
 INSERT INTO backup_catalog
-  (id, file_path, scope, slug, workspace_id, created_at, created_by,
+  (id, file_path, scope, scope_level, slug, workspace_id, created_at, created_by,
    size, sha256, encrypted, format_version)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(file_path) DO UPDATE SET
   scope          = excluded.scope,
+  scope_level    = excluded.scope_level,
   slug           = excluded.slug,
   workspace_id   = excluded.workspace_id,
   created_at     = excluded.created_at,
@@ -63,7 +69,7 @@ ON CONFLICT(file_path) DO UPDATE SET
   encrypted      = excluded.encrypted,
   format_version = excluded.format_version
 `,
-		e.ID, e.FilePath, e.Scope, e.Slug, e.WorkspaceID,
+		e.ID, e.FilePath, e.Scope, scopeLevel, e.Slug, e.WorkspaceID,
 		e.CreatedAt.UTC().Format(time.RFC3339), e.CreatedBy,
 		e.Size, e.SHA256, boolToInt(e.Encrypted), e.FormatVersion,
 	)
@@ -130,7 +136,8 @@ func ListCatalog(ctx context.Context, db *sql.DB, workspaceID string) ([]Catalog
 		return nil, nil
 	}
 	const baseQuery = `
-SELECT id, file_path, scope, COALESCE(slug, ''), COALESCE(workspace_id, ''),
+SELECT id, file_path, scope, COALESCE(scope_level, 'standard'), COALESCE(slug, ''),
+       COALESCE(workspace_id, ''),
        created_at, COALESCE(created_by, ''), size, sha256, encrypted, format_version
 FROM backup_catalog`
 	// Two distinct queries keep the driver's parameter plane typed —
@@ -155,7 +162,7 @@ FROM backup_catalog`
 		var e CatalogEntry
 		var enc int
 		var createdAt string
-		if err := rows.Scan(&e.ID, &e.FilePath, &e.Scope, &e.Slug, &e.WorkspaceID,
+		if err := rows.Scan(&e.ID, &e.FilePath, &e.Scope, &e.ScopeLevel, &e.Slug, &e.WorkspaceID,
 			&createdAt, &e.CreatedBy, &e.Size, &e.SHA256, &enc, &e.FormatVersion); err != nil {
 			return nil, fmt.Errorf("backup: scan catalog row: %w", err)
 		}
@@ -202,9 +209,14 @@ func BackfillCatalogFromDir(ctx context.Context, db *sql.DB, dir string, logger 
 			}
 			continue
 		}
+		level := string(manifest.ScopeLevel)
+		if level == "" {
+			level = string(DefaultScopeLevel)
+		}
 		entry := CatalogEntry{
 			FilePath:      le.Path,
 			Scope:         string(manifest.Scope),
+			ScopeLevel:    level,
 			Size:          le.Size,
 			SHA256:        manifest.Checksums.PayloadSHA256,
 			Encrypted:     manifest.Encryption.Enabled,
@@ -255,9 +267,14 @@ func boolToInt(b bool) int {
 // concerns — the caller (CLI / REST handler) calls UpsertCatalogEntry
 // once a successful CreateResult comes back.
 func CatalogEntryFromResult(res *CreateResult, m *Manifest) CatalogEntry {
+	level := string(m.ScopeLevel)
+	if level == "" {
+		level = string(DefaultScopeLevel)
+	}
 	e := CatalogEntry{
 		FilePath:      res.Path,
 		Scope:         string(m.Scope),
+		ScopeLevel:    level,
 		Size:          res.Size,
 		SHA256:        res.SHA256,
 		Encrypted:     m.Encryption.Enabled,

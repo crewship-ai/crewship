@@ -70,6 +70,12 @@ func (h *BackupHandler) SetCrewContainerName(fn func(slug string) string) {
 
 type createRequest struct {
 	Scope      string `json:"scope"` // "crew" or "workspace"
+	// ScopeLevel selects which per-crew sections the collector
+	// pulls in: "quick" (workspace + memory), "standard" (default,
+	// adds /home/agent + /opt/crew-tools), or "full" (adds
+	// /var/lib so service data — redis, postgresql, ... — survives
+	// a wipe-and-restore cycle). Empty resolves to "standard".
+	ScopeLevel string `json:"scope_level,omitempty"`
 	CrewID     string `json:"crew_id,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
 	Recipient  string `json:"recipient,omitempty"`
@@ -83,6 +89,7 @@ type createResponse struct {
 	SHA256        string    `json:"payload_sha256"`
 	FormatVersion int       `json:"format_version"`
 	Scope         string    `json:"scope"`
+	ScopeLevel    string    `json:"scope_level,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	Encrypted     bool      `json:"encrypted"`
 }
@@ -190,8 +197,18 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	level := backup.ScopeLevel(strings.TrimSpace(req.ScopeLevel))
+	if level == "" {
+		level = backup.DefaultScopeLevel
+	}
+	if !level.Valid() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope_level must be 'quick', 'standard', or 'full'"})
+		return
+	}
+
 	result, err := backup.CreateBackup(ctx, h.db, backup.CreateOptions{
 		Scope:             scope,
+		Level:             level,
 		WorkspaceID:       workspaceID,
 		CrewID:            trimmedCrewID,
 		OutputDir:         outputDir,
@@ -212,6 +229,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	WriteAuditLog(ctx, h.db, "backup.create", "backup", result.Path, user.ID, workspaceID, map[string]interface{}{
 		"scope":          string(scope),
+		"scope_level":    string(result.Manifest.ScopeLevel),
 		"size_bytes":     result.Size,
 		"payload_sha256": result.SHA256,
 		"encrypted":      result.Manifest.Encryption.Enabled,
@@ -236,6 +254,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SHA256:        result.SHA256,
 		FormatVersion: result.Manifest.FormatVersion,
 		Scope:         string(result.Manifest.Scope),
+		ScopeLevel:    string(result.Manifest.ScopeLevel),
 		CreatedAt:     result.Manifest.CreatedAt,
 		Encrypted:     result.Manifest.Encryption.Enabled,
 	})

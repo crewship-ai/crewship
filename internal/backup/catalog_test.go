@@ -33,6 +33,7 @@ CREATE TABLE backup_catalog (
     id TEXT PRIMARY KEY,
     file_path TEXT NOT NULL UNIQUE,
     scope TEXT NOT NULL,
+    scope_level TEXT NOT NULL DEFAULT 'standard',
     slug TEXT,
     workspace_id TEXT,
     created_at TEXT NOT NULL,

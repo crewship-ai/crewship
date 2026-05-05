@@ -65,23 +65,46 @@ const (
 //	volumes/<slug>/home/…
 //	volumes/<slug>/tools/…
 //	memory/<slug>/…
-func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget) error {
+//	system/<slug>/var-lib/…
+//
+// level selects which subset is included (Quick keeps just workspace +
+// memory; Standard adds the named volumes; Full adds /var/lib).
+func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget, level ScopeLevel) error {
 	if crew.ContainerID == "" {
 		// Container was never created or was removed. The crew's DB rows
 		// still restore; callers see a bundle without per-crew volume
 		// data which is the right fallback.
 		return nil
 	}
+	if !level.Valid() {
+		level = DefaultScopeLevel
+	}
 	return WithPaused(ctx, ops, crew.ContainerID, func() error {
-		pairs := []struct {
+		type pair struct {
 			src, prefix string
 			excludes    []string
-		}{
+		}
+		// Quick: just the things that describe the agent's active
+		// engagement. workspace = code under edit, memory = thoughts
+		// the agent persisted.
+		pairs := []pair{
 			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), volumeExclusions},
-			{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions},
-			{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions},
 			{ContainerMemoryPath, fmt.Sprintf("memory/%s", crew.Slug), volumeExclusions},
-			{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions},
+		}
+		// Standard adds the named volumes (home dotfiles + installed
+		// tools). Most users land here.
+		if level == ScopeLevelStandard || level == ScopeLevelFull {
+			pairs = append(pairs,
+				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions},
+				pair{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions},
+			)
+		}
+		// Full adds /var/lib so any service the agent installed
+		// (redis, postgresql, mysql, mongo) round-trips its data dir.
+		if level == ScopeLevelFull {
+			pairs = append(pairs,
+				pair{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions},
+			)
 		}
 		for _, p := range pairs {
 			if err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes); err != nil {

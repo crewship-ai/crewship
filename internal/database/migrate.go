@@ -809,6 +809,14 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_workspace ON scheduled_jobs(workspace_id, enabled);
 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run ON scheduled_jobs(enabled, next_run_at) WHERE enabled = 1;
 `},
+	// scope_level lets the admin UI render the "Quick / Standard / Full"
+	// preset badge alongside an existing bundle without having to
+	// Inspect each manifest. Pre-v66 rows backfill to 'standard' (what
+	// the collector did when no preset existed) so existing entries
+	// don't render an empty badge.
+	{version: 66, name: "add_backup_catalog_scope_level", sql: `
+ALTER TABLE backup_catalog ADD COLUMN scope_level TEXT NOT NULL DEFAULT 'standard';
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

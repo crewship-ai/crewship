@@ -99,6 +99,10 @@ func ListBackups(ctx context.Context, dir string) ([]ListEntry, error) {
 		}
 		if inspectErr == nil && m != nil {
 			le.Scope = m.Scope
+			le.ScopeLevel = m.ScopeLevel
+			if le.ScopeLevel == "" {
+				le.ScopeLevel = DefaultScopeLevel
+			}
 			le.Encrypted = m.Encryption.Enabled
 			le.CreatedAt = m.CreatedAt
 			le.FormatVersion = m.FormatVersion
@@ -128,6 +132,7 @@ type ListEntry struct {
 	Path          string
 	Size          int64
 	Scope         Scope
+	ScopeLevel    ScopeLevel
 	Encrypted     bool
 	CreatedAt     time.Time
 	FormatVersion int

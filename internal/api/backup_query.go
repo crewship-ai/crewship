@@ -26,6 +26,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 		FileName      string    `json:"file_name"`
 		Size          int64     `json:"size_bytes"`
 		Scope         string    `json:"scope"`
+		ScopeLevel    string    `json:"scope_level,omitempty"`
 		Encrypted     bool      `json:"encrypted"`
 		CreatedAt     time.Time `json:"created_at,omitempty"`
 		FormatVersion int       `json:"format_version,omitempty"`
@@ -59,6 +60,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 				FileName:      filepath.Base(e.FilePath),
 				Size:          e.Size,
 				Scope:         e.Scope,
+				ScopeLevel:    e.ScopeLevel,
 				Encrypted:     e.Encrypted,
 				CreatedAt:     e.CreatedAt,
 				FormatVersion: e.FormatVersion,
@@ -96,6 +98,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 			FileName:      filepath.Base(e.Path),
 			Size:          e.Size,
 			Scope:         string(e.Scope),
+			ScopeLevel:    string(e.ScopeLevel),
 			Encrypted:     e.Encrypted,
 			CreatedAt:     e.CreatedAt,
 			FormatVersion: e.FormatVersion,
