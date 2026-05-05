@@ -296,6 +296,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/import", authed(wsCtx(http.HandlerFunc(skills.Import))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Delete))))
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
 	// Path param name MUST match what the wsCtx middleware reads — the
 	// pattern is {workspaceId} everywhere else in the API, and changing

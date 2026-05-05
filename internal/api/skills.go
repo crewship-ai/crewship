@@ -368,3 +368,68 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusCreated, result)
 }
+
+// Delete handles DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}.
+// Removes a skill from the workspace registry. Cascades to agent_skills
+// via the schema's FK.
+//
+// BUNDLED skills are protected: the binary re-seeds them on every
+// startup, so deleting them is a churn no-op AND lets a malicious
+// operator briefly create a window where the official skill row
+// vanishes. Refuse the operation and tell the caller why.
+func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	writeProblem := func(status int, detail string) {
+		writeJSON(w, status, map[string]interface{}{
+			"type": "about:blank", "title": http.StatusText(status),
+			"status": status, "detail": detail, "instance": r.URL.Path,
+		})
+	}
+
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	skillID := r.PathValue("skillId")
+	if skillID == "" {
+		writeProblem(http.StatusBadRequest, "skill_id is required")
+		return
+	}
+
+	var source string
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT source FROM skills WHERE id = ?", skillID).Scan(&source)
+	if err == sql.ErrNoRows {
+		writeProblem(http.StatusNotFound, "skill not found")
+		return
+	}
+	if err != nil {
+		h.logger.Error("delete skill: lookup", "error", err)
+		writeProblem(http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if source == "BUNDLED" {
+		writeProblem(http.StatusForbidden,
+			"BUNDLED skills are re-seeded on every server start; refusing to delete. "+
+				"If you need to suppress one for a workspace, unassign it from every agent instead.")
+		return
+	}
+
+	res, err := h.db.ExecContext(r.Context(), "DELETE FROM skills WHERE id = ?", skillID)
+	if err != nil {
+		h.logger.Error("delete skill", "error", err, "skill_id", skillID)
+		writeProblem(http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		writeProblem(http.StatusNotFound, "skill not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"deleted":  true,
+		"skill_id": skillID,
+	})
+}
