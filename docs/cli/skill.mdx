@@ -1,87 +1,268 @@
 ---
 title: "Skill Commands"
-description: "Import, manage, and assign MCP skills to agents."
+description: "Author, import, and assign skills to agents from the CLI."
 icon: "wand-magic-sparkles"
 ---
 
 # crewship skill
 
-Manage skills -- reusable tool bundles that can be assigned to agents.
+Skills are reusable instruction playbooks that get injected into an agent's
+system prompt as a `[SKILLS AVAILABLE]` block and materialised on disk in
+each CLI's discovery convention (`.claude/skills/`, `.opencode/skills/`,
+`.factory/skills/`, `.agents/skills/`, `.cursor/rules/`). The CLI is the
+canonical authoring + iteration path; the web UI is a surface over the
+same API.
 
 ```bash
 crewship skill <subcommand> [flags]
 ```
 
-## Subcommands
+## Subcommands at a glance
 
-| Command | Description |
-|---------|-------------|
-| `list` | List all skills in the workspace |
-| `get` | Show skill details |
-| `import` | Import a skill from URL or local file |
-| `assign` | Assign a skill to an agent |
-| `unassign` | Remove a skill from an agent |
+| Command | What it does |
+|---------|---|
+| `init` | Generate a SKILL.md scaffold on disk (offline; no API call). |
+| `list` | List skills in the workspace, with optional filters. |
+| `get` | Show skill metadata. |
+| `export` | Recover a previously-imported SKILL.md from the workspace registry. |
+| `import` | Upload a SKILL.md (single URL/file) or walk a whole git repo. |
+| `create` | LLM-author a SKILL.md via Anthropic Messages (requires API key). |
+| `delete` | Remove a skill from the workspace registry. |
+| `assign` | Attach a skill to one agent, several agents, or a whole crew. |
+| `unassign` | Detach the same way. |
+
+---
+
+## The CLI authoring loop
+
+The intended flow for a custom skill is:
+
+```bash
+# 1. Scaffold a starter SKILL.md
+crewship skill init pdf-cleanup --category DEVOPS \
+  --description "Use when the user asks to strip metadata from a PDF."
+
+# 2. Edit the scaffold — fill in Steps, Output format, Guardrails
+$EDITOR ./pdf-cleanup/SKILL.md
+
+# 3. Upload it
+crewship skill import --file ./pdf-cleanup/SKILL.md
+
+# 4. Assign to one or more agents
+crewship skill assign pdf-cleanup --to-crew engineering
+
+# 5. Iterate: pull the current version back, edit, re-upload
+crewship skill export pdf-cleanup --output ./
+$EDITOR ./pdf-cleanup.md
+crewship skill import --file ./pdf-cleanup.md
+```
+
+`init` is intentionally offline — it doesn't talk to the server, so it
+works for users who only have a Claude Code OAuth token and cannot reach
+the Anthropic Messages API directly (the path `crewship skill create`
+needs).
+
+---
+
+## `crewship skill init`
+
+Write a SKILL.md scaffold to disk so you can edit it locally and upload.
+
+```bash
+crewship skill init <slug> [flags]
+```
+
+| Flag | Default | Notes |
+|------|---|---|
+| `--category` | `CUSTOM` | One of `CODING DATA DEVOPS WRITING RESEARCH PM DESIGN SUPPORT SECURITY FINANCE OPS AUTOMATION SALES CUSTOM`. |
+| `--description` | _(TODO placeholder)_ | One-line trigger; should start with `Use when...`, `Useful for...`, or `To <verb>...`. |
+| `--license` | `MIT` | SPDX identifier — must be on the allowlist below for `skill import` to accept it later. |
+| `--output` | `./<slug>/` | Output directory for `<dir>/SKILL.md`. |
+| `--force` | `false` | Overwrite an existing SKILL.md at the destination. |
+
+The scaffold writes the canonical body sections (`When to use`, `Steps`,
+`Output format`, `Guardrails`, optional `Verification`) and frontmatter
+fields the parser accepts.
 
 ---
 
 ## `crewship skill list`
 
-List all skills in the workspace.
-
 ```bash
-crewship skill list
+crewship skill list [flags]
 ```
 
-**Output columns:** SLUG, NAME, CATEGORY, VERSION, SOURCE
+| Flag | Notes |
+|------|---|
+| `--category` | Filter by category. |
+| `--source` | One of `BUNDLED CUSTOM GENERATED MARKETPLACE MANAGED`. |
+| `--vendor` | Vendor namespace (e.g. `anthropic`, `community`). |
+| `--maturity` | One of `OFFICIAL CURATED COMMUNITY EXPERIMENTAL`. |
+| `--runtime` | One of `INSTRUCTIONS SCRIPT MCP HYBRID`. |
+| `--search` | Substring match on name / display_name / description. |
+| `--installed` | Only skills with at least one `agent_skills` row. |
+| `--installed-for=<agent>` | Only skills assigned to a specific agent. |
+
+Examples:
+
+```bash
+crewship skill list --maturity OFFICIAL
+crewship skill list --vendor anthropic --category DESIGN
+crewship skill list --installed-for viktor
+crewship skill list --search pdf
+```
 
 ---
 
-## `crewship skill get`
+## `crewship skill export`
 
-Show detailed information about a skill.
+Recover the SKILL.md body from the workspace and write it to disk or stdout.
 
 ```bash
-crewship skill get <slug-or-id>
+crewship skill export <slug-or-id> [--output PATH]
 ```
 
-**Output fields:** Name, Slug, ID, Category, Version, Source, Author, Description, Tools count, Created.
+Without `--output`, prints to stdout (pipe-friendly). With `--output` set
+to a directory, writes `<slug>.md` inside it.
+
+```bash
+# Print to stdout
+crewship skill export pdf-cleanup
+
+# Write to a directory
+crewship skill export pdf-cleanup --output ./
+```
 
 ---
 
 ## `crewship skill import`
 
-Import a skill from a URL or local SKILL.md file.
+Import a single SKILL.md (URL or file) or walk a whole git repo.
 
 ```bash
-# Import from URL
-crewship skill import https://example.com/skill.md
+# Single SKILL.md from a URL or local file
+crewship skill import https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md
+crewship skill import --file ./SKILL.md
 
-# Import from local file
-crewship skill import --file ./skills/my-skill.md
+# Whole git repo (--depth 1, walks for **/SKILL.md, license-gated)
+crewship skill import --repo https://github.com/anthropics/skills
+crewship skill import --repo https://github.com/owner/skills --paths 'skills/*' --dry-run
+crewship skill import --repo https://github.com/owner/skills --unsafe-license
 ```
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--file` | `string` | | Path to local SKILL.md file. |
+| Flag | Notes |
+|------|---|
+| `--file` | Path to a local SKILL.md (single skill). |
+| `--repo` | Git URL — switches to bulk mode. |
+| `--ref` | Git ref (branch/tag); only with `--repo`. |
+| `--paths` | Glob filters relative to repo root, e.g. `skills/*`. |
+| `--vendor` | Override vendor namespace (defaults to `community`). |
+| `--unsafe-license` | Skip the SPDX license allowlist (use with caution). |
+| `--dry-run` | Walk + parse, don't write. |
 
-Provide either a URL as a positional argument or `--file` for a local file. One of the two is required.
+### What runs on every import
+
+1. **SSRF check** — URL/host must be public; private IPs blocked (single + bulk).
+2. **License gate** — frontmatter `license:` is matched against the SPDX allowlist below.
+3. **Prompt-injection scanner** — body scanned for "ignore previous instructions", role hijack, large base64 blobs, etc. Status stored in `scan_status` (`CLEAN` / `FLAGGED`).
+4. **Size cap** — single fetch ≤ 512 KB; bulk per-file same; bulk total ≤ 500 SKILL.md files.
+5. **BUNDLED protection** — re-importing a slug already owned by a `BUNDLED` skill is refused.
+
+### SPDX allowlist
+
+`MIT`, `Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`, `ISC`, `CC0-1.0`,
+`MPL-2.0`, `Unlicense`, `0BSD`. Pass `--unsafe-license` to bypass for one
+batch (audited via the `license` column).
+
+---
+
+## `crewship skill create`
+
+LLM-authored SKILL.md via Anthropic Messages.
+
+```bash
+crewship skill create --slug pdf-cleanup \
+  --prompt "Help users sanitise PDFs: strip metadata, remove embedded JS, flatten forms"
+```
+
+> **Requires** an active Anthropic credential of type `API_KEY` in the
+> workspace (Settings → Credentials). An OAuth token from `claude /login`
+> is **not** sufficient (it's a Bearer for claude.ai, not the Messages API).
+> Users without an API key should reach for `skill init` instead.
+
+| Flag | Default | Notes |
+|------|---|---|
+| `--slug` | _required_ | Kebab-case identifier. |
+| `--prompt` | _required_ | Free-form description of the skill's behaviour. |
+| `--model` | `claude-sonnet-4-6` | LLM model override. |
+| `--print` | `false` | Print generated SKILL.md to stdout instead of summary. |
+
+---
+
+## `crewship skill delete`
+
+Remove a skill from the workspace registry. Cascades to `agent_skills`.
+
+```bash
+crewship skill delete <slug-or-id>          # interactive confirm
+crewship skill delete <slug-or-id> --force  # skip confirm
+crewship skill rm <slug-or-id>              # alias
+```
+
+`BUNDLED` skills cannot be deleted — they re-seed on every server start.
 
 ---
 
 ## `crewship skill assign`
 
-Assign a skill to an agent.
-
 ```bash
-crewship skill assign <skill-slug> <agent-slug>
+# One agent (positional)
+crewship skill assign my-skill viktor
+
+# Multiple agents
+crewship skill assign my-skill --to-agents viktor,nela,martin
+
+# Whole crew
+crewship skill assign my-skill --to-crew engineering
 ```
+
+The fan-out variant is idempotent: agents that already have the skill are
+treated as success, and per-agent failures are reported but don't abort
+the rest.
 
 ---
 
 ## `crewship skill unassign`
 
-Remove a skill from an agent.
+Same target shapes as `assign`:
 
 ```bash
-crewship skill unassign <skill-slug> <agent-slug>
+crewship skill unassign my-skill viktor
+crewship skill unassign my-skill --to-agents viktor,nela
+crewship skill unassign my-skill --to-crew engineering
 ```
+
+After `unassign`, the next time the agent runs, the orchestrator prunes
+the skill folder from the agent's container (`.claude/skills/<slug>/`,
+`.cursor/rules/<slug>.mdc`, etc.) so a CLI auto-discovery walker can no
+longer pick it up.
+
+---
+
+## Per-CLI filesystem materialisation
+
+When a skill is assigned, the orchestrator writes its SKILL.md into the
+discovery convention each adapter knows. This way the same skill works
+for whatever CLI the agent is configured with:
+
+| CLI | Path inside container |
+|-----|---|
+| Claude Code | `.claude/skills/<slug>/SKILL.md` |
+| OpenAI Codex CLI | `.agents/skills/<slug>/SKILL.md` |
+| OpenCode | `.opencode/skills/<slug>/SKILL.md` |
+| Factory Droid | `.factory/skills/<slug>/SKILL.md` |
+| Cursor | `.cursor/rules/<slug>.mdc` (flat .mdc) |
+| Gemini CLI / Aider / Continue | `[SKILLS AVAILABLE]` block only (no FS) |
+
+The system-prompt block is the authoritative surface — filesystem layout
+is the bonus discovery path for adapters that walk it natively.

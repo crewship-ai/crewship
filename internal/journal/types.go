@@ -115,6 +115,17 @@ const (
 	// Anthropic credentials in the workspace, so the agent will need a manual
 	// assignment before it can chat. Most common cause of "silent run" reports.
 	EntryCredentialAutoAssignEmpty EntryType = "credential.auto_assign_empty"
+
+	// Skills — registry-level + per-agent assignment lifecycle. Skill rows
+	// are global (no workspace_id column), but every event carries the
+	// originating workspace so the journal stays workspace-scoped on read.
+	// `allow_unsafe_license` is captured as a metadata flag on the imported
+	// entry so a compliance audit can list every license-gate override
+	// without correlating across tables.
+	EntrySkillImported   EntryType = "skill.imported"
+	EntrySkillDeleted    EntryType = "skill.deleted"
+	EntrySkillAssigned   EntryType = "skill.assigned"
+	EntrySkillUnassigned EntryType = "skill.unassigned"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

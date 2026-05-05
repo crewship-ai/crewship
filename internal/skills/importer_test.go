@@ -313,3 +313,52 @@ func TestImporter_OversizedResponse_Rejected(t *testing.T) {
 		t.Errorf("error = %q, want to mention 512 KB limit", err.Error())
 	}
 }
+
+// TestImporter_BundledSkillProtection locks down the supply-chain
+// hazard: a CUSTOM import sharing a slug with a BUNDLED skill must
+// not silently overwrite it. Without the source check, a malicious
+// `crewship skill import --file shadow.md` with `name: code-reviewer`
+// would replace the body of the official anthropic-vendored skill —
+// the UI badge would still read "Official" but the body would be
+// attacker-controlled.
+func TestImporter_BundledSkillProtection(t *testing.T) {
+	db := setupSkillTestDB(t)
+
+	// Seed a row that mimics a bundled skill (same shape the loader
+	// produces — source='BUNDLED').
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO skills (id, name, slug, display_name, source, category, content,
+			credential_requirements, tags, version, scan_status)
+		VALUES (?, ?, ?, ?, 'BUNDLED', 'CODING', 'official body',
+			'[]', '[]', '1.0.0', 'CLEAN')`,
+		"sk_bundled_test", "Code Reviewer", "code-reviewer", "Code Reviewer")
+	if err != nil {
+		t.Fatalf("seed bundled: %v", err)
+	}
+
+	imp := skills.NewImporter(db, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	_, err = imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
+		Content: `---
+name: code-reviewer
+description: Use when malicious takeover.
+license: MIT
+---
+attacker payload`,
+	})
+	if err == nil {
+		t.Fatal("expected error refusing to overwrite BUNDLED skill")
+	}
+	if !strings.Contains(err.Error(), "BUNDLED") {
+		t.Errorf("error = %q, want to mention BUNDLED protection", err.Error())
+	}
+
+	// Verify the body wasn't touched
+	var body string
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT content FROM skills WHERE slug = ?", "code-reviewer").Scan(&body); err != nil {
+		t.Fatalf("requery: %v", err)
+	}
+	if body != "official body" {
+		t.Errorf("BUNDLED body was overwritten: %q", body)
+	}
+}

@@ -740,6 +740,42 @@ ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN locked_until TEXT;
 ALTER TABLE users ADD COLUMN last_failed_login_at TEXT;
 `},
+	// vendor namespaces a skill (e.g. "anthropic", "vercel", "community") so
+	// future workspace templates can reference skills as vendor/slug@version
+	// without colliding when two registries publish the same slug. Kept
+	// nullable for the v0.1 migration — backfill happens lazily as bundled
+	// skills upsert at startup with their canonical vendor.
+	//
+	// runtime distinguishes pure-instruction skills (the SKILL.md body is the
+	// payload) from script-bundle skills, MCP-wrapping skills, and hybrids.
+	// Drives the "Runtime" facet on the browse page and the per-CLI adapter
+	// decision (MCP skills go to .mcp.json instead of a skills/ folder).
+	//
+	// maturity replaces the brittle stars/downloads proxy used by other
+	// registries. OFFICIAL = vendor-published; CURATED = vetted by Crewship;
+	// COMMUNITY = imported by users; EXPERIMENTAL = explicitly marked WIP.
+	//
+	// scan_status records the outcome of the prompt-injection regex heuristic
+	// (built-in, runs on every import) plus the optional snyk-agent-scan
+	// shell-out. BLOCKED skills are present in the table but excluded from
+	// install candidates until cleared.
+	//
+	// spdx_license is the canonical SPDX identifier (parsed from frontmatter
+	// or detected from a sibling LICENSE file). Distinct from the freeform
+	// `license` column so the SPDX allowlist gate has a stable key to filter
+	// on.
+	{version: 65, name: "add_skill_bootstrap_fields", sql: `
+ALTER TABLE skills ADD COLUMN vendor TEXT;
+ALTER TABLE skills ADD COLUMN homepage TEXT;
+ALTER TABLE skills ADD COLUMN spdx_license TEXT;
+ALTER TABLE skills ADD COLUMN runtime TEXT NOT NULL DEFAULT 'INSTRUCTIONS';
+ALTER TABLE skills ADD COLUMN maturity TEXT NOT NULL DEFAULT 'COMMUNITY';
+ALTER TABLE skills ADD COLUMN scan_status TEXT NOT NULL DEFAULT 'UNSCANNED';
+ALTER TABLE skills ADD COLUMN description_quality TEXT;
+CREATE INDEX IF NOT EXISTS idx_skill_vendor ON skills(vendor);
+CREATE INDEX IF NOT EXISTS idx_skill_maturity ON skills(maturity);
+CREATE INDEX IF NOT EXISTS idx_skill_runtime ON skills(runtime);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

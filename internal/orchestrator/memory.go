@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -190,62 +188,6 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 	}
 
 	block := assembleSections("[CREW SHARED MEMORY]", "[END CREW SHARED MEMORY]", sections, budget)
-	return block, len(block)
-}
-
-// resolveWorkspaceMemPath determines the workspace memory directory path.
-// If explicit path is provided (WorkspaceMemPath), use it. Otherwise, derive
-// from WorkspaceID using the default data directory layout.
-//
-// Deprecated: used only by the deprecated COORDINATOR role. See
-// [BuildCoordinatorContext] in internal/orchestrator/lead.go.
-func resolveWorkspaceMemPath(explicit, workspaceID string) string {
-	if explicit != "" {
-		return explicit
-	}
-	if workspaceID == "" {
-		return ""
-	}
-	// Derive from default data dir: ~/.crewship/memory/{workspace-id}/
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".crewship", "memory", workspaceID)
-}
-
-// buildWorkspaceMemoryBlock reads workspace memory files from the host filesystem
-// (not from a container). Returns a formatted [WORKSPACE MEMORY] block.
-// This runs in the orchestrator process which has host FS access.
-//
-// Deprecated: used only by the deprecated COORDINATOR role. See
-// [BuildCoordinatorContext] in internal/orchestrator/lead.go.
-func buildWorkspaceMemoryBlock(wsPath string, budget int) (string, int) {
-	var sections []memorySection
-
-	// Read all .md files in workspace memory dir
-	filepath.Walk(wsPath, func(fpath string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
-			return nil
-		}
-		// Skip SQLite index files
-		if strings.HasSuffix(info.Name(), ".sqlite") {
-			return nil
-		}
-		data, err := os.ReadFile(fpath)
-		if err != nil {
-			return nil
-		}
-		content := strings.TrimSpace(string(data))
-		if content == "" {
-			return nil
-		}
-		rel, _ := filepath.Rel(wsPath, fpath)
-		sections = append(sections, memorySection{label: rel, content: content})
-		return nil
-	})
-
-	block := assembleSections("[WORKSPACE MEMORY]", "[END WORKSPACE MEMORY]", sections, budget)
 	return block, len(block)
 }
 

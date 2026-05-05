@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -24,17 +25,29 @@ type AgentHandler struct {
 	logger          *slog.Logger
 	license         *license.License
 	scheduleUpdater ScheduleUpdater
+	journal         journal.Emitter
 }
 
 // NewAgentHandler creates an AgentHandler with the given database and logger.
 
 func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
-	return &AgentHandler{db: db, logger: logger}
+	return &AgentHandler{db: db, logger: logger, journal: noopEmitter{}}
 }
 
 // SetHub attaches a WebSocket hub for broadcasting agent events to connected clients.
 
 func (h *AgentHandler) SetHub(hub *ws.Hub) { h.hub = hub }
+
+// SetJournal wires a journal emitter so per-agent skill assignment
+// changes land in the workspace audit feed alongside the registry-level
+// import/delete events the SkillHandler emits.
+func (h *AgentHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
+}
 
 func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payload map[string]string) {
 	broadcastWorkspaceEvent(h.hub, workspaceID, eventType, payload)
