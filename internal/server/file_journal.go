@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/fileserver"
@@ -32,7 +31,7 @@ func emitFileWrittenEntry(j *journal.Writer, crewID string, ev fileserver.FileEv
 	// Delete is included so Crow's Nest can show a strikethrough; the
 	// existing FilesystemPanel only renders writes today but the data is
 	// captured so a future tab doesn't need a back-fill.
-	verb := "wrote"
+	var verb string
 	switch ev.Event {
 	case "file_created":
 		verb = "created"
@@ -161,6 +160,10 @@ func ftoa(f float64) string {
 	if frac < 0 {
 		frac = -frac
 	}
-	s := itoa(whole) + "." + itoa(frac)
-	return strings.TrimRight(s, "0")
+	if frac == 0 {
+		// Drop the trailing ".0" entirely so 1024 → "1 KB" not "1. KB"
+		// (the previous TrimRight stopped at "0" and left a dangling ".").
+		return itoa(whole)
+	}
+	return itoa(whole) + "." + itoa(frac)
 }

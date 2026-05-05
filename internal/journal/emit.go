@@ -74,7 +74,7 @@ func LookupWorkspaceForCrew(ctx context.Context, db *sql.DB, crewID string) (str
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", nil
 		}
-		return "", err
+		return "", fmt.Errorf("lookup workspace for crew %q: %w", crewID, err)
 	}
 	return ws.String, nil
 }

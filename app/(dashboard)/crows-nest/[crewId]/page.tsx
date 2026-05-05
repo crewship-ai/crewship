@@ -152,7 +152,7 @@ export default function CrowsNestCrewPage() {
     workspaceId,
     params: queryParams,
     limit: 200,
-    enabled: !wsLoading && !!crewId,
+    enabled: !wsLoading && !!workspaceId && !!crewId,
   })
 
   // Keep a separate, time-capped buffer so the resource sparklines only see a

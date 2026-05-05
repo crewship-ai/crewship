@@ -105,7 +105,10 @@ export function ActivityPanel({ entries }: ActivityPanelProps) {
                   <span className="flex-1 min-w-0 truncate text-foreground/85">
                     {e.summary || "—"}
                   </span>
-                  <time className="text-[10px] text-muted-foreground/70 font-mono tabular-nums shrink-0">
+                  <time
+                    dateTime={e.ts}
+                    className="text-[10px] text-muted-foreground/70 font-mono tabular-nums shrink-0"
+                  >
                     {formatRelativeTime(e.ts)}
                   </time>
                 </li>

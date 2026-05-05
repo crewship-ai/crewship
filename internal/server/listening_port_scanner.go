@@ -136,9 +136,14 @@ func scanContainerListeningPorts(
 	scanCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
+	// Read both v4 and v6 tables. The shell loop is more resilient than a
+	// straight `cat … 2>/dev/null` because it tolerates either file
+	// being missing/unreadable (some container runtimes disable IPv6 and
+	// /proc/net/tcp6 is absent — `cat` would still exit 0 there with
+	// 2>/dev/null, but `[ -r ]` avoids relying on that quirk).
 	res, err := ctr.Exec(scanCtx, provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null"},
+		Cmd:         []string{"sh", "-c", `for f in /proc/net/tcp /proc/net/tcp6; do [ -r "$f" ] && cat "$f"; done`},
 	})
 	if err != nil {
 		return nil, err
