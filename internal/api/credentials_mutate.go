@@ -227,6 +227,10 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if respCrewIDs == nil {
 		respCrewIDs = []string{}
 	}
+	respTags := normaliseTags(req.Tags)
+	if respTags == nil {
+		respTags = []string{}
+	}
 
 	writeJSON(w, http.StatusCreated, credentialResponse{
 		ID:           credID,
@@ -238,8 +242,10 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Scope:        req.Scope,
 		CrewID:       legacyCrewID,
 		CrewIDs:      respCrewIDs,
+		Tags:         respTags,
 		AccountLabel: req.AccountLabel,
 		AccountEmail: req.AccountEmail,
+		LastUsedIPs:  []string{},
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		AgentNames:   []string{},
