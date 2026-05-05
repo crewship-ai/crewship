@@ -104,21 +104,39 @@ func (f *fakeDockerOps) workspaceTar() []byte {
 	return buf.Bytes()
 }
 
-// CopyTo merges incoming tar entries into the workspace map. Destination
-// path determines the target directory; for this test only /workspace is
-// meaningful.
+// CopyToVolume mirrors CopyTo for the test fake — selftest only
+// touches /workspace, so volume-targeted traffic is silently consumed
+// (in production CopyToVolume execs `tar -x` inside the container,
+// which we don't model here).
+func (f *fakeDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	return f.CopyTo(ctx, containerID, dstPath, content)
+}
+
+// CopyToSystem is the uid-0 variant. The in-memory fake doesn't model
+// uid checks, so it routes to the same merge path.
+func (f *fakeDockerOps) CopyToSystem(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	return f.CopyTo(ctx, containerID, dstPath, content)
+}
+
+// CopyTo merges incoming tar entries into the workspace map.
+//
+// Models two callers:
+//  1. BackupSelfTest writes the canary via CopyTo(/workspace, tar) where
+//     the tar carries a flat entry name like "CANARY-abc.txt". Resolved
+//     path: /workspace/CANARY-abc.txt → workspace["CANARY-abc.txt"].
+//  2. RestoreCrew (post-fix) calls CopyTo(parent, rewrappedTar) where
+//     the tar's entries each start with the section basename
+//     ("workspace/", "agent/", "output/", "crew-tools/"). Only the
+//     "workspace/" branch is modelled; the others are silently
+//     consumed because the fake CollectCrew never produces them.
+//
+// dstPath is the absolute container path the SDK would receive. The
+// effective container path of an entry is dstPath + "/" + entryName,
+// then we strip ContainerWorkspacePath to get the workspace-relative
+// key.
 func (f *fakeDockerOps) CopyTo(_ context.Context, _ string, dstPath string, content io.Reader) error {
 	if f.copyToErr != nil {
 		return f.copyToErr
-	}
-	if dstPath != ContainerWorkspacePath {
-		// Restore will attempt /home/agent and /opt/crew-tools too when
-		// the bundle has volume sections — not produced by our fake
-		// CollectCrew, so this branch never fires in the happy path.
-		// Silently accept so the test doesn't fail on cross-section
-		// traffic that we model as no-op.
-		_, _ = io.Copy(io.Discard, content)
-		return nil
 	}
 	tr := tar.NewReader(content)
 	for {
@@ -136,8 +154,17 @@ func (f *fakeDockerOps) CopyTo(_ context.Context, _ string, dstPath string, cont
 		if err != nil {
 			return err
 		}
-		name := strings.TrimPrefix(hdr.Name, "./")
-		f.workspace[name] = body
+		entry := strings.TrimPrefix(hdr.Name, "./")
+		// Compose the absolute container path the entry would land at.
+		full := dstPath
+		if !strings.HasSuffix(full, "/") {
+			full += "/"
+		}
+		full += entry
+		// Only record entries that land inside /workspace.
+		if rest, ok := strings.CutPrefix(full, ContainerWorkspacePath+"/"); ok {
+			f.workspace[rest] = body
+		}
 	}
 }
 

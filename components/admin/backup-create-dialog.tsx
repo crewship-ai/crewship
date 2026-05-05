@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2 } from "lucide-react"
+import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -13,10 +13,25 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 import { useBackupStore } from "@/stores/backup-store"
-import { useCreateBackup, type CreateBackupScope } from "@/hooks/use-backups"
+import {
+  useCreateBackup,
+  useCrewsForBackup,
+  type BackupScopeLevel,
+  type CreateBackupScope,
+} from "@/hooks/use-backups"
 
 export function BackupCreateDialog({ workspaceId }: { workspaceId: string | undefined }) {
   const dialog = useBackupStore((s) => s.dialog)
@@ -24,12 +39,59 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
   const create = useCreateBackup(workspaceId)
   const open = dialog === "create"
 
+  // Lazy-fetch the crew list only while the dialog is open AND scope=crew.
+  // Skips the network call for the common workspace-scope case where the
+  // picker is not even rendered.
+  const crewsQuery = useCrewsForBackup(open ? workspaceId : undefined)
+
   const [scope, setScope] = useState<CreateBackupScope>("workspace")
+  const [scopeLevel, setScopeLevel] = useState<BackupScopeLevel>("standard")
   const [crewId, setCrewId] = useState("")
+  const [crewPickerOpen, setCrewPickerOpen] = useState(false)
   const [encryption, setEncryption] = useState<"passphrase" | "recipient" | "none">("passphrase")
   const [passphrase, setPassphrase] = useState("")
   const [recipient, setRecipient] = useState("")
   const [outputDir, setOutputDir] = useState("")
+
+  // Preset definitions live next to the dialog so the help copy and
+  // the radio order stay in lockstep. Order is intentional: Quick →
+  // Standard → Full reads as "smaller to larger" so an admin who
+  // wants the biggest, most-complete backup gravitates rightward.
+  const presets: ReadonlyArray<{
+    value: BackupScopeLevel
+    label: string
+    summary: string
+    keeps: string
+  }> = [
+    {
+      value: "quick",
+      label: "Quick",
+      summary: "Workspace + agent memory only.",
+      keeps: "Files under /workspace and the agent's saved memory. Smallest, fastest.",
+    },
+    {
+      value: "standard",
+      label: "Standard",
+      summary: "Default. User data + CLI logins.",
+      keeps:
+        "Quick + /home/agent + /opt/crew-tools. CLI credentials (gh, aws, gcloud, docker, ssh, npm, …) and dotfiles travel with the bundle, so a restore brings the agent back logged-in.",
+    },
+    {
+      value: "full",
+      label: "Full",
+      summary: "Everything restorable.",
+      keeps:
+        "Standard + /var/lib. Captures running-service data (redis, postgresql, mysql, …) so a wipe-and-restore round-trips cleanly.",
+    },
+  ]
+
+  // Resolve the picked crew's display info from the cached list. Falls
+  // back to the raw id/slug the user pasted in case they bypassed the
+  // picker (rare — but the input still accepts a free-form value to
+  // preserve the previous "type a slug from memory" workflow).
+  const selectedCrew = crewsQuery.data?.find(
+    (c) => c.id === crewId || c.slug === crewId,
+  )
 
   // Centralises sensitive-field cleanup so every close path — Cancel
   // button, dialog overlay click, ESC, success handler — wipes
@@ -42,6 +104,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
     setCrewId("")
     setOutputDir("")
     setScope("workspace")
+    setScopeLevel("standard")
     setEncryption("passphrase")
     close()
   }
@@ -75,6 +138,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
     try {
       const res = await create.mutateAsync({
         scope,
+        scope_level: scopeLevel,
         crew_id: scope === "crew" ? crewIdTrimmed : undefined,
         passphrase: encryption === "passphrase" ? passphrase : undefined,
         recipient: encryption === "recipient" ? recipientTrimmed : undefined,
@@ -118,16 +182,123 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
               ))}
             </div>
           </div>
+          <div className="space-y-2">
+            <Label id="backup-preset-label">Preset</Label>
+            <div
+              className="grid grid-cols-3 gap-2"
+              role="radiogroup"
+              aria-labelledby="backup-preset-label"
+            >
+              {presets.map((p) => (
+                <button
+                  type="button"
+                  key={p.value}
+                  role="radio"
+                  aria-checked={scopeLevel === p.value}
+                  onClick={() => setScopeLevel(p.value)}
+                  className={cn(
+                    "flex flex-col items-start text-left rounded-md border p-3 text-xs transition-colors",
+                    scopeLevel === p.value
+                      ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                      : "border-border hover:bg-accent/40",
+                  )}
+                  data-testid={`backup-preset-${p.value}`}
+                >
+                  <span className="font-medium text-sm">{p.label}</span>
+                  <span className="mt-1 text-muted-foreground leading-snug">
+                    {p.summary}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {presets.find((p) => p.value === scopeLevel)?.keeps}
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              Restore is preset-agnostic — a Quick bundle restores into the same target as a Full one;
+              missing sections are silent skips.
+            </p>
+          </div>
           {scope === "crew" && (
             <div className="space-y-2">
-              <Label htmlFor="crewId">Crew ID or slug</Label>
-              <Input
-                id="crewId"
-                value={crewId}
-                onChange={(e) => setCrewId(e.target.value)}
-                placeholder="e.g. backend or cre_abc123"
-                required
-              />
+              <Label htmlFor="crewId">Crew</Label>
+              <Popover open={crewPickerOpen} onOpenChange={setCrewPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={crewPickerOpen}
+                    aria-label="Select crew"
+                    className="w-full justify-between font-normal"
+                    disabled={crewsQuery.isLoading}
+                  >
+                    {crewsQuery.isLoading ? (
+                      <span className="flex items-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Loading crews…
+                      </span>
+                    ) : selectedCrew ? (
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className="truncate">{selectedCrew.name}</span>
+                        <span className="font-mono text-xs text-muted-foreground truncate">
+                          {selectedCrew.slug}
+                        </span>
+                      </span>
+                    ) : crewId ? (
+                      // Free-form value (paste or fallback) — show as-is so
+                      // the user can still confirm what's about to be sent.
+                      <span className="font-mono text-xs">{crewId}</span>
+                    ) : (
+                      <span className="text-muted-foreground">Pick a crew…</span>
+                    )}
+                    <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search crews by name or slug…" />
+                    <CommandList>
+                      <CommandEmpty>
+                        {crewsQuery.isError
+                          ? "Failed to load crews"
+                          : "No crews match"}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {(crewsQuery.data ?? []).map((c) => (
+                          <CommandItem
+                            key={c.id}
+                            // value drives cmdk's fuzzy match — concat
+                            // name+slug+id so all three are searchable.
+                            value={`${c.name} ${c.slug} ${c.id}`}
+                            onSelect={() => {
+                              setCrewId(c.id)
+                              setCrewPickerOpen(false)
+                            }}
+                            className="flex items-center gap-2"
+                          >
+                            <Check
+                              className={cn(
+                                "h-3.5 w-3.5",
+                                c.id === crewId || c.slug === crewId
+                                  ? "opacity-100"
+                                  : "opacity-0",
+                              )}
+                            />
+                            <span className="flex-1 truncate">{c.name}</span>
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {c.slug}
+                            </span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+              <p className="text-xs text-muted-foreground">
+                {(crewsQuery.data?.length ?? 0)} crews available
+              </p>
             </div>
           )}
           <div className="space-y-2">

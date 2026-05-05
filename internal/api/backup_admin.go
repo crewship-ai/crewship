@@ -95,6 +95,15 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	}
 	if !req.DryRun {
 		for _, p := range deleted {
+			// Sync the catalog with the rotation. Without this the
+			// admin UI's list view (which prefers backup_catalog over
+			// a fresh filesystem walk) keeps showing rotated bundles
+			// that 404 on Verify/Download/Restore. Best-effort: a
+			// failed catalog delete does not undo the file removal,
+			// the next List call's reconcile pass picks up the slack.
+			if cerr := backup.DeleteCatalogEntry(ctx, h.db, p); cerr != nil {
+				h.logger.Warn("backup catalog delete after rotate failed", "error", cerr, "path", p)
+			}
 			WriteAuditLog(ctx, h.db, "backup.rotate", "backup", p, user.ID, workspaceID, map[string]interface{}{
 				"keep_last": req.KeepLast,
 				"keep_days": req.KeepDays,
@@ -274,7 +283,7 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID := crewContainerNameFunc()(crewSlug)
+	containerID := h.resolveCrewContainerName()(crewSlug)
 	result, err := backup.BackupSelfTest(ctx, h.dockerOps, backup.SelfTestOpts{
 		ContainerID: containerID,
 		Crew: backup.CrewTarget{

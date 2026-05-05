@@ -55,6 +55,14 @@ func (r *Router) registerRoutes() {
 		backupDockerOps = &backup.MobyDockerOps{Client: r.dockerClient}
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
+	// Wire the slug→container-name mapping from the active container
+	// provider so the backup runner uses the per-instance prefix
+	// (e.g. "crewship-3-team-research") instead of the hardcoded
+	// default "crewship-team-research" — multi-instance setups would
+	// otherwise fail with "No such container" on docker pause.
+	if r.keeperContainer != nil {
+		backupH.SetCrewContainerName(r.keeperContainer.CrewContainerName)
+	}
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace

@@ -234,19 +234,26 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		table string
 		where string
 		args  []any
+		// requiresCol, if non-empty, must be present on the target
+		// table for the filter to apply. Lets us declare workspace-
+		// scoped filters on tables (e.g. skills) that may have been
+		// reorganized into a global namespace in newer schemas — the
+		// pre-flight column probe matches DumpWorkspace's behavior so
+		// crew dumps don't crash on a perfectly-valid global table.
+		requiresCol string
 	}
 	filters := []filter{
-		{"workspaces", "id = ?", []any{workspaceID}},
-		{"crews", "id = ?", []any{crewID}},
-		{"agents", "crew_id = ?", []any{crewID}},
-		{"skills", "workspace_id = ?", []any{workspaceID}},
-		{"crew_members", "crew_id = ?", []any{crewID}},
-		{"crew_integrations", "crew_id = ?", []any{crewID}},
-		{"mcp_bindings", "crew_id = ?", []any{crewID}},
-		{"agent_chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
-		{"agent_skills", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
-		{"memory_backups", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
-		{"crew_memory", "crew_id = ?", []any{crewID}},
+		{"workspaces", "id = ?", []any{workspaceID}, ""},
+		{"crews", "id = ?", []any{crewID}, ""},
+		{"agents", "crew_id = ?", []any{crewID}, ""},
+		{"skills", "workspace_id = ?", []any{workspaceID}, "workspace_id"},
+		{"crew_members", "crew_id = ?", []any{crewID}, ""},
+		{"crew_integrations", "crew_id = ?", []any{crewID}, ""},
+		{"mcp_bindings", "crew_id = ?", []any{crewID}, ""},
+		{"agent_chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"agent_skills", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"memory_backups", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"crew_memory", "crew_id = ?", []any{crewID}, ""},
 	}
 	for _, f := range filters {
 		exists, err := tableExists(ctx, tx, f.table)
@@ -255,6 +262,18 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		}
 		if !exists {
 			continue
+		}
+		if f.requiresCol != "" {
+			hasCol, err := tableHasColumn(ctx, tx, f.table, f.requiresCol)
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe column on %s: %w", f.table, err)
+			}
+			if !hasCol {
+				// Table exists but the scoping column doesn't — the table
+				// is shared across the instance (skills became global at
+				// some point). Skip silently rather than crash.
+				continue
+			}
 		}
 		rows, err := tx.QueryContext(ctx,
 			fmt.Sprintf("SELECT * FROM %s WHERE %s", f.table, f.where),
@@ -394,6 +413,17 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	if err != nil {
 		return stats, fmt.Errorf("backup: begin restore tx: %w", err)
 	}
+	// Defer FK checks until commit. Without this, the tombstone purge
+	// pass walks tables in BackupTables order (parents first), so
+	// deleting a soft-deleted `workspaces` row before its child
+	// `crews` rows fires "FOREIGN KEY constraint failed" — even
+	// though the bundle is about to re-INSERT both. defer_foreign_keys
+	// is per-transaction (vs PRAGMA foreign_keys which is connection-
+	// scoped) so it stays scoped to this restore and won't leak to
+	// other tx on the same connection.
+	if _, err := tx.ExecContext(ctx, `PRAGMA defer_foreign_keys = ON`); err != nil {
+		return stats, fmt.Errorf("backup: defer FK enforcement: %w", err)
+	}
 	committed := false
 	defer func() {
 		if !committed {
@@ -419,6 +449,19 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 		allowed, err := tableColumns(ctx, tx, table)
 		if err != nil {
 			return stats, fmt.Errorf("backup: columns of %s: %w", table, err)
+		}
+		// Purge tombstones whose primary key collides with a bundle row.
+		// Without this, a row that was soft-deleted on the target (the
+		// admin removed a crew through the UI; the row stays with
+		// deleted_at set) silently shadows the bundle row at INSERT OR
+		// IGNORE time, and the whole restore reports zero rows inserted
+		// — see the "no-op restore detection" path in runner_restore.go.
+		// The semantic: a restore re-asserts the bundle's truth, so a
+		// tombstone with the same PK is overwritten on user request.
+		if allowed["id"] && allowed["deleted_at"] {
+			if err := purgeTombstonesTx(ctx, tx, table, rows); err != nil {
+				return stats, err
+			}
 		}
 		for _, row := range rows {
 			cols := make([]string, 0, len(row))
@@ -455,6 +498,17 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 			}
 		}
 	}
+	// Force-resolve deferred FK violations BEFORE preCommit. preCommit
+	// is the docker-restore closure that mutates container filesystems;
+	// without this scan a bad bundle (or schema-skew leaving an orphan
+	// reference) would let docker write into the target and only fail
+	// on tx.Commit() — leaving a half-restored container with no DB
+	// rows describing it. PRAGMA foreign_key_check returns one row per
+	// violation regardless of defer_foreign_keys, so it's the right
+	// probe to run inside the open tx.
+	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
+		return stats, err
+	}
 	if err := preCommit(ctx); err != nil {
 		return stats, err
 	}
@@ -463,6 +517,86 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	}
 	committed = true
 	return stats, nil
+}
+
+// assertNoFKViolationsTx runs PRAGMA foreign_key_check inside the
+// open restore tx and surfaces a typed error on the first violation.
+// Used to fail fast before the docker-restore preCommit so bundle/
+// schema-skew problems don't leak into container side-effects.
+//
+// Aggregates up to 5 violations into the error message — enough to
+// debug an orphan-graph problem without flooding the log if the
+// bundle is wildly inconsistent.
+func assertNoFKViolationsTx(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("backup: foreign key check: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	const maxReport = 5
+	var seen []string
+	for rows.Next() {
+		var childTable, parentTable sql.NullString
+		var rowID sql.NullInt64
+		var fkID sql.NullInt64
+		if err := rows.Scan(&childTable, &rowID, &parentTable, &fkID); err != nil {
+			return fmt.Errorf("backup: scan foreign key check: %w", err)
+		}
+		if len(seen) < maxReport {
+			seen = append(seen, fmt.Sprintf("%s.rowid=%d → %s",
+				childTable.String, rowID.Int64, parentTable.String))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup: foreign key check iter: %w", err)
+	}
+	if len(seen) > 0 {
+		return fmt.Errorf("backup: deferred FK violations after restore inserts: %s", strings.Join(seen, "; "))
+	}
+	return nil
+}
+
+// purgeTombstonesTx hard-deletes rows in table whose primary key
+// matches a bundle row AND whose deleted_at is set. table is from
+// the BackupTables allowlist (already quoteIdent-safe). rows are
+// the bundle rows about to be re-inserted.
+//
+// Bound on the number of placeholders per statement so SQLite does
+// not balk at the 999-variable default limit when a workspace has
+// thousands of crews / agents in the bundle.
+func purgeTombstonesTx(ctx context.Context, tx *sql.Tx, table string, rows []map[string]any) error {
+	const chunkSize = 500
+	ids := make([]any, 0, len(rows))
+	for _, row := range rows {
+		v, ok := row["id"]
+		if !ok || v == nil {
+			continue
+		}
+		ids = append(ids, v)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	for start := 0; start < len(ids); start += chunkSize {
+		end := start + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		batch := ids[start:end]
+		placeholders := make([]string, len(batch))
+		for i := range batch {
+			placeholders[i] = "?"
+		}
+		query := fmt.Sprintf(
+			"DELETE FROM %s WHERE deleted_at IS NOT NULL AND deleted_at != '' AND id IN (%s)",
+			quoteIdent(table),
+			strings.Join(placeholders, ","),
+		)
+		if _, err := tx.ExecContext(ctx, query, batch...); err != nil {
+			return fmt.Errorf("backup: purge tombstones in %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // tableExistsTx is like tableExists but runs on an already-open tx.

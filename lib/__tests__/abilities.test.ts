@@ -142,8 +142,14 @@ describe("defineAbilitiesFor", () => {
       expect(ability.can("delete", "Credential")).toBe(false)
     })
 
-    it("cannot read Credential, AuditLog, Member", () => {
-      expect(ability.can("read", "Credential")).toBe(false)
+    // Connections PR #269 explicitly granted read("Credential") to
+    // MEMBER + VIEWER so they can see credential metadata (name,
+    // provider, status) for credentials in their crews — sealed
+    // values are never returned by the API regardless of the
+    // ability check, so this is a "list view only" grant. AuditLog
+    // and Member stay off-limits.
+    it("can read Credential metadata, but not AuditLog or Member", () => {
+      expect(ability.can("read", "Credential")).toBe(true)
       expect(ability.can("read", "AuditLog")).toBe(false)
       expect(ability.can("read", "Member")).toBe(false)
     })
@@ -180,8 +186,14 @@ describe("defineAbilitiesFor", () => {
       expect(ability.can("delete", "Credential")).toBe(false)
     })
 
-    it("cannot read Credential, AuditLog, Member", () => {
-      expect(ability.can("read", "Credential")).toBe(false)
+    // Connections PR #269 explicitly granted read("Credential") to
+    // MEMBER + VIEWER so they can see credential metadata (name,
+    // provider, status) for credentials in their crews — sealed
+    // values are never returned by the API regardless of the
+    // ability check, so this is a "list view only" grant. AuditLog
+    // and Member stay off-limits.
+    it("can read Credential metadata, but not AuditLog or Member", () => {
+      expect(ability.can("read", "Credential")).toBe(true)
       expect(ability.can("read", "AuditLog")).toBe(false)
       expect(ability.can("read", "Member")).toBe(false)
     })

@@ -36,6 +36,13 @@ type BackupHandler struct {
 	// future binaries can report what produced each bundle. Injected by
 	// the router from main's build-info; empty string when unknown.
 	crewshipVersion string
+	// crewContainerName maps a crew slug to its Docker container name.
+	// Injected by the router from the active ContainerProvider so the
+	// per-instance prefix (e.g. "crewship-3-team-" on instance 3) is
+	// honored — the previous hardcoded "crewship-team-" prefix broke
+	// every non-default instance. Falls back to the hardcoded prefix
+	// when nil so unit tests + early-init code still build.
+	crewContainerName func(slug string) string
 }
 
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
@@ -46,6 +53,15 @@ func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerOps backup.DockerOp
 	return &BackupHandler{db: db, logger: logger, dockerOps: dockerOps, crewshipVersion: crewshipVersion}
 }
 
+// SetCrewContainerName injects the slug→container-name mapping from the
+// active ContainerProvider. Called by the router after the provider is
+// known. Without this, multi-instance setups (crewship_1, _2, _3) would
+// all collide on "crewship-team-<slug>" and backups would try to pause
+// containers that don't exist with that name on the current instance.
+func (h *BackupHandler) SetCrewContainerName(fn func(slug string) string) {
+	h.crewContainerName = fn
+}
+
 // createRequest is the JSON body of POST /api/v1/admin/backups.
 //
 // Exactly one of Passphrase, Recipient or NoEncrypt must be set (the
@@ -53,7 +69,13 @@ func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerOps backup.DockerOp
 // public key; Passphrase is a user-supplied secret run through scrypt.
 
 type createRequest struct {
-	Scope      string `json:"scope"` // "crew" or "workspace"
+	Scope string `json:"scope"` // "crew" or "workspace"
+	// ScopeLevel selects which per-crew sections the collector
+	// pulls in: "quick" (workspace + memory), "standard" (default,
+	// adds /home/agent + /opt/crew-tools), or "full" (adds
+	// /var/lib so service data — redis, postgresql, ... — survives
+	// a wipe-and-restore cycle). Empty resolves to "standard".
+	ScopeLevel string `json:"scope_level,omitempty"`
 	CrewID     string `json:"crew_id,omitempty"`
 	Passphrase string `json:"passphrase,omitempty"`
 	Recipient  string `json:"recipient,omitempty"`
@@ -67,6 +89,7 @@ type createResponse struct {
 	SHA256        string    `json:"payload_sha256"`
 	FormatVersion int       `json:"format_version"`
 	Scope         string    `json:"scope"`
+	ScopeLevel    string    `json:"scope_level,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	Encrypted     bool      `json:"encrypted"`
 }
@@ -174,8 +197,18 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	level := backup.ScopeLevel(strings.TrimSpace(req.ScopeLevel))
+	if level == "" {
+		level = backup.DefaultScopeLevel
+	}
+	if !level.Valid() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope_level must be 'quick', 'standard', or 'full'"})
+		return
+	}
+
 	result, err := backup.CreateBackup(ctx, h.db, backup.CreateOptions{
 		Scope:             scope,
+		Level:             level,
 		WorkspaceID:       workspaceID,
 		CrewID:            trimmedCrewID,
 		OutputDir:         outputDir,
@@ -184,7 +217,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Passphrase:        passphrase,
 		Recipients:        recipients,
 		NoEncrypt:         req.NoEncrypt,
-		CrewContainerName: crewContainerNameFunc(),
+		CrewContainerName: h.resolveCrewContainerName(),
 		DockerOps:         ops,
 	})
 	if err != nil {
@@ -196,6 +229,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	WriteAuditLog(ctx, h.db, "backup.create", "backup", result.Path, user.ID, workspaceID, map[string]interface{}{
 		"scope":          string(scope),
+		"scope_level":    string(result.Manifest.ScopeLevel),
 		"size_bytes":     result.Size,
 		"payload_sha256": result.SHA256,
 		"encrypted":      result.Manifest.Encryption.Enabled,
@@ -220,6 +254,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SHA256:        result.SHA256,
 		FormatVersion: result.Manifest.FormatVersion,
 		Scope:         string(result.Manifest.Scope),
+		ScopeLevel:    string(result.Manifest.ScopeLevel),
 		CreatedAt:     result.Manifest.CreatedAt,
 		Encrypted:     result.Manifest.Encryption.Enabled,
 	})
@@ -228,8 +263,16 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 // List handles GET /api/v1/admin/backups.
 
 type restoreRequest struct {
-	Path        string `json:"path"`
-	Passphrase  string `json:"passphrase,omitempty"`
+	Path       string `json:"path"`
+	Passphrase string `json:"passphrase,omitempty"`
+	// Identity is one age X25519 secret key (the "AGE-SECRET-KEY-1…"
+	// string the admin printed at create-with-recipient time). When
+	// the bundle was sealed with --recipient, the holder of the
+	// matching identity is the only one who can decrypt; the API
+	// previously exposed only Passphrase, which made age-recipient
+	// bundles impossible to restore via the admin UI / REST without
+	// dropping into the CLI on the host.
+	Identity    string `json:"identity,omitempty"`
 	AsWorkspace string `json:"as_workspace,omitempty"`
 	AsCrew      string `json:"as_crew,omitempty"`
 	DryRun      bool   `json:"dry_run,omitempty"`
@@ -271,15 +314,26 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 	ops := h.dockerOps
 
+	var identities []age.Identity
+	if id := strings.TrimSpace(req.Identity); id != "" {
+		parsed, err := age.ParseX25519Identity(id)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid age identity: " + err.Error()})
+			return
+		}
+		identities = []age.Identity{parsed}
+	}
+
 	result, err := backup.RestoreBackup(ctx, h.db, backup.RestoreOptions{
 		Path:         req.Path,
 		Passphrase:   req.Passphrase,
+		Identities:   identities,
 		AsWorkspace:  req.AsWorkspace,
 		AsCrew:       req.AsCrew,
 		DryRun:       req.DryRun,
 		Actor:        backup.Actor{UserID: user.ID, Email: user.Email, Role: role},
 		DockerOps:    ops,
-		ContainerFor: crewContainerNameFunc(),
+		ContainerFor: h.resolveCrewContainerName(),
 	})
 	if err != nil {
 		h.logger.Warn("backup restore failed", "error", err, "path", req.Path, "user", user.ID)
@@ -440,11 +494,17 @@ func statusForBackupError(err error) int {
 	}
 }
 
-// crewContainerNameFunc returns the slug→container-name mapping used
-// by the Docker provider. Hard-coded here to avoid importing
-// internal/provider/docker (which would create a dependency cycle).
-
-func crewContainerNameFunc() func(slug string) string {
+// resolveCrewContainerName returns the slug→container-name function
+// the backup runner should use. Prefers the injected mapping (set by
+// the router from the active ContainerProvider, so multi-instance
+// prefixes like "crewship-3-team-" are honored), falls back to the
+// default "crewship-team-" prefix only when no provider is wired —
+// keeps unit tests + early-init code paths building without forcing
+// every test to construct a provider stub.
+func (h *BackupHandler) resolveCrewContainerName() func(slug string) string {
+	if h.crewContainerName != nil {
+		return h.crewContainerName
+	}
 	return func(slug string) string { return "crewship-team-" + slug }
 }
 

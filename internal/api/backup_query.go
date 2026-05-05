@@ -26,6 +26,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 		FileName      string    `json:"file_name"`
 		Size          int64     `json:"size_bytes"`
 		Scope         string    `json:"scope"`
+		ScopeLevel    string    `json:"scope_level,omitempty"`
 		Encrypted     bool      `json:"encrypted"`
 		CreatedAt     time.Time `json:"created_at,omitempty"`
 		FormatVersion int       `json:"format_version,omitempty"`
@@ -36,6 +37,16 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	// instead of O(bundles) filesystem scan + per-file Inspect. Fall
 	// back to the filesystem when the catalog is empty (fresh install,
 	// pre-migration data, or a startup backfill that hasn't run yet).
+	//
+	// Reconcile first: prune rows whose backing file disappeared (out-
+	// of-band rm, pre-CRE-159 rotate that forgot to sync). Cheap on a
+	// local filesystem (one stat per row) and keeps the admin UI from
+	// showing entries that would 404 on Verify/Download/Restore.
+	if pruned, rerr := backup.ReconcileCatalog(ctx, h.db, workspaceID); rerr != nil {
+		h.logger.Warn("backup catalog reconcile failed", "error", rerr)
+	} else if len(pruned) > 0 {
+		h.logger.Info("backup catalog reconciled", "pruned_count", len(pruned))
+	}
 	cat, err := backup.ListCatalog(ctx, h.db, workspaceID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -49,6 +60,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 				FileName:      filepath.Base(e.FilePath),
 				Size:          e.Size,
 				Scope:         e.Scope,
+				ScopeLevel:    e.ScopeLevel,
 				Encrypted:     e.Encrypted,
 				CreatedAt:     e.CreatedAt,
 				FormatVersion: e.FormatVersion,
@@ -86,6 +98,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 			FileName:      filepath.Base(e.Path),
 			Size:          e.Size,
 			Scope:         string(e.Scope),
+			ScopeLevel:    string(e.ScopeLevel),
 			Encrypted:     e.Encrypted,
 			CreatedAt:     e.CreatedAt,
 			FormatVersion: e.FormatVersion,
