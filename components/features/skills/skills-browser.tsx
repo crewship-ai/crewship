@@ -63,6 +63,17 @@ const RUNTIMES = [
   { value: "MCP", label: "MCP" },
   { value: "HYBRID", label: "Hybrid" },
 ]
+
+// Detail panel width bounds. The hard max stays at 720 for ultrawide
+// monitors, but at render the value is also clamped against the
+// container so a saved 720 doesn't push the panel past the viewport
+// on smaller screens (the grid uses overflow-hidden, which would
+// silently clip the right edge instead of producing a scrollbar).
+const DETAIL_MIN_PX = 280
+const DETAIL_HARD_MAX_PX = 720
+const CENTRE_MIN_PX = 360
+const RAIL_OPEN_PX = 260
+const RAIL_COLLAPSED_PX = 44
 // Maturity dot colours mirror the bundled-skill ORDER BY in
 // internal/api/skills.go — OFFICIAL > CURATED > COMMUNITY >
 // EXPERIMENTAL. The dot is the visual weight; without it all four
@@ -140,17 +151,50 @@ export function SkillsBrowser() {
     "skills.detail.width",
     380,
   )
+  // Track the grid container width so the panel's effective max can be
+  // recomputed on viewport resize. Without this clamp, a saved 720px
+  // preference renders past the viewport's right edge on narrower
+  // screens — the grid's overflow-hidden then silently truncates the
+  // detail content (and the install button) instead of scrolling.
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const [gridWidth, setGridWidth] = useState(0)
+  useEffect(() => {
+    const el = gridRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0
+      setGridWidth(w)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const railWidthPx = railCollapsed ? RAIL_COLLAPSED_PX : RAIL_OPEN_PX
+  const detailMaxEffective = gridWidth > 0
+    ? Math.max(
+        DETAIL_MIN_PX,
+        Math.min(DETAIL_HARD_MAX_PX, gridWidth - railWidthPx - CENTRE_MIN_PX),
+      )
+    : DETAIL_HARD_MAX_PX
+  // Drag handler reads the latest effective max via ref so a viewport
+  // resize mid-drag clamps to the new bound without re-binding the
+  // listener.
+  const detailMaxRef = useRef(DETAIL_HARD_MAX_PX)
+  detailMaxRef.current = detailMaxEffective
+  const detailWidthRendered = Math.min(detailWidth, detailMaxEffective)
   const detailDragRef = useRef<{ startX: number; startW: number } | null>(null)
   const onDetailDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
-    detailDragRef.current = { startX: e.clientX, startW: detailWidth }
+    detailDragRef.current = { startX: e.clientX, startW: detailWidthRendered }
     const onMove = (ev: MouseEvent) => {
       if (!detailDragRef.current) return
       // Drag-left increases width because the handle is on the
       // panel's LEFT edge — pulling left makes the right column
       // wider.
       const delta = detailDragRef.current.startX - ev.clientX
-      const next = Math.min(720, Math.max(280, detailDragRef.current.startW + delta))
+      const next = Math.min(
+        detailMaxRef.current,
+        Math.max(DETAIL_MIN_PX, detailDragRef.current.startW + delta),
+      )
       setDetailWidth(next)
     }
     const onUp = () => {
@@ -160,7 +204,7 @@ export function SkillsBrowser() {
     }
     window.addEventListener("mousemove", onMove)
     window.addEventListener("mouseup", onUp)
-  }, [detailWidth, setDetailWidth])
+  }, [detailWidthRendered, setDetailWidth])
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const oramaIndex = useRef<AnyOrama | null>(null)
   const [searchHits, setSearchHits] = useState<Set<string> | null>(null)
@@ -412,11 +456,12 @@ export function SkillsBrowser() {
            opens only when a card is selected, so the centre owns
            more breathing room by default. */}
       <div
+        ref={gridRef}
         className="flex-1 min-h-0 grid relative overflow-hidden"
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${railCollapsed ? "44px" : "260px"} 1fr ${selected ? `${detailWidth}px` : "0px"}`,
+            : `${railCollapsed ? `${RAIL_COLLAPSED_PX}px` : `${RAIL_OPEN_PX}px`} 1fr ${selected ? `${detailWidthRendered}px` : "0px"}`,
         }}
       >
         <aside data-panel-id="skills-rail" className={cn(
