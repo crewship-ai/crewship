@@ -212,15 +212,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	var statsCollector *StatsCollector
 	if ctr != nil {
 		statsCollector = NewStatsCollector(ctr, wsHub, logger, 5*time.Second)
-		// Wire the orchestrator so every crew-container create/reuse on the
-		// mission path also registers the container with the stats poller.
-		// Without this, only the direct-run path (handleAgentStart) registers
-		// containers and the dashboard's container resources tile stays empty
-		// for mission-driven runs.
-		sc := statsCollector
-		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
-			sc.Register(containerID, crewID, workspaceID)
-		})
+		// The orchestrator's stats-register callback is wired AFTER the
+		// Server struct is constructed (further down in this function)
+		// because the callback also needs to start the file watcher,
+		// which is a method on Server. See the SetStatsRegisterCallback
+		// call after `s := &Server{...}` below.
 	}
 
 	tokenPool := llmproxy.NewTokenPool(logger)
@@ -295,6 +291,20 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 	if deps != nil {
 		s.db = deps.DB
+	}
+
+	// Wire the orchestrator's container-ready callback now that `s` is
+	// constructed. The callback fans out to two concerns: (1) register
+	// the container with the stats poller so container.metrics journal
+	// entries flow, (2) ensure the file watcher is running for the crew
+	// so file.written entries flow. Both are idempotent — repeated
+	// calls for the same container/crew are no-ops.
+	if statsCollector != nil {
+		sc := statsCollector
+		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
+			sc.Register(containerID, crewID, workspaceID)
+			s.ensureFileWatcher(crewID)
+		})
 	}
 
 	s.registerRoutes()
