@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crow's Nest — Logs (Grafana-style mockup)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          mono: ['ui-monospace','SFMono-Regular','Menlo','Monaco','Consolas','monospace'],
+        },
+      },
+    },
+  }
+</script>
+<style>
+  :root {
+    --bg: #07090c;
+    --bg-2: #0c1014;
+    --bg-3: #11161c;
+    --line: rgba(255,255,255,0.06);
+    --line-2: rgba(255,255,255,0.10);
+    --fg: #e6e8eb;
+    --fg-dim: #9aa3ad;
+    --fg-muted: #5f6975;
+
+    --sev-info: #38bdf8;
+    --sev-notice: #a78bfa;
+    --sev-warn: #fbbf24;
+    --sev-error: #f87171;
+
+    --grp-exec: #34d399;
+    --grp-network: #22d3ee;
+    --grp-run: #fb923c;
+    --grp-keeper: #c084fc;
+    --grp-peer: #f472b6;
+    --grp-assignment: #60a5fa;
+    --grp-approval: #fbbf24;
+    --grp-file: #94a3b8;
+    --grp-container: #818cf8;
+    --grp-mission: #fb7185;
+    --grp-cost: #fde047;
+    --grp-skill: #5eead4;
+  }
+  html, body { background: var(--bg); color: var(--fg); }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  /* slim, subtle scrollbars to match Grafana */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 6px; border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 10px; line-height: 16px;
+    border: 1px solid var(--line-2);
+    background: rgba(255,255,255,0.04);
+    color: var(--fg-dim);
+    white-space: nowrap;
+  }
+  .pill.active { background: rgba(56,189,248,0.12); color: #7dd3fc; border-color: rgba(56,189,248,0.3); }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 7px; border-radius: 999px;
+    font-family: ui-monospace, monospace;
+    font-size: 10px; line-height: 14px;
+    background: rgba(255,255,255,0.04);
+    color: var(--fg-dim);
+    border: 1px solid var(--line-2);
+    cursor: pointer; user-select: none;
+  }
+  .chip:hover { background: rgba(255,255,255,0.07); color: var(--fg); }
+  .chip.on { background: rgba(56,189,248,0.10); color: #bae6fd; border-color: rgba(56,189,248,0.35); }
+  .chip.off { opacity: 0.45; text-decoration: line-through; }
+  .chip .dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+
+  .sev-bar { width: 3px; align-self: stretch; border-radius: 2px; }
+  .sev-info  { background: var(--sev-info); }
+  .sev-notice{ background: var(--sev-notice); }
+  .sev-warn  { background: var(--sev-warn); }
+  .sev-error { background: var(--sev-error); }
+
+  .grp-exec       { color: var(--grp-exec); }
+  .grp-network    { color: var(--grp-network); }
+  .grp-run        { color: var(--grp-run); }
+  .grp-keeper     { color: var(--grp-keeper); }
+  .grp-peer       { color: var(--grp-peer); }
+  .grp-assignment { color: var(--grp-assignment); }
+  .grp-approval   { color: var(--grp-approval); }
+  .grp-file       { color: var(--grp-file); }
+  .grp-container  { color: var(--grp-container); }
+  .grp-mission    { color: var(--grp-mission); }
+  .grp-cost       { color: var(--grp-cost); }
+  .grp-skill      { color: var(--grp-skill); }
+
+  .typebadge {
+    display: inline-flex; align-items: center;
+    padding: 0 5px; height: 14px;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--line-2);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 4px 92px 110px 1fr 70px 18px;
+    gap: 8px;
+    padding: 3px 8px;
+    align-items: start;
+    font-size: 12px;
+    line-height: 18px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .row:hover { background: rgba(255,255,255,0.025); }
+  .row.expanded { background: rgba(56,189,248,0.04); }
+  .row .ts { color: var(--fg-muted); font-family: ui-monospace, monospace; font-size: 11px; }
+  .row .summary { font-family: ui-monospace, monospace; color: #d6dbe1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .ago { color: var(--fg-muted); font-family: ui-monospace, monospace; font-size: 10px; text-align: right; }
+  .row .chev { color: var(--fg-muted); font-size: 10px; line-height: 18px; }
+
+  .row.wrap .summary { white-space: normal; word-break: break-word; }
+
+  .detail {
+    grid-column: 2 / -1;
+    margin-top: 4px;
+    padding: 8px 10px;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    color: #b8bec6;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .histobar {
+    flex: 1 0 auto;
+    display: flex; flex-direction: column-reverse;
+    gap: 1px;
+    min-width: 6px;
+    border-radius: 2px 2px 0 0;
+    overflow: hidden;
+  }
+  .histobar > span { display: block; }
+
+  .stat-card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+
+  /* sparkline canvas grid is just a faint baseline */
+  .spark { background: linear-gradient(to bottom, transparent 0%, transparent 99%, rgba(255,255,255,0.07) 100%); }
+
+  .tab {
+    height: 28px; padding: 0 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px;
+    color: var(--fg-dim);
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    user-select: none;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.active { color: #7dd3fc; border-color: #38bdf8; background: rgba(56,189,248,0.04); }
+  .tab .count { font-family: ui-monospace, monospace; font-size: 10px; color: var(--fg-muted); padding: 0 4px; border-radius: 3px; background: rgba(255,255,255,0.05); }
+
+  .iconbtn {
+    height: 24px; min-width: 24px;
+    padding: 0 6px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    border: 1px solid var(--line-2);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.02);
+    color: var(--fg-dim);
+    font-size: 11px; line-height: 1;
+    cursor: pointer;
+  }
+  .iconbtn:hover { background: rgba(255,255,255,0.06); color: var(--fg); }
+  .iconbtn.on   { background: rgba(56,189,248,0.10); color: #bae6fd; border-color: rgba(56,189,248,0.35); }
+
+  .live-dot { width: 6px; height: 6px; border-radius: 999px; background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,0.6); animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
+
+  .crumb { color: var(--fg-muted); font-size: 11px; }
+  .crumb b { color: var(--fg-dim); font-weight: 500; }
+
+  .scrollshadow { background: linear-gradient(to bottom, rgba(7,9,12,0.0) 0%, rgba(7,9,12,0.0) 80%, rgba(7,9,12,0.95) 100%); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- =========== TOP STRIP =========== -->
+<div class="h-9 flex items-center px-3 gap-2 border-b" style="background: var(--bg-2); border-color: var(--line);">
+  <button class="iconbtn"><span style="font-family: ui-monospace,monospace;">←</span> Back</button>
+  <span class="text-[13px] opacity-80" style="color: var(--fg);">⌖</span>
+  <span class="text-[13px] font-medium">DevOps Crew</span>
+  <span class="pill">crewship-team-devops-7a</span>
+  <span class="crumb"><b>workspace:</b> unify-prod</span>
+  <div class="flex-1"></div>
+  <span class="pill" style="border-color: rgba(52,211,153,0.35); background: rgba(52,211,153,0.10); color: #6ee7b7;">
+    <span class="live-dot"></span> Live · 1.2k events / 5m
+  </span>
+  <button class="iconbtn">⚙</button>
+</div>
+
+<!-- =========== RESOURCES MINI-STRIP =========== -->
+<div class="grid grid-cols-4 gap-px border-b" style="background: var(--line); border-color: var(--line);">
+  <!-- CPU -->
+  <div class="px-3 py-2 flex items-center gap-3" style="background: var(--bg-2);">
+    <div class="text-[10px] uppercase tracking-wider" style="color: var(--fg-muted);">CPU</div>
+    <div class="flex-1 h-7 spark relative overflow-hidden rounded-sm">
+      <svg viewBox="0 0 200 28" class="w-full h-full" preserveAspectRatio="none">
+        <polyline fill="rgba(34,211,238,0.18)" stroke="none"
+          points="0,28 0,16 12,18 24,12 36,14 48,8 60,10 72,6 84,12 96,4 108,10 120,8 132,2 144,6 156,4 168,8 180,6 192,10 200,7 200,28" />
+        <polyline fill="none" stroke="#22d3ee" stroke-width="1.2"
+          points="0,16 12,18 24,12 36,14 48,8 60,10 72,6 84,12 96,4 108,10 120,8 132,2 144,6 156,4 168,8 180,6 192,10 200,7" />
+      </svg>
+    </div>
+    <div class="text-[12px] font-mono tabular-nums" style="color: var(--fg);">68<span class="text-[10px]" style="color: var(--fg-muted);">%</span></div>
+  </div>
+  <!-- MEM -->
+  <div class="px-3 py-2 flex items-center gap-3" style="background: var(--bg-2);">
+    <div class="text-[10px] uppercase tracking-wider" style="color: var(--fg-muted);">MEM</div>
+    <div class="flex-1 h-7 spark relative overflow-hidden rounded-sm">
+      <svg viewBox="0 0 200 28" class="w-full h-full" preserveAspectRatio="none">
+        <polyline fill="rgba(167,139,250,0.18)" stroke="none"
+          points="0,28 0,20 20,18 40,18 60,16 80,15 100,14 120,14 140,12 160,12 180,11 200,10 200,28" />
+        <polyline fill="none" stroke="#a78bfa" stroke-width="1.2"
+          points="0,20 20,18 40,18 60,16 80,15 100,14 120,14 140,12 160,12 180,11 200,10" />
+      </svg>
+    </div>
+    <div class="text-[12px] font-mono tabular-nums" style="color: var(--fg);">1.4<span class="text-[10px]" style="color: var(--fg-muted);">GiB</span></div>
+  </div>
+  <!-- NET IN -->
+  <div class="px-3 py-2 flex items-center gap-3" style="background: var(--bg-2);">
+    <div class="text-[10px] uppercase tracking-wider" style="color: var(--fg-muted);">NET↓</div>
+    <div class="flex-1 h-7 spark relative overflow-hidden rounded-sm">
+      <svg viewBox="0 0 200 28" class="w-full h-full" preserveAspectRatio="none">
+        <polyline fill="rgba(52,211,153,0.18)" stroke="none"
+          points="0,28 0,24 12,22 24,24 36,18 48,20 60,14 72,18 84,12 96,16 108,10 120,14 132,8 144,12 156,6 168,10 180,4 192,8 200,2 200,28" />
+        <polyline fill="none" stroke="#34d399" stroke-width="1.2"
+          points="0,24 12,22 24,24 36,18 48,20 60,14 72,18 84,12 96,16 108,10 120,14 132,8 144,12 156,6 168,10 180,4 192,8 200,2" />
+      </svg>
+    </div>
+    <div class="text-[12px] font-mono tabular-nums" style="color: var(--fg);">348<span class="text-[10px]" style="color: var(--fg-muted);">KB/s</span></div>
+  </div>
+  <!-- DISK -->
+  <div class="px-3 py-2 flex items-center gap-3" style="background: var(--bg-2);">
+    <div class="text-[10px] uppercase tracking-wider" style="color: var(--fg-muted);">DISK</div>
+    <div class="flex-1 h-7 spark relative overflow-hidden rounded-sm">
+      <svg viewBox="0 0 200 28" class="w-full h-full" preserveAspectRatio="none">
+        <polyline fill="rgba(251,146,60,0.18)" stroke="none"
+          points="0,28 0,18 30,18 60,17 90,17 120,16 150,16 180,15 200,15 200,28" />
+        <polyline fill="none" stroke="#fb923c" stroke-width="1.2"
+          points="0,18 30,18 60,17 90,17 120,16 150,16 180,15 200,15" />
+      </svg>
+    </div>
+    <div class="text-[12px] font-mono tabular-nums" style="color: var(--fg);">12.7<span class="text-[10px]" style="color: var(--fg-muted);">GiB</span></div>
+  </div>
+</div>
+
+<!-- =========== TABS =========== -->
+<div class="flex items-center px-2 border-b" style="background: var(--bg); border-color: var(--line);">
+  <div class="tab active">📜 Logs <span class="count">1247</span></div>
+  <div class="tab">▮ Terminal <span class="count">312</span></div>
+  <div class="tab">⌬ Network <span class="count">89</span></div>
+  <div class="tab">⊟ Filesystem <span class="count">204</span></div>
+  <div class="flex-1"></div>
+  <div class="text-[10px] mr-2" style="color: var(--fg-muted);">Last 15m</div>
+  <button class="iconbtn">15m ▾</button>
+  <button class="iconbtn">⟳</button>
+</div>
+
+<!-- =========== TOOLBAR =========== -->
+<div class="px-3 py-2 border-b flex flex-wrap items-center gap-2" style="background: var(--bg-2); border-color: var(--line);">
+  <!-- search -->
+  <div class="relative flex-1 min-w-[260px] max-w-[480px]">
+    <input
+      type="text"
+      placeholder='Search   e.g.  /pnpm test/   keeper.decision   path:/home/agent'
+      class="w-full h-7 pl-7 pr-16 text-[12px] font-mono rounded outline-none"
+      style="background: var(--bg-3); border: 1px solid var(--line-2); color: var(--fg);"
+    />
+    <span class="absolute left-2 top-1.5 text-[12px]" style="color: var(--fg-muted);">⌕</span>
+    <span class="absolute right-1.5 top-1 pill">regex ⌃F</span>
+  </div>
+
+  <span class="opacity-30">│</span>
+
+  <!-- severity -->
+  <div class="inline-flex rounded border" style="border-color: var(--line-2); background: var(--bg-3);">
+    <button class="h-7 px-2 text-[10px] font-mono uppercase tracking-wider" style="background: rgba(56,189,248,0.10); color: #7dd3fc;">All <span class="ml-1 opacity-70">1247</span></button>
+    <button class="h-7 px-2 text-[10px] font-mono uppercase tracking-wider" style="color: var(--fg-dim);">Info <span class="ml-1 opacity-70">982</span></button>
+    <button class="h-7 px-2 text-[10px] font-mono uppercase tracking-wider" style="color: var(--fg-dim);">Notice <span class="ml-1 opacity-70">203</span></button>
+    <button class="h-7 px-2 text-[10px] font-mono uppercase tracking-wider" style="color: #fcd34d;">Warn <span class="ml-1 opacity-70">53</span></button>
+    <button class="h-7 px-2 text-[10px] font-mono uppercase tracking-wider" style="color: #fca5a5;">Error <span class="ml-1 opacity-70">9</span></button>
+  </div>
+
+  <span class="opacity-30">│</span>
+
+  <!-- live / wrap / order -->
+  <button class="iconbtn on" title="Pause live tail"><span class="live-dot"></span> Live</button>
+  <button class="iconbtn" title="Wrap long lines">↵ Wrap</button>
+  <button class="iconbtn on" title="Newest first">⇅ Newest</button>
+  <button class="iconbtn" title="Deduplicate identical">⎘ Dedup</button>
+
+  <div class="flex-1"></div>
+
+  <!-- counts -->
+  <span class="pill"><span class="text-[10px]" style="color: var(--fg-muted);">visible</span> <b style="color: var(--fg);">1247</b> / 1247</span>
+  <button class="iconbtn">⤓ Export</button>
+</div>
+
+<!-- =========== TYPE CHIPS (label filters) =========== -->
+<div class="px-3 py-1.5 border-b flex flex-wrap items-center gap-1.5" style="background: var(--bg-2); border-color: var(--line);">
+  <span class="text-[10px] uppercase tracking-wider mr-1" style="color: var(--fg-muted);">Types</span>
+
+  <span class="chip on" title="exec.command + exec.output_chunk"><span class="dot" style="background: var(--grp-exec);"></span>exec <b class="opacity-60 ml-0.5">427</b></span>
+  <span class="chip on"><span class="dot" style="background: var(--grp-network);"></span>network <b class="opacity-60 ml-0.5">198</b></span>
+  <span class="chip on"><span class="dot" style="background: var(--grp-file);"></span>file <b class="opacity-60 ml-0.5">204</b></span>
+  <span class="chip on"><span class="dot" style="background: var(--grp-container);"></span>container <b class="opacity-60 ml-0.5">112</b></span>
+  <span class="chip on"><span class="dot" style="background: var(--grp-run);"></span>run <b class="opacity-60 ml-0.5">68</b></span>
+  <span class="chip on"><span class="dot" style="background: var(--grp-keeper);"></span>keeper <b class="opacity-60 ml-0.5">42</b></span>
+  <span class="chip on"><span class="dot" style="background: var(--grp-peer);"></span>peer <b class="opacity-60 ml-0.5">71</b></span>
+  <span class="chip on"><span class="dot" style="background: var(--grp-assignment);"></span>assignment <b class="opacity-60 ml-0.5">53</b></span>
+  <span class="chip"><span class="dot" style="background: var(--grp-approval);"></span>approval <b class="opacity-60 ml-0.5">12</b></span>
+  <span class="chip off"><span class="dot" style="background: var(--grp-cost);"></span>cost <b class="opacity-60 ml-0.5">31</b></span>
+  <span class="chip"><span class="dot" style="background: var(--grp-mission);"></span>mission <b class="opacity-60 ml-0.5">7</b></span>
+  <span class="chip"><span class="dot" style="background: var(--grp-skill);"></span>skill <b class="opacity-60 ml-0.5">22</b></span>
+
+  <button class="ml-auto iconbtn" style="color: var(--fg-muted);">＋ Add filter</button>
+</div>
+
+<!-- =========== HISTOGRAM =========== -->
+<div class="px-3 py-2 border-b" style="background: var(--bg); border-color: var(--line);">
+  <div class="flex items-end justify-between mb-1">
+    <div class="text-[10px] uppercase tracking-wider" style="color: var(--fg-muted);">Events / 10s · stacked by severity</div>
+    <div class="text-[10px] font-mono tabular-nums" style="color: var(--fg-muted);">14:18:00 ──────────── 14:33:00</div>
+  </div>
+  <div class="flex items-end gap-[2px] h-12" id="histogram"></div>
+</div>
+
+<!-- =========== MAIN: LOG STREAM + STATS RAIL =========== -->
+<div class="grid" style="grid-template-columns: minmax(0, 1fr) 280px; min-height: 60vh;">
+  <!-- LOG STREAM -->
+  <div class="border-r" style="border-color: var(--line);">
+    <!-- column header -->
+    <div class="grid sticky top-0 z-10 px-2 py-1.5 text-[10px] uppercase tracking-wider border-b"
+         style="background: var(--bg-2); border-color: var(--line); color: var(--fg-muted);
+                grid-template-columns: 4px 92px 110px 1fr 70px 18px; gap: 8px;">
+      <span></span>
+      <span>Time</span>
+      <span>Type</span>
+      <span>Message</span>
+      <span class="text-right">Age</span>
+      <span></span>
+    </div>
+
+    <div id="rows"></div>
+  </div>
+
+  <!-- STATS RAIL -->
+  <div class="p-3 space-y-3" style="background: var(--bg);">
+    <div class="stat-card">
+      <div class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--fg-muted);">Top types</div>
+      <div class="space-y-1.5 text-[11px] font-mono">
+        <div class="flex items-center gap-2"><span class="grp-exec">█</span><span class="flex-1">exec.output_chunk</span><span class="tabular-nums">389</span></div>
+        <div class="flex items-center gap-2"><span class="grp-file">█</span><span class="flex-1">file.written</span><span class="tabular-nums">204</span></div>
+        <div class="flex items-center gap-2"><span class="grp-network">█</span><span class="flex-1">network.egress</span><span class="tabular-nums">187</span></div>
+        <div class="flex items-center gap-2"><span class="grp-container">█</span><span class="flex-1">container.metrics</span><span class="tabular-nums">112</span></div>
+        <div class="flex items-center gap-2"><span class="grp-peer">█</span><span class="flex-1">peer.conversation</span><span class="tabular-nums">71</span></div>
+        <div class="flex items-center gap-2"><span class="grp-assignment">█</span><span class="flex-1">assignment.created</span><span class="tabular-nums">53</span></div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--fg-muted);">Severity mix</div>
+      <div class="flex h-2 rounded-full overflow-hidden mb-2" style="background: rgba(255,255,255,0.05);">
+        <div style="width: 78.7%; background: var(--sev-info);"></div>
+        <div style="width: 16.3%; background: var(--sev-notice);"></div>
+        <div style="width: 4.2%;  background: var(--sev-warn);"></div>
+        <div style="width: 0.7%;  background: var(--sev-error);"></div>
+      </div>
+      <div class="text-[11px] font-mono space-y-0.5">
+        <div class="flex justify-between"><span style="color: var(--sev-info);">● info</span><span class="tabular-nums">982</span></div>
+        <div class="flex justify-between"><span style="color: var(--sev-notice);">● notice</span><span class="tabular-nums">203</span></div>
+        <div class="flex justify-between"><span style="color: var(--sev-warn);">● warn</span><span class="tabular-nums">53</span></div>
+        <div class="flex justify-between"><span style="color: var(--sev-error);">● error</span><span class="tabular-nums">9</span></div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--fg-muted);">Top agents</div>
+      <div class="space-y-1.5 text-[11px] font-mono">
+        <div class="flex items-center gap-2"><span class="opacity-50">⌖</span><span class="flex-1">viktor</span><span class="tabular-nums">512</span></div>
+        <div class="flex items-center gap-2"><span class="opacity-50">⌖</span><span class="flex-1">eva</span><span class="tabular-nums">389</span></div>
+        <div class="flex items-center gap-2"><span class="opacity-50">⌖</span><span class="flex-1">milos (lead)</span><span class="tabular-nums">221</span></div>
+        <div class="flex items-center gap-2"><span class="opacity-50">⌖</span><span class="flex-1">karel</span><span class="tabular-nums">125</span></div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <div class="text-[10px] uppercase tracking-wider mb-2" style="color: var(--fg-muted);">Last 60s rate</div>
+      <div class="flex items-baseline gap-2">
+        <span class="text-2xl font-mono tabular-nums" style="color: var(--fg);">14.2</span>
+        <span class="text-[11px]" style="color: var(--fg-muted);">events / sec</span>
+      </div>
+      <div class="h-6 mt-1">
+        <svg viewBox="0 0 200 24" class="w-full h-full" preserveAspectRatio="none">
+          <polyline fill="rgba(56,189,248,0.18)" stroke="none"
+            points="0,24 0,18 20,16 40,12 60,14 80,10 100,8 120,6 140,8 160,5 180,4 200,3 200,24" />
+          <polyline fill="none" stroke="#38bdf8" stroke-width="1.2"
+            points="0,18 20,16 40,12 60,14 80,10 100,8 120,6 140,8 160,5 180,4 200,3" />
+        </svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- mock event data ----------
+const TYPE_GROUPS = {
+  "exec.command":         { grp:"exec",       label:"exec" },
+  "exec.output_chunk":    { grp:"exec",       label:"stdout" },
+  "network.egress":       { grp:"network",    label:"egress" },
+  "network.port_opened":  { grp:"network",    label:"port↑" },
+  "network.port_closed":  { grp:"network",    label:"port↓" },
+  "file.written":         { grp:"file",       label:"file" },
+  "container.metrics":    { grp:"container",  label:"stats" },
+  "container.snapshot":   { grp:"container",  label:"snapshot" },
+  "agent.status_change":  { grp:"container",  label:"status" },
+  "run.started":          { grp:"run",        label:"run·start" },
+  "run.completed":        { grp:"run",        label:"run·done" },
+  "run.failed":           { grp:"run",        label:"run·fail" },
+  "peer.conversation":    { grp:"peer",       label:"peer" },
+  "peer.escalation":      { grp:"peer",       label:"escalate" },
+  "keeper.decision":      { grp:"keeper",     label:"keeper" },
+  "keeper.request":       { grp:"keeper",     label:"keeper·req" },
+  "mission.status_change":{ grp:"mission",    label:"mission" },
+  "assignment.created":   { grp:"assignment", label:"assign" },
+  "assignment.completed": { grp:"assignment", label:"assign·done" },
+  "assignment.failed":    { grp:"assignment", label:"assign·fail" },
+  "approval.requested":   { grp:"approval",   label:"approval" },
+  "approval.granted":     { grp:"approval",   label:"approval·ok" },
+  "cost.incurred":        { grp:"cost",       label:"cost" },
+  "skill.assigned":       { grp:"skill",      label:"skill+" },
+};
+
+const SAMPLE = [
+  { ts:"14:32:18.421", sev:"info",   t:"exec.command",        msg:"viktor@dev:/work$ pnpm test --filter @crewship/journal" },
+  { ts:"14:32:17.103", sev:"info",   t:"exec.output_chunk",   msg:"PASS  lib/journal.test.ts (4 suites, 12 tests, 0 failures) — 1.84s" },
+  { ts:"14:32:16.882", sev:"notice", t:"keeper.decision",     msg:"ALLOW  read /home/agent/secrets/.env  (L1 · risk 2/10 · auto)" },
+  { ts:"14:32:16.401", sev:"info",   t:"file.written",        msg:"+ /home/agent/work/journal.ts  (2.4 KiB · diff +47 -12)" },
+  { ts:"14:32:15.330", sev:"info",   t:"network.egress",      msg:"→ api.anthropic.com:443  (claude-opus-4-7 · 1.2 KB · 312 ms)" },
+  { ts:"14:32:14.012", sev:"info",   t:"container.metrics",   msg:"cpu=68% mem=1.4GiB rss=812MiB net↑348KB/s net↓42KB/s" },
+  { ts:"14:32:13.778", sev:"warn",   t:"network.egress",      msg:"⚠  registry-1.docker.io:443  rate-limit-remaining=12 (was 60)" },
+  { ts:"14:32:12.901", sev:"notice", t:"peer.conversation",   msg:"viktor → eva:  „Mám hotovou migraci, koukneš na schema?\"" },
+  { ts:"14:32:11.503", sev:"info",   t:"assignment.created",  msg:"milos → eva  task:review-pr-#284  (priority=normal · ttl=15m)" },
+  { ts:"14:32:10.118", sev:"info",   t:"run.started",         msg:"viktor  run-id=r_8f3a91c2  prompt=\"add journal redesign mockup\"" },
+  { ts:"14:32:09.227", sev:"info",   t:"exec.output_chunk",   msg:"› next build · compiling 412 modules" },
+  { ts:"14:32:08.044", sev:"error",  t:"run.failed",          msg:"karel  run-id=r_61a92e  exit=1  „Module not found: @/lib/foo\"" },
+  { ts:"14:32:07.812", sev:"info",   t:"file.written",        msg:"~ /home/agent/work/page.tsx  (12.1 KiB · diff +180 -22)" },
+  { ts:"14:32:06.500", sev:"notice", t:"approval.requested",  msg:"eva → milos  „Smazat větev fix/old-auth?\"  approval-id=a_77b" },
+  { ts:"14:32:05.118", sev:"info",   t:"network.port_opened", msg:"↑ 5173 (vite-dev) bound 0.0.0.0  · proc=node[8124]" },
+  { ts:"14:32:04.005", sev:"info",   t:"exec.output_chunk",   msg:"  ✔ stream-json line: type=assistant role=assistant" },
+  { ts:"14:32:03.221", sev:"info",   t:"keeper.request",      msg:"viktor requests:  exec   git push origin fix/x   (intent: 32 chars)" },
+  { ts:"14:32:02.877", sev:"warn",   t:"keeper.decision",     msg:"DENY   write /etc/passwd  (L4 · risk 9/10 · path-blocklist)" },
+  { ts:"14:32:01.444", sev:"info",   t:"cost.incurred",       msg:"viktor  +$0.0124  (claude-opus-4-7 · in=842 out=312 · cache-read=4096)" },
+  { ts:"14:32:00.011", sev:"info",   t:"skill.assigned",      msg:"+ skill   karel ← \"playwright-smoke\" (manual, by milos)" },
+  { ts:"14:31:58.991", sev:"info",   t:"file.written",        msg:"+ /home/agent/work/lib/utils.ts  (842 B · new file)" },
+  { ts:"14:31:57.800", sev:"info",   t:"exec.output_chunk",   msg:"  ✔ Compiled successfully in 4.2s" },
+  { ts:"14:31:56.220", sev:"notice", t:"peer.escalation",     msg:"karel → milos:  „Chci eskalovat — DB migration vrací conflict.\"" },
+  { ts:"14:31:55.117", sev:"info",   t:"container.snapshot",  msg:"snap_77a · agents=4 procs=12 open-fds=148 · trigger=periodic" },
+  { ts:"14:31:54.001", sev:"info",   t:"assignment.completed",msg:"eva  task:review-pr-#283  ✓ 4m12s  (3 comments, 0 blockers)" },
+  { ts:"14:31:53.661", sev:"info",   t:"run.completed",       msg:"milos  run-id=r_8f2  ✓ 1m42s  out=2.1KB  cost=$0.0420" },
+  { ts:"14:31:52.444", sev:"info",   t:"network.egress",      msg:"→ github.com:443  (api.github.com/graphql · 312 B · 88 ms)" },
+  { ts:"14:31:51.118", sev:"info",   t:"file.written",        msg:"~ /home/agent/work/components/feed.tsx  (8.9 KiB · diff +120 -180)" },
+  { ts:"14:31:50.000", sev:"info",   t:"approval.granted",    msg:"milos ✓ a_77b  „Smazat větev fix/old-auth\"  granted-by=milos" },
+  { ts:"14:31:48.901", sev:"info",   t:"exec.command",        msg:"eva@dev:/work$ git checkout -b fix/feed-virtualization" },
+  { ts:"14:31:47.600", sev:"info",   t:"network.port_closed", msg:"↓ 4321 (jest-watch) closed · proc=node[7811] exited" },
+  { ts:"14:31:46.227", sev:"info",   t:"container.metrics",   msg:"cpu=42% mem=1.3GiB rss=798MiB net↑210KB/s net↓18KB/s" },
+  { ts:"14:31:45.001", sev:"info",   t:"keeper.decision",     msg:"ALLOW  spawn /usr/bin/git  args=[\"checkout\",\"-b\",\"fix/x\"]  (L1 · auto)" },
+  { ts:"14:31:43.882", sev:"info",   t:"peer.conversation",   msg:"eva → milos:  „Vyzvedávám PR #284 — bude hotovo do 14:45.\"" },
+  { ts:"14:31:42.118", sev:"info",   t:"file.written",        msg:"~ /home/agent/work/lib/journal.ts  (4.8 KiB · diff +62 -8)" },
+  { ts:"14:31:41.001", sev:"warn",   t:"network.egress",      msg:"⚠  hub.docker.com:443  TLS handshake retry (attempt 2/3)" },
+];
+
+const EXPANDED_INDEX = 2; // keeper.decision row pre-expanded for demo
+const DETAIL_JSON = `{
+  "id": "evt_01H8X9Z2QK7M3N4P5R6S7T8V9W",
+  "ts": "2026-05-05T14:32:16.882Z",
+  "workspace_id": "ws_unify_prod",
+  "crew_id": "crew_devops_7a",
+  "agent_id": "agent_viktor_91",
+  "entry_type": "keeper.decision",
+  "severity": "notice",
+  "summary": "ALLOW read /home/agent/secrets/.env (L1 · risk 2/10 · auto)",
+  "data": {
+    "request_id": "kr_77a3",
+    "tool": "read_file",
+    "path": "/home/agent/secrets/.env",
+    "credential_id": "cred_anthropic_key",
+    "security_level": 1,
+    "risk_score": 2,
+    "decision": "ALLOW",
+    "decided_by": "auto",
+    "intent": "Read API keys to authenticate the run",
+    "intent_chars": 42,
+    "evaluator": "L1-fast-path"
+  },
+  "links": {
+    "agent": "/agents/viktor",
+    "credential": "/credentials/cred_anthropic_key",
+    "request": "/keeper/requests/kr_77a3"
+  }
+}`;
+
+function relAge(i) {
+  // toy ascending age
+  const sec = i * 1.3 + 2;
+  if (sec < 60) return Math.round(sec) + "s ago";
+  return (sec/60).toFixed(1) + "m ago";
+}
+
+function row(e, i) {
+  const meta = TYPE_GROUPS[e.t] || { grp:"container", label:e.t };
+  const expanded = (i === EXPANDED_INDEX);
+  return `
+    <div class="row ${expanded ? 'expanded' : ''}" data-i="${i}">
+      <div class="sev-bar sev-${e.sev}"></div>
+      <div class="ts">${e.ts}</div>
+      <div><span class="typebadge grp-${meta.grp}">${meta.label}</span></div>
+      <div class="summary">${escapeHtml(e.msg)}</div>
+      <div class="ago">${relAge(i)}</div>
+      <div class="chev">${expanded ? '▾' : '▸'}</div>
+      ${expanded ? `<div class="detail">${escapeHtml(DETAIL_JSON)}</div>` : ''}
+    </div>
+  `;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+}
+
+document.getElementById('rows').innerHTML = SAMPLE.map(row).join('');
+
+// histogram bars
+const HIST_BUCKETS = 90; // 15m / 10s = 90
+const SEV_COLORS = { info: 'var(--sev-info)', notice: 'var(--sev-notice)', warn: 'var(--sev-warn)', error: 'var(--sev-error)' };
+function rand(seed){ let x = Math.sin(seed)*10000; return x - Math.floor(x); }
+let histHTML = '';
+for (let i = 0; i < HIST_BUCKETS; i++) {
+  const total = 4 + Math.floor(rand(i*1.7) * 30) + (i > 70 ? 20 : 0);
+  const warn  = i === 64 || i === 78 ? Math.floor(total * 0.25) : Math.floor(rand(i*2.3) * 3);
+  const error = i === 78 ? 4 : 0;
+  const notice= Math.floor(total * 0.18);
+  const info  = Math.max(0, total - notice - warn - error);
+  const max = 56;
+  const h = (n) => Math.max(0, Math.round(n / 1.0));
+  histHTML += `<div class="histobar" style="height: ${Math.min(max, total)}px;">
+    <span style="height: ${h(info)}px; background: ${SEV_COLORS.info}; opacity: 0.55;"></span>
+    <span style="height: ${h(notice)}px; background: ${SEV_COLORS.notice}; opacity: 0.65;"></span>
+    <span style="height: ${h(warn)}px; background: ${SEV_COLORS.warn}; opacity: 0.85;"></span>
+    <span style="height: ${h(error)}px; background: ${SEV_COLORS.error};"></span>
+  </div>`;
+}
+document.getElementById('histogram').innerHTML = histHTML;
+
+// row click toggles a fake expand on the most recent click
+document.getElementById('rows').addEventListener('click', (ev) => {
+  const r = ev.target.closest('.row');
+  if (!r) return;
+  // collapse all
+  document.querySelectorAll('#rows .row.expanded').forEach(x => {
+    x.classList.remove('expanded');
+    const d = x.querySelector('.detail'); if (d) d.remove();
+    const chev = x.querySelector('.chev'); if (chev) chev.textContent = '▸';
+  });
+  r.classList.add('expanded');
+  const chev = r.querySelector('.chev'); if (chev) chev.textContent = '▾';
+  const det = document.createElement('div');
+  det.className = 'detail';
+  det.textContent = DETAIL_JSON;
+  r.appendChild(det);
+});
+</script>
+</body>
+</html>
