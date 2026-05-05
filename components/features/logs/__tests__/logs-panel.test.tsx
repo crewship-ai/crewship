@@ -32,7 +32,7 @@ vi.mock("recharts", () => ({
   Tooltip: () => null,
 }))
 
-import { LogsPanel } from "@/components/features/crows-nest/logs-panel"
+import { LogsPanel } from "@/components/features/logs/logs-panel"
 
 function entry(overrides: Partial<JournalEntry> = {}): JournalEntry {
   return {
@@ -137,8 +137,67 @@ describe("LogsPanel", () => {
     const row = getAllByTestId("virtuoso-row")[0]
     const inner = within(row)
     fireEvent.click(inner.getByRole("button"))
-    // Expanded detail should expose the payload key/value as raw text.
     expect(row.textContent).toMatch(/risk_score/)
     expect(row.textContent).toMatch(/ALLOW/)
+  })
+
+  it("surfaces a fetch error inline at the top of the list", () => {
+    const { getByText } = render(
+      <LogsPanel entries={[]} error="Failed to load journal (500)" />,
+    )
+    expect(getByText(/Failed to load journal/i)).toBeTruthy()
+  })
+
+  it("renders a Retry control inside the error banner when onRefresh is set", () => {
+    const onRefresh = vi.fn()
+    const { getByText } = render(
+      <LogsPanel entries={[]} error="boom" onRefresh={onRefresh} />,
+    )
+    fireEvent.click(getByText(/Retry/i))
+    expect(onRefresh).toHaveBeenCalledOnce()
+  })
+
+  it("uses agentLookup to resolve top-agent UUIDs to names", () => {
+    const entries = [
+      entry({ id: "a", agent_id: "agent_uuid_1", summary: "x" }),
+      entry({ id: "b", agent_id: "agent_uuid_1", summary: "x" }),
+      entry({ id: "c", agent_id: "agent_uuid_2", summary: "x" }),
+    ]
+    const { getByText, queryByText } = render(
+      <LogsPanel
+        entries={entries}
+        agentLookup={{ agent_uuid_1: "viktor", agent_uuid_2: "eva" }}
+      />,
+    )
+    expect(getByText("viktor")).toBeTruthy()
+    expect(getByText("eva")).toBeTruthy()
+    expect(queryByText("agent_uuid_1")).toBeNull()
+  })
+
+  it("toggles the Live state via the controlled callback", () => {
+    const onLiveChange = vi.fn()
+    const entries = [entry({ id: "a", summary: "x" })]
+    const { getByTitle, rerender } = render(
+      <LogsPanel entries={entries} live={true} onLiveChange={onLiveChange} />,
+    )
+    fireEvent.click(getByTitle(/Pause live tail/i))
+    expect(onLiveChange).toHaveBeenCalledWith(false)
+    // After parent flips the flag, the toolbar reflects "Paused" — both the
+    // toggle and the secondary Resume button share the title, so we just
+    // ensure at least one is present.
+    rerender(<LogsPanel entries={entries} live={false} onLiveChange={onLiveChange} />)
+    expect(document.querySelectorAll('[title="Resume live tail"]').length).toBeGreaterThan(0)
+  })
+
+  it("collapses the stats rail when the chevron is clicked", () => {
+    const entries = [entry({ id: "a", summary: "x" })]
+    const { getByTitle, queryByText } = render(<LogsPanel entries={entries} />)
+    // Initially the stats rail renders its section titles.
+    expect(queryByText(/Severity mix/i)).toBeTruthy()
+    fireEvent.click(getByTitle(/Collapse stats rail/i))
+    expect(queryByText(/Severity mix/i)).toBeNull()
+    // Re-expanding restores it.
+    fireEvent.click(getByTitle(/Expand stats rail/i))
+    expect(queryByText(/Severity mix/i)).toBeTruthy()
   })
 })

@@ -5,7 +5,7 @@ import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from "rechar
 import { X } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { SEVERITY_COLOR, severityOf } from "@/lib/journal-style"
-import { sinceFromTimeRange, type TimeRange } from "./time-range-picker"
+import { sinceFromTimeRange, untilFromTimeRange, type TimeRange, type CustomRange } from "./time-range-picker"
 
 export interface BucketRange {
   fromMs: number
@@ -16,6 +16,8 @@ interface LogsHistogramProps {
   entries: JournalEntry[]
   /** Active time range — defines the histogram window. */
   timeRange?: TimeRange
+  /** Custom [from, to] window when timeRange === "custom". */
+  customRange?: CustomRange | null
   /** Currently-selected bucket — highlighted + drives drill-down filtering in the parent. */
   selected?: BucketRange | null
   /** Click-to-drill: emit bucket on click, null when user clears. */
@@ -51,13 +53,14 @@ const BUCKET_COUNT = 60
 export function LogsHistogram({
   entries,
   timeRange,
+  customRange,
   selected,
   onSelect,
   height = 64,
 }: LogsHistogramProps) {
   const { data, fromMs: windowFrom, toMs: windowTo } = useMemo(() => {
-    return computeBuckets(entries, timeRange, selected)
-  }, [entries, timeRange, selected])
+    return computeBuckets(entries, timeRange, customRange, selected)
+  }, [entries, timeRange, customRange, selected])
 
   const totalEvents = data.reduce((s, b) => s + b.total, 0)
 
@@ -155,6 +158,7 @@ export function LogsHistogram({
 function computeBuckets(
   entries: JournalEntry[],
   timeRange: TimeRange | undefined,
+  customRange: CustomRange | null | undefined,
   selected: BucketRange | null | undefined,
 ): { data: Bucket[]; fromMs: number; toMs: number } {
   const now = Date.now()
@@ -162,8 +166,9 @@ function computeBuckets(
   let toMs: number = now
 
   if (timeRange) {
-    const since = sinceFromTimeRange(timeRange)
+    const since = sinceFromTimeRange(timeRange, customRange)
     fromMs = since ? new Date(since).getTime() : computeFromEntries(entries, now).fromMs
+    toMs = untilFromTimeRange(timeRange, customRange)
   } else {
     const inferred = computeFromEntries(entries, now)
     fromMs = inferred.fromMs
@@ -192,7 +197,7 @@ function computeBuckets(
   }
 
   for (const e of entries) {
-    const ts = new Date(e.ts).getTime()
+    const ts = tsOf(e)
     if (Number.isNaN(ts) || ts < fromMs || ts > toMs) continue
     const idx = Math.min(BUCKET_COUNT - 1, Math.floor((ts - fromMs) / bucketMs))
     const sev = severityOf(e.severity)
@@ -203,6 +208,10 @@ function computeBuckets(
   return { data: buckets, fromMs, toMs }
 }
 
+function tsOf(e: JournalEntry): number {
+  return (e as JournalEntry & { _tsMs?: number })._tsMs ?? new Date(e.ts).getTime()
+}
+
 function computeFromEntries(entries: JournalEntry[], now: number): { fromMs: number; toMs: number } {
   if (entries.length === 0) {
     return { fromMs: now - 15 * 60 * 1000, toMs: now }
@@ -210,7 +219,7 @@ function computeFromEntries(entries: JournalEntry[], now: number): { fromMs: num
   let min = Infinity
   let max = -Infinity
   for (const e of entries) {
-    const t = new Date(e.ts).getTime()
+    const t = tsOf(e)
     if (Number.isNaN(t)) continue
     if (t < min) min = t
     if (t > max) max = t

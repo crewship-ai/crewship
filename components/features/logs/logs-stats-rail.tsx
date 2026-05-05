@@ -12,13 +12,15 @@ import {
 interface LogsStatsRailProps {
   /** All entries currently visible (after filters). */
   entries: JournalEntry[]
+  /** id → display name lookup for resolving UUIDs. */
+  agentLookup?: Record<string, string>
 }
 
 /**
  * Right-side stats rail — derived from currently-visible entries.
  * Mirrors the Grafana Logs panel "metrics" sidebar.
  */
-export function LogsStatsRail({ entries }: LogsStatsRailProps) {
+export function LogsStatsRail({ entries, agentLookup }: LogsStatsRailProps) {
   const stats = useMemo(() => deriveStats(entries), [entries])
 
   return (
@@ -71,7 +73,8 @@ export function LogsStatsRail({ entries }: LogsStatsRailProps) {
             {stats.topAgents.map((row) => (
               <BarRow
                 key={row.agent}
-                label={row.agent}
+                label={agentLookup?.[row.agent] ?? shortenId(row.agent)}
+                title={row.agent}
                 value={row.count}
                 total={stats.maxAgentCount}
                 color="#94a3b8"
@@ -109,11 +112,13 @@ function StatCard({ title, children }: { title: string; children: React.ReactNod
 
 function BarRow({
   label,
+  title,
   value,
   total,
   color,
 }: {
   label: string
+  title?: string
   value: number
   total: number
   color: string
@@ -126,7 +131,7 @@ function BarRow({
           className="inline-block h-2 w-2 rounded-sm shrink-0"
           style={{ background: color }}
         />
-        <span className="flex-1 truncate text-foreground/85" title={label}>
+        <span className="flex-1 truncate text-foreground/85" title={title ?? label}>
           {label}
         </span>
         <span className="tabular-nums text-muted-foreground/85">{value}</span>
@@ -140,6 +145,12 @@ function BarRow({
 
 function Empty() {
   return <div className="text-[11px] text-muted-foreground/60 italic">—</div>
+}
+
+/** Shorten an opaque id for display when no lookup name is available. */
+function shortenId(id: string): string {
+  if (id.length <= 12) return id
+  return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
 interface DerivedStats {
@@ -163,7 +174,8 @@ function deriveStats(entries: JournalEntry[]): DerivedStats {
     sev[severityOf(e.severity)] += 1
     types.set(e.entry_type, (types.get(e.entry_type) ?? 0) + 1)
     if (e.agent_id) agents.set(e.agent_id, (agents.get(e.agent_id) ?? 0) + 1)
-    const t = new Date(e.ts).getTime()
+    // Annotated entries carry _tsMs already; otherwise fall back to parse.
+    const t = (e as JournalEntry & { _tsMs?: number })._tsMs ?? new Date(e.ts).getTime()
     if (!Number.isNaN(t) && now - t <= 60_000) last60s += 1
   }
 

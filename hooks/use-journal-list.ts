@@ -9,6 +9,12 @@ interface UseJournalListOptions {
   /** Page size; backend caps at 500. */
   limit?: number
   enabled?: boolean
+  /**
+   * Cap the in-memory entries buffer. When set, `prependLive` trims the
+   * tail past `maxEntries` so a chatty SSE stream doesn't grow memory
+   * unbounded. Pagination via `loadMore` ignores the cap (user-driven).
+   */
+  maxEntries?: number
 }
 
 interface UseJournalListResult {
@@ -31,7 +37,7 @@ interface UseJournalListResult {
  * `paramsKey` changes rather than requiring callers to remount.
  */
 export function useJournalList(opts: UseJournalListOptions): UseJournalListResult {
-  const { workspaceId, params, limit = 100, enabled = true } = opts
+  const { workspaceId, params, limit = 100, enabled = true, maxEntries } = opts
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -130,9 +136,11 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
   const prependLive = useCallback((entry: JournalEntry) => {
     setEntries((prev) => {
       if (prev.some((e) => e.id === entry.id)) return prev
-      return [entry, ...prev]
+      const next = [entry, ...prev]
+      if (maxEntries && next.length > maxEntries) next.length = maxEntries
+      return next
     })
-  }, [])
+  }, [maxEntries])
 
   useEffect(() => {
     if (!enabled || !workspaceId) {

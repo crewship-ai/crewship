@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select"
 import { SEVERITY_COLOR } from "@/lib/journal-style"
 import type { JournalSeverity } from "@/lib/types/journal"
-import { TimeRangePicker, type TimeRange } from "./time-range-picker"
+import { TimeRangePicker, type TimeRange, type CustomRange } from "./time-range-picker"
 
 export type SeverityFilter = "all" | JournalSeverity
 
@@ -39,6 +39,8 @@ export interface ScopeControl {
 interface LogsToolbarProps {
   query: string
   onQueryChange: (q: string) => void
+  /** Imperative focus handle so the panel can wire `/` shortcut. */
+  searchInputRef?: React.RefObject<HTMLInputElement | null>
   severity: SeverityFilter
   onSeverityChange: (s: SeverityFilter) => void
   counts: SeverityCounts
@@ -57,6 +59,8 @@ interface LogsToolbarProps {
   // Optional time range — when provided renders a picker in the toolbar.
   timeRange?: TimeRange
   onTimeRangeChange?: (r: TimeRange) => void
+  customRange?: CustomRange | null
+  onCustomRangeChange?: (r: CustomRange) => void
 
   // Optional scope selectors — when provided renders selects in the toolbar.
   crewScope?: ScopeControl
@@ -72,6 +76,7 @@ const SEV_ORDER: SeverityFilter[] = ["all", "info", "notice", "warn", "error"]
 export function LogsToolbar({
   query,
   onQueryChange,
+  searchInputRef,
   severity,
   onSeverityChange,
   counts,
@@ -88,6 +93,8 @@ export function LogsToolbar({
   onExport,
   timeRange,
   onTimeRangeChange,
+  customRange,
+  onCustomRangeChange,
   crewScope,
   agentScope,
   onRefresh,
@@ -99,9 +106,10 @@ export function LogsToolbar({
       <div className="relative flex-1 min-w-[240px] max-w-[420px]">
         <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
+          ref={searchInputRef}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search   /regex/   path:/home/agent   keeper.decision"
+          placeholder="Search   /regex/   path:/home/agent   keeper.decision   (/ to focus)"
           className="h-7 pl-7 pr-6 text-[12px] font-mono"
         />
         {query && (
@@ -118,7 +126,12 @@ export function LogsToolbar({
 
       {/* time range */}
       {timeRange && onTimeRangeChange && (
-        <TimeRangePicker value={timeRange} onChange={onTimeRangeChange} />
+        <TimeRangePicker
+          value={timeRange}
+          onChange={onTimeRangeChange}
+          customRange={customRange}
+          onCustomRangeChange={onCustomRangeChange}
+        />
       )}
 
       {/* scope: crew */}

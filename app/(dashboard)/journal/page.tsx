@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Activity,
   BarChart3,
@@ -18,11 +18,14 @@ import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
-import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
 import { RunsView } from "@/components/features/journal/runs-view"
-import { LogsPanel } from "@/components/features/crows-nest/logs-panel"
-import { sinceFromTimeRange, type TimeRange } from "@/components/features/crows-nest/time-range-picker"
-import type { ScopeOption } from "@/components/features/crows-nest/logs-toolbar"
+import { LogsPanel } from "@/components/features/logs/logs-panel"
+import { ResourcesStrip } from "@/components/features/logs/resources-strip"
+import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
+import type { ScopeOption } from "@/components/features/logs/logs-toolbar"
+
+/** SSE buffer cap — prevents unbounded growth on a chatty workspace. */
+const JOURNAL_MAX_ENTRIES = 1000
 
 interface CrewSummary { id: string; name: string }
 interface AgentSummary { id: string; name: string; crew_id?: string | null }
@@ -43,22 +46,37 @@ const JOURNAL_TABS: Array<{ id: JournalTab; label: string; icon: typeof ListOrde
  */
 export default function JournalPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   // Filter state — lifted from the page so URL/deeplink hydration is
   // trivial and so the LogsPanel toolbar can drive the backend query.
   const initialTimeRange = useMemo<TimeRange>(() => {
     const t = searchParams.get("time")
-    return (t === "5m" || t === "15m" || t === "1h" || t === "24h" || t === "7d" || t === "30d" || t === "all")
+    return (t === "5m" || t === "15m" || t === "1h" || t === "24h" || t === "7d" || t === "30d" || t === "all" || t === "custom")
       ? (t as TimeRange)
       : "24h"
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const initialCustomRange = useMemo<CustomRange | null>(() => {
+    const f = Number(searchParams.get("from"))
+    const t = Number(searchParams.get("to"))
+    if (Number.isFinite(f) && Number.isFinite(t) && t > f) return { fromMs: f, toMs: t }
+    return null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange)
+  const [customRange, setCustomRange] = useState<CustomRange | null>(initialCustomRange)
   const [crewId, setCrewId] = useState<string>(() => searchParams.get("crew_id") ?? "")
   const [agentId, setAgentId] = useState<string>(() => searchParams.get("agent_id") ?? "")
   const [serverQuery, setServerQuery] = useState<string>("")
+  // Live-tail state lifted here so we can also pause SSE prepend, not
+  // just the auto-scroll. When `live` is false the user explicitly
+  // froze the list — incoming entries get dropped on the floor.
+  const [live, setLive] = useState(true)
 
   // Initial tab from `?tab=runs`. Unknown values fall back to timeline.
   const initialTab = useMemo<JournalTab>(() => {
@@ -123,27 +141,67 @@ export default function JournalPage() {
     setAgentId("")
   }, [])
 
+  // id → name lookup so the LogsPanel stats rail can render "viktor"
+  // instead of a UUID.
+  const agentLookup = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {}
+    for (const a of agents) out[a.id] = a.name
+    return out
+  }, [agents])
+
+  // Deeplink — mirror filter state into URL search params on change so
+  // the user can share / bookmark a specific view. Uses replace() to
+  // avoid polluting browser history on every keystroke.
+  useEffect(() => {
+    const sp = new URLSearchParams()
+    if (timeRange !== "24h") sp.set("time", timeRange)
+    if (timeRange === "custom" && customRange) {
+      sp.set("from", String(customRange.fromMs))
+      sp.set("to", String(customRange.toMs))
+    }
+    if (crewId) sp.set("crew_id", crewId)
+    if (agentId) sp.set("agent_id", agentId)
+    if (activeTab !== "timeline") sp.set("tab", activeTab)
+    const qs = sp.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [timeRange, customRange, crewId, agentId, activeTab, router, pathname])
+
   // Apply UI filters to backend query params. Severity / types stay
   // client-side via LogsPanel — server returns all and the panel
   // narrows the rendered slice. The `q` param hits FTS5 server-side.
   const queryParams = useMemo<Record<string, string | undefined>>(() => {
-    const since = sinceFromTimeRange(timeRange)
+    const since = sinceFromTimeRange(timeRange, customRange)
+    const until = timeRange === "custom" && customRange
+      ? new Date(customRange.toMs).toISOString()
+      : undefined
     return {
       crew_id: crewId || undefined,
       agent_id: agentId || undefined,
       q: serverQuery.trim() || undefined,
       since,
+      until,
     }
-  }, [timeRange, crewId, agentId, serverQuery])
+  }, [timeRange, customRange, crewId, agentId, serverQuery])
 
   // Only the Timeline tab consumes the journal list + SSE stream. Runs
   // and Stats render from their own data sources.
   const timelineEnabled = !wsLoading && activeTab === "timeline"
-  const { entries, nextCursor, loading, loadingMore, refresh, loadMore, prependLive } =
-    useJournalList({ workspaceId, params: queryParams, enabled: timelineEnabled })
+  const { entries, nextCursor, loading, loadingMore, error, refresh, loadMore, prependLive } =
+    useJournalList({
+      workspaceId,
+      params: queryParams,
+      enabled: timelineEnabled,
+      maxEntries: JOURNAL_MAX_ENTRIES,
+    })
+
+  // The live ref keeps the latest pause state in scope for the SSE
+  // callback without retriggering the stream subscription on toggle.
+  const liveRef = useRef(live)
+  useEffect(() => { liveRef.current = live }, [live])
 
   const handleLive = useCallback(
     (entry: Parameters<typeof prependLive>[0]) => {
+      if (!liveRef.current) return
       prependLive(entry)
     },
     [prependLive],
@@ -159,8 +217,7 @@ export default function JournalPage() {
   const handleLoadMore = useCallback(() => { void loadMore() }, [loadMore])
 
   return (
-    <JournalLookupProvider workspaceId={workspaceId}>
-      <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
         {/* ---- Header strip ---- */}
         <div className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-3 gap-2">
           <BookOpen className="h-3.5 w-3.5 text-foreground/60" />
@@ -199,20 +256,32 @@ export default function JournalPage() {
 
         {/* ---- Tab content ---- */}
         {activeTab === "timeline" && (
-          <div className="flex-1 min-h-0">
-            <LogsPanel
-              entries={entries}
-              timeRange={timeRange}
-              onTimeRangeChange={setTimeRange}
-              crewScope={{ value: crewId, options: crews, onChange: onCrewChange }}
-              agentScope={{ value: agentId, options: agents, onChange: setAgentId }}
-              onServerSearch={setServerQuery}
-              onRefresh={handleRefresh}
-              loading={loading}
-              hasMore={Boolean(nextCursor)}
-              loadingMore={loadingMore}
-              onLoadMore={handleLoadMore}
-            />
+          <div className="flex-1 min-h-0 flex flex-col">
+            {/* Resources strip is per-container — only useful when a
+                single crew is selected. Hide for "All crews" since the
+                metrics would mix across containers. */}
+            {crewId && <ResourcesStrip entries={entries} />}
+            <div className="flex-1 min-h-0">
+              <LogsPanel
+                entries={entries}
+                timeRange={timeRange}
+                onTimeRangeChange={setTimeRange}
+                customRange={customRange}
+                onCustomRangeChange={setCustomRange}
+                crewScope={{ value: crewId, options: crews, onChange: onCrewChange }}
+                agentScope={{ value: agentId, options: agents, onChange: setAgentId }}
+                agentLookup={agentLookup}
+                onServerSearch={setServerQuery}
+                onRefresh={handleRefresh}
+                loading={loading}
+                error={error}
+                live={live}
+                onLiveChange={setLive}
+                hasMore={Boolean(nextCursor)}
+                loadingMore={loadingMore}
+                onLoadMore={handleLoadMore}
+              />
+            </div>
           </div>
         )}
 
@@ -245,7 +314,6 @@ export default function JournalPage() {
           </div>
         )}
       </div>
-    </JournalLookupProvider>
   )
 }
 

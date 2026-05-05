@@ -33,8 +33,8 @@ import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { NetworkPanel } from "@/components/features/crows-nest/network-panel"
 import { FilesystemPanel } from "@/components/features/crows-nest/filesystem-panel"
-import { ResourcesStrip } from "@/components/features/crows-nest/resources-strip"
-import { LogsPanel } from "@/components/features/crows-nest/logs-panel"
+import { ResourcesStrip } from "@/components/features/logs/resources-strip"
+import { LogsPanel } from "@/components/features/logs/logs-panel"
 import type { JournalEntry } from "@/lib/types/journal"
 import { useRouter } from "next/navigation"
 
@@ -117,7 +117,7 @@ function useCrewIdFromUrl(): string | null {
  *
  * Layout: top strip → resources strip → tabs (Logs / Terminal / Network /
  * Filesystem). The Logs tab is a dedicated Grafana Explore-style log
- * viewer — see `components/features/crows-nest/logs-panel.tsx`.
+ * viewer — see `components/features/logs/logs-panel.tsx`.
  */
 export default function CrowsNestCrewPage() {
   const crewId = useCrewIdFromUrl()
@@ -128,6 +128,11 @@ export default function CrowsNestCrewPage() {
   const [crew, setCrew] = useState<Crew | null>(null)
   const [crewLoading, setCrewLoading] = useState(true)
   const [allCrews, setAllCrews] = useState<Crew[]>([])
+  // Live-tail state — when false, SSE prepends are dropped so the user
+  // can take the list "off the rails" while inspecting older entries.
+  const [live, setLive] = useState(true)
+  const liveRef = useRef(live)
+  useEffect(() => { liveRef.current = live }, [live])
 
   const queryParams = useMemo(
     () => (crewId ? { crew_id: crewId, entry_type: OBSERVABILITY_TYPES } : undefined),
@@ -138,11 +143,12 @@ export default function CrowsNestCrewPage() {
   // entries. `prependLive` dedupes so we never double-render. Both hooks
   // stay disabled until the crewId is resolved from the URL so we don't
   // fire a fetch with crew_id="_" against the prerendered placeholder.
-  const { entries: historyEntries, prependLive } = useJournalList({
+  const { entries: historyEntries, error: listError, refresh, prependLive } = useJournalList({
     workspaceId,
     params: queryParams,
     limit: 200,
     enabled: !wsLoading && !!workspaceId && !!crewId,
+    maxEntries: 1000,
   })
 
   // Keep a separate, time-capped buffer so the resource sparklines only see a
@@ -151,6 +157,7 @@ export default function CrowsNestCrewPage() {
   const liveEntriesRef = useRef<JournalEntry[]>([])
   const handleLive = useCallback(
     (entry: JournalEntry) => {
+      if (!liveRef.current) return
       prependLive(entry)
       const next = [entry, ...liveEntriesRef.current].slice(0, 500)
       liveEntriesRef.current = next
@@ -310,7 +317,13 @@ export default function CrowsNestCrewPage() {
         </TabsList>
 
         <TabsContent value="logs" className="flex-1 min-h-0 mt-0">
-          <LogsPanel entries={mergedEntries} />
+          <LogsPanel
+            entries={mergedEntries}
+            error={listError}
+            onRefresh={refresh}
+            live={live}
+            onLiveChange={setLive}
+          />
         </TabsContent>
 
         <TabsContent value="terminal" className="flex-1 min-h-0 mt-0 p-3">
