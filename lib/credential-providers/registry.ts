@@ -90,7 +90,13 @@ export type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
 export interface BrandEntry {
   key: string         // stable upper-snake id, also stored in credentials.provider
   label: string       // display name
-  hex: string         // official brand colour
+  hex: string         // official brand colour (used on light surfaces)
+  // darkHex overrides hex on dark surfaces when the official brand is
+  // black/near-black and would otherwise render invisible against the
+  // app's dark theme. Vercel's own site flips its mark to white on
+  // dark backgrounds for the same reason. Optional — when omitted the
+  // canonical hex is used everywhere.
+  darkHex?: string
   Icon: IconComponent
   category: BrandCategory
   keywords?: string[] // additional name-substring matches (lowercase)
@@ -107,6 +113,13 @@ export interface BrandEntry {
   // Brands without cli are passive secrets — encrypt, store, hand to
   // the agent as an env var, no further interaction.
   cli?: boolean
+}
+
+// brandColor returns the hex to use for rendering. The app is dark by
+// default, so any black brand picks up its darkHex automatically; if a
+// brand has no darkHex its hex is used as-is.
+export function brandColor(b: BrandEntry): string {
+  return b.darkHex ?? b.hex
 }
 
 export type BrandCategory =
@@ -140,35 +153,35 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "GOOGLE", label: "Google AI / Gemini", hex: "#4285F4", Icon: SiGooglegemini as IconComponent, category: "AI", keywords: ["google", "gemini", "googleai", "vertex"], prefixes: ["AIza"], cli: true },
   { key: "HUGGINGFACE", label: "Hugging Face", hex: "#FFD21E", Icon: SiHuggingface as IconComponent, category: "AI", keywords: ["huggingface", "hf_"], prefixes: ["hf_"] },
   { key: "PERPLEXITY", label: "Perplexity", hex: "#1FB8CD", Icon: SiPerplexity as IconComponent, category: "AI", keywords: ["perplexity", "pplx"], prefixes: ["pplx-"] },
-  { key: "REPLICATE", label: "Replicate", hex: "#000000", Icon: SiReplicate as IconComponent, category: "AI", keywords: ["replicate"], prefixes: ["r8_"] },
-  { key: "OLLAMA", label: "Ollama", hex: "#000000", Icon: SiOllama as IconComponent, category: "AI", keywords: ["ollama"] },
-  { key: "ELEVENLABS", label: "ElevenLabs", hex: "#000000", Icon: SiElevenlabs as IconComponent, category: "AI", keywords: ["elevenlabs", "eleven_labs", "11labs"] },
-  { key: "CURSOR", label: "Cursor", hex: "#000000", Icon: CursorIcon, category: "AI", keywords: ["cursor"], cli: true },
-  { key: "FACTORY", label: "Factory Droid", hex: "#000000", Icon: FactoryIcon, category: "AI", keywords: ["factory", "droid"], cli: true },
+  { key: "REPLICATE", label: "Replicate", hex: "#000000", darkHex: "#FFFFFF", Icon: SiReplicate as IconComponent, category: "AI", keywords: ["replicate"], prefixes: ["r8_"] },
+  { key: "OLLAMA", label: "Ollama", hex: "#000000", darkHex: "#FFFFFF", Icon: SiOllama as IconComponent, category: "AI", keywords: ["ollama"] },
+  { key: "ELEVENLABS", label: "ElevenLabs", hex: "#000000", darkHex: "#FFFFFF", Icon: SiElevenlabs as IconComponent, category: "AI", keywords: ["elevenlabs", "eleven_labs", "11labs"] },
+  { key: "CURSOR", label: "Cursor", hex: "#000000", darkHex: "#FFFFFF", Icon: CursorIcon, category: "AI", keywords: ["cursor"], cli: true },
+  { key: "FACTORY", label: "Factory Droid", hex: "#000000", darkHex: "#FFFFFF", Icon: FactoryIcon, category: "AI", keywords: ["factory", "droid"], cli: true },
 
   // ─── Cloud / infra ──────────────────────────────────────────────
   { key: "AWS", label: "AWS", hex: "#FF9900", Icon: AWSIcon, category: "Cloud", keywords: ["aws", "amazon"], prefixes: ["AKIA", "ASIA"] },
   { key: "GCP", label: "Google Cloud", hex: "#4285F4", Icon: SiGooglecloud as IconComponent, category: "Cloud", keywords: ["gcp", "googlecloud", "gcloud"] },
   { key: "CLOUDFLARE", label: "Cloudflare", hex: "#F38020", Icon: SiCloudflare as IconComponent, category: "Cloud", keywords: ["cloudflare", "cf_"] },
-  { key: "VERCEL", label: "Vercel", hex: "#000000", Icon: SiVercel as IconComponent, category: "Cloud", keywords: ["vercel"] },
+  { key: "VERCEL", label: "Vercel", hex: "#000000", darkHex: "#FFFFFF", Icon: SiVercel as IconComponent, category: "Cloud", keywords: ["vercel"] },
   { key: "NETLIFY", label: "Netlify", hex: "#00C7B7", Icon: SiNetlify as IconComponent, category: "Cloud", keywords: ["netlify"] },
-  { key: "RAILWAY", label: "Railway", hex: "#0B0D0E", Icon: SiRailway as IconComponent, category: "Cloud", keywords: ["railway"] },
+  { key: "RAILWAY", label: "Railway", hex: "#0B0D0E", darkHex: "#FFFFFF", Icon: SiRailway as IconComponent, category: "Cloud", keywords: ["railway"] },
   { key: "RENDER", label: "Render", hex: "#46E3B7", Icon: SiRender as IconComponent, category: "Cloud", keywords: ["render"] },
   { key: "DIGITALOCEAN", label: "DigitalOcean", hex: "#0080FF", Icon: SiDigitalocean as IconComponent, category: "Cloud", keywords: ["digitalocean", "do_"] },
   { key: "HEROKU", label: "Heroku", hex: "#430098", Icon: SiHeroku as IconComponent, category: "Cloud", keywords: ["heroku"] },
   { key: "SUPABASE", label: "Supabase", hex: "#3ECF8E", Icon: SiSupabase as IconComponent, category: "Cloud", keywords: ["supabase"] },
   { key: "FIREBASE", label: "Firebase", hex: "#DD2C00", Icon: SiFirebase as IconComponent, category: "Cloud", keywords: ["firebase", "fcm"] },
-  { key: "PLANETSCALE", label: "PlanetScale", hex: "#000000", Icon: SiPlanetscale as IconComponent, category: "Cloud", keywords: ["planetscale"] },
+  { key: "PLANETSCALE", label: "PlanetScale", hex: "#000000", darkHex: "#FFFFFF", Icon: SiPlanetscale as IconComponent, category: "Cloud", keywords: ["planetscale"] },
 
   // ─── Source control / dev ───────────────────────────────────────
   { key: "GITHUB", label: "GitHub", hex: "#181717", Icon: SiGithub as IconComponent, category: "Source", keywords: ["github", "gh_"], prefixes: ["ghp_", "gho_", "ghs_", "github_pat_", "ghu_"] },
   { key: "GITLAB", label: "GitLab", hex: "#FC6D26", Icon: SiGitlab as IconComponent, category: "Source", keywords: ["gitlab", "gl_"], prefixes: ["glpat-"] },
   { key: "BITBUCKET", label: "Bitbucket", hex: "#0052CC", Icon: SiBitbucket as IconComponent, category: "Source", keywords: ["bitbucket"] },
   { key: "CODEBERG", label: "Codeberg", hex: "#2185D0", Icon: SiCodeberg as IconComponent, category: "Source", keywords: ["codeberg"] },
-  { key: "JETBRAINS", label: "JetBrains", hex: "#000000", Icon: SiJetbrains as IconComponent, category: "Source", keywords: ["jetbrains", "intellij", "pycharm", "webstorm"] },
+  { key: "JETBRAINS", label: "JetBrains", hex: "#000000", darkHex: "#FFFFFF", Icon: SiJetbrains as IconComponent, category: "Source", keywords: ["jetbrains", "intellij", "pycharm", "webstorm"] },
   { key: "REPLIT", label: "Replit", hex: "#F26207", Icon: SiReplit as IconComponent, category: "Source", keywords: ["replit"] },
   { key: "GITPOD", label: "Gitpod", hex: "#FFAE33", Icon: SiGitpod as IconComponent, category: "Source", keywords: ["gitpod"] },
-  { key: "CODESANDBOX", label: "CodeSandbox", hex: "#151515", Icon: SiCodesandbox as IconComponent, category: "Source", keywords: ["codesandbox"] },
+  { key: "CODESANDBOX", label: "CodeSandbox", hex: "#151515", darkHex: "#FFFFFF", Icon: SiCodesandbox as IconComponent, category: "Source", keywords: ["codesandbox"] },
 
   // ─── Communication ──────────────────────────────────────────────
   { key: "SLACK", label: "Slack", hex: "#4A154B", Icon: SiSlack as IconComponent, category: "Comms", keywords: ["slack"], prefixes: ["xoxb-", "xoxp-", "xoxa-"] },
@@ -179,13 +192,13 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "TWILIO", label: "Twilio", hex: "#F22F46", Icon: SiTwilio as IconComponent, category: "Comms", keywords: ["twilio"] },
   { key: "SENDGRID", label: "SendGrid", hex: "#1A82E2", Icon: SiSendgrid as IconComponent, category: "Comms", keywords: ["sendgrid"], prefixes: ["SG."] },
   { key: "MAILGUN", label: "Mailgun", hex: "#F06B66", Icon: SiMailgun as IconComponent, category: "Comms", keywords: ["mailgun"] },
-  { key: "RESEND", label: "Resend", hex: "#000000", Icon: SiResend as IconComponent, category: "Comms", keywords: ["resend"], prefixes: ["re_"] },
+  { key: "RESEND", label: "Resend", hex: "#000000", darkHex: "#FFFFFF", Icon: SiResend as IconComponent, category: "Comms", keywords: ["resend"], prefixes: ["re_"] },
   { key: "MAILCHIMP", label: "Mailchimp", hex: "#FFE01B", Icon: SiMailchimp as IconComponent, category: "Comms", keywords: ["mailchimp"] },
   { key: "ZOOM", label: "Zoom", hex: "#0B5CFF", Icon: SiZoom as IconComponent, category: "Comms", keywords: ["zoom"] },
   { key: "LINE", label: "LINE", hex: "#00C300", Icon: SiLine as IconComponent, category: "Comms", keywords: ["line"] },
 
   // ─── Productivity / docs ────────────────────────────────────────
-  { key: "NOTION", label: "Notion", hex: "#000000", Icon: SiNotion as IconComponent, category: "Productivity", keywords: ["notion"], prefixes: ["secret_", "ntn_"] },
+  { key: "NOTION", label: "Notion", hex: "#000000", darkHex: "#FFFFFF", Icon: SiNotion as IconComponent, category: "Productivity", keywords: ["notion"], prefixes: ["secret_", "ntn_"] },
   { key: "LINEAR", label: "Linear", hex: "#5E6AD2", Icon: SiLinear as IconComponent, category: "Productivity", keywords: ["linear", "lin_"], prefixes: ["lin_api_", "lin_oauth_"] },
   { key: "ASANA", label: "Asana", hex: "#F06A6A", Icon: SiAsana as IconComponent, category: "Productivity", keywords: ["asana"] },
   { key: "TRELLO", label: "Trello", hex: "#0052CC", Icon: SiTrello as IconComponent, category: "Productivity", keywords: ["trello"] },
@@ -193,12 +206,12 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "ATLASSIAN", label: "Atlassian", hex: "#0052CC", Icon: SiAtlassian as IconComponent, category: "Productivity", keywords: ["atlassian"] },
   { key: "AIRTABLE", label: "Airtable", hex: "#18BFFF", Icon: SiAirtable as IconComponent, category: "Productivity", keywords: ["airtable"] },
   { key: "CODA", label: "Coda", hex: "#F46A54", Icon: SiCoda as IconComponent, category: "Productivity", keywords: ["coda"] },
-  { key: "CONFLUENCE", label: "Confluence", hex: "#172B4D", Icon: SiConfluence as IconComponent, category: "Productivity", keywords: ["confluence"] },
+  { key: "CONFLUENCE", label: "Confluence", hex: "#172B4D", darkHex: "#4C9AFF", Icon: SiConfluence as IconComponent, category: "Productivity", keywords: ["confluence"] },
   { key: "MIRO", label: "Miro", hex: "#050038", Icon: SiMiro as IconComponent, category: "Productivity", keywords: ["miro"] },
   { key: "FIGMA", label: "Figma", hex: "#F24E1E", Icon: SiFigma as IconComponent, category: "Productivity", keywords: ["figma"] },
   { key: "TODOIST", label: "Todoist", hex: "#E44332", Icon: SiTodoist as IconComponent, category: "Productivity", keywords: ["todoist"] },
   { key: "EVERNOTE", label: "Evernote", hex: "#00A82D", Icon: SiEvernote as IconComponent, category: "Productivity", keywords: ["evernote"] },
-  { key: "BASECAMP", label: "Basecamp", hex: "#1D2D35", Icon: SiBasecamp as IconComponent, category: "Productivity", keywords: ["basecamp"] },
+  { key: "BASECAMP", label: "Basecamp", hex: "#1D2D35", darkHex: "#FFFFFF", Icon: SiBasecamp as IconComponent, category: "Productivity", keywords: ["basecamp"] },
   { key: "CLICKUP", label: "ClickUp", hex: "#7B68EE", Icon: SiClickup as IconComponent, category: "Productivity", keywords: ["clickup"] },
   { key: "OBSIDIAN", label: "Obsidian", hex: "#7C3AED", Icon: SiObsidian as IconComponent, category: "Productivity", keywords: ["obsidian"] },
   { key: "CALENDLY", label: "Calendly", hex: "#006BFF", Icon: SiCalendly as IconComponent, category: "Productivity", keywords: ["calendly"] },
@@ -209,7 +222,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "ONEPASSWORD", label: "1Password", hex: "#0572EC", Icon: Si1Password as IconComponent, category: "Auth", keywords: ["1password", "onepassword"], prefixes: ["ops_"] },
   { key: "LASTPASS", label: "LastPass", hex: "#D32D27", Icon: SiLastpass as IconComponent, category: "Auth", keywords: ["lastpass"] },
   { key: "BITWARDEN", label: "Bitwarden", hex: "#175DDC", Icon: SiBitwarden as IconComponent, category: "Auth", keywords: ["bitwarden"] },
-  { key: "DASHLANE", label: "Dashlane", hex: "#0E353D", Icon: SiDashlane as IconComponent, category: "Auth", keywords: ["dashlane"] },
+  { key: "DASHLANE", label: "Dashlane", hex: "#0E353D", darkHex: "#22D3EE", Icon: SiDashlane as IconComponent, category: "Auth", keywords: ["dashlane"] },
   { key: "CLERK", label: "Clerk", hex: "#6C47FF", Icon: SiClerk as IconComponent, category: "Auth", keywords: ["clerk"], prefixes: ["sk_test_clerk_", "pk_test_clerk_"] },
 
   // ─── Payments ───────────────────────────────────────────────────
@@ -255,7 +268,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "PULUMI", label: "Pulumi", hex: "#8A3391", Icon: SiPulumi as IconComponent, category: "DevOps", keywords: ["pulumi"], prefixes: ["pul-"] },
   { key: "POSTMAN", label: "Postman", hex: "#FF6C37", Icon: SiPostman as IconComponent, category: "DevOps", keywords: ["postman"], prefixes: ["PMAK-"] },
   { key: "INSOMNIA", label: "Insomnia", hex: "#4000BF", Icon: SiInsomnia as IconComponent, category: "DevOps", keywords: ["insomnia"] },
-  { key: "NGROK", label: "ngrok", hex: "#1F1E37", Icon: SiNgrok as IconComponent, category: "DevOps", keywords: ["ngrok"] },
+  { key: "NGROK", label: "ngrok", hex: "#1F1E37", darkHex: "#FFFFFF", Icon: SiNgrok as IconComponent, category: "DevOps", keywords: ["ngrok"] },
   { key: "CYPRESS", label: "Cypress", hex: "#69D3A7", Icon: SiCypress as IconComponent, category: "DevOps", keywords: ["cypress"] },
   { key: "STORYBOOK", label: "Storybook", hex: "#FF4785", Icon: SiStorybook as IconComponent, category: "DevOps", keywords: ["storybook"] },
   { key: "SWAGGER", label: "Swagger / OpenAPI", hex: "#85EA2D", Icon: SiSwagger as IconComponent, category: "DevOps", keywords: ["swagger", "openapi"] },
@@ -273,10 +286,10 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "MYSQL", label: "MySQL", hex: "#4479A1", Icon: SiMysql as IconComponent, category: "Database", keywords: ["mysql"] },
   { key: "MONGODB", label: "MongoDB", hex: "#47A248", Icon: SiMongodb as IconComponent, category: "Database", keywords: ["mongodb", "mongo"] },
   { key: "REDIS", label: "Redis", hex: "#FF4438", Icon: SiRedis as IconComponent, category: "Database", keywords: ["redis"] },
-  { key: "SQLITE", label: "SQLite", hex: "#003B57", Icon: SiSqlite as IconComponent, category: "Database", keywords: ["sqlite"] },
+  { key: "SQLITE", label: "SQLite", hex: "#003B57", darkHex: "#0EA5E9", Icon: SiSqlite as IconComponent, category: "Database", keywords: ["sqlite"] },
   { key: "COUCHBASE", label: "Couchbase", hex: "#EA2328", Icon: SiCouchbase as IconComponent, category: "Database", keywords: ["couchbase"] },
   { key: "COCKROACH", label: "CockroachDB", hex: "#6933FF", Icon: SiCockroachlabs as IconComponent, category: "Database", keywords: ["cockroach"] },
-  { key: "MARIADB", label: "MariaDB", hex: "#003545", Icon: SiMariadb as IconComponent, category: "Database", keywords: ["mariadb"] },
+  { key: "MARIADB", label: "MariaDB", hex: "#003545", darkHex: "#00A0BC", Icon: SiMariadb as IconComponent, category: "Database", keywords: ["mariadb"] },
   { key: "CASSANDRA", label: "Cassandra", hex: "#1287B1", Icon: SiApachecassandra as IconComponent, category: "Database", keywords: ["cassandra"] },
   { key: "SNOWFLAKE", label: "Snowflake", hex: "#29B5E8", Icon: SiSnowflake as IconComponent, category: "Database", keywords: ["snowflake"] },
   { key: "DATABRICKS", label: "Databricks", hex: "#FF3621", Icon: SiDatabricks as IconComponent, category: "Database", keywords: ["databricks"] },
@@ -286,30 +299,30 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "SUBSTACK", label: "Substack", hex: "#FF6719", Icon: SiSubstack as IconComponent, category: "Email", keywords: ["substack"] },
 
   // ─── Social / APIs ──────────────────────────────────────────────
-  { key: "X", label: "X (Twitter)", hex: "#000000", Icon: SiX as IconComponent, category: "Social", keywords: ["twitter", "x.com", "x_"] },
+  { key: "X", label: "X (Twitter)", hex: "#000000", darkHex: "#FFFFFF", Icon: SiX as IconComponent, category: "Social", keywords: ["twitter", "x.com", "x_"] },
   { key: "REDDIT", label: "Reddit", hex: "#FF4500", Icon: SiReddit as IconComponent, category: "Social", keywords: ["reddit"] },
   { key: "YOUTUBE", label: "YouTube", hex: "#FF0000", Icon: SiYoutube as IconComponent, category: "Social", keywords: ["youtube"] },
   { key: "TWITCH", label: "Twitch", hex: "#9146FF", Icon: SiTwitch as IconComponent, category: "Social", keywords: ["twitch"] },
   { key: "FACEBOOK", label: "Facebook / Meta", hex: "#0866FF", Icon: SiFacebook as IconComponent, category: "Social", keywords: ["facebook", "meta", "fb_"] },
   { key: "INSTAGRAM", label: "Instagram", hex: "#E4405F", Icon: SiInstagram as IconComponent, category: "Social", keywords: ["instagram", "ig_"] },
-  { key: "TIKTOK", label: "TikTok", hex: "#000000", Icon: SiTiktok as IconComponent, category: "Social", keywords: ["tiktok"] },
+  { key: "TIKTOK", label: "TikTok", hex: "#000000", darkHex: "#FFFFFF", Icon: SiTiktok as IconComponent, category: "Social", keywords: ["tiktok"] },
   { key: "SPOTIFY", label: "Spotify", hex: "#1ED760", Icon: SiSpotify as IconComponent, category: "Social", keywords: ["spotify"] },
   { key: "PINTEREST", label: "Pinterest", hex: "#BD081C", Icon: SiPinterest as IconComponent, category: "Social", keywords: ["pinterest"] },
 
   // ─── E-commerce ─────────────────────────────────────────────────
-  { key: "BIGCOMMERCE", label: "BigCommerce", hex: "#121118", Icon: SiBigcommerce as IconComponent, category: "Other", keywords: ["bigcommerce"] },
+  { key: "BIGCOMMERCE", label: "BigCommerce", hex: "#121118", darkHex: "#FFFFFF", Icon: SiBigcommerce as IconComponent, category: "Other", keywords: ["bigcommerce"] },
   { key: "ETSY", label: "Etsy", hex: "#F1641E", Icon: SiEtsy as IconComponent, category: "Other", keywords: ["etsy"] },
 
   // ─── Maps / geo ─────────────────────────────────────────────────
   { key: "GMAPS", label: "Google Maps", hex: "#4285F4", Icon: SiGooglemaps as IconComponent, category: "Maps", keywords: ["googlemaps", "maps"] },
-  { key: "MAPBOX", label: "Mapbox", hex: "#000000", Icon: SiMapbox as IconComponent, category: "Maps", keywords: ["mapbox"], prefixes: ["pk.eyJ", "sk.eyJ"] },
+  { key: "MAPBOX", label: "Mapbox", hex: "#000000", darkHex: "#FFFFFF", Icon: SiMapbox as IconComponent, category: "Maps", keywords: ["mapbox"], prefixes: ["pk.eyJ", "sk.eyJ"] },
   { key: "OSM", label: "OpenStreetMap", hex: "#7EBC6F", Icon: SiOpenstreetmap as IconComponent, category: "Maps", keywords: ["openstreetmap", "osm"] },
 
   // ─── ML / data ──────────────────────────────────────────────────
   { key: "TENSORFLOW", label: "TensorFlow", hex: "#FF6F00", Icon: SiTensorflow as IconComponent, category: "ML", keywords: ["tensorflow"] },
   { key: "PYTORCH", label: "PyTorch", hex: "#EE4C2C", Icon: SiPytorch as IconComponent, category: "ML", keywords: ["pytorch"] },
   { key: "PANDAS", label: "Pandas", hex: "#150458", Icon: SiPandas as IconComponent, category: "ML", keywords: ["pandas"] },
-  { key: "NUMPY", label: "NumPy", hex: "#013243", Icon: SiNumpy as IconComponent, category: "ML", keywords: ["numpy"] },
+  { key: "NUMPY", label: "NumPy", hex: "#013243", darkHex: "#4DABCF", Icon: SiNumpy as IconComponent, category: "ML", keywords: ["numpy"] },
   { key: "SKLEARN", label: "scikit-learn", hex: "#F7931E", Icon: SiScikitlearn as IconComponent, category: "ML", keywords: ["scikit", "sklearn"] },
   { key: "KERAS", label: "Keras", hex: "#D00000", Icon: SiKeras as IconComponent, category: "ML", keywords: ["keras"] },
   { key: "MLFLOW", label: "MLflow", hex: "#0194E2", Icon: SiMlflow as IconComponent, category: "ML", keywords: ["mlflow"] },
@@ -326,7 +339,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   // ─── CMS / web ──────────────────────────────────────────────────
   { key: "WEBFLOW", label: "Webflow", hex: "#146EF5", Icon: SiWebflow as IconComponent, category: "Other", keywords: ["webflow"] },
   { key: "WORDPRESS", label: "WordPress", hex: "#21759B", Icon: SiWordpress as IconComponent, category: "Other", keywords: ["wordpress"] },
-  { key: "GHOST", label: "Ghost", hex: "#15171A", Icon: SiGhost as IconComponent, category: "Other", keywords: ["ghost"] },
+  { key: "GHOST", label: "Ghost", hex: "#15171A", darkHex: "#FFFFFF", Icon: SiGhost as IconComponent, category: "Other", keywords: ["ghost"] },
   { key: "CONTENTFUL", label: "Contentful", hex: "#2478CC", Icon: SiContentful as IconComponent, category: "Other", keywords: ["contentful"] },
   { key: "SANITY", label: "Sanity", hex: "#F03E2F", Icon: SiSanity as IconComponent, category: "Other", keywords: ["sanity"] },
   { key: "STRAPI", label: "Strapi", hex: "#4945FF", Icon: SiStrapi as IconComponent, category: "Other", keywords: ["strapi"] },

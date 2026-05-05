@@ -39,7 +39,7 @@ import { RotationDialog } from "@/components/features/credentials/rotation-dialo
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatRelativeTime } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
-import { getBrand } from "@/lib/credential-providers/registry"
+import { getBrand, brandColor } from "@/lib/credential-providers/registry"
 import { cn } from "@/lib/utils"
 
 interface Credential {
@@ -644,7 +644,7 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
         <div className="flex items-center gap-2 min-w-0">
           <BrandIcon
             className="h-4 w-4 shrink-0"
-            style={{ color: brand.hex }}
+            style={{ color: brandColor(brand) }}
             aria-label={brand.label}
           />
           <span className="font-mono text-sm truncate">{cred.name}</span>

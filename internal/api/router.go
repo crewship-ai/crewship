@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
@@ -208,6 +209,12 @@ func (r *Router) Shutdown() {
 	}
 }
 
+// credTestStoredPathRe matches the per-credential test endpoint
+// `/api/v1/credentials/{id}/test` exactly — anchored so a hypothetical
+// future `/credentials/{id}/audit/test` doesn't accidentally fall under
+// the tighter rate limiter as a forward-compat snag.
+var credTestStoredPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/test$`)
+
 // routeWithRateLimiting applies per-IP rate limiting based on the request path.
 
 func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request) {
@@ -228,7 +235,7 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 	// Tighter limit on credential test endpoints — they hit external
 	// provider APIs and could otherwise be used as a free key-validation
 	// oracle for stolen secrets.
-	if path == "/api/v1/credentials/test" || (strings.HasPrefix(path, "/api/v1/credentials/") && strings.HasSuffix(path, "/test")) {
+	if path == "/api/v1/credentials/test" || credTestStoredPathRe.MatchString(path) {
 		r.credTestRateLimitedMux.ServeHTTP(w, req)
 		return
 	}

@@ -896,6 +896,18 @@ CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotati
 	{version: 71, name: "add_credential_tags", sql: `
 ALTER TABLE credentials ADD COLUMN tags TEXT;
 `},
+	// v72 adds a composite index that backs the crew-scoped credential
+	// visibility filter (credentialVisibilityFilter in
+	// internal/api/credentials_loaders.go). The existing
+	// idx_crew_member_user is sufficient for a probe by user_id, but
+	// the EXISTS subquery joins onto credential_crews on crew_id —
+	// having both columns in the same index lets SQLite serve the join
+	// index-only at scale. Acceptable to skip on small workspaces, but
+	// the ordering of the existing single-column indexes already
+	// implies this access pattern, so we add it explicitly.
+	{version: 72, name: "add_crew_members_composite_index", sql: `
+CREATE INDEX IF NOT EXISTS idx_crew_member_user_crew ON crew_members(user_id, crew_id);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

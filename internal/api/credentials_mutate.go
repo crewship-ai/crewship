@@ -51,6 +51,14 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
 	}
+	// Defence in depth: authed middleware should always populate user,
+	// but a future middleware reorder bug should not crash the write
+	// path. Other call sites in this file already guard for nil; mirror
+	// the pattern here.
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
 
 	var req createCredentialRequest
 	if err := readJSON(r, &req); err != nil {
@@ -223,6 +231,9 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// credential first appeared. Outside the create tx — best-effort.
 	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventCreated, "", clientIP(r),
 		map[string]any{"created_by": user.ID, "provider": req.Provider, "type": req.Type}); recErr != nil {
+		// TODO(metrics): when an OpenTelemetry counter is wired into
+		// this package, increment credential_audit_record_failures
+		// here so ops can alarm on lost compliance events.
 		h.logger.Warn("record CREATED audit event", "error", recErr, "credential_id", credID)
 	}
 
@@ -385,7 +396,28 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ub.SetNull("tags")
 		}
-		delete(body, "tags")
+	}
+
+	// security_level is the only typed scalar in `allowed`; mirror the
+	// Create path's 1..3 validation so a PATCH can't smuggle a string
+	// into the INTEGER column (SQLite stores by storage class but won't
+	// reject the type mismatch).
+	if raw, ok := body["security_level"]; ok {
+		var n int
+		switch v := raw.(type) {
+		case float64:
+			n = int(v)
+		case int:
+			n = v
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "security_level must be 1, 2, or 3"})
+			return
+		}
+		if n < 1 || n > 3 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "security_level must be 1, 2, or 3"})
+			return
+		}
+		body["security_level"] = n
 	}
 
 	for jsonKey, col := range allowed {

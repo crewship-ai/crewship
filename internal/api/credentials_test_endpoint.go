@@ -256,9 +256,18 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
 
-	// Crew-scoped visibility: a MEMBER/VIEWER must be allowed to see
-	// the credential before they're allowed to test it. Without this
-	// the FE could leak credential existence by trial-and-error.
+	// Test-stored returns a real-time validity oracle that the audit
+	// tab gates from MEMBER/VIEWER (see AuditTimeline). Keep the
+	// privilege boundary consistent: only roles that can update a
+	// credential may probe its current validity.
+	if !canRole(role, "update") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	// Crew-scoped visibility: even within roles that can update, the
+	// caller must still see the credential. Without this an admin in
+	// workspace A would 200/404 before role-checks otherwise filter.
 	visFilter, visArgs := credentialVisibilityFilter(role, user)
 	args := append([]any{credID, workspaceID}, visArgs...)
 

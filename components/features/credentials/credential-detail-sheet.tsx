@@ -91,6 +91,7 @@ export function CredentialDetailSheet({
   const [showValueDraft, setShowValueDraft] = React.useState(false)
   const [savingValue, setSavingValue] = React.useState(false)
   const [valueSaved, setValueSaved] = React.useState(false)
+  const [valueError, setValueError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (!open || !credential) {
@@ -101,6 +102,7 @@ export function CredentialDetailSheet({
       setValueDraft("")
       setShowValueDraft(false)
       setValueSaved(false)
+      setValueError(null)
     }
   }, [open, credential])
 
@@ -362,6 +364,7 @@ export function CredentialDetailSheet({
                       onClick={async () => {
                         setSavingValue(true)
                         setValueSaved(false)
+                        setValueError(null)
                         try {
                           const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
                             method: "PATCH",
@@ -369,13 +372,25 @@ export function CredentialDetailSheet({
                             body: JSON.stringify({ value: valueDraft }),
                           })
                           if (res.ok) {
+                            // Success — clear draft so plaintext doesn't
+                            // linger in DOM/state.
                             setValueDraft("")
                             setShowValueDraft(false)
                             setValueSaved(true)
                             onRefresh()
+                          } else {
+                            const data = await res.json().catch(() => ({}))
+                            setValueError(typeof data.error === "string" ? data.error : `Request failed (${res.status})`)
                           }
+                        } catch {
+                          setValueError("Network error")
                         } finally {
                           setSavingValue(false)
+                          // Defence-in-depth: even on failure, keep
+                          // plaintext only as long as the input shows
+                          // it. Drafts are gone once the user dismisses
+                          // the error or closes the sheet (handled by
+                          // the open-effect reset).
                         }
                       }}
                     >
@@ -395,6 +410,12 @@ export function CredentialDetailSheet({
                       <span className="text-[11px] text-emerald-400 inline-flex items-center gap-1">
                         <CheckCircle2 className="h-3 w-3" />
                         Saved
+                      </span>
+                    )}
+                    {valueError && (
+                      <span className="text-[11px] text-red-400 inline-flex items-center gap-1">
+                        <XCircle className="h-3 w-3" />
+                        {valueError}
                       </span>
                     )}
                   </div>

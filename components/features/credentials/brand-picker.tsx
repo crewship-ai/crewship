@@ -25,6 +25,7 @@ import {
   BRAND_CATEGORIES,
   GENERIC_BRAND,
   getBrand,
+  brandColor,
   type BrandCategory,
   type BrandEntry,
 } from "@/lib/credential-providers/registry"
@@ -68,7 +69,7 @@ export function BrandPicker({ value, onChange, className }: BrandPickerProps) {
         >
           <CurrentIcon
             className="h-3.5 w-3.5 shrink-0"
-            style={{ color: current.hex }}
+            style={{ color: brandColor(current) }}
           />
           <span className="text-xs font-normal truncate max-w-[110px]">
             {current === GENERIC_BRAND ? "No brand" : current.label}
@@ -193,7 +194,7 @@ function BrandTile({
       {selected && (
         <Check className="absolute top-0.5 right-0.5 h-2.5 w-2.5 text-blue-400" />
       )}
-      <Icon className="h-5 w-5" style={{ color: brand.hex }} />
+      <Icon className="h-5 w-5" style={{ color: brandColor(brand) }} />
       <span className="text-[8px] leading-none text-muted-foreground truncate max-w-full">
         {brand.label}
       </span>
