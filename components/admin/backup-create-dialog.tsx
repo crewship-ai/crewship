@@ -29,6 +29,7 @@ import { useBackupStore } from "@/stores/backup-store"
 import {
   useCreateBackup,
   useCrewsForBackup,
+  type BackupScopeLevel,
   type CreateBackupScope,
 } from "@/hooks/use-backups"
 
@@ -44,12 +45,41 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
   const crewsQuery = useCrewsForBackup(open ? workspaceId : undefined)
 
   const [scope, setScope] = useState<CreateBackupScope>("workspace")
+  const [scopeLevel, setScopeLevel] = useState<BackupScopeLevel>("standard")
   const [crewId, setCrewId] = useState("")
   const [crewPickerOpen, setCrewPickerOpen] = useState(false)
   const [encryption, setEncryption] = useState<"passphrase" | "recipient" | "none">("passphrase")
   const [passphrase, setPassphrase] = useState("")
   const [recipient, setRecipient] = useState("")
   const [outputDir, setOutputDir] = useState("")
+
+  // Preset definitions live next to the dialog so the help copy and
+  // the radio order stay in lockstep. Order is intentional: Quick →
+  // Standard → Full reads as "smaller to larger" so an admin who
+  // wants the biggest, most-complete backup gravitates rightward.
+  const presets: ReadonlyArray<{
+    value: BackupScopeLevel
+    label: string
+    summary: string
+  }> = [
+    {
+      value: "quick",
+      label: "Quick",
+      summary: "Workspace + agent memory only. Smallest, fastest.",
+    },
+    {
+      value: "standard",
+      label: "Standard",
+      summary:
+        "Quick + /home/agent + /opt/crew-tools. Recommended default — covers user data and installed CLIs.",
+    },
+    {
+      value: "full",
+      label: "Full",
+      summary:
+        "Standard + /var/lib. Captures running-service data (redis, postgresql, mysql, …) so a wipe-and-restore round-trips cleanly.",
+    },
+  ]
 
   // Resolve the picked crew's display info from the cached list. Falls
   // back to the raw id/slug the user pasted in case they bypassed the
@@ -70,6 +100,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
     setCrewId("")
     setOutputDir("")
     setScope("workspace")
+    setScopeLevel("standard")
     setEncryption("passphrase")
     close()
   }
@@ -103,6 +134,7 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
     try {
       const res = await create.mutateAsync({
         scope,
+        scope_level: scopeLevel,
         crew_id: scope === "crew" ? crewIdTrimmed : undefined,
         passphrase: encryption === "passphrase" ? passphrase : undefined,
         recipient: encryption === "recipient" ? recipientTrimmed : undefined,
@@ -145,6 +177,40 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
                 </Button>
               ))}
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label id="backup-preset-label">Preset</Label>
+            <div
+              className="grid grid-cols-3 gap-2"
+              role="radiogroup"
+              aria-labelledby="backup-preset-label"
+            >
+              {presets.map((p) => (
+                <button
+                  type="button"
+                  key={p.value}
+                  role="radio"
+                  aria-checked={scopeLevel === p.value}
+                  onClick={() => setScopeLevel(p.value)}
+                  className={cn(
+                    "flex flex-col items-start text-left rounded-md border p-3 text-xs transition-colors",
+                    scopeLevel === p.value
+                      ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                      : "border-border hover:bg-accent/40",
+                  )}
+                  data-testid={`backup-preset-${p.value}`}
+                >
+                  <span className="font-medium text-sm">{p.label}</span>
+                  <span className="mt-1 text-muted-foreground leading-snug">
+                    {p.summary}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Restore is preset-agnostic — a Quick bundle restores into the same target as a Full one;
+              missing sections are silent skips.
+            </p>
           </div>
           {scope === "crew" && (
             <div className="space-y-2">

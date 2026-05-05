@@ -29,11 +29,25 @@ import {
 export type BackupScope = "crew" | "workspace" | "instance"
 export type CreateBackupScope = Exclude<BackupScope, "instance">
 
+/**
+ * BackupScopeLevel selects which per-crew filesystem sections the
+ * backup includes:
+ *
+ *  - quick:    workspace + agent memory (~1 MiB, snapshot of active work)
+ *  - standard: + /home/agent + /opt/crew-tools (default; matches current behaviour)
+ *  - full:     + /var/lib (any in-container service data — redis, postgresql, ...)
+ *
+ * Older bundles produced before the preset feature read back as
+ * "standard" via the catalog migration's column default.
+ */
+export type BackupScopeLevel = "quick" | "standard" | "full"
+
 export interface BackupListEntry {
   path: string
   file_name: string
   size_bytes: number
   scope: BackupScope
+  scope_level?: BackupScopeLevel
   encrypted: boolean
   created_at?: string
   format_version?: number
@@ -54,6 +68,7 @@ export interface BackupManifest {
   format_version: number
   crewship_version_at_backup: string
   scope: BackupScope
+  scope_level?: BackupScopeLevel
   created_at: string
   checksums: { payload_sha256: string }
   encryption: {
@@ -75,6 +90,7 @@ export interface BackupManifest {
 
 export interface CreateBackupRequest {
   scope: CreateBackupScope
+  scope_level?: BackupScopeLevel
   crew_id?: string
   passphrase?: string
   recipient?: string
@@ -88,6 +104,7 @@ export interface CreateBackupResponse {
   payload_sha256: string
   format_version: number
   scope: BackupScope
+  scope_level?: BackupScopeLevel
   created_at: string
   encrypted: boolean
 }

@@ -19,6 +19,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
 import {
   buildDownloadUrl,
   useBackups,
@@ -38,6 +39,30 @@ function formatBytes(n: number) {
     i++
   }
   return `${v.toFixed(1)} ${units[i]}`
+}
+
+// presetMeta keeps the Preset badge styling co-located with the
+// labels. Tailwind colour classes match the visual hierarchy:
+// Quick (light) → Standard (mid) → Full (strong).
+const presetMeta: Record<
+  string,
+  { label: string; className: string; title: string }
+> = {
+  quick: {
+    label: "Quick",
+    className: "border-sky-500/40 text-sky-500",
+    title: "Workspace + agent memory only",
+  },
+  standard: {
+    label: "Standard",
+    className: "border-emerald-500/40 text-emerald-500",
+    title: "Quick + /home/agent + /opt/crew-tools",
+  },
+  full: {
+    label: "Full",
+    className: "border-violet-500/40 text-violet-500",
+    title: "Standard + /var/lib (in-container service data)",
+  },
 }
 
 export function BackupList({ workspaceId }: { workspaceId: string | undefined }) {
@@ -138,6 +163,7 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
               <tr className="text-left">
                 <th className="px-3 py-2 font-medium">File</th>
                 <th className="px-3 py-2 font-medium">Scope</th>
+                <th className="px-3 py-2 font-medium">Preset</th>
                 <th className="px-3 py-2 font-medium">Size</th>
                 <th className="px-3 py-2 font-medium">Encryption</th>
                 <th className="px-3 py-2 font-medium">Created</th>
@@ -165,6 +191,28 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                     <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
                       {row.scope}
                     </Badge>
+                  </td>
+                  <td className="px-3 py-2">
+                    {(() => {
+                      // Server omits scope_level on bundles produced before the
+                      // preset feature shipped. Fall back to "standard" — that
+                      // matches what the catalog migration backfills and what
+                      // the collector did historically.
+                      const lvl = row.scope_level ?? "standard"
+                      const meta = presetMeta[lvl] ?? presetMeta.standard
+                      return (
+                        <Badge
+                          variant="outline"
+                          title={meta.title}
+                          className={cn(
+                            "text-[10px] uppercase tracking-wider",
+                            meta.className,
+                          )}
+                        >
+                          {meta.label}
+                        </Badge>
+                      )
+                    })()}
                   </td>
                   <td className="px-3 py-2 font-mono">{formatBytes(row.size_bytes)}</td>
                   <td className="px-3 py-2">
