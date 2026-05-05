@@ -39,8 +39,7 @@ import { RotationDialog } from "@/components/features/credentials/rotation-dialo
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatRelativeTime } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
-import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
-import { PROVIDER_ICON_COLOR } from "@/lib/colors"
+import { getBrand } from "@/lib/credential-providers/registry"
 import { cn } from "@/lib/utils"
 
 interface Credential {
@@ -610,8 +609,8 @@ interface CredentialRowProps {
 // not a column, not a group header. Type is a tiny inline badge.
 function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelete }: CredentialRowProps) {
   const derived = deriveStatus(cred)
-  const ProviderIcon = PROVIDER_ICONS[cred.provider]
-  const providerColor = PROVIDER_ICON_COLOR[cred.provider] ?? "text-muted-foreground"
+  const brand = getBrand(cred.provider)
+  const BrandIcon = brand.Icon
   const expiresIn = cred.token_expires_at
     ? Math.floor((new Date(cred.token_expires_at).getTime() - Date.now()) / (24 * 3600 * 1000))
     : null
@@ -643,11 +642,11 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
       </TableCell>
       <TableCell>
         <div className="flex items-center gap-2 min-w-0">
-          {ProviderIcon ? (
-            <ProviderIcon className={cn("h-4 w-4 shrink-0", providerColor)} />
-          ) : (
-            <Key className="h-4 w-4 shrink-0 text-muted-foreground" />
-          )}
+          <BrandIcon
+            className="h-4 w-4 shrink-0"
+            style={{ color: brand.hex }}
+            aria-label={brand.label}
+          />
           <span className="font-mono text-sm truncate">{cred.name}</span>
           <Badge variant="outline" className="text-[9px] px-1 font-mono shrink-0 opacity-70">
             {TYPE_LABEL[cred.type]}

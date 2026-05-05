@@ -26,8 +26,8 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
 import { detectProvider, detectType, detectFromValue } from "@/lib/credential-provider"
-import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
-import { PROVIDER_ICON_COLOR } from "@/lib/colors"
+import { getBrand } from "@/lib/credential-providers/registry"
+import { BrandPicker } from "./brand-picker"
 import { cn } from "@/lib/utils"
 
 export type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
@@ -212,15 +212,26 @@ export function CredentialForm({
     }
   }
 
-  const detected = values.provider !== "NONE" ? values.provider : null
-  const ProviderIcon = detected ? PROVIDER_ICONS[detected] : null
-  const providerColor = detected ? PROVIDER_ICON_COLOR[detected] ?? "" : ""
+  const detected = getBrand(values.provider)
+  const DetectedIcon = detected.Icon
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Name */}
+      {/* Name + brand picker. The picker doubles as auto-detection
+          preview: typing "notion" suggests Notion automatically; user
+          can click the chip to override or pick a different brand
+          from the full ~140-entry registry. */}
       <div className="space-y-1.5">
-        <Label htmlFor="cred-name" className="text-xs">Name</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="cred-name" className="text-xs">Name</Label>
+          <BrandPicker
+            value={values.provider}
+            onChange={(key) => {
+              providerTouched.current = true
+              setField("provider", key)
+            }}
+          />
+        </div>
         <div className="relative">
           <Input
             id="cred-name"
@@ -231,20 +242,19 @@ export function CredentialForm({
             autoFocus={mode === "create"}
             required
           />
-          {ProviderIcon && (
+          {detected.key !== "NONE" && (
             <div
-              className={cn(
-                "absolute right-2.5 top-1/2 -translate-y-1/2",
-                providerColor,
-              )}
-              title={`Detected provider: ${detected}`}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2"
+              style={{ color: detected.hex }}
+              title={`Detected: ${detected.label}`}
             >
-              <ProviderIcon className="h-3.5 w-3.5" />
+              <DetectedIcon className="h-3.5 w-3.5" />
             </div>
           )}
         </div>
         <p className="text-[11px] text-muted-foreground">
-          ENV variable name your agent will read. Provider is auto-detected from the prefix.
+          ENV variable name your agent will read. Brand is auto-detected from the name —
+          click the chip above to pick manually.
         </p>
       </div>
 
@@ -506,39 +516,6 @@ export function CredentialForm({
             </div>
           )}
 
-          {/* Provider override — manual escape hatch when auto-detect
-              guesses wrong (e.g. internal key named "STRIPE_*" that is
-              actually for an internal service). */}
-          <div className="space-y-1">
-            <Label htmlFor="cred-provider" className="text-xs">Provider</Label>
-            <Select
-              value={values.provider}
-              onValueChange={(v) => {
-                providerTouched.current = true
-                setField("provider", v)
-              }}
-            >
-              <SelectTrigger id="cred-provider" className="text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="NONE">— no provider</SelectItem>
-                <SelectItem value="ANTHROPIC">Anthropic</SelectItem>
-                <SelectItem value="OPENAI">OpenAI</SelectItem>
-                <SelectItem value="GOOGLE">Google</SelectItem>
-                <SelectItem value="GITHUB">GitHub</SelectItem>
-                <SelectItem value="GITLAB">GitLab</SelectItem>
-                <SelectItem value="VERCEL">Vercel</SelectItem>
-                <SelectItem value="AWS">AWS</SelectItem>
-                <SelectItem value="CURSOR">Cursor</SelectItem>
-                <SelectItem value="FACTORY">Factory</SelectItem>
-                <SelectItem value="CUSTOM_CLI">Custom CLI</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-[10px] text-muted-foreground">
-              Used for the icon and analytics. Override only if auto-detect picks the wrong service.
-            </p>
-          </div>
         </div>
       )}
 
