@@ -246,6 +246,14 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 type restoreRequest struct {
 	Path        string `json:"path"`
 	Passphrase  string `json:"passphrase,omitempty"`
+	// Identity is one age X25519 secret key (the "AGE-SECRET-KEY-1…"
+	// string the admin printed at create-with-recipient time). When
+	// the bundle was sealed with --recipient, the holder of the
+	// matching identity is the only one who can decrypt; the API
+	// previously exposed only Passphrase, which made age-recipient
+	// bundles impossible to restore via the admin UI / REST without
+	// dropping into the CLI on the host.
+	Identity    string `json:"identity,omitempty"`
 	AsWorkspace string `json:"as_workspace,omitempty"`
 	AsCrew      string `json:"as_crew,omitempty"`
 	DryRun      bool   `json:"dry_run,omitempty"`
@@ -287,9 +295,20 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 	ops := h.dockerOps
 
+	var identities []age.Identity
+	if id := strings.TrimSpace(req.Identity); id != "" {
+		parsed, err := age.ParseX25519Identity(id)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid age identity: " + err.Error()})
+			return
+		}
+		identities = []age.Identity{parsed}
+	}
+
 	result, err := backup.RestoreBackup(ctx, h.db, backup.RestoreOptions{
 		Path:         req.Path,
 		Passphrase:   req.Passphrase,
+		Identities:   identities,
 		AsWorkspace:  req.AsWorkspace,
 		AsCrew:       req.AsCrew,
 		DryRun:       req.DryRun,
