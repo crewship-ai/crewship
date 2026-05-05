@@ -110,6 +110,12 @@ type CrewSummary struct {
 	WorkspaceIncluded          bool         `json:"workspace_included"`
 	VolumesIncluded            []string     `json:"volumes_included,omitempty"`
 	MemoryIncluded             bool         `json:"memory_included"`
+	// SystemIncluded is set when the bundle carries the /var/lib
+	// section (any service data the agent populated at runtime —
+	// redis dump.rdb, postgresql data dir, etc.). Bundles produced
+	// before this section was added omit the field entirely; the
+	// restore preflight treats absent as "no system data to land".
+	SystemIncluded             bool         `json:"system_included,omitempty"`
 	AgentCount                 int          `json:"agent_count"`
 	PayloadSizeBytes           int64        `json:"payload_size_bytes,omitempty"`
 }

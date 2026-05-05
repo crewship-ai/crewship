@@ -332,13 +332,43 @@ var volumeExclusions = []string{
 	".ruff_cache/",
 }
 
+// varLibExclusions filters /var/lib content. Most of /var/lib is the
+// package manager's own state (dpkg, apt) — fully reproducible from
+// the cached devcontainer image and useless to ship in every bundle.
+// What we WANT to keep is per-service data dirs like /var/lib/redis,
+// /var/lib/postgresql, /var/lib/mysql that the agent populated at
+// runtime; those are NOT in the image and not regeneratable from it.
+//
+// dev3 baseline (stock devcontainer image, no service installed):
+// /var/lib total ~15 MiB; the bulk is /var/lib/dpkg (~10 MiB) and
+// /var/lib/apt (~3 MiB). Excluding both shrinks the contribution of
+// this section to <1 MiB until a real service writes data here.
+var varLibExclusions = []string{
+	"dpkg/",
+	"apt/",
+	"systemd/",
+	"polkit-1/",
+	// Logs and rotating state — not data we want to restore even if
+	// a service wrote them, since they describe the OLD container's
+	// runtime, not the bundle's logical contents.
+	"logrotate/",
+	"private/", // systemd-private session dirs
+}
+
 // shouldExcludeFromBundle reports whether a path inside a volume
 // section should be skipped. Conservative — only excludes paths that
 // match one of the explicit patterns above so an operator can audit
 // the list and add their own. Path is always wrapper-stripped (e.g.
 // ".cache/mise/foo") not raw.
 func shouldExcludeFromBundle(p string) bool {
-	for _, pat := range volumeExclusions {
+	return shouldExclude(p, volumeExclusions)
+}
+
+// shouldExclude is the section-aware version: callers from CollectCrew
+// pick the right exclusion list (volumeExclusions for /workspace and
+// the named volumes, varLibExclusions for /var/lib).
+func shouldExclude(p string, patterns []string) bool {
+	for _, pat := range patterns {
 		if strings.HasSuffix(pat, "/") {
 			// Directory pattern: match exact dir or any descendant
 			needle := strings.TrimSuffix(pat, "/")
@@ -384,6 +414,14 @@ func shouldExcludeFromBundle(p string) bool {
 //
 // Returns the total bytes written to dst.
 func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
+	return RepackTarWithExcludes(src, dst, prefix, volumeExclusions)
+}
+
+// RepackTarWithExcludes is RepackTar with an explicit exclusion list,
+// so /var/lib (where dpkg/apt state should be skipped, NOT
+// node_modules) and /workspace (the opposite) can both be repacked
+// through one code path.
+func RepackTarWithExcludes(src io.Reader, dst *TarZstWriter, prefix string, excludes []string) (int64, error) {
 	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
@@ -419,7 +457,7 @@ func RepackTar(src io.Reader, dst *TarZstWriter, prefix string) (int64, error) {
 		if trimmed == "" {
 			continue
 		}
-		if shouldExcludeFromBundle(trimmed) {
+		if shouldExclude(trimmed, excludes) {
 			continue
 		}
 		newName := prefix + trimmed

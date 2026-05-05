@@ -47,6 +47,11 @@ type ExtractedPayload struct {
 	workspacePathBySlug map[string]string
 	volumePathsBySlug   map[string]map[string]string // crew → volume name → path
 	memoryPathBySlug    map[string]string
+	// systemPathsBySlug holds /var/lib (and any future rootfs sections
+	// added under "system/") keyed by sub-section name. Separate from
+	// volumePathsBySlug so a future migration that drops a real named
+	// volume can't accidentally collide with a system section name.
+	systemPathsBySlug map[string]map[string]string // crew → kind ("var-lib") → path
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the
@@ -76,6 +81,7 @@ func (p *ExtractedPayload) Close() error {
 	p.workspacePathBySlug = nil
 	p.volumePathsBySlug = nil
 	p.memoryPathBySlug = nil
+	p.systemPathsBySlug = nil
 	return err
 }
 
@@ -133,6 +139,26 @@ func (p *ExtractedPayload) OpenMemory(ctx context.Context, slug string) (io.Read
 	return f, true, nil
 }
 
+// OpenSystem returns a reader for one of a crew's system-rootfs tars
+// (currently only "var-lib"). Bundles produced by older collectors
+// have no system/* section so the (false, nil) signal lets RestoreCrew
+// silently skip without erroring.
+func (p *ExtractedPayload) OpenSystem(ctx context.Context, slug, kind string) (io.ReadCloser, bool, error) {
+	bySlug, ok := p.systemPathsBySlug[slug]
+	if !ok {
+		return nil, false, nil
+	}
+	path, ok := bySlug[kind]
+	if !ok {
+		return nil, false, nil
+	}
+	f, err := p.storageOrDefault().Open(ctx, path)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open system section %s/%s: %w", slug, kind, err)
+	}
+	return f, true, nil
+}
+
 // ExtractPayload walks the payload tar produced by the collector and
 // splits it into the ExtractedPayload buckets. Per-crew sections are
 // re-tar'd into temp files so the caller's peak memory stays bounded
@@ -158,6 +184,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		workspacePathBySlug: map[string]string{},
 		volumePathsBySlug:   map[string]map[string]string{},
 		memoryPathBySlug:    map[string]string{},
+		systemPathsBySlug:   map[string]map[string]string{},
 	}
 	// Defer-based cleanup on error paths so a partial extract does
 	// not leak temp files.
@@ -300,6 +327,11 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				return nil, err
 			}
 
+		case strings.HasPrefix(name, "system/"):
+			if err := repackIntoSink(tr, hdr, name, "system/", sinkFor); err != nil {
+				return nil, err
+			}
+
 		default:
 			// Forward-compat: unknown entries are silently discarded.
 			if _, err := io.Copy(io.Discard, tr); err != nil {
@@ -343,6 +375,17 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				out.volumePathsBySlug[slug] = bySlug
 			}
 			bySlug[vol] = name
+		case "system":
+			if len(parts) < 3 {
+				continue
+			}
+			slug, kind := parts[1], parts[2]
+			bySlug, ok := out.systemPathsBySlug[slug]
+			if !ok {
+				bySlug = map[string]string{}
+				out.systemPathsBySlug[slug] = bySlug
+			}
+			bySlug[kind] = name
 		}
 	}
 
@@ -392,6 +435,17 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 		}
 		key = "memory/" + slug
 		strip = slug + "/"
+	case "system/":
+		slug, more, ok := splitFirst(rest)
+		if !ok {
+			return nil
+		}
+		kind, _, ok := splitFirst(more)
+		if !ok {
+			return nil
+		}
+		key = "system/" + slug + "/" + kind
+		strip = slug + "/" + kind + "/"
 	default:
 		return nil
 	}
@@ -485,6 +539,16 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			open: func() (io.ReadCloser, bool, error) { return payload.OpenMemory(ctx, crewSlug) },
 			dest: ContainerMemoryPath,
 			name: "memory",
+		},
+		{
+			// /var/lib carries service data dirs (redis, postgresql, ...)
+			// the agent populated at runtime. Bundles produced before the
+			// system section was added simply have no entry under
+			// system/<slug>/var-lib so OpenSystem returns (false, nil) and
+			// this is a silent skip — full backwards compatibility.
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenSystem(ctx, crewSlug, "var-lib") },
+			dest: ContainerVarLibPath,
+			name: "var-lib",
 		},
 	}
 	// Per-section errors are collected so a hiccup on one section

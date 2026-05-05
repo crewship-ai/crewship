@@ -297,7 +297,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// land, even though the DB rows + the one running crew's
 		// filesystem would all apply cleanly.
 		for _, c := range manifest.Contents.Crews {
-			if !c.WorkspaceIncluded && !c.MemoryIncluded {
+			if !c.WorkspaceIncluded && !c.MemoryIncluded && !c.SystemIncluded {
 				continue
 			}
 			containerID := opts.ContainerFor(c.Slug)
@@ -313,7 +313,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			}
 		}
 		for _, c := range manifest.Contents.Crews {
-			if !c.WorkspaceIncluded && !c.MemoryIncluded {
+			if !c.WorkspaceIncluded && !c.MemoryIncluded && !c.SystemIncluded {
 				// Bundle has nothing to land for this crew (DB rows
 				// already restored above). Skip silently.
 				continue

@@ -477,6 +477,7 @@ func buildContents(t *WorkspaceTarget) Contents {
 			WorkspaceIncluded:          c.ContainerID != "",
 			VolumesIncluded:            []string{"home", "tools"},
 			MemoryIncluded:             c.ContainerID != "",
+			SystemIncluded:             c.ContainerID != "",
 			AgentCount:                 c.AgentCount,
 		})
 	}
