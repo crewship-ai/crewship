@@ -216,6 +216,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Stamp the timeline so the detail-sheet Audit tab shows when the
+	// credential first appeared. Outside the create tx — best-effort.
+	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventCreated, "", clientIP(r),
+		map[string]any{"created_by": user.ID, "provider": req.Provider, "type": req.Type}); recErr != nil {
+		h.logger.Warn("record CREATED audit event", "error", recErr, "credential_id", credID)
+	}
+
 	respCrewIDs := crewIDs
 	if respCrewIDs == nil {
 		respCrewIDs = []string{}
