@@ -424,11 +424,13 @@ export default function CrowsNestCrewPage() {
               </CardContent>
             </Card>
 
-            {/* Right column: Resources + Filesystem stay as compact
-                placeholders (both await dedicated emitters — see follow-up
-                issue) and Activity gets the bulk of the space so the page
-                shows real signal even when those two are quiet. */}
-            <div className="grid gap-3 grid-rows-[140px_140px_minmax(0,1fr)] min-h-[640px] lg:min-h-0">
+            {/* Right column: Resources sparkline (top, compact),
+                Filesystem (middle, compact), Activity feed (bottom,
+                takes the remaining height). All three feeds are
+                live — Resources via stats collector, Filesystem via
+                fsnotify watcher, Activity via the broad event-type
+                subscription on the journal stream. */}
+            <div className="grid gap-3 grid-rows-[200px_200px_minmax(0,1fr)] min-h-[700px] lg:min-h-0">
               <Card className="py-0 gap-0 flex flex-col overflow-hidden">
                 <CardHeader className="px-3 py-2 border-b border-border/50">
                   <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">

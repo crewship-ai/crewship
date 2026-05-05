@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
@@ -193,10 +194,19 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	sessionsStore := sessions.NewDBStore(deps.DB)
 	wsHub := ws.NewHub(logger, nil, jwtValidator, sessionsStore)
 
-	// File watcher broadcasts real-time file events to WebSocket clients
-	// on the crew:{crewID} channel.
+	// File watcher broadcasts real-time file events to WebSocket clients on
+	// the crew:{crewID} channel AND emits file.written journal entries so
+	// Crow's Nest's Filesystem panel actually fills. The journal pointer
+	// is loaded atomically per event because the journal writer is
+	// constructed later (it depends on deps.DB) — the pointer stays nil
+	// until the wiring block below stores it. Lazy load means we don't
+	// have to reorder construction.
+	var fileJournalPtr atomic.Pointer[journal.Writer]
 	fileWatcher := fileserver.NewWatcher(cfg.Storage.BasePath, logger, func(crewID string, event fileserver.FileEvent) {
 		wsHub.BroadcastChannel("crew", crewID, "file.event", event)
+		if j := fileJournalPtr.Load(); j != nil {
+			emitFileWrittenEntry(j, crewID, event, logger)
+		}
 	})
 
 	var statsCollector *StatsCollector
@@ -318,6 +328,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if s.statsCollector != nil {
 			s.statsCollector.SetJournal(s.journalWriter)
 		}
+
+		// Wire the journal into the file watcher's lazy pointer so file
+		// events emitted by the fsnotify goroutine produce file.written
+		// journal entries. The closure above captured fileJournalPtr so
+		// this Store wakes up in-flight handlers without re-construction.
+		fileJournalPtr.Store(s.journalWriter)
 
 		// Wire the three orchestrator integration points (hooks dispatch,
 		// approval gate, episodic recall) now that the journal is

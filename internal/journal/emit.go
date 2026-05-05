@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -46,6 +47,36 @@ type Writer struct {
 	flushDur time.Duration
 	closed   chan struct{}
 	closeMu  sync.Mutex
+}
+
+// DB exposes the underlying *sql.DB for callers that need to run a
+// scoped lookup before emitting (e.g. resolving a workspace from a
+// crew_id when the hot path doesn't carry it). Read-only intent —
+// callers must not run schema changes through this handle.
+func (w *Writer) DB() *sql.DB {
+	if w == nil {
+		return nil
+	}
+	return w.db
+}
+
+// LookupWorkspaceForCrew returns the workspace_id that owns the given
+// crew. Used by emit-side helpers (file watcher, port scanner) that
+// only know the crew on the hot path. Empty crewID or missing row
+// returns "" and a nil error so callers can treat it as a soft-skip.
+func LookupWorkspaceForCrew(ctx context.Context, db *sql.DB, crewID string) (string, error) {
+	if db == nil || crewID == "" {
+		return "", nil
+	}
+	var ws sql.NullString
+	err := db.QueryRowContext(ctx, `SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&ws)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	return ws.String, nil
 }
 
 // WriterOptions tunes the batcher. Zero values pick sensible defaults.
