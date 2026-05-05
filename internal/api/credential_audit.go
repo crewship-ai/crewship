@@ -276,6 +276,15 @@ type auditEventResponse struct {
 func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	credentialID := r.PathValue("credentialId")
+	role := RoleFromContext(r.Context())
+
+	// Audit reveals IPs of admin actions (rotate, test, revoke) — that's
+	// forensic data, not for VIEWER/MEMBER eyes. Anyone who can update
+	// credentials can read their audit; below that, 403.
+	if !canRole(role, "update") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
 
 	// Workspace isolation: a missing or cross-workspace credential
 	// must 404 the same way the rest of the credential handlers do,

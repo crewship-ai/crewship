@@ -14,9 +14,11 @@ interface AddSecretSheetProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
+  /** Tags already in use across the workspace, for the autocomplete in the form. */
+  knownTags?: string[]
 }
 
-export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess }: AddSecretSheetProps) {
+export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, knownTags }: AddSecretSheetProps) {
   const handleSubmit = async (values: Parameters<NonNullable<React.ComponentProps<typeof CredentialForm>["onSubmit"]>>[0]) => {
     const body: Record<string, unknown> = {
       name: values.name,
@@ -85,6 +87,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess }: A
             onCancel={() => onOpenChange(false)}
             onTest={handleTest}
             submitLabel="Save secret"
+            knownTags={knownTags}
           />
         </div>
       </SheetContent>

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { motion } from "motion/react"
 import {
-  Key, Plus, Pencil, Trash2, Search, Clock, AlertTriangle, ChevronDown, Link2,
+  Key, Plus, Pencil, Trash2, Search, Clock, AlertTriangle,
   ArrowUpDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -21,10 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import {
   Table,
   TableBody,
   TableCell,
@@ -37,7 +33,6 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AddCredentialWizard } from "@/components/features/credentials/add-credential-wizard"
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
@@ -119,7 +114,6 @@ export default function CredentialsPage() {
   const [workspaceId, setWorkspaceId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [addOpen, setAddOpen] = React.useState(false)
-  const [connectOpen, setConnectOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editCredential, setEditCredential] = React.useState<CredentialData | null>(null)
   const canManage = abilities.can("create", "Credential")
@@ -310,35 +304,10 @@ export default function CredentialsPage() {
   }, [filtered, sortKey])
 
   const headerActions = canManage ? (
-    <div className="flex items-center gap-2">
-      <Button onClick={() => setAddOpen(true)} size="sm">
-        <Plus className="mr-1.5 h-3.5 w-3.5" />
-        Add secret
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm">
-            <Link2 className="mr-1.5 h-3.5 w-3.5" />
-            Connect service
-            <ChevronDown className="ml-1 h-3 w-3 opacity-60" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-[240px]">
-          <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Provider-specific flows
-          </DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => setConnectOpen(true)}>
-            <span className="text-xs">OAuth, setup-token, or PAT…</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem disabled>
-            <span className="text-[10px] text-muted-foreground">
-              For a one-off API key, prefer Add secret.
-            </span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+    <Button onClick={() => setAddOpen(true)} size="sm">
+      <Plus className="mr-1.5 h-3.5 w-3.5" />
+      Add secret
+    </Button>
   ) : null
 
   if (loading) {
@@ -532,15 +501,7 @@ export default function CredentialsPage() {
           open={addOpen}
           onOpenChange={setAddOpen}
           onSuccess={handleRefresh}
-        />
-      )}
-
-      {workspaceId && (
-        <AddCredentialWizard
-          workspaceId={workspaceId}
-          open={connectOpen}
-          onOpenChange={setConnectOpen}
-          onSuccess={handleRefresh}
+          knownTags={tagsInUse}
         />
       )}
 
@@ -629,6 +590,7 @@ export default function CredentialsPage() {
           open={editOpen}
           onOpenChange={setEditOpen}
           onSuccess={handleRefresh}
+          knownTags={tagsInUse}
         />
       )}
     </PageShell>

@@ -253,6 +253,14 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	user := UserFromContext(r.Context())
+
+	// Crew-scoped visibility: a MEMBER/VIEWER must be allowed to see
+	// the credential before they're allowed to test it. Without this
+	// the FE could leak credential existence by trial-and-error.
+	visFilter, visArgs := credentialVisibilityFilter(role, user)
+	args := append([]any{credID, workspaceID}, visArgs...)
 
 	var (
 		provider, ctype, encValue string
@@ -260,8 +268,8 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT provider, type, encrypted_value
 		FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
-	`, credID, workspaceID).Scan(&provider, &ctype, &encValue)
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL `+visFilter+`
+	`, args...).Scan(&provider, &ctype, &encValue)
 	if err == sql.ErrNoRows {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
 		return

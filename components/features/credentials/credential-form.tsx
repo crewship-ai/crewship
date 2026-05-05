@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
-import { detectProvider, detectType } from "@/lib/credential-provider"
+import { detectProvider, detectType, detectFromValue } from "@/lib/credential-provider"
 import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
 import { PROVIDER_ICON_COLOR } from "@/lib/colors"
 import { cn } from "@/lib/utils"
@@ -71,6 +71,8 @@ export interface CredentialFormProps {
   submitLabel?: string
   /** Optional hook to test the value with the provider before submit. */
   onTest?: (values: CredentialFormValues) => Promise<{ valid: boolean; error?: string }>
+  /** Existing tag list in the workspace — drives the tag autocomplete. */
+  knownTags?: string[]
 }
 
 export function CredentialForm({
@@ -82,6 +84,7 @@ export function CredentialForm({
   onCancel,
   submitLabel,
   onTest,
+  knownTags,
 }: CredentialFormProps) {
   const [values, setValues] = React.useState<CredentialFormValues>(() => ({
     ...EMPTY_FORM,
@@ -131,6 +134,27 @@ export function CredentialForm({
       return { ...prev, ...patch }
     })
     setTestResult(null)
+  }
+
+  // Paste-first flow: when the user pastes a recognisable secret
+  // shape (sk-ant-, ghp_, AIza...) into a still-empty form, pre-fill
+  // the name + provider for them. Mirrors Doppler / 1Password.
+  const handleValueChange = (next: string) => {
+    setTestResult(null)
+    setValues((prev) => {
+      const patch: Partial<CredentialFormValues> = { value: next }
+      const shouldAutofill =
+        mode === "create" && prev.name.trim() === "" && next.trim().length >= 8
+      if (shouldAutofill) {
+        const guess = detectFromValue(next)
+        if (guess) {
+          patch.name = guess.suggestedName
+          if (!providerTouched.current) patch.provider = guess.provider
+          patch.type = detectType(guess.suggestedName)
+        }
+      }
+      return { ...prev, ...patch }
+    })
   }
 
   const addTag = (raw: string) => {
@@ -241,7 +265,7 @@ export function CredentialForm({
               type={showValue ? "text" : "password"}
               placeholder={mode === "edit" ? "•••••••••••••••" : "Paste secret value"}
               value={values.value}
-              onChange={(e) => { setField("value", e.target.value); setTestResult(null) }}
+              onChange={(e) => handleValueChange(e.target.value)}
               className="pr-10 font-mono text-sm"
             />
             <Button
@@ -310,6 +334,7 @@ export function CredentialForm({
           ))}
           <input
             type="text"
+            list="cred-tag-suggestions"
             value={tagDraft}
             onChange={(e) => setTagDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -330,6 +355,13 @@ export function CredentialForm({
             placeholder={values.tags.length === 0 ? "prod, billing, internal…" : ""}
             className="flex-1 min-w-[80px] bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
           />
+          {knownTags && knownTags.length > 0 && (
+            <datalist id="cred-tag-suggestions">
+              {knownTags
+                .filter((t) => !values.tags.includes(t))
+                .map((t) => <option key={t} value={t} />)}
+            </datalist>
+          )}
         </div>
       </div>
 

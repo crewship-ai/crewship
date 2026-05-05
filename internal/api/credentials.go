@@ -62,8 +62,20 @@ type credentialResponse struct {
 
 func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	user := UserFromContext(r.Context())
 
 	limit, offset := parseListPagination(r, 100, 500)
+
+	// Crew-scoped visibility: roles below MANAGER (= MEMBER, VIEWER)
+	// see workspace-scoped credentials plus credentials assigned to
+	// crews they belong to. MANAGER+ see everything in the workspace
+	// — they're the ones who own the credential lifecycle. The split
+	// happens at the SQL level so we never serialise rows the caller
+	// can't see.
+	visFilter, visArgs := credentialVisibilityFilter(role, user)
+	args := append([]any{workspaceID}, visArgs...)
+	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
@@ -73,13 +85,13 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
-		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
+		WHERE c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
 		-- c.id ASC is the pagination tiebreaker: (type, created_at) alone can
 		-- tie on bulk-imported credentials sharing a second, and ties that
 		-- straddle a page boundary would drop or duplicate rows.
 		ORDER BY c.type ASC, c.created_at DESC, c.id ASC
 		LIMIT ? OFFSET ?
-	`, workspaceID, limit, offset)
+	`, args...)
 	if err != nil {
 		h.logger.Error("list credentials", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -142,6 +154,11 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	user := UserFromContext(r.Context())
+
+	visFilter, visArgs := credentialVisibilityFilter(role, user)
+	args := append([]any{credID, workspaceID}, visArgs...)
 
 	var c credentialResponse
 	var lastUsedIPsRaw, tagsRaw sql.NullString
@@ -153,8 +170,8 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
-		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
-	`, credID, workspaceID).Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
+		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
+	`, args...).Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
 		&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail,
 		&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
@@ -214,6 +231,20 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE agent_mcp_bindings SET credential_id = NULL WHERE credential_id = ?", credID); err != nil {
 		h.logger.Warn("clear credential from MCP bindings", "credential_id", credID, "error", err)
+	}
+
+	// Stamp the timeline so the audit tab still answers "who deleted
+	// this and when" after the row is soft-deleted. credential_audit
+	// rows survive soft-delete (no FK cascade), so the historical
+	// record is preserved.
+	user := UserFromContext(r.Context())
+	var deletedBy string
+	if user != nil {
+		deletedBy = user.ID
+	}
+	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventRevoke, "", clientIP(r),
+		map[string]any{"deleted_by": deletedBy, "soft_delete": true}); recErr != nil {
+		h.logger.Warn("record REVOKE audit event", "error", recErr, "credential_id", credID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})

@@ -27,11 +27,12 @@ interface EditCredentialDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
+  knownTags?: string[]
 }
 
 
 export function EditCredentialDialog({
-  workspaceId, credential, open, onOpenChange, onSuccess,
+  workspaceId, credential, open, onOpenChange, onSuccess, knownTags,
 }: EditCredentialDialogProps) {
   const initial = React.useMemo<Partial<CredentialFormValues>>(() => ({
     name: credential.name,
@@ -98,6 +99,7 @@ export function EditCredentialDialog({
             onSubmit={handleSubmit}
             onCancel={() => onOpenChange(false)}
             submitLabel="Save changes"
+            knownTags={knownTags}
           />
         </div>
       </SheetContent>

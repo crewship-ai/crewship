@@ -44,7 +44,10 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
 
-	if !canRole(role, "manage") {
+	// MANAGER tier can create credentials — the FE CASL ability mirrors
+	// this. "manage" was historically too tight (OWNER+ADMIN only) and
+	// caused 403s for the Add flow even though the button rendered.
+	if !canRole(role, "create") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
 	}
@@ -260,7 +263,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 
-	if !canRole(role, "manage") {
+	if !canRole(role, "update") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
 	}
@@ -343,6 +346,11 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ub := newUpdate()
+	// valueRotated flips when this PATCH actually replaces the encrypted
+	// secret — drives the post-commit audit ROTATE event so silent
+	// in-place rewrites (the Vercel-style inline Save value flow) still
+	// land on the timeline.
+	valueRotated := false
 
 	// Handle value separately (needs encryption)
 	if val, ok := body["value"]; ok {
@@ -357,6 +365,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			// Reset status when value changes so monitor re-validates
 			ub.Set("status", "ACTIVE")
 			ub.SetNull("last_error")
+			valueRotated = true
 		}
 	}
 
@@ -420,6 +429,21 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("commit credential update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Inline value rewrite (Vercel-parity quick rotation) is logically
+	// a rotation — no grace overlap, but the timeline must still see
+	// it. Outside the tx so a slow audit insert never rolls back the
+	// rotation itself.
+	if valueRotated {
+		var rotatedBy string
+		if u := UserFromContext(r.Context()); u != nil {
+			rotatedBy = u.ID
+		}
+		if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventRotate, "", clientIP(r),
+			map[string]any{"mode": "inline", "rotated_by": rotatedBy}); recErr != nil {
+			h.logger.Warn("record inline-rotate audit event", "error", recErr, "credential_id", credID)
+		}
 	}
 
 	h.Get(w, r)

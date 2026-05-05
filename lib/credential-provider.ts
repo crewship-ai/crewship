@@ -55,3 +55,46 @@ export function detectType(
   if (upper.endsWith("_TOKEN") || upper.includes("_TOKEN_")) return "CLI_TOKEN"
   return "SECRET"
 }
+
+// detectFromValue inspects the secret value and returns a suggested
+// (provider, name) pair. Used by the paste-first flow: user pastes
+// `sk-ant-...` and we pre-populate the form with provider=ANTHROPIC
+// and name=ANTHROPIC_API_KEY without them having to type it. Mirrors
+// how Doppler / 1Password recognise common token shapes.
+//
+// Returns nulls when the shape is unfamiliar — caller falls back to
+// the generic "type a name" flow.
+export function detectFromValue(
+  value: string,
+): { provider: CredentialProvider; suggestedName: string } | null {
+  const v = (value ?? "").trim()
+  if (v.length < 8) return null
+
+  // Anthropic — both regular API keys and Claude Code OAuth tokens.
+  if (v.startsWith("sk-ant-oat")) return { provider: "ANTHROPIC", suggestedName: "CLAUDE_CODE_OAUTH_TOKEN" }
+  if (v.startsWith("sk-ant-")) return { provider: "ANTHROPIC", suggestedName: "ANTHROPIC_API_KEY" }
+
+  // OpenAI — both project keys (sk-proj-) and legacy (sk-).
+  if (v.startsWith("sk-proj-")) return { provider: "OPENAI", suggestedName: "OPENAI_API_KEY" }
+  if (/^sk-[A-Za-z0-9_-]{20,}$/.test(v)) return { provider: "OPENAI", suggestedName: "OPENAI_API_KEY" }
+
+  // GitHub PATs (classic + fine-grained) and OAuth.
+  if (v.startsWith("ghp_") || v.startsWith("gho_") || v.startsWith("ghs_") || v.startsWith("github_pat_")) {
+    return { provider: "GITHUB", suggestedName: "GH_TOKEN" }
+  }
+
+  // GitLab PAT.
+  if (v.startsWith("glpat-")) return { provider: "GITLAB", suggestedName: "GITLAB_TOKEN" }
+
+  // Google API keys.
+  if (v.startsWith("AIza") && v.length >= 35) return { provider: "GOOGLE", suggestedName: "GOOGLE_API_KEY" }
+
+  // AWS access key ID.
+  if (/^(AKIA|ASIA)[A-Z0-9]{16}$/.test(v)) return { provider: "AWS", suggestedName: "AWS_ACCESS_KEY_ID" }
+
+  // Vercel — `vercel_...` is non-standard; the official prefix is the
+  // 24-char hex pattern, but tokens copied via CLI often carry no
+  // prefix. We don't false-positive here.
+
+  return null
+}
