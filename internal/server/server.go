@@ -396,6 +396,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				"fix", "export CREWSHIP_PUBLIC_URL=http://<reachable-host>:8080")
 		}
 		opts = append(opts, goapi.WithPortExposePublicURL(publicURL))
+		// Crew container Docker network — must match what the orchestrator
+		// attaches containers to. Without this, multi-instance dev.sh
+		// deployments (crewship-1-agents, crewship-2-agents, ...) would
+		// silently 502 every /expose-port call because the handler defaults
+		// to "crewship-agents" and the container is on a different bridge.
+		if cfg.Container.Network != "" {
+			opts = append(opts, goapi.WithPortExposeNetwork(cfg.Container.Network))
+		}
 		opts = append(opts, goapi.WithHub(wsHub))
 		opts = append(opts, goapi.WithOrchestrator(orch))
 		opts = append(opts, goapi.WithLogWriter(logW))
