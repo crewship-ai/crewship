@@ -126,8 +126,8 @@ export function ImportSkillDialog({
 
       const body =
         tab === "url"
-          ? { url: url.trim() }
-          : { content: content.trim() }
+          ? { url: url.trim(), allow_unsafe_license: unsafeLicense }
+          : { content: content.trim(), allow_unsafe_license: unsafeLicense }
 
       const res = await fetch(
         `/api/v1/workspaces/${workspaceId}/skills/import`,

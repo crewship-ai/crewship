@@ -234,7 +234,9 @@ The --repo flow shells out to git on the server with --depth 1 --filter=blob:non
 			return nil
 		}
 
-		body := map[string]interface{}{}
+		body := map[string]interface{}{
+			"allow_unsafe_license": unsafeFlag,
+		}
 		if fileFlag != "" {
 			data, err := os.ReadFile(fileFlag)
 			if err != nil {

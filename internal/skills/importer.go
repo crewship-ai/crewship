@@ -16,10 +16,12 @@ import (
 )
 
 // ImportRequest specifies a skill to import — either from a URL or pasted content.
-// Exactly one of URL or Content must be non-empty.
+// Exactly one of URL or Content must be non-empty. AllowUnsafeLicense bypasses
+// the SPDX allowlist gate (same semantics as BulkImport's flag).
 type ImportRequest struct {
-	URL     string
-	Content string
+	URL                string
+	Content            string
+	AllowUnsafeLicense bool
 }
 
 // ImportResult is returned by a successful Import call.
@@ -65,8 +67,17 @@ func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 // The workspaceID and userID parameters are accepted for API handler compatibility
 // but currently unused — skills are global platform-wide resources (no workspace_id
 // column in the skills table). They may be used for audit logging in the future.
+//
+// Both the single-skill paths (URL and pasted content) run through the
+// same prompt-injection scanner + SPDX detection that BulkImport uses.
+// Earlier this branch had a "lite" upsert that skipped both gates; that
+// regression let single-file imports land with scan_status=UNSCANNED
+// even on bodies the bulk path would have flagged. The single-skill API
+// keeps the SPDX gate optional via AllowUnsafeLicense — the UI surfaces
+// the same checkbox as the bulk-repo tab.
 func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest) (*ImportResult, error) {
 	var content string
+	source := ""
 
 	switch {
 	case req.URL != "" && req.Content != "":
@@ -88,6 +99,7 @@ func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest)
 			return nil, err
 		}
 		content = fetched
+		source = normalised
 	default:
 		return nil, fmt.Errorf("either url or content is required")
 	}
@@ -97,7 +109,18 @@ func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest)
 		return nil, fmt.Errorf("parse skill: %w", err)
 	}
 
-	return imp.upsert(ctx, parsed)
+	spdx := DetectSPDX(parsed.Meta.License)
+	if !req.AllowUnsafeLicense && parsed.Meta.License != "" && !LicenseAllowed(spdx) {
+		return nil, &LicenseError{Detected: spdx, Raw: parsed.Meta.License}
+	}
+
+	scan := ScanContent(parsed.Content)
+	vendor := parsed.Meta.Vendor
+	if vendor == "" {
+		vendor = "community"
+	}
+
+	return imp.upsertEnriched(ctx, parsed, vendor, spdx, scan, source)
 }
 
 func (imp *Importer) fetchURL(ctx context.Context, url string) (string, error) {
@@ -128,113 +151,12 @@ func (imp *Importer) fetchURL(ctx context.Context, url string) (string, error) {
 	return string(body), nil
 }
 
-func (imp *Importer) upsert(ctx context.Context, parsed *ParsedSkill) (*ImportResult, error) {
-	slug := parsed.Meta.Name // already slugified by ParseSKILLMD
-
-	displayName := parsed.Meta.DisplayName
-	if displayName == "" {
-		displayName = slug
-	}
-
-	version := parsed.Meta.Version
-	if version == "" {
-		version = "1.0.0"
-	}
-
-	category := parsed.Meta.Category
-	if category == "" {
-		category = "CUSTOM"
-	}
-
-	credReqJSON := "[]"
-	if len(parsed.Meta.CredentialRequirements) > 0 {
-		b, err := json.Marshal(parsed.Meta.CredentialRequirements)
-		if err != nil {
-			return nil, fmt.Errorf("marshal credential_requirements: %w", err)
-		}
-		credReqJSON = string(b)
-	}
-
-	tagsJSON := "[]"
-	if len(parsed.Meta.Tags) > 0 {
-		b, err := json.Marshal(parsed.Meta.Tags)
-		if err != nil {
-			return nil, fmt.Errorf("marshal tags: %w", err)
-		}
-		tagsJSON = string(b)
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	// Check if a skill with this slug already exists
-	var existingID string
-	err := imp.db.QueryRowContext(ctx, "SELECT id FROM skills WHERE slug = ?", slug).Scan(&existingID)
-
-	if errors.Is(err, sql.ErrNoRows) {
-		// INSERT new skill
-		newID := generateSkillID()
-		_, insertErr := imp.db.ExecContext(ctx, `
-			INSERT INTO skills (
-				id, name, slug, display_name, description, version, author,
-				category, source, icon, credential_requirements, tags, content,
-				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CUSTOM', ?, ?, ?, ?, ?, ?)`,
-			newID, displayName, slug, displayName,
-			nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
-			category, nullableStr(parsed.Meta.Icon),
-			credReqJSON, tagsJSON, parsed.Content,
-			now, now,
-		)
-		if insertErr != nil {
-			if strings.Contains(insertErr.Error(), "UNIQUE constraint failed: skills.name") {
-				return nil, fmt.Errorf("a skill with name %q already exists", displayName)
-			}
-			return nil, fmt.Errorf("insert skill: %w", insertErr)
-		}
-		return &ImportResult{
-			SkillID: newID,
-			Name:    displayName,
-			Slug:    slug,
-			Created: true,
-		}, nil
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("check skill existence: %w", err)
-	}
-
-	// UPDATE existing skill (keep same ID to preserve agent_skills references)
-	_, updateErr := imp.db.ExecContext(ctx, `
-		UPDATE skills SET
-			name = ?, display_name = ?, description = ?, version = ?, author = ?,
-			category = ?, source = 'CUSTOM', icon = ?,
-			credential_requirements = ?, tags = ?, content = ?, updated_at = ?
-		WHERE id = ?`,
-		displayName, displayName,
-		nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
-		category, nullableStr(parsed.Meta.Icon),
-		credReqJSON, tagsJSON, parsed.Content,
-		now, existingID,
-	)
-	if updateErr != nil {
-		if strings.Contains(updateErr.Error(), "UNIQUE constraint failed: skills.name") {
-			return nil, fmt.Errorf("a skill with name %q already exists", displayName)
-		}
-		return nil, fmt.Errorf("update skill: %w", updateErr)
-	}
-
-	return &ImportResult{
-		SkillID: existingID,
-		Name:    displayName,
-		Slug:    slug,
-		Created: false,
-	}, nil
-}
-
-// upsertEnriched is the v65-aware variant of upsert used by BulkImport
-// and the future single-skill-with-safety paths. It populates the
-// vendor / spdx_license / scan_status / description_quality columns
-// the bare upsert leaves NULL.
+// upsertEnriched is the v65-aware writer used by both single-skill and
+// bulk-repo import paths. It populates vendor / spdx_license /
+// scan_status / description_quality alongside the core columns. The
+// pre-v65 "lite" upsert that wrote those as NULL was removed when the
+// scanner gate was wired into the single path — every import now lands
+// with a real scan result.
 //
 // Identity is still by slug — composite (vendor, slug) lookup is
 // future work once we have multi-source imports producing collisions.
@@ -331,6 +253,9 @@ func (imp *Importer) upsertEnriched(
 			now, now,
 		)
 		if insertErr != nil {
+			if strings.Contains(insertErr.Error(), "UNIQUE constraint failed: skills.name") {
+				return nil, fmt.Errorf("a skill with name %q already exists", displayName)
+			}
 			return nil, fmt.Errorf("insert skill: %w", insertErr)
 		}
 		return &ImportResult{
@@ -366,6 +291,9 @@ func (imp *Importer) upsertEnriched(
 		now, existingID,
 	)
 	if updateErr != nil {
+		if strings.Contains(updateErr.Error(), "UNIQUE constraint failed: skills.name") {
+			return nil, fmt.Errorf("a skill with name %q already exists", displayName)
+		}
 		return nil, fmt.Errorf("update skill: %w", updateErr)
 	}
 	return &ImportResult{

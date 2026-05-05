@@ -328,8 +328,9 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		URL     string `json:"url"`
-		Content string `json:"content"`
+		URL                string `json:"url"`
+		Content            string `json:"content"`
+		AllowUnsafeLicense bool   `json:"allow_unsafe_license"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(http.StatusBadRequest, "Invalid JSON body")
@@ -355,8 +356,9 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	imp := skills.NewImporter(h.db, h.logger)
 	imp.SkipURLValidation = h.SkipURLValidation
 	result, err := imp.Import(r.Context(), wsID, user.ID, skills.ImportRequest{
-		URL:     req.URL,
-		Content: req.Content,
+		URL:                req.URL,
+		Content:            req.Content,
+		AllowUnsafeLicense: req.AllowUnsafeLicense,
 	})
 	if err != nil {
 		h.logger.Info("skill import failed", "error", err)

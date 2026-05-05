@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"path"
 	"regexp"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -50,14 +52,30 @@ func writeAgentSkills(
 	skills []SkillBundle,
 	logger *slog.Logger,
 ) error {
-	if len(skills) == 0 {
-		return nil
-	}
 	folderRoots := []string{
 		".claude/skills",
 		".agents/skills",
 		".opencode/skills",
 		".factory/skills",
+	}
+
+	// Prune stale skill folders BEFORE writing the current set so that a
+	// skill removed via `crewship skill unassign` no longer survives in
+	// .claude/skills/<slug>/. Without this pass, Claude Code's filesystem
+	// auto-discovery would still pick up the orphaned SKILL.md and the
+	// agent could keep activating a skill that the operator believes is
+	// gone — same hazard for .opencode and .factory which also walk
+	// these dirs.
+	keep := make(map[string]struct{}, len(skills))
+	for _, s := range skills {
+		if s.Slug != "" && safeSlugRe.MatchString(s.Slug) {
+			keep[s.Slug] = struct{}{}
+		}
+	}
+	pruneStaleSkillFolders(ctx, container, containerID, workDir, folderRoots, keep, logger)
+
+	if len(skills) == 0 {
+		return nil
 	}
 	written := 0
 	skipped := 0
@@ -121,4 +139,129 @@ func writeAgentSkills(
 		return fmt.Errorf("write agent skills: zero of %d skills landed in any path", len(skills))
 	}
 	return nil
+}
+
+// pruneStaleSkillFolders removes <root>/<slug>/ entries (and the matching
+// .cursor/rules/<slug>.mdc) for slugs no longer in `keep`. Best-effort:
+// failures log a warning but never abort the agent setup since the
+// [SKILLS AVAILABLE] system prompt is the authoritative surface — the
+// filesystem layer is the bonus discovery path.
+//
+// The implementation shells out once per root for the listing and once
+// to rm the orphan set in a single command, so the cost is bounded
+// regardless of skill count. We restrict the rm to slugs that pass
+// safeSlugRe so a corrupted directory entry can never escape the
+// rooted folder.
+func pruneStaleSkillFolders(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	workDir string,
+	folderRoots []string,
+	keep map[string]struct{},
+	logger *slog.Logger,
+) {
+	for _, root := range folderRoots {
+		listing, err := execCapture(ctx, container, containerID, workDir,
+			fmt.Sprintf("ls -1 %s 2>/dev/null || true", shellEscape(root)))
+		if err != nil {
+			if logger != nil {
+				logger.Warn("skill prune: list failed", "root", root, "error", err)
+			}
+			continue
+		}
+		var orphans []string
+		for _, name := range strings.Split(strings.TrimSpace(listing), "\n") {
+			name = strings.TrimSpace(name)
+			if name == "" || !safeSlugRe.MatchString(name) {
+				continue
+			}
+			if _, ok := keep[name]; ok {
+				continue
+			}
+			orphans = append(orphans, path.Join(root, name))
+		}
+		if len(orphans) == 0 {
+			continue
+		}
+		args := make([]string, 0, len(orphans))
+		for _, p := range orphans {
+			args = append(args, shellEscape(p))
+		}
+		script := "rm -rf " + strings.Join(args, " ")
+		if _, err := execCapture(ctx, container, containerID, workDir, script); err != nil {
+			if logger != nil {
+				logger.Warn("skill prune: rm failed", "root", root, "error", err)
+			}
+			continue
+		}
+		if logger != nil {
+			logger.Debug("skill prune: removed orphan skill folders", "root", root, "count", len(orphans))
+		}
+	}
+
+	// Cursor rules are flat .mdc files, not folders — handle them
+	// separately so a single ls + rm walks .cursor/rules and skips any
+	// non-.mdc entries the user may have parked there manually.
+	listing, err := execCapture(ctx, container, containerID, workDir,
+		"ls -1 .cursor/rules 2>/dev/null || true")
+	if err != nil {
+		return
+	}
+	var orphans []string
+	for _, name := range strings.Split(strings.TrimSpace(listing), "\n") {
+		name = strings.TrimSpace(name)
+		if !strings.HasSuffix(name, ".mdc") {
+			continue
+		}
+		slug := strings.TrimSuffix(name, ".mdc")
+		if !safeSlugRe.MatchString(slug) {
+			continue
+		}
+		if _, ok := keep[slug]; ok {
+			continue
+		}
+		orphans = append(orphans, path.Join(".cursor/rules", name))
+	}
+	if len(orphans) == 0 {
+		return
+	}
+	args := make([]string, 0, len(orphans))
+	for _, p := range orphans {
+		args = append(args, shellEscape(p))
+	}
+	script := "rm -f " + strings.Join(args, " ")
+	if _, err := execCapture(ctx, container, containerID, workDir, script); err != nil {
+		if logger != nil {
+			logger.Warn("skill prune: rm cursor rules failed", "error", err)
+		}
+	}
+}
+
+// execCapture runs a shell snippet inside the container and returns
+// stdout as a string. Used for the prune pass which needs to read
+// directory listings (writeFileViaContainer discards stdout).
+func execCapture(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	workDir string,
+	script string,
+) (string, error) {
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		WorkingDir:  workDir,
+		User:        "1001:1001",
+	}
+	result, err := container.Exec(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	defer result.Reader.Close()
+	buf, err := io.ReadAll(result.Reader)
+	if err != nil {
+		return "", err
+	}
+	return string(buf), nil
 }
