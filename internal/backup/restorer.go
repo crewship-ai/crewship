@@ -46,6 +46,11 @@ type ExtractedPayload struct {
 	workspacePathBySlug map[string]string
 	volumePathsBySlug   map[string]map[string]string // crew → volume name → path
 	memoryPathBySlug    map[string]string
+	// systemPathsBySlug holds /var/lib (and any future rootfs sections
+	// added under "system/") keyed by sub-section name. Separate from
+	// volumePathsBySlug so a future migration that drops a real named
+	// volume can't accidentally collide with a system section name.
+	systemPathsBySlug map[string]map[string]string // crew → kind ("var-lib") → path
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the
@@ -75,6 +80,7 @@ func (p *ExtractedPayload) Close() error {
 	p.workspacePathBySlug = nil
 	p.volumePathsBySlug = nil
 	p.memoryPathBySlug = nil
+	p.systemPathsBySlug = nil
 	return err
 }
 
@@ -132,6 +138,26 @@ func (p *ExtractedPayload) OpenMemory(ctx context.Context, slug string) (io.Read
 	return f, true, nil
 }
 
+// OpenSystem returns a reader for one of a crew's system-rootfs tars
+// (currently only "var-lib"). Bundles produced by older collectors
+// have no system/* section so the (false, nil) signal lets RestoreCrew
+// silently skip without erroring.
+func (p *ExtractedPayload) OpenSystem(ctx context.Context, slug, kind string) (io.ReadCloser, bool, error) {
+	bySlug, ok := p.systemPathsBySlug[slug]
+	if !ok {
+		return nil, false, nil
+	}
+	path, ok := bySlug[kind]
+	if !ok {
+		return nil, false, nil
+	}
+	f, err := p.storageOrDefault().Open(ctx, path)
+	if err != nil {
+		return nil, true, fmt.Errorf("backup: open system section %s/%s: %w", slug, kind, err)
+	}
+	return f, true, nil
+}
+
 // ExtractPayload walks the payload tar produced by the collector and
 // splits it into the ExtractedPayload buckets. Per-crew sections are
 // re-tar'd into temp files so the caller's peak memory stays bounded
@@ -157,6 +183,7 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		workspacePathBySlug: map[string]string{},
 		volumePathsBySlug:   map[string]map[string]string{},
 		memoryPathBySlug:    map[string]string{},
+		systemPathsBySlug:   map[string]map[string]string{},
 	}
 	// Defer-based cleanup on error paths so a partial extract does
 	// not leak temp files.
@@ -205,16 +232,42 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 
 		// Defence-in-depth against a tampered bundle: a tar entry that
 		// climbs above the intended prefix (e.g. "../../etc/shadow")
-		// or carries a symlink target would, when later handed to
-		// docker CopyTo, write into unexpected parts of the container
-		// rootfs. Docker enforces its own containment but we reject
-		// the entry up front so the failure mode is "bad bundle", not
-		// "unexpected file where it should not be".
+		// or carries an unsafe symlink target would, when later handed
+		// to docker CopyTo, write into unexpected parts of the
+		// container rootfs. Docker enforces its own containment but
+		// we reject the entry up front so the failure mode is "bad
+		// bundle", not "unexpected file where it should not be".
 		if strings.Contains(name, "..") {
 			return nil, fmt.Errorf("%w: payload entry %q contains parent reference", ErrInvalidManifest, hdr.Name)
 		}
-		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
-			return nil, fmt.Errorf("%w: payload entry %q is a symlink", ErrInvalidManifest, hdr.Name)
+		// Hardlinks (TypeLink) and symlinks (TypeSymlink) get the same
+		// validation: NUL-free target, not absolute, no ".." escape.
+		// Docker's CopyTo bounds extraction to the dst container, so a
+		// rogue link cannot reach the host — but a tampered bundle
+		// could still smuggle a `/etc/shadow` or `../../etc/passwd`
+		// link INTO the restored container's rootfs (especially the
+		// uid-0 /var/lib path). Defence-in-depth: reject up front so
+		// the failure mode is "bad bundle", not "unexpected file
+		// inside the container".
+		//
+		// Legitimate `..`-bearing targets that crews actually ship
+		// (mise / pyenv / npm dedup) live under paths the collector
+		// already excludes (.local/share/mise/, .local/share/pnpm/,
+		// node_modules/, etc.), so this check does not regress real
+		// restores. If a future tool under a non-excluded path needs
+		// a parent-relative link, the collector exclusion list — not
+		// this safety check — is the right knob.
+		if hdr.Typeflag == tar.TypeLink || hdr.Typeflag == tar.TypeSymlink {
+			if strings.ContainsRune(hdr.Linkname, 0) {
+				return nil, fmt.Errorf("%w: payload entry %q link target contains NUL", ErrInvalidManifest, hdr.Name)
+			}
+			clean := path.Clean(hdr.Linkname)
+			if path.IsAbs(clean) {
+				return nil, fmt.Errorf("%w: payload entry %q link target is absolute (%q)", ErrInvalidManifest, hdr.Name, clean)
+			}
+			if clean == ".." || strings.HasPrefix(clean, "../") {
+				return nil, fmt.Errorf("%w: payload entry %q link target escapes via parent reference (%q)", ErrInvalidManifest, hdr.Name, clean)
+			}
 		}
 
 		switch {
@@ -261,6 +314,11 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				return nil, err
 			}
 
+		case strings.HasPrefix(name, "system/"):
+			if err := repackIntoSink(tr, hdr, name, "system/", sinkFor); err != nil {
+				return nil, err
+			}
+
 		default:
 			// Forward-compat: unknown entries are silently discarded.
 			if _, err := io.Copy(io.Discard, tr); err != nil {
@@ -304,6 +362,17 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				out.volumePathsBySlug[slug] = bySlug
 			}
 			bySlug[vol] = name
+		case "system":
+			if len(parts) < 3 {
+				continue
+			}
+			slug, kind := parts[1], parts[2]
+			bySlug, ok := out.systemPathsBySlug[slug]
+			if !ok {
+				bySlug = map[string]string{}
+				out.systemPathsBySlug[slug] = bySlug
+			}
+			bySlug[kind] = name
 		}
 	}
 
@@ -353,6 +422,17 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 		}
 		key = "memory/" + slug
 		strip = slug + "/"
+	case "system/":
+		slug, more, ok := splitFirst(rest)
+		if !ok {
+			return nil
+		}
+		kind, _, ok := splitFirst(more)
+		if !ok {
+			return nil
+		}
+		key = "system/" + slug + "/" + kind
+		strip = slug + "/" + kind + "/"
 	default:
 		return nil
 	}
@@ -401,43 +481,117 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 	if payload == nil {
 		return fmt.Errorf("backup: RestoreCrew: nil payload")
 	}
-	// Workspace bind.
-	if r, ok, err := payload.OpenWorkspace(ctx, crewSlug); err != nil {
-		return err
-	} else if ok {
-		err := ops.CopyTo(ctx, containerID, ContainerWorkspacePath, r)
-		_ = r.Close()
-		if err != nil {
-			return fmt.Errorf("backup: restore workspace %s: %w", crewSlug, err)
-		}
+	// Each section is restored by streaming a tar into the container.
+	// Two restore strategies live in the inner switch below. Workspace
+	// + memory go through the SDK's CopyTo with parent==/. The named
+	// volumes and the system /var/lib path go through CopyToVolume /
+	// CopyToSystem (exec + tar -x) because Docker's archive API
+	// rejects writes whose dst is a named-volume mountpoint inside a
+	// read-only rootfs path.
+	type section struct {
+		open   func() (io.ReadCloser, bool, error)
+		dest   string // container absolute path of the section root
+		name   string // human label for error messages
+		asRoot bool   // exec the tar as uid 0 instead of the agent user
 	}
-	// Named volumes.
-	for _, pair := range []struct{ vol, dest string }{
-		{"home", ContainerHomePath},
-		{"tools", ContainerToolsPath},
-	} {
-		r, ok, err := payload.OpenVolume(ctx, crewSlug, pair.vol)
+	sections := []section{
+		{
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenWorkspace(ctx, crewSlug) },
+			dest: ContainerWorkspacePath,
+			name: "workspace",
+		},
+		{
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenVolume(ctx, crewSlug, "home") },
+			dest: ContainerHomePath,
+			name: "home",
+		},
+		{
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenVolume(ctx, crewSlug, "tools") },
+			dest: ContainerToolsPath,
+			name: "tools",
+		},
+		{
+			open: func() (io.ReadCloser, bool, error) { return payload.OpenMemory(ctx, crewSlug) },
+			dest: ContainerMemoryPath,
+			name: "memory",
+		},
+		{
+			// /var/lib carries service data dirs (redis, postgresql, ...)
+			// the agent populated at runtime. Bundles produced before the
+			// system section was added simply have no entry under
+			// system/<slug>/var-lib so OpenSystem returns (false, nil) and
+			// this is a silent skip — full backwards compatibility.
+			//
+			// Must extract as uid 0: every parent dir under /var/lib is
+			// root-owned, the agent user (1001) has no write bit, and
+			// inner files (mysql/ibdata1, postgres data) are root-owned
+			// reads from the bundle perspective. CopyToSystem handles the
+			// uid switch via a separate exec session.
+			open:   func() (io.ReadCloser, bool, error) { return payload.OpenSystem(ctx, crewSlug, "var-lib") },
+			dest:   ContainerVarLibPath,
+			name:   "var-lib",
+			asRoot: true,
+		},
+	}
+	// Per-section errors are collected so a hiccup on one section
+	// (e.g. a leftover root-owned file blocking unlink in /home/agent)
+	// doesn't prevent the others from being restored. The aggregated
+	// error is returned at the end so the operator sees ALL the
+	// failures, not just the first one.
+	var sectionErrs []string
+	for _, s := range sections {
+		r, ok, err := s.open()
 		if err != nil {
-			return err
+			// Aggregate Open* failures into the same partial-restore
+			// path as CopyTo failures below — a corrupt temp section
+			// for the home volume should not block restoring the
+			// workspace + memory the operator probably cares about
+			// more.
+			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
+			continue
 		}
 		if !ok {
 			continue
 		}
-		err = ops.CopyTo(ctx, containerID, pair.dest, r)
+		parent := path.Dir(s.dest)
+		// Two restore strategies, picked by where the section lands:
+		//
+		//   parent == "/" (e.g. /workspace, /output): Docker's archive
+		//     API works fine because the dst itself is a bind-mounted
+		//     writable target, not a read-only rootfs path. Use the
+		//     SDK's CopyTo directly — it's faster and doesn't require
+		//     `tar` to be installed in the container.
+		//
+		//   parent != "/" (e.g. /home/agent, /opt/crew-tools): these
+		//     are typically NAMED VOLUMES whose mountpoint sits inside
+		//     a read-only rootfs path (/home, /opt). Docker's archive
+		//     API rejects ANY CopyTo into them with "rootfs is marked
+		//     read-only" (when dst=parent) or "Could not find the file"
+		//     (when dst=mountpoint, because the API checks the rootfs
+		//     view rather than the live mount table). Pipe the tar
+		//     into `tar -x -C <dst>` over an exec session instead —
+		//     that runs INSIDE the container, sees the live mounts,
+		//     and lands files on the volume properly.
+		if parent == "/" {
+			err := ops.CopyTo(ctx, containerID, s.dest, r)
+			_ = r.Close()
+			if err != nil {
+				sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
+			}
+			continue
+		}
+		if s.asRoot {
+			err = ops.CopyToSystem(ctx, containerID, s.dest, r)
+		} else {
+			err = ops.CopyToVolume(ctx, containerID, s.dest, r)
+		}
 		_ = r.Close()
 		if err != nil {
-			return fmt.Errorf("backup: restore %s %s: %w", pair.vol, crewSlug, err)
+			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))
 		}
 	}
-	// Memory / output.
-	if r, ok, err := payload.OpenMemory(ctx, crewSlug); err != nil {
-		return err
-	} else if ok {
-		err := ops.CopyTo(ctx, containerID, ContainerMemoryPath, r)
-		_ = r.Close()
-		if err != nil {
-			return fmt.Errorf("backup: restore memory %s: %w", crewSlug, err)
-		}
+	if len(sectionErrs) > 0 {
+		return fmt.Errorf("backup: restore crew %s — partial: %s", crewSlug, strings.Join(sectionErrs, "; "))
 	}
 	return nil
 }

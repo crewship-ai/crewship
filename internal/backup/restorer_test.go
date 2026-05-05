@@ -73,27 +73,81 @@ func TestExtractPayload_RejectsParentTraversal(t *testing.T) {
 	}
 }
 
-func TestExtractPayload_RejectsSymlink(t *testing.T) {
+// TestExtractPayload_RejectsAbsoluteSymlink locks in the defence-in-
+// depth policy: a tampered bundle that ships a symlink to an
+// absolute host-rooted path (e.g. /etc/passwd) is rejected at
+// preflight even though docker CopyTo would already bound the
+// extraction to the destination container. The point is to fail
+// loud at the bundle layer so the operator sees "bad bundle", not
+// "unexpected /etc reference inside the restored container".
+//
+// Legit container layouts that previously needed to pass — mise /
+// pyenv / npm dedup / cursor-agent shims — have always lived under
+// volumeExclusions, so this rejection does not regress real
+// restores; the collector strips them before they reach the bundle.
+func TestExtractPayload_RejectsAbsoluteSymlink(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "/etc/passwd")
 	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
-		t.Fatal("expected ExtractPayload to reject a symlink entry")
+		t.Fatal("expected absolute-target symlink to be rejected at preflight")
 	}
 	if !errors.Is(err, ErrInvalidManifest) {
 		t.Errorf("expected ErrInvalidManifest, got %v", err)
 	}
 }
 
-func TestExtractPayload_RejectsHardLink(t *testing.T) {
-	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "/etc/passwd")
+func TestExtractPayload_RejectsParentTraversalSymlink(t *testing.T) {
+	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "../../../etc/passwd")
 	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
 	if err == nil {
-		t.Fatal("expected ExtractPayload to reject a hardlink entry")
+		t.Fatal("expected '..'-bearing symlink to be rejected at preflight")
 	}
 	if !errors.Is(err, ErrInvalidManifest) {
 		t.Errorf("expected ErrInvalidManifest, got %v", err)
 	}
 }
+
+func TestExtractPayload_AcceptsRelativeSymlink(t *testing.T) {
+	// Sibling-relative symlinks (e.g. shim → real binary one
+	// directory over) are common in language-tooling layouts and
+	// must continue to round-trip.
+	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "real-binary")
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("relative-target symlink should pass preflight; got %v", err)
+	}
+	t.Cleanup(func() { _ = out.Close() })
+}
+
+func TestExtractPayload_AcceptsHardLink(t *testing.T) {
+	// npm/yarn/pnpm dedupe binaries via hardlinks. The link's target
+	// names another path INSIDE the same archive, so the worst case is
+	// a missing target which is detected at extraction time, not
+	// preflight.
+	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "workspace/my-crew/file.txt")
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("contained hardlink should pass preflight; got %v", err)
+	}
+	t.Cleanup(func() { _ = out.Close() })
+}
+
+func TestExtractPayload_RejectsAbsoluteHardLink(t *testing.T) {
+	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "/usr/bin/sudo")
+	_, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err == nil {
+		t.Fatal("expected absolute-target hardlink to be rejected at preflight")
+	}
+	if !errors.Is(err, ErrInvalidManifest) {
+		t.Errorf("expected ErrInvalidManifest, got %v", err)
+	}
+}
+
+// NUL-in-linkname is a defensive guard. The standard library's tar
+// writer refuses to encode such a header, so we can't construct the
+// pathological input from clean Go code — manual tar construction
+// would be required. Keeping the check in code as a belt-and-braces
+// measure but no test fixture exercises it.
 
 func TestExtractPayload_AcceptsValidLayout(t *testing.T) {
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/file.txt", tar.TypeReg, "")

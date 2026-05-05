@@ -42,44 +42,44 @@ func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map
 }
 
 type Router struct {
-	mux                   *http.ServeMux
-	db                    *sql.DB
-	logger                *slog.Logger
-	authMw                *AuthMiddleware
-	sessionsStore         sessions.Store
-	socketPath            string
-	internalToken         string
-	internalBaseURL       string
-	hub                   *ws.Hub
-	orch                  *orchestrator.Orchestrator
-	keeperGK              gatekeeper.Evaluator
-	keeperSecrets         SecretGetter
-	keeperContainer       provider.ContainerProvider
-	keeperConfig          *config.KeeperConfig
-	keeperConvReader      ConversationReader
-	missionCallback       MissionCallback
-	scheduleUpdater       ScheduleUpdater
-	logWriter             *logcollector.Writer
-	allowSignup           bool
-	googleClientID        string
-	googleSecret          string
-	authBaseURL           string
-	license               *license.License
-	agentHandler          *AgentHandler
-	storagePath           string // base path for crew file storage
-	catalogFetcher        *devcontainer.CatalogFetcher
-	runtimeFetcher        *devcontainer.RuntimeFetcher
-	dockerClient          *dockerclient.Client
-	featureCacheDir       string
-	portExposeRegistry    *PortExposeRegistry // closed via Shutdown() on server stop
-	portExposePublicURL   string              // e.g. http://192.168.1.201:8080, used to build capability URLs
-	authRateLimitedMux    http.Handler        // mux wrapped with auth rate limiter
-	apiRateLimitedMux     http.Handler        // mux wrapped with general API rate limiter
-	credTestRateLimitedMux http.Handler       // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
-	journal               journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
-	consolidator          *consolidate.Consolidator
-	consolidateMemoryRoot string
-	provisioning          *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
+	mux                    *http.ServeMux
+	db                     *sql.DB
+	logger                 *slog.Logger
+	authMw                 *AuthMiddleware
+	sessionsStore          sessions.Store
+	socketPath             string
+	internalToken          string
+	internalBaseURL        string
+	hub                    *ws.Hub
+	orch                   *orchestrator.Orchestrator
+	keeperGK               gatekeeper.Evaluator
+	keeperSecrets          SecretGetter
+	keeperContainer        provider.ContainerProvider
+	keeperConfig           *config.KeeperConfig
+	keeperConvReader       ConversationReader
+	missionCallback        MissionCallback
+	scheduleUpdater        ScheduleUpdater
+	logWriter              *logcollector.Writer
+	allowSignup            bool
+	googleClientID         string
+	googleSecret           string
+	authBaseURL            string
+	license                *license.License
+	agentHandler           *AgentHandler
+	storagePath            string // base path for crew file storage
+	catalogFetcher         *devcontainer.CatalogFetcher
+	runtimeFetcher         *devcontainer.RuntimeFetcher
+	dockerClient           *dockerclient.Client
+	featureCacheDir        string
+	portExposeRegistry     *PortExposeRegistry // closed via Shutdown() on server stop
+	portExposePublicURL    string              // e.g. http://192.168.1.201:8080, used to build capability URLs
+	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
+	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
+	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
+	journal                journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
+	consolidator           *consolidate.Consolidator
+	consolidateMemoryRoot  string
+	provisioning           *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
 }
 
 // Provisioning returns the registered ProvisioningHandler so wiring code (e.g.

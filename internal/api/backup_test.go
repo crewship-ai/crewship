@@ -67,9 +67,24 @@ func TestStatusForBackupError(t *testing.T) {
 	}
 }
 
-func TestCrewContainerNameFunc(t *testing.T) {
-	fn := crewContainerNameFunc()
+func TestResolveCrewContainerName_Default(t *testing.T) {
+	// No SetCrewContainerName called → falls back to the legacy default
+	// prefix so old setups + tests without a provider still work.
+	h := &BackupHandler{}
+	fn := h.resolveCrewContainerName()
 	if got := fn("my-crew"); got != "crewship-team-my-crew" {
-		t.Errorf("unexpected container name: %q", got)
+		t.Errorf("default prefix: got %q, want crewship-team-my-crew", got)
+	}
+}
+
+func TestResolveCrewContainerName_Injected(t *testing.T) {
+	// SetCrewContainerName called → uses the injected mapping (this is
+	// what fixes multi-instance setups; the router wires the active
+	// ContainerProvider's CrewContainerName method).
+	h := &BackupHandler{}
+	h.SetCrewContainerName(func(slug string) string { return "crewship-3-team-" + slug })
+	fn := h.resolveCrewContainerName()
+	if got := fn("my-crew"); got != "crewship-3-team-my-crew" {
+		t.Errorf("injected prefix: got %q, want crewship-3-team-my-crew", got)
 	}
 }

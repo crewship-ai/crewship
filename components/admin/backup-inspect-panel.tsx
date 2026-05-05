@@ -39,6 +39,15 @@ export function BackupInspectPanel({ workspaceId }: { workspaceId: string | unde
             <dd>{data.crewship_version_at_backup}</dd>
             <dt className="text-muted-foreground">Scope</dt>
             <dd>{data.scope}</dd>
+            <dt className="text-muted-foreground">Preset</dt>
+            <dd className="capitalize">
+              {data.scope_level ?? "standard"}
+              {!data.scope_level && (
+                <span className="ml-1 text-muted-foreground text-[10px]">
+                  (legacy bundle)
+                </span>
+              )}
+            </dd>
             <dt className="text-muted-foreground">Created</dt>
             <dd>{new Date(data.created_at).toLocaleString()}</dd>
             <dt className="text-muted-foreground">Checksum</dt>

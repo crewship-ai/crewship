@@ -950,6 +950,90 @@ ALTER TABLE credentials ADD COLUMN tags TEXT;
 	{version: 73, name: "add_crew_members_composite_index", sql: `
 CREATE INDEX IF NOT EXISTS idx_crew_member_user_crew ON crew_members(user_id, crew_id);
 `},
+	// v74 — auto-backup scheduling + off-site destinations.
+	// Originally authored as v65 on this branch; renumbered during the
+	// merge with main after PR #267 (skills) and PR #269 (connections)
+	// claimed v65–v73. The migration runner keys on (version, name) so
+	// a renumbered migration is treated as a fresh apply on every
+	// existing database that already ran the connections/skills
+	// chain — which is exactly what we want here, because no instance
+	// has applied the original v65 yet.
+	//
+	// scheduled_jobs holds cron-driven backup tasks. A row's lifecycle:
+	//   created → next_run_at computed by gocron → fires → last_run_at +
+	//   last_status updated. scope+target_id mirror the existing manual
+	//   POST /api/v1/admin/backups payload so the runner can reuse one
+	//   code path. destination_id NULL = local default (back-compat with
+	//   pre-migration manual backups).
+	//
+	// backup_destinations is the registry of where bundles can be written.
+	// kind=local writes to local_path; the S3-family kinds are all reached
+	// via minio-go/v7 (single client lib, all S3-compatible APIs). Secrets
+	// support env: prefix (recommended) so the access key never lands in
+	// the DB cleartext; inline values are still allowed for ergonomic
+	// single-tenant setups but should be wrapped via age in a follow-up.
+	//
+	// One-row-per-(workspace,name) UNIQUE prevents accidental duplicate
+	// destination registration. Restore handler will refuse to delete a
+	// destination that any scheduled_job still references.
+	{version: 74, name: "add_backup_schedules_and_destinations", sql: `
+CREATE TABLE IF NOT EXISTS backup_destinations (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('local','s3','b2','wasabi','minio','r2')),
+    bucket TEXT,
+    region TEXT,
+    endpoint TEXT,
+    path_style INTEGER NOT NULL DEFAULT 0,
+    prefix TEXT NOT NULL DEFAULT '',
+    access_key_ref TEXT,
+    secret_key_ref TEXT,
+    local_path TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_tested_at TEXT,
+    last_test_status TEXT CHECK(last_test_status IS NULL OR last_test_status IN ('reachable','unreachable','error')),
+    last_test_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(workspace_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_backup_destinations_workspace ON backup_destinations(workspace_id);
+
+CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'backup' CHECK(kind IN ('backup')),
+    name TEXT NOT NULL,
+    cron_expr TEXT NOT NULL,
+    timezone TEXT NOT NULL DEFAULT 'UTC',
+    scope TEXT NOT NULL CHECK(scope IN ('workspace','crew','config')),
+    target_id TEXT,
+    keep_last INTEGER NOT NULL DEFAULT 14,
+    keep_days INTEGER NOT NULL DEFAULT 30,
+    destination_id TEXT REFERENCES backup_destinations(id) ON DELETE SET NULL,
+    encryption_mode TEXT NOT NULL DEFAULT 'passphrase' CHECK(encryption_mode IN ('none','passphrase','age_recipients')),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    notify_on_failure INTEGER NOT NULL DEFAULT 0,
+    last_run_at TEXT,
+    last_status TEXT CHECK(last_status IS NULL OR last_status IN ('success','failed','skipped')),
+    last_error TEXT,
+    last_bundle_path TEXT,
+    next_run_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_workspace ON scheduled_jobs(workspace_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run ON scheduled_jobs(enabled, next_run_at) WHERE enabled = 1;
+`},
+	// v75 — was v66 before the merge. scope_level lets the admin UI
+	// render the "Quick / Standard / Full" preset badge alongside an
+	// existing bundle without having to inspect each manifest. Pre-v75
+	// rows backfill to 'standard' (what the collector did when no
+	// preset existed) so existing entries don't render an empty badge.
+	{version: 75, name: "add_backup_catalog_scope_level", sql: `
+ALTER TABLE backup_catalog ADD COLUMN scope_level TEXT NOT NULL DEFAULT 'standard';
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

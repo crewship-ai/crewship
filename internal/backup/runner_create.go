@@ -25,6 +25,11 @@ type CreateOptions struct {
 	CrewID          string // required for Scope=crew
 	OutputDir       string // defaults to ~/.crewship/backups
 	CrewshipVersion string // for manifest.CrewshipVersionAtBackup
+	// Level selects which per-crew sections the collector includes.
+	// Empty resolves to DefaultScopeLevel (standard) so existing CLI
+	// / API callers that don't yet know about presets keep producing
+	// the same bundles they did before.
+	Level ScopeLevel
 	// Actor is stamped into the manifest and audit log.
 	Actor Actor
 	// Encryption — exactly one of Passphrase, Recipients, or NoEncrypt
@@ -179,6 +184,42 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
+	// 2. Reconcile each crew's ContainerID against the Docker daemon.
+	// LoadX populates ContainerID purely from the slug→name function,
+	// which means crews that have never been provisioned (no container
+	// ever created) still get an ID. Trying to pause a non-existent
+	// container later produces the cryptic "No such container" error
+	// instead of a clean skip — and that fails the WHOLE backup, not
+	// just the missing crew. Probe upfront and clear ContainerID for
+	// any crew whose container doesn't exist; CollectCrew already
+	// no-ops on empty ContainerID, so DB rows still backup correctly
+	// while the live filesystem section is simply absent for those
+	// crews. Probe is cheap (single Docker /containers/$name/json
+	// call per crew) and runs in serial — workspaces with hundreds of
+	// crews would want batching, but that's not a v1 concern.
+	if opts.DockerOps != nil {
+		for i := range target.CrewTargets {
+			c := &target.CrewTargets[i]
+			if c.ContainerID == "" {
+				continue
+			}
+			exists, exErr := opts.DockerOps.ContainerExists(ctx, c.ContainerID)
+			if exErr != nil {
+				// Daemon hiccup / permission error — fail loudly. The
+				// previous behaviour silently zeroed ContainerID and
+				// kept going, which produced "successful" bundles
+				// where every crew's filesystem was missing — much
+				// worse than a clear backup error the operator can
+				// retry. Only the definite-absent case (exists=false
+				// below) skips the section.
+				return nil, fmt.Errorf("backup: probe container %s for crew %s: %w", c.ContainerID, c.Slug, exErr)
+			}
+			if !exists {
+				c.ContainerID = ""
+			}
+		}
+	}
+
 	// 2a. Acquire the in-process workspace guard BEFORE the DB lock.
 	// This closes the TOCTOU race with mission-start: without it, a
 	// request already past refuseIfBackupInProgress could register a
@@ -252,9 +293,13 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	}
 
 	// 5a. Per-crew live data.
+	level := opts.Level
+	if !level.Valid() {
+		level = DefaultScopeLevel
+	}
 	for _, crew := range target.CrewTargets {
 		if opts.DockerOps != nil && crew.ContainerID != "" {
-			if err := CollectCrew(ctx, opts.DockerOps, payloadWriter, crew); err != nil {
+			if err := CollectCrew(ctx, opts.DockerOps, payloadWriter, crew, level); err != nil {
 				_ = payloadWriter.Close()
 				_ = payloadFile.Close()
 				return nil, err
@@ -341,11 +386,12 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		CrewshipVersionAtBackup: DetectCrewshipVersion(opts.CrewshipVersion),
 		SchemaMigrationVersions: migrations,
 		Scope:                   opts.Scope,
+		ScopeLevel:              level,
 		CompatibleTargets:       compatibleTargetsFor(opts.Scope),
 		CreatedAt:               now,
 		CreatedBy:               opts.Actor,
 		SourceInstance:          currentInstance(),
-		Contents:                buildContents(target),
+		Contents:                buildContents(target, level),
 		Checksums:               Checksums{PayloadSHA256: sha},
 	}
 	switch {
@@ -417,11 +463,15 @@ func compatibleTargetsFor(s Scope) []Target {
 	}
 }
 
-// buildContents assembles the manifest's Contents summary. We mark
-// every section as "included" for every crew because CollectCrew
-// streams all of them; skipping would require per-crew introspection
-// which is not useful in MVP.
-func buildContents(t *WorkspaceTarget) Contents {
+// buildContents assembles the manifest's Contents summary. The
+// per-section flags now reflect the chosen preset so the restore
+// preflight (and the UI) can tell which sections to expect.
+//
+// For every preset, a missing container ID still zeroes everything
+// out — the crew was never provisioned, so there is no on-disk data
+// to capture regardless of preset.
+func buildContents(t *WorkspaceTarget, level ScopeLevel) Contents {
+	standard := level == ScopeLevelStandard || level == ScopeLevelFull
 	contents := Contents{
 		Workspace: &WorkspaceSummary{
 			ID:   t.ID,
@@ -430,7 +480,8 @@ func buildContents(t *WorkspaceTarget) Contents {
 		},
 	}
 	for _, c := range t.CrewTargets {
-		contents.Crews = append(contents.Crews, CrewSummary{
+		hasContainer := c.ContainerID != ""
+		summary := CrewSummary{
 			ID:                         c.ID,
 			Slug:                       c.Slug,
 			Name:                       c.Name,
@@ -440,11 +491,20 @@ func buildContents(t *WorkspaceTarget) Contents {
 			ConfigHash:                 c.ConfigHash,
 			DevcontainerConfigIncluded: c.DevcontainerConfig != "",
 			MiseConfigIncluded:         c.MiseConfig != "",
-			WorkspaceIncluded:          c.ContainerID != "",
-			VolumesIncluded:            []string{"home", "tools"},
-			MemoryIncluded:             c.ContainerID != "",
-			AgentCount:                 c.AgentCount,
-		})
+			// Workspace and memory ride every preset (Quick / Standard
+			// / Full); they are the smallest sections and are what
+			// every operator expects to see survive a backup.
+			WorkspaceIncluded: hasContainer,
+			MemoryIncluded:    hasContainer,
+			AgentCount:        c.AgentCount,
+		}
+		if standard && hasContainer {
+			summary.VolumesIncluded = []string{"home", "tools"}
+		}
+		if level == ScopeLevelFull && hasContainer {
+			summary.SystemIncluded = true
+		}
+		contents.Crews = append(contents.Crews, summary)
 	}
 	return contents
 }

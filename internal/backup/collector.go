@@ -40,11 +40,21 @@ type WorkspaceTarget struct {
 // match the Docker provider's mount conventions; keeping them in one
 // place means the restorer can mirror them without having to consult
 // the provider implementation.
+//
+// /var/lib captures rootfs writable-layer state that isn't on a named
+// volume — typically service data dirs (redis, postgresql, mysql,
+// mongodb) that an agent installed and started inside the container.
+// Without this, the bundle is "user data only" and an admin restoring
+// after a wipe gets a healthy /workspace + /home/agent but every
+// service the agent stood up is starting from zero. Pure rebuilds-
+// from-image content (/var/lib/dpkg, /var/lib/apt, /var/lib/systemd)
+// is filtered out at repack time so the bundle stays small.
 const (
 	ContainerWorkspacePath = "/workspace"
 	ContainerHomePath      = "/home/agent"
 	ContainerToolsPath     = "/opt/crew-tools"
 	ContainerMemoryPath    = "/output"
+	ContainerVarLibPath    = "/var/lib"
 )
 
 // CollectCrew pauses the crew container, streams its workspace bind,
@@ -55,24 +65,55 @@ const (
 //	volumes/<slug>/home/…
 //	volumes/<slug>/tools/…
 //	memory/<slug>/…
-func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget) error {
+//	system/<slug>/var-lib/…
+//
+// level selects which subset is included (Quick keeps just workspace +
+// memory; Standard adds the named volumes; Full adds /var/lib).
+func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew CrewTarget, level ScopeLevel) error {
 	if crew.ContainerID == "" {
 		// Container was never created or was removed. The crew's DB rows
 		// still restore; callers see a bundle without per-crew volume
 		// data which is the right fallback.
 		return nil
 	}
+	if !level.Valid() {
+		level = DefaultScopeLevel
+	}
 	return WithPaused(ctx, ops, crew.ContainerID, func() error {
-		pairs := []struct {
+		type pair struct {
 			src, prefix string
-		}{
-			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug)},
-			{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug)},
-			{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug)},
-			{ContainerMemoryPath, fmt.Sprintf("memory/%s", crew.Slug)},
+			excludes    []string
+		}
+		// Quick: just the things that describe the agent's active
+		// engagement. workspace = code under edit (vendored deps,
+		// node_modules, build outputs all belong to the user — no
+		// exclusions, otherwise an offline / committed-deps project
+		// silently loses content), memory = the agent's persisted
+		// thoughts (tiny, no exclusions to apply).
+		pairs := []pair{
+			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil},
+			{ContainerMemoryPath, fmt.Sprintf("memory/%s", crew.Slug), nil},
+		}
+		// Standard adds the named volumes (home dotfiles + installed
+		// tools). volumeExclusions trims regenerable caches (mise,
+		// pyenv, npm, .yarn/cache) so /home/agent's 1.6 GB does not
+		// land in every bundle, while preserving credential paths
+		// (~/.config/<tool>/, ~/.aws, ~/.ssh, ~/.docker, ~/.gitconfig).
+		if level == ScopeLevelStandard || level == ScopeLevelFull {
+			pairs = append(pairs,
+				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions},
+				pair{ContainerToolsPath, fmt.Sprintf("volumes/%s/tools", crew.Slug), volumeExclusions},
+			)
+		}
+		// Full adds /var/lib so any service the agent installed
+		// (redis, postgresql, mysql, mongo) round-trips its data dir.
+		if level == ScopeLevelFull {
+			pairs = append(pairs,
+				pair{ContainerVarLibPath, fmt.Sprintf("system/%s/var-lib", crew.Slug), varLibExclusions},
+			)
 		}
 		for _, p := range pairs {
-			if err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix); err != nil {
+			if err := copyContainerPath(ctx, ops, dst, crew.ContainerID, p.src, p.prefix, p.excludes); err != nil {
 				return fmt.Errorf("backup: collect %s:%s: %w", crew.Slug, p.src, err)
 			}
 		}
@@ -83,8 +124,11 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 // copyContainerPath streams srcPath from the container as a tar and
 // repacks it into dst under prefix. Non-existent paths are silently
 // skipped — a crew that was never fully provisioned can still be
-// backed up without erroring on a missing /opt/crew-tools.
-func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, containerID, srcPath, prefix string) error {
+// backed up without erroring on a missing /opt/crew-tools. excludes
+// is the section-specific exclusion list applied at repack time so
+// regeneratable content (/home/agent caches, /var/lib/dpkg state)
+// never lands in the bundle.
+func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, containerID, srcPath, prefix string, excludes []string) error {
 	rc, err := ops.CopyFrom(ctx, containerID, srcPath)
 	if err != nil {
 		// Treat "No such container:path" as skippable; anything else is
@@ -95,7 +139,7 @@ func copyContainerPath(ctx context.Context, ops DockerOps, dst *TarZstWriter, co
 		return err
 	}
 	defer func() { _ = rc.Close() }()
-	if _, err := RepackTar(rc, dst, prefix); err != nil {
+	if _, err := RepackTarWithExcludes(rc, dst, prefix, excludes); err != nil {
 		return err
 	}
 	return nil

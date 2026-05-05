@@ -26,6 +26,48 @@ func (s Scope) Valid() bool {
 	}
 }
 
+// ScopeLevel selects which of the per-crew filesystem sections the
+// collector pulls into the bundle. Three presets — Quick / Standard
+// / Full — keep the admin UX manageable while still giving operators
+// real choice between snapshot speed (~1 MiB) and full preservation
+// of installed services (~50+ MiB depending on /var/lib content).
+//
+// Restore is preset-agnostic: missing sections are silent skips, so
+// a Quick bundle can be restored into the same target as a Full one
+// without flag wrangling.
+type ScopeLevel string
+
+const (
+	// ScopeLevelQuick captures only /workspace + /output (agent
+	// memory). Use when you need a fast snapshot of "what the agent
+	// is currently working on" without the home dir / tools / system
+	// data tail.
+	ScopeLevelQuick ScopeLevel = "quick"
+	// ScopeLevelStandard adds /home/agent + /opt/crew-tools to the
+	// Quick set. This is the default and matches what every release
+	// up to and including the /var/lib expansion was producing.
+	ScopeLevelStandard ScopeLevel = "standard"
+	// ScopeLevelFull adds /var/lib on top of Standard so any service
+	// the agent installed and started inside the container (redis,
+	// postgresql, mysql, ...) round-trips through the bundle.
+	ScopeLevelFull ScopeLevel = "full"
+)
+
+// Valid reports whether l is a known scope level.
+func (l ScopeLevel) Valid() bool {
+	switch l {
+	case ScopeLevelQuick, ScopeLevelStandard, ScopeLevelFull:
+		return true
+	default:
+		return false
+	}
+}
+
+// DefaultScopeLevel is what an empty / unspecified preset resolves
+// to. Standard matches the historical (pre-preset) collector
+// behaviour exactly, so existing call sites don't change shape.
+const DefaultScopeLevel = ScopeLevelStandard
+
 // Target describes where a bundle can be restored.
 //   - "same-instance": crew-scope bundles; cannot be restored to a
 //     different Crewship instance in MVP due to FK / ID remapping gaps.
@@ -46,17 +88,23 @@ const (
 // and writers always include the current set. Removals require a bump
 // of FormatVersion.
 type Manifest struct {
-	FormatVersion           int        `json:"format_version"`
-	CrewshipVersionAtBackup string     `json:"crewship_version_at_backup"`
-	SchemaMigrationVersions []int      `json:"schema_migration_versions"`
-	Scope                   Scope      `json:"scope"`
-	CompatibleTargets       []Target   `json:"compatible_targets"`
-	CreatedAt               time.Time  `json:"created_at"`
-	CreatedBy               Actor      `json:"created_by"`
-	SourceInstance          Instance   `json:"source_instance"`
-	Contents                Contents   `json:"contents"`
-	Encryption              Encryption `json:"encryption"`
-	Checksums               Checksums  `json:"checksums"`
+	FormatVersion           int    `json:"format_version"`
+	CrewshipVersionAtBackup string `json:"crewship_version_at_backup"`
+	SchemaMigrationVersions []int  `json:"schema_migration_versions"`
+	Scope                   Scope  `json:"scope"`
+	// ScopeLevel records which preset (quick/standard/full) the
+	// admin chose at create time so the UI can render a coherent
+	// badge without re-deriving from CrewSummary.*Included flags.
+	// Older bundles that pre-date the preset feature omit this
+	// field entirely; the catalog migration backfills 'standard'.
+	ScopeLevel        ScopeLevel `json:"scope_level,omitempty"`
+	CompatibleTargets []Target   `json:"compatible_targets"`
+	CreatedAt         time.Time  `json:"created_at"`
+	CreatedBy         Actor      `json:"created_by"`
+	SourceInstance    Instance   `json:"source_instance"`
+	Contents          Contents   `json:"contents"`
+	Encryption        Encryption `json:"encryption"`
+	Checksums         Checksums  `json:"checksums"`
 }
 
 // Actor describes the user who created or restored the bundle.
@@ -110,8 +158,14 @@ type CrewSummary struct {
 	WorkspaceIncluded          bool         `json:"workspace_included"`
 	VolumesIncluded            []string     `json:"volumes_included,omitempty"`
 	MemoryIncluded             bool         `json:"memory_included"`
-	AgentCount                 int          `json:"agent_count"`
-	PayloadSizeBytes           int64        `json:"payload_size_bytes,omitempty"`
+	// SystemIncluded is set when the bundle carries the /var/lib
+	// section (any service data the agent populated at runtime —
+	// redis dump.rdb, postgresql data dir, etc.). Bundles produced
+	// before this section was added omit the field entirely; the
+	// restore preflight treats absent as "no system data to land".
+	SystemIncluded   bool  `json:"system_included,omitempty"`
+	AgentCount       int   `json:"agent_count"`
+	PayloadSizeBytes int64 `json:"payload_size_bytes,omitempty"`
 }
 
 // FeaturePin pins a devcontainer feature OCI reference to a digest so
@@ -146,6 +200,14 @@ func (m *Manifest) Validate() error {
 	}
 	if !m.Scope.Valid() {
 		return fmt.Errorf("%w: scope %q not in {crew, workspace, instance}", ErrInvalidScope, m.Scope)
+	}
+	// scope_level was added after FormatVersion=1 shipped, so an
+	// empty value means "legacy bundle from before presets". Only
+	// reject NON-empty values that aren't a known preset — that
+	// catches a tampered or future-version manifest leaking an
+	// unknown preset into restore / UI badge logic.
+	if m.ScopeLevel != "" && !m.ScopeLevel.Valid() {
+		return fmt.Errorf("%w: scope_level %q not in {quick, standard, full}", ErrInvalidManifest, m.ScopeLevel)
 	}
 	if len(m.CompatibleTargets) == 0 {
 		return fmt.Errorf("%w: compatible_targets must not be empty", ErrInvalidManifest)
