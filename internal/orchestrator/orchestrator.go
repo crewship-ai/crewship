@@ -48,6 +48,21 @@ type AgentRunRequest struct {
 	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
+	Skills             []SkillBundle     // Installed skills, written to per-CLI discovery paths in addition to the [SKILLS AVAILABLE] system-prompt block
+}
+
+// SkillBundle is a single agent-installed skill rendered as a SKILL.md
+// file ready for materialisation into a CLI-specific discovery path
+// (.claude/skills/, .agents/skills/, .cursor/rules/, etc.). Slug becomes
+// the folder/filename; Content is the full SKILL.md text including
+// frontmatter — already reconstructed by the resolver since we don't
+// keep raw frontmatter in the DB. Vendor is informational; per-CLI
+// writers don't currently namespace by vendor (would diverge from
+// upstream tooling that walks flat slugs).
+type SkillBundle struct {
+	Slug    string
+	Vendor  string
+	Content string
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.

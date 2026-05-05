@@ -30,6 +30,8 @@
               "guides/devcontainers",
               "guides/credentials",
               "guides/skills",
+              "guides/skills-authoring",
+              "guides/skills-format",
               "guides/orchestration",
               "guides/cli-adapters",
               "guides/cli/claude-code",

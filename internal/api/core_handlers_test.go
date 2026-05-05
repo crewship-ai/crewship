@@ -2005,16 +2005,46 @@ func TestAgentSkills_AddListRemove(t *testing.T) {
 	if addRR.Code != http.StatusCreated {
 		t.Fatalf("add = %d, body: %s", addRR.Code, addRR.Body.String())
 	}
+	var addBody struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(addRR.Body).Decode(&addBody); err != nil {
+		t.Fatalf("add body decode: %v", err)
+	}
+	if addBody.ID == "" {
+		t.Fatal("add returned empty id")
+	}
 
-	// Add duplicate → conflict
+	// Add duplicate → idempotent 200 (re-running fan-out --to-crew over a
+	// crew where some agents already had the skill must not error out;
+	// the second call returns the existing assignment id instead).
 	dup := httptest.NewRecorder()
 	dupReq := httptest.NewRequest("POST", "/api/v1/agents/agent-sk/skills",
 		bytes.NewBufferString(`{"skill_id":"sk-1"}`))
 	dupReq.SetPathValue("agentId", "agent-sk")
 	dupReq = withWorkspaceUser(dupReq, userID, wsID, "OWNER")
 	h.AddSkill(dup, dupReq)
-	if dup.Code != http.StatusConflict {
-		t.Errorf("dup = %d, want 409", dup.Code)
+	if dup.Code != http.StatusOK {
+		t.Errorf("dup = %d, want 200 (idempotent)", dup.Code)
+	}
+	var dupBody struct {
+		ID              string `json:"id"`
+		AlreadyAssigned bool   `json:"already_assigned"`
+	}
+	if err := json.NewDecoder(dup.Body).Decode(&dupBody); err != nil {
+		t.Errorf("dup body decode: %v", err)
+	} else {
+		if !dupBody.AlreadyAssigned {
+			t.Errorf("dup already_assigned = false, want true")
+		}
+		// The whole point of idempotency is that the second call returns
+		// the SAME row, not a new one. A handler that silently inserted
+		// a fresh agent_skills row would also return 200 + already_assigned,
+		// so check the id matches what AddSkill gave us the first time.
+		if dupBody.ID != addBody.ID {
+			t.Errorf("dup id = %q, want existing %q (idempotent must return same row)",
+				dupBody.ID, addBody.ID)
+		}
 	}
 
 	// Add: missing skill_id

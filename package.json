@@ -49,6 +49,7 @@
     "@dicebear/thumbs": "^9.4.2",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
+    "@orama/orama": "^3.1.18",
     "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
