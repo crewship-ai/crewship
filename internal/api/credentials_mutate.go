@@ -22,6 +22,7 @@ type createCredentialRequest struct {
 	Scope         string   `json:"scope"`
 	CrewID        *string  `json:"crew_id"`
 	CrewIDs       []string `json:"crew_ids"`
+	Tags          []string `json:"tags"`
 	AccountLabel  *string  `json:"account_label"`
 	AccountEmail  *string  `json:"account_email"`
 	RefreshToken  *string  `json:"refresh_token"`
@@ -43,8 +44,19 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
 
-	if !canRole(role, "manage") {
+	// MANAGER tier can create credentials — the FE CASL ability mirrors
+	// this. "manage" was historically too tight (OWNER+ADMIN only) and
+	// caused 403s for the Add flow even though the button rendered.
+	if !canRole(role, "create") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+	// Defence in depth: authed middleware should always populate user,
+	// but a future middleware reorder bug should not crash the write
+	// path. Other call sites in this file already guard for nil; mirror
+	// the pattern here.
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
 
@@ -152,14 +164,19 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		credStatus = "PENDING"
 	}
 
+	var tagsArg any
+	if encoded, ok := encodeTagsJSON(req.Tags); ok {
+		tagsArg = encoded
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email,
-			token_expires_at, security_level, status, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			token_expires_at, security_level, status, tags, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail,
-		req.TokenExpires, secLevel, credStatus, user.ID, now, now)
+		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now)
 	if err != nil {
 		tx.Rollback()
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -210,9 +227,23 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Stamp the timeline so the detail-sheet Audit tab shows when the
+	// credential first appeared. Outside the create tx — best-effort.
+	if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventCreated, "", clientIP(r),
+		map[string]any{"created_by": user.ID, "provider": req.Provider, "type": req.Type}); recErr != nil {
+		// TODO(metrics): when an OpenTelemetry counter is wired into
+		// this package, increment credential_audit_record_failures
+		// here so ops can alarm on lost compliance events.
+		h.logger.Warn("record CREATED audit event", "error", recErr, "credential_id", credID)
+	}
+
 	respCrewIDs := crewIDs
 	if respCrewIDs == nil {
 		respCrewIDs = []string{}
+	}
+	respTags := normaliseTags(req.Tags)
+	if respTags == nil {
+		respTags = []string{}
 	}
 
 	writeJSON(w, http.StatusCreated, credentialResponse{
@@ -225,8 +256,10 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Scope:        req.Scope,
 		CrewID:       legacyCrewID,
 		CrewIDs:      respCrewIDs,
+		Tags:         respTags,
 		AccountLabel: req.AccountLabel,
 		AccountEmail: req.AccountEmail,
+		LastUsedIPs:  []string{},
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		AgentNames:   []string{},
@@ -241,7 +274,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 
-	if !canRole(role, "manage") {
+	if !canRole(role, "update") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
 	}
@@ -324,6 +357,11 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ub := newUpdate()
+	// valueRotated flips when this PATCH actually replaces the encrypted
+	// secret — drives the post-commit audit ROTATE event so silent
+	// in-place rewrites (the Vercel-style inline Save value flow) still
+	// land on the timeline.
+	valueRotated := false
 
 	// Handle value separately (needs encryption)
 	if val, ok := body["value"]; ok {
@@ -338,7 +376,48 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			// Reset status when value changes so monitor re-validates
 			ub.Set("status", "ACTIVE")
 			ub.SetNull("last_error")
+			valueRotated = true
 		}
+	}
+
+	// Tags: accept either a JSON array or null. Empty/missing arrays
+	// clear the column so the row goes back to NULL rather than "[]".
+	if raw, ok := body["tags"]; ok {
+		var tags []string
+		if arr, ok := raw.([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					tags = append(tags, s)
+				}
+			}
+		}
+		if encoded, ok := encodeTagsJSON(tags); ok {
+			ub.Set("tags", encoded)
+		} else {
+			ub.SetNull("tags")
+		}
+	}
+
+	// security_level is the only typed scalar in `allowed`; mirror the
+	// Create path's 1..3 validation so a PATCH can't smuggle a string
+	// into the INTEGER column (SQLite stores by storage class but won't
+	// reject the type mismatch).
+	if raw, ok := body["security_level"]; ok {
+		var n int
+		switch v := raw.(type) {
+		case float64:
+			n = int(v)
+		case int:
+			n = v
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "security_level must be 1, 2, or 3"})
+			return
+		}
+		if n < 1 || n > 3 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "security_level must be 1, 2, or 3"})
+			return
+		}
+		body["security_level"] = n
 	}
 
 	for jsonKey, col := range allowed {
@@ -382,6 +461,21 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("commit credential update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Inline value rewrite (Vercel-parity quick rotation) is logically
+	// a rotation — no grace overlap, but the timeline must still see
+	// it. Outside the tx so a slow audit insert never rolls back the
+	// rotation itself.
+	if valueRotated {
+		var rotatedBy string
+		if u := UserFromContext(r.Context()); u != nil {
+			rotatedBy = u.ID
+		}
+		if recErr := RecordCredentialEvent(r.Context(), h.db, h.logger, credID, AuditEventRotate, "", clientIP(r),
+			map[string]any{"mode": "inline", "rotated_by": rotatedBy}); recErr != nil {
+			h.logger.Warn("record inline-rotate audit event", "error", recErr, "credential_id", credID)
+		}
 	}
 
 	h.Get(w, r)

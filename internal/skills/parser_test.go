@@ -15,7 +15,7 @@ display_name: GitHub Integration
 version: 1.0.0
 author: crewship-ai
 description: Work with GitHub repos, PRs, issues, and code reviews.
-category: DEVELOPMENT
+category: DEVOPS
 icon: git-pull-request
 credential_requirements:
   - GITHUB_TOKEN
@@ -47,8 +47,8 @@ Use GitHub API for all operations.`
 	if parsed.Meta.Author != "crewship-ai" {
 		t.Errorf("author = %q, want %q", parsed.Meta.Author, "crewship-ai")
 	}
-	if parsed.Meta.Category != "DEVELOPMENT" {
-		t.Errorf("category = %q, want %q", parsed.Meta.Category, "DEVELOPMENT")
+	if parsed.Meta.Category != "DEVOPS" {
+		t.Errorf("category = %q, want %q", parsed.Meta.Category, "DEVOPS")
 	}
 	if parsed.Meta.Icon != "git-pull-request" {
 		t.Errorf("icon = %q, want %q", parsed.Meta.Icon, "git-pull-request")
@@ -229,9 +229,14 @@ func TestParseSKILLMD_Category(t *testing.T) {
 		wantContains string
 		wantCategory string
 	}{
-		{"invalid_category", "---\nname: test-skill\ncategory: INVALID\n---\n# Test", true, "invalid category", ""},
+		// v65: unknown categories fall back to CUSTOM rather than rejecting
+		// the whole skill. Third-party registries use a long tail of category
+		// strings; a hard reject would block ~30% of imports.
+		{"invalid_category_falls_back", "---\nname: test-skill\ncategory: INVALID\n---\n# Test", false, "", "CUSTOM"},
 		{"normalization", "---\nname: test-skill\ncategory: coding\n---\n# Test", false, "", "CODING"},
 		{"empty_allowed", "---\nname: test-skill\n---\n# Test", false, "", ""},
+		{"new_writing_category", "---\nname: test-skill\ncategory: writing\n---\n# Test", false, "", "WRITING"},
+		{"new_security_category", "---\nname: test-skill\ncategory: security\n---\n# Test", false, "", "SECURITY"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -251,6 +256,50 @@ func TestParseSKILLMD_Category(t *testing.T) {
 			}
 			if parsed.Meta.Category != tt.wantCategory {
 				t.Errorf("category = %q, want %q", parsed.Meta.Category, tt.wantCategory)
+			}
+		})
+	}
+}
+
+func TestParseSKILLMD_StripsDynamicContext(t *testing.T) {
+	t.Parallel()
+	// Anthropic Claude Code expands !`...` by shelling out at load time.
+	// Crewship strips it on import — multi-tenant containers can't trust
+	// arbitrary shell from third-party SKILL.md.
+	input := "---\nname: test-skill\n---\n## Diff\n\n!`git diff HEAD`\n\nReview above and summarise."
+	parsed, err := skills.ParseSKILLMD(input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(parsed.Content, "!`") {
+		t.Errorf("dynamic context not stripped: %q", parsed.Content)
+	}
+	if !strings.Contains(parsed.Content, "Review above") {
+		t.Errorf("body content lost during strip: %q", parsed.Content)
+	}
+}
+
+func TestLintDescription(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		want bool // true => passes (returns "")
+	}{
+		{"missing", "", false},
+		{"too_short", "Helps with PDFs", false},
+		{"no_trigger_phrase", "Performs operations on documents and files of various kinds today.", false},
+		{"use_when", "Use when the user asks to extract tables from a PDF document.", true},
+		{"use_this_skill_when", "Use this skill when reviewing SQL migrations for safety.", true},
+		{"useful_for", "Useful for triaging Kubernetes pod failures and CrashLoopBackOff incidents.", true},
+		{"to_verb", "To extract structured data from PDF documents using OCR layout analysis.", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := skills.LintDescription(tt.desc)
+			passed := got == ""
+			if passed != tt.want {
+				t.Errorf("LintDescription(%q) = %q, want pass=%v", tt.desc, got, tt.want)
 			}
 		})
 	}

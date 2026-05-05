@@ -36,6 +36,7 @@ func (r *Router) registerRoutes() {
 	if r.scheduleUpdater != nil {
 		agents.SetScheduler(r.scheduleUpdater)
 	}
+	agents.SetJournal(r.Journal())
 
 	if r.license != nil {
 		ws.SetLicense(r.license)
@@ -44,6 +45,7 @@ func (r *Router) registerRoutes() {
 	}
 	creds := NewCredentialHandler(r.db, r.logger)
 	skills := NewSkillHandler(r.db, r.logger)
+	skills.SetJournal(r.Journal())
 	runs := NewRunHandler(r.db, r.logger)
 	audit := NewAuditHandler(r.db, r.logger)
 	// Adapt the concrete Docker client to backup.DockerOps so the
@@ -139,6 +141,22 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
+	// Recipes — 1-click curated bundles (CONNECTIONS.md §6)
+	recipesH := NewRecipeHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/recipes", authed(http.HandlerFunc(recipesH.List)))
+	r.mux.Handle("GET /api/v1/recipes/{slug}", authed(http.HandlerFunc(recipesH.Get)))
+	r.mux.Handle("GET /api/v1/recipes/{slug}/preview", authed(wsCtx(http.HandlerFunc(recipesH.Preview))))
+	r.mux.Handle("POST /api/v1/recipes/{slug}/install", authed(wsCtx(http.HandlerFunc(recipesH.Install))))
+	// Credential audit timeline (CONNECTIONS.md §4.3 inline drawer)
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/audit", authed(wsCtx(http.HandlerFunc(creds.AuditTimeline))))
+	// Credential rotation w/ grace overlap (CONNECTIONS.md §7.1, MUST-add #1)
+	r.mux.Handle("POST /api/v1/credentials/{credentialId}/rotate", authed(wsCtx(http.HandlerFunc(creds.Rotate))))
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/rotations", authed(wsCtx(http.HandlerFunc(creds.ListRotations))))
+	r.mux.Handle("DELETE /api/v1/credential-rotations/{rotationId}", authed(wsCtx(http.HandlerFunc(creds.CancelRotation))))
+	// Per-tool granularity (Cursor parity, CONNECTIONS.md §3.1)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools", authed(wsCtx(http.HandlerFunc(integrations.ListCrewIntegrationTools))))
+	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegrationTool))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh", authed(wsCtx(http.HandlerFunc(integrations.RefreshCrewIntegrationTools))))
 	// Agent MCP bindings
 	r.mux.Handle("GET /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.ListAgentBindings))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.CreateAgentBinding))))
@@ -294,6 +312,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.mux.Handle("POST /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.Create))))
 	r.mux.Handle("POST /api/v1/credentials/test", authed(http.HandlerFunc(creds.Test)))
+	r.mux.Handle("POST /api/v1/credentials/{credentialId}/test", authed(wsCtx(http.HandlerFunc(creds.TestStored))))
 	r.mux.Handle("GET /api/v1/credentials/default-env-var", authed(http.HandlerFunc(creds.DefaultEnvVar)))
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Get))))
 	r.mux.Handle("PATCH /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Update))))
@@ -304,6 +323,14 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
 	r.mux.Handle("GET /api/v1/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Get))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/import", authed(wsCtx(http.HandlerFunc(skills.Import))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/skills/{skillId}", authed(wsCtx(http.HandlerFunc(skills.Delete))))
+	skillGen := NewSkillGenerateHandler(r.db, r.logger)
+	// Path param name MUST match what the wsCtx middleware reads — the
+	// pattern is {workspaceId} everywhere else in the API, and changing
+	// it broke the workspace lookup on this route in the prior commit.
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/generate", authed(wsCtx(http.HandlerFunc(skillGen.Generate))))
+	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/bulk-import", authed(wsCtx(http.HandlerFunc(skillBulk.Import))))
 
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))

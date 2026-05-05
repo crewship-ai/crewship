@@ -23,6 +23,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/server"
+	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/crewship-ai/crewship/web"
 	"github.com/spf13/cobra"
@@ -94,6 +95,9 @@ var startCmd = &cobra.Command{
 		}
 		if err := database.SeedBundledSkills(context.Background(), db.DB, logger); err != nil {
 			logger.Warn("failed to seed bundled skills", "error", err)
+		}
+		if err := bundledSkills.Install(context.Background(), db.DB, logger); err != nil {
+			logger.Warn("failed to install bundled anthropic skills", "error", err)
 		}
 
 		lic := license.New()
@@ -231,6 +235,21 @@ var startCmd = &cobra.Command{
 			defer func() {
 				close(registryStop)
 				registryWg.Wait()
+			}()
+		}
+
+		// Credential rotation expiry worker (CONNECTIONS.md §7.1):
+		// every hour, scrub old_value on rotations whose grace
+		// window has passed. Runs once on startup so any rotations
+		// that aged out while the server was down get cleaned up
+		// before we serve traffic.
+		if deps.DB != nil {
+			rotationStop := make(chan struct{})
+			var rotationWg sync.WaitGroup
+			api.StartCredentialRotationExpiryWorker(deps.DB, logger, rotationStop, &rotationWg)
+			defer func() {
+				close(rotationStop)
+				rotationWg.Wait()
 			}()
 		}
 

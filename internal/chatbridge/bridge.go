@@ -73,6 +73,7 @@ type ChatInfo struct {
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
 	PreferredLanguage  string
+	InstalledSkills    []orchestrator.SkillBundle
 }
 
 // ProvisioningEnqueueResult mirrors api.EnqueueResult shape locally so the
@@ -443,6 +444,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: info.AgentMCPConfigJSON,
 		PreferredLanguage:  info.PreferredLanguage,
+		Skills:             info.InstalledSkills,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).

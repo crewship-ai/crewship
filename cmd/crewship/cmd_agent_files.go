@@ -22,8 +22,8 @@ import (
 //	agent git-log <agent>          → /api/v1/agents/{id}/git-log
 //	agent container-files <agent>  → /api/v1/agents/{id}/container-files
 //
-// They share the resolveAgentID + queryString + emitFormatted pattern,
-// so they live in one file rather than five.
+// They share the resolveAgentID + queryString pattern, so they live in
+// one file rather than five.
 
 var agentFilesCmd = &cobra.Command{
 	Use:               "files <agent-slug-or-id>",

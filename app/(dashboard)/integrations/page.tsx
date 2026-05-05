@@ -9,6 +9,7 @@ import {
   Users,
   ChevronRight,
   Bot,
+  Wrench,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -27,6 +28,11 @@ import { cn } from "@/lib/utils"
 
 import { ExpandedPanel } from "@/components/features/integrations/expanded-panel"
 import { TemplatePopover } from "@/components/features/integrations/template-popover"
+import { Marketplace } from "@/components/features/integrations/marketplace"
+import { MCPDetailSheet } from "@/components/features/integrations/mcp-detail-sheet"
+import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
+import { MCPLogo } from "@/components/icons/mcp-logos"
+import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
 import type {
   AgentBinding,
@@ -56,6 +62,10 @@ export default function IntegrationsPage() {
 
   // UI state
   const [loading, setLoading] = React.useState(true)
+  const [activeTab, setActiveTab] = React.useState<"connected" | "marketplace">("connected")
+  const [detailServer, setDetailServer] = React.useState<CrewIntegration | null>(null)
+  const [detailOpen, setDetailOpen] = React.useState(false)
+  const [wizardOpen, setWizardOpen] = React.useState(false)
   const [expandedId, setExpandedId] = React.useState<string | null>(null)
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false)
   const [emptyPopoverOpen, setEmptyPopoverOpen] = React.useState(false)
@@ -401,21 +411,10 @@ export default function IntegrationsPage() {
   // -------------------------------------------------------------------------
 
   const headerActions = canManage ? (
-    <TemplatePopover
-      open={templatePopoverOpen}
-      onOpenChange={setTemplatePopoverOpen}
-      onSelect={handleAddServer}
-      onBrowseRegistry={() => {
-        setTemplatePopoverOpen(false)
-        setRegistryOpen(true)
-      }}
-      trigger={
-        <Button size="sm" className="h-7 px-2.5 text-xs">
-          <Plus className="mr-1.5 h-3 w-3" />
-          Add MCP Server
-        </Button>
-      }
-    />
+    <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => setWizardOpen(true)}>
+      <Plus className="mr-1.5 h-3 w-3" />
+      Add MCP Server
+    </Button>
   ) : null
 
   // Computed KPIs from the already-loaded servers list — no extra API calls.
@@ -476,6 +475,58 @@ export default function IntegrationsPage() {
         {headerActions}
       </div>
 
+      {/* ── Tab strip (CONNECTIONS.md §5.1) ────────────────────── */}
+      <div className="flex items-center gap-0 border-b border-white/[0.08]">
+        <button
+          onClick={() => setActiveTab("connected")}
+          className={cn(
+            "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
+            activeTab === "connected"
+              ? "border-blue-400 text-blue-400"
+              : "border-transparent text-muted-foreground hover:text-foreground/80",
+          )}
+        >
+          Connected
+          {servers.length > 0 && (
+            <span className="text-[10px] font-mono opacity-60">{servers.length}</span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("marketplace")}
+          className={cn(
+            "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
+            activeTab === "marketplace"
+              ? "border-blue-400 text-blue-400"
+              : "border-transparent text-muted-foreground hover:text-foreground/80",
+          )}
+        >
+          Marketplace
+          <span className="text-[10px] font-mono opacity-60">200+</span>
+        </button>
+      </div>
+
+      {activeTab === "marketplace" && workspaceId && (
+        <Marketplace
+          onAdd={async (entry) => {
+            // Map registry entry → handleAddServer template payload.
+            await handleAddServer({
+              name: entry.name,
+              label: entry.display_name || entry.name,
+              icon: entry.icon || entry.name,
+              transport: (entry.transport === "stdio" ? "stdio" : "streamable-http"),
+              command: entry.command || (entry.package_name ? "npx" : undefined),
+              args: entry.package_name && !entry.command ? `-y ${entry.package_name}` : undefined,
+              url: entry.endpoint || undefined,
+              envHint: undefined,
+            })
+            setActiveTab("connected")
+          }}
+        />
+      )}
+
+      {activeTab === "connected" && (
+        <>
+
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
         <KpiCard
@@ -512,39 +563,38 @@ export default function IntegrationsPage() {
 
       {/* ── Servers list ───────────────────────────────────────── */}
       {servers.length === 0 ? (
-        <SettingsCard
-          title="MCP servers"
-          description="Connect MCP servers to give your agents access to external tools and services"
-        >
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
-              <Plug className="h-4 w-4 text-muted-foreground/60" />
-            </div>
-            <div className="text-sm font-medium text-foreground/80">No integrations yet</div>
-            <div className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
-              MCP servers expose tools (GitHub, Slack, databases, browsers) that your agents can call during tasks.
-            </div>
-            {canManage && (
-              <div className="mt-4">
-                <TemplatePopover
-                  open={emptyPopoverOpen}
-                  onOpenChange={setEmptyPopoverOpen}
-                  onSelect={handleAddServer}
-                  onBrowseRegistry={() => {
-                    setEmptyPopoverOpen(false)
-                    setRegistryOpen(true)
-                  }}
-                  trigger={
-                    <Button size="sm" className="h-7 px-2.5 text-xs">
-                      <Plus className="mr-1.5 h-3 w-3" />
-                      Add first MCP server
-                    </Button>
-                  }
-                />
+        <div className="space-y-4">
+          {workspaceId && (
+            <RecipesEmptyState
+              workspaceId={workspaceId}
+              onInstalled={() => { if (workspaceId) fetchAll(workspaceId) }}
+            />
+          )}
+          <SettingsCard
+            title="Or set up manually"
+            description="Pick from the marketplace or add a custom server"
+          >
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
+                <Plug className="h-4 w-4 text-muted-foreground/60" />
               </div>
-            )}
-          </div>
-        </SettingsCard>
+              <div className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
+                MCP servers expose tools (GitHub, Slack, databases, browsers) that your agents can call during tasks.
+              </div>
+              {canManage && (
+                <div className="mt-4 flex gap-2">
+                  <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => setActiveTab("marketplace")}>
+                    Browse Marketplace
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => setWizardOpen(true)}>
+                    <Plus className="mr-1.5 h-3 w-3" />
+                    Add MCP server
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SettingsCard>
+        </div>
       ) : (
         <SettingsCard
           title="Connected MCP servers"
@@ -578,12 +628,14 @@ export default function IntegrationsPage() {
                     )}
                   />
 
-                  {/* Transport icon */}
-                  {server.transport === "streamable-http" ? (
-                    <Globe className="h-3 w-3 text-muted-foreground/60 shrink-0" />
-                  ) : (
-                    <Terminal className="h-3 w-3 text-muted-foreground/60 shrink-0" />
-                  )}
+                  {/* Brand logo (CONNECTIONS.md §5.2) — replaces generic
+                      transport icon. Falls back to Globe/Terminal when
+                      no brand match. */}
+                  <MCPLogo
+                    name={server.icon || server.name}
+                    transport={server.transport}
+                    className="h-4 w-4 shrink-0 opacity-85"
+                  />
 
                   {/* Name + subtitle */}
                   <div className="min-w-0 flex-1">
@@ -608,6 +660,19 @@ export default function IntegrationsPage() {
                       {server.agent_binding_count}
                     </span>
                   )}
+
+                  {/* Tools chip — opens MCPDetailSheet on Tools tab.
+                      Stop propagation so we don't toggle the inline
+                      expand at the same time. */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setDetailServer(server); setDetailOpen(true) }}
+                    className="hidden md:inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground shrink-0 font-mono tabular-nums px-1.5 h-5 rounded border border-white/10 hover:border-blue-400/40 hover:bg-blue-500/[0.05] transition-colors"
+                    title="Manage tools"
+                  >
+                    <Wrench className="h-2.5 w-2.5" />
+                    Tools
+                  </button>
 
                   {/* Updated relative time */}
                   <span className="hidden lg:inline text-[10px] text-muted-foreground/60 font-mono shrink-0 w-[54px] text-right">
@@ -664,6 +729,27 @@ export default function IntegrationsPage() {
         onOpenChange={setRegistryOpen}
         onAdd={handleRegistryAdd}
       />
+        </>
+      )}
+
+      {workspaceId && detailServer && (
+        <MCPDetailSheet
+          workspaceId={workspaceId}
+          server={detailServer}
+          open={detailOpen}
+          onOpenChange={(o) => { setDetailOpen(o); if (!o) setDetailServer(null) }}
+          onRefresh={() => { if (workspaceId) fetchAll(workspaceId) }}
+        />
+      )}
+
+      {workspaceId && (
+        <AddMCPWizard
+          workspaceId={workspaceId}
+          open={wizardOpen}
+          onOpenChange={setWizardOpen}
+          onAdded={() => { if (workspaceId) fetchAll(workspaceId) }}
+        />
+      )}
     </div>
   )
 }

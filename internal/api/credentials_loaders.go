@@ -6,6 +6,43 @@ import (
 	"fmt"
 )
 
+// credentialVisibilityFilter builds the SQL fragment + arguments that
+// constrain which credentials the caller may see, based on their
+// workspace role.
+//
+// MANAGER+ (canRole "update") sees every credential in the workspace —
+// they own the credential lifecycle and need full visibility for
+// rotations, revokes, and audit reviews.
+//
+// MEMBER and VIEWER are scoped: they see WORKSPACE-scoped credentials
+// (which are intentionally workspace-wide, e.g. shared CI tokens) plus
+// any CREW-scoped credential whose crew they belong to via
+// crew_members. This mirrors how a teammate without admin rights only
+// gets to see secrets attached to projects they actually work on.
+//
+// Returns ("", nil) for full-access roles so callers can append the
+// fragment unconditionally.
+func credentialVisibilityFilter(role string, user *AuthUser) (string, []any) {
+	if canRole(role, "update") {
+		return "", nil
+	}
+	// Defensive: an empty user shouldn't reach here (auth middleware
+	// guarantees one), but if it does, scope-only filter blanks the
+	// crew side so we never serve CREW-scoped rows under no identity.
+	var userID string
+	if user != nil {
+		userID = user.ID
+	}
+	return ` AND (
+		c.scope = 'WORKSPACE'
+		OR EXISTS (
+			SELECT 1 FROM credential_crews cc
+			JOIN crew_members cm ON cm.crew_id = cc.crew_id
+			WHERE cc.credential_id = c.id AND cm.user_id = ?
+		)
+	)`, []any{userID}
+}
+
 // Batch / junction-table loaders for CredentialHandler. Lifted out of
 // credentials.go to keep the handler file focused on HTTP-facing
 // methods. All functions are unexported methods on CredentialHandler

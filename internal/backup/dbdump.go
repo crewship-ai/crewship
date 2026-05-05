@@ -27,6 +27,7 @@ var BackupTables = []string{
 	"crews",
 	"agents",
 	"skills",
+	"agent_skills",
 	"crew_members",
 	"crew_integrations",
 	"mcp_bindings",
@@ -100,6 +101,12 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "agents":
 		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "agent_chats":
+		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
+	case "agent_skills":
+		// Skills are global (no workspace_id column on the skills row),
+		// but agent_skills attaches them to a specific agent. Scope by
+		// the agent's transitive workspace so a backup of workspace A
+		// only carries the assignments that actually live in A.
 		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
 	case "memory_backups":
 		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
@@ -244,6 +251,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		{"crew_integrations", "crew_id = ?", []any{crewID}, ""},
 		{"mcp_bindings", "crew_id = ?", []any{crewID}, ""},
 		{"agent_chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"agent_skills", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
 		{"memory_backups", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
 		{"crew_memory", "crew_id = ?", []any{crewID}, ""},
 	}

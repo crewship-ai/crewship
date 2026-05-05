@@ -1,0 +1,142 @@
+---
+title: "SKILL.md Format Reference"
+description: "The frontmatter and body conventions parsed from a SKILL.md file."
+icon: "file-code"
+---
+
+# SKILL.md format
+
+Every skill is a single Markdown file with YAML frontmatter and a body. The
+parser at `internal/skills/parser.go` is the source of truth; this page
+documents every accepted field and the validation rules around it.
+
+```markdown
+---
+name: pdf-cleanup
+description: Use when the user asks to strip metadata or embedded JS from PDFs.
+license: MIT
+category: DEVOPS
+runtime: INSTRUCTIONS
+maturity: COMMUNITY
+tags:
+  - pdf
+  - sanitisation
+credential_requirements:
+  - PDFCRUSH_API_KEY
+---
+
+## When to use
+...
+## Steps
+...
+```
+
+## Frontmatter fields
+
+| Field | Required | Validation | Notes |
+|---|---|---|---|
+| `name` | ✅ | kebab-case slug, `^[a-z0-9][a-z0-9._-]{0,127}$` | The canonical identifier. Drives the folder name on disk and the slug column in the registry. |
+| `description` | ✅ | Single line, ≤ 1024 chars | The trigger. Should start with `Use when ...`, `Useful for ...`, `To <verb> ...`. The LLM uses this to decide whether the skill is relevant. |
+| `license` | ✅ for `import` to pass the SPDX gate | Free-form; resolved through `DetectSPDX` against the allowlist | Without an allowlisted SPDX id the import is rejected unless `--unsafe-license` is passed. |
+| `display_name` | optional | — | Human-readable name. Defaults to `name` if absent. |
+| `version` | optional | semver-ish string | Stored on the row. Currently informational; **not used for upsert ordering** (last write wins). |
+| `author` | optional | — | Surfaced in `skill get`. |
+| `vendor` | optional | — | Namespace within the registry. Defaults to `community` for unscoped imports. |
+| `homepage` | optional | URL | Surfaced in the detail panel. |
+| `category` | optional | enum | One of `CODING DATA DEVOPS WRITING RESEARCH PM DESIGN SUPPORT SECURITY FINANCE OPS AUTOMATION SALES CUSTOM`. Unknown values fall back to `CUSTOM`. |
+| `runtime` | optional | enum | `INSTRUCTIONS` (default) `SCRIPT` `MCP` `HYBRID`. Unknown values fall back to `INSTRUCTIONS`. |
+| `maturity` | optional | enum | `OFFICIAL` `CURATED` `COMMUNITY` (default) `EXPERIMENTAL`. Unknown values fall back to `COMMUNITY`. |
+| `icon` | optional | Lucide icon name | Surfaced in the UI (e.g. `sparkles`, `wrench`). |
+| `credential_requirements` | optional | YAML list of strings | Env-var names the skill expects to be present at run time. Surfaced as a "needs credential" badge. |
+| `tags` | optional | YAML list of strings | Free-form, indexed by the in-browser Orama search. |
+
+Unknown frontmatter fields are silently ignored (log line in the importer).
+
+## Body sections
+
+The body is plain Markdown. The bundled skills use a five-section pattern;
+agents do not require it but it makes review and search predictable:
+
+1. `## When to use` — restate the trigger phrase, list one example that
+   should fire and one near-miss that should not. The LLM relies on this
+   far more than on the frontmatter description.
+2. `## Steps` — the agent's playbook. Concrete, ordered, action-oriented.
+3. `## Output format` — what the agent should return. Be specific (JSON
+   shape, exact phrase, table columns) — vague output sections cause the
+   agent to drift.
+4. `## Guardrails` — what the agent must NOT do. Always include at least
+   one concrete negative.
+5. `## Verification` _(optional)_ — how a human can spot-check whether
+   the skill produced the right thing.
+
+## What gets stripped
+
+- Backtick-prefixed dynamic-context blocks `!\`cmd\`` are removed before
+  storage. Claude Code shells out for these at load time; allowing them
+  in a multi-tenant skill registry would be a remote-execution vector.
+- Frontmatter values that fail the slug / enum guards trigger a parser
+  fallback (logged) rather than a hard reject — same compatibility
+  posture as the rest of the importer.
+
+## SPDX allowlist
+
+The license gate accepts:
+
+```
+MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC,
+CC0-1.0, MPL-2.0, Unlicense, 0BSD
+```
+
+Anything else (including `GPL-3.0`, `AGPL-3.0`, no-license, "Complete
+terms in LICENSE.txt") is rejected unless the operator passes
+`--unsafe-license`. The raw value is preserved in the `license` column
+for audit; the canonicalised SPDX id, if any, is written to
+`spdx_license`.
+
+## Prompt-injection scanner
+
+Every imported body runs through `ScanContent`
+(`internal/skills/safety.go`). Patterns it flags:
+
+- "ignore previous / prior / earlier instructions"
+- "you are now …" role hijack attempts
+- "reveal the system prompt"
+- "DAN" jailbreak markers
+- Large base64 blobs (≥ 1024 contiguous base64 chars) — used to smuggle
+  payloads past human review.
+
+A `FLAGGED` skill is still inserted into the registry (so operators can
+investigate) but the reason is recorded in `description_quality` and
+the UI surfaces a warning chip. Operators should review and `crewship
+skill delete` confirmed-malicious imports.
+
+## Minimum viable SKILL.md
+
+If you're starting from `crewship skill init` and want the shortest path
+to a working skill:
+
+```markdown
+---
+name: my-skill
+description: Use when the user asks to <very specific intent>.
+license: MIT
+category: CUSTOM
+---
+
+## When to use
+The user message contains "<phrase>". Do NOT activate on near-misses
+like "<near miss>".
+
+## Steps
+1. <action>
+2. <action>
+
+## Output format
+<exact shape>
+
+## Guardrails
+- Do not <thing>.
+```
+
+That parses, passes the SPDX gate, scans clean, and lands in the
+registry as `scan_status=CLEAN, maturity=COMMUNITY, runtime=INSTRUCTIONS`.
