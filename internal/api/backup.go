@@ -69,7 +69,7 @@ func (h *BackupHandler) SetCrewContainerName(fn func(slug string) string) {
 // public key; Passphrase is a user-supplied secret run through scrypt.
 
 type createRequest struct {
-	Scope      string `json:"scope"` // "crew" or "workspace"
+	Scope string `json:"scope"` // "crew" or "workspace"
 	// ScopeLevel selects which per-crew sections the collector
 	// pulls in: "quick" (workspace + memory), "standard" (default,
 	// adds /home/agent + /opt/crew-tools), or "full" (adds
@@ -263,8 +263,8 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 // List handles GET /api/v1/admin/backups.
 
 type restoreRequest struct {
-	Path        string `json:"path"`
-	Passphrase  string `json:"passphrase,omitempty"`
+	Path       string `json:"path"`
+	Passphrase string `json:"passphrase,omitempty"`
 	// Identity is one age X25519 secret key (the "AGE-SECRET-KEY-1…"
 	// string the admin printed at create-with-recipient time). When
 	// the bundle was sealed with --recipient, the holder of the

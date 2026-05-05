@@ -490,6 +490,17 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 			}
 		}
 	}
+	// Force-resolve deferred FK violations BEFORE preCommit. preCommit
+	// is the docker-restore closure that mutates container filesystems;
+	// without this scan a bad bundle (or schema-skew leaving an orphan
+	// reference) would let docker write into the target and only fail
+	// on tx.Commit() — leaving a half-restored container with no DB
+	// rows describing it. PRAGMA foreign_key_check returns one row per
+	// violation regardless of defer_foreign_keys, so it's the right
+	// probe to run inside the open tx.
+	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
+		return stats, err
+	}
 	if err := preCommit(ctx); err != nil {
 		return stats, err
 	}
@@ -498,6 +509,43 @@ func RestoreDumpTx(ctx context.Context, db *sql.DB, dump *DBDump, preCommit func
 	}
 	committed = true
 	return stats, nil
+}
+
+// assertNoFKViolationsTx runs PRAGMA foreign_key_check inside the
+// open restore tx and surfaces a typed error on the first violation.
+// Used to fail fast before the docker-restore preCommit so bundle/
+// schema-skew problems don't leak into container side-effects.
+//
+// Aggregates up to 5 violations into the error message — enough to
+// debug an orphan-graph problem without flooding the log if the
+// bundle is wildly inconsistent.
+func assertNoFKViolationsTx(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return fmt.Errorf("backup: foreign key check: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	const maxReport = 5
+	var seen []string
+	for rows.Next() {
+		var childTable, parentTable sql.NullString
+		var rowID sql.NullInt64
+		var fkID sql.NullInt64
+		if err := rows.Scan(&childTable, &rowID, &parentTable, &fkID); err != nil {
+			return fmt.Errorf("backup: scan foreign key check: %w", err)
+		}
+		if len(seen) < maxReport {
+			seen = append(seen, fmt.Sprintf("%s.rowid=%d → %s",
+				childTable.String, rowID.Int64, parentTable.String))
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("backup: foreign key check iter: %w", err)
+	}
+	if len(seen) > 0 {
+		return fmt.Errorf("backup: deferred FK violations after restore inserts: %s", strings.Join(seen, "; "))
+	}
+	return nil
 }
 
 // purgeTombstonesTx hard-deletes rows in table whose primary key

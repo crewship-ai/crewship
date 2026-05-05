@@ -2,7 +2,6 @@ package backup
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -495,25 +494,12 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 		return fmt.Errorf("backup: RestoreCrew: nil payload")
 	}
 	// Each section is restored by streaming a tar into the container.
-	// The Docker SDK's CopyToContainer is sensitive to the dst path:
-	// paths whose leaf is a USER-OWNED bind mount (e.g. /home/agent)
-	// sometimes return "Could not find the file <path>" even though
-	// the dir exists at runtime — the daemon resolves through the
-	// container's image-layer view rather than the live mount table.
-	//
-	// Robust pattern: copy into the PARENT directory and prepend the
-	// basename back onto every tar entry so files land at the
-	// expected absolute path inside the container.
-	//
-	// Example /home/agent restore:
-	//   sink tar (after RepackTar's wrapper-strip): ".bashrc", ".cache/foo"
-	//   rewrapTarUnder("agent"): "agent/", "agent/.bashrc", "agent/.cache/foo"
-	//   CopyTo dest=/home → /home/agent/.bashrc, /home/agent/.cache/foo ✓
-	//
-	// /workspace restore:
-	//   sink tar: "proof/marker.txt"
-	//   rewrapped: "workspace/", "workspace/proof/marker.txt"
-	//   CopyTo dest=/ → /workspace/proof/marker.txt ✓
+	// Two restore strategies live in the inner switch below. Workspace
+	// + memory go through the SDK's CopyTo with parent==/. The named
+	// volumes and the system /var/lib path go through CopyToVolume /
+	// CopyToSystem (exec + tar -x) because Docker's archive API
+	// rejects writes whose dst is a named-volume mountpoint inside a
+	// read-only rootfs path.
 	type section struct {
 		open   func() (io.ReadCloser, bool, error)
 		dest   string // container absolute path of the section root
@@ -614,60 +600,6 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 		return fmt.Errorf("backup: restore crew %s — partial: %s", crewSlug, strings.Join(sectionErrs, "; "))
 	}
 	return nil
-}
-
-// rewrapTarUnder reads a tar stream and returns a new tar reader whose
-// entries are all prefixed with `basename + "/"`. Used by RestoreCrew
-// to put the section's basename back on every entry (collector +
-// RepackTar strip it; restore needs it back so the tar lands at the
-// right absolute path when extracted at the parent dir). Also emits a
-// leading TypeDir entry for the basename so the destination directory
-// is materialised even when the tar's only contents are hidden files.
-//
-// Materialises the rewrapped tar to a bytes.Buffer because the Docker
-// SDK consumes the reader synchronously and we need to produce all
-// entries (header + body) deterministically. Volume tars are typically
-// hundreds of MB at the high end; this fits comfortably in modern host
-// RAM but for billion-file workspaces we'd want to back this with a
-// temp file.
-func rewrapTarUnder(src io.Reader, basename string) (io.Reader, error) {
-	if basename == "" {
-		return src, nil
-	}
-	prefix := basename + "/"
-	var out bytes.Buffer
-	tw := tar.NewWriter(&out)
-	if err := tw.WriteHeader(&tar.Header{
-		Name:     prefix,
-		Mode:     0o755,
-		Typeflag: tar.TypeDir,
-	}); err != nil {
-		return nil, fmt.Errorf("backup: rewrap header %s: %w", basename, err)
-	}
-	tr := tar.NewReader(src)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("backup: rewrap read: %w", err)
-		}
-		newHdr := *hdr
-		newHdr.Name = prefix + strings.TrimPrefix(hdr.Name, "./")
-		if err := tw.WriteHeader(&newHdr); err != nil {
-			return nil, fmt.Errorf("backup: rewrap write %s: %w", newHdr.Name, err)
-		}
-		if hdr.Typeflag == tar.TypeReg && hdr.Size > 0 {
-			if _, err := io.CopyN(tw, tr, hdr.Size); err != nil {
-				return nil, fmt.Errorf("backup: rewrap body %s: %w", newHdr.Name, err)
-			}
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("backup: rewrap close: %w", err)
-	}
-	return &out, nil
 }
 
 // SectionEntries walks a workspace bundle manifest and returns the

@@ -205,12 +205,14 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 			}
 			exists, exErr := opts.DockerOps.ContainerExists(ctx, c.ContainerID)
 			if exErr != nil {
-				// Probe failed (Docker daemon issue, network glitch).
-				// Don't fail the backup — clear the ID so collection
-				// is skipped for this crew, and let the operator see
-				// it via the manifest's WorkspaceIncluded=false flag.
-				c.ContainerID = ""
-				continue
+				// Daemon hiccup / permission error — fail loudly. The
+				// previous behaviour silently zeroed ContainerID and
+				// kept going, which produced "successful" bundles
+				// where every crew's filesystem was missing — much
+				// worse than a clear backup error the operator can
+				// retry. Only the definite-absent case (exists=false
+				// below) skips the section.
+				return nil, fmt.Errorf("backup: probe container %s for crew %s: %w", c.ContainerID, c.Slug, exErr)
 			}
 			if !exists {
 				c.ContainerID = ""

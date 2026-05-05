@@ -88,23 +88,23 @@ const (
 // and writers always include the current set. Removals require a bump
 // of FormatVersion.
 type Manifest struct {
-	FormatVersion           int        `json:"format_version"`
-	CrewshipVersionAtBackup string     `json:"crewship_version_at_backup"`
-	SchemaMigrationVersions []int      `json:"schema_migration_versions"`
-	Scope                   Scope      `json:"scope"`
+	FormatVersion           int    `json:"format_version"`
+	CrewshipVersionAtBackup string `json:"crewship_version_at_backup"`
+	SchemaMigrationVersions []int  `json:"schema_migration_versions"`
+	Scope                   Scope  `json:"scope"`
 	// ScopeLevel records which preset (quick/standard/full) the
 	// admin chose at create time so the UI can render a coherent
 	// badge without re-deriving from CrewSummary.*Included flags.
 	// Older bundles that pre-date the preset feature omit this
 	// field entirely; the catalog migration backfills 'standard'.
-	ScopeLevel              ScopeLevel `json:"scope_level,omitempty"`
-	CompatibleTargets       []Target   `json:"compatible_targets"`
-	CreatedAt               time.Time  `json:"created_at"`
-	CreatedBy               Actor      `json:"created_by"`
-	SourceInstance          Instance   `json:"source_instance"`
-	Contents                Contents   `json:"contents"`
-	Encryption              Encryption `json:"encryption"`
-	Checksums               Checksums  `json:"checksums"`
+	ScopeLevel        ScopeLevel `json:"scope_level,omitempty"`
+	CompatibleTargets []Target   `json:"compatible_targets"`
+	CreatedAt         time.Time  `json:"created_at"`
+	CreatedBy         Actor      `json:"created_by"`
+	SourceInstance    Instance   `json:"source_instance"`
+	Contents          Contents   `json:"contents"`
+	Encryption        Encryption `json:"encryption"`
+	Checksums         Checksums  `json:"checksums"`
 }
 
 // Actor describes the user who created or restored the bundle.
@@ -163,9 +163,9 @@ type CrewSummary struct {
 	// redis dump.rdb, postgresql data dir, etc.). Bundles produced
 	// before this section was added omit the field entirely; the
 	// restore preflight treats absent as "no system data to land".
-	SystemIncluded             bool         `json:"system_included,omitempty"`
-	AgentCount                 int          `json:"agent_count"`
-	PayloadSizeBytes           int64        `json:"payload_size_bytes,omitempty"`
+	SystemIncluded   bool  `json:"system_included,omitempty"`
+	AgentCount       int   `json:"agent_count"`
+	PayloadSizeBytes int64 `json:"payload_size_bytes,omitempty"`
 }
 
 // FeaturePin pins a devcontainer feature OCI reference to a digest so
@@ -200,6 +200,14 @@ func (m *Manifest) Validate() error {
 	}
 	if !m.Scope.Valid() {
 		return fmt.Errorf("%w: scope %q not in {crew, workspace, instance}", ErrInvalidScope, m.Scope)
+	}
+	// scope_level was added after FormatVersion=1 shipped, so an
+	// empty value means "legacy bundle from before presets". Only
+	// reject NON-empty values that aren't a known preset — that
+	// catches a tampered or future-version manifest leaking an
+	// unknown preset into restore / UI badge logic.
+	if m.ScopeLevel != "" && !m.ScopeLevel.Valid() {
+		return fmt.Errorf("%w: scope_level %q not in {quick, standard, full}", ErrInvalidManifest, m.ScopeLevel)
 	}
 	if len(m.CompatibleTargets) == 0 {
 		return fmt.Errorf("%w: compatible_targets must not be empty", ErrInvalidManifest)

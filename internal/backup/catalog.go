@@ -121,9 +121,14 @@ func ReconcileCatalog(ctx context.Context, db *sql.DB, workspaceID string) ([]st
 		} else if !errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		if delErr := DeleteCatalogEntry(ctx, db, e.FilePath); delErr == nil {
-			pruned = append(pruned, e.FilePath)
+		if delErr := DeleteCatalogEntry(ctx, db, e.FilePath); delErr != nil {
+			// Surface the partial progress alongside the error so the
+			// caller (admin List handler) can still log "we pruned
+			// these N before hitting a DB issue" without losing the
+			// failure signal.
+			return pruned, fmt.Errorf("backup: reconcile delete %s: %w", e.FilePath, delErr)
 		}
+		pruned = append(pruned, e.FilePath)
 	}
 	return pruned, nil
 }

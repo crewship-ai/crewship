@@ -245,11 +245,14 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                       <Button
                         size="sm"
                         variant="ghost"
-                        // Disabled while a verify is in flight to keep the
-                        // loading spinner anchored to the row that asked
-                        // for it; clicking another row would otherwise let
-                        // both toasts arrive in unpredictable order.
-                        disabled={verify.isPending && verify.variables === row.path}
+                        // Disabled across ALL rows while a verify is
+                        // in flight. Per-row guarding (the previous
+                        // approach) lets the user click a different
+                        // row mid-flight, kicking off a second mutation
+                        // whose toast can interleave with the first.
+                        // The mutation hook serialises by design when
+                        // disabled is global.
+                        disabled={verify.isPending}
                         onClick={() => onVerify(row)}
                         aria-label="Verify checksum"
                         title="Verify integrity (recompute sha256)"

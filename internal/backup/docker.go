@@ -222,8 +222,15 @@ func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath
 
 	// Pump the tar stream into the exec's stdin; CloseWrite so tar
 	// sees EOF and exits.
+	//
+	// If the source stream errors mid-copy we MUST close the hijacked
+	// connection ourselves. Without it, tar inside the container keeps
+	// waiting for stdin while CloseWrite is never called, the drain
+	// goroutine never sees EOF, and the <-drainCh wait below blocks
+	// forever — turning a corrupted bundle into a hung restore.
 	pumpErr := func() error {
 		if _, err := io.Copy(resp.Conn, content); err != nil {
+			resp.Close()
 			return fmt.Errorf("backup: exec-tar stdin %s:%s: %w", containerID, dstPath, err)
 		}
 		if err := resp.CloseWrite(); err != nil {
@@ -334,12 +341,12 @@ func WithPaused(ctx context.Context, ops DockerOps, containerID string, fn func(
 var volumeExclusions = []string{
 	// /home/agent caches + tool installations
 	".cache/",
-	".local/lib/",          // node_modules + python site-packages
-	".local/share/mise/",   // mise tool installations (re-fetchable)
+	".local/lib/",        // node_modules + python site-packages
+	".local/share/mise/", // mise tool installations (re-fetchable)
 	".local/share/cursor-agent/",
 	".local/share/pnpm/",
 	".local/share/yarn/",
-	".local/state/",        // logs/state we don't need
+	".local/state/", // logs/state we don't need
 	".npm/",
 	".yarn/cache/",
 	// Anywhere in the tree
@@ -373,18 +380,12 @@ var varLibExclusions = []string{
 	"private/", // systemd-private session dirs
 }
 
-// shouldExcludeFromBundle reports whether a path inside a volume
-// section should be skipped. Conservative — only excludes paths that
-// match one of the explicit patterns above so an operator can audit
-// the list and add their own. Path is always wrapper-stripped (e.g.
+// shouldExclude reports whether a path inside a section should be
+// skipped. Callers from CollectCrew pick the right exclusion list
+// (volumeExclusions for the named volumes, varLibExclusions for
+// /var/lib, nil for /workspace and /output where every byte is
+// user-meaningful). Path is always wrapper-stripped (e.g.
 // ".cache/mise/foo") not raw.
-func shouldExcludeFromBundle(p string) bool {
-	return shouldExclude(p, volumeExclusions)
-}
-
-// shouldExclude is the section-aware version: callers from CollectCrew
-// pick the right exclusion list (volumeExclusions for /workspace and
-// the named volumes, varLibExclusions for /var/lib).
 func shouldExclude(p string, patterns []string) bool {
 	for _, pat := range patterns {
 		if strings.HasSuffix(pat, "/") {

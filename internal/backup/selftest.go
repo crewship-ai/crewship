@@ -159,7 +159,7 @@ func BackupSelfTest(ctx context.Context, ops DockerOps, opts SelfTestOpts) (*Sel
 	}
 	err = WithPaused(ctx, ops, opts.ContainerID, func() error {
 		return copyContainerPath(ctx, ops, writer, opts.ContainerID,
-			ContainerWorkspacePath, fmt.Sprintf("workspace/%s", opts.Crew.Slug), volumeExclusions)
+			ContainerWorkspacePath, fmt.Sprintf("workspace/%s", opts.Crew.Slug), nil)
 	})
 	if err != nil {
 		_ = writer.Close()

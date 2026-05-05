@@ -85,14 +85,20 @@ func CollectCrew(ctx context.Context, ops DockerOps, dst *TarZstWriter, crew Cre
 			excludes    []string
 		}
 		// Quick: just the things that describe the agent's active
-		// engagement. workspace = code under edit, memory = thoughts
-		// the agent persisted.
+		// engagement. workspace = code under edit (vendored deps,
+		// node_modules, build outputs all belong to the user — no
+		// exclusions, otherwise an offline / committed-deps project
+		// silently loses content), memory = the agent's persisted
+		// thoughts (tiny, no exclusions to apply).
 		pairs := []pair{
-			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), volumeExclusions},
-			{ContainerMemoryPath, fmt.Sprintf("memory/%s", crew.Slug), volumeExclusions},
+			{ContainerWorkspacePath, fmt.Sprintf("workspace/%s", crew.Slug), nil},
+			{ContainerMemoryPath, fmt.Sprintf("memory/%s", crew.Slug), nil},
 		}
 		// Standard adds the named volumes (home dotfiles + installed
-		// tools). Most users land here.
+		// tools). volumeExclusions trims regenerable caches (mise,
+		// pyenv, npm, .yarn/cache) so /home/agent's 1.6 GB does not
+		// land in every bundle, while preserving credential paths
+		// (~/.config/<tool>/, ~/.aws, ~/.ssh, ~/.docker, ~/.gitconfig).
 		if level == ScopeLevelStandard || level == ScopeLevelFull {
 			pairs = append(pairs,
 				pair{ContainerHomePath, fmt.Sprintf("volumes/%s/home", crew.Slug), volumeExclusions},

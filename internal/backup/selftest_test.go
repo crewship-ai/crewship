@@ -121,14 +121,14 @@ func (f *fakeDockerOps) CopyToSystem(ctx context.Context, containerID, dstPath s
 // CopyTo merges incoming tar entries into the workspace map.
 //
 // Models two callers:
-//   1. BackupSelfTest writes the canary via CopyTo(/workspace, tar) where
-//      the tar carries a flat entry name like "CANARY-abc.txt". Resolved
-//      path: /workspace/CANARY-abc.txt → workspace["CANARY-abc.txt"].
-//   2. RestoreCrew (post-fix) calls CopyTo(parent, rewrappedTar) where
-//      the tar's entries each start with the section basename
-//      ("workspace/", "agent/", "output/", "crew-tools/"). Only the
-//      "workspace/" branch is modelled; the others are silently
-//      consumed because the fake CollectCrew never produces them.
+//  1. BackupSelfTest writes the canary via CopyTo(/workspace, tar) where
+//     the tar carries a flat entry name like "CANARY-abc.txt". Resolved
+//     path: /workspace/CANARY-abc.txt → workspace["CANARY-abc.txt"].
+//  2. RestoreCrew (post-fix) calls CopyTo(parent, rewrappedTar) where
+//     the tar's entries each start with the section basename
+//     ("workspace/", "agent/", "output/", "crew-tools/"). Only the
+//     "workspace/" branch is modelled; the others are silently
+//     consumed because the fake CollectCrew never produces them.
 //
 // dstPath is the absolute container path the SDK would receive. The
 // effective container path of an entry is dstPath + "/" + entryName,
