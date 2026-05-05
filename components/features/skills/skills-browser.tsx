@@ -6,8 +6,11 @@ import type { AnyOrama } from "@orama/orama"
 import { VirtuosoGrid } from "react-virtuoso"
 import {
   Search, Sparkles, Plus, X, ChevronDown, ChevronRight,
-  Package, RefreshCw, ShieldCheck, BadgeCheck, Lock, Dot, AlertTriangle, Loader2,
-  Library, CheckSquare, PanelLeftClose, PanelLeftOpen,
+  Package, RefreshCw, ShieldCheck, BadgeCheck, Lock, AlertTriangle, Loader2,
+  Library, CheckSquare, PanelLeftClose, PanelLeftOpen, Users,
+  Code2, Database, Cloud, PenLine, Microscope, ListChecks,
+  Palette, LifeBuoy, Shield, DollarSign, Settings, Workflow,
+  HandCoins, Box,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -23,17 +26,36 @@ import { SkillsDetailPanel } from "@/components/features/skills/skills-detail-pa
 // Counts are computed live from the loaded list — values with zero
 // matches still render so the user can see them go grey instead of
 // silently disappear (locked enum, not free-form).
-const DOMAINS = [
-  "CODING", "DATA", "DEVOPS", "WRITING", "RESEARCH", "PM",
-  "DESIGN", "SUPPORT", "SECURITY", "FINANCE", "OPS", "AUTOMATION",
-  "SALES", "CUSTOM",
+// Domain icons help the eye land on the right facet at a glance —
+// 14 text rows all look identical. Colours are applied per-row in the
+// rail render so disabled rows can grey-out uniformly without per-icon
+// tint drift.
+const DOMAINS: Array<{ value: string; icon: typeof Code2 }> = [
+  { value: "CODING", icon: Code2 },
+  { value: "DATA", icon: Database },
+  { value: "DEVOPS", icon: Cloud },
+  { value: "WRITING", icon: PenLine },
+  { value: "RESEARCH", icon: Microscope },
+  { value: "PM", icon: ListChecks },
+  { value: "DESIGN", icon: Palette },
+  { value: "SUPPORT", icon: LifeBuoy },
+  { value: "SECURITY", icon: Shield },
+  { value: "FINANCE", icon: DollarSign },
+  { value: "OPS", icon: Settings },
+  { value: "AUTOMATION", icon: Workflow },
+  { value: "SALES", icon: HandCoins },
+  { value: "CUSTOM", icon: Box },
 ]
+// Source colours map to trust tier — emerald=official, sky=verified,
+// neutral=community, violet=generated, amber=private. Tailwind text-*
+// classes are applied directly on the icon so the count column keeps
+// the standard muted colour.
 const SOURCES = [
-  { value: "BUNDLED", label: "Official", icon: ShieldCheck },
-  { value: "MARKETPLACE", label: "Verified", icon: BadgeCheck },
-  { value: "CUSTOM", label: "Community", icon: Dot },
-  { value: "GENERATED", label: "Generated", icon: Sparkles },
-  { value: "MANAGED", label: "Private", icon: Lock },
+  { value: "BUNDLED", label: "Official", icon: ShieldCheck, colour: "text-emerald-400" },
+  { value: "MARKETPLACE", label: "Verified", icon: BadgeCheck, colour: "text-sky-400" },
+  { value: "CUSTOM", label: "Community", icon: Users, colour: "text-white/55" },
+  { value: "GENERATED", label: "Generated", icon: Sparkles, colour: "text-violet-400" },
+  { value: "MANAGED", label: "Private", icon: Lock, colour: "text-amber-400" },
 ]
 const RUNTIMES = [
   { value: "INSTRUCTIONS", label: "Instructions" },
@@ -41,11 +63,15 @@ const RUNTIMES = [
   { value: "MCP", label: "MCP" },
   { value: "HYBRID", label: "Hybrid" },
 ]
+// Maturity dot colours mirror the bundled-skill ORDER BY in
+// internal/api/skills.go — OFFICIAL > CURATED > COMMUNITY >
+// EXPERIMENTAL. The dot is the visual weight; without it all four
+// rows read as equal-weight text.
 const MATURITIES = [
-  { value: "OFFICIAL", label: "Official" },
-  { value: "CURATED", label: "Curated" },
-  { value: "COMMUNITY", label: "Community" },
-  { value: "EXPERIMENTAL", label: "Experimental" },
+  { value: "OFFICIAL", label: "Official", dot: "bg-emerald-400" },
+  { value: "CURATED", label: "Curated", dot: "bg-sky-400" },
+  { value: "COMMUNITY", label: "Community", dot: "bg-white/40" },
+  { value: "EXPERIMENTAL", label: "Experimental", dot: "bg-amber-400" },
 ]
 
 interface FilterState {
@@ -438,15 +464,25 @@ export function SkillsBrowser() {
           <div className="flex-1 overflow-y-auto px-2 py-1">
             <FacetSection title="Domain" defaultOpen>
               {DOMAINS.map((d) => {
-                const c = counts.byDomain[d] ?? 0
+                const c = counts.byDomain[d.value] ?? 0
+                const Icon = d.icon
+                const isDisabled = c === 0 && !filter.domains.has(d.value)
                 return (
                   <FacetRow
-                    key={d}
-                    label={capitalise(d)}
+                    key={d.value}
+                    label={
+                      <span className="inline-flex items-center gap-1.5">
+                        <Icon className={cn(
+                          "h-3 w-3",
+                          isDisabled ? "text-white/25" : "text-white/65",
+                        )} />
+                        {capitalise(d.value)}
+                      </span>
+                    }
                     count={c}
-                    checked={filter.domains.has(d)}
-                    onToggle={() => toggle("domains", d)}
-                    disabled={c === 0 && !filter.domains.has(d)}
+                    checked={filter.domains.has(d.value)}
+                    onToggle={() => toggle("domains", d.value)}
+                    disabled={isDisabled}
                   />
                 )
               })}
@@ -456,19 +492,23 @@ export function SkillsBrowser() {
               {SOURCES.map((s) => {
                 const c = counts.bySource[s.value] ?? 0
                 const Icon = s.icon
+                const isDisabled = c === 0 && !filter.sources.has(s.value)
                 return (
                   <FacetRow
                     key={s.value}
                     label={
                       <span className="inline-flex items-center gap-1.5">
-                        <Icon className="h-3 w-3" />
+                        <Icon className={cn(
+                          "h-3 w-3",
+                          isDisabled ? "text-white/25" : s.colour,
+                        )} />
                         {s.label}
                       </span>
                     }
                     count={c}
                     checked={filter.sources.has(s.value)}
                     onToggle={() => toggle("sources", s.value)}
-                    disabled={c === 0 && !filter.sources.has(s.value)}
+                    disabled={isDisabled}
                   />
                 )
               })}
@@ -493,14 +533,23 @@ export function SkillsBrowser() {
             <FacetSection title="Maturity">
               {MATURITIES.map((m) => {
                 const c = counts.byMaturity[m.value] ?? 0
+                const isDisabled = c === 0 && !filter.maturities.has(m.value)
                 return (
                   <FacetRow
                     key={m.value}
-                    label={m.label}
+                    label={
+                      <span className="inline-flex items-center gap-2">
+                        <span className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          isDisabled ? "bg-white/15" : m.dot,
+                        )} />
+                        {m.label}
+                      </span>
+                    }
                     count={c}
                     checked={filter.maturities.has(m.value)}
                     onToggle={() => toggle("maturities", m.value)}
-                    disabled={c === 0 && !filter.maturities.has(m.value)}
+                    disabled={isDisabled}
                   />
                 )
               })}
