@@ -47,6 +47,12 @@ type DockerOps interface {
 	// inside the container; devcontainer base images ship it.
 	CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error
 
+	// CopyToSystem is the uid-0 variant of CopyToVolume for system
+	// paths whose contents are root-owned (e.g. /var/lib service
+	// data dirs). The agent-user tar fails open with "Cannot open:
+	// Permission denied" on every entry there.
+	CopyToSystem(ctx context.Context, containerID, dstPath string, content io.Reader) error
+
 	// ContainerExists reports whether a container with the given ID or
 	// name is known to the daemon. Used by restore preflight so CopyTo
 	// does not fail with a cryptic "No such container" mid-stream.
@@ -142,6 +148,18 @@ func (m *MobyDockerOps) CopyTo(ctx context.Context, containerID, dstPath string,
 // transferred. The goroutine here pumps output continuously so back
 // pressure flows correctly.
 func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	return m.copyToWithUser(ctx, containerID, dstPath, content, "1001:1001")
+}
+
+// CopyToSystem is the root variant. Routes through the same exec-tar
+// machinery as CopyToVolume but as uid 0 so root-owned paths under
+// /var/lib (redis dump.rdb, postgresql data dir, mysql ibdata1)
+// extract without "Permission denied".
+func (m *MobyDockerOps) CopyToSystem(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	return m.copyToWithUser(ctx, containerID, dstPath, content, "0:0")
+}
+
+func (m *MobyDockerOps) copyToWithUser(ctx context.Context, containerID, dstPath string, content io.Reader, user string) error {
 	// Tar flags rationale (verified against dev3 GNU tar 1.34 inside
 	// devcontainer base image):
 	//   --overwrite         replace existing files outright. Critical
@@ -174,7 +192,7 @@ func (m *MobyDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath s
 			"--no-same-owner", "--no-same-permissions", "--touch",
 			"-f", "-", "-C", dstPath,
 		},
-		User:         "1001:1001",
+		User:         user,
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,

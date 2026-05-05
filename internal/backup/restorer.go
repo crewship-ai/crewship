@@ -515,9 +515,10 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 	//   rewrapped: "workspace/", "workspace/proof/marker.txt"
 	//   CopyTo dest=/ → /workspace/proof/marker.txt ✓
 	type section struct {
-		open func() (io.ReadCloser, bool, error)
-		dest string // container absolute path of the section root
-		name string // human label for error messages
+		open   func() (io.ReadCloser, bool, error)
+		dest   string // container absolute path of the section root
+		name   string // human label for error messages
+		asRoot bool   // exec the tar as uid 0 instead of the agent user
 	}
 	sections := []section{
 		{
@@ -546,9 +547,16 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			// system section was added simply have no entry under
 			// system/<slug>/var-lib so OpenSystem returns (false, nil) and
 			// this is a silent skip — full backwards compatibility.
-			open: func() (io.ReadCloser, bool, error) { return payload.OpenSystem(ctx, crewSlug, "var-lib") },
-			dest: ContainerVarLibPath,
-			name: "var-lib",
+			//
+			// Must extract as uid 0: every parent dir under /var/lib is
+			// root-owned, the agent user (1001) has no write bit, and
+			// inner files (mysql/ibdata1, postgres data) are root-owned
+			// reads from the bundle perspective. CopyToSystem handles the
+			// uid switch via a separate exec session.
+			open:   func() (io.ReadCloser, bool, error) { return payload.OpenSystem(ctx, crewSlug, "var-lib") },
+			dest:   ContainerVarLibPath,
+			name:   "var-lib",
+			asRoot: true,
 		},
 	}
 	// Per-section errors are collected so a hiccup on one section
@@ -592,7 +600,11 @@ func RestoreCrew(ctx context.Context, ops DockerOps, containerID string, crewSlu
 			}
 			continue
 		}
-		err = ops.CopyToVolume(ctx, containerID, s.dest, r)
+		if s.asRoot {
+			err = ops.CopyToSystem(ctx, containerID, s.dest, r)
+		} else {
+			err = ops.CopyToVolume(ctx, containerID, s.dest, r)
+		}
 		_ = r.Close()
 		if err != nil {
 			sectionErrs = append(sectionErrs, fmt.Sprintf("%s: %v", s.name, err))

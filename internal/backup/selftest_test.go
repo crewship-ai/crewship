@@ -112,6 +112,12 @@ func (f *fakeDockerOps) CopyToVolume(ctx context.Context, containerID, dstPath s
 	return f.CopyTo(ctx, containerID, dstPath, content)
 }
 
+// CopyToSystem is the uid-0 variant. The in-memory fake doesn't model
+// uid checks, so it routes to the same merge path.
+func (f *fakeDockerOps) CopyToSystem(ctx context.Context, containerID, dstPath string, content io.Reader) error {
+	return f.CopyTo(ctx, containerID, dstPath, content)
+}
+
 // CopyTo merges incoming tar entries into the workspace map.
 //
 // Models two callers:
