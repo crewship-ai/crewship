@@ -246,15 +246,27 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
                         aria-label="Verify checksum"
                         title="Verify integrity (recompute sha256)"
                       >
-                        {verify.isPending && verify.variables === row.path ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : verify.data?.valid && verify.variables === row.path ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                        ) : verify.data && !verify.data.valid && verify.variables === row.path ? (
-                          <XCircle className="h-3.5 w-3.5 text-destructive" />
-                        ) : (
-                          <ShieldCheck className="h-3.5 w-3.5" />
-                        )}
+                        {(() => {
+                          // Match the predicate used by onVerify so the
+                          // row icon and the toast cannot disagree —
+                          // success means valid=true AND no error
+                          // string. A non-empty error with valid=true
+                          // (defensive: shouldn't happen but the API
+                          // shape allows it) still flips the row to
+                          // failure and matches the toast.
+                          const ours =
+                            verify.data && verify.variables === row.path
+                          if (verify.isPending && verify.variables === row.path) {
+                            return <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          }
+                          if (ours && verify.data!.valid && !verify.data!.error) {
+                            return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                          }
+                          if (ours && (!verify.data!.valid || Boolean(verify.data!.error))) {
+                            return <XCircle className="h-3.5 w-3.5 text-destructive" />
+                          }
+                          return <ShieldCheck className="h-3.5 w-3.5" />
+                        })()}
                       </Button>
                       {workspaceId ? (
                         <Button

@@ -112,9 +112,11 @@ func TestExtractPayload_AcceptsRelativeSymlink(t *testing.T) {
 	// directory over) are common in language-tooling layouts and
 	// must continue to round-trip.
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/link", tar.TypeSymlink, "real-binary")
-	if _, err := ExtractPayload(t.Context(), bytes.NewReader(payload)); err != nil {
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err != nil {
 		t.Fatalf("relative-target symlink should pass preflight; got %v", err)
 	}
+	t.Cleanup(func() { _ = out.Close() })
 }
 
 func TestExtractPayload_AcceptsHardLink(t *testing.T) {
@@ -123,9 +125,11 @@ func TestExtractPayload_AcceptsHardLink(t *testing.T) {
 	// a missing target which is detected at extraction time, not
 	// preflight.
 	payload := buildPayloadWithEntry(t, "workspace/my-crew/hard", tar.TypeLink, "workspace/my-crew/file.txt")
-	if _, err := ExtractPayload(t.Context(), bytes.NewReader(payload)); err != nil {
+	out, err := ExtractPayload(t.Context(), bytes.NewReader(payload))
+	if err != nil {
 		t.Fatalf("contained hardlink should pass preflight; got %v", err)
 	}
+	t.Cleanup(func() { _ = out.Close() })
 }
 
 func TestExtractPayload_RejectsAbsoluteHardLink(t *testing.T) {
