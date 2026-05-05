@@ -5,12 +5,13 @@ import { motion } from "motion/react"
 import {
   Activity, Settings as SettingsIcon, Users,
   Loader2, FlaskConical, RefreshCw, AlertTriangle, Trash2,
-  CheckCircle2, XCircle, Clock,
+  CheckCircle2, XCircle, Clock, Pencil, Eye, EyeOff,
 } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -33,6 +34,7 @@ interface CredentialSummary {
   last_used_at: string | null
   last_used_ips: string[]
   last_error: string | null
+  tags: string[]
   created_at: string
   updated_at: string
   agent_names: string[]
@@ -67,10 +69,13 @@ export interface CredentialDetailSheetProps {
   onOpenChange: (open: boolean) => void
   onRefresh: () => void
   onRotate: (cred: CredentialSummary) => void
+  /** Optional handler — opens the full Edit dialog. When omitted the
+   *  Edit button is hidden (legacy callers). */
+  onEdit?: (cred: CredentialSummary) => void
 }
 
 export function CredentialDetailSheet({
-  workspaceId, credential, open, onOpenChange, onRefresh, onRotate,
+  workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onEdit,
 }: CredentialDetailSheetProps) {
   const [tab, setTab] = React.useState<"overview" | "used-by" | "audit" | "settings">("overview")
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
@@ -79,6 +84,12 @@ export function CredentialDetailSheet({
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
+  // Inline value rewrite — Vercel-parity manual rotation. Lives in the
+  // Settings tab next to the full grace-overlap rotation flow.
+  const [valueDraft, setValueDraft] = React.useState("")
+  const [showValueDraft, setShowValueDraft] = React.useState(false)
+  const [savingValue, setSavingValue] = React.useState(false)
+  const [valueSaved, setValueSaved] = React.useState(false)
 
   React.useEffect(() => {
     if (!open || !credential) {
@@ -86,6 +97,9 @@ export function CredentialDetailSheet({
       setAudit([])
       setRotations([])
       setTestResult(null)
+      setValueDraft("")
+      setShowValueDraft(false)
+      setValueSaved(false)
     }
   }, [open, credential])
 
@@ -145,10 +159,32 @@ export function CredentialDetailSheet({
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent side="right" className="sm:max-w-[480px] p-0 flex flex-col">
           <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
-            <SheetTitle className="text-base font-mono">{credential.name}</SheetTitle>
-            <SheetDescription className="text-xs">
-              {credential.account_label || credential.description || credential.provider}
-            </SheetDescription>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <SheetTitle className="text-base font-mono truncate">{credential.name}</SheetTitle>
+                <SheetDescription className="text-xs truncate">
+                  {credential.account_label || credential.description || credential.provider}
+                </SheetDescription>
+              </div>
+              {onEdit && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onEdit(credential)}
+                  className="shrink-0"
+                >
+                  <Pencil className="h-3 w-3 mr-1.5" />
+                  Edit
+                </Button>
+              )}
+            </div>
+            {credential.tags && credential.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {credential.tags.map((t) => (
+                  <Badge key={t} variant="outline" className="text-[10px] px-1 font-mono">{t}</Badge>
+                ))}
+              </div>
+            )}
           </SheetHeader>
 
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex-1 flex flex-col">
@@ -274,11 +310,83 @@ export function CredentialDetailSheet({
                 )}
               </TabsContent>
 
-              <TabsContent value="settings" className="m-0 space-y-3">
-                <Button size="sm" variant="outline" className="w-full justify-start" onClick={() => onRotate(credential)}>
-                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                  Rotate credential...
-                </Button>
+              <TabsContent value="settings" className="m-0 space-y-4">
+                {/* Inline value rewrite — quick manual rotation without
+                    grace overlap. For users who just need to paste a
+                    new key and move on (Vercel pattern). The real
+                    rotation flow with overlap lives in onRotate. */}
+                <div className="space-y-1.5">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                    Update value
+                  </div>
+                  <div className="relative">
+                    <Input
+                      type={showValueDraft ? "text" : "password"}
+                      placeholder="Paste new secret value"
+                      value={valueDraft}
+                      onChange={(e) => { setValueDraft(e.target.value); setValueSaved(false) }}
+                      className="pr-10 font-mono text-xs"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2"
+                      onClick={() => setShowValueDraft((s) => !s)}
+                      aria-label={showValueDraft ? "Hide value" : "Show value"}
+                    >
+                      {showValueDraft ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!valueDraft.trim() || savingValue}
+                      onClick={async () => {
+                        setSavingValue(true)
+                        setValueSaved(false)
+                        try {
+                          const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ value: valueDraft }),
+                          })
+                          if (res.ok) {
+                            setValueDraft("")
+                            setShowValueDraft(false)
+                            setValueSaved(true)
+                            onRefresh()
+                          }
+                        } finally {
+                          setSavingValue(false)
+                        }
+                      }}
+                    >
+                      {savingValue && <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />}
+                      Save value
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onRotate(credential)}
+                      className="text-[11px] text-muted-foreground hover:text-foreground"
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1.5" />
+                      Rotate with grace overlap…
+                    </Button>
+                    {valueSaved && (
+                      <span className="text-[11px] text-emerald-400 inline-flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Saved
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Save replaces the value immediately. Use rotate-with-grace if agents are
+                    currently running and need a 24h overlap.
+                  </p>
+                </div>
 
                 {rotations.length > 0 && (
                   <div className="space-y-1.5">

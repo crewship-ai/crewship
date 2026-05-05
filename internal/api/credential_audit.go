@@ -200,6 +200,63 @@ func parseLastUsedIPs(raw sql.NullString) []string {
 	return ips
 }
 
+// parseTags unmarshals credentials.tags into a slice. NULL/empty/
+// malformed all collapse to []string{} so callers don't have to
+// branch.
+func parseTags(raw sql.NullString) []string {
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return []string{}
+	}
+	var tags []string
+	if err := json.Unmarshal([]byte(raw.String), &tags); err != nil {
+		return []string{}
+	}
+	return tags
+}
+
+// normaliseTags trims, lowercases, dedupes, and caps the tag list to
+// keep storage predictable. Empty input → nil so the column stays
+// NULL rather than "[]"-as-text.
+func normaliseTags(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, t := range in {
+		t = strings.TrimSpace(strings.ToLower(t))
+		if t == "" || len(t) > 32 {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+		if len(out) >= 8 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// encodeTagsJSON serialises a slice for the credentials.tags column.
+// Returns ("", false) for empty input so callers can write SQL NULL.
+func encodeTagsJSON(tags []string) (string, bool) {
+	tags = normaliseTags(tags)
+	if len(tags) == 0 {
+		return "", false
+	}
+	b, err := json.Marshal(tags)
+	if err != nil {
+		return "", false
+	}
+	return string(b), true
+}
+
 // auditEventResponse is the shape returned by the audit list endpoint.
 // metadata_json is exposed as a parsed object so the FE doesn't need
 // to second-parse the embedded JSON string.

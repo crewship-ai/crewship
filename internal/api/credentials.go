@@ -44,11 +44,14 @@ type credentialResponse struct {
 	// LastUsedIPs is the parsed JSON array (max 5, ringbuffer) so the
 	// FE doesn't have to second-parse an embedded JSON string.
 	LastUsedIPs []string `json:"last_used_ips"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
-	AgentCount  int      `json:"_count_agent_credentials"`
-	AgentNames  []string `json:"agent_names"`
-	MCPUsed     bool     `json:"mcp_used"`
+	// Tags is the parsed JSON array of free-form labels. Always
+	// non-nil so the FE can iterate without a null check.
+	Tags       []string `json:"tags"`
+	CreatedAt  string   `json:"created_at"`
+	UpdatedAt  string   `json:"updated_at"`
+	AgentCount int      `json:"_count_agent_credentials"`
+	AgentNames []string `json:"agent_names"`
+	MCPUsed    bool     `json:"mcp_used"`
 }
 
 // Batch loaders and junction-table helpers live in credentials_loaders.go
@@ -66,7 +69,7 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
 			c.scope, c.crew_id, c.account_label, c.account_email,
 			c.token_expires_at, c.last_checked_at, c.last_error,
-			c.last_used_at, c.last_used_ips,
+			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
@@ -87,17 +90,18 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []credentialResponse
 	for rows.Next() {
 		var c credentialResponse
-		var lastUsedIPsRaw sql.NullString
+		var lastUsedIPsRaw, tagsRaw sql.NullString
 		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
 			&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail,
 			&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
-			&c.LastUsedAt, &lastUsedIPsRaw,
+			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 			&c.CreatedAt, &c.UpdatedAt, &c.AgentCount); err != nil {
 			h.logger.Error("scan credential", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 		c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
+		c.Tags = parseTags(tagsRaw)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -140,12 +144,12 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	var c credentialResponse
-	var lastUsedIPsRaw sql.NullString
+	var lastUsedIPsRaw, tagsRaw sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
 			c.scope, c.crew_id, c.account_label, c.account_email,
 			c.token_expires_at, c.last_checked_at, c.last_error,
-			c.last_used_at, c.last_used_ips,
+			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
@@ -153,9 +157,10 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, credID, workspaceID).Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
 		&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail,
 		&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
-		&c.LastUsedAt, &lastUsedIPsRaw,
+		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 		&c.CreatedAt, &c.UpdatedAt, &c.AgentCount)
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
+	c.Tags = parseTags(tagsRaw)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})

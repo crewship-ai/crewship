@@ -174,13 +174,13 @@ CREDS=$(curl -sf -b "$COOKIE_JAR" "${BASE}/api/v1/credentials?workspace_id=${WS_
 CRED_COUNT=$(echo "$CREDS" | jq 'length')
 ok "GET /api/v1/credentials → ${CRED_COUNT} existing"
 
-# Verify the new fields are present (last_used_at and last_used_ips,
-# even if null/empty for fresh credentials).
-HAS_FIELDS=$(echo "$CREDS" | jq 'first | has("last_used_at") and has("last_used_ips")')
+# Verify the new fields are present (last_used_at, last_used_ips, tags
+# from migration v71; even if null/empty for fresh credentials).
+HAS_FIELDS=$(echo "$CREDS" | jq 'first | has("last_used_at") and has("last_used_ips") and has("tags")')
 if [ "$HAS_FIELDS" = "true" ] || [ "$CRED_COUNT" = "0" ]; then
-  ok "  schema: last_used_at + last_used_ips fields present"
+  ok "  schema: last_used_at + last_used_ips + tags fields present"
 else
-  fail "  schema: audit columns missing from credential response"
+  fail "  schema: audit/tags columns missing from credential response"
 fi
 
 # ----------------------------------------------------------------------------

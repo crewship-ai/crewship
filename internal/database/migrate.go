@@ -888,6 +888,14 @@ ALTER TABLE credential_rotations_new RENAME TO credential_rotations;
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
 `},
+	// v71 adds a free-form tag list to credentials so users can organise
+	// secrets without our hardcoded provider enum getting in the way
+	// (Doppler / Vercel pattern). Stored as JSON TEXT — SQLite has no
+	// native array type, and pulling tags into a junction table is
+	// premature for a list that's typically 0–3 items per credential.
+	{version: 71, name: "add_credential_tags", sql: `
+ALTER TABLE credentials ADD COLUMN tags TEXT;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

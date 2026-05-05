@@ -22,6 +22,7 @@ type createCredentialRequest struct {
 	Scope         string   `json:"scope"`
 	CrewID        *string  `json:"crew_id"`
 	CrewIDs       []string `json:"crew_ids"`
+	Tags          []string `json:"tags"`
 	AccountLabel  *string  `json:"account_label"`
 	AccountEmail  *string  `json:"account_email"`
 	RefreshToken  *string  `json:"refresh_token"`
@@ -152,14 +153,19 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		credStatus = "PENDING"
 	}
 
+	var tagsArg any
+	if encoded, ok := encodeTagsJSON(req.Tags); ok {
+		tagsArg = encoded
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email,
-			token_expires_at, security_level, status, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			token_expires_at, security_level, status, tags, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail,
-		req.TokenExpires, secLevel, credStatus, user.ID, now, now)
+		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now)
 	if err != nil {
 		tx.Rollback()
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -339,6 +345,25 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.Set("status", "ACTIVE")
 			ub.SetNull("last_error")
 		}
+	}
+
+	// Tags: accept either a JSON array or null. Empty/missing arrays
+	// clear the column so the row goes back to NULL rather than "[]".
+	if raw, ok := body["tags"]; ok {
+		var tags []string
+		if arr, ok := raw.([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok {
+					tags = append(tags, s)
+				}
+			}
+		}
+		if encoded, ok := encodeTagsJSON(tags); ok {
+			ub.Set("tags", encoded)
+		} else {
+			ub.SetNull("tags")
+		}
+		delete(body, "tags")
 	}
 
 	for jsonKey, col := range allowed {
