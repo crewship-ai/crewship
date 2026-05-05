@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import {
+  Activity,
   ArrowLeft,
   Binoculars,
   FolderTree,
@@ -29,6 +30,7 @@ import { useJournalStream } from "@/hooks/use-journal-stream"
 import { NetworkPanel } from "@/components/features/crows-nest/network-panel"
 import { FilesystemPanel } from "@/components/features/crows-nest/filesystem-panel"
 import { ResourceSparklines } from "@/components/features/crows-nest/resource-sparklines"
+import { ActivityPanel } from "@/components/features/crows-nest/activity-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { JournalEntry } from "@/lib/types/journal"
 
@@ -46,14 +48,48 @@ interface Crew {
   _count?: { agents: number }
 }
 
+// Types subscribed to by the page. The first 7 feed the dedicated panels
+// (Terminal / Network / Resources / Filesystem). The rest power the
+// Activity feed so the page surfaces something useful even when the
+// container.metrics + file.written emitters aren't wired yet — see the
+// follow-up tracked in PR #272 / Crow's Nest emit gaps.
 const OBSERVABILITY_TYPES = [
+  // Terminal
   "exec.command",
   "exec.output_chunk",
+  // Network
   "network.port_opened",
   "network.port_closed",
   "network.egress",
+  // Filesystem (emitter not yet wired)
   "file.written",
+  // Resources (emitter not yet wired)
   "container.metrics",
+  // Activity feed — broader signal of what the crew is doing
+  "container.snapshot",
+  "agent.status_change",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "peer.conversation",
+  "peer.escalation",
+  "keeper.request",
+  "keeper.decision",
+  "mission.status_change",
+  "assignment.created",
+  "assignment.completed",
+  "assignment.failed",
+  "task.delegated",
+  "approval.requested",
+  "approval.granted",
+  "approval.denied",
+  "cost.incurred",
+  "budget.warning",
+  "budget.exceeded",
+  "skill.assigned",
+  "memory.updated",
+  "system.compaction",
 ].join(",")
 
 type SeverityFilter = "all" | "info" | "notice" | "warn" | "error"
@@ -388,7 +424,11 @@ export default function CrowsNestCrewPage() {
               </CardContent>
             </Card>
 
-            <div className="grid gap-3 grid-rows-2 min-h-[640px] lg:min-h-0">
+            {/* Right column: Resources + Filesystem stay as compact
+                placeholders (both await dedicated emitters — see follow-up
+                issue) and Activity gets the bulk of the space so the page
+                shows real signal even when those two are quiet. */}
+            <div className="grid gap-3 grid-rows-[140px_140px_minmax(0,1fr)] min-h-[640px] lg:min-h-0">
               <Card className="py-0 gap-0 flex flex-col overflow-hidden">
                 <CardHeader className="px-3 py-2 border-b border-border/50">
                   <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -407,6 +447,16 @@ export default function CrowsNestCrewPage() {
                 </CardHeader>
                 <CardContent className="p-0 flex-1 min-h-0 overflow-auto">
                   <FilesystemPanel entries={filteredEntries} />
+                </CardContent>
+              </Card>
+              <Card className="py-0 gap-0 flex flex-col overflow-hidden">
+                <CardHeader className="px-3 py-2 border-b border-border/50">
+                  <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Activity className="h-3 w-3 opacity-70" /> Activity
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 flex-1 min-h-0">
+                  <ActivityPanel entries={filteredEntries} />
                 </CardContent>
               </Card>
             </div>
