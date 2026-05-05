@@ -1,10 +1,18 @@
 "use client"
 
-import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download } from "lucide-react"
+import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download, RefreshCw, Users, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SEVERITY_COLOR } from "@/lib/journal-style"
 import type { JournalSeverity } from "@/lib/types/journal"
+import { TimeRangePicker, type TimeRange } from "./time-range-picker"
 
 export type SeverityFilter = "all" | JournalSeverity
 
@@ -14,6 +22,18 @@ export interface SeverityCounts {
   notice: number
   warn: number
   error: number
+}
+
+export interface ScopeOption {
+  id: string
+  name: string
+}
+
+export interface ScopeControl {
+  /** Empty string = "all". */
+  value: string
+  options: ScopeOption[]
+  onChange: (id: string) => void
 }
 
 interface LogsToolbarProps {
@@ -33,6 +53,18 @@ interface LogsToolbarProps {
   dedup: boolean
   onDedupToggle: () => void
   onExport?: () => void
+
+  // Optional time range — when provided renders a picker in the toolbar.
+  timeRange?: TimeRange
+  onTimeRangeChange?: (r: TimeRange) => void
+
+  // Optional scope selectors — when provided renders selects in the toolbar.
+  crewScope?: ScopeControl
+  agentScope?: ScopeControl
+
+  // Optional refresh button — shows spinner while `loading`.
+  onRefresh?: () => void
+  loading?: boolean
 }
 
 const SEV_ORDER: SeverityFilter[] = ["all", "info", "notice", "warn", "error"]
@@ -54,29 +86,60 @@ export function LogsToolbar({
   dedup,
   onDedupToggle,
   onExport,
+  timeRange,
+  onTimeRangeChange,
+  crewScope,
+  agentScope,
+  onRefresh,
+  loading,
 }: LogsToolbarProps) {
   return (
-    <div className="px-3 py-2 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-2">
+    <div className="px-3 py-2 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-2 sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-card/70">
       {/* search */}
-      <div className="relative flex-1 min-w-[260px] max-w-[480px]">
+      <div className="relative flex-1 min-w-[240px] max-w-[420px]">
         <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder="Search   /regex/   path:/home/agent   keeper.decision"
-          className="h-7 pl-7 text-[12px] font-mono"
+          className="h-7 pl-7 pr-6 text-[12px] font-mono"
         />
         {query && (
           <button
             type="button"
             onClick={() => onQueryChange("")}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground hover:text-foreground font-mono"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-foreground font-mono"
             aria-label="Clear search"
           >
             ✕
           </button>
         )}
       </div>
+
+      {/* time range */}
+      {timeRange && onTimeRangeChange && (
+        <TimeRangePicker value={timeRange} onChange={onTimeRangeChange} />
+      )}
+
+      {/* scope: crew */}
+      {crewScope && (
+        <ScopeSelect
+          control={crewScope}
+          allLabel="All crews"
+          Icon={Users}
+          aria="Crew scope"
+        />
+      )}
+
+      {/* scope: agent */}
+      {agentScope && (
+        <ScopeSelect
+          control={agentScope}
+          allLabel={crewScope?.value ? "All in crew" : "All agents"}
+          Icon={User}
+          aria="Agent scope"
+        />
+      )}
 
       <span className="opacity-30">│</span>
 
@@ -91,10 +154,10 @@ export function LogsToolbar({
               type="button"
               onClick={() => onSeverityChange(s)}
               className={cn(
-                "h-7 px-2 text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 transition-colors",
+                "h-7 px-2 text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 transition-colors border-r border-border/60 last:border-r-0",
                 active
-                  ? "bg-primary/15 text-primary border-r border-border/60 last:border-r-0"
-                  : "text-muted-foreground hover:text-foreground border-r border-border/60 last:border-r-0",
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:text-foreground",
               )}
               style={
                 active && s !== "all"
@@ -140,6 +203,19 @@ export function LogsToolbar({
         <span className="text-muted-foreground">/ {totalCount.toLocaleString()}</span>
       </span>
 
+      {onRefresh && (
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="inline-flex items-center gap-1 h-6 px-2 rounded border border-border/60 bg-card text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent/40 disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Refresh from server"
+          aria-label="Refresh"
+        >
+          <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
+        </button>
+      )}
+
       {onExport && (
         <ToolbarToggle on={false} onClick={onExport} title="Export visible entries to JSON">
           <Download className="h-3 w-3" /> Export
@@ -157,6 +233,46 @@ export function LogsToolbar({
         </button>
       )}
     </div>
+  )
+}
+
+function ScopeSelect({
+  control,
+  allLabel,
+  Icon,
+  aria,
+}: {
+  control: ScopeControl
+  allLabel: string
+  Icon: React.ComponentType<{ className?: string }>
+  aria: string
+}) {
+  return (
+    <Select
+      value={control.value || "__all__"}
+      onValueChange={(v) => control.onChange(v === "__all__" ? "" : v)}
+    >
+      <SelectTrigger
+        size="sm"
+        className="h-7 px-2 text-[11px] gap-1 max-w-[160px] [&>svg]:opacity-60"
+        aria-label={aria}
+      >
+        <Icon className="h-3 w-3 opacity-70" />
+        <SelectValue>
+          {control.value
+            ? control.options.find((o) => o.id === control.value)?.name ?? allLabel
+            : allLabel}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__all__" className="text-xs">{allLabel}</SelectItem>
+        {control.options.map((o) => (
+          <SelectItem key={o.id} value={o.id} className="text-xs">
+            {o.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 

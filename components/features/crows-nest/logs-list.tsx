@@ -21,6 +21,8 @@ interface LogsListProps {
   /** When true, autoscroll sticks to the bottom (or top, depending on order). */
   followTail: boolean
   newestFirst: boolean
+  /** Called when the user scrolls within `endReachedThreshold` of the bottom. */
+  onEndReached?: () => void
 }
 
 /**
@@ -29,7 +31,7 @@ interface LogsListProps {
  * Click a row to expand it inline and reveal payload + refs as
  * formatted JSON. Multiple rows can be open at once.
  */
-export function LogsList({ entries, wrap, followTail, newestFirst }: LogsListProps) {
+export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached }: LogsListProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const toggleExpand = useCallback((id: string) => {
@@ -60,6 +62,8 @@ export function LogsList({ entries, wrap, followTail, newestFirst }: LogsListPro
       followOutput={followOutput as false | "auto"}
       defaultItemHeight={26}
       computeItemKey={(_, e) => e.id}
+      endReached={onEndReached}
+      increaseViewportBy={{ top: 0, bottom: 600 }}
       itemContent={(_, e) => (
         <LogRow
           entry={e}

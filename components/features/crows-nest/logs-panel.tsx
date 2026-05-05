@@ -1,27 +1,69 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { groupOf, type EntryGroup, GROUP_ORDER } from "@/lib/journal-style"
-import { LogsToolbar, type SeverityFilter, type SeverityCounts } from "./logs-toolbar"
+import { LogsToolbar, type SeverityFilter, type SeverityCounts, type ScopeControl } from "./logs-toolbar"
 import { LogsTypeChips } from "./logs-type-chips"
 import { LogsHistogram } from "./logs-histogram"
 import { LogsList } from "./logs-list"
 import { LogsStatsRail } from "./logs-stats-rail"
+import type { TimeRange } from "./time-range-picker"
 
 interface LogsPanelProps {
   entries: JournalEntry[]
+
+  // ---- Optional server-driven filters / actions ----
+  /** When provided, renders a time-range picker in the toolbar. */
+  timeRange?: TimeRange
+  onTimeRangeChange?: (r: TimeRange) => void
+
+  /** When provided, renders a crew select in the toolbar. */
+  crewScope?: ScopeControl
+  /** When provided, renders an agent select in the toolbar. */
+  agentScope?: ScopeControl
+
+  /**
+   * Called (debounced) when the user types in the search box. Lets the
+   * parent forward the query to the backend's full-text search so the
+   * filter sees more than the currently-loaded chunk. Client-side
+   * narrowing of the rendered list still runs on top of this.
+   */
+  onServerSearch?: (q: string) => void
+
+  /** Refresh handler — shows a button + spinner state. */
+  onRefresh?: () => void
+  /** Mark the panel as loading (spinner on the refresh button). */
+  loading?: boolean
+
+  /** Pagination — called when the user scrolls to the bottom of the list. */
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
 }
 
 /**
- * Grafana Explore-style log viewer for Crow's Nest.
+ * Grafana Explore-style log viewer.
  *
- * Owns its own filter state (search, severity, muted groups, view toggles)
- * and derives every downstream slice from `entries`. Keeps the parent
- * page free of UI bookkeeping so other tabs (Terminal, Network, Filesystem)
- * can render independent slices of the same `entries` prop.
+ * Owns the local UI state (search input, severity, muted groups, view
+ * toggles) and derives every downstream slice from `entries`. Server
+ * filters (time range, crew/agent, full-text search) are wired via
+ * optional callbacks so the parent page can keep the source-of-truth
+ * for what's actually fetched.
  */
-export function LogsPanel({ entries }: LogsPanelProps) {
+export function LogsPanel({
+  entries,
+  timeRange,
+  onTimeRangeChange,
+  crewScope,
+  agentScope,
+  onServerSearch,
+  onRefresh,
+  loading,
+  hasMore,
+  loadingMore,
+  onLoadMore,
+}: LogsPanelProps) {
   const [query, setQuery] = useState("")
   const [severity, setSeverity] = useState<SeverityFilter>("all")
   const [muted, setMuted] = useState<Set<EntryGroup>>(new Set())
@@ -30,7 +72,14 @@ export function LogsPanel({ entries }: LogsPanelProps) {
   const [newestFirst, setNewestFirst] = useState(true)
   const [dedup, setDedup] = useState(false)
 
-  // Pre-compile regex once if the user typed `/.../` syntax.
+  // Debounce the search → server callback. 300 ms matches the prior
+  // JournalFilters debounce and keeps typing latency invisible.
+  useEffect(() => {
+    if (!onServerSearch) return
+    const t = setTimeout(() => onServerSearch(query), 300)
+    return () => clearTimeout(t)
+  }, [query, onServerSearch])
+
   const matcher = useMemo(() => buildMatcher(query), [query])
 
   // Stage 1: severity + search filter (used for type-chip counts).
@@ -43,8 +92,6 @@ export function LogsPanel({ entries }: LogsPanelProps) {
     })
   }, [entries, severity, matcher])
 
-  // Group counts on the post-severity-search set, so chip totals reflect
-  // what's actually being shown when the user hasn't muted any group.
   const groupCounts = useMemo(() => {
     const c: Record<EntryGroup, number> = Object.fromEntries(
       GROUP_ORDER.map((g) => [g, 0]),
@@ -78,9 +125,6 @@ export function LogsPanel({ entries }: LogsPanelProps) {
     return out
   }, [filtered, newestFirst, dedup])
 
-  // Severity counts for the segmented control are derived from the
-  // search-only filter (NOT including the severity filter itself, which
-  // would always make every non-active count = 0).
   const severityCounts = useMemo<SeverityCounts>(() => {
     const c: SeverityCounts = { all: 0, info: 0, notice: 0, warn: 0, error: 0 }
     const base = matcher ? entries.filter(matcher) : entries
@@ -108,12 +152,27 @@ export function LogsPanel({ entries }: LogsPanelProps) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `crows-nest-logs-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.json`
+    a.download = `crewship-logs-${new Date().toISOString().slice(0, 19).replace(/[:.]/g, "-")}.json`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }, [ordered])
+
+  const hasAnyEntries = entries.length > 0
+  const hasFilters =
+    severity !== "all" || muted.size > 0 || query.trim().length > 0
+
+  // Pagination guard — don't fire onLoadMore while one is in flight.
+  const loadMoreInFlight = useRef(false)
+  useEffect(() => {
+    if (!loadingMore) loadMoreInFlight.current = false
+  }, [loadingMore])
+  const handleEndReached = useCallback(() => {
+    if (!onLoadMore || !hasMore || loadingMore || loadMoreInFlight.current) return
+    loadMoreInFlight.current = true
+    onLoadMore()
+  }, [onLoadMore, hasMore, loadingMore])
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -134,6 +193,12 @@ export function LogsPanel({ entries }: LogsPanelProps) {
         dedup={dedup}
         onDedupToggle={() => setDedup((v) => !v)}
         onExport={onExport}
+        timeRange={timeRange}
+        onTimeRangeChange={onTimeRangeChange}
+        crewScope={crewScope}
+        agentScope={agentScope}
+        onRefresh={onRefresh}
+        loading={loading}
       />
       <LogsTypeChips
         counts={groupCounts}
@@ -143,16 +208,77 @@ export function LogsPanel({ entries }: LogsPanelProps) {
       />
       <LogsHistogram entries={filtered} />
       <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "minmax(0,1fr) 280px" }}>
-        <div className="border-r border-border/50 min-h-0 overflow-hidden">
-          <LogsList
-            entries={ordered}
-            wrap={wrap}
-            followTail={live}
-            newestFirst={newestFirst}
-          />
+        <div className="border-r border-border/50 min-h-0 overflow-hidden flex flex-col">
+          {ordered.length === 0 ? (
+            <EmptyState
+              hasAnyEntries={hasAnyEntries}
+              hasFilters={hasFilters}
+              loading={Boolean(loading)}
+            />
+          ) : (
+            <>
+              <div className="flex-1 min-h-0">
+                <LogsList
+                  entries={ordered}
+                  wrap={wrap}
+                  followTail={live}
+                  newestFirst={newestFirst}
+                  onEndReached={handleEndReached}
+                />
+              </div>
+              {(loadingMore || (hasMore === false && ordered.length > 0)) && (
+                <div className="shrink-0 px-3 py-2 text-center text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60 border-t border-border/40">
+                  {loadingMore ? "Loading older entries…" : "End of journal"}
+                </div>
+              )}
+            </>
+          )}
         </div>
         <LogsStatsRail entries={ordered} />
       </div>
+    </div>
+  )
+}
+
+function EmptyState({
+  hasAnyEntries,
+  hasFilters,
+  loading,
+}: {
+  hasAnyEntries: boolean
+  hasFilters: boolean
+  loading: boolean
+}) {
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground/60">
+        Loading entries…
+      </div>
+    )
+  }
+  if (!hasAnyEntries) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-1 text-center px-6">
+        <div className="text-[12px] text-foreground/80">No journal entries</div>
+        <div className="text-[11px] text-muted-foreground/70 max-w-sm">
+          Once the crew runs, events will land here in real time.
+        </div>
+      </div>
+    )
+  }
+  if (hasFilters) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center gap-1 text-center px-6">
+        <div className="text-[12px] text-foreground/80">No entries match the current filters</div>
+        <div className="text-[11px] text-muted-foreground/70 max-w-sm">
+          Adjust severity, type chips, or clear the search to widen the view.
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground/60 italic">
+      No log entries.
     </div>
   )
 }
@@ -167,7 +293,6 @@ function buildMatcher(q: string): ((e: JournalEntry) => boolean) | null {
   const trimmed = q.trim()
   if (!trimmed) return null
 
-  // /regex/ form
   const rx = trimmed.match(/^\/(.+)\/([imsx]*)$/)
   if (rx) {
     try {
@@ -178,7 +303,6 @@ function buildMatcher(q: string): ((e: JournalEntry) => boolean) | null {
     }
   }
 
-  // path:foo bar — split into k:v pairs + free tokens
   const tokens = trimmed.split(/\s+/)
   const kv: Array<[string, string]> = []
   const free: string[] = []

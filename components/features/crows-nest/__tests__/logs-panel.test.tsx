@@ -119,7 +119,7 @@ describe("LogsPanel", () => {
     const entries = [entry({ id: "a", severity: "info", summary: "x" })]
     const { getByPlaceholderText, getByText } = render(<LogsPanel entries={entries} />)
     fireEvent.change(getByPlaceholderText(/search/i), { target: { value: "no-such-string-anywhere" } })
-    expect(getByText(/No log entries match/i)).toBeTruthy()
+    expect(getByText(/No entries match the current filters/i)).toBeTruthy()
   })
 
   it("expands a row to reveal payload JSON when clicked", () => {
