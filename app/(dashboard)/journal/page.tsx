@@ -28,6 +28,7 @@ import {
 } from "@/components/features/journal/journal-filters"
 import { JournalTimeline } from "@/components/features/journal/journal-timeline"
 import { RunsView } from "@/components/features/journal/runs-view"
+import { LogsPanel } from "@/components/features/crows-nest/logs-panel"
 
 /** Convert the UI `timeRange` selection into an RFC3339 `since` string. */
 function sinceFromRange(range: JournalFilterValue["timeRange"]): string | undefined {
@@ -185,14 +186,20 @@ export default function JournalPage() {
 
         {/* ---- Tab panels ---- */}
         {activeTab === "timeline" && (
-          <JournalTimeline
-            entries={visibleEntries}
-            loading={loading}
-            loadingMore={loadingMore}
-            hasMore={Boolean(nextCursor)}
-            error={error}
-            onLoadMore={loadMore}
-          />
+          <div className="rounded-md border border-border/60 bg-background overflow-hidden h-[calc(100vh-220px)]">
+            {loading && visibleEntries.length === 0 ? (
+              <JournalTimeline
+                entries={visibleEntries}
+                loading={loading}
+                loadingMore={loadingMore}
+                hasMore={Boolean(nextCursor)}
+                error={error}
+                onLoadMore={loadMore}
+              />
+            ) : (
+              <LogsPanel entries={visibleEntries} />
+            )}
+          </div>
         )}
 
         {activeTab === "runs" && (
