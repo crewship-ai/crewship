@@ -156,7 +156,21 @@ export function ImportSkillDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // When the dialog is dismissed via backdrop click or Escape,
+        // the radix primitive only flips `open` to false — without
+        // also clearing the form state, the next time the user opens
+        // the dialog it still has whatever URL/content/repo they
+        // typed before. Mirroring the explicit Cancel/Close path
+        // here keeps every close shape consistent.
+        if (!next) {
+          reset()
+        }
+        setOpen(next)
+      }}
+    >
       <DialogTrigger asChild>
         <Button variant={triggerVariant} size={triggerSize}>
           {triggerLabel ?? (

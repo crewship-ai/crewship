@@ -213,10 +213,12 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
               <Download className="h-3 w-3" />
               {formatCount(skill.downloads)}
             </span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {formatRelative(skill.updated_at)}
-            </span>
+            {skill.updated_at && (
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {formatRelative(skill.updated_at)}
+              </span>
+            )}
           </div>
 
           {skill.installed_on && skill.installed_on.length > 0 && (

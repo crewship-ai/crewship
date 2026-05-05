@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -251,6 +252,7 @@ The --repo flow shells out to git on the server with --depth 1 --filter=blob:non
 				Source        string `json:"source"`
 				TotalFound    int    `json:"total_found"`
 				TotalImported int    `json:"total_imported"`
+				Truncated     bool   `json:"truncated"`
 				Imported      []struct {
 					SkillID string `json:"skill_id"`
 					Slug    string `json:"slug"`
@@ -279,6 +281,13 @@ The --repo flow shells out to git on the server with --depth 1 --filter=blob:non
 				for _, s := range result.Skipped {
 					fmt.Printf("  - %s — %s\n", s.Path, s.Reason)
 				}
+			}
+			if result.Truncated {
+				// Surface as a non-zero exit so CI/scripted callers can
+				// detect "we didn't import everything you asked for".
+				return fmt.Errorf("bulk import truncated: walker stopped after %d files; "+
+					"split the source repo or raise the server-side maxBulkSkills cap",
+					result.TotalFound)
 			}
 			cli.PrintSuccess(fmt.Sprintf("Bulk import complete: %d/%d", result.TotalImported, result.TotalFound))
 			return nil
@@ -504,35 +513,30 @@ func resolveCrewMembers(client *cli.Client, crewSlugOrID string) ([]assignTarget
 // rather than the command aborting on the first.
 func runAssignFanout(client *cli.Client, skillID, skillLabel string, targets []assignTarget, op string) error {
 	var failures []string
-	for _, t := range targets {
-		var resp interface {
-			StatusCode() int
-		}
-		_ = resp
+	// runOne issues a single request and centralises body-close so an
+	// early-return on cli.CheckError doesn't leak a connection. The
+	// previous loop only closed on the success branch, leaking one
+	// keepalive socket per agent on every error in a fan-out — fine
+	// for one agent, gnarly across a 50-agent crew on a flaky network.
+	runOne := func(target assignTarget) error {
+		var r *http.Response
+		var err error
 		if op == "assign" {
-			r, err := client.Post("/api/v1/agents/"+t.id+"/skills", map[string]string{
+			r, err = client.Post("/api/v1/agents/"+target.id+"/skills", map[string]string{
 				"skill_id": skillID,
 			})
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s: %v", t.slug, err))
-				continue
-			}
-			if err := cli.CheckError(r); err != nil {
-				failures = append(failures, fmt.Sprintf("%s: %v", t.slug, err))
-				continue
-			}
-			r.Body.Close()
 		} else {
-			r, err := client.Delete("/api/v1/agents/" + t.id + "/skills/" + skillID)
-			if err != nil {
-				failures = append(failures, fmt.Sprintf("%s: %v", t.slug, err))
-				continue
-			}
-			if err := cli.CheckError(r); err != nil {
-				failures = append(failures, fmt.Sprintf("%s: %v", t.slug, err))
-				continue
-			}
-			r.Body.Close()
+			r, err = client.Delete("/api/v1/agents/" + target.id + "/skills/" + skillID)
+		}
+		if err != nil {
+			return err
+		}
+		defer r.Body.Close()
+		return cli.CheckError(r)
+	}
+	for _, t := range targets {
+		if err := runOne(t); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", t.slug, err))
 		}
 	}
 

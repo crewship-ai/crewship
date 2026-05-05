@@ -244,6 +244,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		{"crew_integrations", "crew_id = ?", []any{crewID}},
 		{"mcp_bindings", "crew_id = ?", []any{crewID}},
 		{"agent_chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
+		{"agent_skills", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
 		{"memory_backups", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}},
 		{"crew_memory", "crew_id = ?", []any{crewID}},
 	}
