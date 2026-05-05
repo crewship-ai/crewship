@@ -310,3 +310,53 @@ func TestSyncMCPRegistry_RealUpstreamSchema(t *testing.T) {
 		t.Errorf("remote.url not mapped to endpoint: got %q", rEndpoint)
 	}
 }
+
+// TestSyncMCPRegistry_PreservesCuration is the regression guard for the
+// most subtle invariant of v67: an admin promoting an entry to
+// trust_tier='crewship' or is_featured=1 must NOT lose those flags on
+// the next sync cycle. The whole "Verified by Crewship" trust signal
+// only works if curation is locally owned (CONNECTIONS.md §5.6 + the
+// ON CONFLICT clause in SyncMCPRegistry that explicitly excludes those
+// columns).
+func TestSyncMCPRegistry_PreservesCuration(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	srv := newRegistryFixture(t)
+	prev := mcpRegistryURL
+	mcpRegistryURL = srv.URL
+	t.Cleanup(func() { mcpRegistryURL = prev })
+
+	// First sync to populate the table.
+	if err := SyncMCPRegistry(context.Background(), db, logger); err != nil {
+		t.Fatalf("first SyncMCPRegistry: %v", err)
+	}
+
+	// Admin curates: promote example.com/server-stdio to crewship-tier
+	// and feature it. Both columns are locally owned per v67 design.
+	if _, err := db.Exec(`UPDATE mcp_registry_servers
+		SET trust_tier = 'crewship', is_featured = 1
+		WHERE id = ?`, "example.com/server-stdio"); err != nil {
+		t.Fatalf("curate: %v", err)
+	}
+
+	// Second sync — upstream still says is_verified=true (active). If the
+	// ON CONFLICT clause was wrong, this would clobber trust_tier back to
+	// 'community' (the default) and is_featured back to 0.
+	if err := SyncMCPRegistry(context.Background(), db, logger); err != nil {
+		t.Fatalf("second SyncMCPRegistry: %v", err)
+	}
+
+	var trustTier string
+	var isFeatured int
+	if err := db.QueryRow(`SELECT trust_tier, is_featured FROM mcp_registry_servers WHERE id = ?`,
+		"example.com/server-stdio").Scan(&trustTier, &isFeatured); err != nil {
+		t.Fatalf("read after re-sync: %v", err)
+	}
+	if trustTier != "crewship" {
+		t.Errorf("trust_tier clobbered by sync: got %q, want 'crewship'", trustTier)
+	}
+	if isFeatured != 1 {
+		t.Errorf("is_featured clobbered by sync: got %d, want 1", isFeatured)
+	}
+}

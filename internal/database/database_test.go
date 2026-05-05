@@ -190,6 +190,89 @@ func TestMigrateMemoryConfigColumn(t *testing.T) {
 	}
 }
 
+// TestMigrateCredentialAuditSignal verifies migration v65 adds the columns the
+// 5-state status taxonomy + last-used IP ringbuffer rely on. Mirrors the shape
+// of TestMigrateMemoryConfigColumn — pragma_table_info introspection plus a
+// round-trip insert/update so we catch nullability or type regressions.
+func TestMigrateCredentialAuditSignal(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open("file:" + filepath.Join(dir, "credaudit.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	wantCols := map[string]string{"last_used_at": "TEXT", "last_used_ips": "TEXT"}
+	got := map[string]string{}
+	rows, err := db.Query("PRAGMA table_info(credentials)")
+	if err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	defer rows.Close()
+	var cid int
+	var colName, colType string
+	var notNull, dfltValue, pk interface{}
+	for rows.Next() {
+		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if _, want := wantCols[colName]; want {
+			got[colName] = colType
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	for col, typ := range wantCols {
+		if got[col] != typ {
+			t.Errorf("column %s: got type %q, want %q", col, got[col], typ)
+		}
+	}
+
+	// Round-trip: existing row may insert with nulls (pre-sidecar credentials),
+	// then sidecar populates the columns later.
+	if _, err := db.Exec(`INSERT INTO users (id, email) VALUES ('u1', 'a@b.c')`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('w1', 'W', 'w')`); err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO credentials (id, workspace_id, name, encrypted_value, created_by)
+		VALUES ('c1', 'w1', 'TEST_KEY', 'enc', 'u1')
+	`); err != nil {
+		t.Fatalf("insert credential without audit columns: %v", err)
+	}
+	// Sidecar update path — JSON array, max 5 enforced in Go (not schema).
+	if _, err := db.Exec(`
+		UPDATE credentials SET last_used_at = '2026-05-04T10:00:00Z',
+		                       last_used_ips = '["1.2.3.4","5.6.7.8"]'
+		WHERE id = 'c1'
+	`); err != nil {
+		t.Fatalf("update audit cols: %v", err)
+	}
+	var lastUsed, lastIPs *string
+	if err := db.QueryRow(`SELECT last_used_at, last_used_ips FROM credentials WHERE id = 'c1'`).Scan(&lastUsed, &lastIPs); err != nil {
+		t.Fatalf("read audit cols: %v", err)
+	}
+	if lastUsed == nil || *lastUsed != "2026-05-04T10:00:00Z" {
+		t.Errorf("last_used_at: got %v, want 2026-05-04T10:00:00Z", lastUsed)
+	}
+	if lastIPs == nil || *lastIPs != `["1.2.3.4","5.6.7.8"]` {
+		t.Errorf("last_used_ips: got %v, want JSON array", lastIPs)
+	}
+
+	var version int
+	if err := db.QueryRow("SELECT version FROM _migrations WHERE version = 65").Scan(&version); err != nil {
+		t.Errorf("migration 65 not recorded: %v", err)
+	}
+}
+
 // TestMigrateVersionCollision guards the collision check in Migrate(): if the
 // _migrations table already has a different name recorded for the version the
 // code is about to apply, the runner must fail loudly instead of silently

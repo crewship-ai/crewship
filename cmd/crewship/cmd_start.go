@@ -238,6 +238,21 @@ var startCmd = &cobra.Command{
 			}()
 		}
 
+		// Credential rotation expiry worker (CONNECTIONS.md §7.1):
+		// every hour, scrub old_value on rotations whose grace
+		// window has passed. Runs once on startup so any rotations
+		// that aged out while the server was down get cleaned up
+		// before we serve traffic.
+		if deps.DB != nil {
+			rotationStop := make(chan struct{})
+			var rotationWg sync.WaitGroup
+			api.StartCredentialRotationExpiryWorker(deps.DB, logger, rotationStop, &rotationWg)
+			defer func() {
+				close(rotationStop)
+				rotationWg.Wait()
+			}()
+		}
+
 		if err := srv.Start(ctx); err != nil {
 			return fmt.Errorf("server error: %w", err)
 		}
