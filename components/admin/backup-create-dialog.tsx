@@ -61,22 +61,26 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
     value: BackupScopeLevel
     label: string
     summary: string
+    keeps: string
   }> = [
     {
       value: "quick",
       label: "Quick",
-      summary: "Workspace + agent memory only. Smallest, fastest.",
+      summary: "Workspace + agent memory only.",
+      keeps: "Files under /workspace and the agent's saved memory. Smallest, fastest.",
     },
     {
       value: "standard",
       label: "Standard",
-      summary:
-        "Quick + /home/agent + /opt/crew-tools. Recommended default — covers user data and installed CLIs.",
+      summary: "Default. User data + CLI logins.",
+      keeps:
+        "Quick + /home/agent + /opt/crew-tools. CLI credentials (gh, aws, gcloud, docker, ssh, npm, …) and dotfiles travel with the bundle, so a restore brings the agent back logged-in.",
     },
     {
       value: "full",
       label: "Full",
-      summary:
+      summary: "Everything restorable.",
+      keeps:
         "Standard + /var/lib. Captures running-service data (redis, postgresql, mysql, …) so a wipe-and-restore round-trips cleanly.",
     },
   ]
@@ -207,6 +211,9 @@ export function BackupCreateDialog({ workspaceId }: { workspaceId: string | unde
                 </button>
               ))}
             </div>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {presets.find((p) => p.value === scopeLevel)?.keeps}
+            </p>
             <p className="text-[11px] text-muted-foreground">
               Restore is preset-agnostic — a Quick bundle restores into the same target as a Full one;
               missing sections are silent skips.
