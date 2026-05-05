@@ -24,8 +24,9 @@ vi.mock("react-virtuoso", () => ({
 
 // Mock recharts to a no-op div — happy-dom can't measure ResponsiveContainer.
 vi.mock("recharts", () => ({
-  Bar: () => null,
+  Bar: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   BarChart: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  Cell: () => null,
   ResponsiveContainer: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   XAxis: () => null,
   Tooltip: () => null,

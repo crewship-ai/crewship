@@ -5,7 +5,7 @@ import type { JournalEntry } from "@/lib/types/journal"
 import { groupOf, type EntryGroup, GROUP_ORDER } from "@/lib/journal-style"
 import { LogsToolbar, type SeverityFilter, type SeverityCounts, type ScopeControl } from "./logs-toolbar"
 import { LogsTypeChips } from "./logs-type-chips"
-import { LogsHistogram } from "./logs-histogram"
+import { LogsHistogram, type BucketRange } from "./logs-histogram"
 import { LogsList } from "./logs-list"
 import { LogsStatsRail } from "./logs-stats-rail"
 import type { TimeRange } from "./time-range-picker"
@@ -71,6 +71,14 @@ export function LogsPanel({
   const [wrap, setWrap] = useState(false)
   const [newestFirst, setNewestFirst] = useState(true)
   const [dedup, setDedup] = useState(false)
+  // Histogram drill-down — when set, narrows the rendered list to the
+  // clicked bucket. Reset whenever the active time range changes so a
+  // stale bucket from a previous window doesn't silently filter
+  // everything out.
+  const [bucket, setBucket] = useState<BucketRange | null>(null)
+  useEffect(() => {
+    setBucket(null)
+  }, [timeRange])
 
   // Debounce the search → server callback. 300 ms matches the prior
   // JournalFilters debounce and keeps typing latency invisible.
@@ -108,9 +116,20 @@ export function LogsPanel({
     return sevSearchFiltered.filter((e) => !muted.has(groupOf(e.entry_type)))
   }, [sevSearchFiltered, muted])
 
+  // Stage 2.5: histogram bucket narrowing. Histogram still receives
+  // `filtered` (the unconstrained set) so the selected bucket is
+  // visible in context — only the list/stats see the narrower slice.
+  const bucketed = useMemo(() => {
+    if (!bucket) return filtered
+    return filtered.filter((e) => {
+      const ts = new Date(e.ts).getTime()
+      return ts >= bucket.fromMs && ts < bucket.toMs
+    })
+  }, [filtered, bucket])
+
   // Stage 3: order + dedup.
   const ordered = useMemo(() => {
-    const arr = filtered.slice()
+    const arr = bucketed.slice()
     arr.sort((a, b) => {
       const t = new Date(b.ts).getTime() - new Date(a.ts).getTime()
       return newestFirst ? t : -t
@@ -123,7 +142,7 @@ export function LogsPanel({
       out.push(e)
     }
     return out
-  }, [filtered, newestFirst, dedup])
+  }, [bucketed, newestFirst, dedup])
 
   const severityCounts = useMemo<SeverityCounts>(() => {
     const c: SeverityCounts = { all: 0, info: 0, notice: 0, warn: 0, error: 0 }
@@ -206,7 +225,12 @@ export function LogsPanel({
         onToggle={onToggleGroup}
         onResetAll={onResetGroups}
       />
-      <LogsHistogram entries={filtered} />
+      <LogsHistogram
+        entries={filtered}
+        timeRange={timeRange}
+        selected={bucket}
+        onSelect={setBucket}
+      />
       <div className="flex-1 min-h-0 grid" style={{ gridTemplateColumns: "minmax(0,1fr) 280px" }}>
         <div className="border-r border-border/50 min-h-0 overflow-hidden flex flex-col">
           {ordered.length === 0 ? (
