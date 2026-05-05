@@ -26,6 +26,7 @@ import { ProjectProgress, type ProjectProgressEntry } from "@/components/feature
 import { ActivityFeed } from "@/components/features/dashboard/activity-feed"
 import { InboxTile, type InboxEntry } from "@/components/features/dashboard/inbox-tile"
 import { RecentMissionsTable } from "@/components/features/dashboard/recent-missions-table"
+import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 
 import {
   AgentSummary, CrewSummary, ProjectSummary, RunsResponse,
@@ -463,6 +464,14 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+      {/* Recipes empty state — only when workspace has 0 crews. */}
+      {crews.length === 0 && workspaceId && (
+        <RecipesEmptyState
+          workspaceId={workspaceId}
+          onInstalled={() => { fetchData(); fetchTimeseries() }}
+        />
+      )}
+
       {/* ── Row 1: 6 KPI cards ─ responsive 2→3→6 cols ──────────── */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <KpiCard

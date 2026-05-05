@@ -50,6 +50,11 @@ export function defineAbilitiesFor(role: OrgRole): AppAbility {
       can("read", "Crew")
       can("read", "Agent")
       can("read", "Skill")
+      // Members see credential metadata (names, providers, statuses)
+      // for credentials in their crews — values are never exposed by
+      // the API. Mirrors the BE List/Get which only enforces workspace
+      // membership, plus the new crew-scoped visibility filter.
+      can("read", "Credential")
       break
 
     case "VIEWER":
@@ -57,6 +62,7 @@ export function defineAbilitiesFor(role: OrgRole): AppAbility {
       can("read", "Crew")
       can("read", "Agent")
       can("read", "Skill")
+      can("read", "Credential")
       break
   }
 

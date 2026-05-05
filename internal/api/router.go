@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
@@ -74,6 +75,7 @@ type Router struct {
 	portExposePublicURL   string              // e.g. http://10.0.0.1:8080, used to build capability URLs
 	authRateLimitedMux    http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux     http.Handler        // mux wrapped with general API rate limiter
+	credTestRateLimitedMux http.Handler       // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
 	journal               journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator          *consolidate.Consolidator
 	consolidateMemoryRoot string
@@ -169,8 +171,9 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	r.registerRoutes()
 
 	// Pre-wrap mux with rate limiters (once, not per-request)
-	r.authRateLimitedMux = NewRateLimiter(10).Middleware(r.mux) // 10 req/min per IP
-	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(r.mux) // 120 req/min per IP
+	r.authRateLimitedMux = NewRateLimiter(10).Middleware(r.mux)     // 10 req/min per IP
+	r.apiRateLimitedMux = NewRateLimiter(120).Middleware(r.mux)     // 120 req/min per IP
+	r.credTestRateLimitedMux = NewRateLimiter(60).Middleware(r.mux) // 60 req/min per IP — tighter on /credentials/test to limit its use as a credential-validation oracle (a tenant should never need 60 manual test clicks per minute)
 
 	return r, nil
 }
@@ -206,6 +209,12 @@ func (r *Router) Shutdown() {
 	}
 }
 
+// credTestStoredPathRe matches the per-credential test endpoint
+// `/api/v1/credentials/{id}/test` exactly — anchored so a hypothetical
+// future `/credentials/{id}/audit/test` doesn't accidentally fall under
+// the tighter rate limiter as a forward-compat snag.
+var credTestStoredPathRe = regexp.MustCompile(`^/api/v1/credentials/[^/]+/test$`)
+
 // routeWithRateLimiting applies per-IP rate limiting based on the request path.
 
 func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request) {
@@ -220,6 +229,14 @@ func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request)
 	// Stricter rate limiting for auth endpoints
 	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/bootstrap" {
 		r.authRateLimitedMux.ServeHTTP(w, req)
+		return
+	}
+
+	// Tighter limit on credential test endpoints — they hit external
+	// provider APIs and could otherwise be used as a free key-validation
+	// oracle for stolen secrets.
+	if path == "/api/v1/credentials/test" || credTestStoredPathRe.MatchString(path) {
+		r.credTestRateLimitedMux.ServeHTTP(w, req)
 		return
 	}
 

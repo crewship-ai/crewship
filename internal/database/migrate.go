@@ -740,6 +740,12 @@ ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN locked_until TEXT;
 ALTER TABLE users ADD COLUMN last_failed_login_at TEXT;
 `},
+	// v65 — from main (PR #267 skills bootstrap). Kept ahead of the
+	// connections migrations so the version sequence matches main; our
+	// connections migrations were renumbered v65→v73 during the
+	// feat/connections ↔ main merge to avoid the version-collision
+	// guard in Migrate().
+	//
 	// vendor namespaces a skill (e.g. "anthropic", "vercel", "community") so
 	// future workspace templates can reference skills as vendor/slug@version
 	// without colliding when two registries publish the same slug. Kept
@@ -775,6 +781,174 @@ ALTER TABLE skills ADD COLUMN description_quality TEXT;
 CREATE INDEX IF NOT EXISTS idx_skill_vendor ON skills(vendor);
 CREATE INDEX IF NOT EXISTS idx_skill_maturity ON skills(maturity);
 CREATE INDEX IF NOT EXISTS idx_skill_runtime ON skills(runtime);
+`},
+	// v66 backs the row-level "is this credential still in use?" signal
+	// copied from GitLab/GitHub/Stripe. last_checked_at already exists
+	// for health-check timestamps; last_used_at is distinct — it records
+	// real usage as observed by the sidecar and is the input for the
+	// computed Stale status (last_used_at < now - 90d) surfaced in the
+	// 5-state taxonomy from CONNECTIONS.md §3.4. last_used_ips holds a
+	// JSON array max 5 elements; the ringbuffer cap is enforced in Go,
+	// not the schema. We do NOT add a separate expires_at column —
+	// token_expires_at on credentials already covers that and adding a
+	// duplicate would split writes across two columns and rot one of
+	// them. PRD CONNECTIONS.md mentioned expires_at as shorthand; this
+	// migration formalises the column reuse decision.
+	{version: 66, name: "add_credential_audit_signal", sql: `
+ALTER TABLE credentials ADD COLUMN last_used_at TEXT;
+ALTER TABLE credentials ADD COLUMN last_used_ips TEXT;
+CREATE INDEX IF NOT EXISTS idx_credentials_last_used ON credentials(last_used_at);
+`},
+	// v67 adds mcp_tool_bindings for the per-tool enable/disable feature
+	// (Cursor parity, biggest MVP differentiator vs. Cursor/Continue per
+	// CONNECTIONS.md §3.1). One MCP server publishes N tools via
+	// mcp/list-tools; agents bound to that server see the union of
+	// enabled tools. mcp_server_id+mcp_server_scope mirrors the
+	// agent_mcp_bindings discriminator pattern (workspace_mcp_servers vs
+	// crew_mcp_servers live in separate ID spaces). description is
+	// optional — populated when the sidecar refreshes from the live
+	// server, NULL when the row was created manually.
+	{version: 67, name: "add_mcp_tool_bindings", sql: `
+CREATE TABLE IF NOT EXISTS mcp_tool_bindings (
+	id TEXT PRIMARY KEY,
+	mcp_server_id TEXT NOT NULL,
+	mcp_server_scope TEXT NOT NULL CHECK(mcp_server_scope IN ('workspace','crew')),
+	tool_name TEXT NOT NULL,
+	description TEXT,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(mcp_server_id, mcp_server_scope, tool_name)
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_bindings_server ON mcp_tool_bindings(mcp_server_id, mcp_server_scope);
+`},
+	// v68 promotes the existing binary is_verified flag on
+	// mcp_registry_servers (added in v36) to the 3-tier trust model
+	// from CONNECTIONS.md §5.6: anthropic / crewship / community.
+	// is_featured is a curation-only flag (DO-NOT-BUILD #4: install
+	// counts must be real or absent — featured replaces them as a
+	// trust signal we control without faking metrics). The sync
+	// worker (SyncMCPRegistry) treats both columns as locally-owned
+	// and never overwrites them on upsert, so manual curation
+	// survives every sync cycle. Backfill: every existing entry
+	// synced from the upstream Anthropic registry gets
+	// trust_tier='anthropic' (that's what is_verified meant before),
+	// and is_featured stays 0 until an admin promotes it.
+	{version: 68, name: "add_mcp_registry_trust_tier", sql: `
+ALTER TABLE mcp_registry_servers ADD COLUMN trust_tier TEXT NOT NULL DEFAULT 'community';
+ALTER TABLE mcp_registry_servers ADD COLUMN is_featured INTEGER NOT NULL DEFAULT 0;
+UPDATE mcp_registry_servers SET trust_tier = 'anthropic' WHERE is_verified = 1;
+CREATE INDEX IF NOT EXISTS idx_mcp_registry_trust_tier ON mcp_registry_servers(trust_tier);
+CREATE INDEX IF NOT EXISTS idx_mcp_registry_featured ON mcp_registry_servers(is_featured) WHERE is_featured = 1;
+`},
+	// v69 backs the inline audit drawer (CONNECTIONS.md §4.3 Audit
+	// tab — Doppler pattern: per-row slide-out > separate audit page).
+	// Each event captures who used the credential, from which IP, and
+	// the outcome. event_type is open-ended (USE / ROTATE / TEST /
+	// REVOKE / DETECTED) — a CHECK constraint here would force a
+	// schema migration every time we add a new event class, so we
+	// validate at the Go layer instead. metadata_json carries
+	// event-specific context (e.g. {"old_status":"ACTIVE",
+	// "new_status":"ERROR","reason":"401 Unauthorized"}).
+	//
+	// agent_id is nullable: rotations and test-connection events
+	// originate from a user request, not an agent run.
+	//
+	// The (credential_id, occurred_at DESC) index is the hot path —
+	// the detail Sheet's Audit tab queries last 50 events per
+	// credential.
+	{version: 69, name: "add_credential_audit", sql: `
+CREATE TABLE IF NOT EXISTS credential_audit (
+	id TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	event_type TEXT NOT NULL,
+	agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+	ip_address TEXT,
+	metadata_json TEXT,
+	occurred_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_credential ON credential_audit(credential_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_audit_occurred ON credential_audit(occurred_at);
+`},
+	// v70 backs the rotation-with-grace-overlap feature — biggest
+	// enterprise differentiator vs. GitLab's "original becomes
+	// inactive immediately" pattern (CONNECTIONS.md §7.1, MUST-add #1
+	// from project_credentials_integrations_strategy.md).
+	//
+	// On rotate: a row is inserted with both encrypted values. The
+	// credentials.encrypted_value column flips to the new value
+	// immediately (so all NEW agent runs use the new key) but the
+	// sidecar can fall back to old_value during the grace window if
+	// it hits a 401 — covers in-flight runs that had already cached
+	// the old value at start.
+	//
+	// status transitions: ACTIVE → EXPIRED (grace ran out, old_value
+	// scrubbed) or ACTIVE → CANCELLED (admin clicked "End grace
+	// early"). Both terminals scrub old_value to ''.
+	//
+	// The (expires_at, status) index supports the hourly cron that
+	// finds rotations to expire.
+	{version: 70, name: "add_credential_rotations", sql: `
+CREATE TABLE IF NOT EXISTS credential_rotations (
+	id TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	old_value TEXT NOT NULL,
+	grace_seconds INTEGER NOT NULL DEFAULT 0,
+	rotated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	rotated_by TEXT NOT NULL REFERENCES users(id),
+	status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','EXPIRED','CANCELLED'))
+);
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
+`},
+	// v71 fixes the credential_rotations.rotated_by FK from
+	// "NOT NULL REFERENCES users(id)" (defaults to NO ACTION) to
+	// "REFERENCES users(id) ON DELETE SET NULL". The original v70
+	// would block deleting any user who has rotation history with a
+	// FK constraint error — incompatible with how credential_audit
+	// already nulls out agent_id on agent deletion.
+	//
+	// SQLite can't ALTER an existing FK, so this is the standard
+	// recreate dance: rename old → create new with fixed schema →
+	// copy rows → drop old. Indexes are recreated afterwards.
+	{version: 71, name: "fix_credential_rotations_rotated_by_fk", sql: `
+CREATE TABLE credential_rotations_new (
+	id TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	old_value TEXT NOT NULL,
+	grace_seconds INTEGER NOT NULL DEFAULT 0,
+	rotated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	expires_at TEXT NOT NULL,
+	rotated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+	status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','EXPIRED','CANCELLED'))
+);
+INSERT INTO credential_rotations_new (id, credential_id, old_value, grace_seconds, rotated_at, expires_at, rotated_by, status)
+	SELECT id, credential_id, old_value, grace_seconds, rotated_at, expires_at, rotated_by, status FROM credential_rotations;
+DROP TABLE credential_rotations;
+ALTER TABLE credential_rotations_new RENAME TO credential_rotations;
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_credential ON credential_rotations(credential_id, rotated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credential_rotations_expires ON credential_rotations(expires_at, status);
+`},
+	// v72 adds a free-form tag list to credentials so users can organise
+	// secrets without our hardcoded provider enum getting in the way
+	// (Doppler / Vercel pattern). Stored as JSON TEXT — SQLite has no
+	// native array type, and pulling tags into a junction table is
+	// premature for a list that's typically 0–3 items per credential.
+	{version: 72, name: "add_credential_tags", sql: `
+ALTER TABLE credentials ADD COLUMN tags TEXT;
+`},
+	// v73 adds a composite index that backs the crew-scoped credential
+	// visibility filter (credentialVisibilityFilter in
+	// internal/api/credentials_loaders.go). The existing
+	// idx_crew_member_user is sufficient for a probe by user_id, but
+	// the EXISTS subquery joins onto credential_crews on crew_id —
+	// having both columns in the same index lets SQLite serve the join
+	// index-only at scale. Acceptable to skip on small workspaces, but
+	// the ordering of the existing single-column indexes already
+	// implies this access pattern, so we add it explicitly.
+	{version: 73, name: "add_crew_members_composite_index", sql: `
+CREATE INDEX IF NOT EXISTS idx_crew_member_user_crew ON crew_members(user_id, crew_id);
 `},
 }
 
