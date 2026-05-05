@@ -289,7 +289,13 @@ export function CredentialForm({
               {showValue ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             </Button>
           </div>
-          {onTest && values.value.trim().length > 0 && detected && (
+          {/* Test button only for CLI providers — those are the brands
+              Crewship itself uses inside agent containers, where we
+              maintain real upstream HTTP probes. For passive secrets
+              (Notion, Stripe, Linear, …) the agent talks to the API
+              directly, so a "Test value" button here would be a
+              placebo that returns "no validation available". */}
+          {onTest && values.value.trim().length > 0 && detected.cli && (
             <div className="flex items-center gap-2 pt-1">
               <Button
                 type="button"

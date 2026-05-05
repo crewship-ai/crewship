@@ -17,6 +17,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { formatDate, formatRelativeTime } from "@/lib/time"
+import { getBrand } from "@/lib/credential-providers/registry"
 import { cn } from "@/lib/utils"
 
 interface CredentialSummary {
@@ -161,7 +162,18 @@ export function CredentialDetailSheet({
           <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <SheetTitle className="text-base font-mono truncate">{credential.name}</SheetTitle>
+                <div className="flex items-center gap-2">
+                  <SheetTitle className="text-base font-mono truncate">{credential.name}</SheetTitle>
+                  {getBrand(credential.provider).cli && (
+                    <Badge
+                      variant="outline"
+                      className="text-[9px] px-1 font-mono shrink-0 border-blue-400/50 text-blue-300"
+                      title="Crewship uses this credential to authenticate the agent's CLI inside the container"
+                    >
+                      CLI
+                    </Badge>
+                  )}
+                </div>
                 <SheetDescription className="text-xs truncate">
                   {credential.account_label || credential.description || credential.provider}
                 </SheetDescription>
@@ -244,6 +256,9 @@ export function CredentialDetailSheet({
                   </div>
                 )}
 
+                {/* Test now is only meaningful for CLI providers — see
+                    credential-form.tsx for the same gating rationale. */}
+                {getBrand(credential.provider).cli && (
                 <div className="pt-3 border-t border-white/10 flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
                     {testing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}
@@ -256,6 +271,7 @@ export function CredentialDetailSheet({
                     </span>
                   )}
                 </div>
+                )}
               </TabsContent>
 
               <TabsContent value="used-by" className="m-0">

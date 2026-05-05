@@ -95,6 +95,18 @@ export interface BrandEntry {
   category: BrandCategory
   keywords?: string[] // additional name-substring matches (lowercase)
   prefixes?: string[] // value prefixes for paste detection
+  // cli flags providers that Crewship itself uses inside agent
+  // containers (Claude Code, Codex CLI, Gemini CLI, Cursor CLI,
+  // Factory Droid). These are first-class:
+  //   • the value can be probed against the upstream API ("Test"
+  //     button is shown only when cli is true)
+  //   • they're future rotation-pool candidates: multiple keys of
+  //     the same brand form a pool that the sidecar cycles through
+  //     when one hits a rate-limit or quota wall
+  //
+  // Brands without cli are passive secrets — encrypt, store, hand to
+  // the agent as an env var, no further interaction.
+  cli?: boolean
 }
 
 export type BrandCategory =
@@ -123,16 +135,16 @@ export type BrandCategory =
 
 export const BRAND_REGISTRY: BrandEntry[] = [
   // ─── AI / inference ─────────────────────────────────────────────
-  { key: "ANTHROPIC", label: "Anthropic", hex: "#D97757", Icon: SiAnthropic as IconComponent, category: "AI", keywords: ["anthropic", "claude"], prefixes: ["sk-ant-"] },
-  { key: "OPENAI", label: "OpenAI", hex: "#412991", Icon: SiOpenai as IconComponent, category: "AI", keywords: ["openai", "chatgpt", "gpt", "oai_"], prefixes: ["sk-proj-", "sk-svcacct-"] },
-  { key: "GOOGLE", label: "Google AI / Gemini", hex: "#4285F4", Icon: SiGooglegemini as IconComponent, category: "AI", keywords: ["google", "gemini", "googleai", "vertex"], prefixes: ["AIza"] },
+  { key: "ANTHROPIC", label: "Anthropic", hex: "#D97757", Icon: SiAnthropic as IconComponent, category: "AI", keywords: ["anthropic", "claude"], prefixes: ["sk-ant-"], cli: true },
+  { key: "OPENAI", label: "OpenAI", hex: "#412991", Icon: SiOpenai as IconComponent, category: "AI", keywords: ["openai", "chatgpt", "gpt", "oai_"], prefixes: ["sk-proj-", "sk-svcacct-"], cli: true },
+  { key: "GOOGLE", label: "Google AI / Gemini", hex: "#4285F4", Icon: SiGooglegemini as IconComponent, category: "AI", keywords: ["google", "gemini", "googleai", "vertex"], prefixes: ["AIza"], cli: true },
   { key: "HUGGINGFACE", label: "Hugging Face", hex: "#FFD21E", Icon: SiHuggingface as IconComponent, category: "AI", keywords: ["huggingface", "hf_"], prefixes: ["hf_"] },
   { key: "PERPLEXITY", label: "Perplexity", hex: "#1FB8CD", Icon: SiPerplexity as IconComponent, category: "AI", keywords: ["perplexity", "pplx"], prefixes: ["pplx-"] },
   { key: "REPLICATE", label: "Replicate", hex: "#000000", Icon: SiReplicate as IconComponent, category: "AI", keywords: ["replicate"], prefixes: ["r8_"] },
   { key: "OLLAMA", label: "Ollama", hex: "#000000", Icon: SiOllama as IconComponent, category: "AI", keywords: ["ollama"] },
   { key: "ELEVENLABS", label: "ElevenLabs", hex: "#000000", Icon: SiElevenlabs as IconComponent, category: "AI", keywords: ["elevenlabs", "eleven_labs", "11labs"] },
-  { key: "CURSOR", label: "Cursor", hex: "#000000", Icon: CursorIcon, category: "AI", keywords: ["cursor"] },
-  { key: "FACTORY", label: "Factory Droid", hex: "#000000", Icon: FactoryIcon, category: "AI", keywords: ["factory", "droid"] },
+  { key: "CURSOR", label: "Cursor", hex: "#000000", Icon: CursorIcon, category: "AI", keywords: ["cursor"], cli: true },
+  { key: "FACTORY", label: "Factory Droid", hex: "#000000", Icon: FactoryIcon, category: "AI", keywords: ["factory", "droid"], cli: true },
 
   // ─── Cloud / infra ──────────────────────────────────────────────
   { key: "AWS", label: "AWS", hex: "#FF9900", Icon: AWSIcon, category: "Cloud", keywords: ["aws", "amazon"], prefixes: ["AKIA", "ASIA"] },

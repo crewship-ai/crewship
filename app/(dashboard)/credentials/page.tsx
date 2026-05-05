@@ -648,6 +648,15 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
             aria-label={brand.label}
           />
           <span className="font-mono text-sm truncate">{cred.name}</span>
+          {brand.cli && (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1 font-mono shrink-0 border-blue-400/50 text-blue-300"
+              title="Crewship uses this credential to authenticate the agent's CLI inside the container"
+            >
+              CLI
+            </Badge>
+          )}
           <Badge variant="outline" className="text-[9px] px-1 font-mono shrink-0 opacity-70">
             {TYPE_LABEL[cred.type]}
           </Badge>
