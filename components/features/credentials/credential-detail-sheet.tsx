@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { formatDate, formatRelativeTime } from "@/lib/time"
 import { getBrand } from "@/lib/credential-providers/registry"
+import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 
 interface CredentialSummary {
@@ -92,6 +93,12 @@ export function CredentialDetailSheet({
   const [savingValue, setSavingValue] = React.useState(false)
   const [valueSaved, setValueSaved] = React.useState(false)
   const [valueError, setValueError] = React.useState<string | null>(null)
+
+  // Test/Rotate are MANAGE+ operations. Hide the affordances for
+  // members who can't perform them rather than letting them click
+  // through to a 403; mirrors the BE gating in TestStored / Rotate.
+  const { abilities } = useAbilities()
+  const canManage = abilities.can("update", "Credential")
 
   React.useEffect(() => {
     if (!open || !credential) {
@@ -258,9 +265,11 @@ export function CredentialDetailSheet({
                   </div>
                 )}
 
-                {/* Test now is only meaningful for CLI providers — see
-                    credential-form.tsx for the same gating rationale. */}
-                {getBrand(credential.provider).cli && (
+                {/* Test now is only meaningful for CLI providers and
+                    requires update permission. Mirrors the BE gating
+                    in TestStored — hiding the button avoids a click →
+                    403 dead-end for read-only members. */}
+                {getBrand(credential.provider).cli && canManage && (
                 <div className="pt-3 border-t border-white/10 flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>
                     {testing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5 mr-1.5" />}
@@ -329,10 +338,16 @@ export function CredentialDetailSheet({
               </TabsContent>
 
               <TabsContent value="settings" className="m-0 space-y-4">
+                {!canManage && (
+                  <p className="text-xs text-muted-foreground">
+                    You don&apos;t have permission to rotate or delete this credential.
+                  </p>
+                )}
                 {/* Inline value rewrite — quick manual rotation without
                     grace overlap. For users who just need to paste a
                     new key and move on (Vercel pattern). The real
                     rotation flow with overlap lives in onRotate. */}
+                {canManage && (
                 <div className="space-y-1.5">
                   <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
                     Update value
@@ -342,7 +357,14 @@ export function CredentialDetailSheet({
                       type={showValueDraft ? "text" : "password"}
                       placeholder="Paste new secret value"
                       value={valueDraft}
-                      onChange={(e) => { setValueDraft(e.target.value); setValueSaved(false) }}
+                      onChange={(e) => {
+                        setValueDraft(e.target.value)
+                        setValueSaved(false)
+                        // Clear stale error as soon as the user retries —
+                        // a red message stuck under a freshly-typed input
+                        // reads like "your current input is rejected".
+                        setValueError(null)
+                      }}
                       className="pr-10 font-mono text-xs"
                     />
                     <Button
@@ -424,8 +446,9 @@ export function CredentialDetailSheet({
                     currently running and need a 24h overlap.
                   </p>
                 </div>
+                )}
 
-                {rotations.length > 0 && (
+                {canManage && rotations.length > 0 && (
                   <div className="space-y-1.5">
                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
                       Rotation history
@@ -454,6 +477,7 @@ export function CredentialDetailSheet({
                   </div>
                 )}
 
+                {canManage && (
                 <div className="pt-3 border-t border-white/10">
                   <Button
                     size="sm"
@@ -465,6 +489,7 @@ export function CredentialDetailSheet({
                     Delete credential
                   </Button>
                 </div>
+                )}
               </TabsContent>
             </div>
           </Tabs>

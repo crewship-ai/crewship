@@ -118,6 +118,11 @@ export interface BrandEntry {
 // brandColor returns the hex to use for rendering. The app is dark by
 // default, so any black brand picks up its darkHex automatically; if a
 // brand has no darkHex its hex is used as-is.
+//
+// INVARIANT: app is dark-by-default; revisit this helper's signature
+// when a theme toggle ships — at that point this needs an isDark arg
+// or a useTheme() call. Search for "INVARIANT: app is dark" before
+// adding light-theme support.
 export function brandColor(b: BrandEntry): string {
   return b.darkHex ?? b.hex
 }
@@ -168,13 +173,13 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "RAILWAY", label: "Railway", hex: "#0B0D0E", darkHex: "#FFFFFF", Icon: SiRailway as IconComponent, category: "Cloud", keywords: ["railway"] },
   { key: "RENDER", label: "Render", hex: "#46E3B7", Icon: SiRender as IconComponent, category: "Cloud", keywords: ["render"] },
   { key: "DIGITALOCEAN", label: "DigitalOcean", hex: "#0080FF", Icon: SiDigitalocean as IconComponent, category: "Cloud", keywords: ["digitalocean", "do_"] },
-  { key: "HEROKU", label: "Heroku", hex: "#430098", Icon: SiHeroku as IconComponent, category: "Cloud", keywords: ["heroku"] },
+  { key: "HEROKU", label: "Heroku", hex: "#430098", darkHex: "#A98DD0", Icon: SiHeroku as IconComponent, category: "Cloud", keywords: ["heroku"] },
   { key: "SUPABASE", label: "Supabase", hex: "#3ECF8E", Icon: SiSupabase as IconComponent, category: "Cloud", keywords: ["supabase"] },
   { key: "FIREBASE", label: "Firebase", hex: "#DD2C00", Icon: SiFirebase as IconComponent, category: "Cloud", keywords: ["firebase", "fcm"] },
   { key: "PLANETSCALE", label: "PlanetScale", hex: "#000000", darkHex: "#FFFFFF", Icon: SiPlanetscale as IconComponent, category: "Cloud", keywords: ["planetscale"] },
 
   // ─── Source control / dev ───────────────────────────────────────
-  { key: "GITHUB", label: "GitHub", hex: "#181717", Icon: SiGithub as IconComponent, category: "Source", keywords: ["github", "gh_"], prefixes: ["ghp_", "gho_", "ghs_", "github_pat_", "ghu_"] },
+  { key: "GITHUB", label: "GitHub", hex: "#181717", darkHex: "#FFFFFF", Icon: SiGithub as IconComponent, category: "Source", keywords: ["github", "gh_"], prefixes: ["ghp_", "gho_", "ghs_", "github_pat_", "ghu_"] },
   { key: "GITLAB", label: "GitLab", hex: "#FC6D26", Icon: SiGitlab as IconComponent, category: "Source", keywords: ["gitlab", "gl_"], prefixes: ["glpat-"] },
   { key: "BITBUCKET", label: "Bitbucket", hex: "#0052CC", Icon: SiBitbucket as IconComponent, category: "Source", keywords: ["bitbucket"] },
   { key: "CODEBERG", label: "Codeberg", hex: "#2185D0", Icon: SiCodeberg as IconComponent, category: "Source", keywords: ["codeberg"] },
@@ -184,7 +189,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "CODESANDBOX", label: "CodeSandbox", hex: "#151515", darkHex: "#FFFFFF", Icon: SiCodesandbox as IconComponent, category: "Source", keywords: ["codesandbox"] },
 
   // ─── Communication ──────────────────────────────────────────────
-  { key: "SLACK", label: "Slack", hex: "#4A154B", Icon: SiSlack as IconComponent, category: "Comms", keywords: ["slack"], prefixes: ["xoxb-", "xoxp-", "xoxa-"] },
+  { key: "SLACK", label: "Slack", hex: "#4A154B", darkHex: "#ECB22E", Icon: SiSlack as IconComponent, category: "Comms", keywords: ["slack"], prefixes: ["xoxb-", "xoxp-", "xoxa-"] },
   { key: "DISCORD", label: "Discord", hex: "#5865F2", Icon: SiDiscord as IconComponent, category: "Comms", keywords: ["discord"] },
   { key: "TELEGRAM", label: "Telegram", hex: "#26A5E4", Icon: SiTelegram as IconComponent, category: "Comms", keywords: ["telegram"] },
   { key: "WHATSAPP", label: "WhatsApp", hex: "#25D366", Icon: SiWhatsapp as IconComponent, category: "Comms", keywords: ["whatsapp"] },
@@ -207,7 +212,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "AIRTABLE", label: "Airtable", hex: "#18BFFF", Icon: SiAirtable as IconComponent, category: "Productivity", keywords: ["airtable"] },
   { key: "CODA", label: "Coda", hex: "#F46A54", Icon: SiCoda as IconComponent, category: "Productivity", keywords: ["coda"] },
   { key: "CONFLUENCE", label: "Confluence", hex: "#172B4D", darkHex: "#4C9AFF", Icon: SiConfluence as IconComponent, category: "Productivity", keywords: ["confluence"] },
-  { key: "MIRO", label: "Miro", hex: "#050038", Icon: SiMiro as IconComponent, category: "Productivity", keywords: ["miro"] },
+  { key: "MIRO", label: "Miro", hex: "#050038", darkHex: "#FFD02F", Icon: SiMiro as IconComponent, category: "Productivity", keywords: ["miro"] },
   { key: "FIGMA", label: "Figma", hex: "#F24E1E", Icon: SiFigma as IconComponent, category: "Productivity", keywords: ["figma"] },
   { key: "TODOIST", label: "Todoist", hex: "#E44332", Icon: SiTodoist as IconComponent, category: "Productivity", keywords: ["todoist"] },
   { key: "EVERNOTE", label: "Evernote", hex: "#00A82D", Icon: SiEvernote as IconComponent, category: "Productivity", keywords: ["evernote"] },
@@ -232,7 +237,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "KLARNA", label: "Klarna", hex: "#FFA8CD", Icon: SiKlarna as IconComponent, category: "Payments", keywords: ["klarna"] },
   { key: "SHOPIFY", label: "Shopify", hex: "#7AB55C", Icon: SiShopify as IconComponent, category: "Payments", keywords: ["shopify"], prefixes: ["shpat_", "shpca_", "shppa_"] },
   { key: "WOOCOMMERCE", label: "WooCommerce", hex: "#7F54B3", Icon: SiWoocommerce as IconComponent, category: "Payments", keywords: ["woocommerce"], prefixes: ["ck_", "cs_"] },
-  { key: "VISA", label: "Visa", hex: "#1A1F71", Icon: SiVisa as IconComponent, category: "Payments", keywords: ["visa"] },
+  { key: "VISA", label: "Visa", hex: "#1A1F71", darkHex: "#F7B600", Icon: SiVisa as IconComponent, category: "Payments", keywords: ["visa"] },
   { key: "MASTERCARD", label: "Mastercard", hex: "#EB001B", Icon: SiMastercard as IconComponent, category: "Payments", keywords: ["mastercard"] },
 
   // ─── Analytics / observability ──────────────────────────────────
@@ -267,7 +272,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "TERRAFORM", label: "Terraform Cloud", hex: "#7B42BC", Icon: SiTerraform as IconComponent, category: "DevOps", keywords: ["terraform"] },
   { key: "PULUMI", label: "Pulumi", hex: "#8A3391", Icon: SiPulumi as IconComponent, category: "DevOps", keywords: ["pulumi"], prefixes: ["pul-"] },
   { key: "POSTMAN", label: "Postman", hex: "#FF6C37", Icon: SiPostman as IconComponent, category: "DevOps", keywords: ["postman"], prefixes: ["PMAK-"] },
-  { key: "INSOMNIA", label: "Insomnia", hex: "#4000BF", Icon: SiInsomnia as IconComponent, category: "DevOps", keywords: ["insomnia"] },
+  { key: "INSOMNIA", label: "Insomnia", hex: "#4000BF", darkHex: "#9580FF", Icon: SiInsomnia as IconComponent, category: "DevOps", keywords: ["insomnia"] },
   { key: "NGROK", label: "ngrok", hex: "#1F1E37", darkHex: "#FFFFFF", Icon: SiNgrok as IconComponent, category: "DevOps", keywords: ["ngrok"] },
   { key: "CYPRESS", label: "Cypress", hex: "#69D3A7", Icon: SiCypress as IconComponent, category: "DevOps", keywords: ["cypress"] },
   { key: "STORYBOOK", label: "Storybook", hex: "#FF4785", Icon: SiStorybook as IconComponent, category: "DevOps", keywords: ["storybook"] },
@@ -321,7 +326,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   // ─── ML / data ──────────────────────────────────────────────────
   { key: "TENSORFLOW", label: "TensorFlow", hex: "#FF6F00", Icon: SiTensorflow as IconComponent, category: "ML", keywords: ["tensorflow"] },
   { key: "PYTORCH", label: "PyTorch", hex: "#EE4C2C", Icon: SiPytorch as IconComponent, category: "ML", keywords: ["pytorch"] },
-  { key: "PANDAS", label: "Pandas", hex: "#150458", Icon: SiPandas as IconComponent, category: "ML", keywords: ["pandas"] },
+  { key: "PANDAS", label: "Pandas", hex: "#150458", darkHex: "#E70488", Icon: SiPandas as IconComponent, category: "ML", keywords: ["pandas"] },
   { key: "NUMPY", label: "NumPy", hex: "#013243", darkHex: "#4DABCF", Icon: SiNumpy as IconComponent, category: "ML", keywords: ["numpy"] },
   { key: "SKLEARN", label: "scikit-learn", hex: "#F7931E", Icon: SiScikitlearn as IconComponent, category: "ML", keywords: ["scikit", "sklearn"] },
   { key: "KERAS", label: "Keras", hex: "#D00000", Icon: SiKeras as IconComponent, category: "ML", keywords: ["keras"] },
@@ -334,7 +339,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "SALESFORCE", label: "Salesforce", hex: "#00A1E0", Icon: SiSalesforce as IconComponent, category: "Marketing", keywords: ["salesforce"] },
   { key: "HUBSPOT", label: "HubSpot", hex: "#FF7A59", Icon: SiHubspot as IconComponent, category: "Marketing", keywords: ["hubspot"] },
   { key: "ZAPIER", label: "Zapier", hex: "#FF4F00", Icon: SiZapier as IconComponent, category: "Marketing", keywords: ["zapier"] },
-  { key: "MAKE", label: "Make", hex: "#6D00CC", Icon: SiMake as IconComponent, category: "Marketing", keywords: ["make.com", "integromat"] },
+  { key: "MAKE", label: "Make", hex: "#6D00CC", darkHex: "#A66DFF", Icon: SiMake as IconComponent, category: "Marketing", keywords: ["make.com", "integromat"] },
 
   // ─── CMS / web ──────────────────────────────────────────────────
   { key: "WEBFLOW", label: "Webflow", hex: "#146EF5", Icon: SiWebflow as IconComponent, category: "Other", keywords: ["webflow"] },
