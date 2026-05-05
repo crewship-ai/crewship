@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -362,5 +363,99 @@ func TestListCatalog_DecodesEncryptedIntToBool(t *testing.T) {
 		if r.Encrypted != want {
 			t.Errorf("row %q: got Encrypted=%v want %v", r.FilePath, r.Encrypted, want)
 		}
+	}
+}
+
+func TestReconcileCatalog_PrunesMissingFiles(t *testing.T) {
+	db := newCatalogDB(t)
+	ctx := context.Background()
+
+	dir := t.TempDir()
+	present := dir + "/present.tar.zst"
+	missing := dir + "/missing.tar.zst"
+	if err := os.WriteFile(present, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write present file: %v", err)
+	}
+	// missing intentionally never created on disk
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := UpsertCatalogEntry(ctx, db, CatalogEntry{
+		FilePath: present, Scope: "workspace", WorkspaceID: "ws-1",
+		CreatedAt: now, Size: 1, SHA256: "s",
+	}); err != nil {
+		t.Fatalf("seed present: %v", err)
+	}
+	if err := UpsertCatalogEntry(ctx, db, CatalogEntry{
+		FilePath: missing, Scope: "workspace", WorkspaceID: "ws-1",
+		CreatedAt: now, Size: 1, SHA256: "s",
+	}); err != nil {
+		t.Fatalf("seed missing: %v", err)
+	}
+
+	pruned, err := ReconcileCatalog(ctx, db, "ws-1")
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != missing {
+		t.Errorf("pruned: got %v want [%s]", pruned, missing)
+	}
+
+	rows, err := ListCatalog(ctx, db, "ws-1")
+	if err != nil {
+		t.Fatalf("list after reconcile: %v", err)
+	}
+	if len(rows) != 1 || rows[0].FilePath != present {
+		t.Errorf("after reconcile: got %d rows %v, want 1 row pointing at %q", len(rows), rows, present)
+	}
+
+	// Idempotent: a second reconcile is a no-op.
+	pruned2, err := ReconcileCatalog(ctx, db, "ws-1")
+	if err != nil {
+		t.Fatalf("reconcile #2: %v", err)
+	}
+	if len(pruned2) != 0 {
+		t.Errorf("second reconcile pruned %v, want []", pruned2)
+	}
+}
+
+func TestReconcileCatalog_NilDBIsNoOp(t *testing.T) {
+	if pruned, err := ReconcileCatalog(context.Background(), nil, ""); err != nil || pruned != nil {
+		t.Errorf("nil db reconcile: got (%v, %v) want (nil, nil)", pruned, err)
+	}
+}
+
+func TestReconcileCatalog_ScopesByWorkspace(t *testing.T) {
+	db := newCatalogDB(t)
+	ctx := context.Background()
+
+	dir := t.TempDir()
+	missingA := dir + "/missing-a.tar.zst"
+	missingB := dir + "/missing-b.tar.zst"
+
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, e := range []CatalogEntry{
+		{FilePath: missingA, Scope: "workspace", WorkspaceID: "ws-A", CreatedAt: now, Size: 1, SHA256: "s"},
+		{FilePath: missingB, Scope: "workspace", WorkspaceID: "ws-B", CreatedAt: now, Size: 1, SHA256: "s"},
+	} {
+		if err := UpsertCatalogEntry(ctx, db, e); err != nil {
+			t.Fatalf("seed %s: %v", e.FilePath, err)
+		}
+	}
+
+	// Reconcile only ws-A: ws-B's stale row must survive so an admin
+	// of one workspace cannot vacuum another's catalog.
+	pruned, err := ReconcileCatalog(ctx, db, "ws-A")
+	if err != nil {
+		t.Fatalf("reconcile ws-A: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != missingA {
+		t.Errorf("ws-A pruned: %v want [%s]", pruned, missingA)
+	}
+	all, err := ListCatalog(ctx, db, "")
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(all) != 1 || all[0].FilePath != missingB {
+		t.Errorf("after scoped reconcile: got %v want only ws-B's row", all)
 	}
 }

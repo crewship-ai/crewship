@@ -86,6 +86,42 @@ func DeleteCatalogEntry(ctx context.Context, db *sql.DB, path string) error {
 	return nil
 }
 
+// ReconcileCatalog removes catalog rows whose backing file no longer
+// exists on disk. Returns the paths it pruned. Used by the List
+// handler and startup to keep the admin UI honest when bundles are
+// deleted out of band — the historical drift sources are
+// pre-CRE-128 rotates that removed files without syncing the catalog
+// and the test rig's `rm` of bundle files. workspaceID scopes the
+// reconcile so an admin pruning their own list cannot accidentally
+// touch another workspace's rows.
+//
+// Only os.ErrNotExist triggers a prune. Any other Stat error
+// (permission denied, transient I/O failure on a remote backend) is
+// left alone — vacuuming the entire catalog on a flaky NFS would
+// hurt more than the drift.
+func ReconcileCatalog(ctx context.Context, db *sql.DB, workspaceID string) ([]string, error) {
+	if db == nil {
+		return nil, nil
+	}
+	cat, err := ListCatalog(ctx, db, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	st := getDefaultStorage()
+	var pruned []string
+	for _, e := range cat {
+		if _, err := st.Stat(ctx, e.FilePath); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if delErr := DeleteCatalogEntry(ctx, db, e.FilePath); delErr == nil {
+			pruned = append(pruned, e.FilePath)
+		}
+	}
+	return pruned, nil
+}
+
 // ListCatalog returns the catalogued bundles sorted by created_at
 // descending (newest first, matching the CLI). Optional workspaceID
 // filter scopes the result to one workspace when non-empty.

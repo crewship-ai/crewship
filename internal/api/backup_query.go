@@ -36,6 +36,16 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	// instead of O(bundles) filesystem scan + per-file Inspect. Fall
 	// back to the filesystem when the catalog is empty (fresh install,
 	// pre-migration data, or a startup backfill that hasn't run yet).
+	//
+	// Reconcile first: prune rows whose backing file disappeared (out-
+	// of-band rm, pre-CRE-159 rotate that forgot to sync). Cheap on a
+	// local filesystem (one stat per row) and keeps the admin UI from
+	// showing entries that would 404 on Verify/Download/Restore.
+	if pruned, rerr := backup.ReconcileCatalog(ctx, h.db, workspaceID); rerr != nil {
+		h.logger.Warn("backup catalog reconcile failed", "error", rerr)
+	} else if len(pruned) > 0 {
+		h.logger.Info("backup catalog reconciled", "pruned_count", len(pruned))
+	}
 	cat, err := backup.ListCatalog(ctx, h.db, workspaceID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
