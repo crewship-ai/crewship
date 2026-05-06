@@ -26,6 +26,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/connectors"
 )
@@ -199,13 +200,17 @@ func InstanceURLFromRequest(r *http.Request) string {
 	if host == "" {
 		host = r.Host
 	}
+	// Forwarded headers are comma-lists; take the first token, trim
+	// whitespace and a stray trailing slash so a header like
+	// "example.com/, internal:8080" doesn't poison the base URL.
+	host = strings.TrimRight(strings.TrimSpace(strings.SplitN(host, ",", 2)[0]), "/")
 	if host == "" {
 		return ""
 	}
-	scheme := r.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		// Default to https — matches the production posture; tests
-		// override via X-Forwarded-Proto when they need http.
+	scheme := strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-Proto"), ",", 2)[0]))
+	// Only http/https are valid; anything else (empty, "ws", garbage)
+	// falls back to https to match the production posture.
+	if scheme != "http" && scheme != "https" {
 		scheme = "https"
 	}
 	return scheme + "://" + host

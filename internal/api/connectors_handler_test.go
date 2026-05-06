@@ -661,6 +661,48 @@ func TestInstanceURLFromRequest_NoTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestInstanceURLFromRequest_SanitizesCommaList(t *testing.T) {
+	t.Parallel()
+	// X-Forwarded-Host can carry multiple proxies. Take the first.
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Host = "internal.svc.local"
+	req.Header.Set("X-Forwarded-Host", "acme.example.com, internal.svc.local")
+	req.Header.Set("X-Forwarded-Proto", "https, http")
+	got := InstanceURLFromRequest(req)
+	if got != "https://acme.example.com" {
+		t.Errorf("got %q, want https://acme.example.com", got)
+	}
+}
+
+func TestInstanceURLFromRequest_StripsTrailingSlashFromHeader(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Host = "acme.example.com"
+	req.Header.Set("X-Forwarded-Host", "acme.example.com/")
+	got := InstanceURLFromRequest(req)
+	if got != "https://acme.example.com" {
+		t.Errorf("got %q, want https://acme.example.com (no trailing slash)", got)
+	}
+}
+
+func TestInstanceURLFromRequest_RejectsInvalidScheme(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Host = "acme.example.com"
+	req.Header.Set("X-Forwarded-Proto", "ws")
+	got := InstanceURLFromRequest(req)
+	if got != "https://acme.example.com" {
+		t.Errorf("got %q, want fallback to https for invalid proto", got)
+	}
+}
+
+func TestInstanceURLFromRequest_NilRequest(t *testing.T) {
+	t.Parallel()
+	if got := InstanceURLFromRequest(nil); got != "" {
+		t.Errorf("got %q, want empty for nil request", got)
+	}
+}
+
 func TestConnectors_Install_MalformedBody(t *testing.T) {
 	h := newSynthHandler(t)
 	db := h.db

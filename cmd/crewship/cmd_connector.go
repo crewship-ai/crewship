@@ -72,6 +72,12 @@ func runValidateOne(path string, strict bool) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	m, err := connectors.ParseManifest(data)
+	if errors.Is(err, connectors.ErrManifestNotImplemented) {
+		// Don't dump the raw "manifest logic not implemented" sentinel
+		// onto the user — surface a clear scaffold message instead so
+		// the failure mode is honest about why nothing validates yet.
+		return fmt.Errorf("connector validate is part of the connectors scaffold; manifest parser ships in Sprint 1 (path=%s)", path)
+	}
 	if err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
