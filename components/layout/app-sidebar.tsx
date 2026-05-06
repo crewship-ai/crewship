@@ -17,7 +17,6 @@ import {
   ChevronDown,
   Ship,
   BookOpen,
-  Gavel,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -66,7 +65,6 @@ const navSections = [
     label: "Monitor",
     items: [
       { title: "Journal", href: "/journal", icon: BookOpen },
-      { title: "Approvals", href: "/approvals", icon: Gavel },
     ],
   },
   {
