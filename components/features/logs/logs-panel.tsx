@@ -8,7 +8,8 @@ import { annotateEntries, filterEntries, type AnnotatedEntry } from "@/lib/journ
 import { buildMatcher } from "@/lib/log-search"
 import { LogsToolbar, type SeverityFilter, type ScopeControl } from "./logs-toolbar"
 import { LogsTypeChips } from "./logs-type-chips"
-import { LogsHistogram, type BucketRange } from "./logs-histogram"
+import { LogsHistogram } from "./logs-histogram"
+import type { BucketRange } from "./logs-histogram"
 import { LogsList } from "./logs-list"
 import { LogsStatsRail } from "./logs-stats-rail"
 import type { TimeRange, CustomRange } from "./time-range-picker"
@@ -112,7 +113,6 @@ export function LogsPanel({
   const [wrap, setWrap] = useState(false)
   const [newestFirst, setNewestFirst] = useState(true)
   const [dedup, setDedup] = useState(false)
-  const [bucket, setBucket] = useState<BucketRange | null>(null)
   const [statsCollapsed, setStatsCollapsed] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
@@ -124,12 +124,6 @@ export function LogsPanel({
     if (onLiveChange) onLiveChange(!live)
     else setInternalLive((v) => !v)
   }, [live, onLiveChange])
-
-  // Histogram bucket auto-clears when the active time range changes —
-  // a stale bucket from a prior window would silently filter everything.
-  useEffect(() => {
-    setBucket(null)
-  }, [timeRange, customRange])
 
   // Debounced server search — 300 ms keeps typing latency invisible.
   useEffect(() => {
@@ -144,9 +138,12 @@ export function LogsPanel({
   const matcher = useMemo(() => buildMatcher(query), [query])
 
   // One pass for severity counts, group counts, filtered, bucketed.
+  // Bucket narrowing has been folded into the time-range itself —
+  // clicking on a histogram bar now narrows the active time range,
+  // not a parallel client-side filter — so we always pass null here.
   const stage = useMemo(
-    () => filterEntries(annotated, { severity, matcher, muted, bucket }),
-    [annotated, severity, matcher, muted, bucket],
+    () => filterEntries(annotated, { severity, matcher, muted, bucket: null }),
+    [annotated, severity, matcher, muted],
   )
 
   // Sort + optional adjacent dedup happen on the bucketed slice — these
@@ -180,8 +177,19 @@ export function LogsPanel({
     setQuery("")
     setSeverity("all")
     setMuted(new Set())
-    setBucket(null)
   }, [])
+
+  // Histogram click/drag commits a new active time range. The parent
+  // re-fetches the narrowed window — Elastic Discover style. To
+  // restore a wider view the user picks a preset from the toolbar's
+  // TimeRangePicker.
+  const handleHistogramSelect = useCallback(
+    (range: BucketRange) => {
+      onTimeRangeChange?.("custom")
+      onCustomRangeChange?.(range)
+    },
+    [onTimeRangeChange, onCustomRangeChange],
+  )
 
   const onExport = useCallback(() => {
     const blob = new Blob([JSON.stringify(ordered, null, 2)], { type: "application/json" })
@@ -249,7 +257,7 @@ export function LogsPanel({
 
   const hasAnyEntries = entries.length > 0
   const hasFilters =
-    severity !== "all" || muted.size > 0 || query.trim().length > 0 || bucket !== null
+    severity !== "all" || muted.size > 0 || query.trim().length > 0
   const visibleCount = ordered.length
   const totalCount = entries.length
 
@@ -292,8 +300,7 @@ export function LogsPanel({
         entries={stage.filtered}
         timeRange={timeRange}
         customRange={customRange ?? null}
-        selected={bucket}
-        onSelect={setBucket}
+        onRangeSelect={handleHistogramSelect}
       />
       {error && (
         <div className="px-3 py-2 border-b border-border/50 bg-red-500/10 text-red-300 text-[11px] flex items-center gap-2 shrink-0">
