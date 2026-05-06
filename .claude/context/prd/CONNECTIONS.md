@@ -316,80 +316,124 @@ Multi-select checkbox v hlavicce (tristate). Floating bar dole obsahuje:
 
 ---
 
-## 5. Integrations / MCP Marketplace (`/integrations`)
+## 5. Integrations / Connectors (`/integrations`)
 
-### 5.1 Tab strip
+> **2026-05 redesign — supersedes původní 4-step wizard přístup.** CEO
+> rozhodl odstranit `Marketplace` tab z `/integrations` (samostatný
+> Marketplace už je v sidebar) a wizard "Add MCP server" nahradit
+> catalog-first flow inspirovaným n8n / Zapier / Claude.ai Connectors.
+> Slovo "MCP" je v UI skryté; user-facing termín je **Connector**.
 
-`/integrations` ma dve hlavni taby:
-- `Connected` (default) -- soucasne UI s polished row (brand-logos, per-tool count chip)
-- `Marketplace` -- novy view, browse/install
+### 5.1 Stránka — bez tab stripu
 
-### 5.2 Connected tab -- enhancements oproti soucasnemu stavu
+`/integrations` má **jediný seznam připojených konektorů** + tlačítko
+**`+ Add Connector`** (rename z "+ Add MCP server"). URL zůstává
+`/integrations` (žádný breaking redirect).
 
-- Brand logo 40 px na kazdem expandable rowu (misto generic `Globe`/`Terminal` ikon)
+Žádný tab strip (pre-redesign měl `Connected | Marketplace`). Jeden tab
+= žádný tab.
+
+### 5.2 Connected list — enhancements
+
+- Brand logo 40 px na každém expandable rowu
 - Status badge 5-state (sekce 3.4)
-- Per-server **per-tool count chip**: `12/20 tools enabled` -- klik otevre Sheet na Tools tabu
-- Hot-swap reload icon (Paperclip pattern) -- klik = re-fetch tools z `mcp/list-tools` bez restartu
-- Aktualni expanded panel `ExpandedPanel` zustava, jen polish (brand logo header)
+- Per-server per-tool count chip (`12/20 tools enabled`)
+- Hot-swap reload icon — re-fetch tools z `mcp/list-tools` bez restartu
+- Aktuální `ExpandedPanel` zůstává (jen polish brand logo header)
 
-### 5.3 Marketplace tab -- novy
+### 5.3 Add Connector — catalog-first flow
+
+Klik na `+ Add Connector` otevře **fullscreen catalog** (ne sheet, ne
+4-step wizard) — `<ConnectorCatalog>`. Layout:
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│ Marketplace · 187 servers available           [+ Custom MCP server]   │
-├────────────────────────────────────────────────────────────────────────┤
-│  Categories         │  [Search 187 servers...]                         │
-│ ───────────────     │  Transport▾  Auth▾  Trust▾                       │
-│  All           187  │ ┌────────────────────────────────────────────┐  │
-│  Productivity   28  │ │ FEATURED                                   │  │
-│  Dev Tools      45  │ │ [GitHub] [Linear] [Slack] [Notion] [Postg.]│  │
-│  Search         12  │ │ Big cards, 2-row grid, "Most installed"    │  │
-│  Databases      18  │ └────────────────────────────────────────────┘  │
-│  Communication  15  │  All servers                                    │
-│  Cloud          22  │  ┌────────┐ ┌────────┐ ┌────────┐               │
-│  AI              8  │  │ logo   │ │ logo   │ │ logo   │  3-col grid   │
-│  Observability  10  │  │ Name   │ │ Name   │ │ Name   │               │
-│  Self-hosted     6  │  │ desc.  │ │ desc.  │ │ desc.  │               │
-│  Verified by    -   │  │ [HTTP] │ │ [stdio]│ │ [HTTP] │               │
-│  ─ Anthropic    12  │  │ ✓Anthr.│ │ ✓Crew. │ │ Comm.  │               │
-│  ─ Crewship     34  │  │ [Inst.]│ │ [Inst.]│ │ [Inst.]│               │
-│  ─ Community   141  │  └────────┘ └────────┘ └────────┘               │
-└────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│ Browse connectors                                          [✕]      │
+├─────────────────────────────────────────────────────────────────────┤
+│ 🔎 [Search 6 connectors...]                                          │
+├─────────────────────────────────────────────────────────────────────┤
+│ ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐            │
+│ │ Linear    │ │ GitHub    │ │ Slack     │ │ Postgres  │            │
+│ │ DCR ✓     │ │ Token     │ │ Token     │ │ Conn str  │            │
+│ │ tracking  │ │ repos     │ │ messages  │ │ database  │            │
+│ └───────────┘ └───────────┘ └───────────┘ └───────────┘            │
+│ ┌───────────┐ ┌───────────┐                                         │
+│ │ Everything│ │Filesystem │                                         │
+│ │ Demo ✓    │ │ Local ✓   │                                         │
+│ └───────────┘ └───────────┘                                         │
+│                                                                     │
+│ ────────────────────────────────────────────────────────────────    │
+│ Don't see what you need? [+ Add custom MCP server] (escape hatch)   │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-- Levy sidebar 180 px: kategorie s counts; sekundarni "Verified by" filter pod
-- Top: search (debounced 300ms, full-text na name+description+category)
-- Filter chips: `Transport` (any/stdio/HTTP) · `Auth` (any/OAuth/API key/None) · `Trust` (any/Anthropic/Crewship/Community)
-- **Featured row** -- 5-6 vetsich karet, top of viewport
-- Card grid 3-col: 48 px logo, name, 1-line description, transport badge, auth chip, trust chip, "Install" button
-- Klik karta -> Sheet zprava s tabs: `Overview` / `Tools` (vsechny tools s popisy) / `Setup` (env vars, required credentials) / `Connect` (button + crew picker + agent multiselect)
+- **Search** — case-insensitive substring přes name + description.
+- **Tile** — 1-line description, brand logo, brand color border.
+- **Custom MCP server** — escape hatch dole. Otevře původní 4-step
+  wizard `AddMCPWizard` (nikam jsme ho nezahodili) pro power usery,
+  kteří potřebují paste raw `transport/command/args`.
 
-### 5.4 Add MCP wizard (4 steps)
+### 5.4 Connect Sheet — schema-driven, žádný 4-step wizard
 
-Stejny shell jako Add Credential. Width `sm:max-w-[720px]`.
+Klik na dlaždici otevře `<ConnectorConnectSheet>` (sheet zprava, ne
+modal). Renderuje **JEDNU obrazovku** podle `manifest.auth_mode`:
 
-**Step 1 -- Source**: 3 karty
-- `Browse Marketplace` (default, vede do marketplace tab inline -- in-wizard)
-- `From template` (14 curated, brand logos)
-- `Custom server` (paste URL nebo command)
+| auth_mode | UI |
+|---|---|
+| `mcp_oauth` | Brand header + popis + jediné tlačítko **Connect**. Submit zavolá `/install`, server vrátí `next_step=mcp_oauth`, frontend redirectuje do DCR consent flow. |
+| `pat` | `<SchemaForm>` s manifest's `fields[]` — typicky 1 password field. `verify` se volá nejdřív (best-effort), pak `/install`. |
+| `conn_string` | `<SchemaForm>` s host/port/db/user/password/ssl. Defaulty z manifest (např. port=5432). |
+| `byo_oauth` | `manifest.docs.setup_md` rendered jako markdown nahoře (s resolveným `${instance_url}`), pak `<SchemaForm>` s `client_id`+`client_secret`. Submit vrátí `oauth_url`, frontend popup. |
+| `none` | Single Connect button (jako mcp_oauth, žádné fields). |
 
-**Step 2 -- Configure**: dle source
-- Marketplace/Template: auto-vyplnene `command`/`url`/`env`, uzivatel jen edituje
-- Custom: standard form (name, transport, command/args nebo url, env JSON)
-- Vpravo zivy YAML preview (recyklovat orchestration `MissionYamlEditor` v read-only modu)
-- **Advanced settings** disclosure (Claude.ai pattern) -- skryva OAuth Client ID/Secret pod toggle "I have my own OAuth app"
+**Jeden screen na mode** — žádné Source/Configure/Auth/Assign kroky.
+"Multi-step" UX je dotted-line oddělovač uvnitř jednoho sheetu.
 
-**Step 3 -- Auth**:
-- Pokud server vyzaduje credentials -> Credential Picker (existujici komponenta) NEBO inline "+ Add credential" (nested wizard) NEBO OAuth "Connect with X" button
-- Pokud OAuth -> button zahaji flow primo, status "Waiting..." pak ✓ po returnu
-- Pokud zadny auth -> skip karta
+### 5.5 Connector manifest format
 
-**Step 4 -- Assign & Test**:
-- Crew picker (kde server pobezi)
-- Agent multiselect (kteri maji k tools pristup)
-- **Per-tool toggle list** (default all enabled, expandable)
-- "Test connection" button -- vola `mcp/test`, vypise tools ktere server publikuje
-- Po success: "✓ Add MCP server"
+Curated katalog je **embedded YAML** v `internal/connectors/fixtures/`,
+ne DB tabulka. Manifest → frontend forma renderována přímo z
+`auth_mode + fields[]`. Žádný per-konektor React kód.
+
+Schema, validation rules a authoring guide:
+[`internal/connectors/README.md`](../../../internal/connectors/README.md).
+
+### 5.6 Backend architektura
+
+| Vrstva | Soubor | Zodpovědnost |
+|---|---|---|
+| Schema | `internal/connectors/manifest.go` | Types + `ParseManifest`/`Validate`/`Resolve`/`MaterializeMCP` |
+| Catalog | `internal/connectors/loader.go` | `Catalog`, `LoadAll`, `LoadByID` z embed.FS |
+| API | `internal/api/connectors_handler.go` | `GET /api/v1/connectors`, `GET /:id`, `POST /:id/verify`, `POST /:id/install` |
+| Migration | `internal/database/migrate.go` v76 | `connector_id TEXT` na `workspace_mcp_servers` + `crew_mcp_servers` (link instance ↔ manifest) |
+| CLI | `cmd/crewship/cmd_connector.go` | `crewship connector validate/lint/list/show/test` |
+| Frontend | `components/features/connectors/{connector-catalog,connect-sheet,schema-form}.tsx` | Catalog + sheet + schema form |
+| Frontend route | `app/(dashboard)/integrations/page.tsx` | Sprint 0: drop Marketplace tab; Sprint 1: wire `<ConnectorCatalog>` |
+
+### 5.7 Auth modes (5)
+
+| Mode | Použití | Catalog dlaždice ukáže |
+|---|---|---|
+| `mcp_oauth` | MCP server podporuje DCR (RFC 7591) — Linear, Anthropic Connectors | Connect button, žádný formulář |
+| `pat` | Většina API (GitHub, OpenAI, Slack bot, Brave, Sentry, Stripe) | Paste token form |
+| `conn_string` | Databáze (Postgres, MySQL, Mongo, Snowflake) | Host/port/db/user/password form |
+| `byo_oauth` | OAuth providers bez DCR a bez hosted brokeru | setup_md instructions + client_id/secret form |
+| `none` | Public/demo MCP servery (everything, filesystem) | Connect button, žádný formulář |
+
+Volba `pat` před `byo_oauth` kdykoli MCP server akceptuje token přes
+env (většina toho dělá). `byo_oauth` jen když OAuth dance musí
+proběhnout uvnitř produktu.
+
+### 5.8 Add MCP wizard (legacy 4-step) — escape hatch only
+
+Původní `AddMCPWizard` z PRD v1.0 zůstává jako **Custom MCP server**
+escape hatch. Otevírá se z dole catalog grid pro power usery.
+
+Default user flow ho nikdy nevidí. Žádné per-mode wizardy.
+
+### 5.9 MCP Server detail Sheet (klik na connected row)
+
+Beze změny vůči PRD v1.0 — `Overview / Tools / Logs / Settings` tabs.
 
 ### 5.5 MCP Server detail Sheet (klik na connected row nebo install ze marketplace)
 

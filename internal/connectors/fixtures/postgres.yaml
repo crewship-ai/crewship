@@ -1,0 +1,53 @@
+# PostgreSQL — exemplar of the conn_string path.
+# Five fields combine via the `derived.dsn` template into a libpq URI
+# that the MCP server consumes as its single positional arg. This is
+# the model for every database connector (MySQL, Mongo, Snowflake, …).
+id: postgres
+name: PostgreSQL
+description: Connect to a Postgres database
+category: databases
+brand:
+  logo: postgres
+  color: "#336791"
+auth_mode: conn_string
+fields:
+  - key: host
+    label: Host
+    type: text
+    required: true
+    placeholder: db.example.com
+  - key: port
+    label: Port
+    type: number
+    required: true
+    default: "5432"
+  - key: database
+    label: Database
+    type: text
+    required: true
+  - key: user
+    label: User
+    type: text
+    required: true
+  - key: password
+    label: Password
+    type: password
+    required: true
+  - key: ssl
+    label: SSL mode
+    type: select
+    required: true
+    default: require
+    choices:
+      - require
+      - prefer
+      - disable
+derived:
+  dsn: "postgres://${field.user}:${field.password}@${field.host}:${field.port}/${field.database}?sslmode=${field.ssl}"
+mcp:
+  transport: stdio
+  command: npx
+  args:
+    - "-y"
+    - "@modelcontextprotocol/server-postgres"
+    - "${derived.dsn}"
