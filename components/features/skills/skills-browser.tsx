@@ -184,7 +184,14 @@ export function SkillsBrowser() {
   // listener.
   const detailMaxRef = useRef(DETAIL_HARD_MAX_PX)
   detailMaxRef.current = detailMaxEffective
-  const detailWidthRendered = Math.min(detailWidth, detailMaxEffective)
+  // Two-sided clamp: a stale or externally-written persisted width below
+  // DETAIL_MIN_PX would otherwise render an unusably narrow panel even
+  // on wide screens. Floor at DETAIL_MIN_PX, but step out of the way
+  // when detailMaxEffective is itself below that — e.g. on a tight
+  // viewport where the centre column has already taken priority.
+  const detailWidthRendered = detailMaxEffective < DETAIL_MIN_PX
+    ? detailMaxEffective
+    : Math.min(detailMaxEffective, Math.max(DETAIL_MIN_PX, detailWidth))
   const detailDragRef = useRef<{ startX: number; startW: number } | null>(null)
   const onDetailDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
