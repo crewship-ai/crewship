@@ -27,6 +27,7 @@ import { EvalView } from "@/components/features/journal/eval-view"
 import { LogsPanel } from "@/components/features/logs/logs-panel"
 import { ResourcesStrip } from "@/components/features/logs/resources-strip"
 import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
+import { refreshRateMs, type RefreshRate } from "@/components/features/logs/refresh-rate-picker"
 import type { ScopeOption } from "@/components/features/logs/logs-toolbar"
 
 /**
@@ -124,6 +125,11 @@ export default function JournalPage() {
   const [agentId, setAgentId] = useState<string>(() => searchParams.get("agent_id") ?? "")
   const [serverQuery, setServerQuery] = useState<string>("")
   const [live, setLive] = useState(true)
+  // Auto-refresh cadence — defaults to "live" (SSE-driven, no polling)
+  // so we don't load the backend with redundant requests when a
+  // working stream is already pushing events. Pollers (5s/10s/…) are
+  // additive on top of SSE for users who want a hard freshness floor.
+  const [refreshRate, setRefreshRate] = useState<RefreshRate>("live")
 
   // Initial tab from `?tab=`. Unknown / unauthorized values fall back
   // to timeline so a stale bookmark can never surface a 403.
@@ -301,6 +307,19 @@ export default function JournalPage() {
 
   const handleRefresh = useCallback(() => { void refresh() }, [refresh])
 
+  // Periodic auto-refresh — only when the user has explicitly opted
+  // in via the picker. "live" / "off" → no timer.
+  useEffect(() => {
+    if (!timelineEnabled) return
+    const ms = refreshRateMs(refreshRate)
+    if (ms === null) return
+    const id = setInterval(() => {
+      if (!liveRef.current) return // paused live tail → don't auto-refresh either
+      void refresh()
+    }, ms)
+    return () => clearInterval(id)
+  }, [timelineEnabled, refreshRate, refresh])
+
   // Eager pagination — once the initial fetch lands, keep walking the
   // cursor until the backend reports no more pages OR we hit the
   // in-memory cap. This is the Elastic Discover / Grafana Logs
@@ -379,20 +398,18 @@ export default function JournalPage() {
             transition={{ duration: 0.18, ease: "easeOut" }}
             className="flex-1 min-h-0 flex flex-col"
           >
-            <AnimatePresence>
-              {crewId && (
-                <motion.div
-                  key="resources-strip"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.22, ease: "easeOut" }}
-                  className="overflow-hidden"
-                >
-                  <ResourcesStrip entries={entries} />
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <motion.div
+              key="resources-strip"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="overflow-hidden"
+            >
+              <ResourcesStrip
+                entries={entries}
+                mode={crewId ? "single" : "aggregate"}
+              />
+            </motion.div>
             <div className="flex-1 min-h-0">
               <LogsPanel
                 entries={entries}
@@ -408,6 +425,8 @@ export default function JournalPage() {
                 onRefresh={handleRefresh}
                 loading={loading}
                 error={error}
+                refreshRate={refreshRate}
+                onRefreshRateChange={setRefreshRate}
                 live={live}
                 onLiveChange={setLive}
                 hasMore={Boolean(nextCursor)}

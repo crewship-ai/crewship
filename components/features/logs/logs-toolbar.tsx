@@ -17,6 +17,7 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { SEVERITY_COLOR } from "@/lib/journal-style"
 import type { JournalSeverity } from "@/lib/types/journal"
 import { TimeRangePicker, type TimeRange, type CustomRange } from "./time-range-picker"
+import { RefreshRatePicker, type RefreshRate } from "./refresh-rate-picker"
 import type { BucketRange } from "./logs-histogram"
 
 export type SeverityFilter = "all" | JournalSeverity
@@ -90,6 +91,10 @@ interface LogsToolbarProps {
    */
   bucketFilter?: BucketRange | null
   onClearBucketFilter?: () => void
+
+  /** Refresh-rate cadence (e.g. "live", "10s"). Renders a picker when provided. */
+  refreshRate?: RefreshRate
+  onRefreshRateChange?: (r: RefreshRate) => void
 }
 
 const SEV_ORDER: SeverityFilter[] = ["all", "info", "notice", "warn", "error"]
@@ -122,6 +127,8 @@ export function LogsToolbar({
   loading,
   bucketFilter,
   onClearBucketFilter,
+  refreshRate,
+  onRefreshRateChange,
 }: LogsToolbarProps) {
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-2 sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-card/70">
@@ -155,6 +162,11 @@ export function LogsToolbar({
           customRange={customRange}
           onCustomRangeChange={onCustomRangeChange}
         />
+      )}
+
+      {/* refresh cadence */}
+      {refreshRate && onRefreshRateChange && (
+        <RefreshRatePicker value={refreshRate} onChange={onRefreshRateChange} />
       )}
 
       {/* scope: crew */}

@@ -14,6 +14,7 @@ import type { BucketRange } from "./logs-histogram"
 import { LogsList } from "./logs-list"
 import { LogsStatsRail } from "./logs-stats-rail"
 import type { TimeRange, CustomRange } from "./time-range-picker"
+import type { RefreshRate } from "./refresh-rate-picker"
 
 interface LogsPanelProps {
   entries: JournalEntry[]
@@ -50,6 +51,10 @@ interface LogsPanelProps {
   loading?: boolean
   /** Surface a fetch error inline at the top of the list area. */
   error?: string | null
+
+  /** Auto-refresh cadence — when provided, renders a picker in the toolbar. */
+  refreshRate?: RefreshRate
+  onRefreshRateChange?: (r: RefreshRate) => void
 
   /**
    * Live-tail state — controlled by the parent so it can also pause the
@@ -100,6 +105,8 @@ export function LogsPanel({
   onRefresh,
   loading,
   error,
+  refreshRate,
+  onRefreshRateChange,
   live: liveProp,
   onLiveChange,
   hasMore,
@@ -288,6 +295,8 @@ export function LogsPanel({
         loading={loading}
         bucketFilter={bucket}
         onClearBucketFilter={() => setBucket(null)}
+        refreshRate={refreshRate}
+        onRefreshRateChange={onRefreshRateChange}
       />
       <LogsTypeChips
         counts={stage.groupCounts}
