@@ -203,6 +203,7 @@ export function LogsToolbar({
               key={s}
               type="button"
               onClick={() => onSeverityChange(s)}
+              aria-pressed={active}
               className={cn(
                 "h-7 px-2 text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 transition-colors border-r border-border/60 last:border-r-0",
                 active
@@ -428,6 +429,7 @@ function ToolbarToggle({
       type="button"
       onClick={onClick}
       title={title}
+      aria-pressed={on}
       className={cn(
         "inline-flex items-center gap-1 h-6 px-2 rounded border text-[10px] transition-colors",
         on

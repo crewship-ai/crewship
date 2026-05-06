@@ -82,8 +82,9 @@ describe("LogsPanel", () => {
     ]
     const { getAllByTestId, getByRole } = render(<LogsPanel entries={entries} />)
     expect(getAllByTestId("virtuoso-row")).toHaveLength(3)
-    // Click the "exec" chip to mute it
-    fireEvent.click(getByRole("button", { name: /^exec/i }))
+    // Click the "exec" chip to mute it. The chip exposes its label via
+    // aria-label as "Mute exec (N)" once a group has entries.
+    fireEvent.click(getByRole("button", { name: /Mute exec/i }))
     const rows = getAllByTestId("virtuoso-row")
     expect(rows).toHaveLength(1)
     expect(rows[0].textContent).toMatch(/egress-c/)

@@ -38,9 +38,15 @@ const MAX_ROWS = 5
  */
 export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
   const openPorts = useMemo<OpenPort[]>(() => {
+    // Walk in ts order so a port_closed observed *before* its
+    // corresponding port_opened in the array (entries can arrive
+    // unsorted from SSE batching) doesn't incorrectly mask the open.
+    const sorted = [...entries].sort(
+      (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+    )
     const closed = new Set<string>()
     const open = new Map<string, OpenPort>()
-    for (const e of entries) {
+    for (const e of sorted) {
       if (e.entry_type !== "network.port_opened" && e.entry_type !== "network.port_closed") continue
       const port = (e.payload?.port as number | string | undefined) ?? ""
       const proto = (e.payload?.protocol as string | undefined) ?? "tcp"

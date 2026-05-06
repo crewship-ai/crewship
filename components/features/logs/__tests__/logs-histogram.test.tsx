@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, fireEvent } from "@testing-library/react"
 import type { JournalEntry } from "@/lib/types/journal"
 
@@ -16,6 +16,11 @@ import { LogsHistogram } from "@/components/features/logs/logs-histogram"
 const BUCKET_COUNT = 60
 const CHART_WIDTH = 600
 
+// Save the real getBoundingClientRect so the suite can restore it
+// after each test — otherwise the prototype-level stub leaks into any
+// later DOM-touching test that runs in the same process.
+const realGetBoundingClientRect = Element.prototype.getBoundingClientRect
+
 function mockChartBounds() {
   const rect = {
     x: 0, y: 0, top: 0, left: 0, right: CHART_WIDTH, bottom: 64,
@@ -27,6 +32,10 @@ function mockChartBounds() {
 
 beforeEach(() => {
   mockChartBounds()
+})
+
+afterEach(() => {
+  Element.prototype.getBoundingClientRect = realGetBoundingClientRect
 })
 
 /** The wrapper that owns the click handler — has cursor: pointer + height set. */

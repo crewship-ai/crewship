@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/presence"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // Server is the main crewship process, wiring together the HTTP server, IPC
@@ -57,6 +58,16 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go s.wsHub.Run(ctx)
 	go s.orchestrator.Start(ctx)
+
+	// Rehydrate stats + file-watcher tracking for crew containers that
+	// survived a previous crewshipd run. Without this, the stats
+	// collector and listening-port scanner stay blind to existing
+	// containers until each crew's next dispatch (which calls
+	// EnsureCrewRuntime + the registration callback). Synchronous so
+	// the bookkeeping is in place before the collectors start polling.
+	if s.statsCollector != nil && s.db != nil {
+		s.rehydrateContainers(ctx)
+	}
 
 	if s.statsCollector != nil {
 		go s.statsCollector.Run(ctx)
@@ -171,6 +182,12 @@ func (s *Server) Shutdown() error {
 
 	s.logWriter.Close()
 	s.convStore.Close()
+	// Detach the file-watcher's journal pointer BEFORE closing the
+	// writer. Otherwise a late fsnotify event firing in the gap between
+	// "Close starts draining" and "goroutine actually exits" would
+	// dereference a draining/closed writer and either lose the entry or
+	// (worse) panic on a closed channel.
+	s.fileJournalPtr.Store(nil)
 	// Close the journal writer after HTTP shutdown so any handlers still
 	// draining requests have flushed their emits. Close drains the
 	// buffered channel synchronously, so entries that made it in before
@@ -379,4 +396,69 @@ func startCatalogRefresh(catalog *devcontainer.CatalogFetcher, runtimes *devcont
 			refresh()
 		}
 	}()
+}
+
+
+// rehydrateContainers re-registers crew containers that survived a
+// previous crewshipd process with the stats collector + file watcher.
+// Stats collection and the listening-port scanner only see containers
+// that have been registered via the orchestrator callback — without
+// this boot-time pass, persisted containers stay invisible until
+// their crew is dispatched again.
+//
+// Best-effort: failures to talk to Docker are logged at debug, never
+// propagated. The next dispatch will register through the normal
+// callback path anyway.
+func (s *Server) rehydrateContainers(ctx context.Context) {
+	lookup, ok := s.container.(provider.CrewContainerLookup)
+	if !ok {
+		// Provider does not expose existing-container lookup (e.g. apple
+		// containers). Skip silently — registration will happen on next
+		// dispatch via the orchestrator callback.
+		return
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, workspace_id, slug
+		FROM crews
+		WHERE deleted_at IS NULL`)
+	if err != nil {
+		s.logger.Debug("rehydrate: query crews failed", "err", err)
+		return
+	}
+	defer rows.Close()
+
+	type crewRow struct{ id, workspaceID, slug string }
+	var crews []crewRow
+	for rows.Next() {
+		var c crewRow
+		if err := rows.Scan(&c.id, &c.workspaceID, &c.slug); err != nil {
+			s.logger.Debug("rehydrate: scan crew failed", "err", err)
+			continue
+		}
+		crews = append(crews, c)
+	}
+
+	registered := 0
+	for _, c := range crews {
+		containerID, running, err := lookup.FindCrewContainer(ctx, c.slug)
+		if err != nil {
+			s.logger.Debug("rehydrate: find container failed", "crew_slug", c.slug, "err", err)
+			continue
+		}
+		if containerID == "" {
+			continue
+		}
+		if !running {
+			// Stopped container counts as known but not actively
+			// streaming metrics. Skip rather than auto-start.
+			continue
+		}
+		s.statsCollector.Register(containerID, c.id, c.workspaceID)
+		s.ensureFileWatcher(c.id)
+		registered++
+	}
+	if registered > 0 {
+		s.logger.Info("rehydrated existing crew containers", "count", registered)
+	}
 }

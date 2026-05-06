@@ -38,6 +38,8 @@ export function LogsTypeChips({ counts, muted, onToggle, onResetAll }: LogsTypeC
             key={g}
             type="button"
             onClick={() => onToggle(g)}
+            aria-pressed={!off}
+            aria-label={`${off ? "Enable" : "Mute"} ${GROUP_LABEL[g]} (${count})`}
             variants={{
               hidden: { opacity: 0, scale: 0.85, y: -2 },
               visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.2, ease: "easeOut" } },

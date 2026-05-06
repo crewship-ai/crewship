@@ -138,14 +138,23 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
     }
   }, [nextCursor, loadingMore, workspaceId, buildParams])
 
+  // Normalize once outside prependLive so the validation cost isn't
+  // paid on every SSE event. NaN / negative / non-finite values
+  // disable the cap; 0 is treated as a hard cap (drop everything).
+  const cap = (() => {
+    if (maxEntries === undefined) return undefined
+    if (!Number.isFinite(maxEntries) || maxEntries < 0) return undefined
+    return Math.floor(maxEntries)
+  })()
+
   const prependLive = useCallback((entry: JournalEntry) => {
     setEntries((prev) => {
       if (prev.some((e) => e.id === entry.id)) return prev
       const next = [entry, ...prev]
-      if (maxEntries && next.length > maxEntries) next.length = maxEntries
+      if (cap !== undefined && next.length > cap) next.length = cap
       return next
     })
-  }, [maxEntries])
+  }, [cap])
 
   useEffect(() => {
     if (!enabled || !workspaceId) {

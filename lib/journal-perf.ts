@@ -81,7 +81,11 @@ export function filterEntries(
     if (stage.muted.has(grp)) continue
     out.filtered.push(e)
 
-    if (stage.bucket && (e._tsMs < stage.bucket.fromMs || e._tsMs >= stage.bucket.toMs)) continue
+    // Inclusive on both ends: matches computeBuckets() in logs-histogram,
+    // which counts entries where ts === toMs into the last bucket.
+    // Otherwise an event landing exactly on the bucket boundary appears
+    // in the histogram bar but is missing from the list.
+    if (stage.bucket && (e._tsMs < stage.bucket.fromMs || e._tsMs > stage.bucket.toMs)) continue
     out.bucketed.push(e)
   }
 

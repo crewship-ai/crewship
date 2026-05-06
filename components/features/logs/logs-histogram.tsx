@@ -182,6 +182,56 @@ export function LogsHistogram({
     }
   }, [dragStart, dragVisualEndIdx])
 
+  // Keyboard navigation. Replaces the recharts accessibilityLayer
+  // (which we disable to avoid its phantom focus outline) — same
+  // semantics: Tab to focus, ArrowLeft/Right move bucket cursor,
+  // Home/End jump to ends, Enter / Space toggle the selection,
+  // Escape clears it.
+  const [keyFocusIdx, setKeyFocusIdx] = useState<number | null>(null)
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!onSelect) return
+      const cur = keyFocusIdx ?? Math.floor(BUCKET_COUNT / 2)
+      switch (e.key) {
+        case "ArrowLeft":
+          e.preventDefault()
+          setKeyFocusIdx(Math.max(0, cur - 1))
+          break
+        case "ArrowRight":
+          e.preventDefault()
+          setKeyFocusIdx(Math.min(BUCKET_COUNT - 1, cur + 1))
+          break
+        case "Home":
+          e.preventDefault()
+          setKeyFocusIdx(0)
+          break
+        case "End":
+          e.preventDefault()
+          setKeyFocusIdx(BUCKET_COUNT - 1)
+          break
+        case "Enter":
+        case " ": {
+          e.preventDefault()
+          const b = data[cur]
+          if (!b) return
+          if (selected && selected.fromMs === b.fromMs && selected.toMs === b.toMs) {
+            onSelect(null)
+          } else {
+            onSelect({ fromMs: b.fromMs, toMs: b.toMs })
+          }
+          break
+        }
+        case "Escape":
+          if (selected) {
+            e.preventDefault()
+            onSelect(null)
+          }
+          break
+      }
+    },
+    [keyFocusIdx, data, selected, onSelect],
+  )
+
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40">
       <div className="flex items-end justify-between mb-1 gap-3 flex-wrap">
@@ -202,13 +252,30 @@ export function LogsHistogram({
         ref={containerRef}
         onMouseDown={handleMouseDown}
         onClick={handleClick}
-        className="relative [&_*]:!outline-none"
+        onKeyDown={onSelect ? handleKeyDown : undefined}
+        onBlur={() => setKeyFocusIdx(null)}
+        tabIndex={onSelect ? 0 : -1}
+        role={onSelect ? "application" : undefined}
+        aria-label={onSelect ? "Event volume histogram. Use arrow keys to navigate buckets, Enter to filter, Escape to clear." : undefined}
+        className="relative [&_*]:!outline-none focus-visible:ring-1 focus-visible:ring-sky-500/60 focus-visible:rounded"
         style={{
           height,
           cursor: onSelect ? (dragRect ? "ew-resize" : "pointer") : "default",
           userSelect: dragStart ? "none" : undefined,
         }}
       >
+        {/* Keyboard focus indicator — only shows when the user is
+            navigating via Tab/Arrow, never on mouse interaction. */}
+        {keyFocusIdx !== null && (
+          <div
+            className="absolute top-0 bottom-0 pointer-events-none border border-sky-300/80 z-20"
+            style={{
+              left: `${(keyFocusIdx / BUCKET_COUNT) * 100}%`,
+              width: `${(1 / BUCKET_COUNT) * 100}%`,
+            }}
+            aria-hidden
+          />
+        )}
         {/* Persistent selection — committed bucket(s) tinted behind bars. */}
         <AnimatePresence>
           {selected && !dragRect && (
