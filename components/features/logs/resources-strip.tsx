@@ -58,7 +58,7 @@ export function ResourcesStrip({ entries, mode = "single" }: ResourcesStripProps
         max={mode === "aggregate" ? undefined : 100}
         color="#a78bfa"
         latest={s.latest.mem}
-        format={(v) => `${v.toFixed(0)}%`}
+        format={mode === "aggregate" ? fmtMB : (v) => `${v.toFixed(0)}%`}
       />
       <Cell
         label="NET"
@@ -181,6 +181,8 @@ function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series 
     ts: number
     crew: string
     cpu: number | null
+    /** ram_pct in single mode, ram_mb in aggregate (sum across crews makes
+     *  sense in MB; sum across containers' relative percentages doesn't). */
     mem: number | null
     netCum: number | null
     net: number | null
@@ -195,11 +197,14 @@ function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series 
     const rx = typeof p.net_rx === "number" ? (p.net_rx as number) : null
     const tx = typeof p.net_tx === "number" ? (p.net_tx as number) : null
     const netCum = rx !== null && tx !== null ? rx + tx : null
+    const memValue = mode === "aggregate"
+      ? (typeof p.ram_mb === "number" ? (p.ram_mb as number) : null)
+      : (typeof p.ram_pct === "number" ? (p.ram_pct as number) : null)
     points.push({
       ts,
       crew: e.crew_id ?? "",
       cpu: typeof p.cpu_pct === "number" ? (p.cpu_pct as number) : null,
-      mem: typeof p.ram_pct === "number" ? (p.ram_pct as number) : null,
+      mem: memValue,
       netCum,
       net: null,
       disk: null,
@@ -318,4 +323,9 @@ function fmtBytesRate(v: number): string {
   if (v < 1024 * 1024) return `${(v / 1024).toFixed(0)} KB/s`
   if (v < 1024 * 1024 * 1024) return `${(v / 1024 / 1024).toFixed(1)} MB/s`
   return `${(v / 1024 / 1024 / 1024).toFixed(2)} GB/s`
+}
+
+function fmtMB(v: number): string {
+  if (v < 1024) return `${v.toFixed(0)} MB`
+  return `${(v / 1024).toFixed(2)} GiB`
 }
