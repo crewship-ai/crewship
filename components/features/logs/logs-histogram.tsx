@@ -98,7 +98,7 @@ export function LogsHistogram({
             </button>
           )}
           <div className="text-[10px] font-mono tabular-nums text-muted-foreground/70">
-            {fmtClock(windowFrom)} ─ {fmtClock(windowTo)}
+            {windowFmt(windowFrom, windowTo)}
           </div>
         </div>
       </div>
@@ -175,22 +175,12 @@ function computeBuckets(
     toMs = inferred.toMs
   }
 
-  // Auto-zoom: if the loaded entries cover much less than the requested
-  // window (e.g. user picked "30d" but only 1000 recent entries are
-  // loaded), snap the histogram window to the data extent. Otherwise
-  // 59 of 60 buckets are empty and the one bucket with data is a
-  // useless single spike. The server query still uses the full
-  // timeRange — this only affects what the histogram visualizes.
-  if (entries.length > 0) {
-    const dataRange = computeFromEntries(entries, now)
-    const windowSpan = toMs - fromMs
-    const dataSpan = dataRange.toMs - dataRange.fromMs
-    if (windowSpan > 0 && dataSpan / windowSpan < 0.25) {
-      fromMs = Math.max(fromMs, dataRange.fromMs)
-      toMs = Math.min(toMs, dataRange.toMs)
-    }
-  }
-
+  // NOTE: the previous auto-zoom heuristic (snap window to data extent
+  // when data covered <25% of the requested range) was removed because
+  // it caused the histogram to *shift* every time pagination loaded
+  // older entries — bars walked left as the data extent grew. With the
+  // window strictly anchored to the user-selected range, sparse data
+  // simply clusters in fewer buckets, which is honest and stable.
   if (toMs - fromMs < 1000) toMs = fromMs + 1000
 
   const bucketMs = (toMs - fromMs) / BUCKET_COUNT
@@ -297,6 +287,16 @@ function fmtRange(fromMs: number, toMs: number): string {
     return `${fmtDateTime(fromMs)} → ${fmtDateTime(toMs)}`
   }
   return `${fmtClock(fromMs)} → ${fmtClock(toMs)}`
+}
+
+/** Window header label — same logic as fmtRange but uses an em-dash. */
+function windowFmt(fromMs: number, toMs: number): string {
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return "—"
+  const span = toMs - fromMs
+  if (span > 24 * 60 * 60 * 1000) {
+    return `${fmtDateTime(fromMs)} ─ ${fmtDateTime(toMs)}`
+  }
+  return `${fmtClock(fromMs)} ─ ${fmtClock(toMs)}`
 }
 
 function fmtDateTime(ts: number): string {
