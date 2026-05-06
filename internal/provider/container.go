@@ -112,6 +112,23 @@ type HostAddressProvider interface {
 	HostAddress() string
 }
 
+// CrewContainerLookup is an optional interface that container providers
+// can implement to expose a non-mutating "does a container for this crew
+// already exist?" lookup. Used by Server.Start for boot-time rehydration:
+// containers persist across `crewshipd` restarts, so the stats collector
+// + listening-port scanner stay blind to them unless we re-register on
+// startup. Providers that don't implement this just skip rehydration —
+// existing crews start being tracked again the next time their crew is
+// dispatched (i.e. the next EnsureCrewRuntime call).
+type CrewContainerLookup interface {
+	// FindCrewContainer returns the existing container ID for a crew
+	// slug. `running` is false for stopped-but-present containers (so
+	// the caller can decide whether to start it). When no container is
+	// found, returns ("", false, nil) — only error path is for transport
+	// failures talking to the runtime.
+	FindCrewContainer(ctx context.Context, slug string) (containerID string, running bool, err error)
+}
+
 // VolumeManager is an optional interface for managing persistent volumes
 // associated with crew containers (home directories, tool storage).
 type VolumeManager interface {

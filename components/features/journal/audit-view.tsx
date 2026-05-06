@@ -92,7 +92,7 @@ function getActionClasses(action: string): string {
   return STATUS_BG_LIGHT[actionStatusKey(action)] ?? "bg-muted text-muted-foreground"
 }
 
-export default function AuditPage() {
+export function AuditView() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [totalCount, setTotalCount] = useState(0)
@@ -269,7 +269,7 @@ export default function AuditPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+    <div className="p-4 md:p-6 pb-10 space-y-4 bg-background h-full">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">

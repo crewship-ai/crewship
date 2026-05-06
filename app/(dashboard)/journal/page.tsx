@@ -1,122 +1,302 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Activity,
-  BarChart3,
   BookOpen,
-  Clock,
+  DollarSign,
+  LineChart,
   ListOrdered,
   Radio,
   RadioTower,
-  RefreshCw,
+  Shield,
   Zap,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
-import { JournalLookupProvider } from "@/hooks/use-journal-lookup"
-import {
-  JournalFilters,
-  DEFAULT_JOURNAL_FILTERS,
-  type JournalFilterValue,
-} from "@/components/features/journal/journal-filters"
-import { JournalTimeline } from "@/components/features/journal/journal-timeline"
 import { RunsView } from "@/components/features/journal/runs-view"
+import { AuditView } from "@/components/features/journal/audit-view"
+import { SpendView } from "@/components/features/journal/spend-view"
+import { EvalView } from "@/components/features/journal/eval-view"
+import { LogsPanel } from "@/components/features/logs/logs-panel"
+import { ResourcesStrip } from "@/components/features/logs/resources-strip"
+import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
+import { refreshRateMs, type RefreshRate } from "@/components/features/logs/refresh-rate-picker"
+import type { ScopeOption } from "@/components/features/logs/logs-toolbar"
 
-/** Convert the UI `timeRange` selection into an RFC3339 `since` string. */
-function sinceFromRange(range: JournalFilterValue["timeRange"]): string | undefined {
-  const now = Date.now()
-  switch (range) {
-    case "1h": return new Date(now - 60 * 60 * 1000).toISOString()
-    case "24h": return new Date(now - 24 * 60 * 60 * 1000).toISOString()
-    case "7d": return new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
-    case "30d": return new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString()
-    default: return undefined
-  }
+/**
+ * Cap on entries kept in memory. Generous enough to hold a full
+ * Grafana-style "show me everything in the time range" window for
+ * busy workspaces; small enough to keep the filter chain + virtuoso
+ * + histogram + stats rail all responsive on a laptop.
+ */
+const JOURNAL_MAX_ENTRIES = 5000
+
+interface CrewSummary {
+  id: string
+  name: string
+  icon?: string | null
+  color?: string | null
+  avatar_style?: string | null
+}
+interface AgentSummary {
+  id: string
+  name: string
+  crew_id?: string | null
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  crew?: { avatar_style?: string | null } | null
 }
 
-type JournalTab = "timeline" | "runs" | "stats"
+type JournalTab = "timeline" | "runs" | "eval" | "audit" | "spend"
 
-const JOURNAL_TABS: Array<{ id: JournalTab; label: string; icon: typeof ListOrdered }> = [
+interface TabDef {
+  id: JournalTab
+  label: string
+  icon: typeof ListOrdered
+  /** When true, only OWNER/ADMIN see the tab. */
+  adminOnly?: boolean
+}
+
+const ALL_TABS: TabDef[] = [
   { id: "timeline", label: "Timeline", icon: ListOrdered },
   { id: "runs", label: "Runs", icon: Activity },
-  { id: "stats", label: "Stats", icon: BarChart3 },
+  { id: "eval", label: "Eval", icon: LineChart },
+  { id: "audit", label: "Audit", icon: Shield, adminOnly: true },
+  { id: "spend", label: "Spend", icon: DollarSign, adminOnly: true },
 ]
 
 /**
- * Crew Journal — workspace-wide, append-only event stream. Uses
- * `/api/v1/journal` for paginated history and `/api/v1/journal/stream`
- * (SSE) for live updates, with graceful fallback to polling.
+ * Crew Journal — workspace-wide records center.
  *
- * Layout pattern: "Sidebar + main" (filter rail + content) with a
- * tab strip above the timeline. See `docs/design/patterns.md` #2.
+ * Five tabs render different immutable record types under one roof:
+ *   - Timeline: runtime events from `journal_entries` (Grafana-style)
+ *   - Runs:     agent run aggregates from `/api/v1/runs`
+ *   - Eval:     eval.* journal projection
+ *   - Audit:    entity CRUD log from `/api/v1/audit` (admin-only)
+ *   - Spend:    cost ledger from `/api/v1/paymaster/*` (admin-only)
+ *
+ * Per-tab RBAC hides admin-only tabs entirely from non-admins so they
+ * never see a "click here for 403" affordance.
  */
 export default function JournalPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const { workspaceId, loading: wsLoading } = useWorkspace()
+  const { role, loading: rolesLoading } = useAbilities()
+  const isAdmin = role === "OWNER" || role === "ADMIN"
 
-  // Seed filters from query params (?crew_id=...&type=...) so the "View full
-  // journal" link from crew cards and deeplinks lands on the expected view.
-  const initialFilters = useMemo<JournalFilterValue>(() => {
-    const base = { ...DEFAULT_JOURNAL_FILTERS }
-    const crewId = searchParams.get("crew_id")
-    const agentId = searchParams.get("agent_id")
-    if (crewId) base.crewId = crewId
-    if (agentId) base.agentId = agentId
-    const types = searchParams.get("entry_type")
-    if (types) base.types = types.split(",") as JournalFilterValue["types"]
-    return base
-  // Intentionally read once on mount; navigating with new params re-mounts.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Visible tabs depends on role. Admin-only tabs are filtered out for
+  // non-admins. The deeplink defaults to timeline if the user lacks
+  // access to the requested tab.
+  const visibleTabs = useMemo<TabDef[]>(
+    () => ALL_TABS.filter((t) => !t.adminOnly || isAdmin),
+    [isAdmin],
+  )
+
+  // Filter state — lifted from the page so URL/deeplink hydration is
+  // trivial and so the LogsPanel toolbar can drive the backend query.
+  const initialTimeRange = useMemo<TimeRange>(() => {
+    const t = searchParams.get("time")
+    return (t === "5m" || t === "15m" || t === "1h" || t === "24h" || t === "7d" || t === "30d" || t === "all" || t === "custom")
+      ? (t as TimeRange)
+      : "24h"
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const [filters, setFilters] = useState<JournalFilterValue>(initialFilters)
-  // Initial tab from `?tab=runs` (deeplink target for the legacy /runs
-  // redirect — Phase F of unified-journal). Unknown values fall back to
-  // timeline so a stale bookmark can never break the page.
+  const initialCustomRange = useMemo<CustomRange | null>(() => {
+    const f = Number(searchParams.get("from"))
+    const t = Number(searchParams.get("to"))
+    if (Number.isFinite(f) && Number.isFinite(t) && t > f) return { fromMs: f, toMs: t }
+    return null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const [timeRange, setTimeRange] = useState<TimeRange>(initialTimeRange)
+  const [customRange, setCustomRange] = useState<CustomRange | null>(initialCustomRange)
+  const [crewId, setCrewId] = useState<string>(() => searchParams.get("crew_id") ?? "")
+  const [agentId, setAgentId] = useState<string>(() => searchParams.get("agent_id") ?? "")
+  const [serverQuery, setServerQuery] = useState<string>("")
+  const [live, setLive] = useState(true)
+  // Auto-refresh cadence — defaults to "live" (SSE-driven, no polling)
+  // so we don't load the backend with redundant requests when a
+  // working stream is already pushing events. Pollers (5s/10s/…) are
+  // additive on top of SSE for users who want a hard freshness floor.
+  const [refreshRate, setRefreshRate] = useState<RefreshRate>("live")
+
+  // Initial tab from `?tab=`. Unknown / unauthorized values fall back
+  // to timeline so a stale bookmark can never surface a 403.
   const initialTab = useMemo<JournalTab>(() => {
     const t = searchParams.get("tab")
-    return t === "runs" || t === "stats" ? t : "timeline"
+    const valid = ALL_TABS.some((tab) => tab.id === t)
+    if (!valid) return "timeline"
+    return t as JournalTab
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [activeTab, setActiveTab] = useState<JournalTab>(initialTab)
 
-  // Apply UI filters to backend query params. The backend accepts CSV for
-  // list-shaped filters (entry_type, severity). The `q` param hits FTS5
-  // across summary + payload — server-side, not client-side filtering.
-  const queryParams = useMemo<Record<string, string | undefined>>(() => {
-    const since = sinceFromRange(filters.timeRange)
-    return {
-      crew_id: filters.crewId || undefined,
-      agent_id: filters.agentId || undefined,
-      entry_type: filters.types.length ? filters.types.join(",") : undefined,
-      severity: filters.severities.length ? filters.severities.join(",") : undefined,
-      q: filters.search.trim() || undefined,
-      since,
-    }
-  }, [filters])
+  // If admin permissions resolve to non-admin, demote out of an admin-only tab.
+  useEffect(() => {
+    if (rolesLoading) return
+    const tabDef = ALL_TABS.find((t) => t.id === activeTab)
+    if (tabDef?.adminOnly && !isAdmin) setActiveTab("timeline")
+  }, [activeTab, isAdmin, rolesLoading])
 
-  // Only the Timeline tab consumes the journal list + SSE stream. Runs
-  // and Stats render from their own data sources, so disabling these
-  // hooks elsewhere avoids a redundant fetch + open SSE connection on
-  // every page load that lands on a non-Timeline tab (deeplinks from
-  // /runs go straight to ?tab=runs).
+  // Crew + agent options for the toolbar selects.
+  const [crews, setCrews] = useState<ScopeOption[]>([])
+  const [agents, setAgents] = useState<ScopeOption[]>([])
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setCrews([])
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+        if (!res.ok) return
+        const json = (await res.json()) as CrewSummary[]
+        if (!cancelled && Array.isArray(json)) {
+          setCrews(
+            json.map((c) => ({
+              id: c.id,
+              name: c.name,
+              icon: c.icon ?? null,
+              color: c.color ?? null,
+            })),
+          )
+        }
+      } catch {
+        /* leave empty on failure */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [workspaceId])
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setAgents([])
+      return
+    }
+    let cancelled = false
+    const url = crewId
+      ? `/api/v1/agents?workspace_id=${workspaceId}&crew_id=${crewId}`
+      : `/api/v1/agents?workspace_id=${workspaceId}`
+    ;(async () => {
+      try {
+        const res = await fetch(url)
+        if (!res.ok) return
+        const json = (await res.json()) as AgentSummary[]
+        if (!cancelled && Array.isArray(json)) {
+          setAgents(
+            json.map((a) => ({
+              id: a.id,
+              name: a.name,
+              avatarSeed: a.avatar_seed ?? null,
+              avatarStyle: a.avatar_style ?? a.crew?.avatar_style ?? null,
+            })),
+          )
+        }
+      } catch {
+        /* leave empty on failure */
+      }
+    })()
+    return () => { cancelled = true }
+  }, [workspaceId, crewId])
+
+  // Crew change clears any agent selection that's no longer in scope.
+  const onCrewChange = useCallback((id: string) => {
+    setCrewId(id)
+    setAgentId("")
+  }, [])
+
+  // id → name lookup so the LogsPanel stats rail can render "viktor"
+  // instead of a UUID.
+  const agentLookup = useMemo<Record<string, string>>(() => {
+    const out: Record<string, string> = {}
+    for (const a of agents) out[a.id] = a.name
+    return out
+  }, [agents])
+
+  // Deeplink — mirror filter state into URL search params on change so
+  // the user can share / bookmark a specific view.
+  useEffect(() => {
+    const sp = new URLSearchParams()
+    if (timeRange !== "24h") sp.set("time", timeRange)
+    if (timeRange === "custom" && customRange) {
+      sp.set("from", String(customRange.fromMs))
+      sp.set("to", String(customRange.toMs))
+    }
+    if (crewId) sp.set("crew_id", crewId)
+    if (agentId) sp.set("agent_id", agentId)
+    if (activeTab !== "timeline") sp.set("tab", activeTab)
+    const qs = sp.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [timeRange, customRange, crewId, agentId, activeTab, router, pathname])
+
+  const queryParams = useMemo<Record<string, string | undefined>>(() => {
+    const since = sinceFromTimeRange(timeRange, customRange)
+    const until = timeRange === "custom" && customRange
+      ? new Date(customRange.toMs).toISOString()
+      : undefined
+    return {
+      crew_id: crewId || undefined,
+      agent_id: agentId || undefined,
+      q: serverQuery.trim() || undefined,
+      since,
+      until,
+    }
+  }, [timeRange, customRange, crewId, agentId, serverQuery])
+
+  // Only the Timeline tab consumes the journal list + SSE stream.
   const timelineEnabled = !wsLoading && activeTab === "timeline"
   const { entries, nextCursor, loading, loadingMore, error, refresh, loadMore, prependLive } =
-    useJournalList({ workspaceId, params: queryParams, enabled: timelineEnabled })
+    useJournalList({
+      workspaceId,
+      params: queryParams,
+      enabled: timelineEnabled,
+      maxEntries: JOURNAL_MAX_ENTRIES,
+    })
 
-  // SSE prepend — the hook dedupes by id, so re-firing is safe.
+  const liveRef = useRef(live)
+  useEffect(() => { liveRef.current = live }, [live])
+
+  // SSE prepend batching — chatty workspaces can fire 50+ events/sec.
+  // Without batching, each event triggers a state update + full filter
+  // chain re-render (toolbar counts, histogram 60 buckets, virtuoso
+  // viewport, stats rail). Buffer up to 250 ms and flush as a group.
+  const pendingRef = useRef<Parameters<typeof prependLive>[0][]>([])
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flushPending = useCallback(() => {
+    flushTimerRef.current = null
+    const batch = pendingRef.current
+    if (batch.length === 0) return
+    pendingRef.current = []
+    for (const e of batch) prependLive(e)
+  }, [prependLive])
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+    }
+  }, [])
+
   const handleLive = useCallback(
     (entry: Parameters<typeof prependLive>[0]) => {
-      prependLive(entry)
+      if (!liveRef.current) return
+      pendingRef.current.push(entry)
+      if (!flushTimerRef.current) {
+        flushTimerRef.current = setTimeout(flushPending, 250)
+      }
     },
-    [prependLive],
+    [flushPending],
   )
   const { status: streamStatus } = useJournalStream({
     workspaceId,
@@ -125,110 +305,191 @@ export default function JournalPage() {
     onEntry: handleLive,
   })
 
-  // Search is now server-side via FTS5 (?q= maps to MATCH on
-  // journal_entries_fts). Entries returned from the API already
-  // reflect the search term, so no extra client filtering needed.
-  const visibleEntries = entries
+  const handleRefresh = useCallback(() => { void refresh() }, [refresh])
+
+  // Periodic auto-refresh — only when the user has explicitly opted
+  // in via the picker. "live" / "off" → no timer.
+  useEffect(() => {
+    if (!timelineEnabled) return
+    const ms = refreshRateMs(refreshRate)
+    if (ms === null) return
+    const id = setInterval(() => {
+      if (!liveRef.current) return // paused live tail → don't auto-refresh either
+      void refresh()
+    }, ms)
+    return () => clearInterval(id)
+  }, [timelineEnabled, refreshRate, refresh])
+
+  // Eager pagination — once the initial fetch lands, keep walking the
+  // cursor until the backend reports no more pages OR we hit the
+  // in-memory cap. This is the Elastic Discover / Grafana Logs
+  // behaviour: the time-range select determines what the user sees,
+  // not a scroll position. Scroll-triggered loadMore is intentionally
+  // not wired so the list stays "what's in the window" and nothing
+  // sneaks in mid-scroll.
+  useEffect(() => {
+    if (!timelineEnabled) return
+    if (loading || loadingMore) return
+    if (!nextCursor) return
+    if (entries.length >= JOURNAL_MAX_ENTRIES) return
+    void loadMore()
+  }, [timelineEnabled, loading, loadingMore, nextCursor, entries.length, loadMore])
+
+  // Stats-rail Network card — admin-only and only meaningful when a single
+  // crew is in scope (metrics are per-container).
+  const showNetworkCard = isAdmin && Boolean(crewId)
 
   return (
-    <JournalLookupProvider workspaceId={workspaceId}>
-    <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 bg-background min-h-[calc(100vh-48px)]">
-      {/* Main column — header + tab strip + content */}
-      <div className="flex-1 min-w-0 space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-4 w-4 text-foreground/60" />
-            <h1 className="text-body font-medium text-foreground/80">Crew Journal</h1>
-            <Badge variant="outline" className="text-[10px] border-border/60 font-mono uppercase tracking-wider">
-              {entries.length} loaded
-            </Badge>
-            <StreamStatusBadge status={streamStatus} />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2.5 text-xs"
-              onClick={() => refresh()}
-              disabled={loading}
-            >
-              <RefreshCw className={cn("h-3 w-3 mr-1.5", loading && "animate-spin")} />
-              Refresh
-            </Button>
-          </div>
-        </div>
-
-        {/* ---- Tab strip (matches /orchestration vocabulary) ---- */}
-        <div
-          role="tablist"
-          aria-label="Journal views"
-          className="flex items-center h-9 bg-card border-b border-border/60 px-1 gap-0 rounded-t-md overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-        >
-          {JOURNAL_TABS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={activeTab === id}
-              onClick={() => setActiveTab(id)}
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
-                activeTab === id
-                  ? "border-blue-400 text-blue-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80",
-              )}
-            >
-              <Icon className="h-3 w-3 opacity-75" />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* ---- Tab panels ---- */}
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+      {/* ---- Header strip ---- */}
+      <div className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-3 gap-2">
+        <BookOpen className="h-3.5 w-3.5 text-foreground/60" />
+        <h1 className="text-body font-medium text-foreground/80">Crew Journal</h1>
         {activeTab === "timeline" && (
-          <JournalTimeline
-            entries={visibleEntries}
-            loading={loading}
-            loadingMore={loadingMore}
-            hasMore={Boolean(nextCursor)}
-            error={error}
-            onLoadMore={loadMore}
-          />
+          <Badge variant="outline" className="text-[10px] border-border/60 font-mono">
+            {entries.length} loaded
+          </Badge>
+        )}
+        {activeTab === "timeline" && <StreamStatusBadge status={streamStatus} />}
+        <div className="flex-1" />
+      </div>
+
+      {/* ---- Tab strip ---- */}
+      <div
+        role="tablist"
+        aria-label="Journal views"
+        className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-2 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      >
+        {visibleTabs.map(({ id, label, icon: Icon, adminOnly }) => (
+          <motion.button
+            key={id}
+            role="tab"
+            aria-selected={activeTab === id}
+            onClick={() => setActiveTab(id)}
+            whileHover={{ y: -1 }}
+            whileTap={{ y: 0, scale: 0.97 }}
+            transition={{ duration: 0.12 }}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-colors duration-100 relative top-px whitespace-nowrap shrink-0",
+              activeTab === id
+                ? "border-blue-400 text-blue-400"
+                : "border-transparent text-muted-foreground hover:text-foreground/80",
+            )}
+          >
+            <Icon className="h-3 w-3 opacity-75" />
+            {label}
+            {adminOnly && (
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-mono">
+                admin
+              </span>
+            )}
+          </motion.button>
+        ))}
+      </div>
+
+      {/* ---- Tab content (animated swap) ---- */}
+      <AnimatePresence mode="wait">
+        {activeTab === "timeline" && (
+          <motion.div
+            key="timeline"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 flex flex-col"
+          >
+            <motion.div
+              key="resources-strip"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="overflow-hidden"
+            >
+              <ResourcesStrip
+                entries={entries}
+                mode={crewId ? "single" : "aggregate"}
+              />
+            </motion.div>
+            <div className="flex-1 min-h-0">
+              <LogsPanel
+                entries={entries}
+                timeRange={timeRange}
+                onTimeRangeChange={setTimeRange}
+                customRange={customRange}
+                onCustomRangeChange={setCustomRange}
+                crewScope={{ value: crewId, options: crews, onChange: onCrewChange }}
+                agentScope={{ value: agentId, options: agents, onChange: setAgentId }}
+                agentLookup={agentLookup}
+                showNetworkCard={showNetworkCard}
+                onServerSearch={setServerQuery}
+                onRefresh={handleRefresh}
+                loading={loading}
+                error={error}
+                refreshRate={refreshRate}
+                onRefreshRateChange={setRefreshRate}
+                live={live}
+                onLiveChange={setLive}
+                hasMore={Boolean(nextCursor)}
+                loadingMore={loadingMore}
+                cappedAt={entries.length >= JOURNAL_MAX_ENTRIES ? JOURNAL_MAX_ENTRIES : undefined}
+              />
+            </div>
+          </motion.div>
         )}
 
         {activeTab === "runs" && (
-          <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
+          <motion.div
+            key="runs"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-auto p-4"
+          >
+            <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
+          </motion.div>
         )}
 
-        {activeTab === "stats" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <BarChart3 className="h-3.5 w-3.5" />
-                Journal statistics
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-              <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center">
-                <Clock className="h-4 w-4 text-muted-foreground/60" />
-              </div>
-              <div className="text-sm font-medium text-foreground/80">Coming soon</div>
-              <div className="text-[11px] text-muted-foreground max-w-sm">
-                Breakdowns by entry type, crew, and time-of-day will land here. For
-                now, the Timeline tab surfaces the raw feed.
-              </div>
-            </CardContent>
-          </Card>
+        {activeTab === "eval" && (
+          <motion.div
+            key="eval"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-hidden"
+          >
+            <EvalView />
+          </motion.div>
         )}
-      </div>
 
-      {/* Filter rail — only meaningful for the Timeline tab. The Runs
-          tab brings its own filters (status / trigger), and Stats has
-          no filterable surface yet. */}
-      {activeTab === "timeline" && (
-        <JournalFilters workspaceId={workspaceId} value={filters} onChange={setFilters} />
-      )}
+        {activeTab === "audit" && isAdmin && (
+          <motion.div
+            key="audit"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-hidden"
+          >
+            <AuditView />
+          </motion.div>
+        )}
+
+        {activeTab === "spend" && isAdmin && (
+          <motion.div
+            key="spend"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-hidden"
+          >
+            <SpendView />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
-    </JournalLookupProvider>
   )
 }
 

@@ -21,10 +21,41 @@ import (
 	dockernetwork "github.com/docker/docker/api/types/network"
 )
 
+// FindCrewContainer is a non-mutating lookup for an existing crew
+// container by slug. Returns ("", false, nil) when none is found. Used
+// by Server.Start to re-register containers that survived a crewshipd
+// restart with the stats collector.
+func (p *Provider) FindCrewContainer(ctx context.Context, slug string) (string, bool, error) {
+	containerName := p.CrewContainerName(slug)
+	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return "", false, fmt.Errorf("list containers: %w", err)
+	}
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if name == "/"+containerName {
+				return c.ID, c.State == "running", nil
+			}
+		}
+	}
+	return "", false, nil
+}
+
 // EnsureCrewRuntime creates or starts a Docker container for the given crew.
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
+//
+// Calls are serialized per crew_id via Provider.crewLocks. A burst of
+// concurrent assignments to the same crew (e.g. 8 issues dispatched at
+// once) used to race between the "list → not found" and "create" steps,
+// with N-1 callers failing with `Conflict: name already in use`. The
+// per-crew mutex makes the second caller see the freshly-created
+// container and reuse it instead.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
+	mu := p.lockForCrew(team.ID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
 	// Ensure network exists (auto-recreate if deleted at runtime)
 	if p.cfg.Network != "" {
