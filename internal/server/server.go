@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
@@ -193,24 +194,29 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	sessionsStore := sessions.NewDBStore(deps.DB)
 	wsHub := ws.NewHub(logger, nil, jwtValidator, sessionsStore)
 
-	// File watcher broadcasts real-time file events to WebSocket clients
-	// on the crew:{crewID} channel.
+	// File watcher broadcasts real-time file events to WebSocket clients on
+	// the crew:{crewID} channel AND emits file.written journal entries so
+	// Crow's Nest's Filesystem panel actually fills. The journal pointer
+	// is loaded atomically per event because the journal writer is
+	// constructed later (it depends on deps.DB) — the pointer stays nil
+	// until the wiring block below stores it. Lazy load means we don't
+	// have to reorder construction.
+	var fileJournalPtr atomic.Pointer[journal.Writer]
 	fileWatcher := fileserver.NewWatcher(cfg.Storage.BasePath, logger, func(crewID string, event fileserver.FileEvent) {
 		wsHub.BroadcastChannel("crew", crewID, "file.event", event)
+		if j := fileJournalPtr.Load(); j != nil {
+			emitFileWrittenEntry(j, crewID, event, logger)
+		}
 	})
 
 	var statsCollector *StatsCollector
 	if ctr != nil {
 		statsCollector = NewStatsCollector(ctr, wsHub, logger, 5*time.Second)
-		// Wire the orchestrator so every crew-container create/reuse on the
-		// mission path also registers the container with the stats poller.
-		// Without this, only the direct-run path (handleAgentStart) registers
-		// containers and the dashboard's container resources tile stays empty
-		// for mission-driven runs.
-		sc := statsCollector
-		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
-			sc.Register(containerID, crewID, workspaceID)
-		})
+		// The orchestrator's stats-register callback is wired AFTER the
+		// Server struct is constructed (further down in this function)
+		// because the callback also needs to start the file watcher,
+		// which is a method on Server. See the SetStatsRegisterCallback
+		// call after `s := &Server{...}` below.
 	}
 
 	tokenPool := llmproxy.NewTokenPool(logger)
@@ -287,6 +293,20 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		s.db = deps.DB
 	}
 
+	// Wire the orchestrator's container-ready callback now that `s` is
+	// constructed. The callback fans out to two concerns: (1) register
+	// the container with the stats poller so container.metrics journal
+	// entries flow, (2) ensure the file watcher is running for the crew
+	// so file.written entries flow. Both are idempotent — repeated
+	// calls for the same container/crew are no-ops.
+	if statsCollector != nil {
+		sc := statsCollector
+		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
+			sc.Register(containerID, crewID, workspaceID)
+			s.ensureFileWatcher(crewID)
+		})
+	}
+
 	s.registerRoutes()
 	s.registerIPCRoutes()
 
@@ -318,6 +338,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if s.statsCollector != nil {
 			s.statsCollector.SetJournal(s.journalWriter)
 		}
+
+		// Wire the journal into the file watcher's lazy pointer so file
+		// events emitted by the fsnotify goroutine produce file.written
+		// journal entries. The closure above captured fileJournalPtr so
+		// this Store wakes up in-flight handlers without re-construction.
+		fileJournalPtr.Store(s.journalWriter)
 
 		// Wire the three orchestrator integration points (hooks dispatch,
 		// approval gate, episodic recall) now that the journal is
@@ -370,6 +396,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 				"fix", "export CREWSHIP_PUBLIC_URL=http://<reachable-host>:8080")
 		}
 		opts = append(opts, goapi.WithPortExposePublicURL(publicURL))
+		// Crew container Docker network — must match what the orchestrator
+		// attaches containers to. Without this, multi-instance dev.sh
+		// deployments (crewship-1-agents, crewship-2-agents, ...) would
+		// silently 502 every /expose-port call because the handler defaults
+		// to "crewship-agents" and the container is on a different bridge.
+		if cfg.Container.Network != "" {
+			opts = append(opts, goapi.WithPortExposeNetwork(cfg.Container.Network))
+		}
 		opts = append(opts, goapi.WithHub(wsHub))
 		opts = append(opts, goapi.WithOrchestrator(orch))
 		opts = append(opts, goapi.WithLogWriter(logW))

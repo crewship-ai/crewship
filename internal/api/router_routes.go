@@ -713,6 +713,9 @@ func (r *Router) registerRoutes() {
 	if r.portExposePublicURL != "" {
 		peCfg.PublicBaseURL = r.portExposePublicURL
 	}
+	if r.portExposeNetwork != "" {
+		peCfg.NetworkName = r.portExposeNetwork
+	}
 	var peInspector DockerInspector
 	if r.dockerClient != nil {
 		dc := r.dockerClient

@@ -111,6 +111,33 @@ func (sc *StatsCollector) Latest(containerID string) *provider.ContainerMetrics 
 	return sc.latest[containerID]
 }
 
+// TrackedContainer is the public projection of a registered crew container,
+// returned by Tracked() so sibling background workers (the listening-port
+// scanner, future audit jobs) can iterate the live set without touching
+// StatsCollector internals.
+type TrackedContainer struct {
+	ContainerID string
+	CrewID      string
+	WorkspaceID string
+}
+
+// Tracked snapshots the currently registered containers. The returned
+// slice is a copy so the caller can iterate without holding a lock.
+// Used by runListeningPortScanner to know which containers to probe.
+func (sc *StatsCollector) Tracked() []TrackedContainer {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	out := make([]TrackedContainer, 0, len(sc.tracked))
+	for _, t := range sc.tracked {
+		out = append(out, TrackedContainer{
+			ContainerID: t.ContainerID,
+			CrewID:      t.CrewID,
+			WorkspaceID: t.WorkspaceID,
+		})
+	}
+	return out
+}
+
 // LatestByCrewID looks up the container registered for the given crewID and
 // returns its latest metrics along with the container ID. This avoids trusting
 // a client-supplied container_id parameter.

@@ -85,6 +85,16 @@ func (s *Server) Start(ctx context.Context) error {
 		// to Docker events.
 		go runPortExposureScanner(ctx, s.db, s.journalWriter, s.logger)
 
+		// Crow's Nest listening-port scanner: every 15s, exec into each
+		// tracked crew container and read /proc/net/tcp{,6} to discover
+		// LISTEN sockets that the agent didn't go through /expose-port
+		// to register (python -m http.server, dev servers, etc.). Emits
+		// the same network.port_* journal types so the Network panel
+		// renders both sources uniformly.
+		if s.container != nil && s.statsCollector != nil {
+			go runListeningPortScanner(ctx, s.container, s.statsCollector, s.journalWriter, s.logger)
+		}
+
 		// Watch Roster offline sweeper: every 60s, flip agents idle >5min
 		// to offline. The transition itself emits agent.status_change so
 		// the journal records the timeout rather than silent disappearance.

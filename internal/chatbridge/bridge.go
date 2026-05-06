@@ -407,6 +407,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.containerMu.Lock()
 		b.containerCache[containerKey] = containerID
 		b.containerMu.Unlock()
+		// Hand the container to the stats collector so Crow's Nest's Resources
+		// panel actually fills (without this, chat-driven runs — the main
+		// path — would never produce container.metrics journal entries).
+		b.orch.RegisterStatsContainer(containerID, info.CrewID, info.WorkspaceID)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Container ready"})
 		b.logger.Info("team container ensured", "crew_id", info.CrewID, "container_id", truncateID(containerID, 12))
 	} else if containerID == "" {
