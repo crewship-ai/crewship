@@ -351,7 +351,9 @@ verify:
 	}
 
 	var resp VerifyResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
 	if resp.OK {
 		t.Errorf("expected ok=false on 401 from provider")
 	}
@@ -421,7 +423,9 @@ func TestConnectors_Verify_MCPOAuthIsNoOp(t *testing.T) {
 		t.Fatalf("status = %d", rr.Code)
 	}
 	var resp VerifyResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
 	if !resp.OK {
 		t.Errorf("mcp_oauth verify must be ok, got message: %s", resp.Message)
 	}
@@ -517,7 +521,9 @@ func TestConnectors_Install_BYOOAuth_ReturnsOAuthURL(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp InstallResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
 	if resp.NextStep != "oauth" {
 		t.Errorf("next_step = %q, want oauth", resp.NextStep)
 	}
@@ -553,7 +559,9 @@ func TestConnectors_Install_MCPOAuth_ReturnsMCPOAuthStep(t *testing.T) {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp InstallResponse
-	json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
 	if resp.NextStep != "mcp_oauth" {
 		t.Errorf("next_step = %q, want mcp_oauth", resp.NextStep)
 	}
