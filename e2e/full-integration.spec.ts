@@ -131,6 +131,20 @@ test.describe("B. Legacy redirects", () => {
     await page.goto("/agents")
     await page.waitForURL(/\/crews\/agents/, { timeout: 10_000 })
   })
+
+  test("/runs → /journal?tab=runs", async ({ page }) => {
+    await login(page)
+    await page.goto("/runs")
+    await page.waitForURL(/\/journal\?tab=runs/, { timeout: 10_000 })
+    expect(page.url()).toMatch(/\/journal\?tab=runs/)
+  })
+
+  test("/audit → /settings?tab=audit", async ({ page }) => {
+    await login(page)
+    await page.goto("/audit")
+    await page.waitForURL(/\/settings\?tab=audit/, { timeout: 10_000 })
+    expect(page.url()).toMatch(/\/settings\?tab=audit/)
+  })
 })
 
 // ---------------------------------------------------------------------------
