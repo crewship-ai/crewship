@@ -1034,6 +1034,22 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run ON scheduled_jobs(enabled
 	{version: 75, name: "add_backup_catalog_scope_level", sql: `
 ALTER TABLE backup_catalog ADD COLUMN scope_level TEXT NOT NULL DEFAULT 'standard';
 `},
+	// v76 — link an installed MCP server back to the catalog manifest
+	// it was created from. Nullable so existing rows (created before
+	// the catalog existed) and rows from the "Custom MCP server"
+	// escape hatch (no manifest) stay legal. Index is partial — we
+	// only ever query rows where the column is set.
+	//
+	// connector_id stores the manifest id (e.g. "linear", "github"),
+	// NOT a foreign-key reference: manifests live in code (embed.FS),
+	// not the database. Renames or removals from the catalog must be
+	// handled at the application layer (e.g. drift report on startup).
+	{version: 76, name: "add_workspace_mcp_connector_id", sql: `
+ALTER TABLE workspace_mcp_servers ADD COLUMN connector_id TEXT;
+ALTER TABLE crew_mcp_servers ADD COLUMN connector_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_workspace_mcp_connector_id ON workspace_mcp_servers(connector_id) WHERE connector_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_crew_mcp_connector_id ON crew_mcp_servers(connector_id) WHERE connector_id IS NOT NULL;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

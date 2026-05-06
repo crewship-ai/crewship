@@ -1,0 +1,34 @@
+# Filesystem — official MCP server for local file access, no remote
+# auth required (sandboxed to whichever paths the user grants). Real
+# package: @modelcontextprotocol/server-filesystem. Single field is the
+# path to expose, demonstrating the conn_string-ish pattern when no
+# secret is involved.
+#
+# https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
+#
+# Auth mode is "none" because the path is non-secret config; if it were
+# a credential we'd use conn_string + a derived block.
+id: filesystem
+name: Filesystem
+description: Read & write files inside a workspace-scoped path.
+category: storage
+brand:
+  logo: folder
+  color: "#0EA5E9"
+auth_mode: none
+fields:
+  - key: root_path
+    label: Root path
+    type: text
+    required: true
+    placeholder: /workspace/data
+    help: Absolute path on the agent container that the MCP server may read & write.
+mcp:
+  transport: stdio
+  command: npx
+  args:
+    - "-y"
+    - "@modelcontextprotocol/server-filesystem"
+    - "${field.root_path}"
+verify:
+  mcp_method: tools/list
