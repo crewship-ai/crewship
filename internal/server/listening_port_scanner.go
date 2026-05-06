@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strconv"
@@ -93,6 +94,15 @@ func runListeningPortScanner(
 				// Container may have been removed mid-cycle, paused, or
 				// /proc unreadable — debug-level, scanner moves on.
 				logger.Debug("listening-port scan failed", "container_id", tc.ContainerID, "err", err)
+				// Carry forward the prior observed ports for this
+				// container so a transient exec/read error doesn't trick
+				// the diff loop into emitting bogus port_closed (now)
+				// followed by port_opened (next cycle on recovery).
+				for k, v := range prev {
+					if k.ContainerID == tc.ContainerID {
+						current[k] = v
+					}
+				}
 				continue
 			}
 			for _, p := range ports {
@@ -146,7 +156,7 @@ func scanContainerListeningPorts(
 		Cmd:         []string{"sh", "-c", `for f in /proc/net/tcp /proc/net/tcp6; do [ -r "$f" ] && cat "$f"; done`},
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("exec /proc/net/tcp scan for container %s: %w", containerID, err)
 	}
 	defer func() {
 		if res != nil && res.Reader != nil {
@@ -165,7 +175,7 @@ func scanContainerListeningPorts(
 		seen[port] = struct{}{}
 	}
 	if err := scanner.Err(); err != nil && err != io.EOF {
-		return nil, err
+		return nil, fmt.Errorf("parse /proc/net/tcp scan output for container %s: %w", containerID, err)
 	}
 
 	out := make([]int, 0, len(seen))
