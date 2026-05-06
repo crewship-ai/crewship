@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
-import { useParams } from "next/navigation"
 import Link from "next/link"
 import {
+  Activity,
   ArrowLeft,
   Binoculars,
   FolderTree,
@@ -30,6 +30,7 @@ import { useJournalStream } from "@/hooks/use-journal-stream"
 import { NetworkPanel } from "@/components/features/crows-nest/network-panel"
 import { FilesystemPanel } from "@/components/features/crows-nest/filesystem-panel"
 import { ResourceSparklines } from "@/components/features/crows-nest/resource-sparklines"
+import { ActivityPanel } from "@/components/features/crows-nest/activity-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { JournalEntry } from "@/lib/types/journal"
 
@@ -47,17 +48,70 @@ interface Crew {
   _count?: { agents: number }
 }
 
+// Types subscribed to by the page. The first 7 feed the dedicated panels
+// (Terminal / Network / Resources / Filesystem). The rest power the
+// Activity feed so the page surfaces something useful even when the
+// container.metrics + file.written emitters aren't wired yet — see the
+// follow-up tracked in PR #272 / Crow's Nest emit gaps.
 const OBSERVABILITY_TYPES = [
+  // Terminal
   "exec.command",
   "exec.output_chunk",
+  // Network
   "network.port_opened",
   "network.port_closed",
   "network.egress",
+  // Filesystem (emitter not yet wired)
   "file.written",
+  // Resources (emitter not yet wired)
   "container.metrics",
+  // Activity feed — broader signal of what the crew is doing
+  "container.snapshot",
+  "agent.status_change",
+  "run.started",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "peer.conversation",
+  "peer.escalation",
+  "keeper.request",
+  "keeper.decision",
+  "mission.status_change",
+  "assignment.created",
+  "assignment.completed",
+  "assignment.failed",
+  "task.delegated",
+  "approval.requested",
+  "approval.granted",
+  "approval.denied",
+  "cost.incurred",
+  "budget.warning",
+  "budget.exceeded",
+  "skill.assigned",
+  "memory.updated",
+  "system.compaction",
 ].join(",")
 
 type SeverityFilter = "all" | "info" | "notice" | "warn" | "error"
+
+/**
+ * Read the crew id from the live URL after client hydration.
+ *
+ * useParams() is unreliable in Next.js static export: layout.tsx prerenders
+ * with [{ crewId: "_" }] and useParams returns "_" for the prerendered file
+ * even after the user navigates to /crows-nest/<real-id>. Pulling from
+ * window.location.pathname bypasses that and gives us the real id. Same
+ * pattern as chat/[agentSlug]/chat-page-client.tsx.
+ */
+function useCrewIdFromUrl(): string | null {
+  const [id, setId] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const m = window.location.pathname.match(/^\/crows-nest\/([^/]+)\/?$/)
+    if (m) setId(decodeURIComponent(m[1]))
+  }, [])
+  return id
+}
 
 /**
  * Crow's Nest — live observability dashboard for a single crew container.
@@ -70,7 +124,7 @@ type SeverityFilter = "all" | "info" | "notice" | "warn" | "error"
  * filesystem). Admin-only.
  */
 export default function CrowsNestCrewPage() {
-  const params = useParams<{ crewId: string }>()
+  const crewId = useCrewIdFromUrl()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { role, loading: rolesLoading } = useAbilities()
   const isMobile = useIsMobile()
@@ -86,20 +140,19 @@ export default function CrowsNestCrewPage() {
   }, [isMobile])
 
   const queryParams = useMemo(
-    () => ({
-      crew_id: params.crewId,
-      entry_type: OBSERVABILITY_TYPES,
-    }),
-    [params.crewId],
+    () => (crewId ? { crew_id: crewId, entry_type: OBSERVABILITY_TYPES } : undefined),
+    [crewId],
   )
 
   // Seed the panels with history via the list endpoint; then stream in new
-  // entries. `prependLive` dedupes so we never double-render.
+  // entries. `prependLive` dedupes so we never double-render. Both hooks
+  // stay disabled until the crewId is resolved from the URL so we don't
+  // fire a fetch with crew_id="_" against the prerendered placeholder.
   const { entries: historyEntries, prependLive } = useJournalList({
     workspaceId,
     params: queryParams,
     limit: 200,
-    enabled: !wsLoading,
+    enabled: !wsLoading && !!workspaceId && !!crewId,
   })
 
   // Keep a separate, time-capped buffer so the resource sparklines only see a
@@ -119,7 +172,7 @@ export default function CrowsNestCrewPage() {
   const { status: streamStatus } = useJournalStream({
     workspaceId,
     params: queryParams,
-    enabled: !wsLoading && !!workspaceId,
+    enabled: !wsLoading && !!workspaceId && !!crewId,
     onEntry: handleLive,
   })
 
@@ -153,7 +206,7 @@ export default function CrowsNestCrewPage() {
 
   // Fetch current crew + sibling crews for the sidebar picker.
   useEffect(() => {
-    if (!workspaceId || !params.crewId) {
+    if (!workspaceId || !crewId) {
       if (!wsLoading) setCrewLoading(false)
       return
     }
@@ -161,7 +214,7 @@ export default function CrowsNestCrewPage() {
     ;(async () => {
       try {
         const [crewRes, listRes] = await Promise.all([
-          fetch(`/api/v1/crews/${encodeURIComponent(params.crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`),
+          fetch(`/api/v1/crews/${encodeURIComponent(crewId)}?workspace_id=${encodeURIComponent(workspaceId)}`),
           fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`),
         ])
         if (crewRes.ok) {
@@ -188,9 +241,9 @@ export default function CrowsNestCrewPage() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId, wsLoading, params.crewId])
+  }, [workspaceId, wsLoading, crewId])
 
-  if (wsLoading || rolesLoading || crewLoading) {
+  if (wsLoading || rolesLoading || crewLoading || !crewId) {
     return (
       <div className="flex items-center justify-center py-20 text-muted-foreground">
         <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading…
@@ -218,7 +271,7 @@ export default function CrowsNestCrewPage() {
   // "IDLE" when entries are actually arriving is more confusing than the
   // subtle difference in transport.
   const sseConnected = streamStatus === "connected" || streamStatus === "polling"
-  const crewSlug = crew?.slug ?? params.crewId.slice(0, 6)
+  const crewSlug = crew?.slug ?? crewId.slice(0, 6)
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
@@ -283,7 +336,7 @@ export default function CrowsNestCrewPage() {
                       <li className="text-[11px] text-muted-foreground px-2 py-1">No crews.</li>
                     ) : (
                       allCrews.map((c) => {
-                        const active = c.id === params.crewId
+                        const active = c.id === crewId
                         return (
                           <li key={c.id}>
                             <Link
@@ -371,7 +424,13 @@ export default function CrowsNestCrewPage() {
               </CardContent>
             </Card>
 
-            <div className="grid gap-3 grid-rows-2 min-h-[640px] lg:min-h-0">
+            {/* Right column: Resources sparkline (top, compact),
+                Filesystem (middle, compact), Activity feed (bottom,
+                takes the remaining height). All three feeds are
+                live — Resources via stats collector, Filesystem via
+                fsnotify watcher, Activity via the broad event-type
+                subscription on the journal stream. */}
+            <div className="grid gap-3 grid-rows-[200px_200px_minmax(0,1fr)] min-h-[700px] lg:min-h-0">
               <Card className="py-0 gap-0 flex flex-col overflow-hidden">
                 <CardHeader className="px-3 py-2 border-b border-border/50">
                   <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -390,6 +449,16 @@ export default function CrowsNestCrewPage() {
                 </CardHeader>
                 <CardContent className="p-0 flex-1 min-h-0 overflow-auto">
                   <FilesystemPanel entries={filteredEntries} />
+                </CardContent>
+              </Card>
+              <Card className="py-0 gap-0 flex flex-col overflow-hidden">
+                <CardHeader className="px-3 py-2 border-b border-border/50">
+                  <CardTitle className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Activity className="h-3 w-3 opacity-70" /> Activity
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 flex-1 min-h-0">
+                  <ActivityPanel entries={filteredEntries} />
                 </CardContent>
               </Card>
             </div>

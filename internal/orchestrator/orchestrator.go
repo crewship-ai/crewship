@@ -543,6 +543,27 @@ func (o *Orchestrator) SetStatsRegisterCallback(fn StatsRegisterFunc) {
 	o.statsRegister = fn
 }
 
+// RegisterStatsContainer hands a container off to the stats collector for
+// metric polling + container.metrics journal emit. Safe to call repeatedly
+// for the same container (the collector dedupes). No-op when the callback
+// hasn't been wired (tests / dry-run) or workspaceID is empty.
+//
+// chat-driven runs that go through chatbridge call EnsureCrewRuntime
+// directly (they need extra CrewConfig fields like PostStartCommands that
+// GetOrCreateContainer doesn't accept) — they MUST also call this so
+// Crow's Nest's Resources panel actually fills with data.
+func (o *Orchestrator) RegisterStatsContainer(containerID, crewID, workspaceID string) {
+	if containerID == "" || workspaceID == "" {
+		return
+	}
+	o.mu.RLock()
+	reg := o.statsRegister
+	o.mu.RUnlock()
+	if reg != nil {
+		reg(containerID, crewID, workspaceID)
+	}
+}
+
 // SetSidecarEnabled enables the sidecar proxy for credential injection.
 // When enabled, credentials are NOT passed via env vars. Instead, a sidecar
 // proxy is started inside the container that intercepts HTTP requests and

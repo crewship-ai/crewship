@@ -73,6 +73,7 @@ type Router struct {
 	featureCacheDir        string
 	portExposeRegistry     *PortExposeRegistry // closed via Shutdown() on server stop
 	portExposePublicURL    string              // e.g. http://10.0.0.1:8080, used to build capability URLs
+	portExposeNetwork      string              // Docker bridge name; falls back to handler default when empty
 	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
 	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
 	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)

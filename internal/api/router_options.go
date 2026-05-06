@@ -53,6 +53,19 @@ func WithPortExposePublicURL(u string) RouterOption {
 	}
 }
 
+// WithPortExposeNetwork overrides the Docker bridge name the port-expose
+// handler probes for the agent container's IP. The default
+// ("crewship-agents") only matches single-instance dev deployments;
+// multi-instance setups (dev.sh) suffix the network with the instance
+// number ("crewship-1-agents"), and a misconfigured deployment otherwise
+// silently 502s every /expose-port call with "container not reachable
+// on crew network". Should match cfg.Container.Network.
+func WithPortExposeNetwork(name string) RouterOption {
+	return func(r *Router) {
+		r.portExposeNetwork = name
+	}
+}
+
 // WithHub attaches a WebSocket hub for real-time event broadcasting to connected clients.
 func WithHub(hub *ws.Hub) RouterOption {
 	return func(r *Router) {
