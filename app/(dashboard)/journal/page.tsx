@@ -415,6 +415,15 @@ export default function JournalPage() {
           </Badge>
         )}
         {activeTab === "timeline" && <StreamStatusBadge status={streamStatus} />}
+        {activeTab === "timeline" && (
+          <AnomalyBadge
+            entries={entries}
+            onClick={() => {
+              setSeverity("error")
+              setTimeRange("5m")
+            }}
+          />
+        )}
         <div className="flex-1" />
       </div>
 
@@ -512,6 +521,9 @@ export default function JournalPage() {
                 onMutedChange={setMuted}
                 traceId={traceId}
                 onClearTraceId={() => setTraceId("")}
+                onSelectTrace={setTraceId}
+                onSelectAgent={setAgentId}
+                onSelectCrew={onCrewChange}
                 onServerSearch={setServerQuery}
                 onRefresh={handleRefresh}
                 loading={loading}
@@ -542,6 +554,56 @@ export default function JournalPage() {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+/**
+ * Live error/warn count over the last ANOMALY_WINDOW_MS milliseconds,
+ * surfaced as a pulsing red pill in the header. Acts as a "you should
+ * look at this" signal so a viewer scrolling through routine
+ * exec.command + container.metrics traffic doesn't miss a fresh
+ * cluster of failures. Clicking jumps the filter to severity=error +
+ * time=5m so the pill always resolves to a useful narrowed view.
+ *
+ * Threshold (ANOMALY_THRESHOLD) deliberately starts low (>= 3) — false
+ * positives here are cheap (a quick glance) and false negatives are
+ * not (a missed cluster of run.failed events).
+ */
+const ANOMALY_WINDOW_MS = 5 * 60 * 1000
+const ANOMALY_THRESHOLD = 3
+
+function AnomalyBadge({
+  entries,
+  onClick,
+}: {
+  entries: Array<{ ts: string; severity?: string }>
+  onClick: () => void
+}) {
+  const errCount = useMemo(() => {
+    const cutoff = Date.now() - ANOMALY_WINDOW_MS
+    let n = 0
+    for (const e of entries) {
+      if (e.severity !== "error" && e.severity !== "warn") continue
+      const t = Date.parse(e.ts)
+      if (Number.isFinite(t) && t >= cutoff) n++
+    }
+    return n
+  }, [entries])
+  if (errCount < ANOMALY_THRESHOLD) return null
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 h-5 px-2 rounded-full border border-red-500/40 bg-red-500/10 text-[10px] font-mono text-red-300 hover:bg-red-500/20 transition-colors"
+      title={`${errCount} error/warn events in the last 5 minutes — click to focus`}
+    >
+      <span className="relative inline-flex">
+        <span className="absolute inline-flex h-1.5 w-1.5 rounded-full bg-red-400 opacity-75 animate-ping" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-400" />
+      </span>
+      <span className="tabular-nums">{errCount}</span>
+      <span className="opacity-80">in 5m</span>
+    </button>
   )
 }
 
