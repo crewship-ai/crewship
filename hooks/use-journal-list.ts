@@ -9,6 +9,12 @@ interface UseJournalListOptions {
   /** Page size; backend caps at 500. */
   limit?: number
   enabled?: boolean
+  /**
+   * Cap the in-memory entries buffer. When set, `prependLive` trims the
+   * tail past `maxEntries` so a chatty SSE stream doesn't grow memory
+   * unbounded. Pagination via `loadMore` ignores the cap (user-driven).
+   */
+  maxEntries?: number
 }
 
 interface UseJournalListResult {
@@ -31,7 +37,12 @@ interface UseJournalListResult {
  * `paramsKey` changes rather than requiring callers to remount.
  */
 export function useJournalList(opts: UseJournalListOptions): UseJournalListResult {
-  const { workspaceId, params, limit = 100, enabled = true } = opts
+  // Backend caps page size at 500. The default used to be 100 but that
+  // triggered scroll-load round-trips on every glance through the list.
+  // Grafana / Elastic Discover behaviour: pick a time range, fetch
+  // everything in it. 500 per request × eager pagination at the page
+  // level → user sees all events for the active window.
+  const { workspaceId, params, limit = 500, enabled = true, maxEntries } = opts
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -127,12 +138,23 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
     }
   }, [nextCursor, loadingMore, workspaceId, buildParams])
 
+  // Normalize once outside prependLive so the validation cost isn't
+  // paid on every SSE event. NaN / negative / non-finite values
+  // disable the cap; 0 is treated as a hard cap (drop everything).
+  const cap = (() => {
+    if (maxEntries === undefined) return undefined
+    if (!Number.isFinite(maxEntries) || maxEntries < 0) return undefined
+    return Math.floor(maxEntries)
+  })()
+
   const prependLive = useCallback((entry: JournalEntry) => {
     setEntries((prev) => {
       if (prev.some((e) => e.id === entry.id)) return prev
-      return [entry, ...prev]
+      const next = [entry, ...prev]
+      if (cap !== undefined && next.length > cap) next.length = cap
+      return next
     })
-  }, [])
+  }, [cap])
 
   useEffect(() => {
     if (!enabled || !workspaceId) {

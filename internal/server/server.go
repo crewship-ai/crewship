@@ -38,8 +38,6 @@ import (
 )
 
 // Server is the main crewship process, wiring together the HTTP server, IPC
-
-// Server is the main crewship process, wiring together the HTTP server, IPC
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 
 type Server struct {
@@ -75,6 +73,13 @@ type Server struct {
 	startedAt         time.Time
 	runCtx            context.Context
 	runCancel         context.CancelFunc
+
+	// fileJournalPtr is the pointer the file-watcher closure dereferences
+	// to emit file.written entries. Stored on the struct (instead of a
+	// local in New()) so Shutdown can clear it BEFORE journalWriter.Close
+	// — otherwise a late filesystem event could try to emit through a
+	// draining/closed writer.
+	fileJournalPtr atomic.Pointer[journal.Writer]
 }
 
 // Deps holds the external dependencies injected into the server at startup.
@@ -197,14 +202,22 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// File watcher broadcasts real-time file events to WebSocket clients on
 	// the crew:{crewID} channel AND emits file.written journal entries so
 	// Crow's Nest's Filesystem panel actually fills. The journal pointer
-	// is loaded atomically per event because the journal writer is
-	// constructed later (it depends on deps.DB) — the pointer stays nil
-	// until the wiring block below stores it. Lazy load means we don't
-	// have to reorder construction.
-	var fileJournalPtr atomic.Pointer[journal.Writer]
+	// lives on the Server struct (initialized below) because the journal
+	// writer is constructed later (it depends on deps.DB), and Shutdown
+	// needs to be able to clear the pointer before journalWriter.Close so
+	// a late filesystem event doesn't try to emit through a draining
+	// writer.
+	//
+	// We declare a sentinel here that closures over `serverPtr` (set
+	// below after the Server is constructed) so the closure dereferences
+	// the per-Server atomic instead of a local.
+	var serverPtr *Server
 	fileWatcher := fileserver.NewWatcher(cfg.Storage.BasePath, logger, func(crewID string, event fileserver.FileEvent) {
 		wsHub.BroadcastChannel("crew", crewID, "file.event", event)
-		if j := fileJournalPtr.Load(); j != nil {
+		if serverPtr == nil {
+			return
+		}
+		if j := serverPtr.fileJournalPtr.Load(); j != nil {
 			emitFileWrittenEntry(j, crewID, event, logger)
 		}
 	})
@@ -292,6 +305,23 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	if deps != nil {
 		s.db = deps.DB
 	}
+	// Promote the closure's view of the server now that it exists.
+	// The file-watcher closure declared above reads via this pointer.
+	serverPtr = s
+
+	// Wire the orchestrator's container-ready callback now that `s` is
+	// constructed. The callback fans out to two concerns: (1) register
+	// the container with the stats poller so container.metrics journal
+	// entries flow, (2) ensure the file watcher is running for the crew
+	// so file.written entries flow. Both are idempotent — repeated
+	// calls for the same container/crew are no-ops.
+	if statsCollector != nil {
+		sc := statsCollector
+		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
+			sc.Register(containerID, crewID, workspaceID)
+			s.ensureFileWatcher(crewID)
+		})
+	}
 
 	// Wire the orchestrator's container-ready callback now that `s` is
 	// constructed. The callback fans out to two concerns: (1) register
@@ -341,9 +371,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 		// Wire the journal into the file watcher's lazy pointer so file
 		// events emitted by the fsnotify goroutine produce file.written
-		// journal entries. The closure above captured fileJournalPtr so
+		// journal entries. The closure above reads s.fileJournalPtr so
 		// this Store wakes up in-flight handlers without re-construction.
-		fileJournalPtr.Store(s.journalWriter)
+		s.fileJournalPtr.Store(s.journalWriter)
 
 		// Wire the three orchestrator integration points (hooks dispatch,
 		// approval gate, episodic recall) now that the journal is

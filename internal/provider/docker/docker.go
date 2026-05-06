@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
@@ -67,6 +68,24 @@ type Provider struct {
 	// provisioner uses identical semantics — one source of truth for
 	// "is my local copy stale?".
 	digestResolver *dockerutil.DigestResolver
+
+	// crewLocks serializes concurrent EnsureCrewRuntime calls per crew_id.
+	// Without this, a burst of N assignments to the same crew (e.g. 8
+	// issues dispatched at once) races between "list containers → not
+	// found" and "container create" — N-1 of them fail with
+	// `Conflict: container name already in use`. Different crews still
+	// run in parallel.
+	crewLocks sync.Map // crew_id (string) → *sync.Mutex
+}
+
+// lockForCrew returns the mutex for a given crew, creating it on first
+// use. Cheap: load from sync.Map first, only LoadOrStore if missing.
+func (p *Provider) lockForCrew(crewID string) *sync.Mutex {
+	if mu, ok := p.crewLocks.Load(crewID); ok {
+		return mu.(*sync.Mutex)
+	}
+	actual, _ := p.crewLocks.LoadOrStore(crewID, &sync.Mutex{})
+	return actual.(*sync.Mutex)
 }
 
 // socketCandidate is a socket path + label for auto-detection.
