@@ -169,11 +169,15 @@ export function SkillsBrowser() {
     return () => ro.disconnect()
   }, [])
   const railWidthPx = railCollapsed ? RAIL_COLLAPSED_PX : RAIL_OPEN_PX
+  // Effective max only clamps the upper bound — no DETAIL_MIN_PX floor.
+  // Flooring at 280 inflates the panel back up when the viewport is
+  // tight (e.g. 800px wide with the rail open, only 180px available),
+  // which then squeezes the centre column under its 360px minimum —
+  // the exact symptom this clamp was meant to prevent. If the panel
+  // gets uncomfortably narrow, the user can collapse the rail to reclaim
+  // space; we don't auto-pump the max.
   const detailMaxEffective = gridWidth > 0
-    ? Math.max(
-        DETAIL_MIN_PX,
-        Math.min(DETAIL_HARD_MAX_PX, gridWidth - railWidthPx - CENTRE_MIN_PX),
-      )
+    ? Math.min(DETAIL_HARD_MAX_PX, Math.max(0, gridWidth - railWidthPx - CENTRE_MIN_PX))
     : DETAIL_HARD_MAX_PX
   // Drag handler reads the latest effective max via ref so a viewport
   // resize mid-drag clamps to the new bound without re-binding the
