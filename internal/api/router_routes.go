@@ -63,6 +63,13 @@ func (r *Router) registerRoutes() {
 	if r.keeperContainer != nil {
 		backupH.SetCrewContainerName(r.keeperContainer.CrewContainerName)
 	}
+	// Dual-emit backup admin actions (create / delete / unlock / rotate
+	// / download / restore) into the unified Crew Journal alongside the
+	// audit_logs row that WriteAuditLog already writes. Skipped silently
+	// when the router has no journal emitter (early bring-up paths).
+	if r.journal != nil {
+		backupH.SetJournal(r.journal)
+	}
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
@@ -549,6 +556,12 @@ func (r *Router) registerRoutes() {
 	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.featureCacheDir, r.hub)
 	r.provisioning = provisioning
+	// Mirror provisioning lifecycle (queued / building / complete /
+	// failed) into the unified Crew Journal alongside the existing WS
+	// broadcast. Skipped when no journal is wired (early bring-up).
+	if r.journal != nil {
+		provisioning.SetJournal(r.journal)
+	}
 	r.mux.Handle("GET /api/v1/features/catalog", authed(http.HandlerFunc(provisioning.CatalogList)))
 	r.mux.Handle("GET /api/v1/runtimes/catalog", authed(http.HandlerFunc(provisioning.RuntimeCatalogList)))
 
@@ -691,6 +704,14 @@ func (r *Router) registerRoutes() {
 		WithConversations(r.keeperConvReader)
 	if r.hub != nil {
 		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
+	}
+	// Mirror keeper.request / keeper.decision into the unified Crew
+	// Journal so credential-access events surface in the Timeline
+	// alongside operational events. The keeper_requests table remains
+	// the source of truth for the dedicated keeper UI; this is purely
+	// additive observability.
+	if r.journal != nil {
+		keeperH.SetJournal(r.journal)
 	}
 	r.mux.Handle("POST /api/v1/internal/keeper/request", internalAuth(http.HandlerFunc(keeperH.HandleRequest)))
 	r.mux.Handle("GET /api/v1/internal/keeper/request/{requestId}", internalAuth(http.HandlerFunc(keeperH.GetRequest)))

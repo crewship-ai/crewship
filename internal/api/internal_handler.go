@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // buildEthosBlock returns the [CREWSHIP ETHOS] system prompt block.
@@ -29,8 +32,23 @@ func buildEthosBlock(agentRole string) string {
 	return "[CREWSHIP ETHOS]\n" + roleText
 }
 
-// WriteAuditLog records an action in the audit_logs table. It is safe to call from any goroutine.
-func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {
+// WriteAuditLog records an action in the audit_logs table. It is safe
+// to call from any goroutine.
+//
+// When `j` is non-nil it ALSO emits a typed audit.entity_* journal
+// entry so the same record surfaces in the unified Crew Journal /
+// Timeline alongside operational events. Pass `nil` (or
+// noopEmitter{}) to skip journal emit — the audit_logs row still
+// lands as before.
+//
+// Why dual-write instead of dropping audit_logs entirely: the legacy
+// `/api/v1/audit` query path is what the Settings → Audit Log surface
+// reads from (with category filters, CSV export, IP/UA expansion).
+// Replicating those affordances on top of journal_entries would be a
+// bigger rewrite than the value justifies, so we keep both: audit_logs
+// for the dedicated compliance view, journal_entries for the unified
+// timeline.
+func WriteAuditLog(ctx context.Context, db *sql.DB, j journal.Emitter, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	metaJSON := "{}"
 	if metadata != nil {
@@ -45,6 +63,68 @@ func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID
 	if err != nil {
 		slog.Warn("audit log write failed", "error", err, "action", action)
 	}
+	if j == nil {
+		return
+	}
+	// Map free-form action verbs onto a fixed set of typed audit entry
+	// types so the journal stays queryable by category. Anything that
+	// doesn't match a known prefix lands as audit.entity_updated, which
+	// is the safe default — a generic "the entity changed" event.
+	entryType := classifyAuditAction(action)
+	payload := map[string]any{
+		"action":      action,
+		"entity_type": entityType,
+		"entity_id":   entityID,
+	}
+	if metadata != nil {
+		payload["metadata"] = metadata
+	}
+	actorType := journal.ActorUser
+	if userID == "" {
+		actorType = journal.ActorSystem
+	}
+	if _, emitErr := j.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		Type:        entryType,
+		Severity:    journal.SeverityNotice,
+		ActorType:   actorType,
+		ActorID:     userID,
+		Summary:     fmt.Sprintf("%s %s %s", action, entityType, shortenID(entityID, 12)),
+		Payload:     payload,
+		Refs:        map[string]any{"entity_type": entityType, "entity_id": entityID},
+	}); emitErr != nil {
+		slog.Warn("audit journal emit failed", "error", emitErr, "action", action)
+	}
+}
+
+// classifyAuditAction maps a free-form audit action verb (e.g.
+// "create", "backup.delete", "credential.rotate") onto one of the four
+// typed audit.entity_* journal entry types. Unknown verbs fall to
+// audit.entity_updated — chosen as the safe default because it implies
+// "something about this entity changed" without claiming to be a
+// creation or destruction we don't have evidence for.
+func classifyAuditAction(action string) journal.EntryType {
+	a := strings.ToLower(action)
+	switch {
+	case strings.Contains(a, "delete") || strings.Contains(a, "remove") || strings.Contains(a, "revoke"):
+		return journal.EntryAuditEntityDeleted
+	case strings.Contains(a, "restore") || strings.Contains(a, "unlock"):
+		return journal.EntryAuditEntityRestored
+	case strings.Contains(a, "create") || strings.Contains(a, "invite") || a == "backup.create":
+		return journal.EntryAuditEntityCreated
+	default:
+		return journal.EntryAuditEntityUpdated
+	}
+}
+
+// shortenID shortens an opaque id for inclusion in a human-readable
+// audit summary. The first 12 hex chars of a UUID are unique enough to
+// disambiguate while keeping summaries scannable in the Timeline.
+func shortenID(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
 
 // decryptCredential is a shared helper that decrypts an encrypted credential value.

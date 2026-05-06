@@ -18,13 +18,26 @@ type Query struct {
 	CrewID      string
 	AgentID     string
 	MissionID   string
-	Types       []EntryType
-	Severities  []Severity
-	Priorities  []Priority // empty → any priority; use to surface only 'permanent'+'high'+'pin' etc.
-	Since       time.Time
-	Until       time.Time
-	Cursor      string // opaque — set from a prior page's last entry ID+TS
-	Limit       int
+	// CrewIDs / AgentIDs are multi-valued counterparts to CrewID /
+	// AgentID. When non-empty they take precedence — the SQL emits an
+	// IN-clause covering every supplied id. Single-valued fields are
+	// kept for backwards compatibility with existing call sites.
+	CrewIDs    []string
+	AgentIDs   []string
+	Types      []EntryType
+	// ExcludeTypes filters out entries of the listed types. Useful for
+	// "show me everything except container.metrics" without having to
+	// maintain a 50-element inclusion list. Combines AND with Types
+	// (the matching set is `Types` minus `ExcludeTypes`).
+	ExcludeTypes []EntryType
+	Severities   []Severity
+	ActorTypes   []ActorType // empty → any actor; use to filter by user/agent/system/keeper
+	Priorities   []Priority  // empty → any priority; use to surface only 'permanent'+'high'+'pin' etc.
+	TraceID      string      // when set, narrows to a single run (run.* + every span sharing trace_id)
+	Since        time.Time
+	Until        time.Time
+	Cursor       string // opaque — set from a prior page's last entry ID+TS
+	Limit        int
 
 	// FTSQuery is a free-text search applied via the journal_entries_fts
 	// virtual table (migration 55). When non-empty, List joins the FTS5
@@ -68,17 +81,35 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	conds = append(conds, "workspace_id = ?")
 	args = append(args, q.WorkspaceID)
 
-	if q.CrewID != "" {
+	if len(q.CrewIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(q.CrewIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "crew_id IN ("+placeholders+")")
+		for _, id := range q.CrewIDs {
+			args = append(args, id)
+		}
+	} else if q.CrewID != "" {
 		conds = append(conds, "crew_id = ?")
 		args = append(args, q.CrewID)
 	}
-	if q.AgentID != "" {
+	if len(q.AgentIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(q.AgentIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "agent_id IN ("+placeholders+")")
+		for _, id := range q.AgentIDs {
+			args = append(args, id)
+		}
+	} else if q.AgentID != "" {
 		conds = append(conds, "agent_id = ?")
 		args = append(args, q.AgentID)
 	}
 	if q.MissionID != "" {
 		conds = append(conds, "mission_id = ?")
 		args = append(args, q.MissionID)
+	}
+	if q.TraceID != "" {
+		conds = append(conds, "trace_id = ?")
+		args = append(args, q.TraceID)
 	}
 	if len(q.Types) > 0 {
 		placeholders := strings.Repeat("?,", len(q.Types))
@@ -88,12 +119,28 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 			args = append(args, string(t))
 		}
 	}
+	if len(q.ExcludeTypes) > 0 {
+		placeholders := strings.Repeat("?,", len(q.ExcludeTypes))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "entry_type NOT IN ("+placeholders+")")
+		for _, t := range q.ExcludeTypes {
+			args = append(args, string(t))
+		}
+	}
 	if len(q.Severities) > 0 {
 		placeholders := strings.Repeat("?,", len(q.Severities))
 		placeholders = placeholders[:len(placeholders)-1]
 		conds = append(conds, "severity IN ("+placeholders+")")
 		for _, s := range q.Severities {
 			args = append(args, string(s))
+		}
+	}
+	if len(q.ActorTypes) > 0 {
+		placeholders := strings.Repeat("?,", len(q.ActorTypes))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "actor_type IN ("+placeholders+")")
+		for _, a := range q.ActorTypes {
+			args = append(args, string(a))
 		}
 	}
 	if len(q.Priorities) > 0 {
@@ -288,17 +335,35 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 		conds = []string{"workspace_id = ?"}
 		args  = []any{q.WorkspaceID}
 	)
-	if q.CrewID != "" {
+	if len(q.CrewIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(q.CrewIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "crew_id IN ("+placeholders+")")
+		for _, id := range q.CrewIDs {
+			args = append(args, id)
+		}
+	} else if q.CrewID != "" {
 		conds = append(conds, "crew_id = ?")
 		args = append(args, q.CrewID)
 	}
-	if q.AgentID != "" {
+	if len(q.AgentIDs) > 0 {
+		placeholders := strings.Repeat("?,", len(q.AgentIDs))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "agent_id IN ("+placeholders+")")
+		for _, id := range q.AgentIDs {
+			args = append(args, id)
+		}
+	} else if q.AgentID != "" {
 		conds = append(conds, "agent_id = ?")
 		args = append(args, q.AgentID)
 	}
 	if q.MissionID != "" {
 		conds = append(conds, "mission_id = ?")
 		args = append(args, q.MissionID)
+	}
+	if q.TraceID != "" {
+		conds = append(conds, "trace_id = ?")
+		args = append(args, q.TraceID)
 	}
 	// Mirror List's Type / Severity / Until filters so Count matches
 	// the result set you'd actually paginate through. Previously Count
@@ -312,12 +377,28 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 			args = append(args, string(t))
 		}
 	}
+	if len(q.ExcludeTypes) > 0 {
+		placeholders := strings.Repeat("?,", len(q.ExcludeTypes))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "entry_type NOT IN ("+placeholders+")")
+		for _, t := range q.ExcludeTypes {
+			args = append(args, string(t))
+		}
+	}
 	if len(q.Severities) > 0 {
 		placeholders := strings.Repeat("?,", len(q.Severities))
 		placeholders = placeholders[:len(placeholders)-1]
 		conds = append(conds, "severity IN ("+placeholders+")")
 		for _, s := range q.Severities {
 			args = append(args, string(s))
+		}
+	}
+	if len(q.ActorTypes) > 0 {
+		placeholders := strings.Repeat("?,", len(q.ActorTypes))
+		placeholders = placeholders[:len(placeholders)-1]
+		conds = append(conds, "actor_type IN ("+placeholders+")")
+		for _, a := range q.ActorTypes {
+			args = append(args, string(a))
 		}
 	}
 	if len(q.Priorities) > 0 {
