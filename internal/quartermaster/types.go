@@ -12,6 +12,16 @@
 // "Replay" in this package means observational replay — rehydrate the
 // trajectory from the journal and recompute metrics. Re-executing agents
 // end-to-end is a later tier (Tier 4) and not in scope here.
+//
+// NICE-TO-HAVE / parked: the Eval surface in /journal was removed when
+// it became clear no production missions had been replayed yet, so the
+// dashboard always rendered an empty state. The emit machinery here
+// (Replay, Compare, RegressionReport) is intentionally preserved — when
+// at least two production missions exist worth comparing across model
+// versions, restore the Eval tab + view in `app/(dashboard)/journal/page.tsx`
+// and route POST /api/v1/eval/replay from a "Replay this mission" button
+// on the mission detail page. No code here needs to change to bring
+// that surface back.
 package quartermaster
 
 import "time"

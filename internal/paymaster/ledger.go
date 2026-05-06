@@ -130,6 +130,18 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 
 	if j != nil {
 		emitLLMCall(ctx, j, c, rec)
+		// Cache-hit path: when the call landed primarily on cached
+		// tokens, emit a tighter llm.cache_hit entry too so the
+		// Timeline / Cost views can break down "warm" vs "cold" calls
+		// without re-deriving from llm.call payloads. Threshold of
+		// 50% of input tokens being cached is the standard heuristic;
+		// pure cache-creation calls (CacheCreationTokens > 0,
+		// CachedInputTokens == 0) don't qualify because the cache
+		// didn't help on this turn.
+		if c.CachedInputTokens > 0 && c.InputTokens > 0 &&
+			float64(c.CachedInputTokens)/float64(c.InputTokens) >= 0.5 {
+			emitLLMCacheHit(ctx, j, c, rec)
+		}
 		// cost.incurred fires only for metered rows with non-zero $ — flat-
 		// rate rows are not "money spent" from our perspective (sub already
 		// covers them), and zero-cost metered calls (cache hits, local
@@ -196,6 +208,40 @@ func emitLLMCall(ctx context.Context, j journal.Emitter, c Call, rec CostRecord)
 		Summary:     summary,
 		Payload:     payload,
 		Refs:        map[string]any{"ledger_id": rec.ID},
+	})
+}
+
+// emitLLMCacheHit fires when the prompt cache absorbed the bulk of the
+// input tokens. Useful for cost dashboards (you can see how much the
+// cache is saving over time) and for debugging an agent that's
+// unexpectedly NOT hitting cache (e.g., trace_id changed every call so
+// nothing reuses). Volume is bounded by the cache-hit ratio threshold
+// in Record so we don't double-emit on every llm.call.
+func emitLLMCacheHit(ctx context.Context, j journal.Emitter, c Call, rec CostRecord) {
+	hitRatio := 0.0
+	if c.InputTokens > 0 {
+		hitRatio = float64(c.CachedInputTokens) / float64(c.InputTokens)
+	}
+	_, _ = j.Emit(ctx, journal.Entry{
+		WorkspaceID: c.Scope.WorkspaceID,
+		CrewID:      c.Scope.CrewID,
+		AgentID:     c.Scope.AgentID,
+		MissionID:   c.Scope.MissionID,
+		TS:          rec.TS,
+		Type:        journal.EntryLLMCacheHit,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorSystem,
+		Summary: fmt.Sprintf("%s/%s cache hit: %d cached / %d input (%.0f%%)",
+			c.Provider, c.Model, c.CachedInputTokens, c.InputTokens, hitRatio*100),
+		Payload: map[string]any{
+			"provider":            c.Provider,
+			"model":               c.Model,
+			"input_tokens":        c.InputTokens,
+			"cached_input_tokens": c.CachedInputTokens,
+			"hit_ratio":           hitRatio,
+			"ledger_id":           rec.ID,
+		},
+		Refs: map[string]any{"ledger_id": rec.ID},
 	})
 }
 

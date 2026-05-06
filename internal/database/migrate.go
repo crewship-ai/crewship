@@ -1050,6 +1050,20 @@ ALTER TABLE crew_mcp_servers ADD COLUMN connector_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_workspace_mcp_connector_id ON workspace_mcp_servers(connector_id) WHERE connector_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_crew_mcp_connector_id ON crew_mcp_servers(connector_id) WHERE connector_id IS NOT NULL;
 `},
+	// New filter shapes hit by the unified-journal expansion need
+	// indexes to stay snappy at workspace scale (10k+ entries/day):
+	//   trace_id  → /journal?trace_id=… deeplink and the click-through
+	//               from RunsView; partial index skips the bulk of
+	//               container.metrics rows that have no trace.
+	//   actor_type→ "show me what users did vs agents" filter chip.
+	//   priority  → "permanent / pin / high" surfaces in compaction
+	//               + recall paths; skipping the dominant 'normal'
+	//               value via the partial predicate.
+	{version: 77, name: "add_journal_filter_indexes", sql: `
+CREATE INDEX IF NOT EXISTS idx_journal_trace_id ON journal_entries(trace_id) WHERE trace_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_journal_actor_ts ON journal_entries(actor_type, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHERE priority != 'normal';
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

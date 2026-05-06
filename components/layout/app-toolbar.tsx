@@ -56,8 +56,8 @@ const mobileNavSections = [
   {
     label: "Monitor",
     items: [
-      { title: "Runs", href: "/runs", icon: Activity },
-      { title: "Audit Log", href: "/audit", icon: Shield },
+      { title: "Runs", href: "/journal?tab=runs", icon: Activity },
+      { title: "Audit Log", href: "/settings?tab=audit", icon: Shield },
     ],
   },
   {
@@ -76,7 +76,6 @@ const pageConfig: Record<string, { title: string }> = {
   "/crews": { title: "Crews" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
-  "/audit": { title: "Audit Log" },
   "/settings": { title: "Settings" },
 }
 

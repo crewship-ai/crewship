@@ -126,6 +126,44 @@ const (
 	EntrySkillDeleted    EntryType = "skill.deleted"
 	EntrySkillAssigned   EntryType = "skill.assigned"
 	EntrySkillUnassigned EntryType = "skill.unassigned"
+
+	// Audit — workspace CRUD lifecycle. These mirror writes to the
+	// audit_logs table, dual-emitted from WriteAuditLog so a compliance
+	// reviewer can read the same events from either surface (legacy
+	// audit_logs query path or the unified journal). Payload carries
+	// `entity_type`, `entity_id`, `action`, plus any metadata the call
+	// site supplied. Severity is `notice` so the events surface in the
+	// Timeline without being lost in `info` chatter.
+	EntryAuditEntityCreated  EntryType = "audit.entity_created"
+	EntryAuditEntityUpdated  EntryType = "audit.entity_updated"
+	EntryAuditEntityDeleted  EntryType = "audit.entity_deleted"
+	EntryAuditEntityRestored EntryType = "audit.entity_restored"
+
+	// Provisioning — container lifecycle for crew runtime. Emit at
+	// state transitions in the Provisioner so operators see "the build
+	// queue moved" without tailing slog. `queued` fires before the
+	// docker build kicks off; `building` flips when image build starts;
+	// `complete` lands when the runtime is ready to accept assignments;
+	// `failed` carries the original error in payload.error.
+	EntryProvisioningQueued   EntryType = "provisioning.queued"
+	EntryProvisioningBuilding EntryType = "provisioning.building"
+	EntryProvisioningComplete EntryType = "provisioning.complete"
+	EntryProvisioningFailed   EntryType = "provisioning.failed"
+
+	// Chat — user↔agent conversation turns. Captures the trigger that
+	// kicks off a series of agent actions, so the Timeline can answer
+	// "what did the user ask?" alongside "what did the agent do?".
+	// Payload contains the message text capped to PreviewLen chars in
+	// summary; full content in payload.content. chat_id + agent_id +
+	// (optional) crew_id wire it back to the conversation surface.
+	EntryChatUserMessage  EntryType = "chat.user_message"
+	EntryChatAgentResponse EntryType = "chat.agent_response"
+
+	// Agent — runtime errors caught at the orchestrator boundary.
+	// Panic recoveries, unexpected shutdowns, provider stream errors
+	// land here so they are visible in the same surface as exec.command
+	// outputs they were processing when things went wrong.
+	EntryAgentError EntryType = "agent.error"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

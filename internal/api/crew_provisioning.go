@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/docker/docker/client"
 )
@@ -52,6 +53,12 @@ type ProvisioningHandler struct {
 	// goroutine bound to context.Background().
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
+
+	// journal mirrors provisioning lifecycle (queued → building →
+	// complete/failed) into the unified Crew Journal. nil maps to
+	// noopEmitter so tests + early bring-up keep working without
+	// requiring journal wiring. Set via SetJournal at router setup.
+	journal journal.Emitter
 }
 
 func NewProvisioningHandler(
@@ -82,6 +89,7 @@ func NewProvisioningHandler(
 		wsHub:          wsHub,
 		bgCtx:          bgCtx,
 		bgCancel:       bgCancel,
+		journal:        noopEmitter{},
 	}
 	if docker != nil {
 		h.gcClient = docker // *client.Client implements orphanGCClient
@@ -112,6 +120,18 @@ func (h *ProvisioningHandler) Stop() {
 	if h.bgCancel != nil {
 		h.bgCancel()
 	}
+}
+
+// SetJournal wires a journal emitter so provisioning lifecycle events
+// (queued, building, complete, failed) surface in the unified Crew
+// Journal alongside operational events. Pass nil to keep the existing
+// WS-broadcast-only path.
+func (h *ProvisioningHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // Orphan GC tunables. A provisioning run should finish well under tempContainerMaxAge;
