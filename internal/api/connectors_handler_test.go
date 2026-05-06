@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
@@ -132,6 +133,22 @@ func TestConnectors_List_OK(t *testing.T) {
 		t.Errorf("len = %d, want 3", len(items))
 	}
 
+	// Stable-order contract: ConnectorHandler.List documents that
+	// items come back in catalog insertion order. Verify the exact
+	// sequence so a non-deterministic map-walk implementation can't
+	// silently regress past this test. fstest.MapFS yields keys
+	// in lexical filename order, which is also what embed.FS does
+	// for the shipped FixturesFS — so the expected order is fixed.
+	expectedOrder := []string{"synth-byo", "synth-mcp-oauth", "synth-pat"}
+	for i, want := range expectedOrder {
+		if i >= len(items) {
+			break
+		}
+		if items[i].ID != want {
+			t.Errorf("items[%d].ID = %q, want %q (stable order broken)", i, items[i].ID, want)
+		}
+	}
+
 	// Each item must surface the fields the catalog UI needs.
 	seen := map[string]ConnectorListItem{}
 	for _, it := range items {
@@ -234,9 +251,13 @@ func TestConnectors_Get_NotFound(t *testing.T) {
 func TestConnectors_Verify_PATCallsHTTPEndpoint(t *testing.T) {
 	// Stand up a fake provider that asserts the bearer header was
 	// substituted from the user-submitted api_key.
-	called := false
+	//
+	// The httptest handler runs in its own goroutine; the assertion
+	// below reads `called` from the test goroutine. atomic.Bool keeps
+	// the write/read pair race-free under `go test -race`.
+	var called atomic.Bool
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
+		called.Store(true)
 		if r.Header.Get("Authorization") != "Bearer sk-test-123" {
 			t.Errorf("Authorization header = %q", r.Header.Get("Authorization"))
 		}
@@ -288,7 +309,7 @@ verify:
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
-	if !called {
+	if !called.Load() {
 		t.Error("expected verify URL to be called")
 	}
 
