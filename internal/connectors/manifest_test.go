@@ -15,7 +15,7 @@ package connectors_test
 import (
 	"encoding/json"
 	"errors"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -28,10 +28,16 @@ import (
 // Helpers
 // -------------------------------------------------------------------
 
+// loadFixture reads a manifest from the package's embedded FixturesFS
+// rather than directly from disk. The internal/** coding guideline
+// forbids direct filesystem access; routing tests through the same
+// embed.FS the production catalog uses also catches the case where
+// a fixture exists on disk but accidentally got dropped from the
+// `//go:embed fixtures/*.yaml` glob.
 func loadFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	path := filepath.Join("fixtures", name)
-	data, err := os.ReadFile(path)
+	data, err := fs.ReadFile(connectors.FixturesFS, path)
 	if err != nil {
 		t.Fatalf("read fixture %s: %v", name, err)
 	}
@@ -805,6 +811,9 @@ func TestMaterializeMCP_PostgresFullDSN(t *testing.T) {
 		t.Errorf("command = %q", out.Command)
 	}
 	// Last arg should be the resolved DSN, not the placeholder.
+	if len(out.Args) == 0 {
+		t.Fatalf("expected non-empty Args, got %+v", out)
+	}
 	last := out.Args[len(out.Args)-1]
 	wantDSN := "postgres://alice:s3cret@db.example.com:5432/app?sslmode=prefer"
 	if last != wantDSN {
@@ -858,6 +867,9 @@ func TestMaterializeMCP_AppliesFieldDefault(t *testing.T) {
 	}, "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(out.Args) == 0 {
+		t.Fatalf("expected non-empty Args, got %+v", out)
 	}
 	last := out.Args[len(out.Args)-1]
 	if !strings.Contains(last, ":5432/") {

@@ -181,37 +181,35 @@ func (h *ConnectorHandler) Install(w http.ResponseWriter, r *http.Request) {
 	notImplemented(w, "Install")
 }
 
-// InstanceURLFromRequest derives the customer-facing base URL from
-// the inbound request so OAuth redirects, setup_md placeholders, and
-// any other ${instance_url} substitution share one definition of
-// "what URL is this Crewship instance?".
+// InstanceURLFromRequest derives the customer-facing base URL used to
+// fill ${instance_url} in OAuth redirect_uri construction and
+// setup_md docs.
 //
-//   - Scheme: X-Forwarded-Proto header (proxy deployments) → "https"
-//   - Host:   X-Forwarded-Host header → r.Host
+// Resolution order, security-first:
+//
+//  1. publicBaseURL (operator-configured, e.g. CREWSHIP_PUBLIC_URL)
+//     wins unconditionally. This is the only path that should run
+//     in production deployments where OAuth callbacks matter.
+//  2. Otherwise fall back to "https://" + r.Host. r.Host is bounded
+//     by the listener's hostname so it can't be spoofed by a header.
+//
+// X-Forwarded-Host / X-Forwarded-Proto are intentionally NOT honored
+// here — on a directly-exposed instance (no trusted reverse proxy in
+// front) those headers are attacker-controlled, and feeding them
+// into OAuth redirect_uri or user-visible setup docs would enable
+// callback hijacking. Operators that DO have a trusted proxy must
+// set publicBaseURL via config rather than rely on the helper to
+// auto-detect.
 //
 // Returned without trailing slash so callers can append paths
-// directly: `instance + "/oauth/callback"`. Returns "" if the host
-// can't be determined (defensive — caller should treat as fatal).
-func InstanceURLFromRequest(r *http.Request) string {
-	if r == nil {
+// directly: `instance + "/oauth/callback"`. Returns "" when neither
+// publicBaseURL nor r.Host is usable.
+func InstanceURLFromRequest(r *http.Request, publicBaseURL string) string {
+	if publicBaseURL != "" {
+		return strings.TrimRight(publicBaseURL, "/")
+	}
+	if r == nil || r.Host == "" {
 		return ""
 	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	// Forwarded headers are comma-lists; take the first token, trim
-	// whitespace and a stray trailing slash so a header like
-	// "example.com/, internal:8080" doesn't poison the base URL.
-	host = strings.TrimRight(strings.TrimSpace(strings.SplitN(host, ",", 2)[0]), "/")
-	if host == "" {
-		return ""
-	}
-	scheme := strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-Proto"), ",", 2)[0]))
-	// Only http/https are valid; anything else (empty, "ws", garbage)
-	// falls back to https to match the production posture.
-	if scheme != "http" && scheme != "https" {
-		scheme = "https"
-	}
-	return scheme + "://" + host
+	return "https://" + r.Host
 }

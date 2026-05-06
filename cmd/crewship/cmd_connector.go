@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -166,6 +167,12 @@ func runLintDir(dir string, strict, recursive bool) error {
 // list  — GET /api/v1/connectors
 // -------------------------------------------------------------------
 
+// scaffoldNotImplemented is the user-facing message we surface when
+// the server end of a connector subcommand still returns 501. Keeps
+// CLI output consistent with `validate` so users see one coherent
+// "Sprint 1 not yet shipped" reason instead of a raw HTTP error.
+const scaffoldNotImplemented = "connectors endpoint is part of the scaffold; server-side handlers ship in Sprint 1"
+
 var connectorListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List the connector catalog from the server",
@@ -177,6 +184,9 @@ var connectorListCmd = &cobra.Command{
 		resp, err := client.Get("/api/v1/connectors")
 		if err != nil {
 			return err
+		}
+		if resp.StatusCode == http.StatusNotImplemented {
+			return errors.New(scaffoldNotImplemented)
 		}
 		if err := cli.CheckError(resp); err != nil {
 			return err
@@ -221,6 +231,9 @@ var connectorShowCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if resp.StatusCode == http.StatusNotImplemented {
+			return errors.New(scaffoldNotImplemented)
+		}
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -264,6 +277,9 @@ var connectorTestCmd = &cobra.Command{
 		resp, err := client.Post("/api/v1/connectors/"+args[0]+"/verify", body)
 		if err != nil {
 			return err
+		}
+		if resp.StatusCode == http.StatusNotImplemented {
+			return errors.New(scaffoldNotImplemented)
 		}
 		if err := cli.CheckError(resp); err != nil {
 			return err

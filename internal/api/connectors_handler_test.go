@@ -618,36 +618,49 @@ func TestConnectors_Install_UnknownConnector_404(t *testing.T) {
 // what the docs/setup_md authoring guide promises.
 // -------------------------------------------------------------------
 
-func TestInstanceURLFromRequest_PlainHost(t *testing.T) {
+func TestInstanceURLFromRequest_FallsBackToRequestHost(t *testing.T) {
 	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Host = "acme.example.com:8080"
-	got := InstanceURLFromRequest(req)
+	got := InstanceURLFromRequest(req, "")
 	if got != "https://acme.example.com:8080" {
 		t.Errorf("got %q, want https://acme.example.com:8080", got)
 	}
 }
 
-func TestInstanceURLFromRequest_ForwardedProto(t *testing.T) {
+func TestInstanceURLFromRequest_PublicBaseURLOverrides(t *testing.T) {
 	t.Parallel()
+	// Even with a totally different r.Host, the configured public
+	// URL wins — this is the path operators wire up in production.
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "acme.example.com"
-	req.Header.Set("X-Forwarded-Proto", "http")
-	got := InstanceURLFromRequest(req)
-	if got != "http://acme.example.com" {
-		t.Errorf("got %q, want http://acme.example.com", got)
+	req.Host = "internal.svc.local:8080"
+	got := InstanceURLFromRequest(req, "https://acme.example.com")
+	if got != "https://acme.example.com" {
+		t.Errorf("got %q, want https://acme.example.com (config wins)", got)
 	}
 }
 
-func TestInstanceURLFromRequest_ForwardedHost(t *testing.T) {
+func TestInstanceURLFromRequest_PublicBaseURLStripsTrailingSlash(t *testing.T) {
 	t.Parallel()
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "internal.svc.local:8080"
-	req.Header.Set("X-Forwarded-Host", "acme.example.com")
-	req.Header.Set("X-Forwarded-Proto", "https")
-	got := InstanceURLFromRequest(req)
+	got := InstanceURLFromRequest(nil, "https://acme.example.com/")
 	if got != "https://acme.example.com" {
-		t.Errorf("got %q, want https://acme.example.com (forwarded-host wins)", got)
+		t.Errorf("got %q, want trailing slash stripped", got)
+	}
+}
+
+func TestInstanceURLFromRequest_IgnoresForwardedHost(t *testing.T) {
+	t.Parallel()
+	// Security: an attacker setting X-Forwarded-Host on a directly-
+	// exposed instance must NOT poison ${instance_url}. The helper
+	// is bounded by r.Host (the listener's hostname) when no public
+	// URL is configured.
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Host = "real.example.com"
+	req.Header.Set("X-Forwarded-Host", "evil.attacker.com")
+	req.Header.Set("X-Forwarded-Proto", "http")
+	got := InstanceURLFromRequest(req, "")
+	if got != "https://real.example.com" {
+		t.Errorf("got %q, forwarded headers must not override r.Host", got)
 	}
 }
 
@@ -655,51 +668,25 @@ func TestInstanceURLFromRequest_NoTrailingSlash(t *testing.T) {
 	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Host = "acme.example.com"
-	got := InstanceURLFromRequest(req)
+	got := InstanceURLFromRequest(req, "")
 	if strings.HasSuffix(got, "/") {
 		t.Errorf("instance_url must not end with slash: %q", got)
 	}
 }
 
-func TestInstanceURLFromRequest_SanitizesCommaList(t *testing.T) {
+func TestInstanceURLFromRequest_NilRequestNoConfig(t *testing.T) {
 	t.Parallel()
-	// X-Forwarded-Host can carry multiple proxies. Take the first.
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "internal.svc.local"
-	req.Header.Set("X-Forwarded-Host", "acme.example.com, internal.svc.local")
-	req.Header.Set("X-Forwarded-Proto", "https, http")
-	got := InstanceURLFromRequest(req)
-	if got != "https://acme.example.com" {
-		t.Errorf("got %q, want https://acme.example.com", got)
+	if got := InstanceURLFromRequest(nil, ""); got != "" {
+		t.Errorf("got %q, want empty for nil request + no config", got)
 	}
 }
 
-func TestInstanceURLFromRequest_StripsTrailingSlashFromHeader(t *testing.T) {
+func TestInstanceURLFromRequest_EmptyHost(t *testing.T) {
 	t.Parallel()
 	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "acme.example.com"
-	req.Header.Set("X-Forwarded-Host", "acme.example.com/")
-	got := InstanceURLFromRequest(req)
-	if got != "https://acme.example.com" {
-		t.Errorf("got %q, want https://acme.example.com (no trailing slash)", got)
-	}
-}
-
-func TestInstanceURLFromRequest_RejectsInvalidScheme(t *testing.T) {
-	t.Parallel()
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Host = "acme.example.com"
-	req.Header.Set("X-Forwarded-Proto", "ws")
-	got := InstanceURLFromRequest(req)
-	if got != "https://acme.example.com" {
-		t.Errorf("got %q, want fallback to https for invalid proto", got)
-	}
-}
-
-func TestInstanceURLFromRequest_NilRequest(t *testing.T) {
-	t.Parallel()
-	if got := InstanceURLFromRequest(nil); got != "" {
-		t.Errorf("got %q, want empty for nil request", got)
+	req.Host = ""
+	if got := InstanceURLFromRequest(req, ""); got != "" {
+		t.Errorf("got %q, want empty for empty host", got)
 	}
 }
 
