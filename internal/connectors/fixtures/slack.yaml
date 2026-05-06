@@ -1,0 +1,56 @@
+# Slack — exemplar of the pat path with a REAL MCP server.
+#
+# We use bot-token PAT mode (not byo_oauth) because:
+#   1. The official @modelcontextprotocol/server-slack reads
+#      SLACK_BOT_TOKEN from env, so the MCP runtime is the same either
+#      way (bot token, env-injected, stdio process).
+#   2. byo_oauth without a hosted broker forces customers through
+#      a 5-minute Slack-app registration before they can do anything —
+#      exactly the friction the connectors redesign is trying to remove.
+#   3. The original Slack MCP integration in Crewship already accepts
+#      a bot token paste, so this matches reality.
+#
+# A future byo_oauth flavor (which produces the same SLACK_BOT_TOKEN
+# automatically via OAuth) is on the roadmap. When that lands it can
+# add a sibling fixture slack-oauth.yaml without changing this one.
+id: slack
+name: Slack
+description: Send messages, read channels, manage workspaces
+category: communication
+brand:
+  logo: slack
+  color: "#4A154B"
+auth_mode: pat
+fields:
+  - key: bot_token
+    label: Slack Bot Token
+    type: password
+    required: true
+    placeholder: xoxb-...
+    help: |
+      From your Slack app's **OAuth & Permissions** page, copy the
+      **Bot User OAuth Token** (`xoxb-...`). Required scopes:
+      `chat:write`, `channels:read`, `users:read`.
+  - key: team_id
+    label: Team ID
+    type: text
+    required: false
+    placeholder: T01234567
+    help: Optional — restricts the MCP server to a single workspace.
+mcp:
+  transport: stdio
+  command: npx
+  args:
+    - "-y"
+    - "@modelcontextprotocol/server-slack"
+  env:
+    SLACK_BOT_TOKEN: "${field.bot_token}"
+    SLACK_TEAM_ID: "${field.team_id}"
+verify:
+  http:
+    method: POST
+    url: https://slack.com/api/auth.test
+    headers:
+      Authorization: "Bearer ${field.bot_token}"
+      Content-Type: "application/x-www-form-urlencoded"
+    expect_status: 200

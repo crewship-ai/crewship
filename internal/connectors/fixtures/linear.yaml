@@ -1,0 +1,23 @@
+# Linear — exemplar of the mcp_oauth path.
+# The MCP server itself implements OAuth 2.1 with Dynamic Client
+# Registration (RFC 7591), so Crewship needs nothing from the user
+# beyond consent. This is the best-UX tier.
+id: linear
+name: Linear
+description: Issue tracking and project management
+category: dev_tools
+brand:
+  logo: linear
+  color: "#5E6AD2"
+auth_mode: mcp_oauth
+fields: []
+mcp:
+  transport: streamable-http
+  endpoint: "https://mcp.linear.app/mcp"
+verify:
+  mcp_method: tools/list
+docs:
+  setup_md: |
+    Click **Connect Linear** below. Linear will ask you to log in and
+    approve access to your workspace. No tokens to copy or apps to
+    register.
