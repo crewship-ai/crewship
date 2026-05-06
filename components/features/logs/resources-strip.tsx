@@ -167,12 +167,22 @@ function Spark({
 function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series {
   const cutoff = Date.now() - 30 * 60 * 1000
 
-  // Parse + filter once.
+  // Parse + filter once. Backend payload (per internal/server/stats.go):
+  //   cpu_pct  — float, % of container CPU quota
+  //   ram_pct  — float, % of container memory limit
+  //   ram_mb   — float, absolute MB used
+  //   net_rx   — int, **cumulative** bytes received since container start
+  //   net_tx   — int, **cumulative** bytes transmitted since container start
+  //   (no disk field — backend hasn't wired one yet)
+  //
+  // Net rate is derived per-crew from consecutive cumulative samples.
+  // The per-point "net" value is left as null until we compute deltas.
   type Point = {
     ts: number
     crew: string
     cpu: number | null
     mem: number | null
+    netCum: number | null
     net: number | null
     disk: number | null
   }
@@ -182,16 +192,37 @@ function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series 
     const ts = new Date(e.ts).getTime()
     if (Number.isNaN(ts) || ts < cutoff) continue
     const p = e.payload ?? {}
+    const rx = typeof p.net_rx === "number" ? (p.net_rx as number) : null
+    const tx = typeof p.net_tx === "number" ? (p.net_tx as number) : null
+    const netCum = rx !== null && tx !== null ? rx + tx : null
     points.push({
       ts,
       crew: e.crew_id ?? "",
       cpu: typeof p.cpu_pct === "number" ? (p.cpu_pct as number) : null,
-      mem: typeof p.mem_pct === "number" ? (p.mem_pct as number) : null,
-      net: typeof p.net_bytes_s === "number" ? (p.net_bytes_s as number) : null,
-      disk: typeof p.disk_pct === "number" ? (p.disk_pct as number) : null,
+      mem: typeof p.ram_pct === "number" ? (p.ram_pct as number) : null,
+      netCum,
+      net: null,
+      disk: null,
     })
   }
   points.sort((a, b) => a.ts - b.ts)
+
+  // Compute per-crew net rate (bytes/sec) from cumulative deltas. Two
+  // consecutive samples for the same crew → bytes/sec over that window.
+  // Container restart resets the counter; treat negative deltas as null.
+  const lastByCrew = new Map<string, Point>()
+  for (const p of points) {
+    if (p.netCum === null) continue
+    const prev = lastByCrew.get(p.crew)
+    if (prev && prev.netCum !== null) {
+      const dtMs = p.ts - prev.ts
+      const dBytes = p.netCum - prev.netCum
+      if (dtMs > 0 && dBytes >= 0) {
+        p.net = dBytes / (dtMs / 1000)
+      }
+    }
+    lastByCrew.set(p.crew, p)
+  }
 
   if (mode === "single") {
     return downsamplePerPoint(points)
