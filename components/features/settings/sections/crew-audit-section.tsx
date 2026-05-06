@@ -163,9 +163,23 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
     }
   }, [workspaceId, category, dateRange, page])
 
+  // Cancellable export — for 10k-row exports the page-walk can run
+  // for many seconds; users need a way to bail without abandoning
+  // the route. The controller is stashed on a ref so the Cancel
+  // button can call .abort() and the catch block can distinguish
+  // a user cancellation (DOMException 'AbortError') from a real
+  // network failure.
+  const exportAbortRef = useRef<AbortController | null>(null)
+
+  const handleCancelExport = useCallback(() => {
+    exportAbortRef.current?.abort()
+  }, [])
+
   const handleExport = useCallback(async () => {
     const total = pagination?.total ?? 0
     if (!workspaceId || total === 0) return
+    const controller = new AbortController()
+    exportAbortRef.current = controller
     setExporting(true)
     try {
       const all: AuditLog[] = []
@@ -180,7 +194,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         if (category !== "all") params.set("entity_type", category)
         const dateFrom = getDateFrom(dateRange)
         if (dateFrom) params.set("date_from", dateFrom)
-        const res = await fetch(`/api/v1/audit?${params}`)
+        const res = await fetch(`/api/v1/audit?${params}`, { signal: controller.signal })
         if (!res.ok) {
           setError("Export failed — partial results discarded")
           return
@@ -224,9 +238,13 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           `Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows (total matches: ${total.toLocaleString()}). Narrow the date range or category for a complete export.`,
         )
       }
-    } catch {
+    } catch (err) {
+      // User-cancelled exports aren't failures — clear the loading
+      // state quietly without surfacing a scary message.
+      if (err instanceof DOMException && err.name === "AbortError") return
       setError("Export failed")
     } finally {
+      exportAbortRef.current = null
       setExporting(false)
     }
   }, [workspaceId, pagination, category, dateRange])
@@ -290,6 +308,17 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
             <Download className={cn("h-3 w-3 mr-1.5", exporting && "animate-pulse")} />
             {exporting ? "Exporting…" : "Export CSV"}
           </Button>
+          {exporting && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+              onClick={handleCancelExport}
+              aria-label="Cancel export"
+            >
+              Cancel
+            </Button>
+          )}
         </div>
       </div>
 

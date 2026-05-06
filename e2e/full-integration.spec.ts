@@ -351,7 +351,7 @@ test.describe("G. No console errors on critical pages", () => {
     "/crews/agents",
     "/orchestration",
     "/issues",
-    "/paymaster",
+    "/journal",
     "/approvals",
   ]
 
