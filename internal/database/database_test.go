@@ -564,3 +564,87 @@ func TestIsTimestampColumnName(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrateConnectorIDColumn verifies migration v76 adds the
+// connector_id column on both workspace_mcp_servers and crew_mcp_servers
+// and that the column is nullable (existing rows keep working without
+// a manifest reference).
+func TestMigrateConnectorIDColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open("file:" + filepath.Join(dir, "connector.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Verify both tables got the column. The pragma_table_info pattern
+	// matches what TestMigrateMemoryConfigColumn does — keeping the
+	// idiom consistent so future migration tests are mechanical.
+	for _, table := range []string{"workspace_mcp_servers", "crew_mcp_servers"} {
+		t.Run(table, func(t *testing.T) {
+			var cid int
+			var colName, colType string
+			var notNull, dfltValue, pk interface{}
+			// SQLite's PRAGMA table_info doesn't accept placeholder
+			// args, and `table` is one of two compile-time string
+			// literals from the loop above (no user input). Annotate
+			// to silence the static-analysis SQL-injection rule.
+			//nolint:gosec // table is a hardcoded literal from the loop
+			rows, err := db.Query("PRAGMA table_info(" + table + ")")
+			if err != nil {
+				t.Fatalf("pragma: %v", err)
+			}
+			defer rows.Close()
+			found := false
+			for rows.Next() {
+				if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); err != nil {
+					t.Fatalf("scan: %v", err)
+				}
+				if colName == "connector_id" {
+					found = true
+					if colType != "TEXT" {
+						t.Errorf("%s.connector_id type = %q, want TEXT", table, colType)
+					}
+					// Nullable: notNull must be 0 (or interface holding 0/false).
+					if nn, ok := notNull.(int64); ok && nn != 0 {
+						t.Errorf("%s.connector_id NOT NULL = %v, want nullable", table, nn)
+					}
+					break
+				}
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatalf("rows err: %v", err)
+			}
+			if !found {
+				t.Errorf("%s.connector_id column missing after migration", table)
+			}
+		})
+	}
+
+	// Migration row recorded.
+	var version int
+	if err := db.QueryRow("SELECT version FROM _migrations WHERE version = 76").Scan(&version); err == sql.ErrNoRows {
+		t.Error("migration 76 not recorded in _migrations")
+	} else if err != nil {
+		t.Fatalf("query _migrations: %v", err)
+	}
+
+	// Partial index exists. SQLite stores them in sqlite_master.
+	for _, idx := range []string{"idx_workspace_mcp_connector_id", "idx_crew_mcp_connector_id"} {
+		var name string
+		err := db.QueryRow(
+			"SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+			idx,
+		).Scan(&name)
+		if err == sql.ErrNoRows {
+			t.Errorf("partial index %q not created", idx)
+		} else if err != nil {
+			t.Fatalf("sqlite_master: %v", err)
+		}
+	}
+}

@@ -1,0 +1,29 @@
+# Everything — official MCP demo server, no auth, used as a smoke test
+# for the catalog → install → connect → list-tools pipeline. Ships in
+# modelcontextprotocol/servers and exposes every MCP capability so we
+# can verify the integration end-to-end without hitting a third party.
+#
+# https://github.com/modelcontextprotocol/servers/tree/main/src/everything
+#
+# This is the "dummy MCP for testing" the CEO asked for: it requires no
+# credentials, runs locally via npx, and prints back whatever you send.
+id: everything
+name: Everything (MCP demo)
+description: Official MCP demo server — exercises every capability with no auth required.
+category: testing
+brand:
+  logo: mcp
+  color: "#7C3AED"
+auth_mode: none
+mcp:
+  transport: stdio
+  command: npx
+  args:
+    - "-y"
+    - "@modelcontextprotocol/server-everything"
+verify:
+  mcp_method: tools/list
+docs:
+  setup_md: |
+    Install with one click — no credentials needed. Useful as a smoke
+    test that your Crewship instance can spawn MCP servers correctly.

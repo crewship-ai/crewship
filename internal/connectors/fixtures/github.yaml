@@ -1,0 +1,43 @@
+# GitHub — exemplar of the pat path with a REAL MCP server.
+# @modelcontextprotocol/server-github ships in modelcontextprotocol/servers
+# (https://github.com/modelcontextprotocol/servers/tree/main/src/github)
+# and reads GITHUB_PERSONAL_ACCESS_TOKEN from env.
+#
+# Why GitHub instead of OpenAI as the PAT exemplar:
+#   - OpenAI is an LLM provider; there is no @modelcontextprotocol/server-openai
+#   - GitHub MCP is genuinely useful in agent workflows (PR review, issue triage)
+#   - PAT verification is straightforward (GET /user with Bearer auth)
+id: github
+name: GitHub
+description: Code repos, pull requests, issues
+category: dev_tools
+brand:
+  logo: github
+  color: "#181717"
+auth_mode: pat
+fields:
+  - key: pat
+    label: Personal Access Token
+    type: password
+    required: true
+    placeholder: ghp_...
+    help: |
+      Create a fine-grained PAT at
+      [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)
+      with `repo` and `read:org` scopes.
+mcp:
+  transport: stdio
+  command: npx
+  args:
+    - "-y"
+    - "@modelcontextprotocol/server-github"
+  env:
+    GITHUB_PERSONAL_ACCESS_TOKEN: "${field.pat}"
+verify:
+  http:
+    method: GET
+    url: https://api.github.com/user
+    headers:
+      Authorization: "Bearer ${field.pat}"
+      Accept: "application/vnd.github+json"
+    expect_status: 200
