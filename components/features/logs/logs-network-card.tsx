@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { motion } from "motion/react"
 import { ExternalLink, Network, Plug } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { formatRelativeTime } from "@/lib/time"
@@ -86,7 +87,13 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
 
   if (openPorts.length === 0 && topEgress.length === 0) {
     return (
-      <div className="rounded-md border border-border/50 bg-card/40 px-3 py-2">
+      <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 6 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
+      }}
+      className="rounded-md border border-border/50 bg-card/40 px-3 py-2"
+    >
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
           <Network className="h-3 w-3" />
           Network
@@ -94,12 +101,18 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
         <div className="text-[11px] text-muted-foreground/60 italic">
           No network activity in window.
         </div>
-      </div>
+      </motion.div>
     )
   }
 
   return (
-    <div className="rounded-md border border-border/50 bg-card/40 px-3 py-2">
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 6 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
+      }}
+      className="rounded-md border border-border/50 bg-card/40 px-3 py-2"
+    >
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
         <Network className="h-3 w-3" />
         Network
@@ -147,6 +160,6 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
           </ul>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }

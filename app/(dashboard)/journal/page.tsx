@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Activity,
@@ -341,13 +342,16 @@ export default function JournalPage() {
         className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-2 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       >
         {visibleTabs.map(({ id, label, icon: Icon, adminOnly }) => (
-          <button
+          <motion.button
             key={id}
             role="tab"
             aria-selected={activeTab === id}
             onClick={() => setActiveTab(id)}
+            whileHover={{ y: -1 }}
+            whileTap={{ y: 0, scale: 0.97 }}
+            transition={{ duration: 0.12 }}
             className={cn(
-              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
+              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-colors duration-100 relative top-px whitespace-nowrap shrink-0",
               activeTab === id
                 ? "border-blue-400 text-blue-400"
                 : "border-transparent text-muted-foreground hover:text-foreground/80",
@@ -360,63 +364,112 @@ export default function JournalPage() {
                 admin
               </span>
             )}
-          </button>
+          </motion.button>
         ))}
       </div>
 
-      {/* ---- Tab content ---- */}
-      {activeTab === "timeline" && (
-        <div className="flex-1 min-h-0 flex flex-col">
-          {crewId && <ResourcesStrip entries={entries} />}
-          <div className="flex-1 min-h-0">
-            <LogsPanel
-              entries={entries}
-              timeRange={timeRange}
-              onTimeRangeChange={setTimeRange}
-              customRange={customRange}
-              onCustomRangeChange={setCustomRange}
-              crewScope={{ value: crewId, options: crews, onChange: onCrewChange }}
-              agentScope={{ value: agentId, options: agents, onChange: setAgentId }}
-              agentLookup={agentLookup}
-              showNetworkCard={showNetworkCard}
-              onServerSearch={setServerQuery}
-              onRefresh={handleRefresh}
-              loading={loading}
-              error={error}
-              live={live}
-              onLiveChange={setLive}
-              hasMore={Boolean(nextCursor)}
-              loadingMore={loadingMore}
-              cappedAt={entries.length >= JOURNAL_MAX_ENTRIES ? JOURNAL_MAX_ENTRIES : undefined}
-              /* No onLoadMore — pagination is eager at the page level. */
-            />
-          </div>
-        </div>
-      )}
+      {/* ---- Tab content (animated swap) ---- */}
+      <AnimatePresence mode="wait">
+        {activeTab === "timeline" && (
+          <motion.div
+            key="timeline"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 flex flex-col"
+          >
+            <AnimatePresence>
+              {crewId && (
+                <motion.div
+                  key="resources-strip"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.22, ease: "easeOut" }}
+                  className="overflow-hidden"
+                >
+                  <ResourcesStrip entries={entries} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <div className="flex-1 min-h-0">
+              <LogsPanel
+                entries={entries}
+                timeRange={timeRange}
+                onTimeRangeChange={setTimeRange}
+                customRange={customRange}
+                onCustomRangeChange={setCustomRange}
+                crewScope={{ value: crewId, options: crews, onChange: onCrewChange }}
+                agentScope={{ value: agentId, options: agents, onChange: setAgentId }}
+                agentLookup={agentLookup}
+                showNetworkCard={showNetworkCard}
+                onServerSearch={setServerQuery}
+                onRefresh={handleRefresh}
+                loading={loading}
+                error={error}
+                live={live}
+                onLiveChange={setLive}
+                hasMore={Boolean(nextCursor)}
+                loadingMore={loadingMore}
+                cappedAt={entries.length >= JOURNAL_MAX_ENTRIES ? JOURNAL_MAX_ENTRIES : undefined}
+              />
+            </div>
+          </motion.div>
+        )}
 
-      {activeTab === "runs" && (
-        <div className="flex-1 min-h-0 overflow-auto p-4">
-          <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
-        </div>
-      )}
+        {activeTab === "runs" && (
+          <motion.div
+            key="runs"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-auto p-4"
+          >
+            <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
+          </motion.div>
+        )}
 
-      {activeTab === "eval" && (
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <EvalView />
-        </div>
-      )}
+        {activeTab === "eval" && (
+          <motion.div
+            key="eval"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-hidden"
+          >
+            <EvalView />
+          </motion.div>
+        )}
 
-      {activeTab === "audit" && isAdmin && (
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <AuditView />
-        </div>
-      )}
+        {activeTab === "audit" && isAdmin && (
+          <motion.div
+            key="audit"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-hidden"
+          >
+            <AuditView />
+          </motion.div>
+        )}
 
-      {activeTab === "spend" && isAdmin && (
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <SpendView />
-        </div>
-      )}
+        {activeTab === "spend" && isAdmin && (
+          <motion.div
+            key="spend"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="flex-1 min-h-0 overflow-hidden"
+          >
+            <SpendView />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

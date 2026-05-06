@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from "recharts"
 import type { JournalEntry } from "@/lib/types/journal"
 import { SEVERITY_COLOR, severityOf } from "@/lib/journal-style"
@@ -209,16 +210,34 @@ export function LogsHistogram({
         }}
       >
         {/* Persistent selection — committed bucket(s) tinted behind bars. */}
-        {selected && !dragRect && <SelectionOverlay data={data} selected={selected} />}
+        <AnimatePresence>
+          {selected && !dragRect && (
+            <motion.div
+              key="sel-overlay"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+            >
+              <SelectionOverlay data={data} selected={selected} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* In-flight drag marquee — only visible after the user moves
-            the cursor past DRAG_THRESHOLD_PX while holding the mouse. */}
-        {dragRect && (
-          <div
-            className="absolute top-0 bottom-0 pointer-events-none border border-dashed border-sky-400/60 bg-sky-500/15 z-10"
-            style={{ left: `${dragRect.left}%`, width: `${dragRect.width}%` }}
-          />
-        )}
+        {/* In-flight drag marquee — fades in once the threshold is crossed. */}
+        <AnimatePresence>
+          {dragRect && (
+            <motion.div
+              key="drag-overlay"
+              className="absolute top-0 bottom-0 pointer-events-none border border-dashed border-sky-400/60 bg-sky-500/15 z-10"
+              style={{ left: `${dragRect.left}%`, width: `${dragRect.width}%` }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.12 }}
+            />
+          )}
+        </AnimatePresence>
 
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -229,7 +248,7 @@ export function LogsHistogram({
           >
             <XAxis dataKey="fromMs" hide />
             <Tooltip cursor={{ fill: "rgba(255,255,255,0.06)" }} content={<HistTooltip />} />
-            <Bar dataKey="info" stackId="s" isAnimationActive={false}>
+            <Bar dataKey="info" stackId="s" isAnimationActive animationDuration={250}>
               {data.map((b, i) => (
                 <Cell
                   key={`info-${i}`}
@@ -238,7 +257,7 @@ export function LogsHistogram({
                 />
               ))}
             </Bar>
-            <Bar dataKey="notice" stackId="s" isAnimationActive={false}>
+            <Bar dataKey="notice" stackId="s" isAnimationActive animationDuration={250}>
               {data.map((b, i) => (
                 <Cell
                   key={`notice-${i}`}
@@ -247,7 +266,7 @@ export function LogsHistogram({
                 />
               ))}
             </Bar>
-            <Bar dataKey="warn" stackId="s" isAnimationActive={false}>
+            <Bar dataKey="warn" stackId="s" isAnimationActive animationDuration={250}>
               {data.map((b, i) => (
                 <Cell
                   key={`warn-${i}`}
@@ -256,7 +275,7 @@ export function LogsHistogram({
                 />
               ))}
             </Bar>
-            <Bar dataKey="error" stackId="s" isAnimationActive={false}>
+            <Bar dataKey="error" stackId="s" isAnimationActive animationDuration={250}>
               {data.map((b, i) => (
                 <Cell
                   key={`error-${i}`}

@@ -1,6 +1,7 @@
 "use client"
 
 import Image from "next/image"
+import { AnimatePresence, motion } from "motion/react"
 import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download, RefreshCw, Users, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -234,18 +235,25 @@ export function LogsToolbar({
 
       <div className="flex-1" />
 
-      {bucketFilter && onClearBucketFilter && (
-        <button
-          type="button"
-          onClick={onClearBucketFilter}
-          className="inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] font-mono text-sky-300 hover:bg-sky-500/20"
-          title="Clear histogram selection"
-        >
-          <Filter className="h-3 w-3" />
-          {fmtBucketLabel(bucketFilter)}
-          <span className="text-base leading-none">×</span>
-        </button>
-      )}
+      <AnimatePresence>
+        {bucketFilter && onClearBucketFilter && (
+          <motion.button
+            key="bucket-pill"
+            type="button"
+            onClick={onClearBucketFilter}
+            initial={{ opacity: 0, scale: 0.85, y: -2 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: -2 }}
+            transition={{ type: "spring", damping: 18, stiffness: 320 }}
+            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] font-mono text-sky-300 hover:bg-sky-500/20"
+            title="Clear histogram selection"
+          >
+            <Filter className="h-3 w-3" />
+            {fmtBucketLabel(bucketFilter)}
+            <span className="text-base leading-none">×</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       <span className="inline-flex items-center gap-1.5 px-2 h-6 rounded border border-border/60 bg-card text-[10px] font-mono">
         <span className="text-muted-foreground">visible</span>

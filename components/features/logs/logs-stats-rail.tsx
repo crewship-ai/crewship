@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
+import { motion } from "motion/react"
 import type { JournalEntry } from "@/lib/types/journal"
 import {
   GROUP_COLOR,
@@ -27,7 +28,15 @@ export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsSta
   const stats = useMemo(() => deriveStats(entries), [entries])
 
   return (
-    <div className="p-3 space-y-3 bg-background/60 overflow-y-auto h-full">
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={{
+        hidden: {},
+        visible: { transition: { staggerChildren: 0.04, delayChildren: 0.02 } },
+      }}
+      className="p-3 space-y-3 bg-background/60 overflow-y-auto h-full"
+    >
       <StatCard title="Severity mix">
         <div className="flex h-2 rounded-full overflow-hidden mb-2 bg-muted/40">
           {(["info", "notice", "warn", "error"] as const).map((s) => {
@@ -100,18 +109,24 @@ export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsSta
           {stats.last60s} events in the last minute
         </div>
       </StatCard>
-    </div>
+    </motion.div>
   )
 }
 
 function StatCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-md border border-border/50 bg-card/40 px-3 py-2">
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 6 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
+      }}
+      className="rounded-md border border-border/50 bg-card/40 px-3 py-2"
+    >
       <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
         {title}
       </div>
       {children}
-    </div>
+    </motion.div>
   )
 }
 

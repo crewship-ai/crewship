@@ -1,5 +1,6 @@
 "use client"
 
+import { motion } from "motion/react"
 import { cn } from "@/lib/utils"
 import { GROUP_COLOR, GROUP_LABEL, GROUP_ORDER, type EntryGroup } from "@/lib/journal-style"
 
@@ -19,16 +20,30 @@ export function LogsTypeChips({ counts, muted, onToggle, onResetAll }: LogsTypeC
   const anyMuted = muted.size > 0
 
   return (
-    <div className="px-3 py-1.5 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-1.5">
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={{
+        hidden: {},
+        visible: { transition: { staggerChildren: 0.025, delayChildren: 0.05 } },
+      }}
+      className="px-3 py-1.5 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-1.5"
+    >
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-1">Types</span>
       {visible.map((g) => {
         const off = muted.has(g)
         const count = counts[g]
         return (
-          <button
+          <motion.button
             key={g}
             type="button"
             onClick={() => onToggle(g)}
+            variants={{
+              hidden: { opacity: 0, scale: 0.85, y: -2 },
+              visible: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.2, ease: "easeOut" } },
+            }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
             className={cn(
               "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[10px] font-mono transition-colors",
               off
@@ -42,18 +57,21 @@ export function LogsTypeChips({ counts, muted, onToggle, onResetAll }: LogsTypeC
             />
             <span>{GROUP_LABEL[g]}</span>
             <span className="opacity-60 tabular-nums">{count}</span>
-          </button>
+          </motion.button>
         )
       })}
       {anyMuted && (
-        <button
+        <motion.button
           type="button"
           onClick={onResetAll}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           className="ml-auto text-[10px] text-muted-foreground hover:text-foreground"
         >
           Reset
-        </button>
+        </motion.button>
       )}
-    </div>
+    </motion.div>
   )
 }

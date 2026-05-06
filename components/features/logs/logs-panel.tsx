@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { AnimatePresence, motion } from "motion/react"
 import { AlertCircle, ChevronLeft, ChevronRight } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { type EntryGroup } from "@/lib/journal-style"
@@ -301,21 +302,29 @@ export function LogsPanel({
         selected={bucket}
         onSelect={setBucket}
       />
-      {error && (
-        <div className="px-3 py-2 border-b border-border/50 bg-red-500/10 text-red-300 text-[11px] flex items-center gap-2 shrink-0">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-          <span>{error}</span>
-          {onRefresh && (
-            <button
-              type="button"
-              onClick={onRefresh}
-              className="ml-auto underline-offset-2 hover:underline"
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="px-3 py-2 border-b border-border/50 bg-red-500/10 text-red-300 text-[11px] flex items-center gap-2 shrink-0 overflow-hidden"
+          >
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+            <span>{error}</span>
+            {onRefresh && (
+              <button
+                type="button"
+                onClick={onRefresh}
+                className="ml-auto underline-offset-2 hover:underline"
+              >
+                Retry
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div
         className="flex-1 min-h-0 grid"
         style={{ gridTemplateColumns: statsCollapsed ? "minmax(0,1fr) 28px" : "minmax(0,1fr) 280px" }}
@@ -397,44 +406,66 @@ function EmptyState({
 }) {
   if (loading) {
     return (
-      <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground/60">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className="h-full flex items-center justify-center text-[12px] text-muted-foreground/60"
+      >
         Loading entries…
-      </div>
+      </motion.div>
     )
   }
   if (!hasAnyEntries) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-1 text-center px-6">
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
+        className="h-full flex flex-col items-center justify-center gap-1 text-center px-6"
+      >
         <div className="text-[12px] text-foreground/80">No journal entries</div>
         <div className="text-[11px] text-muted-foreground/70 max-w-sm">
           Once the crew runs, events will land here in real time.
         </div>
-      </div>
+      </motion.div>
     )
   }
   if (hasFilters) {
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-2 text-center px-6">
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
+        className="h-full flex flex-col items-center justify-center gap-2 text-center px-6"
+      >
         <div className="text-[12px] text-foreground/80">No entries match the current filters</div>
         <div className="text-[11px] text-muted-foreground/70 max-w-sm">
           Adjust severity, type chips, search, or histogram selection to widen the view.
         </div>
         {onClearFilters && (
-          <button
+          <motion.button
             type="button"
             onClick={onClearFilters}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
             className="mt-1 inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] text-sky-300 hover:bg-sky-500/20"
           >
             Clear all filters
             <span className="opacity-60 font-mono">Esc</span>
-          </button>
+          </motion.button>
         )}
-      </div>
+      </motion.div>
     )
   }
   return (
-    <div className="h-full flex items-center justify-center text-[12px] text-muted-foreground/60 italic">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+      className="h-full flex items-center justify-center text-[12px] text-muted-foreground/60 italic"
+    >
       No log entries.
-    </div>
+    </motion.div>
   )
 }
