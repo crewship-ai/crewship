@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { Bar, BarChart, Cell, ReferenceArea, ResponsiveContainer, Tooltip, XAxis } from "recharts"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from "recharts"
 import { X } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { SEVERITY_COLOR, severityOf } from "@/lib/journal-style"
@@ -18,7 +18,7 @@ interface LogsHistogramProps {
   timeRange?: TimeRange
   /** Custom [from, to] window when timeRange === "custom". */
   customRange?: CustomRange | null
-  /** Currently-selected bucket — highlighted + drives drill-down filtering in the parent. */
+  /** Currently-selected bucket range — drives drill-down filtering in the parent. */
   selected?: BucketRange | null
   /** Click-to-drill: emit bucket on click, null when user clears. */
   onSelect?: (range: BucketRange | null) => void
@@ -34,21 +34,21 @@ interface Bucket {
   warn: number
   error: number
   total: number
-  selected: boolean
 }
 
 const BUCKET_COUNT = 60
 
 /**
  * Stacked-bar histogram of journal-event volume across the active time
- * window — Elastic Discover-style. Click a bar to drill into that
- * bucket; the parent narrows the rendered list to that slice. Click
- * the highlighted bar (or the inline pill) again to clear.
+ * window. Click a bar to drill into that bucket; **drag across bars to
+ * select a multi-bucket range** (Elastic Discover style). Click the
+ * highlighted region or the inline pill to clear.
  *
- * Window selection:
- *   1. `timeRange` prop wins → window = [now − range, now]
- *   2. else, infer from the entries' min/max ts
- *   3. else, fall back to last 15 minutes
+ * Drag detection is done at the wrapper-div level using pointer pixel
+ * coordinates → bucket index. We deliberately don't go through
+ * recharts' onClick/onMouseDown state machine because activePayload
+ * isn't reliably populated on the very first mousedown without a prior
+ * hover, which led to "click does nothing" reports.
  */
 export function LogsHistogram({
   entries,
@@ -58,49 +58,84 @@ export function LogsHistogram({
   onSelect,
   height = 64,
 }: LogsHistogramProps) {
-  const { data, fromMs: windowFrom, toMs: windowTo } = useMemo(() => {
-    return computeBuckets(entries, timeRange, customRange, selected)
-  }, [entries, timeRange, customRange, selected])
+  const { data, fromMs: windowFrom, toMs: windowTo } = useMemo(
+    () => computeBuckets(entries, timeRange, customRange),
+    [entries, timeRange, customRange],
+  )
 
   const totalEvents = data.reduce((s, b) => s + b.total, 0)
 
-  // Drag-to-select range — Elastic Discover style. mousedown on a bucket
-  // starts the drag; mousemove tracks the live end; mouseup (anywhere
-  // on the document, not just inside the chart) finalizes. A pure
-  // click — mouseup over the same bucket — falls through to the
-  // single-bucket toggle behaviour. ReferenceArea highlights the
-  // pending range while the user drags.
-  const [dragStart, setDragStart] = useState<number | null>(null)
-  const [dragEnd, setDragEnd] = useState<number | null>(null)
-  const dragStartRef = useRef<number | null>(null)
-  const dragEndRef = useRef<number | null>(null)
-  useEffect(() => { dragStartRef.current = dragStart }, [dragStart])
-  useEffect(() => { dragEndRef.current = dragEnd }, [dragEnd])
+  // ─── Drag-to-select ──────────────────────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [dragStartIdx, setDragStartIdx] = useState<number | null>(null)
+  const [dragEndIdx, setDragEndIdx] = useState<number | null>(null)
 
+  // Refs mirror state for the document-level mouseup handler — using
+  // state directly there hits stale-closure issues across re-renders.
+  const dragStartIdxRef = useRef<number | null>(null)
+  const dragEndIdxRef = useRef<number | null>(null)
   const dataRef = useRef(data)
-  useEffect(() => { dataRef.current = data }, [data])
   const selectedRef = useRef(selected)
-  useEffect(() => { selectedRef.current = selected }, [selected])
   const onSelectRef = useRef(onSelect)
+  useEffect(() => { dragStartIdxRef.current = dragStartIdx }, [dragStartIdx])
+  useEffect(() => { dragEndIdxRef.current = dragEndIdx }, [dragEndIdx])
+  useEffect(() => { dataRef.current = data }, [data])
+  useEffect(() => { selectedRef.current = selected }, [selected])
   useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
 
-  // Document-level mouseup so a drag that ends outside the chart bounds
-  // still finalizes (rather than getting stuck mid-selection).
+  const pixelToIndex = useCallback((clientX: number): number | null => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0) return null
+    const ratio = (clientX - rect.left) / rect.width
+    if (ratio < 0 || ratio > 1) return null
+    const idx = Math.floor(ratio * BUCKET_COUNT)
+    return Math.max(0, Math.min(BUCKET_COUNT - 1, idx))
+  }, [])
+
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!onSelect) return
+      // Ignore right-click / middle-click — only respond to primary button.
+      if (e.button !== 0) return
+      const idx = pixelToIndex(e.clientX)
+      if (idx === null) return
+      e.preventDefault()
+      setDragStartIdx(idx)
+      setDragEndIdx(idx)
+    },
+    [onSelect, pixelToIndex],
+  )
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (dragStartIdxRef.current === null) return
+      const idx = pixelToIndex(e.clientX)
+      if (idx === null) return
+      if (idx !== dragEndIdxRef.current) setDragEndIdx(idx)
+    },
+    [pixelToIndex],
+  )
+
+  // Document mouseup so a drag that ends outside the chart still
+  // finalizes — and so we never depend on recharts' synthetic event
+  // bubbling to fire mouseup at the right time.
   useEffect(() => {
     const finalize = () => {
-      const s = dragStartRef.current
-      const e = dragEndRef.current
+      const s = dragStartIdxRef.current
+      const e = dragEndIdxRef.current
       if (s === null || e === null) return
-      setDragStart(null)
-      setDragEnd(null)
+      setDragStartIdx(null)
+      setDragEndIdx(null)
       const onSel = onSelectRef.current
       if (!onSel) return
       const buckets = dataRef.current
-      const startBucket = buckets.find((b) => b.fromMs === s)
-      const endBucket = buckets.find((b) => b.fromMs === e)
+      const lo = Math.min(s, e)
+      const hi = Math.max(s, e)
+      const startBucket = buckets[lo]
+      const endBucket = buckets[hi]
       if (!startBucket || !endBucket) return
-      if (startBucket.fromMs === endBucket.fromMs) {
-        // Pure click — toggle single bucket.
+      // Pure click: lo === hi → toggle the single bucket.
+      if (lo === hi) {
         const sel = selectedRef.current
         if (sel && sel.fromMs === startBucket.fromMs && sel.toMs === startBucket.toMs) {
           onSel(null)
@@ -108,37 +143,36 @@ export function LogsHistogram({
           onSel({ fromMs: startBucket.fromMs, toMs: startBucket.toMs })
         }
       } else {
-        // Drag — range selection across multiple buckets.
-        const fromMs = Math.min(startBucket.fromMs, endBucket.fromMs)
-        const toMs = Math.max(startBucket.toMs, endBucket.toMs)
-        onSel({ fromMs, toMs })
+        onSel({ fromMs: startBucket.fromMs, toMs: endBucket.toMs })
       }
     }
     document.addEventListener("mouseup", finalize)
     return () => document.removeEventListener("mouseup", finalize)
   }, [])
 
-  const handleMouseDown = (state: unknown) => {
-    if (!onSelect) return
-    const s = state as { activePayload?: Array<{ payload?: Bucket }> } | null | undefined
-    const bucket = s?.activePayload?.[0]?.payload
-    if (!bucket) return
-    setDragStart(bucket.fromMs)
-    setDragEnd(bucket.fromMs)
-  }
+  // Bucket-level "is this in the selected range" — driven by props, not
+  // the in-flight drag overlay.
+  const isBucketSelected = useCallback(
+    (b: Bucket) => {
+      if (!selected) return false
+      // Tolerance of half a bucket in case of float drift.
+      const halfBucket = (b.toMs - b.fromMs) / 2
+      return b.fromMs >= selected.fromMs - halfBucket && b.toMs <= selected.toMs + halfBucket
+    },
+    [selected],
+  )
 
-  const handleMouseMove = (state: unknown) => {
-    if (dragStart === null) return
-    const s = state as { activePayload?: Array<{ payload?: Bucket }> } | null | undefined
-    const bucket = s?.activePayload?.[0]?.payload
-    if (!bucket) return
-    if (bucket.fromMs !== dragEnd) setDragEnd(bucket.fromMs)
-  }
-
-  const dragOverlay =
-    dragStart !== null && dragEnd !== null && dragStart !== dragEnd
-      ? { x1: Math.min(dragStart, dragEnd), x2: Math.max(dragStart, dragEnd) }
+  // Live drag overlay — left/width as % of chart width, computed from
+  // bucket indices so it always snaps to bar edges.
+  const dragRect =
+    dragStartIdx !== null && dragEndIdx !== null && dragStartIdx !== dragEndIdx
+      ? {
+          left: (Math.min(dragStartIdx, dragEndIdx) / BUCKET_COUNT) * 100,
+          width: ((Math.abs(dragEndIdx - dragStartIdx) + 1) / BUCKET_COUNT) * 100,
+        }
       : null
+
+  const isDragging = dragStartIdx !== null
 
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40">
@@ -170,40 +204,55 @@ export function LogsHistogram({
         </div>
       </div>
       <div
+        ref={containerRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        className="relative [&_*]:!outline-none"
         style={{
           height,
-          cursor: onSelect ? (dragStart !== null ? "ew-resize" : "crosshair") : "default",
-          userSelect: dragStart !== null ? "none" : undefined,
+          cursor: onSelect ? (isDragging ? "ew-resize" : "crosshair") : "default",
+          userSelect: isDragging ? "none" : undefined,
         }}
       >
+        {/* Selection overlay (committed selection) — rendered as a
+            positioned div so we sidestep recharts' ReferenceArea
+            quirks with categorical axes. */}
+        {selected && !isDragging && (
+          <SelectionOverlay
+            data={data}
+            selected={selected}
+          />
+        )}
+
+        {/* Drag overlay (in-flight) — purely a visual hint while the
+            user sweeps, doesn't touch parent state. */}
+        {dragRect && (
+          <div
+            className="absolute top-0 bottom-0 pointer-events-none border border-dashed border-sky-400/60 bg-sky-500/15"
+            style={{ left: `${dragRect.left}%`, width: `${dragRect.width}%` }}
+          />
+        )}
+
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={data}
             margin={{ top: 0, right: 0, left: 0, bottom: 0 }}
             barCategoryGap={1}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
+            // Disable recharts' built-in keyboard accessibility layer —
+            // the focus outline it adds rendered as a giant blue
+            // rectangle around the whole chart in dark mode and looked
+            // like a phantom selection. Drag/click via wrapper div is
+            // what drives selection now.
+            accessibilityLayer={false}
           >
             <XAxis dataKey="fromMs" hide />
             <Tooltip cursor={{ fill: "rgba(255,255,255,0.06)" }} content={<HistTooltip />} />
-            {dragOverlay && (
-              <ReferenceArea
-                x1={dragOverlay.x1}
-                x2={dragOverlay.x2}
-                strokeOpacity={0.4}
-                stroke="#38bdf8"
-                strokeDasharray="3 3"
-                fill="#38bdf8"
-                fillOpacity={0.12}
-                ifOverflow="visible"
-              />
-            )}
             <Bar dataKey="info" stackId="s" isAnimationActive={false}>
               {data.map((b, i) => (
                 <Cell
                   key={`info-${i}`}
                   fill={SEVERITY_COLOR.info}
-                  fillOpacity={selected ? (b.selected ? 1 : 0.25) : 1}
+                  fillOpacity={selected ? (isBucketSelected(b) ? 1 : 0.25) : 1}
                 />
               ))}
             </Bar>
@@ -212,7 +261,7 @@ export function LogsHistogram({
                 <Cell
                   key={`notice-${i}`}
                   fill={SEVERITY_COLOR.notice}
-                  fillOpacity={selected ? (b.selected ? 1 : 0.25) : 1}
+                  fillOpacity={selected ? (isBucketSelected(b) ? 1 : 0.25) : 1}
                 />
               ))}
             </Bar>
@@ -221,7 +270,7 @@ export function LogsHistogram({
                 <Cell
                   key={`warn-${i}`}
                   fill={SEVERITY_COLOR.warn}
-                  fillOpacity={selected ? (b.selected ? 1 : 0.25) : 1}
+                  fillOpacity={selected ? (isBucketSelected(b) ? 1 : 0.25) : 1}
                 />
               ))}
             </Bar>
@@ -230,7 +279,7 @@ export function LogsHistogram({
                 <Cell
                   key={`error-${i}`}
                   fill={SEVERITY_COLOR.error}
-                  fillOpacity={selected ? (b.selected ? 1 : 0.25) : 1}
+                  fillOpacity={selected ? (isBucketSelected(b) ? 1 : 0.25) : 1}
                 />
               ))}
             </Bar>
@@ -241,11 +290,30 @@ export function LogsHistogram({
   )
 }
 
+/** Persistent selection overlay — sits behind the bars to tint the chosen range. */
+function SelectionOverlay({ data, selected }: { data: Bucket[]; selected: BucketRange }) {
+  const halfBucket = (data[0]?.toMs ?? 0) - (data[0]?.fromMs ?? 0)
+  const firstIdx = data.findIndex(
+    (b) => b.fromMs >= selected.fromMs - halfBucket / 2,
+  )
+  const lastIdx = data.length - 1 - [...data].reverse().findIndex(
+    (b) => b.toMs <= selected.toMs + halfBucket / 2,
+  )
+  if (firstIdx < 0 || lastIdx < 0 || lastIdx < firstIdx) return null
+  const left = (firstIdx / BUCKET_COUNT) * 100
+  const width = ((lastIdx - firstIdx + 1) / BUCKET_COUNT) * 100
+  return (
+    <div
+      className="absolute top-0 bottom-0 pointer-events-none border-l border-r border-sky-500/50 bg-sky-500/10"
+      style={{ left: `${left}%`, width: `${width}%` }}
+    />
+  )
+}
+
 function computeBuckets(
   entries: JournalEntry[],
   timeRange: TimeRange | undefined,
   customRange: CustomRange | null | undefined,
-  selected: BucketRange | null | undefined,
 ): { data: Bucket[]; fromMs: number; toMs: number } {
   const now = Date.now()
   let fromMs: number
@@ -261,12 +329,6 @@ function computeBuckets(
     toMs = inferred.toMs
   }
 
-  // NOTE: the previous auto-zoom heuristic (snap window to data extent
-  // when data covered <25% of the requested range) was removed because
-  // it caused the histogram to *shift* every time pagination loaded
-  // older entries — bars walked left as the data extent grew. With the
-  // window strictly anchored to the user-selected range, sparse data
-  // simply clusters in fewer buckets, which is honest and stable.
   if (toMs - fromMs < 1000) toMs = fromMs + 1000
 
   const bucketMs = (toMs - fromMs) / BUCKET_COUNT
@@ -283,7 +345,6 @@ function computeBuckets(
       warn: 0,
       error: 0,
       total: 0,
-      selected: Boolean(selected && Math.abs(f - selected.fromMs) < bucketMs / 2),
     })
   }
 
@@ -316,7 +377,6 @@ function computeFromEntries(entries: JournalEntry[], now: number): { fromMs: num
     if (t > max) max = t
   }
   if (!isFinite(min) || !isFinite(max)) return { fromMs: now - 15 * 60 * 1000, toMs: now }
-  // Pad both sides slightly so the first/last bucket isn't a sliver.
   const span = Math.max(max - min, 60_000)
   return { fromMs: min - span * 0.02, toMs: max + span * 0.02 }
 }
@@ -368,14 +428,12 @@ function fmtClock(ts: number): string {
 
 function fmtRange(fromMs: number, toMs: number): string {
   const span = toMs - fromMs
-  // For multi-day spans, include the date.
   if (span > 24 * 60 * 60 * 1000) {
     return `${fmtDateTime(fromMs)} → ${fmtDateTime(toMs)}`
   }
   return `${fmtClock(fromMs)} → ${fmtClock(toMs)}`
 }
 
-/** Window header label — same logic as fmtRange but uses an em-dash. */
 function windowFmt(fromMs: number, toMs: number): string {
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return "—"
   const span = toMs - fromMs
