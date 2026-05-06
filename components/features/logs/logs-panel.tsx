@@ -114,6 +114,16 @@ export function LogsPanel({
   const [newestFirst, setNewestFirst] = useState(true)
   const [dedup, setDedup] = useState(false)
   const [statsCollapsed, setStatsCollapsed] = useState(false)
+  // Histogram bucket selection — client-side narrowing of the loaded
+  // entries. Kept separate from `timeRange`/`customRange` because
+  // changing those triggers a backend re-fetch (slow); a bucket
+  // filter is an instant client-side narrow.
+  const [bucket, setBucket] = useState<BucketRange | null>(null)
+  // Stale buckets from a previous time range would silently filter
+  // every entry. Reset whenever the active time window changes.
+  useEffect(() => {
+    setBucket(null)
+  }, [timeRange, customRange])
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // `live` is controlled when the parent passes both the value and a
@@ -138,12 +148,9 @@ export function LogsPanel({
   const matcher = useMemo(() => buildMatcher(query), [query])
 
   // One pass for severity counts, group counts, filtered, bucketed.
-  // Bucket narrowing has been folded into the time-range itself —
-  // clicking on a histogram bar now narrows the active time range,
-  // not a parallel client-side filter — so we always pass null here.
   const stage = useMemo(
-    () => filterEntries(annotated, { severity, matcher, muted, bucket: null }),
-    [annotated, severity, matcher, muted],
+    () => filterEntries(annotated, { severity, matcher, muted, bucket }),
+    [annotated, severity, matcher, muted, bucket],
   )
 
   // Sort + optional adjacent dedup happen on the bucketed slice — these
@@ -177,19 +184,8 @@ export function LogsPanel({
     setQuery("")
     setSeverity("all")
     setMuted(new Set())
+    setBucket(null)
   }, [])
-
-  // Histogram click/drag commits a new active time range. The parent
-  // re-fetches the narrowed window — Elastic Discover style. To
-  // restore a wider view the user picks a preset from the toolbar's
-  // TimeRangePicker.
-  const handleHistogramSelect = useCallback(
-    (range: BucketRange) => {
-      onTimeRangeChange?.("custom")
-      onCustomRangeChange?.(range)
-    },
-    [onTimeRangeChange, onCustomRangeChange],
-  )
 
   const onExport = useCallback(() => {
     const blob = new Blob([JSON.stringify(ordered, null, 2)], { type: "application/json" })
@@ -257,7 +253,7 @@ export function LogsPanel({
 
   const hasAnyEntries = entries.length > 0
   const hasFilters =
-    severity !== "all" || muted.size > 0 || query.trim().length > 0
+    severity !== "all" || muted.size > 0 || query.trim().length > 0 || bucket !== null
   const visibleCount = ordered.length
   const totalCount = entries.length
 
@@ -289,6 +285,8 @@ export function LogsPanel({
         agentScope={agentScope}
         onRefresh={onRefresh}
         loading={loading}
+        bucketFilter={bucket}
+        onClearBucketFilter={() => setBucket(null)}
       />
       <LogsTypeChips
         counts={stage.groupCounts}
@@ -300,7 +298,8 @@ export function LogsPanel({
         entries={stage.filtered}
         timeRange={timeRange}
         customRange={customRange ?? null}
-        onRangeSelect={handleHistogramSelect}
+        selected={bucket}
+        onSelect={setBucket}
       />
       {error && (
         <div className="px-3 py-2 border-b border-border/50 bg-red-500/10 text-red-300 text-[11px] flex items-center gap-2 shrink-0">

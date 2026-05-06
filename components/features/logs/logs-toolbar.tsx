@@ -16,6 +16,7 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { SEVERITY_COLOR } from "@/lib/journal-style"
 import type { JournalSeverity } from "@/lib/types/journal"
 import { TimeRangePicker, type TimeRange, type CustomRange } from "./time-range-picker"
+import type { BucketRange } from "./logs-histogram"
 
 export type SeverityFilter = "all" | JournalSeverity
 
@@ -80,6 +81,14 @@ interface LogsToolbarProps {
   // Optional refresh button — shows spinner while `loading`.
   onRefresh?: () => void
   loading?: boolean
+
+  /**
+   * Currently-active histogram bucket selection. When set, the toolbar
+   * renders a clear pill so the user knows their list is narrowed
+   * client-side beyond the time-range filter.
+   */
+  bucketFilter?: BucketRange | null
+  onClearBucketFilter?: () => void
 }
 
 const SEV_ORDER: SeverityFilter[] = ["all", "info", "notice", "warn", "error"]
@@ -110,6 +119,8 @@ export function LogsToolbar({
   agentScope,
   onRefresh,
   loading,
+  bucketFilter,
+  onClearBucketFilter,
 }: LogsToolbarProps) {
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-2 sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-card/70">
@@ -222,6 +233,19 @@ export function LogsToolbar({
       </ToolbarToggle>
 
       <div className="flex-1" />
+
+      {bucketFilter && onClearBucketFilter && (
+        <button
+          type="button"
+          onClick={onClearBucketFilter}
+          className="inline-flex items-center gap-1 h-6 px-2 rounded border border-sky-500/40 bg-sky-500/10 text-[10px] font-mono text-sky-300 hover:bg-sky-500/20"
+          title="Clear histogram selection"
+        >
+          <Filter className="h-3 w-3" />
+          {fmtBucketLabel(bucketFilter)}
+          <span className="text-base leading-none">×</span>
+        </button>
+      )}
 
       <span className="inline-flex items-center gap-1.5 px-2 h-6 rounded border border-border/60 bg-card text-[10px] font-mono">
         <span className="text-muted-foreground">visible</span>
@@ -350,6 +374,22 @@ function ScopeBadge({ option, kind }: { option: ScopeOption; kind: "crew" | "age
       {option.name.slice(0, 1).toUpperCase()}
     </span>
   )
+}
+
+function fmtBucketLabel(b: BucketRange): string {
+  const f = new Date(b.fromMs)
+  const t = new Date(b.toMs)
+  const sameDay =
+    f.getFullYear() === t.getFullYear() &&
+    f.getMonth() === t.getMonth() &&
+    f.getDate() === t.getDate()
+  const fmtTime = (d: Date) =>
+    `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+  const fmtDay = (d: Date) =>
+    `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  return sameDay
+    ? `${fmtTime(f)}–${fmtTime(t)}`
+    : `${fmtDay(f)} ${fmtTime(f)} → ${fmtDay(t)} ${fmtTime(t)}`
 }
 
 function ToolbarToggle({

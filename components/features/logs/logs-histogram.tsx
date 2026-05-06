@@ -17,14 +17,15 @@ interface LogsHistogramProps {
   timeRange?: TimeRange
   /** Custom [from, to] window when timeRange === "custom". */
   customRange?: CustomRange | null
+  /** Currently-active bucket selection — shaded on the chart. */
+  selected?: BucketRange | null
   /**
-   * Called when the user clicks a single bar OR drags across several
-   * to commit a range selection. The parent should treat the emitted
-   * range as the new active time window — which means narrowing the
-   * fetched data, NOT just doing a client-side filter. To "go back",
-   * the user picks a wider preset from the time-range picker.
+   * Click / drag commits a selection. Emit `null` to clear (when
+   * the user clicks the already-selected bucket). The parent should
+   * apply this as a client-side narrow on the loaded entries — fast,
+   * no backend re-fetch.
    */
-  onRangeSelect?: (range: BucketRange) => void
+  onSelect?: (range: BucketRange | null) => void
   height?: number
 }
 
@@ -58,7 +59,8 @@ export function LogsHistogram({
   entries,
   timeRange,
   customRange,
-  onRangeSelect,
+  selected,
+  onSelect,
   height = 64,
 }: LogsHistogramProps) {
   const { data, fromMs: windowFrom, toMs: windowTo } = useMemo(
@@ -73,9 +75,11 @@ export function LogsHistogram({
   const dragStartIdxRef = useRef<number | null>(null)
   const dragStartXRef = useRef<number | null>(null)
   const dataRef = useRef(data)
-  const onRangeSelectRef = useRef(onRangeSelect)
+  const selectedRef = useRef(selected)
+  const onSelectRef = useRef(onSelect)
   useEffect(() => { dataRef.current = data }, [data])
-  useEffect(() => { onRangeSelectRef.current = onRangeSelect }, [onRangeSelect])
+  useEffect(() => { selectedRef.current = selected }, [selected])
+  useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
 
   // Visual drag-end index (only set once the pointer has moved past
   // DRAG_THRESHOLD_PX, so a quick click never paints a drag overlay).
@@ -93,7 +97,7 @@ export function LogsHistogram({
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!onRangeSelect) return
+      if (!onSelect) return
       if (e.button !== 0) return
       const idx = pixelToIndex(e.clientX)
       if (idx === null) return
@@ -103,7 +107,7 @@ export function LogsHistogram({
       setDragVisualEnd(null)
       setIsDragging(false)
     },
-    [onRangeSelect, pixelToIndex],
+    [onSelect, pixelToIndex],
   )
 
   const handlePointerMove = useCallback(
@@ -129,14 +133,21 @@ export function LogsHistogram({
       setDragVisualEnd(null)
       setIsDragging(false)
       if (startIdx === null || startX === null) return
-      const onSel = onRangeSelectRef.current
+      const onSel = onSelectRef.current
       if (!onSel) return
       const buckets = dataRef.current
       const moved = Math.abs(e.clientX - startX) >= DRAG_THRESHOLD_PX
       if (!moved) {
-        // Click — single bucket.
+        // Click — single bucket. Toggle off if it's already the
+        // active selection.
         const b = buckets[startIdx]
-        if (b) onSel({ fromMs: b.fromMs, toMs: b.toMs })
+        if (!b) return
+        const sel = selectedRef.current
+        if (sel && sel.fromMs === b.fromMs && sel.toMs === b.toMs) {
+          onSel(null)
+        } else {
+          onSel({ fromMs: b.fromMs, toMs: b.toMs })
+        }
         return
       }
       // Drag — find end bucket from final pointer position.
@@ -174,8 +185,8 @@ export function LogsHistogram({
           {totalEvents > 0 && (
             <span className="ml-2 normal-case opacity-70">{totalEvents.toLocaleString()} in window</span>
           )}
-          {onRangeSelect && totalEvents > 0 && (
-            <span className="ml-2 normal-case opacity-50 italic">click a bar to zoom · drag for range</span>
+          {onSelect && totalEvents > 0 && !selected && (
+            <span className="ml-2 normal-case opacity-50 italic">click a bar to filter · drag for range</span>
           )}
         </div>
         <div className="text-[10px] font-mono tabular-nums text-muted-foreground/70">
@@ -189,10 +200,16 @@ export function LogsHistogram({
         className="relative [&_*]:!outline-none"
         style={{
           height,
-          cursor: onRangeSelect ? (isDragging ? "ew-resize" : "crosshair") : "default",
+          cursor: onSelect ? (isDragging ? "ew-resize" : "crosshair") : "default",
           userSelect: dragStartIdxRef.current !== null ? "none" : undefined,
         }}
       >
+        {/* Persistent selection — sky-blue tint behind bars. */}
+        {selected && !isDragging && (
+          <SelectionOverlay data={data} selected={selected} />
+        )}
+
+        {/* In-flight drag — dashed marquee while user sweeps. */}
         {dragRect && (
           <div
             className="absolute top-0 bottom-0 pointer-events-none border border-dashed border-sky-400/60 bg-sky-500/15 z-10"
@@ -210,21 +227,74 @@ export function LogsHistogram({
             <XAxis dataKey="fromMs" hide />
             <Tooltip cursor={{ fill: "rgba(255,255,255,0.06)" }} content={<HistTooltip />} />
             <Bar dataKey="info" stackId="s" isAnimationActive={false}>
-              {data.map((_, i) => <Cell key={`info-${i}`} fill={SEVERITY_COLOR.info} />)}
+              {data.map((b, i) => (
+                <Cell
+                  key={`info-${i}`}
+                  fill={SEVERITY_COLOR.info}
+                  fillOpacity={selected ? (isInRange(b, selected) ? 1 : 0.25) : 1}
+                />
+              ))}
             </Bar>
             <Bar dataKey="notice" stackId="s" isAnimationActive={false}>
-              {data.map((_, i) => <Cell key={`notice-${i}`} fill={SEVERITY_COLOR.notice} />)}
+              {data.map((b, i) => (
+                <Cell
+                  key={`notice-${i}`}
+                  fill={SEVERITY_COLOR.notice}
+                  fillOpacity={selected ? (isInRange(b, selected) ? 1 : 0.25) : 1}
+                />
+              ))}
             </Bar>
             <Bar dataKey="warn" stackId="s" isAnimationActive={false}>
-              {data.map((_, i) => <Cell key={`warn-${i}`} fill={SEVERITY_COLOR.warn} />)}
+              {data.map((b, i) => (
+                <Cell
+                  key={`warn-${i}`}
+                  fill={SEVERITY_COLOR.warn}
+                  fillOpacity={selected ? (isInRange(b, selected) ? 1 : 0.25) : 1}
+                />
+              ))}
             </Bar>
             <Bar dataKey="error" stackId="s" isAnimationActive={false}>
-              {data.map((_, i) => <Cell key={`error-${i}`} fill={SEVERITY_COLOR.error} />)}
+              {data.map((b, i) => (
+                <Cell
+                  key={`error-${i}`}
+                  fill={SEVERITY_COLOR.error}
+                  fillOpacity={selected ? (isInRange(b, selected) ? 1 : 0.25) : 1}
+                />
+              ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
+  )
+}
+
+/** Whether the bucket falls within the selected range (with half-bucket tolerance). */
+function isInRange(b: Bucket, sel: BucketRange): boolean {
+  const halfBucket = (b.toMs - b.fromMs) / 2
+  return b.fromMs >= sel.fromMs - halfBucket && b.toMs <= sel.toMs + halfBucket
+}
+
+/** Persistent selection overlay — sits behind the bars. */
+function SelectionOverlay({ data, selected }: { data: Bucket[]; selected: BucketRange }) {
+  if (data.length === 0) return null
+  const halfBucket = (data[0].toMs - data[0].fromMs) / 2
+  let firstIdx = -1
+  let lastIdx = -1
+  for (let i = 0; i < data.length; i++) {
+    if (data[i].fromMs >= selected.fromMs - halfBucket && data[i].toMs <= selected.toMs + halfBucket) {
+      if (firstIdx === -1) firstIdx = i
+      lastIdx = i
+    }
+  }
+  if (firstIdx < 0 || lastIdx < 0) return null
+  const left = (firstIdx / BUCKET_COUNT) * 100
+  const width = ((lastIdx - firstIdx + 1) / BUCKET_COUNT) * 100
+  return (
+    <div
+      className="absolute top-0 bottom-0 pointer-events-none border-l border-r border-sky-500/60 bg-sky-500/10"
+      style={{ left: `${left}%`, width: `${width}%` }}
+    />
   )
 }
 
