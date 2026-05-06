@@ -24,7 +24,10 @@ import { LogsPanel } from "@/components/features/logs/logs-panel"
 import { ResourcesStrip } from "@/components/features/logs/resources-strip"
 import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
 import { refreshRateMs, type RefreshRate } from "@/components/features/logs/refresh-rate-picker"
-import type { ScopeOption } from "@/components/features/logs/logs-toolbar"
+import type { ScopeOption, SeverityFilter } from "@/components/features/logs/logs-toolbar"
+import { GROUP_ORDER, type EntryGroup } from "@/lib/journal-style"
+import { entryTypesForGroups } from "@/lib/journal-groups"
+import { parseStructuredQuery } from "@/lib/log-search"
 
 /**
  * Cap on entries kept in memory. Generous enough to hold a full
@@ -125,7 +128,31 @@ export default function JournalPage() {
   const [customRange, setCustomRange] = useState<CustomRange | null>(initialCustomRange)
   const [crewId, setCrewId] = useState<string>(() => searchParams.get("crew_id") ?? "")
   const [agentId, setAgentId] = useState<string>(() => searchParams.get("agent_id") ?? "")
+  const [traceId, setTraceId] = useState<string>(() => searchParams.get("trace_id") ?? "")
   const [serverQuery, setServerQuery] = useState<string>("")
+  // Severity + muted-groups are LIFTED out of LogsPanel so we can mirror
+  // them as server-side filters. The previous client-only filtering
+  // silently dropped matches when the 5,000-entry buffer cap kicked in
+  // — muting "container" might leave zero events visible because the
+  // server already returned the most recent 5k container.metrics rows.
+  const initialSeverity = useMemo<SeverityFilter>(() => {
+    const s = searchParams.get("severity")
+    return (s === "info" || s === "notice" || s === "warn" || s === "error" ? s : "all") as SeverityFilter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const initialMuted = useMemo<Set<EntryGroup>>(() => {
+    const raw = searchParams.get("mute")
+    if (!raw) return new Set<EntryGroup>()
+    const set = new Set<EntryGroup>()
+    for (const g of raw.split(",")) {
+      const trimmed = g.trim() as EntryGroup
+      if ((GROUP_ORDER as readonly string[]).includes(trimmed)) set.add(trimmed)
+    }
+    return set
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const [severity, setSeverity] = useState<SeverityFilter>(initialSeverity)
+  const [muted, setMuted] = useState<Set<EntryGroup>>(initialMuted)
   const [live, setLive] = useState(true)
   // Auto-refresh cadence — defaults to "live" (SSE-driven, no polling)
   // so we don't load the backend with redundant requests when a
@@ -234,7 +261,9 @@ export default function JournalPage() {
   }, [agents])
 
   // Deeplink — mirror filter state into URL search params on change so
-  // the user can share / bookmark a specific view.
+  // the user can share / bookmark a specific view. Severity + muted
+  // groups are part of the filter contract: a saved bookmark must
+  // restore the exact view, not just the time range.
   useEffect(() => {
     const sp = new URLSearchParams()
     if (timeRange !== "24h") sp.set("time", timeRange)
@@ -244,24 +273,52 @@ export default function JournalPage() {
     }
     if (crewId) sp.set("crew_id", crewId)
     if (agentId) sp.set("agent_id", agentId)
+    if (traceId) sp.set("trace_id", traceId)
+    if (severity !== "all") sp.set("severity", severity)
+    if (muted.size > 0) sp.set("mute", Array.from(muted).join(","))
     if (activeTab !== "timeline") sp.set("tab", activeTab)
     const qs = sp.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-  }, [timeRange, customRange, crewId, agentId, activeTab, router, pathname])
+  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, activeTab, router, pathname])
+
+  // Structured-query split: tokens like `agent:viktor severity:error
+  // type:exec.command` get peeled off the search box and routed to
+  // server-side query params instead of being narrowed client-side over
+  // the 5,000-row buffer. Free text + payload keys (`payload.foo:bar`)
+  // stay in clientSearchQuery and feed LogsPanel's local matcher.
+  const structured = useMemo(() => parseStructuredQuery(serverQuery), [serverQuery])
 
   const queryParams = useMemo<Record<string, string | undefined>>(() => {
     const since = sinceFromTimeRange(timeRange, customRange)
     const until = timeRange === "custom" && customRange
       ? new Date(customRange.toMs).toISOString()
       : undefined
+    // Server-side severity: skip when "all" so we don't bind a filter.
+    const severityParam = severity === "all" ? undefined : severity
+    // Server-side mute → exclude_entry_type. "other" can't be expanded
+    // server-side (its membership is the complement of every known
+    // type) so it remains client-only — entryTypesForGroups handles
+    // that gracefully by returning [] for "other".
+    const excludeTypes = entryTypesForGroups(muted)
+    // structured.serverParams takes precedence over scope-level
+    // filters when both are set so the user can use the search box to
+    // pin one specific agent/crew/trace without first clearing the
+    // toolbar selects. trace_id from URL still wins over an
+    // unstructured token if both somehow coexist.
     return {
-      crew_id: crewId || undefined,
-      agent_id: agentId || undefined,
-      q: serverQuery.trim() || undefined,
+      crew_id: structured.serverParams.crew_id ?? (crewId || undefined),
+      agent_id: structured.serverParams.agent_id ?? (agentId || undefined),
+      trace_id: traceId || structured.serverParams.trace_id || undefined,
+      entry_type: structured.serverParams.entry_type,
+      severity: structured.serverParams.severity ?? severityParam,
+      actor_type: structured.serverParams.actor_type,
+      priority: structured.serverParams.priority,
+      exclude_entry_type: excludeTypes.length > 0 ? excludeTypes.join(",") : undefined,
+      q: structured.clientQuery.trim() || undefined,
       since,
       until,
     }
-  }, [timeRange, customRange, crewId, agentId, serverQuery])
+  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, structured])
 
   // Only the Timeline tab consumes the journal list + SSE stream.
   const timelineEnabled = !wsLoading && activeTab === "timeline"
@@ -449,6 +506,12 @@ export default function JournalPage() {
                 agentScope={{ value: agentId, options: agents, onChange: setAgentId }}
                 agentLookup={agentLookup}
                 showNetworkCard={showNetworkCard}
+                severity={severity}
+                onSeverityChange={setSeverity}
+                muted={muted}
+                onMutedChange={setMuted}
+                traceId={traceId}
+                onClearTraceId={() => setTraceId("")}
                 onServerSearch={setServerQuery}
                 onRefresh={handleRefresh}
                 loading={loading}
@@ -472,7 +535,7 @@ export default function JournalPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-auto p-4"
+            className="flex-1 min-h-0 overflow-hidden flex flex-col"
           >
             <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
           </motion.div>
