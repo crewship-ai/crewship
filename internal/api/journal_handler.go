@@ -178,6 +178,23 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 // parseJournalQuery turns URL query params into a journal.Query.
 // Returns an error describing the first bad input so the handler can
 // respond 400 with a useful message.
+//
+// Supported params (all optional, all CSV where multi-valued):
+//
+//	crew_id           single crew filter
+//	agent_id          single agent filter
+//	crew_ids          multi-value crew filter — CSV, takes precedence over crew_id
+//	agent_ids         multi-value agent filter — CSV, takes precedence over agent_id
+//	mission_id        narrow to a single mission
+//	trace_id          narrow to a single run (trace_id == run_id)
+//	entry_type        CSV of EntryType values to include
+//	exclude_entry_type CSV of EntryType values to exclude (NOT IN)
+//	severity          CSV of Severity values
+//	actor_type        CSV of ActorType values (agent|user|system|keeper|sidecar|orchestrator)
+//	priority          CSV of Priority values (normal|high|pin|permanent)
+//	since, until      RFC3339 bounds
+//	cursor, limit     pagination
+//	q                 free-text search (FTS5)
 func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, error) {
 	qs := r.URL.Query()
 	q := journal.Query{
@@ -185,7 +202,22 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 		CrewID:      qs.Get("crew_id"),
 		AgentID:     qs.Get("agent_id"),
 		MissionID:   qs.Get("mission_id"),
+		TraceID:     qs.Get("trace_id"),
 		Cursor:      qs.Get("cursor"),
+	}
+	if v := qs.Get("crew_ids"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				q.CrewIDs = append(q.CrewIDs, s)
+			}
+		}
+	}
+	if v := qs.Get("agent_ids"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				q.AgentIDs = append(q.AgentIDs, s)
+			}
+		}
 	}
 	if v := qs.Get("entry_type"); v != "" {
 		for _, s := range strings.Split(v, ",") {
@@ -194,10 +226,35 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 			}
 		}
 	}
+	if v := qs.Get("exclude_entry_type"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				q.ExcludeTypes = append(q.ExcludeTypes, journal.EntryType(s))
+			}
+		}
+	}
 	if v := qs.Get("severity"); v != "" {
 		for _, s := range strings.Split(v, ",") {
 			if s = strings.TrimSpace(s); s != "" {
 				q.Severities = append(q.Severities, journal.Severity(s))
+			}
+		}
+	}
+	if v := qs.Get("actor_type"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				q.ActorTypes = append(q.ActorTypes, journal.ActorType(s))
+			}
+		}
+	}
+	if v := qs.Get("priority"); v != "" {
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				p := journal.Priority(s)
+				if !journal.ValidPriority(p) {
+					return q, fmt.Errorf("priority must be one of normal|high|pin|permanent (got %q)", s)
+				}
+				q.Priorities = append(q.Priorities, p)
 			}
 		}
 	}

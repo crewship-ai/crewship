@@ -95,6 +95,15 @@ interface LogsToolbarProps {
   /** Refresh-rate cadence (e.g. "live", "10s"). Renders a picker when provided. */
   refreshRate?: RefreshRate
   onRefreshRateChange?: (r: RefreshRate) => void
+
+  /**
+   * Trace focus — when set, the toolbar renders a "trace ABCD" pill
+   * with an X to clear. Communicates "you're zoomed into one run, not
+   * the full workspace timeline" so the empty-list case doesn't
+   * confuse a user who deeplinked from another surface.
+   */
+  traceId?: string
+  onClearTraceId?: () => void
 }
 
 const SEV_ORDER: SeverityFilter[] = ["all", "info", "notice", "warn", "error"]
@@ -129,17 +138,20 @@ export function LogsToolbar({
   onClearBucketFilter,
   refreshRate,
   onRefreshRateChange,
+  traceId,
+  onClearTraceId,
 }: LogsToolbarProps) {
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-2 sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-card/70">
       {/* search */}
-      <div className="relative flex-1 min-w-[240px] max-w-[420px]">
+      <div className="relative flex-1 min-w-[240px] max-w-[460px]">
         <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
           ref={searchInputRef}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search…"
+          placeholder="Search… (try agent:viktor severity:error)"
+          title="Structured tokens go to the server: agent / crew / trace / type / severity / actor / priority. Free text + payload keys (payload.tool_name:Bash) stay client-side."
           className="h-7 pl-7 pr-6 text-[12px] font-mono"
         />
         {query && (
@@ -249,6 +261,23 @@ export function LogsToolbar({
       <div className="flex-1" />
 
       <AnimatePresence>
+        {traceId && onClearTraceId && (
+          <motion.button
+            key="trace-pill"
+            type="button"
+            onClick={onClearTraceId}
+            initial={{ opacity: 0, scale: 0.85, y: -2 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: -2 }}
+            transition={{ type: "spring", damping: 18, stiffness: 320 }}
+            className="inline-flex items-center gap-1 h-6 px-2 rounded border border-violet-500/40 bg-violet-500/10 text-[10px] font-mono text-violet-300 hover:bg-violet-500/20"
+            title="Clear trace focus"
+          >
+            <Filter className="h-3 w-3" />
+            trace {traceId.slice(0, 8)}
+            <span className="text-base leading-none">×</span>
+          </motion.button>
+        )}
         {bucketFilter && onClearBucketFilter && (
           <motion.button
             key="bucket-pill"

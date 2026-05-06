@@ -7,11 +7,10 @@ import {
   Activity,
   BookOpen,
   DollarSign,
-  LineChart,
   ListOrdered,
+  Lock,
   Radio,
   RadioTower,
-  Shield,
   Zap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -21,14 +20,14 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { RunsView } from "@/components/features/journal/runs-view"
-import { AuditView } from "@/components/features/journal/audit-view"
-import { SpendView } from "@/components/features/journal/spend-view"
-import { EvalView } from "@/components/features/journal/eval-view"
 import { LogsPanel } from "@/components/features/logs/logs-panel"
 import { ResourcesStrip } from "@/components/features/logs/resources-strip"
 import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
 import { refreshRateMs, type RefreshRate } from "@/components/features/logs/refresh-rate-picker"
-import type { ScopeOption } from "@/components/features/logs/logs-toolbar"
+import type { ScopeOption, SeverityFilter } from "@/components/features/logs/logs-toolbar"
+import { GROUP_ORDER, type EntryGroup } from "@/lib/journal-style"
+import { entryTypesForGroups } from "@/lib/journal-groups"
+import { parseStructuredQuery } from "@/lib/log-search"
 
 /**
  * Cap on entries kept in memory. Generous enough to hold a full
@@ -54,7 +53,7 @@ interface AgentSummary {
   crew?: { avatar_style?: string | null } | null
 }
 
-type JournalTab = "timeline" | "runs" | "eval" | "audit" | "spend"
+type JournalTab = "timeline" | "runs" | "spend"
 
 interface TabDef {
   id: JournalTab
@@ -62,25 +61,31 @@ interface TabDef {
   icon: typeof ListOrdered
   /** When true, only OWNER/ADMIN see the tab. */
   adminOnly?: boolean
+  /**
+   * Locked tabs render with a "Soon" badge and a lock icon, and the
+   * click handler is a no-op so activeTab never lands on them.
+   */
+  locked?: boolean
 }
 
 const ALL_TABS: TabDef[] = [
   { id: "timeline", label: "Timeline", icon: ListOrdered },
   { id: "runs", label: "Runs", icon: Activity },
-  { id: "eval", label: "Eval", icon: LineChart },
-  { id: "audit", label: "Audit", icon: Shield, adminOnly: true },
-  { id: "spend", label: "Spend", icon: DollarSign, adminOnly: true },
+  { id: "spend", label: "Spend", icon: DollarSign, adminOnly: true, locked: true },
 ]
 
 /**
  * Crew Journal — workspace-wide records center.
  *
- * Five tabs render different immutable record types under one roof:
  *   - Timeline: runtime events from `journal_entries` (Grafana-style)
- *   - Runs:     agent run aggregates from `/api/v1/runs`
- *   - Eval:     eval.* journal projection
- *   - Audit:    entity CRUD log from `/api/v1/audit` (admin-only)
- *   - Spend:    cost ledger from `/api/v1/paymaster/*` (admin-only)
+ *   - Runs:     agent run aggregates derived from journal `run.*` entries
+ *   - Spend:    cost ledger surface — currently locked behind a "Soon"
+ *               badge until LLM-cost attribution is prioritized.
+ *
+ * Audit log moved to `/settings?tab=audit` (admin compliance view).
+ * Eval / quartermaster replay surface was removed; the backend emit
+ * machinery in `internal/quartermaster/` is preserved as a nice-to-have
+ * to revisit when there are >=2 production missions worth comparing.
  *
  * Per-tab RBAC hides admin-only tabs entirely from non-admins so they
  * never see a "click here for 403" affordance.
@@ -123,7 +128,31 @@ export default function JournalPage() {
   const [customRange, setCustomRange] = useState<CustomRange | null>(initialCustomRange)
   const [crewId, setCrewId] = useState<string>(() => searchParams.get("crew_id") ?? "")
   const [agentId, setAgentId] = useState<string>(() => searchParams.get("agent_id") ?? "")
+  const [traceId, setTraceId] = useState<string>(() => searchParams.get("trace_id") ?? "")
   const [serverQuery, setServerQuery] = useState<string>("")
+  // Severity + muted-groups are LIFTED out of LogsPanel so we can mirror
+  // them as server-side filters. The previous client-only filtering
+  // silently dropped matches when the 5,000-entry buffer cap kicked in
+  // — muting "container" might leave zero events visible because the
+  // server already returned the most recent 5k container.metrics rows.
+  const initialSeverity = useMemo<SeverityFilter>(() => {
+    const s = searchParams.get("severity")
+    return (s === "info" || s === "notice" || s === "warn" || s === "error" ? s : "all") as SeverityFilter
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const initialMuted = useMemo<Set<EntryGroup>>(() => {
+    const raw = searchParams.get("mute")
+    if (!raw) return new Set<EntryGroup>()
+    const set = new Set<EntryGroup>()
+    for (const g of raw.split(",")) {
+      const trimmed = g.trim() as EntryGroup
+      if ((GROUP_ORDER as readonly string[]).includes(trimmed)) set.add(trimmed)
+    }
+    return set
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const [severity, setSeverity] = useState<SeverityFilter>(initialSeverity)
+  const [muted, setMuted] = useState<Set<EntryGroup>>(initialMuted)
   const [live, setLive] = useState(true)
   // Auto-refresh cadence — defaults to "live" (SSE-driven, no polling)
   // so we don't load the backend with redundant requests when a
@@ -142,11 +171,16 @@ export default function JournalPage() {
   }, [])
   const [activeTab, setActiveTab] = useState<JournalTab>(initialTab)
 
-  // If admin permissions resolve to non-admin, demote out of an admin-only tab.
+  // If admin permissions resolve to non-admin OR a deeplink lands on a
+  // locked tab, demote back to timeline. Locked check fires regardless
+  // of role so even admins can't snap into an unimplemented surface via
+  // a stale bookmark.
   useEffect(() => {
     if (rolesLoading) return
     const tabDef = ALL_TABS.find((t) => t.id === activeTab)
-    if (tabDef?.adminOnly && !isAdmin) setActiveTab("timeline")
+    if (!tabDef || tabDef.locked || (tabDef.adminOnly && !isAdmin)) {
+      setActiveTab("timeline")
+    }
   }, [activeTab, isAdmin, rolesLoading])
 
   // Crew + agent options for the toolbar selects.
@@ -227,7 +261,9 @@ export default function JournalPage() {
   }, [agents])
 
   // Deeplink — mirror filter state into URL search params on change so
-  // the user can share / bookmark a specific view.
+  // the user can share / bookmark a specific view. Severity + muted
+  // groups are part of the filter contract: a saved bookmark must
+  // restore the exact view, not just the time range.
   useEffect(() => {
     const sp = new URLSearchParams()
     if (timeRange !== "24h") sp.set("time", timeRange)
@@ -237,24 +273,52 @@ export default function JournalPage() {
     }
     if (crewId) sp.set("crew_id", crewId)
     if (agentId) sp.set("agent_id", agentId)
+    if (traceId) sp.set("trace_id", traceId)
+    if (severity !== "all") sp.set("severity", severity)
+    if (muted.size > 0) sp.set("mute", Array.from(muted).join(","))
     if (activeTab !== "timeline") sp.set("tab", activeTab)
     const qs = sp.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
-  }, [timeRange, customRange, crewId, agentId, activeTab, router, pathname])
+  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, activeTab, router, pathname])
+
+  // Structured-query split: tokens like `agent:viktor severity:error
+  // type:exec.command` get peeled off the search box and routed to
+  // server-side query params instead of being narrowed client-side over
+  // the 5,000-row buffer. Free text + payload keys (`payload.foo:bar`)
+  // stay in clientSearchQuery and feed LogsPanel's local matcher.
+  const structured = useMemo(() => parseStructuredQuery(serverQuery), [serverQuery])
 
   const queryParams = useMemo<Record<string, string | undefined>>(() => {
     const since = sinceFromTimeRange(timeRange, customRange)
     const until = timeRange === "custom" && customRange
       ? new Date(customRange.toMs).toISOString()
       : undefined
+    // Server-side severity: skip when "all" so we don't bind a filter.
+    const severityParam = severity === "all" ? undefined : severity
+    // Server-side mute → exclude_entry_type. "other" can't be expanded
+    // server-side (its membership is the complement of every known
+    // type) so it remains client-only — entryTypesForGroups handles
+    // that gracefully by returning [] for "other".
+    const excludeTypes = entryTypesForGroups(muted)
+    // structured.serverParams takes precedence over scope-level
+    // filters when both are set so the user can use the search box to
+    // pin one specific agent/crew/trace without first clearing the
+    // toolbar selects. trace_id from URL still wins over an
+    // unstructured token if both somehow coexist.
     return {
-      crew_id: crewId || undefined,
-      agent_id: agentId || undefined,
-      q: serverQuery.trim() || undefined,
+      crew_id: structured.serverParams.crew_id ?? (crewId || undefined),
+      agent_id: structured.serverParams.agent_id ?? (agentId || undefined),
+      trace_id: traceId || structured.serverParams.trace_id || undefined,
+      entry_type: structured.serverParams.entry_type,
+      severity: structured.serverParams.severity ?? severityParam,
+      actor_type: structured.serverParams.actor_type,
+      priority: structured.serverParams.priority,
+      exclude_entry_type: excludeTypes.length > 0 ? excludeTypes.join(",") : undefined,
+      q: structured.clientQuery.trim() || undefined,
       since,
       until,
     }
-  }, [timeRange, customRange, crewId, agentId, serverQuery])
+  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, structured])
 
   // Only the Timeline tab consumes the journal list + SSE stream.
   const timelineEnabled = !wsLoading && activeTab === "timeline"
@@ -351,6 +415,15 @@ export default function JournalPage() {
           </Badge>
         )}
         {activeTab === "timeline" && <StreamStatusBadge status={streamStatus} />}
+        {activeTab === "timeline" && (
+          <AnomalyBadge
+            entries={entries}
+            onClick={() => {
+              setSeverity("error")
+              setTimeRange("5m")
+            }}
+          />
+        )}
         <div className="flex-1" />
       </div>
 
@@ -360,31 +433,52 @@ export default function JournalPage() {
         aria-label="Journal views"
         className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-2 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       >
-        {visibleTabs.map(({ id, label, icon: Icon, adminOnly }) => (
-          <motion.button
-            key={id}
-            role="tab"
-            aria-selected={activeTab === id}
-            onClick={() => setActiveTab(id)}
-            whileHover={{ y: -1 }}
-            whileTap={{ y: 0, scale: 0.97 }}
-            transition={{ duration: 0.12 }}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-colors duration-100 relative top-px whitespace-nowrap shrink-0",
-              activeTab === id
-                ? "border-blue-400 text-blue-400"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            <Icon className="h-3 w-3 opacity-75" />
-            {label}
-            {adminOnly && (
-              <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-mono">
-                admin
-              </span>
-            )}
-          </motion.button>
-        ))}
+        {visibleTabs.map(({ id, label, icon: Icon, adminOnly, locked }) => {
+          const isActive = activeTab === id
+          return (
+            <motion.button
+              key={id}
+              role="tab"
+              aria-selected={isActive}
+              aria-disabled={locked || undefined}
+              onClick={() => {
+                // Locked tabs never accept activation. Clicks fall
+                // through to the cursor-not-allowed style so the user
+                // sees the tooltip but the URL/state stays put.
+                if (locked) return
+                setActiveTab(id)
+              }}
+              whileHover={locked ? undefined : { y: -1 }}
+              whileTap={locked ? undefined : { y: 0, scale: 0.97 }}
+              transition={{ duration: 0.12 }}
+              title={locked ? `${label} — coming soon` : undefined}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-colors duration-100 relative top-px whitespace-nowrap shrink-0",
+                locked
+                  ? "border-transparent text-muted-foreground/40 cursor-not-allowed"
+                  : isActive
+                    ? "border-blue-400 text-blue-400"
+                    : "border-transparent text-muted-foreground hover:text-foreground/80",
+              )}
+            >
+              <Icon className="h-3 w-3 opacity-75" />
+              {label}
+              {locked && (
+                <>
+                  <Lock className="h-2.5 w-2.5 opacity-60" />
+                  <span className="text-[9px] uppercase tracking-wider text-amber-400/70 font-mono">
+                    soon
+                  </span>
+                </>
+              )}
+              {adminOnly && !locked && (
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-mono">
+                  admin
+                </span>
+              )}
+            </motion.button>
+          )
+        })}
       </div>
 
       {/* ---- Tab content (animated swap) ---- */}
@@ -421,6 +515,15 @@ export default function JournalPage() {
                 agentScope={{ value: agentId, options: agents, onChange: setAgentId }}
                 agentLookup={agentLookup}
                 showNetworkCard={showNetworkCard}
+                severity={severity}
+                onSeverityChange={setSeverity}
+                muted={muted}
+                onMutedChange={setMuted}
+                traceId={traceId}
+                onClearTraceId={() => setTraceId("")}
+                onSelectTrace={setTraceId}
+                onSelectAgent={setAgentId}
+                onSelectCrew={onCrewChange}
                 onServerSearch={setServerQuery}
                 onRefresh={handleRefresh}
                 loading={loading}
@@ -444,52 +547,63 @@ export default function JournalPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-auto p-4"
+            className="flex-1 min-h-0 overflow-hidden flex flex-col"
           >
             <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
           </motion.div>
         )}
-
-        {activeTab === "eval" && (
-          <motion.div
-            key="eval"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-hidden"
-          >
-            <EvalView />
-          </motion.div>
-        )}
-
-        {activeTab === "audit" && isAdmin && (
-          <motion.div
-            key="audit"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-hidden"
-          >
-            <AuditView />
-          </motion.div>
-        )}
-
-        {activeTab === "spend" && isAdmin && (
-          <motion.div
-            key="spend"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-hidden"
-          >
-            <SpendView />
-          </motion.div>
-        )}
       </AnimatePresence>
     </div>
+  )
+}
+
+/**
+ * Live error/warn count over the last ANOMALY_WINDOW_MS milliseconds,
+ * surfaced as a pulsing red pill in the header. Acts as a "you should
+ * look at this" signal so a viewer scrolling through routine
+ * exec.command + container.metrics traffic doesn't miss a fresh
+ * cluster of failures. Clicking jumps the filter to severity=error +
+ * time=5m so the pill always resolves to a useful narrowed view.
+ *
+ * Threshold (ANOMALY_THRESHOLD) deliberately starts low (>= 3) — false
+ * positives here are cheap (a quick glance) and false negatives are
+ * not (a missed cluster of run.failed events).
+ */
+const ANOMALY_WINDOW_MS = 5 * 60 * 1000
+const ANOMALY_THRESHOLD = 3
+
+function AnomalyBadge({
+  entries,
+  onClick,
+}: {
+  entries: Array<{ ts: string; severity?: string }>
+  onClick: () => void
+}) {
+  const errCount = useMemo(() => {
+    const cutoff = Date.now() - ANOMALY_WINDOW_MS
+    let n = 0
+    for (const e of entries) {
+      if (e.severity !== "error" && e.severity !== "warn") continue
+      const t = Date.parse(e.ts)
+      if (Number.isFinite(t) && t >= cutoff) n++
+    }
+    return n
+  }, [entries])
+  if (errCount < ANOMALY_THRESHOLD) return null
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 h-5 px-2 rounded-full border border-red-500/40 bg-red-500/10 text-[10px] font-mono text-red-300 hover:bg-red-500/20 transition-colors"
+      title={`${errCount} error/warn events in the last 5 minutes — click to focus`}
+    >
+      <span className="relative inline-flex">
+        <span className="absolute inline-flex h-1.5 w-1.5 rounded-full bg-red-400 opacity-75 animate-ping" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-400" />
+      </span>
+      <span className="tabular-nums">{errCount}</span>
+      <span className="opacity-80">in 5m</span>
+    </button>
   )
 }
 

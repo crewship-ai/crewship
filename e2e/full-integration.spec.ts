@@ -95,12 +95,9 @@ test.describe("A. Top-level routes", () => {
     "/crews/agents/new",
     "/orchestration",
     "/issues",
-    "/runs",
+    "/runs",        // legacy redirect → /journal?tab=runs (still 200 after follow)
     "/journal",
     "/approvals",
-    "/paymaster",
-    "/eval",
-    "/audit",
     "/crows-nest",
     "/skills",
     "/credentials",

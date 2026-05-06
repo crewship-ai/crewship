@@ -38,6 +38,25 @@ interface LogsPanelProps {
   showNetworkCard?: boolean
 
   /**
+   * Severity filter — controlled. When provided, the toolbar's
+   * severity row drives this state via `onSeverityChange` instead of
+   * the panel's internal state. Used by /journal so the parent can
+   * forward severity to the server-side `severity=` query param,
+   * fixing the silent-zero-results bug when client-side filtering
+   * runs on top of the 5,000-row buffer cap.
+   */
+  severity?: SeverityFilter
+  onSeverityChange?: (s: SeverityFilter) => void
+  /**
+   * Muted (clicked-off) groups — controlled when provided. Same
+   * server-forwarding rationale as `severity`: muting a group should
+   * remove its rows from the SQL result, not just narrow the
+   * already-loaded buffer.
+   */
+  muted?: Set<EntryGroup>
+  onMutedChange?: (next: Set<EntryGroup>) => void
+
+  /**
    * Called (debounced) when the user types in the search box. Lets the
    * parent forward the query to the backend's full-text search so the
    * filter sees more than the currently-loaded chunk. Client-side
@@ -79,6 +98,25 @@ interface LogsPanelProps {
    * narrow the time range.
    */
   cappedAt?: number
+
+  /**
+   * Trace deeplink — when set, the toolbar renders a clear pill so
+   * the user knows they're focused on a single run. Calling
+   * `onClearTraceId` removes the focus and returns to the full
+   * timeline.
+   */
+  traceId?: string
+  onClearTraceId?: () => void
+
+  /**
+   * Detail-row jump handlers passed through to LogsList. Wire each one
+   * to the corresponding setter on the page (setTraceId, setAgentId,
+   * setCrewId) so clicking an ID in an expanded entry zooms the
+   * filter to that entity in one tap.
+   */
+  onSelectTrace?: (traceId: string) => void
+  onSelectAgent?: (agentId: string) => void
+  onSelectCrew?: (crewId: string) => void
 }
 
 /**
@@ -101,6 +139,10 @@ export function LogsPanel({
   agentScope,
   agentLookup,
   showNetworkCard,
+  severity: severityProp,
+  onSeverityChange,
+  muted: mutedProp,
+  onMutedChange,
   onServerSearch,
   onRefresh,
   loading,
@@ -113,10 +155,32 @@ export function LogsPanel({
   loadingMore,
   onLoadMore,
   cappedAt,
+  traceId,
+  onClearTraceId,
+  onSelectTrace,
+  onSelectAgent,
+  onSelectCrew,
 }: LogsPanelProps) {
   const [query, setQuery] = useState("")
-  const [severity, setSeverity] = useState<SeverityFilter>("all")
-  const [muted, setMuted] = useState<Set<EntryGroup>>(new Set())
+  // Severity + muted are controlled when the parent passes both the
+  // value and the setter. Otherwise we keep local state for legacy
+  // surfaces (older standalone uses of LogsPanel).
+  const [internalSeverity, setInternalSeverity] = useState<SeverityFilter>("all")
+  const [internalMuted, setInternalMuted] = useState<Set<EntryGroup>>(new Set())
+  const severity = severityProp ?? internalSeverity
+  const muted = mutedProp ?? internalMuted
+  const setSeverity = useCallback((next: SeverityFilter) => {
+    if (onSeverityChange) onSeverityChange(next)
+    else setInternalSeverity(next)
+  }, [onSeverityChange])
+  const setMuted = useCallback((updater: Set<EntryGroup> | ((prev: Set<EntryGroup>) => Set<EntryGroup>)) => {
+    if (onMutedChange) {
+      const next = typeof updater === "function" ? updater(muted) : updater
+      onMutedChange(next)
+      return
+    }
+    setInternalMuted(updater as React.SetStateAction<Set<EntryGroup>>)
+  }, [onMutedChange, muted])
   const [internalLive, setInternalLive] = useState(true)
   const [wrap, setWrap] = useState(false)
   const [newestFirst, setNewestFirst] = useState(true)
@@ -184,16 +248,16 @@ export function LogsPanel({
       else next.add(g)
       return next
     })
-  }, [])
+  }, [setMuted])
 
-  const onResetGroups = useCallback(() => setMuted(new Set()), [])
+  const onResetGroups = useCallback(() => setMuted(new Set()), [setMuted])
 
   const onClearAllFilters = useCallback(() => {
     setQuery("")
     setSeverity("all")
     setMuted(new Set())
     setBucket(null)
-  }, [])
+  }, [setSeverity, setMuted])
 
   const onExport = useCallback(() => {
     const blob = new Blob([JSON.stringify(ordered, null, 2)], { type: "application/json" })
@@ -297,6 +361,8 @@ export function LogsPanel({
         onClearBucketFilter={() => setBucket(null)}
         refreshRate={refreshRate}
         onRefreshRateChange={onRefreshRateChange}
+        traceId={traceId}
+        onClearTraceId={onClearTraceId}
       />
       <LogsTypeChips
         counts={stage.groupCounts}
@@ -355,6 +421,9 @@ export function LogsPanel({
                   followTail={live}
                   newestFirst={newestFirst}
                   onEndReached={handleEndReached}
+                  onSelectTrace={onSelectTrace}
+                  onSelectAgent={onSelectAgent}
+                  onSelectCrew={onSelectCrew}
                 />
               </div>
               {(loadingMore || (hasMore === false && visibleCount > 0) || cappedAt) && (

@@ -23,6 +23,16 @@ interface LogsListProps {
   newestFirst: boolean
   /** Called when the user scrolls within `endReachedThreshold` of the bottom. */
   onEndReached?: () => void
+  /**
+   * Detail-row click handlers. When provided, the corresponding ID
+   * appears as a clickable button in the expanded detail so the user
+   * can jump from "I see this entry" → "show me everything in this
+   * run / from this agent / for this crew" without leaving the page.
+   * Omitted handlers degrade silently to plain text.
+   */
+  onSelectTrace?: (traceId: string) => void
+  onSelectAgent?: (agentId: string) => void
+  onSelectCrew?: (crewId: string) => void
 }
 
 /**
@@ -31,7 +41,7 @@ interface LogsListProps {
  * Click a row to expand it inline and reveal payload + refs as
  * formatted JSON. Multiple rows can be open at once.
  */
-export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached }: LogsListProps) {
+export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached, onSelectTrace, onSelectAgent, onSelectCrew }: LogsListProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const toggleExpand = useCallback((id: string) => {
@@ -70,6 +80,9 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached 
           wrap={wrap}
           expanded={expanded.has(e.id)}
           onToggle={() => toggleExpand(e.id)}
+          onSelectTrace={onSelectTrace}
+          onSelectAgent={onSelectAgent}
+          onSelectCrew={onSelectCrew}
         />
       )}
       className="h-full"
@@ -82,11 +95,17 @@ function LogRow({
   wrap,
   expanded,
   onToggle,
+  onSelectTrace,
+  onSelectAgent,
+  onSelectCrew,
 }: {
   entry: JournalEntry
   wrap: boolean
   expanded: boolean
   onToggle: () => void
+  onSelectTrace?: (traceId: string) => void
+  onSelectAgent?: (agentId: string) => void
+  onSelectCrew?: (crewId: string) => void
 }) {
   const sev = severityOf(entry.severity)
   const grp = groupOf(entry.entry_type)
@@ -146,38 +165,90 @@ function LogRow({
       </span>
 
       {expanded && (
-        <div className="col-start-2 col-end-7 mt-1 mb-1 rounded border border-border/60 bg-card/60">
-          <Detail entry={entry} sev={sev} />
+        <div
+          className="col-start-2 col-end-7 mt-1 mb-1 rounded border border-border/60 bg-card/60"
+          // Stop click bubbling so interacting with the detail (selecting
+          // text in the JSON, clicking trace/agent/crew jump buttons)
+          // doesn't collapse the row.
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          role="region"
+          aria-label="Entry detail"
+        >
+          <Detail
+            entry={entry}
+            sev={sev}
+            onSelectTrace={onSelectTrace}
+            onSelectAgent={onSelectAgent}
+            onSelectCrew={onSelectCrew}
+          />
         </div>
       )}
     </div>
   )
 }
 
-function Detail({ entry, sev }: { entry: JournalEntry; sev: ReturnType<typeof severityOf> }) {
-  const meta: Array<[string, string | undefined]> = [
-    ["entry_type", entry.entry_type],
-    ["severity", entry.severity as string],
-    ["actor_type", entry.actor_type],
-    ["actor_id", entry.actor_id],
-    ["agent_id", entry.agent_id],
-    ["crew_id", entry.crew_id],
-    ["mission_id", entry.mission_id],
-    ["trace_id", entry.trace_id],
+function Detail({
+  entry,
+  sev,
+  onSelectTrace,
+  onSelectAgent,
+  onSelectCrew,
+}: {
+  entry: JournalEntry
+  sev: ReturnType<typeof severityOf>
+  onSelectTrace?: (traceId: string) => void
+  onSelectAgent?: (agentId: string) => void
+  onSelectCrew?: (crewId: string) => void
+}) {
+  // Each meta row carries an optional jump handler. Fields with a
+  // handler render as a button (Filter to this trace / agent / crew);
+  // fields without one render as plain text. Severity gets its
+  // canonical color even when not interactive.
+  type Row = { key: string; value: string | undefined; jump?: () => void; tone?: string }
+  const meta: Row[] = [
+    { key: "entry_type", value: entry.entry_type },
+    { key: "severity", value: entry.severity as string, tone: SEVERITY_COLOR[sev] },
+    { key: "actor_type", value: entry.actor_type },
+    { key: "actor_id", value: entry.actor_id },
+    {
+      key: "agent_id",
+      value: entry.agent_id,
+      jump: entry.agent_id && onSelectAgent ? () => onSelectAgent(entry.agent_id as string) : undefined,
+    },
+    {
+      key: "crew_id",
+      value: entry.crew_id,
+      jump: entry.crew_id && onSelectCrew ? () => onSelectCrew(entry.crew_id as string) : undefined,
+    },
+    { key: "mission_id", value: entry.mission_id },
+    {
+      key: "trace_id",
+      value: entry.trace_id,
+      jump: entry.trace_id && onSelectTrace ? () => onSelectTrace(entry.trace_id as string) : undefined,
+    },
   ]
   return (
     <div className="p-2 space-y-2">
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] font-mono">
-        {meta.map(([k, v]) =>
-          v ? (
-            <span key={k} className="text-muted-foreground">
-              <span className="opacity-60">{k}:</span>{" "}
-              <span
-                className="text-foreground/85"
-                style={k === "severity" ? { color: SEVERITY_COLOR[sev] } : undefined}
-              >
-                {v}
-              </span>
+        {meta.map(({ key, value, jump, tone }) =>
+          value ? (
+            <span key={key} className="text-muted-foreground">
+              <span className="opacity-60">{key}:</span>{" "}
+              {jump ? (
+                <button
+                  type="button"
+                  onClick={jump}
+                  className="text-sky-300 hover:text-sky-200 hover:underline underline-offset-2 transition-colors"
+                  title={`Filter timeline to this ${key.replace("_id", "")}`}
+                >
+                  {value}
+                </button>
+              ) : (
+                <span className="text-foreground/85" style={tone ? { color: tone } : undefined}>
+                  {value}
+                </span>
+              )}
             </span>
           ) : null,
         )}
