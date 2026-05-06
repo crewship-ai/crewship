@@ -84,6 +84,9 @@ export function LogsHistogram({
           {totalEvents > 0 && (
             <span className="ml-2 normal-case opacity-70">{totalEvents.toLocaleString()} in window</span>
           )}
+          {onSelect && totalEvents > 0 && !selected && (
+            <span className="ml-2 normal-case opacity-50 italic">click a bar to filter</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {selected && onSelect && (

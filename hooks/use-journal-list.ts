@@ -37,7 +37,12 @@ interface UseJournalListResult {
  * `paramsKey` changes rather than requiring callers to remount.
  */
 export function useJournalList(opts: UseJournalListOptions): UseJournalListResult {
-  const { workspaceId, params, limit = 100, enabled = true, maxEntries } = opts
+  // Backend caps page size at 500. The default used to be 100 but that
+  // triggered scroll-load round-trips on every glance through the list.
+  // Grafana / Elastic Discover behaviour: pick a time range, fetch
+  // everything in it. 500 per request × eager pagination at the page
+  // level → user sees all events for the active window.
+  const { workspaceId, params, limit = 500, enabled = true, maxEntries } = opts
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)

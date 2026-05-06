@@ -28,8 +28,13 @@ import { ResourcesStrip } from "@/components/features/logs/resources-strip"
 import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
 import type { ScopeOption } from "@/components/features/logs/logs-toolbar"
 
-/** SSE buffer cap — prevents unbounded growth on a chatty workspace. */
-const JOURNAL_MAX_ENTRIES = 1000
+/**
+ * Cap on entries kept in memory. Generous enough to hold a full
+ * Grafana-style "show me everything in the time range" window for
+ * busy workspaces; small enough to keep the filter chain + virtuoso
+ * + histogram + stats rail all responsive on a laptop.
+ */
+const JOURNAL_MAX_ENTRIES = 5000
 
 interface CrewSummary {
   id: string
@@ -294,7 +299,21 @@ export default function JournalPage() {
   })
 
   const handleRefresh = useCallback(() => { void refresh() }, [refresh])
-  const handleLoadMore = useCallback(() => { void loadMore() }, [loadMore])
+
+  // Eager pagination — once the initial fetch lands, keep walking the
+  // cursor until the backend reports no more pages OR we hit the
+  // in-memory cap. This is the Elastic Discover / Grafana Logs
+  // behaviour: the time-range select determines what the user sees,
+  // not a scroll position. Scroll-triggered loadMore is intentionally
+  // not wired so the list stays "what's in the window" and nothing
+  // sneaks in mid-scroll.
+  useEffect(() => {
+    if (!timelineEnabled) return
+    if (loading || loadingMore) return
+    if (!nextCursor) return
+    if (entries.length >= JOURNAL_MAX_ENTRIES) return
+    void loadMore()
+  }, [timelineEnabled, loading, loadingMore, nextCursor, entries.length, loadMore])
 
   // Stats-rail Network card — admin-only and only meaningful when a single
   // crew is in scope (metrics are per-container).
@@ -368,7 +387,8 @@ export default function JournalPage() {
               onLiveChange={setLive}
               hasMore={Boolean(nextCursor)}
               loadingMore={loadingMore}
-              onLoadMore={handleLoadMore}
+              cappedAt={entries.length >= JOURNAL_MAX_ENTRIES ? JOURNAL_MAX_ENTRIES : undefined}
+              /* No onLoadMore — pagination is eager at the page level. */
             />
           </div>
         </div>

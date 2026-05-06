@@ -57,10 +57,21 @@ interface LogsPanelProps {
   live?: boolean
   onLiveChange?: (live: boolean) => void
 
-  /** Pagination — called when the user scrolls to the bottom of the list. */
+  /**
+   * Pagination state. The journal page now eager-loads all entries in
+   * the active time range, so `onLoadMore` is rarely passed from
+   * there — it's still supported for surfaces that want
+   * scroll-triggered pagination (e.g. /crows-nest before its merge).
+   */
   hasMore?: boolean
   loadingMore?: boolean
   onLoadMore?: () => void
+  /**
+   * When set, the loaded buffer hit this cap and older entries beyond
+   * it weren't fetched. Footer renders a hint nudging the user to
+   * narrow the time range.
+   */
+  cappedAt?: number
 }
 
 /**
@@ -92,6 +103,7 @@ export function LogsPanel({
   hasMore,
   loadingMore,
   onLoadMore,
+  cappedAt,
 }: LogsPanelProps) {
   const [query, setQuery] = useState("")
   const [severity, setSeverity] = useState<SeverityFilter>("all")
@@ -321,9 +333,13 @@ export function LogsPanel({
                   onEndReached={handleEndReached}
                 />
               </div>
-              {(loadingMore || (hasMore === false && visibleCount > 0)) && (
+              {(loadingMore || (hasMore === false && visibleCount > 0) || cappedAt) && (
                 <div className="shrink-0 px-3 py-2 text-center text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60 border-t border-border/40">
-                  {loadingMore ? "Loading older entries…" : "End of journal"}
+                  {loadingMore
+                    ? "Loading more…"
+                    : cappedAt
+                      ? `Showing first ${cappedAt.toLocaleString()} — narrow the time range to see more`
+                      : "End of journal"}
                 </div>
               )}
             </>
