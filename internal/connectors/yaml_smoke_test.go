@@ -12,6 +12,8 @@ package connectors_test
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,6 +54,15 @@ func TestFixtures_RawYAMLParsesIntoManifest(t *testing.T) {
 			var m connectors.Manifest
 			if err := dec.Decode(&m); err != nil {
 				t.Fatalf("yaml decode: %v", err)
+			}
+
+			// Manifests must be single-document. A `---` separator
+			// followed by a second document is silent breakage that
+			// the first Decode wouldn't catch. Pin single-document
+			// shape by requiring the next Decode to be io.EOF.
+			var second connectors.Manifest
+			if err := dec.Decode(&second); !errors.Is(err, io.EOF) {
+				t.Errorf("expected single document (io.EOF after first), got: %v", err)
 			}
 
 			// Smoke-level invariants — full Validate() lives in

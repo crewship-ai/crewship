@@ -114,13 +114,24 @@ type InstallResponse struct {
 	OAuthURL      string `json:"oauth_url,omitempty"`
 }
 
+// notImplemented is the safe TDD-scaffold response: 501 with a small
+// hint rather than a panic. Returned by all four handler entry points
+// until the implementer fills in the bodies. Tests assert specific
+// behavior (200/201/404/etc.) so they fail loudly while production
+// requests get a controlled, non-crash response.
+func notImplemented(w http.ResponseWriter, name string) {
+	http.Error(w, "connectors: "+name+" not implemented", http.StatusNotImplemented)
+}
+
 // List handles GET /api/v1/connectors.
 //
 // Response: 200 with []ConnectorListItem (stable order). Empty array
 // if catalog is empty. No filtering parameters in v1 — frontend filters
 // client-side.
+//
+// TDD STUB — returns 501 until wired up.
 func (h *ConnectorHandler) List(w http.ResponseWriter, r *http.Request) {
-	panic("TDD STUB — implement me")
+	notImplemented(w, "List")
 }
 
 // Get handles GET /api/v1/connectors/{connectorId}.
@@ -128,8 +139,10 @@ func (h *ConnectorHandler) List(w http.ResponseWriter, r *http.Request) {
 // Response: 200 with the full Manifest. 404 if the catalog has no
 // matching id. Returns the manifest verbatim so frontend can render
 // the schema-driven form without a second round-trip.
+//
+// TDD STUB — returns 501 until wired up.
 func (h *ConnectorHandler) Get(w http.ResponseWriter, r *http.Request) {
-	panic("TDD STUB — implement me")
+	notImplemented(w, "Get")
 }
 
 // Verify handles POST /api/v1/connectors/{connectorId}/verify.
@@ -140,8 +153,10 @@ func (h *ConnectorHandler) Get(w http.ResponseWriter, r *http.Request) {
 // since auth happens via redirect, not paste.
 //
 // Auth: requires ?workspace_id=X and MANAGER+ role.
+//
+// TDD STUB — returns 501 until wired up.
 func (h *ConnectorHandler) Verify(w http.ResponseWriter, r *http.Request) {
-	panic("TDD STUB — implement me")
+	notImplemented(w, "Verify")
 }
 
 // Install handles POST /api/v1/connectors/{connectorId}/install.
@@ -159,22 +174,39 @@ func (h *ConnectorHandler) Verify(w http.ResponseWriter, r *http.Request) {
 // Used for byo_oauth setup_md and OAuth redirect_uri construction.
 //
 // Auth: requires ?workspace_id=X and MANAGER+ role.
+//
+// TDD STUB — returns 501 until wired up.
 func (h *ConnectorHandler) Install(w http.ResponseWriter, r *http.Request) {
-	panic("TDD STUB — implement me")
+	notImplemented(w, "Install")
 }
 
-// InstanceURLFromRequest is a small helper extracted onto the package
-// surface so the handler, tests, and any future routes share one
-// definition of "what URL is this Crewship instance?". Production
-// behavior:
+// InstanceURLFromRequest derives the customer-facing base URL from
+// the inbound request so OAuth redirects, setup_md placeholders, and
+// any other ${instance_url} substitution share one definition of
+// "what URL is this Crewship instance?".
 //
-//   - Scheme: X-Forwarded-Proto header → "https" → "http"
-//   - Host:   X-Forwarded-Host header  → r.Host
+//   - Scheme: X-Forwarded-Proto header (proxy deployments) → "https"
+//   - Host:   X-Forwarded-Host header → r.Host
 //
 // Returned without trailing slash so callers can append paths
-// directly: `instance + "/oauth/callback"`.
-//
-// TDD STUB — body panics until implemented.
+// directly: `instance + "/oauth/callback"`. Returns "" if the host
+// can't be determined (defensive — caller should treat as fatal).
 func InstanceURLFromRequest(r *http.Request) string {
-	panic("TDD STUB — implement me")
+	if r == nil {
+		return ""
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	if host == "" {
+		return ""
+	}
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		// Default to https — matches the production posture; tests
+		// override via X-Forwarded-Proto when they need http.
+		scheme = "https"
+	}
+	return scheme + "://" + host
 }

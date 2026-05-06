@@ -93,6 +93,18 @@ export interface InstallResponse {
   oauth_url?: string
 }
 
+/**
+ * InstallResult is the discriminated payload handed to the parent's
+ * `onInstalled` callback. PAT / conn_string / none flows finish
+ * synchronously and produce `installed`; mcp_oauth / byo_oauth
+ * produce `oauth-redirect` because the user still has to complete
+ * consent in a popup before the integration is truly active. Callers
+ * branch on `status` rather than special-casing an empty integrationId.
+ */
+export type InstallResult =
+  | { status: "installed"; integrationId: string }
+  | { status: "oauth-redirect"; integrationId: string; oauthUrl: string; nextStep: "oauth" | "mcp_oauth" }
+
 /** POST /api/v1/connectors/{id}/verify response. */
 export interface VerifyResponse {
   ok: boolean

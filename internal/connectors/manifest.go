@@ -182,6 +182,13 @@ var (
 	ErrManifestVerifyAmbiguous        = errors.New("connectors: verify block must declare exactly one of http or mcp_method, not both")
 	ErrManifestTransportFieldMismatch = errors.New("connectors: mcp block has fields incompatible with the declared transport")
 	ErrManifestCyclicDerived          = errors.New("connectors: derived map has a cycle")
+
+	// ErrManifestNotImplemented is the safe scaffold return value for
+	// manifest entry points that haven't been implemented yet.
+	// Returning a sentinel rather than panicking means an accidental
+	// production call surfaces as a typed error in the caller's
+	// errors.Is chain, not a process crash.
+	ErrManifestNotImplemented = errors.New("connectors: manifest logic not implemented")
 )
 
 // IDPattern is the regex Validate() applies to Manifest.ID. Exposed so
@@ -197,8 +204,10 @@ const IDPattern = `^[a-z][a-z0-9_-]*$`
 // Returns ErrManifestEmpty if data is empty. Does NOT call Validate;
 // callers should chain Parse → Validate explicitly so they can decide
 // whether to surface the parse error or the schema error to the user.
+//
+// TDD STUB — returns ErrManifestNotImplemented until wired up.
 func ParseManifest(data []byte) (*Manifest, error) {
-	panic("TDD STUB — implement me")
+	return nil, ErrManifestNotImplemented
 }
 
 // Validate enforces invariants that depend on AuthMode:
@@ -224,8 +233,10 @@ func ParseManifest(data []byte) (*Manifest, error) {
 //   - stdio           → MCP.Command set, MCP.Endpoint empty
 //   - streamable-http → MCP.Endpoint set, MCP.Command empty
 //   - Derived map is acyclic (no key references itself transitively)
+//
+// TDD STUB — returns ErrManifestNotImplemented until wired up.
 func (m *Manifest) Validate() error {
-	panic("TDD STUB — implement me")
+	return ErrManifestNotImplemented
 }
 
 // ResolveContext carries the values that placeholders are resolved
@@ -244,8 +255,10 @@ type ResolveContext struct {
 // ErrManifestPlaceholder so the caller can surface a clear error
 // before the MCP server tries to start with a literal "${field.host}"
 // in its argv.
+//
+// TDD STUB — returns ErrManifestNotImplemented until wired up.
 func (m *Manifest) Resolve(s string, ctx ResolveContext) (string, error) {
-	panic("TDD STUB — implement me")
+	return "", ErrManifestNotImplemented
 }
 
 // MaterializeMCP returns a copy of MCP with all placeholders resolved
@@ -254,8 +267,10 @@ func (m *Manifest) Resolve(s string, ctx ResolveContext) (string, error) {
 //
 // Returns ErrManifestMissingFieldVal if a required field has no value
 // in the input map.
+//
+// TDD STUB — returns ErrManifestNotImplemented until wired up.
 func (m *Manifest) MaterializeMCP(fields map[string]string, instanceURL string) (*MCPConfig, error) {
-	panic("TDD STUB — implement me")
+	return nil, ErrManifestNotImplemented
 }
 
 // fieldByKey is a small helper used by validators and resolvers.

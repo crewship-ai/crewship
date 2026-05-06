@@ -158,7 +158,9 @@ describe("ConnectorConnectSheet — PAT flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /connect/i }))
 
     await waitFor(() => {
-      expect(onInstalled).toHaveBeenCalledWith("int_123")
+      // Discriminated InstallResult: PAT path completes synchronously
+      // → status=installed + integrationId.
+      expect(onInstalled).toHaveBeenCalledWith({ status: "installed", integrationId: "int_123" })
     })
     // The install endpoint must have been called with the workspace_id.
     const installCall = fetchMock.mock.calls.find(([u]) => String(u).includes("/install"))

@@ -40,22 +40,31 @@ type Catalog struct {
 //
 // Pass FixturesFS to load the shipped fixtures; pass an os.DirFS or
 // a test-built fstest.MapFS to load alternate sources.
+//
+// TDD STUB — returns an empty catalog so accidental production calls
+// fail gracefully (empty results, not panic).
 func LoadAll(filesystem fs.FS) (*Catalog, []error) {
-	panic("TDD STUB — implement me")
+	return &Catalog{}, nil
 }
 
 // LoadByID returns one manifest by id, or ErrConnectorNotFound.
+//
+// TDD STUB — always returns ErrConnectorNotFound until wired up.
 func (c *Catalog) LoadByID(id string) (*Manifest, error) {
-	panic("TDD STUB — implement me")
+	return nil, ErrConnectorNotFound
 }
 
 // List returns all manifests in stable (insertion) order. Used by the
 // API layer to drive the catalog tile grid.
+//
+// TDD STUB — returns an empty (non-nil) slice until wired up.
 func (c *Catalog) List() []*Manifest {
-	panic("TDD STUB — implement me")
+	return []*Manifest{}
 }
 
 // Len reports the number of valid manifests in the catalog.
+//
+// TDD STUB — returns 0 until wired up.
 func (c *Catalog) Len() int {
-	panic("TDD STUB — implement me")
+	return 0
 }

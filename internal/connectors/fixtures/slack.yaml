@@ -46,11 +46,12 @@ mcp:
   env:
     SLACK_BOT_TOKEN: "${field.bot_token}"
     SLACK_TEAM_ID: "${field.team_id}"
-verify:
-  http:
-    method: POST
-    url: https://slack.com/api/auth.test
-    headers:
-      Authorization: "Bearer ${field.bot_token}"
-      Content-Type: "application/x-www-form-urlencoded"
-    expect_status: 200
+# NOTE: Slack's auth.test endpoint returns HTTP 200 even for invalid
+# tokens — the actual outcome lives in the JSON body's `ok` field
+# ({"ok": false, "error": "invalid_auth"} for bad tokens). The
+# manifest schema's verify.http only asserts HTTP status, so a status
+# check would pass invalid tokens through to runtime. Verify is left
+# unset until the schema grows expect_body assertions; the install
+# itself will surface auth failures at first MCP call.
+# verify: <intentionally omitted>
+

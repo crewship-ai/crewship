@@ -590,6 +590,11 @@ func TestMigrateConnectorIDColumn(t *testing.T) {
 			var cid int
 			var colName, colType string
 			var notNull, dfltValue, pk interface{}
+			// SQLite's PRAGMA table_info doesn't accept placeholder
+			// args, and `table` is one of two compile-time string
+			// literals from the loop above (no user input). Annotate
+			// to silence the static-analysis SQL-injection rule.
+			//nolint:gosec // table is a hardcoded literal from the loop
 			rows, err := db.Query("PRAGMA table_info(" + table + ")")
 			if err != nil {
 				t.Fatalf("pragma: %v", err)

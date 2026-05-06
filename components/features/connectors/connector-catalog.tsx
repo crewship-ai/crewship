@@ -25,6 +25,13 @@ export interface ConnectorCatalogProps {
   loading?: boolean
 }
 
+// Rendered as a non-crashing placeholder until ConnectorCatalog is
+// implemented. Keeps the bundle from failing if the catalog gets
+// rendered before the impl lands.
 export function ConnectorCatalog(_: ConnectorCatalogProps): ReactElement {
-  throw new Error("TDD STUB — implement ConnectorCatalog")
+  return (
+    <div role="status" aria-live="polite" className="text-sm text-muted-foreground p-4">
+      Connector catalog is not implemented yet.
+    </div>
+  )
 }

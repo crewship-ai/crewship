@@ -181,6 +181,8 @@ var connectorListCmd = &cobra.Command{
 			Description string `json:"description"`
 			Category    string `json:"category"`
 			AuthMode    string `json:"auth_mode"`
+			BrandLogo   string `json:"brand_logo"`
+			BrandColor  string `json:"brand_color"`
 		}
 		if err := cli.ReadJSON(resp, &items); err != nil {
 			return err

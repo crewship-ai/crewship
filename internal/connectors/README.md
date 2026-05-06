@@ -150,7 +150,7 @@ Per-mode:
 
 Sentinel errors (use `errors.Is`, not message text):
 
-```
+```text
 ErrManifestEmpty             ErrManifestMissingID
 ErrManifestInvalidID         ErrManifestMissingName
 ErrManifestUnknownAuthMode   ErrManifestMissingField
@@ -158,7 +158,9 @@ ErrManifestInvalidTransport  ErrManifestMissingOAuth
 ErrManifestPlaceholder       ErrManifestMissingFieldVal
 ErrManifestDuplicateField    ErrManifestInvalidColor
 ErrManifestEmptyChoices      ErrManifestMissingType
-ErrManifestUnknownFieldType
+ErrManifestUnknownFieldType  ErrManifestVerifyAmbiguous
+ErrManifestTransportFieldMismatch
+ErrManifestCyclicDerived     ErrManifestNotImplemented
 ```
 
 ---

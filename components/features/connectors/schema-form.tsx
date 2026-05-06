@@ -30,6 +30,13 @@ export interface SchemaFormProps {
   submitLabel?: string
 }
 
+// Rendered as a non-crashing placeholder until SchemaForm is
+// implemented. Keeps a parent sheet from blowing up if it mounts
+// before the impl lands.
 export function SchemaForm(_: SchemaFormProps): ReactElement {
-  throw new Error("TDD STUB — implement SchemaForm")
+  return (
+    <div role="status" aria-live="polite" className="text-sm text-muted-foreground p-4">
+      Schema form is not implemented yet.
+    </div>
+  )
 }

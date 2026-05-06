@@ -224,11 +224,18 @@ func TestParseManifest_FilesystemFixture_None(t *testing.T) {
 func TestParseManifest_Empty(t *testing.T) {
 	_, err := connectors.ParseManifest(nil)
 	if !errors.Is(err, connectors.ErrManifestEmpty) {
-		t.Errorf("err = %v, want ErrManifestEmpty", err)
+		t.Errorf("err = %v (nil input), want ErrManifestEmpty", err)
 	}
 	_, err = connectors.ParseManifest([]byte(""))
 	if !errors.Is(err, connectors.ErrManifestEmpty) {
-		t.Errorf("err = %v, want ErrManifestEmpty (whitespace)", err)
+		t.Errorf("err = %v (empty string), want ErrManifestEmpty", err)
+	}
+	// Whitespace-only must collapse to empty too — yaml.v3 treats it
+	// as a missing document, but our wrapper must surface the same
+	// sentinel regardless of formatting.
+	_, err = connectors.ParseManifest([]byte(" \n\t\n  "))
+	if !errors.Is(err, connectors.ErrManifestEmpty) {
+		t.Errorf("err = %v (whitespace), want ErrManifestEmpty", err)
 	}
 }
 
