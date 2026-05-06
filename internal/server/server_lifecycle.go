@@ -438,6 +438,12 @@ func (s *Server) rehydrateContainers(ctx context.Context) {
 		}
 		crews = append(crews, c)
 	}
+	// Catch iterator failures that happen *after* the last successful
+	// Scan — without this, a connection drop mid-scan silently truncates
+	// the crew list and we'd skip rehydrating the tail.
+	if err := rows.Err(); err != nil {
+		s.logger.Debug("rehydrate: iterate crews failed", "err", err)
+	}
 
 	registered := 0
 	for _, c := range crews {

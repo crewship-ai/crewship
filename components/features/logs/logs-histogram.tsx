@@ -191,15 +191,17 @@ export function LogsHistogram({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (!onSelect) return
-      const cur = keyFocusIdx ?? Math.floor(BUCKET_COUNT / 2)
       switch (e.key) {
         case "ArrowLeft":
           e.preventDefault()
-          setKeyFocusIdx(Math.max(0, cur - 1))
+          // First arrow press lands at the rightmost bucket so users
+          // exploring "where's the most recent activity?" don't have
+          // to walk backwards from bucket 0.
+          setKeyFocusIdx((prev) => Math.max(0, (prev ?? BUCKET_COUNT - 1) - 1))
           break
         case "ArrowRight":
           e.preventDefault()
-          setKeyFocusIdx(Math.min(BUCKET_COUNT - 1, cur + 1))
+          setKeyFocusIdx((prev) => Math.min(BUCKET_COUNT - 1, (prev ?? -1) + 1))
           break
         case "Home":
           e.preventDefault()
@@ -211,8 +213,13 @@ export function LogsHistogram({
           break
         case "Enter":
         case " ": {
+          // Don't fire a filter on the very first Enter when no bucket
+          // has been navigated to yet — that would produce an
+          // unexpected selection from a single keystroke. The user
+          // must arrow first to commit to a bucket.
+          if (keyFocusIdx === null) return
           e.preventDefault()
-          const b = data[cur]
+          const b = data[keyFocusIdx]
           if (!b) return
           if (selected && selected.fromMs === b.fromMs && selected.toMs === b.toMs) {
             onSelect(null)

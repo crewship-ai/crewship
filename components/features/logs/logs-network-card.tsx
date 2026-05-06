@@ -44,7 +44,6 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
     const sorted = [...entries].sort(
       (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
     )
-    const closed = new Set<string>()
     const open = new Map<string, OpenPort>()
     for (const e of sorted) {
       if (e.entry_type !== "network.port_opened" && e.entry_type !== "network.port_closed") continue
@@ -52,19 +51,22 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
       const proto = (e.payload?.protocol as string | undefined) ?? "tcp"
       const key = `${port}/${proto}`
       if (e.entry_type === "network.port_closed") {
-        closed.add(key)
+        // Removing on close (instead of just marking "closed") means a
+        // later open(8080) → close(8080) → open(8080) sequence ends in
+        // the right state: open. Previously the port stayed in `open`
+        // forever once added.
+        open.delete(key)
         continue
       }
-      if (closed.has(key)) continue
-      if (!open.has(key)) {
-        open.set(key, {
-          key,
-          port,
-          protocol: proto,
-          agentId: e.actor_id ?? "",
-          openedAt: e.ts,
-        })
-      }
+      // Either fresh open, or re-open after close — overwrite so the
+      // displayed timestamp + actor reflect the latest open.
+      open.set(key, {
+        key,
+        port,
+        protocol: proto,
+        agentId: e.actor_id ?? "",
+        openedAt: e.ts,
+      })
     }
     return Array.from(open.values()).slice(0, MAX_ROWS)
   }, [entries])

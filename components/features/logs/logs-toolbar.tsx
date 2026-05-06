@@ -288,9 +288,17 @@ export function LogsToolbar({
       )}
 
       {onExport && (
-        <ToolbarToggle on={false} onClick={onExport} title="Export visible entries to JSON">
+        // Plain button, not ToolbarToggle — Export is a one-shot
+        // action, not an on/off state. ToolbarToggle adds aria-pressed
+        // which would announce Export as a toggle to screen readers.
+        <button
+          type="button"
+          onClick={onExport}
+          title="Export visible entries to JSON"
+          className="inline-flex items-center gap-1 h-6 px-2 rounded border border-border/60 bg-card text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent/40"
+        >
           <Download className="h-3 w-3" /> Export
-        </ToolbarToggle>
+        </button>
       )}
 
       {!live && (
