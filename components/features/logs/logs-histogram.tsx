@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo } from "react"
-import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from "recharts"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Bar, BarChart, Cell, ReferenceArea, ResponsiveContainer, Tooltip, XAxis } from "recharts"
 import { X } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { SEVERITY_COLOR, severityOf } from "@/lib/journal-style"
@@ -64,17 +64,81 @@ export function LogsHistogram({
 
   const totalEvents = data.reduce((s, b) => s + b.total, 0)
 
-  const handleBarClick = (state: unknown) => {
+  // Drag-to-select range — Elastic Discover style. mousedown on a bucket
+  // starts the drag; mousemove tracks the live end; mouseup (anywhere
+  // on the document, not just inside the chart) finalizes. A pure
+  // click — mouseup over the same bucket — falls through to the
+  // single-bucket toggle behaviour. ReferenceArea highlights the
+  // pending range while the user drags.
+  const [dragStart, setDragStart] = useState<number | null>(null)
+  const [dragEnd, setDragEnd] = useState<number | null>(null)
+  const dragStartRef = useRef<number | null>(null)
+  const dragEndRef = useRef<number | null>(null)
+  useEffect(() => { dragStartRef.current = dragStart }, [dragStart])
+  useEffect(() => { dragEndRef.current = dragEnd }, [dragEnd])
+
+  const dataRef = useRef(data)
+  useEffect(() => { dataRef.current = data }, [data])
+  const selectedRef = useRef(selected)
+  useEffect(() => { selectedRef.current = selected }, [selected])
+  const onSelectRef = useRef(onSelect)
+  useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
+
+  // Document-level mouseup so a drag that ends outside the chart bounds
+  // still finalizes (rather than getting stuck mid-selection).
+  useEffect(() => {
+    const finalize = () => {
+      const s = dragStartRef.current
+      const e = dragEndRef.current
+      if (s === null || e === null) return
+      setDragStart(null)
+      setDragEnd(null)
+      const onSel = onSelectRef.current
+      if (!onSel) return
+      const buckets = dataRef.current
+      const startBucket = buckets.find((b) => b.fromMs === s)
+      const endBucket = buckets.find((b) => b.fromMs === e)
+      if (!startBucket || !endBucket) return
+      if (startBucket.fromMs === endBucket.fromMs) {
+        // Pure click — toggle single bucket.
+        const sel = selectedRef.current
+        if (sel && sel.fromMs === startBucket.fromMs && sel.toMs === startBucket.toMs) {
+          onSel(null)
+        } else {
+          onSel({ fromMs: startBucket.fromMs, toMs: startBucket.toMs })
+        }
+      } else {
+        // Drag — range selection across multiple buckets.
+        const fromMs = Math.min(startBucket.fromMs, endBucket.fromMs)
+        const toMs = Math.max(startBucket.toMs, endBucket.toMs)
+        onSel({ fromMs, toMs })
+      }
+    }
+    document.addEventListener("mouseup", finalize)
+    return () => document.removeEventListener("mouseup", finalize)
+  }, [])
+
+  const handleMouseDown = (state: unknown) => {
     if (!onSelect) return
     const s = state as { activePayload?: Array<{ payload?: Bucket }> } | null | undefined
     const bucket = s?.activePayload?.[0]?.payload
     if (!bucket) return
-    if (selected && selected.fromMs === bucket.fromMs) {
-      onSelect(null)
-      return
-    }
-    onSelect({ fromMs: bucket.fromMs, toMs: bucket.toMs })
+    setDragStart(bucket.fromMs)
+    setDragEnd(bucket.fromMs)
   }
+
+  const handleMouseMove = (state: unknown) => {
+    if (dragStart === null) return
+    const s = state as { activePayload?: Array<{ payload?: Bucket }> } | null | undefined
+    const bucket = s?.activePayload?.[0]?.payload
+    if (!bucket) return
+    if (bucket.fromMs !== dragEnd) setDragEnd(bucket.fromMs)
+  }
+
+  const dragOverlay =
+    dragStart !== null && dragEnd !== null && dragStart !== dragEnd
+      ? { x1: Math.min(dragStart, dragEnd), x2: Math.max(dragStart, dragEnd) }
+      : null
 
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40">
@@ -85,7 +149,7 @@ export function LogsHistogram({
             <span className="ml-2 normal-case opacity-70">{totalEvents.toLocaleString()} in window</span>
           )}
           {onSelect && totalEvents > 0 && !selected && (
-            <span className="ml-2 normal-case opacity-50 italic">click a bar to filter</span>
+            <span className="ml-2 normal-case opacity-50 italic">click or drag to filter</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -105,16 +169,35 @@ export function LogsHistogram({
           </div>
         </div>
       </div>
-      <div style={{ height, cursor: onSelect ? "pointer" : "default" }}>
+      <div
+        style={{
+          height,
+          cursor: onSelect ? (dragStart !== null ? "ew-resize" : "crosshair") : "default",
+          userSelect: dragStart !== null ? "none" : undefined,
+        }}
+      >
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={data}
             margin={{ top: 0, right: 0, left: 0, bottom: 0 }}
             barCategoryGap={1}
-            onClick={handleBarClick}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
           >
             <XAxis dataKey="fromMs" hide />
             <Tooltip cursor={{ fill: "rgba(255,255,255,0.06)" }} content={<HistTooltip />} />
+            {dragOverlay && (
+              <ReferenceArea
+                x1={dragOverlay.x1}
+                x2={dragOverlay.x2}
+                strokeOpacity={0.4}
+                stroke="#38bdf8"
+                strokeDasharray="3 3"
+                fill="#38bdf8"
+                fillOpacity={0.12}
+                ifOverflow="visible"
+              />
+            )}
             <Bar dataKey="info" stackId="s" isAnimationActive={false}>
               {data.map((b, i) => (
                 <Cell
