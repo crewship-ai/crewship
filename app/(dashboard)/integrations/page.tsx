@@ -28,7 +28,6 @@ import { cn } from "@/lib/utils"
 
 import { ExpandedPanel } from "@/components/features/integrations/expanded-panel"
 import { TemplatePopover } from "@/components/features/integrations/template-popover"
-import { Marketplace } from "@/components/features/integrations/marketplace"
 import { MCPDetailSheet } from "@/components/features/integrations/mcp-detail-sheet"
 import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
 import { MCPLogo } from "@/components/icons/mcp-logos"
@@ -62,7 +61,6 @@ export default function IntegrationsPage() {
 
   // UI state
   const [loading, setLoading] = React.useState(true)
-  const [activeTab, setActiveTab] = React.useState<"connected" | "marketplace">("connected")
   const [detailServer, setDetailServer] = React.useState<CrewIntegration | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
   const [wizardOpen, setWizardOpen] = React.useState(false)
@@ -413,7 +411,7 @@ export default function IntegrationsPage() {
   const headerActions = canManage ? (
     <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => setWizardOpen(true)}>
       <Plus className="mr-1.5 h-3 w-3" />
-      Add MCP Server
+      Add Connector
     </Button>
   ) : null
 
@@ -443,7 +441,7 @@ export default function IntegrationsPage() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Plug className="h-3.5 w-3.5 text-foreground/50" />
-            <h1 className="text-body font-medium text-foreground/80">Integrations</h1>
+            <h1 className="text-body font-medium text-foreground/80">Connectors</h1>
           </div>
           {headerActions}
         </div>
@@ -465,67 +463,20 @@ export default function IntegrationsPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Plug className="h-3.5 w-3.5 text-foreground/50" />
-          <h1 className="text-body font-medium text-foreground/80">Integrations</h1>
+          <h1 className="text-body font-medium text-foreground/80">Connectors</h1>
           <span className="text-[10px] font-mono text-muted-foreground/60">
             {servers.length === 0
-              ? "no MCP servers"
-              : `${servers.length} MCP server${servers.length === 1 ? "" : "s"}`}
+              ? "no connectors"
+              : `${servers.length} connector${servers.length === 1 ? "" : "s"}`}
           </span>
         </div>
         {headerActions}
       </div>
 
-      {/* ── Tab strip (CONNECTIONS.md §5.1) ────────────────────── */}
-      <div className="flex items-center gap-0 border-b border-white/[0.08]">
-        <button
-          onClick={() => setActiveTab("connected")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
-            activeTab === "connected"
-              ? "border-blue-400 text-blue-400"
-              : "border-transparent text-muted-foreground hover:text-foreground/80",
-          )}
-        >
-          Connected
-          {servers.length > 0 && (
-            <span className="text-[10px] font-mono opacity-60">{servers.length}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab("marketplace")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
-            activeTab === "marketplace"
-              ? "border-blue-400 text-blue-400"
-              : "border-transparent text-muted-foreground hover:text-foreground/80",
-          )}
-        >
-          Marketplace
-          <span className="text-[10px] font-mono opacity-60">200+</span>
-        </button>
-      </div>
-
-      {activeTab === "marketplace" && workspaceId && (
-        <Marketplace
-          onAdd={async (entry) => {
-            // Map registry entry → handleAddServer template payload.
-            await handleAddServer({
-              name: entry.name,
-              label: entry.display_name || entry.name,
-              icon: entry.icon || entry.name,
-              transport: (entry.transport === "stdio" ? "stdio" : "streamable-http"),
-              command: entry.command || (entry.package_name ? "npx" : undefined),
-              args: entry.package_name && !entry.command ? `-y ${entry.package_name}` : undefined,
-              url: entry.endpoint || undefined,
-              envHint: undefined,
-            })
-            setActiveTab("connected")
-          }}
-        />
-      )}
-
-      {activeTab === "connected" && (
-        <>
+      {/* Sprint 0 — tab strip removed. Marketplace lives in the
+          sidebar; /integrations now renders a single connected list.
+          Sprint 1 will replace AddMCPWizard with a catalog-first flow.
+          See CONNECTIONS.md §5.1. */}
 
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
@@ -571,24 +522,21 @@ export default function IntegrationsPage() {
             />
           )}
           <SettingsCard
-            title="Or set up manually"
-            description="Pick from the marketplace or add a custom server"
+            title="Set up manually"
+            description="Add a custom MCP server"
           >
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
                 <Plug className="h-4 w-4 text-muted-foreground/60" />
               </div>
               <div className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
-                MCP servers expose tools (GitHub, Slack, databases, browsers) that your agents can call during tasks.
+                Connectors expose tools (GitHub, Slack, databases, browsers) that your agents can call during tasks.
               </div>
               {canManage && (
                 <div className="mt-4 flex gap-2">
-                  <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => setActiveTab("marketplace")}>
-                    Browse Marketplace
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => setWizardOpen(true)}>
+                  <Button size="sm" className="h-7 px-2.5 text-xs" onClick={() => setWizardOpen(true)}>
                     <Plus className="mr-1.5 h-3 w-3" />
-                    Add MCP server
+                    Add Connector
                   </Button>
                 </div>
               )}
@@ -729,8 +677,6 @@ export default function IntegrationsPage() {
         onOpenChange={setRegistryOpen}
         onAdd={handleRegistryAdd}
       />
-        </>
-      )}
 
       {workspaceId && detailServer && (
         <MCPDetailSheet
