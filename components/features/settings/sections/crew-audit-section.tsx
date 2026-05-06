@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Shield, ChevronRight, ChevronLeft, Search } from "lucide-react"
+import { Shield, ChevronRight, ChevronLeft, Search, RefreshCw, Download } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
@@ -111,6 +111,7 @@ interface CrewAuditSectionProps {
 export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [category, setCategory] = useState("all")
@@ -118,15 +119,25 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
   const [pagination, setPagination] = useState<AuditPagination | null>(null)
+  const [exporting, setExporting] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
-  const fetchLogs = useCallback(async () => {
+  // Cap on rows an export may walk across pages. The audit table can
+  // grow large in long-lived workspaces; an unbounded fetch loop would
+  // pin the main thread and stall every other settings interaction
+  // while it walks pagination. 10k is enough for >6 months of typical
+  // CRUD activity and small enough to stay snappy.
+  const EXPORT_MAX_ROWS = 10_000
+
+  const fetchLogs = useCallback(async (opts?: { silent?: boolean }) => {
     // Abort any in-flight request
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
-    setLoading(true)
+    const silent = opts?.silent ?? false
+    if (silent) setRefreshing(true)
+    else setLoading(true)
     setError(null)
     try {
       const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), limit: String(PAGE_SIZE) })
@@ -148,8 +159,77 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       setError("Failed to load audit logs")
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [workspaceId, category, dateRange, page])
+
+  const handleExport = useCallback(async () => {
+    const total = pagination?.total ?? 0
+    if (!workspaceId || total === 0) return
+    setExporting(true)
+    try {
+      const all: AuditLog[] = []
+      const totalToFetch = Math.min(total, EXPORT_MAX_ROWS)
+      const pageCount = Math.ceil(totalToFetch / PAGE_SIZE)
+      for (let p = 1; p <= pageCount; p++) {
+        const params = new URLSearchParams({
+          workspace_id: workspaceId,
+          page: String(p),
+          limit: String(PAGE_SIZE),
+        })
+        if (category !== "all") params.set("entity_type", category)
+        const dateFrom = getDateFrom(dateRange)
+        if (dateFrom) params.set("date_from", dateFrom)
+        const res = await fetch(`/api/v1/audit?${params}`)
+        if (!res.ok) {
+          setError("Export failed — partial results discarded")
+          return
+        }
+        const raw = await res.json()
+        const data = Array.isArray(raw.data) ? raw.data.map(normalizeLog) : []
+        all.push(...data)
+        if (all.length >= EXPORT_MAX_ROWS) break
+      }
+      if (all.length === 0) return
+      const rows = all.map((log) => ({
+        timestamp: log.created_at,
+        action: log.action,
+        entity_type: log.entity_type,
+        entity_id: log.entity_id,
+        user: log.user?.full_name ?? log.user?.email ?? "",
+        ip_address: log.ip_address ?? "",
+      }))
+      // Neutralise spreadsheet-formula prefixes (=, +, -, @) so an
+      // attacker-controlled entity_id or user field can't exfiltrate
+      // data when the CSV is opened in Excel/Numbers/Sheets.
+      const toCsvCell = (value: unknown): string => {
+        const raw = String(value ?? "")
+        const safe = /^[\t\r\n ]*[=+\-@]/.test(raw) ? `'${raw}` : raw
+        return `"${safe.replace(/"/g, '""')}"`
+      }
+      const header = Object.keys(rows[0] ?? {}).join(",")
+      const csv = [
+        header,
+        ...rows.map((r) => Object.values(r).map(toCsvCell).join(",")),
+      ].join("\n")
+      const blob = new Blob([csv], { type: "text/csv" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      if (total > EXPORT_MAX_ROWS) {
+        setError(
+          `Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows (total matches: ${total.toLocaleString()}). Narrow the date range or category for a complete export.`,
+        )
+      }
+    } catch {
+      setError("Export failed")
+    } finally {
+      setExporting(false)
+    }
+  }, [workspaceId, pagination, category, dateRange])
 
   useEffect(() => { fetchLogs() }, [fetchLogs])
 
@@ -180,11 +260,37 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   return (
     <div className="space-y-4">
       {/* ── Header ── */}
-      <div>
-        <h3 className="text-body font-medium text-foreground/80 leading-none">Audit log</h3>
-        <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
-          Every state-changing action on this workspace, immutably recorded
-        </p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-body font-medium text-foreground/80 leading-none">Audit log</h3>
+          <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+            Every state-changing action on this workspace, immutably recorded
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            onClick={() => fetchLogs({ silent: true })}
+            disabled={loading || refreshing}
+            aria-label="Refresh audit log"
+          >
+            <RefreshCw className={cn("h-3 w-3 mr-1.5", refreshing && "animate-spin")} />
+            Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 px-2.5 text-xs"
+            onClick={handleExport}
+            disabled={(pagination?.total ?? 0) === 0 || exporting || loading}
+            aria-label="Export audit log to CSV"
+          >
+            <Download className={cn("h-3 w-3 mr-1.5", exporting && "animate-pulse")} />
+            {exporting ? "Exporting…" : "Export CSV"}
+          </Button>
+        </div>
       </div>
 
       {/* ── Filter bar ── */}
@@ -251,7 +357,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       ) : error ? (
         <div className="rounded-xl border border-destructive/30 bg-destructive/[0.03] p-6 text-center">
           <p role="alert" className="text-xs text-destructive mb-3">{error}</p>
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={fetchLogs}>
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => fetchLogs()}>
             Retry
           </Button>
         </div>
