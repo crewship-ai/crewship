@@ -175,7 +175,22 @@ function computeBuckets(
     toMs = inferred.toMs
   }
 
-  // Guard: ensure non-zero range so we always have meaningful buckets.
+  // Auto-zoom: if the loaded entries cover much less than the requested
+  // window (e.g. user picked "30d" but only 1000 recent entries are
+  // loaded), snap the histogram window to the data extent. Otherwise
+  // 59 of 60 buckets are empty and the one bucket with data is a
+  // useless single spike. The server query still uses the full
+  // timeRange — this only affects what the histogram visualizes.
+  if (entries.length > 0) {
+    const dataRange = computeFromEntries(entries, now)
+    const windowSpan = toMs - fromMs
+    const dataSpan = dataRange.toMs - dataRange.fromMs
+    if (windowSpan > 0 && dataSpan / windowSpan < 0.25) {
+      fromMs = Math.max(fromMs, dataRange.fromMs)
+      toMs = Math.min(toMs, dataRange.toMs)
+    }
+  }
+
   if (toMs - fromMs < 1000) toMs = fromMs + 1000
 
   const bucketMs = (toMs - fromMs) / BUCKET_COUNT

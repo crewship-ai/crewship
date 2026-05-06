@@ -31,8 +31,21 @@ import type { ScopeOption } from "@/components/features/logs/logs-toolbar"
 /** SSE buffer cap — prevents unbounded growth on a chatty workspace. */
 const JOURNAL_MAX_ENTRIES = 1000
 
-interface CrewSummary { id: string; name: string }
-interface AgentSummary { id: string; name: string; crew_id?: string | null }
+interface CrewSummary {
+  id: string
+  name: string
+  icon?: string | null
+  color?: string | null
+  avatar_style?: string | null
+}
+interface AgentSummary {
+  id: string
+  name: string
+  crew_id?: string | null
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  crew?: { avatar_style?: string | null } | null
+}
 
 type JournalTab = "timeline" | "runs" | "eval" | "audit" | "spend"
 
@@ -140,7 +153,14 @@ export default function JournalPage() {
         if (!res.ok) return
         const json = (await res.json()) as CrewSummary[]
         if (!cancelled && Array.isArray(json)) {
-          setCrews(json.map((c) => ({ id: c.id, name: c.name })))
+          setCrews(
+            json.map((c) => ({
+              id: c.id,
+              name: c.name,
+              icon: c.icon ?? null,
+              color: c.color ?? null,
+            })),
+          )
         }
       } catch {
         /* leave empty on failure */
@@ -164,7 +184,14 @@ export default function JournalPage() {
         if (!res.ok) return
         const json = (await res.json()) as AgentSummary[]
         if (!cancelled && Array.isArray(json)) {
-          setAgents(json.map((a) => ({ id: a.id, name: a.name })))
+          setAgents(
+            json.map((a) => ({
+              id: a.id,
+              name: a.name,
+              avatarSeed: a.avatar_seed ?? null,
+              avatarStyle: a.avatar_style ?? a.crew?.avatar_style ?? null,
+            })),
+          )
         }
       } catch {
         /* leave empty on failure */
@@ -230,12 +257,34 @@ export default function JournalPage() {
   const liveRef = useRef(live)
   useEffect(() => { liveRef.current = live }, [live])
 
+  // SSE prepend batching — chatty workspaces can fire 50+ events/sec.
+  // Without batching, each event triggers a state update + full filter
+  // chain re-render (toolbar counts, histogram 60 buckets, virtuoso
+  // viewport, stats rail). Buffer up to 250 ms and flush as a group.
+  const pendingRef = useRef<Parameters<typeof prependLive>[0][]>([])
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flushPending = useCallback(() => {
+    flushTimerRef.current = null
+    const batch = pendingRef.current
+    if (batch.length === 0) return
+    pendingRef.current = []
+    for (const e of batch) prependLive(e)
+  }, [prependLive])
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+    }
+  }, [])
+
   const handleLive = useCallback(
     (entry: Parameters<typeof prependLive>[0]) => {
       if (!liveRef.current) return
-      prependLive(entry)
+      pendingRef.current.push(entry)
+      if (!flushTimerRef.current) {
+        flushTimerRef.current = setTimeout(flushPending, 250)
+      }
     },
-    [prependLive],
+    [flushPending],
   )
   const { status: streamStatus } = useJournalStream({
     workspaceId,

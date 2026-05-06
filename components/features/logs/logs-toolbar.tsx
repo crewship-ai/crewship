@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download, RefreshCw, Users, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
@@ -10,6 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { SEVERITY_COLOR } from "@/lib/journal-style"
 import type { JournalSeverity } from "@/lib/types/journal"
 import { TimeRangePicker, type TimeRange, type CustomRange } from "./time-range-picker"
@@ -27,6 +30,14 @@ export interface SeverityCounts {
 export interface ScopeOption {
   id: string
   name: string
+  /** Crew icon slug (e.g. "ship", "binoculars"). Render via CrewIcon. */
+  icon?: string | null
+  /** Crew gradient palette key. */
+  color?: string | null
+  /** Agent dicebear seed — falls back to name. */
+  avatarSeed?: string | null
+  /** Agent dicebear style — falls back to crew/default. */
+  avatarStyle?: string | null
 }
 
 export interface ScopeControl {
@@ -109,7 +120,7 @@ export function LogsToolbar({
           ref={searchInputRef}
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search   /regex/   path:/home/agent   keeper.decision   (/ to focus)"
+          placeholder="Search…"
           className="h-7 pl-7 pr-6 text-[12px] font-mono"
         />
         {query && (
@@ -139,8 +150,9 @@ export function LogsToolbar({
         <ScopeSelect
           control={crewScope}
           allLabel="All crews"
-          Icon={Users}
+          fallbackIcon={Users}
           aria="Crew scope"
+          kind="crew"
         />
       )}
 
@@ -149,8 +161,9 @@ export function LogsToolbar({
         <ScopeSelect
           control={agentScope}
           allLabel={crewScope?.value ? "All in crew" : "All agents"}
-          Icon={User}
+          fallbackIcon={User}
           aria="Agent scope"
+          kind="agent"
         />
       )}
 
@@ -252,14 +265,20 @@ export function LogsToolbar({
 function ScopeSelect({
   control,
   allLabel,
-  Icon,
+  fallbackIcon: FallbackIcon,
   aria,
+  kind,
 }: {
   control: ScopeControl
   allLabel: string
-  Icon: React.ComponentType<{ className?: string }>
+  fallbackIcon: React.ComponentType<{ className?: string }>
   aria: string
+  kind: "crew" | "agent"
 }) {
+  const selected = control.value
+    ? control.options.find((o) => o.id === control.value) ?? null
+    : null
+
   return (
     <Select
       value={control.value || "__all__"}
@@ -267,25 +286,69 @@ function ScopeSelect({
     >
       <SelectTrigger
         size="sm"
-        className="h-7 px-2 text-[11px] gap-1 max-w-[160px] [&>svg]:opacity-60"
+        className="h-7 px-2 text-[11px] gap-1.5 max-w-[180px] [&>svg]:opacity-60"
         aria-label={aria}
       >
-        <Icon className="h-3 w-3 opacity-70" />
+        {selected ? (
+          <ScopeBadge option={selected} kind={kind} />
+        ) : (
+          <FallbackIcon className="h-3 w-3 opacity-70 shrink-0" />
+        )}
         <SelectValue>
-          {control.value
-            ? control.options.find((o) => o.id === control.value)?.name ?? allLabel
-            : allLabel}
+          {selected?.name ?? allLabel}
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="__all__" className="text-xs">{allLabel}</SelectItem>
+        <SelectItem value="__all__" className="text-xs">
+          <span className="inline-flex items-center gap-2">
+            <FallbackIcon className="h-3 w-3 opacity-60" />
+            {allLabel}
+          </span>
+        </SelectItem>
         {control.options.map((o) => (
           <SelectItem key={o.id} value={o.id} className="text-xs">
-            {o.name}
+            <span className="inline-flex items-center gap-2 min-w-0">
+              <ScopeBadge option={o} kind={kind} />
+              <span className="truncate">{o.name}</span>
+            </span>
           </SelectItem>
         ))}
       </SelectContent>
     </Select>
+  )
+}
+
+/**
+ * 16-px badge rendered next to the scope option name. Crews get the
+ * gradient `CrewIcon`; agents get a DiceBear avatar; missing data
+ * falls back to a neutral monogram so the dropdown never looks empty.
+ */
+function ScopeBadge({ option, kind }: { option: ScopeOption; kind: "crew" | "agent" }) {
+  if (kind === "crew" && option.icon) {
+    return (
+      <span className="inline-flex items-center justify-center shrink-0 [&>div]:!h-4 [&>div]:!w-4 [&>div]:!rounded">
+        <CrewIcon icon={option.icon} color={option.color} size="sm" className="!h-4 !w-4 !rounded [&>svg]:!h-2.5 [&>svg]:!w-2.5" />
+      </span>
+    )
+  }
+  if (kind === "agent") {
+    const seed = option.avatarSeed || option.name
+    const url = getAgentAvatarUrl(seed, option.avatarStyle ?? null)
+    return (
+      <Image
+        src={url}
+        alt=""
+        width={16}
+        height={16}
+        className="h-4 w-4 rounded shrink-0 bg-muted/40"
+        unoptimized
+      />
+    )
+  }
+  return (
+    <span className="h-4 w-4 rounded inline-flex items-center justify-center bg-muted/40 text-[9px] font-mono text-muted-foreground shrink-0">
+      {option.name.slice(0, 1).toUpperCase()}
+    </span>
   )
 }
 
