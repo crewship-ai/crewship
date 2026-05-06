@@ -1,7 +1,6 @@
 "use client"
 
 import { useMemo } from "react"
-import { motion } from "motion/react"
 import { ExternalLink, Network, Plug } from "lucide-react"
 import type { JournalEntry } from "@/lib/types/journal"
 import { formatRelativeTime } from "@/lib/time"
@@ -78,7 +77,22 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
       if (e.entry_type !== "network.egress") continue
       const ts = (e as JournalEntry & { _tsMs?: number })._tsMs ?? new Date(e.ts).getTime()
       if (Number.isNaN(ts) || ts < cutoff) continue
-      const host = String(e.payload?.host ?? e.payload?.url ?? "").trim()
+      // Prefer payload.host directly; otherwise extract hostname from
+      // payload.url so `https://api.foo.com/v1` and
+      // `https://api.foo.com/v2?x=1` both bucket as `api.foo.com`
+      // instead of two separate rows.
+      const rawHost = String(e.payload?.host ?? "").trim()
+      const rawUrl = String(e.payload?.url ?? "").trim()
+      let host = rawHost
+      if (!host && rawUrl) {
+        try {
+          const candidate = rawUrl.includes("://") ? rawUrl : `https://${rawUrl}`
+          host = new URL(candidate).host
+        } catch {
+          host = rawUrl
+        }
+      }
+      host = host.toLowerCase()
       if (!host) continue
       const existing = byHost.get(host)
       if (existing) {
@@ -93,15 +107,15 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
       .slice(0, MAX_ROWS)
   }, [entries])
 
+  // Tailwind `animate-in` (via tailwindcss-animate, already used by
+  // shadcn primitives like Popover / AlertDialog) handles the mount
+  // fade — no motion/react import needed for a one-shot enter.
+  const cardClass =
+    "rounded-md border border-border/50 bg-card/40 px-3 py-2 animate-in fade-in-0 slide-in-from-top-1 duration-200"
+
   if (openPorts.length === 0 && topEgress.length === 0) {
     return (
-      <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 6 },
-        visible: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
-      }}
-      className="rounded-md border border-border/50 bg-card/40 px-3 py-2"
-    >
+      <div className={cardClass}>
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
           <Network className="h-3 w-3" />
           Network
@@ -109,18 +123,12 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
         <div className="text-[11px] text-muted-foreground/60 italic">
           No network activity in window.
         </div>
-      </motion.div>
+      </div>
     )
   }
 
   return (
-    <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 6 },
-        visible: { opacity: 1, y: 0, transition: { duration: 0.22, ease: "easeOut" } },
-      }}
-      className="rounded-md border border-border/50 bg-card/40 px-3 py-2"
-    >
+    <div className={cardClass}>
       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
         <Network className="h-3 w-3" />
         Network
@@ -168,6 +176,6 @@ export function LogsNetworkCard({ entries }: LogsNetworkCardProps) {
           </ul>
         </div>
       )}
-    </motion.div>
+    </div>
   )
 }
