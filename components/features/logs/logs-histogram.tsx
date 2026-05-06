@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef } from "react"
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from "recharts"
 import type { JournalEntry } from "@/lib/types/journal"
 import { SEVERITY_COLOR, severityOf } from "@/lib/journal-style"
@@ -13,17 +13,15 @@ export interface BucketRange {
 
 interface LogsHistogramProps {
   entries: JournalEntry[]
-  /** Active time range — defines the histogram window. */
   timeRange?: TimeRange
-  /** Custom [from, to] window when timeRange === "custom". */
   customRange?: CustomRange | null
   /** Currently-active bucket selection — shaded on the chart. */
   selected?: BucketRange | null
   /**
-   * Click / drag commits a selection. Emit `null` to clear (when
-   * the user clicks the already-selected bucket). The parent should
-   * apply this as a client-side narrow on the loaded entries — fast,
-   * no backend re-fetch.
+   * Click commits a single-bucket selection. Click the already-selected
+   * bucket to clear (emit `null`). Plain click only — no drag, no
+   * hover tracking — to avoid accidental selections during cursor
+   * movement.
    */
   onSelect?: (range: BucketRange | null) => void
   height?: number
@@ -41,19 +39,16 @@ interface Bucket {
 }
 
 const BUCKET_COUNT = 60
-/** Pixel distance the pointer must travel between down and up to count as a drag. */
-const DRAG_THRESHOLD_PX = 8
 
 /**
  * Stacked-bar histogram of journal-event volume across the active time
- * window. Click a bar to drill into that bucket's time range; **press
- * and drag** across multiple bars to commit a multi-bucket range.
+ * window. **Click a bar** to filter the list to that time bucket.
+ * **Click the same bar again** (or the toolbar pill) to clear.
  *
- * The histogram window IS the active time range — selection narrows
- * the time range itself rather than running a parallel client-side
- * filter. This matches Elastic Discover / Grafana Logs: the chart
- * always shows the full extent of what's loaded, and clicking a slice
- * zooms in.
+ * No hover-to-select, no drag — every selection is a deliberate click.
+ * The narrowing is client-side so the list updates within one render
+ * frame; the time-range picker stays untouched (it controls what the
+ * backend fetches, not what's filtered after).
  */
 export function LogsHistogram({
   entries,
@@ -70,112 +65,27 @@ export function LogsHistogram({
 
   const totalEvents = data.reduce((s, b) => s + b.total, 0)
 
-  // ─── Drag-or-click selection ────────────────────────────────────────
   const containerRef = useRef<HTMLDivElement>(null)
-  const dragStartIdxRef = useRef<number | null>(null)
-  const dragStartXRef = useRef<number | null>(null)
-  const dataRef = useRef(data)
-  const selectedRef = useRef(selected)
-  const onSelectRef = useRef(onSelect)
-  useEffect(() => { dataRef.current = data }, [data])
-  useEffect(() => { selectedRef.current = selected }, [selected])
-  useEffect(() => { onSelectRef.current = onSelect }, [onSelect])
 
-  // Visual drag-end index (only set once the pointer has moved past
-  // DRAG_THRESHOLD_PX, so a quick click never paints a drag overlay).
-  const [dragVisualEnd, setDragVisualEnd] = useState<number | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
-
-  const pixelToIndex = useCallback((clientX: number): number | null => {
-    const rect = containerRef.current?.getBoundingClientRect()
-    if (!rect || rect.width <= 0) return null
-    const ratio = (clientX - rect.left) / rect.width
-    if (ratio < 0 || ratio > 1) return null
-    const idx = Math.floor(ratio * BUCKET_COUNT)
-    return Math.max(0, Math.min(BUCKET_COUNT - 1, idx))
-  }, [])
-
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
       if (!onSelect) return
-      if (e.button !== 0) return
-      const idx = pixelToIndex(e.clientX)
-      if (idx === null) return
-      e.preventDefault()
-      dragStartIdxRef.current = idx
-      dragStartXRef.current = e.clientX
-      setDragVisualEnd(null)
-      setIsDragging(false)
-    },
-    [onSelect, pixelToIndex],
-  )
-
-  const handlePointerMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (dragStartIdxRef.current === null || dragStartXRef.current === null) return
-      const dx = Math.abs(e.clientX - dragStartXRef.current)
-      if (dx < DRAG_THRESHOLD_PX) return
-      const idx = pixelToIndex(e.clientX)
-      if (idx === null) return
-      setIsDragging(true)
-      setDragVisualEnd(idx)
-    },
-    [pixelToIndex],
-  )
-
-  // Document-level mouseup so a release outside the chart still finalizes.
-  useEffect(() => {
-    const finalize = (e: MouseEvent) => {
-      const startIdx = dragStartIdxRef.current
-      const startX = dragStartXRef.current
-      dragStartIdxRef.current = null
-      dragStartXRef.current = null
-      setDragVisualEnd(null)
-      setIsDragging(false)
-      if (startIdx === null || startX === null) return
-      const onSel = onSelectRef.current
-      if (!onSel) return
-      const buckets = dataRef.current
-      const moved = Math.abs(e.clientX - startX) >= DRAG_THRESHOLD_PX
-      if (!moved) {
-        // Click — single bucket. Toggle off if it's already the
-        // active selection.
-        const b = buckets[startIdx]
-        if (!b) return
-        const sel = selectedRef.current
-        if (sel && sel.fromMs === b.fromMs && sel.toMs === b.toMs) {
-          onSel(null)
-        } else {
-          onSel({ fromMs: b.fromMs, toMs: b.toMs })
-        }
-        return
-      }
-      // Drag — find end bucket from final pointer position.
       const rect = containerRef.current?.getBoundingClientRect()
       if (!rect || rect.width <= 0) return
       const ratio = (e.clientX - rect.left) / rect.width
-      const endIdx = Math.max(0, Math.min(BUCKET_COUNT - 1, Math.floor(ratio * BUCKET_COUNT)))
-      const lo = Math.min(startIdx, endIdx)
-      const hi = Math.max(startIdx, endIdx)
-      const startBucket = buckets[lo]
-      const endBucket = buckets[hi]
-      if (!startBucket || !endBucket) return
-      onSel({ fromMs: startBucket.fromMs, toMs: endBucket.toMs })
-    }
-    document.addEventListener("mouseup", finalize)
-    return () => document.removeEventListener("mouseup", finalize)
-  }, [])
-
-  // Drag overlay rectangle as % of chart width.
-  const dragRect = useMemo(() => {
-    if (!isDragging || dragStartIdxRef.current === null || dragVisualEnd === null) return null
-    const lo = Math.min(dragStartIdxRef.current, dragVisualEnd)
-    const hi = Math.max(dragStartIdxRef.current, dragVisualEnd)
-    return {
-      left: (lo / BUCKET_COUNT) * 100,
-      width: ((hi - lo + 1) / BUCKET_COUNT) * 100,
-    }
-  }, [isDragging, dragVisualEnd])
+      if (ratio < 0 || ratio > 1) return
+      const idx = Math.max(0, Math.min(BUCKET_COUNT - 1, Math.floor(ratio * BUCKET_COUNT)))
+      const b = data[idx]
+      if (!b) return
+      // Toggle off if clicking the same single-bucket selection.
+      if (selected && selected.fromMs === b.fromMs && selected.toMs === b.toMs) {
+        onSelect(null)
+        return
+      }
+      onSelect({ fromMs: b.fromMs, toMs: b.toMs })
+    },
+    [onSelect, data, selected],
+  )
 
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40">
@@ -186,7 +96,7 @@ export function LogsHistogram({
             <span className="ml-2 normal-case opacity-70">{totalEvents.toLocaleString()} in window</span>
           )}
           {onSelect && totalEvents > 0 && !selected && (
-            <span className="ml-2 normal-case opacity-50 italic">click a bar to filter · drag for range</span>
+            <span className="ml-2 normal-case opacity-50 italic">click a bar to filter</span>
           )}
         </div>
         <div className="text-[10px] font-mono tabular-nums text-muted-foreground/70">
@@ -195,27 +105,14 @@ export function LogsHistogram({
       </div>
       <div
         ref={containerRef}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
+        onClick={handleClick}
         className="relative [&_*]:!outline-none"
         style={{
           height,
-          cursor: onSelect ? (isDragging ? "ew-resize" : "crosshair") : "default",
-          userSelect: dragStartIdxRef.current !== null ? "none" : undefined,
+          cursor: onSelect ? "pointer" : "default",
         }}
       >
-        {/* Persistent selection — sky-blue tint behind bars. */}
-        {selected && !isDragging && (
-          <SelectionOverlay data={data} selected={selected} />
-        )}
-
-        {/* In-flight drag — dashed marquee while user sweeps. */}
-        {dragRect && (
-          <div
-            className="absolute top-0 bottom-0 pointer-events-none border border-dashed border-sky-400/60 bg-sky-500/15 z-10"
-            style={{ left: `${dragRect.left}%`, width: `${dragRect.width}%` }}
-          />
-        )}
+        {selected && <SelectionOverlay data={data} selected={selected} />}
 
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
