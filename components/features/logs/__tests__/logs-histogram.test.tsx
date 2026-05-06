@@ -167,14 +167,84 @@ describe("LogsHistogram interaction", () => {
     )
     const layer = getInteractiveLayer(container)
 
-    // Click bucket 5
     fireEvent.click(layer, { clientX: xOfBucket(5) })
     const range5 = onSelect.mock.calls[0][0]
-    // Click bucket 50
     fireEvent.click(layer, { clientX: xOfBucket(50) })
     const range50 = onSelect.mock.calls[1][0]
 
     expect(range5.fromMs).toBeLessThan(range50.fromMs)
     expect(onSelect).toHaveBeenCalledTimes(2)
+  })
+
+  it("emits a multi-bucket range when the user drags past the threshold", () => {
+    const onSelect = vi.fn()
+    const { container } = render(
+      <LogsHistogram entries={[makeEntry()]} timeRange="1h" onSelect={onSelect} />,
+    )
+    const layer = getInteractiveLayer(container)
+
+    // mousedown at bucket 10, drag to bucket 30 (well past 10 px), release
+    fireEvent.mouseDown(layer, { clientX: xOfBucket(10), button: 0 })
+    fireEvent(document, new MouseEvent("mousemove", { clientX: xOfBucket(30) }))
+    fireEvent(document, new MouseEvent("mouseup", { clientX: xOfBucket(30) }))
+
+    expect(onSelect).toHaveBeenCalledOnce()
+    const range = onSelect.mock.calls[0][0]
+    const oneMinMs = (60 * 60 * 1000) / 60
+    // Expected span ≈ 21 buckets (10..30 inclusive)
+    expect(range.toMs - range.fromMs).toBeGreaterThan(oneMinMs * 19)
+    expect(range.toMs - range.fromMs).toBeLessThan(oneMinMs * 23)
+  })
+
+  it("treats a tiny mousedown jitter (< threshold) as a click, not a drag", () => {
+    const onSelect = vi.fn()
+    const { container } = render(
+      <LogsHistogram entries={[makeEntry()]} timeRange="1h" onSelect={onSelect} />,
+    )
+    const layer = getInteractiveLayer(container)
+
+    // Move only 4 px while held — below the 10 px threshold.
+    fireEvent.mouseDown(layer, { clientX: 200, button: 0 })
+    fireEvent(document, new MouseEvent("mousemove", { clientX: 204 }))
+    fireEvent(document, new MouseEvent("mouseup", { clientX: 204 }))
+    // Browser would now fire `click` — simulate it.
+    fireEvent.click(layer, { clientX: 204 })
+
+    expect(onSelect).toHaveBeenCalledOnce()
+    const range = onSelect.mock.calls[0][0]
+    const oneMinMs = (60 * 60 * 1000) / 60
+    // Single-bucket selection — span ≈ 1 minute.
+    expect(range.toMs - range.fromMs).toBeLessThan(oneMinMs * 1.5)
+  })
+
+  it("the trailing click after a drag does not double-fire selection", () => {
+    const onSelect = vi.fn()
+    const { container } = render(
+      <LogsHistogram entries={[makeEntry()]} timeRange="1h" onSelect={onSelect} />,
+    )
+    const layer = getInteractiveLayer(container)
+
+    fireEvent.mouseDown(layer, { clientX: xOfBucket(5), button: 0 })
+    fireEvent(document, new MouseEvent("mousemove", { clientX: xOfBucket(40) }))
+    fireEvent(document, new MouseEvent("mouseup", { clientX: xOfBucket(40) }))
+    // The browser dispatches a synthetic `click` after the mouseup —
+    // it must not retrigger the single-bucket logic.
+    fireEvent.click(layer, { clientX: xOfBucket(40) })
+
+    expect(onSelect).toHaveBeenCalledOnce()
+  })
+
+  it("right-button drag does not start a range selection", () => {
+    const onSelect = vi.fn()
+    const { container } = render(
+      <LogsHistogram entries={[makeEntry()]} timeRange="1h" onSelect={onSelect} />,
+    )
+    const layer = getInteractiveLayer(container)
+
+    fireEvent.mouseDown(layer, { clientX: xOfBucket(10), button: 2 })
+    fireEvent(document, new MouseEvent("mousemove", { clientX: xOfBucket(40) }))
+    fireEvent(document, new MouseEvent("mouseup", { clientX: xOfBucket(40) }))
+
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })
