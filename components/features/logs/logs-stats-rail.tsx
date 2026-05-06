@@ -8,19 +8,22 @@ import {
   groupOf,
   severityOf,
 } from "@/lib/journal-style"
+import { LogsNetworkCard } from "./logs-network-card"
 
 interface LogsStatsRailProps {
   /** All entries currently visible (after filters). */
   entries: JournalEntry[]
   /** id → display name lookup for resolving UUIDs. */
   agentLookup?: Record<string, string>
+  /** Render the admin-only Network observability card (open ports, egress). */
+  showNetworkCard?: boolean
 }
 
 /**
  * Right-side stats rail — derived from currently-visible entries.
  * Mirrors the Grafana Logs panel "metrics" sidebar.
  */
-export function LogsStatsRail({ entries, agentLookup }: LogsStatsRailProps) {
+export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsStatsRailProps) {
   const stats = useMemo(() => deriveStats(entries), [entries])
 
   return (
@@ -83,6 +86,8 @@ export function LogsStatsRail({ entries, agentLookup }: LogsStatsRailProps) {
           </div>
         )}
       </StatCard>
+
+      {showNetworkCard && <LogsNetworkCard entries={entries} />}
 
       <StatCard title="Last 60s rate">
         <div className="flex items-baseline gap-2">

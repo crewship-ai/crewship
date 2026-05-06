@@ -31,6 +31,9 @@ interface LogsPanelProps {
   /** id → display name lookup for resolving UUIDs in the stats rail. */
   agentLookup?: Record<string, string>
 
+  /** Render the admin-only Network card in the stats rail. */
+  showNetworkCard?: boolean
+
   /**
    * Called (debounced) when the user types in the search box. Lets the
    * parent forward the query to the backend's full-text search so the
@@ -79,6 +82,7 @@ export function LogsPanel({
   crewScope,
   agentScope,
   agentLookup,
+  showNetworkCard,
   onServerSearch,
   onRefresh,
   loading,
@@ -346,7 +350,11 @@ export function LogsPanel({
             >
               <ChevronRight className="h-3 w-3" />
             </button>
-            <LogsStatsRail entries={ordered} agentLookup={agentLookup} />
+            <LogsStatsRail
+              entries={ordered}
+              agentLookup={agentLookup}
+              showNetworkCard={showNetworkCard}
+            />
           </div>
         )}
       </div>

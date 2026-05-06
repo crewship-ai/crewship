@@ -61,7 +61,7 @@ function runSignature(entry: JournalEntry): string {
  * Layout pattern: "Top strip + grid cards" (pure dashboard, no sidebar).
  * See `docs/design/patterns.md` #3.
  */
-export default function EvalPage() {
+export function EvalView() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   // 7-day window by default — matches "regressions detected in last 7d".
@@ -127,7 +127,7 @@ export default function EvalPage() {
   }, [metrics])
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-full bg-background">
       {/* ---- Top strip (h-9) ---- */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-border/60 px-3 gap-2">
         <LineChart className="h-3.5 w-3.5 text-foreground/60 shrink-0" />

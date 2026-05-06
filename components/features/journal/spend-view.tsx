@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils"
  * Layout pattern: "Sidebar + main" (filter rail + content). See
  * `docs/design/patterns.md` #2.
  */
-export default function PaymasterPage() {
+export function SpendView() {
   const searchParams = useSearchParams()
   const [range, setRange] = useState<PaymasterRange>("7d")
   const [selectedCrewId, setSelectedCrewId] = useState<string | null>(
@@ -138,7 +138,7 @@ export default function PaymasterPage() {
   const initialLoading = crewSpend.loading && !crewSpend.data && !crewSpend.error
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-full bg-background">
       {/* ---- Top strip (h-9, breadcrumb + actions) ---- */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-border/60 px-3 gap-2">
         <DollarSign className="h-3.5 w-3.5 text-foreground/60 shrink-0" />
