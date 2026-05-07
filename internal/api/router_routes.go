@@ -355,6 +355,11 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
 	// Versioning — every save creates an immutable history row;
 	// rollback flips head to a prior version (history preserved).
+	// User-facing save (UI "New routine" flow). MANAGER+ role
+	// required. Distinct from /internal/pipelines/save which the
+	// sidecar uses with X-Internal-Token; this route uses normal
+	// JWT auth and records authorship as the calling user.
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/save", authed(wsCtx(http.HandlerFunc(pipes.Save))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions", authed(wsCtx(http.HandlerFunc(pipes.ListVersions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", authed(wsCtx(http.HandlerFunc(pipes.Rollback))))

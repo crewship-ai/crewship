@@ -1114,6 +1114,140 @@ type internalSaveRequest struct {
 	LastTestRunPassed bool            `json:"last_test_run_passed"`
 }
 
+// userSaveRequest is the body shape for the workspace-scoped save
+// endpoint. Workspace_id comes from the path (wsCtx middleware), not
+// the body. Author identity is inferred from the JWT — user_id +
+// authored_via = "user_api". The optional author_crew_id lets UI
+// authors pin a specific crew context for runtime; without it, runs
+// fall back to the first crew the saving user belongs to.
+type userSaveRequest struct {
+	Slug              string          `json:"slug"`
+	Name              string          `json:"name"`
+	Description       string          `json:"description"`
+	Definition        json.RawMessage `json:"definition"`
+	AuthorCrewID      string          `json:"author_crew_id,omitempty"`
+	LastTestRunAt     string          `json:"last_test_run_at,omitempty"` // RFC3339
+	LastTestRunPassed bool            `json:"last_test_run_passed,omitempty"`
+	// SkipTestGate is honored only when the caller's role is
+	// OWNER or ADMIN; lower roles get a 403 if they try. Used by
+	// UI flows that have already test-run'd the definition through
+	// the /test_run endpoint and pass last_test_run_at + true here.
+	SkipTestGate bool `json:"skip_test_gate,omitempty"`
+}
+
+// Save is the workspace-scoped save endpoint that backs the UI's
+// "New routine" flow. JWT auth + MANAGER+ role required. The
+// distinction from InternalSave: author identity is extracted from
+// the user context (not trusted from the body), and authored_via is
+// always "user_api" so audit logs show real human authorship.
+//
+// POST /api/v1/workspaces/{wsId}/pipelines/save
+func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "auth required"})
+		return
+	}
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "MANAGER+ role required to save routines"})
+		return
+	}
+
+	var body userSaveRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if body.Slug == "" || len(body.Definition) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug + definition required"})
+		return
+	}
+	if body.SkipTestGate && role != "OWNER" && role != "ADMIN" {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "skip_test_gate requires OWNER or ADMIN role",
+		})
+		return
+	}
+
+	dsl, err := pipeline.Parse(body.Definition)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// If author_crew_id is provided, validate the user's agent slugs
+	// against THAT crew (cross-crew validation). If absent, skip
+	// agent-slug validation so the routine saves with whatever the
+	// DSL declares — runtime resolution at first invocation surfaces
+	// any mismatch with a clear error.
+	var agentSlugs map[string]struct{}
+	if body.AuthorCrewID != "" {
+		var lookupErr error
+		agentSlugs, lookupErr = h.lookupAgentSlugs(r, body.AuthorCrewID)
+		if lookupErr != nil {
+			h.logger.Warn("pipeline user save: lookup agent slugs", "error", lookupErr, "crew", body.AuthorCrewID)
+			agentSlugs = nil
+		}
+	}
+	pipelineSlugs, err := h.lookupPipelineSlugs(r, workspaceID)
+	if err != nil {
+		h.logger.Warn("pipeline user save: lookup pipeline slugs", "error", err, "workspace", workspaceID)
+		pipelineSlugs = nil
+	}
+	if err := pipeline.Validate(dsl, agentSlugs, pipelineSlugs); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := pipeline.CycleDetect(dsl, h.cycleResolver(r.Context(), workspaceID)); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+
+	in := pipeline.SaveInput{
+		WorkspaceID:    workspaceID,
+		Slug:           body.Slug,
+		Name:           body.Name,
+		Description:    body.Description,
+		DefinitionJSON: string(body.Definition),
+		Author: pipeline.AuthorMeta{
+			CrewID: body.AuthorCrewID,
+			UserID: user.ID,
+			Via:    pipeline.AuthoredViaUser,
+		},
+		LastTestRunPassed: body.LastTestRunPassed || body.SkipTestGate,
+	}
+	if body.SkipTestGate {
+		// Synthesize a fresh test-run timestamp so the store's
+		// gate doesn't fire. Audit trail still shows skip via
+		// the logger below.
+		now := time.Now().UTC()
+		in.LastTestRunAt = &now
+		h.logger.Info("pipeline save: test gate skipped", "user_id", user.ID, "role", role, "slug", body.Slug)
+	} else if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
+		in.LastTestRunAt = &t
+	}
+
+	saved, err := h.store.Save(r.Context(), in)
+	if errors.Is(err, pipeline.ErrTestRunGateFailed) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"error": "save requires a fresh, passing test_run within 5 minutes (or skip_test_gate for OWNER/ADMIN)",
+		})
+		return
+	}
+	if errors.Is(err, pipeline.ErrSlugConflict) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "slug already exists in workspace"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("pipeline user save", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
+}
+
 // InternalSave is the trusted endpoint the sidecar forwards to.
 // X-Internal-Token authentication runs upstream of this handler;
 // here we just trust the caller's claim about author identity.

@@ -18,6 +18,7 @@ import { RoutinesTimelineView } from "./routines-timeline-view"
 import { RoutinesActivityView } from "./routines-activity-view"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutinesFilterSidebar, type RoutineFilters } from "./routines-filter-sidebar"
+import { RoutineCreateDialog } from "./routine-create-dialog"
 
 // RoutinesLayout — full /routines page. Shape mirrors orchestration:
 // top toolbar with tabs + actions, optional left filter panel, main
@@ -55,6 +56,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   })
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -142,8 +144,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           size="sm"
           variant="default"
           className="h-7 gap-1.5 text-xs"
-          title="Create a new routine via DSL editor (UI deferred — currently agents and CLI author routines)"
-          disabled
+          onClick={() => setCreateDialogOpen(true)}
+          title="Create a new routine — DSL editor with starter templates + Test & Save"
         >
           <Plus className="h-3 w-3" />
           New routine
@@ -275,7 +277,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         )}
       </div>
 
-      {/* Import dialog (placeholder — wired in next commit) */}
+      {/* Import dialog */}
       {importDialogOpen && (
         <ImportRoutineDialog
           workspaceId={workspaceId}
@@ -286,6 +288,17 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           }}
         />
       )}
+
+      {/* Create dialog — Test & Save flow with starter templates */}
+      <RoutineCreateDialog
+        workspaceId={workspaceId}
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onCreated={(slug) => {
+          refresh()
+          setSelectedSlug(slug)
+        }}
+      />
     </div>
   )
 }
