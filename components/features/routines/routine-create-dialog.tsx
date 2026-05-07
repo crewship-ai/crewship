@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { X, FlaskConical, Save, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -126,14 +126,24 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(null)
   const [skipTestGate, setSkipTestGate] = useState(false)
 
-  // Lazy-load crews on open. We could useCrews() but a one-shot fetch
-  // here keeps the dialog self-contained.
-  if (open && crews.length === 0) {
+  // Lazy-load crews on first open. Side effect lives in useEffect
+  // (not in render body) so React's render pipeline isn't disturbed
+  // — putting fetch + setState directly in the component body causes
+  // re-render loops and, in some hydration scenarios, blocks the
+  // dialog from mounting at all.
+  useEffect(() => {
+    if (!open || crews.length > 0) return
+    let cancelled = false
     fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((data: Crew[]) => setCrews(Array.isArray(data) ? data : []))
+      .then((data: Crew[]) => {
+        if (!cancelled) setCrews(Array.isArray(data) ? data : [])
+      })
       .catch(() => {})
-  }
+    return () => {
+      cancelled = true
+    }
+  }, [open, workspaceId, crews.length])
 
   if (!open) return null
 

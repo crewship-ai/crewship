@@ -160,6 +160,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// ── Phase 10c: Routines (5 starter recipes) ──
+	// Independent of skipIssues so a workspace can have routines
+	// without the demo issues clutter. Failure here is non-fatal —
+	// a missing crew or DSL parse error logs but doesn't abort.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedRoutines(ctx, client, crewIDs); err != nil {
+		// Log + continue rather than abort: routines are an
+		// optional layer, and a parse error on one shouldn't
+		// torpedo the rest of the seed.
+		fmt.Fprintf(os.Stderr, "Routine seeding hit an error (continuing): %v\n", err)
+	}
+
 	// ── Phase 10b: Wait for background provisioning (only if requested) ──
 	// Provisioning was triggered in Phase 2b; in async mode we skip the wait
 	// entirely and tell the user how to check status. With --wait-provision
