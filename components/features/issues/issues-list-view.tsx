@@ -13,6 +13,7 @@ import {
 import { PriorityIcon, priorityLabel } from "./priority-icon"
 import { StatusIcon, statusLabel } from "./status-icon"
 import { LabelBadge } from "./label-badge"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import { formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
@@ -67,8 +68,18 @@ const BULK_PRIORITIES: { value: IssuePriority; label: string }[] = [
 ]
 
 export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAction, workspaceId }: IssuesListViewProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("updated")
-  const [sortDir, setSortDir] = useState<SortDir>("desc")
+  // Sort preference is sticky across sessions — viewers tend to settle
+  // on one column (updated / priority / status) and reverse it for
+  // worst-first sweeps. Resetting on reload makes the table feel
+  // amnesiac.
+  const [sortKey, setSortKey] = useUserPreference<SortKey>(
+    "issues.list.sortKey",
+    "updated",
+  )
+  const [sortDir, setSortDir] = useUserPreference<SortDir>(
+    "issues.list.sortDir",
+    "desc",
+  )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkMenuOpen, setBulkMenuOpen] = useState<"status" | "priority" | null>(null)
 
@@ -120,13 +131,13 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   const handleSort = useCallback(
     (key: SortKey) => {
       if (sortKey === key) {
-        setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+        setSortDir(sortDir === "asc" ? "desc" : "asc")
       } else {
         setSortKey(key)
         setSortDir(key === "updated" ? "desc" : "asc")
       }
     },
-    [sortKey],
+    [sortKey, sortDir, setSortDir, setSortKey],
   )
 
   const sorted = useMemo(() => {
