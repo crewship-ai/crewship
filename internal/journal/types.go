@@ -172,7 +172,7 @@ const (
 	// Payload contains the message text capped to PreviewLen chars in
 	// summary; full content in payload.content. chat_id + agent_id +
 	// (optional) crew_id wire it back to the conversation surface.
-	EntryChatUserMessage  EntryType = "chat.user_message"
+	EntryChatUserMessage   EntryType = "chat.user_message"
 	EntryChatAgentResponse EntryType = "chat.agent_response"
 
 	// Agent — runtime errors caught at the orchestrator boundary.

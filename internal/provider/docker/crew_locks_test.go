@@ -73,7 +73,7 @@ func TestLockForCrew_OneCrewLockedOthersFree(t *testing.T) {
 	go func() {
 		muB := p.lockForCrew("crew-B")
 		muB.Lock()
-		muB.Unlock()
+		muB.Unlock() //nolint:staticcheck // test asserts the lock can be acquired+released without contention from crew-A's held lock; the empty critical section IS the assertion
 		close(done)
 	}()
 

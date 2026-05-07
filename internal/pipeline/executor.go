@@ -490,6 +490,15 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
 	}
 
+	// DAG dispatch — if any step declares `needs:` AND we're not in
+	// dry-run (which still wants the linear "what would execute"
+	// preview), switch to the parallel scheduler. The linear loop
+	// below stays the no-DAG path, so existing pipelines keep their
+	// exact behaviour.
+	if in.Mode != ModeDryRun && hasNeeds(dsl) {
+		return e.runDAG(ctx, in, depth, dsl, result, pipelineID, pipelineSlug, runID, emit, inputsForCtx, renderEnv, startedAt)
+	}
+
 	for i := range dsl.Steps {
 		// Cancel pre-emption — if the run was cancelled (or its
 		// parent ctx tripped) between steps, exit cleanly here so
