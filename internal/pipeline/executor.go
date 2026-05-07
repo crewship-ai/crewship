@@ -357,35 +357,93 @@ func (e *Executor) runAgentStep(
 		}
 		totalCost += res.CostUSD
 
-		// Validation gate.
+		// Validation gate (cheap structural checks first — bail
+		// before we spend rubric-grader tokens on output that
+		// already fails byte-level rules).
 		ok, reason := validateOutput(res.Output, step.Validation)
-		if ok {
+		if !ok {
+			lastValidationReason = reason
+			emit.emitValidationFailed(ctx, step, reason, onFail)
+			switch onFail {
+			case OnFailAbort:
+				return "", totalCost, time.Since(startTotal).Milliseconds(),
+					fmt.Errorf("validation failed: %s", reason)
+			case OnFailRetryStep:
+				return "", totalCost, time.Since(startTotal).Milliseconds(),
+					fmt.Errorf("validation failed (retry_step not yet implemented): %s", reason)
+			case OnFailEscalateTier:
+				continue
+			}
+		}
+
+		// Outcomes (rubric-based grading) — runs only if structural
+		// validation passed. Crewship's answer to Anthropic Managed
+		// Agents "outcomes" feature. The grader is a separate agent
+		// in the author crew, not a raw LLM call, so the no-API-key
+		// invariant survives.
+		if step.Outcomes != nil {
+			gradeRes, gradeCost, gradeErr := e.runOutcomesGrader(ctx, step, res.Output, in)
+			totalCost += gradeCost
+			if gradeErr != nil {
+				// Grader infrastructure failure: surface but treat
+				// as non-fatal-by-default (we don't want a flaky
+				// grader to block the worker's output). Emit a
+				// validation_failed entry for observability and
+				// fall through to returning the worker's output.
+				emit.emitValidationFailed(ctx, step, "grader error: "+gradeErr.Error(), OnFailAbort)
+				return res.Output, totalCost, time.Since(stepStart).Milliseconds(), nil
+			}
+			if gradeRes.passed {
+				return res.Output, totalCost, time.Since(stepStart).Milliseconds(), nil
+			}
+			// Grader rejected the output. Attach the grader's
+			// feedback as the validation reason so the
+			// escalate/retry path has actionable detail.
+			reason = "outcomes failed: " + gradeRes.feedback
+			lastValidationReason = reason
+			emit.emitValidationFailed(ctx, step, reason, outcomesOnFail(step))
+			switch outcomesOnFail(step) {
+			case OnFailAbort:
+				return "", totalCost, time.Since(startTotal).Milliseconds(),
+					fmt.Errorf("outcomes failed: %s", reason)
+			case OnFailRetryStep:
+				// Append grader feedback to the prompt so the
+				// next worker attempt has the failure reason in
+				// context. We don't yet implement a per-step
+				// retry budget (separate from tier escalation);
+				// for now retry_step degrades to abort with
+				// feedback embedded in the error.
+				return "", totalCost, time.Since(startTotal).Milliseconds(),
+					fmt.Errorf("outcomes failed and retry_step requires per-step budget (not yet implemented): %s", reason)
+			case OnFailEscalateTier:
+				// fall through to escalation
+			}
+		} else if ok {
+			// No outcomes configured + validation passed = done.
 			return res.Output, totalCost, time.Since(stepStart).Milliseconds(), nil
 		}
-		lastValidationReason = reason
-		emit.emitValidationFailed(ctx, step, reason, onFail)
-
-		switch onFail {
-		case OnFailAbort:
-			return "", totalCost, time.Since(startTotal).Milliseconds(),
-				fmt.Errorf("validation failed: %s", reason)
-		case OnFailRetryStep:
-			// Retry on same tier — we'd need a retry budget here.
-			// MVP: treat retry_step the same as abort, since with a
-			// non-deterministic LLM the retry is rarely useful and a
-			// proper retry budget is a Phase 2 feature.
-			return "", totalCost, time.Since(startTotal).Milliseconds(),
-				fmt.Errorf("validation failed (retry_step not yet implemented): %s", reason)
-		case OnFailEscalateTier:
-			// Try the next tier. If we're already on the last
-			// available tier, the loop exits and we fall through.
-			continue
-		}
+		// Either validation failed with escalate_tier, or outcomes
+		// failed with escalate_tier — both fall through to next
+		// fallback tier in the for-loop.
 	}
 
-	// Exhausted all tiers; surface the last validation reason.
+	// Exhausted all tiers; surface the last failure reason
+	// (validation OR outcomes — they share lastValidationReason).
 	return "", totalCost, time.Since(startTotal).Milliseconds(),
-		fmt.Errorf("validation failed after exhausting tiers: %s", lastValidationReason)
+		fmt.Errorf("step failed after exhausting tiers: %s", lastValidationReason)
+}
+
+// outcomesOnFail returns the OnFail action for outcomes failures,
+// defaulting to abort. We don't reuse the step's OnFail because
+// validation failures and outcomes failures may want different
+// escalation strategies — a banned-token validation might warrant
+// escalate_tier, but a rubric miss might warrant retry_step with
+// grader feedback (when retry budgets land in Phase 2).
+func outcomesOnFail(step Step) OnFailAction {
+	if step.Outcomes != nil && step.Outcomes.OnFail != "" {
+		return step.Outcomes.OnFail
+	}
+	return OnFailAbort
 }
 
 // runCallPipelineStep handles a call_pipeline step by looking up the

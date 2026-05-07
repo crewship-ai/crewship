@@ -92,6 +92,7 @@ type Step struct {
 	ModelOverride string          `json:"model_override,omitempty"`
 	TimeoutSec    int             `json:"timeout_seconds,omitempty"`
 	Validation    *Validation     `json:"validation,omitempty"`
+	Outcomes      *Outcomes       `json:"outcomes,omitempty"`
 	OnFail        OnFailAction    `json:"on_fail,omitempty"`
 	Raw           json.RawMessage `json:"-"` // captured raw step body for type-specific re-decoding
 
@@ -153,6 +154,65 @@ type Validation struct {
 	MustContain    []string        `json:"must_contain,omitempty"`
 	MinLength      *int            `json:"min_length,omitempty"`
 	MaxLength      *int            `json:"max_length,omitempty"`
+}
+
+// Outcomes is rubric-based output evaluation by a separate grader
+// agent. It runs AFTER the step's structural Validation passes (so
+// cheap byte-level checks short-circuit before we burn LLM tokens
+// on grading), and can iterate the worker if the rubric isn't met.
+//
+// Crewship's answer to Anthropic's Managed Agents "outcomes" feature
+// (announced May 6, 2026 at Code with Claude). Same shape, but
+// because our runtime is multi-CLI, the grader can be a different
+// CLI adapter than the worker — Opus authors, Haiku grades.
+//
+// Crucially, the grader is an AGENT in the author crew (referenced
+// by slug, just like StepAgentRun.AgentSlug), not a raw LLM call.
+// That preserves Pavel's "no API keys" model: the grader auths via
+// its own CLI tool, the same way every other Crewship agent does.
+//
+// On rubric failure:
+//   - "abort"          → step fails, run fails
+//   - "retry_step"     → re-run worker with grader's feedback in prompt
+//   - "escalate_tier"  → re-run worker on a smarter tier (existing
+//     execution-tier escalation), grade again
+//
+// MaxIterations caps the retry loop so a stubborn output can't
+// burn unbounded tokens. Default is 3 (one initial run + 2 revisions).
+type Outcomes struct {
+	// Criteria are the named pass/fail rules the grader evaluates
+	// against. Each Rule is a natural-language statement; the grader
+	// agent reads them all in one prompt and returns structured
+	// pass/fail per criterion. Keep them few (5–10) and well-scoped
+	// — long lists turn the grader into a hallucination machine.
+	Criteria []OutcomeCriterion `json:"criteria"`
+	// GraderAgentSlug names the agent that runs the rubric eval.
+	// MUST be a slug in the pipeline's AUTHOR crew. Resolves the
+	// same way as StepAgentRun.AgentSlug — security boundary is
+	// identical.
+	GraderAgentSlug string `json:"grader_agent_slug"`
+	// MaxIterations caps the worker→grade→revise→grade loop.
+	// 1 = single shot (grade once, no revision). Default 3.
+	MaxIterations int `json:"max_iterations,omitempty"`
+	// OnFail is what the executor does when the rubric ultimately
+	// can't be satisfied (after MaxIterations exhausted). Defaults
+	// to OnFailAbort — never propagate unrubric'd output downstream.
+	OnFail OnFailAction `json:"on_fail,omitempty"`
+}
+
+// OutcomeCriterion is one named rubric entry. Name is a stable
+// identifier the grader returns in its verdict; Rule is the
+// human-readable statement the grader evaluates.
+//
+// Examples:
+//
+//	{"name":"length",         "rule":"between 100 and 500 characters"}
+//	{"name":"tone",           "rule":"professional, no slang"}
+//	{"name":"no_hallucinate", "rule":"every fact appears in the inputs"}
+type OutcomeCriterion struct {
+	Name        string `json:"name"`
+	Rule        string `json:"rule"`
+	Description string `json:"description,omitempty"` // optional longer-form context for the grader
 }
 
 // Pipeline is the persisted record. Mirrors the pipelines table 1:1
