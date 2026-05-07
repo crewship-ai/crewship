@@ -153,11 +153,11 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "ts >= ?")
-		args = append(args, formatTSBound(q.Since))
+		args = append(args, formatSinceBound(q.Since))
 	}
 	if !q.Until.IsZero() {
 		conds = append(conds, "ts <= ?")
-		args = append(args, formatTSBound(q.Until))
+		args = append(args, formatUntilBound(q.Until))
 	}
 	if q.Cursor != "" {
 		cTS, cID, err := decodeCursor(q.Cursor)
@@ -296,7 +296,7 @@ func Get(ctx context.Context, db *sql.DB, workspaceID, id string) (*Entry, error
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("journal: get: %w", err)
 	}
 	e.CrewID = crewID.String
 	e.AgentID = agentID.String
@@ -411,11 +411,11 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "ts >= ?")
-		args = append(args, formatTSBound(q.Since))
+		args = append(args, formatSinceBound(q.Since))
 	}
 	if !q.Until.IsZero() {
 		conds = append(conds, "ts <= ?")
-		args = append(args, formatTSBound(q.Until))
+		args = append(args, formatUntilBound(q.Until))
 	}
 	// Mirror List's FTS5 join so Count returns the same N as the
 	// paginated list — otherwise the badge contradicts what the user
@@ -429,7 +429,7 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 	query := `SELECT COUNT(*) ` + from + ` WHERE ` + strings.Join(conds, " AND ")
 	var n int64
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("journal: count: %w", err)
 	}
 	return n, nil
 }
@@ -449,19 +449,45 @@ func decodeCursor(s string) (string, string, error) {
 	return s[:i], s[i+1:], nil
 }
 
-// formatTSBound formats a Since/Until value with the same milli-precision
-// layout `emit.go` uses for stored entries. Without the matching format
-// SQLite's lexicographic comparison silently excludes entries whose `ts`
-// is the same instant as Since but stored with a literal ".000" while
-// the bound is encoded as RFC3339Nano without trailing zeros.
+// boundLayout is the canonical milli-precision layout `emit.go` uses
+// for stored entries. Both bound formatters target this layout so
+// SQLite's lexicographic comparison stays consistent with stored
+// rows — a prior bug formatted Since/Until as RFC3339Nano (which
+// strips trailing zeros) and the literal ".000Z" sort produced
+// off-by-one inclusion at whole-second timestamps.
+const boundLayout = "2006-01-02T15:04:05.000Z"
+
+// formatSinceBound formats a lower-bound timestamp at millisecond
+// precision matching the storage format. Sub-millisecond fractions on
+// the caller's side are rounded UP — Since is "include rows from this
+// instant onward", so a stored row at the same milli that's actually
+// before the caller's sub-ms instant must NOT be included. Rounding up
+// to the next milli is the conservative direction for a lower bound.
 //
-// Reads the trailing zero off the stored format too — `2026-04-30T10:00:00.000Z`
-// vs `2026-04-30T10:00:00Z` lexicographically sort with the literal ".000Z"
-// AFTER the bare "Z", so a Since lacking the suffix excludes the exact-
-// match row.  Picking one canonical format both sides use is the only
-// way to keep the inclusive bound actually inclusive.
-func formatTSBound(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+// Worked example: caller passes 10:00:00.000500Z. A naive truncation
+// would lower the bound to 10:00:00.000Z, which would then INCLUDE a
+// row stored as 10:00:00.000Z even though that row is technically
+// older than the caller's intent. Ceil to 10:00:00.001Z keeps the
+// bound honest at the storage's milli grid.
+func formatSinceBound(t time.Time) string {
+	t = t.UTC()
+	if t.Nanosecond()%int(time.Millisecond) != 0 {
+		// Bump the bound up by one full ms minus the existing
+		// fractional remainder, then truncate. time.Truncate alone
+		// always floors; we want ceil for sub-ms inputs.
+		t = t.Truncate(time.Millisecond).Add(time.Millisecond)
+	}
+	return t.Format(boundLayout)
+}
+
+// formatUntilBound formats an upper-bound timestamp at millisecond
+// precision matching the storage format. Sub-millisecond fractions are
+// rounded DOWN (the natural floor of Truncate) — Until is "no later
+// than this instant", so a stored row at the same milli that's
+// actually after the caller's sub-ms instant must NOT be included.
+// Floor is the conservative direction for an upper bound.
+func formatUntilBound(t time.Time) string {
+	return t.UTC().Truncate(time.Millisecond).Format(boundLayout)
 }
 
 // parseJournalTS accepts both the milli-precision format we write and the

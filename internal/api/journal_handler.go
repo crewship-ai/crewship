@@ -87,7 +87,9 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	q.Limit = 50 // bound the initial batch so a long-idle reconnect doesn't flood
+	// `q.Limit` is left at the default; the seed loop and poll loop
+	// each pick their own batch size below (seedPageSize for the
+	// resume gap walk, 100 for live polls).
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -103,20 +105,29 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Last-Event-ID resume: SSE clients (browsers and our CLI) send the
 	// last successfully-seen entry id back when they reconnect after a
 	// drop. Honour it by looking the entry up so we know its ts, then
-	// seed only the entries strictly newer than that watermark — the
-	// client already has everything up to and including the resume id.
-	// If lookup fails (id from another tenant, expired row, malformed)
+	// seed every row strictly newer than that watermark — paging if a
+	// long disconnect produced more than one batch's worth of gap. If
+	// lookup fails (id from another tenant, expired row, malformed)
 	// fall through to the regular full seed so the stream still
 	// produces useful output rather than silently truncating.
 	resumeID := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	// Watermark uses time.Time + id pair throughout. A prior version
+	// kept the timestamp as an RFC3339Nano string and compared
+	// lexically; that breaks when one side strips trailing-zero
+	// fractional seconds (`Z` instead of `.000Z`) because the formats
+	// then sort against each other inconsistently. time.Before/After
+	// compares on the underlying instant regardless of how it was
+	// originally serialised.
 	var (
-		lastSeenTS string
-		lastSeenID string
+		lastSeenTime time.Time
+		lastSeenID   string
+		hasWatermark bool
 	)
 	if resumeID != "" {
 		if resumed, err := journal.Get(r.Context(), h.db, workspaceID, resumeID); err == nil && resumed != nil {
-			lastSeenTS = resumed.TS.UTC().Format(time.RFC3339Nano)
+			lastSeenTime = resumed.TS.UTC()
 			lastSeenID = resumed.ID
+			hasWatermark = true
 		} else if err != nil {
 			h.logger.Warn("journal stream resume lookup failed", "err", err, "resume_id", resumeID)
 		}
@@ -125,41 +136,63 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Seed with a replay of the most recent N events so a fresh client
 	// paints the full current view before switching to live updates.
 	// On a Last-Event-ID resume the client already has the older
-	// history, so the seed is the gap between resumeID and now.
+	// history, so the seed is the gap between resumeID and now —
+	// paged so a disconnect that missed >seedPageSize entries doesn't
+	// drop the older end of the gap on the floor.
+	//
+	// Paging walks newest-first via the keyset Cursor (advancing the
+	// watermark via Since would land us back on the newest page every
+	// iteration because List is ordered DESC). Pages are collected
+	// then emitted in chronological order so the client timeline
+	// appends in the right direction across page boundaries.
+	const seedPageSize = 50
+	const maxSeedPages = 10 // 500-entry replay ceiling per resume
 	seedQuery := q
-	if lastSeenTS != "" {
-		if t, err := time.Parse(time.RFC3339Nano, lastSeenTS); err == nil {
-			seedQuery.Since = t
-		}
+	if hasWatermark {
+		seedQuery.Since = lastSeenTime
 	}
-	entries, _, err := journal.List(r.Context(), h.db, seedQuery)
-	if err != nil {
-		// Don't abort the stream on a transient seed failure — the
-		// poll loop below can still carry live traffic once the DB
-		// recovers. Log so oncall can see why the client's initial
-		// view was empty.
-		h.logger.Warn("journal stream seed failed", "err", err)
-	} else {
-		// `entries` is newest-first; iterate reversed so the client
-		// timeline appends in chronological order. Filter out the
-		// resume id itself plus anything strictly older — the >= bound
-		// in `Since` is inclusive of the watermark instant, so the
-		// resume row would otherwise echo back to the client.
-		for i := len(entries) - 1; i >= 0; i-- {
-			e := entries[i]
-			if lastSeenID != "" && e.ID == lastSeenID {
+	seedQuery.Limit = seedPageSize
+	seedQuery.Cursor = ""
+	collected := make([]journal.Entry, 0, seedPageSize)
+	for page := 0; page < maxSeedPages; page++ {
+		entries, nextCursor, err := journal.List(r.Context(), h.db, seedQuery)
+		if err != nil {
+			// Don't abort the stream on a transient seed failure —
+			// the poll loop below can still carry live traffic once
+			// the DB recovers.
+			h.logger.Warn("journal stream seed failed", "err", err, "page", page)
+			break
+		}
+		collected = append(collected, entries...)
+		// nextCursor is empty when journal.List returned fewer than
+		// the limit (last page). No more pages to walk.
+		if nextCursor == "" {
+			break
+		}
+		seedQuery.Cursor = nextCursor
+	}
+	// `collected` is newest-first across all pages. Emit reversed so
+	// the client sees them in chronological order. Filter out the
+	// resume id itself plus anything strictly older — the >= bound in
+	// `Since` is inclusive of the watermark instant, so the resume
+	// row would otherwise echo back to the client.
+	for i := len(collected) - 1; i >= 0; i-- {
+		e := collected[i]
+		ts := e.TS.UTC()
+		if hasWatermark {
+			if ts.Before(lastSeenTime) {
 				continue
 			}
-			ts := e.TS.UTC().Format(time.RFC3339Nano)
-			if ts < lastSeenTS || (ts == lastSeenTS && lastSeenID != "" && e.ID <= lastSeenID) {
+			if ts.Equal(lastSeenTime) && e.ID <= lastSeenID {
 				continue
 			}
-			writeSSEEvent(w, "entry", e)
-			lastSeenTS = ts
-			lastSeenID = e.ID
 		}
-		flusher.Flush()
+		writeSSEEvent(w, "entry", e)
+		lastSeenTime = ts
+		lastSeenID = e.ID
+		hasWatermark = true
 	}
+	flusher.Flush()
 
 	// Watermark is the compound (ts, id) of the last emitted entry so a
 	// burst of entries sharing a millisecond timestamp isn't partially
@@ -167,11 +200,11 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// every entry with the same ts as the last one we saw. The DB
 	// ORDER BY (ts DESC, id DESC) in journal.List guarantees the tie-
 	// breaker is deterministic.
-	if lastSeenTS == "" {
+	if !hasWatermark {
 		// Brand-new client (no Last-Event-ID) and the seed slice was
 		// empty — start the live tail from "now" so the next poll
 		// produces fresh entries rather than re-emitting history.
-		lastSeenTS = time.Now().UTC().Format(time.RFC3339Nano)
+		lastSeenTime = time.Now().UTC()
 	}
 
 	ticker := time.NewTicker(1 * time.Second)
@@ -191,7 +224,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case <-ticker.C:
 			poll := q
-			poll.Since, _ = time.Parse(time.RFC3339Nano, lastSeenTS)
+			poll.Since = lastSeenTime
 			poll.Cursor = ""
 			poll.Limit = 100
 			rows, _, err := journal.List(r.Context(), h.db, poll)
@@ -202,16 +235,19 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			// Emit oldest first so the client timeline appends in order.
 			for i := len(rows) - 1; i >= 0; i-- {
 				e := rows[i]
-				ts := e.TS.Format(time.RFC3339Nano)
+				ts := e.TS.UTC()
 				// Skip entries the client has already seen, tied by
 				// id when ts matches so burst-within-ms doesn't drop
 				// rows. id comparison is stable because the journal
-				// IDs are time-ordered hex tokens.
-				if ts < lastSeenTS || (ts == lastSeenTS && e.ID <= lastSeenID) {
+				// IDs are time-ordered hex tokens. Comparing on
+				// time.Time directly avoids the variable-width
+				// RFC3339Nano string sort (no fractional vs. .000
+				// quirks).
+				if ts.Before(lastSeenTime) || (ts.Equal(lastSeenTime) && e.ID <= lastSeenID) {
 					continue
 				}
 				writeSSEEvent(w, "entry", e)
-				lastSeenTS = e.TS.UTC().Format(time.RFC3339Nano)
+				lastSeenTime = ts
 				lastSeenID = e.ID
 			}
 			flusher.Flush()

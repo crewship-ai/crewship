@@ -565,11 +565,11 @@ func TestList_SinceUntilBound_InclusiveOnExactMatch(t *testing.T) {
 	})
 }
 
-// TestFormatTSBound_RoundtripsWithEmitLayout pins the canonical bound
-// format. emit.go writes `2006-01-02T15:04:05.000Z`; this helper must
-// emit the identical layout so SQLite's string comparison treats them
-// as equal.
-func TestFormatTSBound_RoundtripsWithEmitLayout(t *testing.T) {
+// TestFormatSinceBound covers the lower-bound formatter. Whole-milli
+// inputs round-trip identically; sub-milli inputs round UP so a stored
+// row at the same milli (which is older than the caller's sub-ms
+// intent) is correctly excluded.
+func TestFormatSinceBound(t *testing.T) {
 	cases := []struct {
 		name string
 		t    time.Time
@@ -577,17 +577,56 @@ func TestFormatTSBound_RoundtripsWithEmitLayout(t *testing.T) {
 	}{
 		{"whole second", time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC),
 			"2026-04-30T10:00:00.000Z"},
-		{"with millis", time.Date(2026, 4, 30, 10, 0, 0, 123_000_000, time.UTC),
+		{"whole milli round-trips",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_000_000, time.UTC),
 			"2026-04-30T10:00:00.123Z"},
-		{"sub-milli truncated", time.Date(2026, 4, 30, 10, 0, 0, 123_456_789, time.UTC),
-			"2026-04-30T10:00:00.123Z"},
-		{"non-UTC normalised", time.Date(2026, 4, 30, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600)),
+		{"sub-milli ceils to next milli",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_000_001, time.UTC),
+			"2026-04-30T10:00:00.124Z"},
+		{"sub-milli mid-fraction ceils",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_500_000, time.UTC),
+			"2026-04-30T10:00:00.124Z"},
+		{"sub-milli at top of range ceils",
+			time.Date(2026, 4, 30, 10, 0, 0, 999_999_999, time.UTC),
+			"2026-04-30T10:00:01.000Z"},
+		{"non-UTC normalised",
+			time.Date(2026, 4, 30, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600)),
 			"2026-04-30T10:00:00.000Z"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := formatTSBound(c.t); got != c.want {
-				t.Errorf("formatTSBound(%v) = %q, want %q", c.t, got, c.want)
+			if got := formatSinceBound(c.t); got != c.want {
+				t.Errorf("formatSinceBound(%v) = %q, want %q", c.t, got, c.want)
+			}
+		})
+	}
+}
+
+// TestFormatUntilBound covers the upper-bound formatter. Sub-milli
+// inputs FLOOR (truncate) so a stored row newer than the caller's
+// sub-ms intent is correctly excluded.
+func TestFormatUntilBound(t *testing.T) {
+	cases := []struct {
+		name string
+		t    time.Time
+		want string
+	}{
+		{"whole second", time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC),
+			"2026-04-30T10:00:00.000Z"},
+		{"whole milli round-trips",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_000_000, time.UTC),
+			"2026-04-30T10:00:00.123Z"},
+		{"sub-milli floors",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_999_999, time.UTC),
+			"2026-04-30T10:00:00.123Z"},
+		{"non-UTC normalised",
+			time.Date(2026, 4, 30, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600)),
+			"2026-04-30T10:00:00.000Z"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatUntilBound(c.t); got != c.want {
+				t.Errorf("formatUntilBound(%v) = %q, want %q", c.t, got, c.want)
 			}
 		})
 	}

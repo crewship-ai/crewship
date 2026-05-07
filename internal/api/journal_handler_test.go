@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -653,6 +654,79 @@ func TestJournalHandler_Stream_LastEventIDResume(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestJournalHandler_Stream_ResumePagingBeyondSeedCap pins CodeRabbit's
+// PR #283 finding: a Last-Event-ID reconnect must page through the
+// gap, not silently truncate at the per-batch cap. We seed >50
+// entries newer than the resume id and assert every one of them
+// arrives in the seed batch (no off-by-one or watermark-skip).
+func TestJournalHandler_Stream_ResumePagingBeyondSeedCap(t *testing.T) {
+	h, userID, wsID, _ := newJournalHandlerTest(t)
+
+	// One "anchor" row (the Last-Event-ID target) plus 75 newer rows.
+	// 75 > seedPageSize (50) so the seed loop must page at least
+	// twice to deliver all of them.
+	now := time.Now().UTC()
+	seedJournalRow(t, h, "j_anchor", wsID,
+		string(journal.EntryRunStarted), "info", "anchor",
+		now.Add(-200*time.Second))
+	const newer = 75
+	for i := 0; i < newer; i++ {
+		// Use ascending whole-second offsets so the chronological
+		// order across pages is well-defined.
+		seedJournalRow(t, h, fmt.Sprintf("j_post%03d", i), wsID,
+			string(journal.EntryRunStarted), "info", "post",
+			now.Add(-time.Duration(newer-i)*time.Second))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequestWithContext(ctx, "GET", "/api/v1/journal/stream", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	req.Header.Set("Last-Event-ID", "j_anchor")
+	rr := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Stream(rr, req)
+	}()
+
+	// Allow time for both seed pages to land before cancelling.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stream did not return after ctx cancel")
+	}
+
+	// Every j_post* id must appear in the seed; the anchor itself
+	// must not (the resume contract is "give me what I haven't seen").
+	body := rr.Body.String()
+	gotIDs := []string{}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "id: ") {
+			gotIDs = append(gotIDs, strings.TrimPrefix(line, "id: "))
+		}
+	}
+	if len(gotIDs) != newer {
+		t.Errorf("seed ids: got %d, want %d (resume must page through gap)\nfirst 5: %v",
+			len(gotIDs), newer, firstN(gotIDs, 5))
+	}
+	for _, id := range gotIDs {
+		if id == "j_anchor" {
+			t.Errorf("resume row should be excluded from seed; saw j_anchor")
+		}
+	}
+}
+
+// firstN is a tiny readability helper for failure messages.
+func firstN(s []string, n int) []string {
+	if len(s) < n {
+		return s
+	}
+	return s[:n]
 }
 
 // equalStringSet checks two slices contain the same elements ignoring
