@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // provisionLogTailCap bounds the in-memory ring buffer of progress messages
@@ -443,6 +444,24 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	job.Status = "running"
 	h.mu.Unlock()
 
+	// Emit provisioning.queued so the Timeline gets a marker before
+	// the (potentially multi-minute) image pull begins. Without this,
+	// the Crow's Nest viewer sees a long silence between the trigger
+	// and the first exec.command in the new container.
+	_, _ = h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		Type:        journal.EntryProvisioningQueued,
+		Severity:    journal.SeverityNotice,
+		ActorType:   journal.ActorOrchestrator,
+		Summary:     fmt.Sprintf("provisioning queued for crew %s", crewID),
+		Payload: map[string]any{
+			"crew_id":      crewID,
+			"workspace_id": workspaceID,
+		},
+		Refs: map[string]any{"crew_id": crewID},
+	})
+
 	cfg, err := devcontainer.ParseBytes([]byte(cfgJSON))
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("parse devcontainer_config: %w", err))
@@ -510,6 +529,24 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		})
 	}
 
+	// Emit provisioning.building once the plan is set and the actual
+	// image build is about to start. Distinct from queued so a viewer
+	// can tell pre-flight-config-parse from honest-build progress.
+	_, _ = h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		Type:        journal.EntryProvisioningBuilding,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorOrchestrator,
+		Summary:     fmt.Sprintf("provisioning crew %s (base=%s)", crewID, baseImage),
+		Payload: map[string]any{
+			"crew_id":    crewID,
+			"base_image": baseImage,
+			"features":   len(cfg.Features),
+		},
+		Refs: map[string]any{"crew_id": crewID},
+	})
+
 	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON,
 		devcontainer.WithPlan(plan),
 		devcontainer.WithProgress(progress),
@@ -563,6 +600,20 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		"cached_image": result.CachedImage,
 		"config_hash":  result.ConfigHash,
 	})
+	_, _ = h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      crewID,
+		Type:        journal.EntryProvisioningComplete,
+		Severity:    journal.SeverityNotice,
+		ActorType:   journal.ActorOrchestrator,
+		Summary:     fmt.Sprintf("provisioning complete for crew %s", crewID),
+		Payload: map[string]any{
+			"crew_id":      crewID,
+			"cached_image": result.CachedImage,
+			"config_hash":  result.ConfigHash,
+		},
+		Refs: map[string]any{"crew_id": crewID},
+	})
 }
 
 // markJobFailed records a failure on the job, logs it, and broadcasts a
@@ -582,6 +633,23 @@ func (h *ProvisioningHandler) markJobFailed(job *ProvisionJob, workspaceID strin
 	h.wsHub.BroadcastWorkspace(workspaceID, "provision.failed", map[string]any{
 		"crew_id": job.CrewID,
 		"error":   err.Error(),
+	})
+	// Mirror the failure to the journal at warn so the Timeline
+	// surfaces it without the viewer having to scroll. context.Background
+	// because the caller's ctx may already be cancelled by the time
+	// markJobFailed runs (e.g. provisioning timeout).
+	_, _ = h.journal.Emit(context.Background(), journal.Entry{
+		WorkspaceID: workspaceID,
+		CrewID:      job.CrewID,
+		Type:        journal.EntryProvisioningFailed,
+		Severity:    journal.SeverityWarn,
+		ActorType:   journal.ActorOrchestrator,
+		Summary:     fmt.Sprintf("provisioning failed for crew %s: %v", job.CrewID, err),
+		Payload: map[string]any{
+			"crew_id": job.CrewID,
+			"error":   err.Error(),
+		},
+		Refs: map[string]any{"crew_id": job.CrewID},
 	})
 }
 

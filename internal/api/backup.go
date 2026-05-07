@@ -16,6 +16,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // BackupHandler serves the /api/v1/admin/backups endpoints. All routes
@@ -43,6 +44,12 @@ type BackupHandler struct {
 	// every non-default instance. Falls back to the hardcoded prefix
 	// when nil so unit tests + early-init code still build.
 	crewContainerName func(slug string) string
+	// journal is the workspace event emitter. WriteAuditLog dual-emits
+	// audit.entity_* entries when this is non-nil so backup admin
+	// actions (create / delete / unlock / rotate / download) surface in
+	// the unified Crew Journal alongside operational events. nil maps
+	// to noopEmitter via the SetJournal setter below.
+	journal journal.Emitter
 }
 
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
@@ -50,7 +57,18 @@ type BackupHandler struct {
 // restoring a workspace that has no crews with containers).
 
 func NewBackupHandler(db *sql.DB, logger *slog.Logger, dockerOps backup.DockerOps, crewshipVersion string) *BackupHandler {
-	return &BackupHandler{db: db, logger: logger, dockerOps: dockerOps, crewshipVersion: crewshipVersion}
+	return &BackupHandler{db: db, logger: logger, dockerOps: dockerOps, crewshipVersion: crewshipVersion, journal: noopEmitter{}}
+}
+
+// SetJournal wires a journal emitter so backup admin actions land in
+// the unified Crew Journal in addition to the audit_logs table. Pass
+// nil (or skip the call) to keep the existing audit_logs-only path.
+func (h *BackupHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // SetCrewContainerName injects the slug→container-name mapping from the
@@ -227,7 +245,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteAuditLog(ctx, h.db, "backup.create", "backup", result.Path, user.ID, workspaceID, map[string]interface{}{
+	WriteAuditLog(ctx, h.db, h.journal, "backup.create", "backup", result.Path, user.ID, workspaceID, map[string]interface{}{
 		"scope":          string(scope),
 		"scope_level":    string(result.Manifest.ScopeLevel),
 		"size_bytes":     result.Size,
@@ -351,7 +369,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	if req.DryRun {
 		auditAction = "backup.restore.dry_run"
 	}
-	WriteAuditLog(ctx, h.db, auditAction, "backup", req.Path, user.ID, workspaceID, map[string]interface{}{
+	WriteAuditLog(ctx, h.db, h.journal, auditAction, "backup", req.Path, user.ID, workspaceID, map[string]interface{}{
 		"scope":         string(result.Manifest.Scope),
 		"crews_count":   result.CrewsCount,
 		"rows_inserted": result.RowsInserted,

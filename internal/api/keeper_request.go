@@ -7,9 +7,11 @@ package api
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 )
@@ -137,6 +139,33 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal — continue with evaluation
 	}
 
+	// Emit keeper.request to the journal so a credential access ask
+	// shows up in the Timeline even before the gatekeeper has decided.
+	// Pairs with keeper.decision below — both share `request_id` in
+	// payload so the UI can collapse a request+decision pair into a
+	// single visual row when needed.
+	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.RequestingCrewID,
+		AgentID:     body.RequestingAgentID,
+		Type:        journal.EntryKeeperRequest,
+		Severity:    journal.SeverityNotice,
+		ActorType:   journal.ActorAgent,
+		ActorID:     body.RequestingAgentID,
+		Summary:     fmt.Sprintf("%s requested credential %s", agentName, credName),
+		Payload: map[string]any{
+			"request_id":      reqID,
+			"credential_id":   body.CredentialID,
+			"credential_name": credName,
+			"security_level":  secLevel,
+			"intent":          body.Intent,
+			"task_id":         body.TaskID,
+		},
+		Refs: map[string]any{"keeper_request_id": reqID, "credential_id": body.CredentialID},
+	}); jerr != nil {
+		h.logger.Warn("keeper: journal emit request failed", "error", jerr, "request_id", reqID)
+	}
+
 	// Load agent's recent conversation history for Keeper context
 	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
 
@@ -184,6 +213,38 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
 		nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID); err != nil {
 		h.logger.Error("keeper: update request decision", "error", err)
+	}
+
+	// Emit keeper.decision so the Timeline shows the verdict alongside
+	// the request. Severity escalates to warn for DENY because a denied
+	// credential ask is the kind of event an operator wants to see
+	// without scrolling — it often means an agent went off the rails.
+	decisionSeverity := journal.SeverityNotice
+	if gkResp.Decision == string(keeper.DecisionDeny) {
+		decisionSeverity = journal.SeverityWarn
+	}
+	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.RequestingCrewID,
+		AgentID:     body.RequestingAgentID,
+		Type:        journal.EntryKeeperDecision,
+		Severity:    decisionSeverity,
+		ActorType:   journal.ActorKeeper,
+		ActorID:     "keeper",
+		Summary: fmt.Sprintf("keeper %s credential %s for %s (risk %d)",
+			gkResp.Decision, credName, agentName, gkResp.RiskScore),
+		Payload: map[string]any{
+			"request_id":      reqID,
+			"credential_id":   body.CredentialID,
+			"credential_name": credName,
+			"decision":        gkResp.Decision,
+			"reason":          gkResp.Reason,
+			"risk_score":      gkResp.RiskScore,
+			"security_level":  secLevel,
+		},
+		Refs: map[string]any{"keeper_request_id": reqID, "credential_id": body.CredentialID},
+	}); jerr != nil {
+		h.logger.Warn("keeper: journal emit decision failed", "error", jerr, "request_id", reqID)
 	}
 
 	h.logger.Info("keeper: decision",

@@ -191,7 +191,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if user != nil {
 		userID = user.ID
 	}
-	WriteAuditLog(r.Context(), h.db, "create", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+	WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
 		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter,
 	})
 

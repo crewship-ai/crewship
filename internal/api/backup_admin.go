@@ -36,7 +36,7 @@ func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	WriteAuditLog(ctx, h.db, "backup.unlock", "backup", workspaceID, user.ID, workspaceID, nil)
+	WriteAuditLog(ctx, h.db, h.journal, "backup.unlock", "backup", workspaceID, user.ID, workspaceID, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -104,7 +104,7 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 			if cerr := backup.DeleteCatalogEntry(ctx, h.db, p); cerr != nil {
 				h.logger.Warn("backup catalog delete after rotate failed", "error", cerr, "path", p)
 			}
-			WriteAuditLog(ctx, h.db, "backup.rotate", "backup", p, user.ID, workspaceID, map[string]interface{}{
+			WriteAuditLog(ctx, h.db, h.journal, "backup.rotate", "backup", p, user.ID, workspaceID, map[string]interface{}{
 				"keep_last": req.KeepLast,
 				"keep_days": req.KeepDays,
 			})
@@ -156,7 +156,7 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := backup.DeleteCatalogEntry(ctx, h.db, path); err != nil {
 		h.logger.Warn("backup catalog delete failed", "error", err, "path", path)
 	}
-	WriteAuditLog(ctx, h.db, "backup.delete", "backup", path, user.ID, workspaceID, nil)
+	WriteAuditLog(ctx, h.db, h.journal, "backup.delete", "backup", path, user.ID, workspaceID, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -209,7 +209,7 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 
 	if user != nil {
-		WriteAuditLog(ctx, h.db, "backup.download", "backup", path, user.ID, workspaceID, nil)
+		WriteAuditLog(ctx, h.db, h.journal, "backup.download", "backup", path, user.ID, workspaceID, nil)
 	}
 }
 
