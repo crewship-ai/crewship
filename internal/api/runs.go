@@ -70,6 +70,14 @@ type pagination struct {
 // preserved 1:1 so frontend consumers don't see a contract change.
 func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		// Without a workspace journal.ListRuns errors out as a 500, but
+		// the caller's mistake is missing context — return 401 to match
+		// every other read handler in this package and to avoid leaking
+		// internal failure modes.
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
 
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
@@ -81,9 +89,21 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	offset := (page - 1) * limit
 
+	// Status, when supplied, must be one of the documented enum values.
+	// journal.ListRuns silently treats unknown statuses as "no filter"
+	// which surfaces in the UI as "filter shows all rows" — a confusing
+	// failure mode for typos.  Reject explicitly so the caller learns.
+	statusRaw := r.URL.Query().Get("status")
+	if statusRaw != "" && !validRunStatus(statusRaw) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "status must be one of: RUNNING, COMPLETED, FAILED, CANCELLED, TIMEOUT",
+		})
+		return
+	}
+
 	q := journal.RunsQuery{
 		WorkspaceID: workspaceID,
-		Status:      journal.RunStatus(r.URL.Query().Get("status")),
+		Status:      journal.RunStatus(statusRaw),
 		AgentID:     r.URL.Query().Get("agent_id"),
 		TriggerType: r.URL.Query().Get("trigger"),
 		Tag:         r.URL.Query().Get("tag"),
@@ -241,6 +261,20 @@ func stringPtrOrNil(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// validRunStatus mirrors journal.RunStatus for input validation. The
+// inverse — RunStatus → string — is just `string(s)`; this is the
+// closed list we accept on the wire so a typo doesn't silently widen
+// the result set.
+func validRunStatus(s string) bool {
+	switch journal.RunStatus(s) {
+	case journal.RunStatusRunning, journal.RunStatusCompleted,
+		journal.RunStatusFailed, journal.RunStatusCancelled,
+		journal.RunStatusTimeout:
+		return true
+	}
+	return false
 }
 
 // formatRFC3339 returns the RFC3339 string used by the legacy agent_runs

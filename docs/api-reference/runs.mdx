@@ -1,0 +1,105 @@
+---
+title: "Runs"
+description: "Agent execution runs reconstructed from the Crew Journal stream."
+icon: "play"
+---
+
+A "run" is one agent execution — orchestrator picks up an assignment, exec's the CLI, the run ends with one of `COMPLETED` / `FAILED` / `CANCELLED` / `TIMEOUT`. Since PR #234 the legacy `agent_runs` table is gone; runs are reconstructed from the [Crew Journal](/guides/crew-journal) by grouping `journal_entries` on `trace_id` (which equals the run id). The HTTP shape is preserved — frontend consumers don't see a contract change.
+
+Every endpoint is workspace-scoped via the session context. There is no write endpoint — runs come into existence when the orchestrator emits `run.started` and conclude when a terminal `run.{completed|failed|cancelled|timeout}` lands on the same `trace_id`.
+
+---
+
+## List runs
+
+```
+GET /api/v1/runs
+```
+
+Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadata. Backed by `journal.ListRuns` (CTE-grouped over `journal_entries` keyed on `trace_id`) plus `journal.RunStats` for the tiles.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `status` | string | Filter to one of `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT`. Invalid values → `400`. |
+| `agent_id` | string | Filter by agent. |
+| `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). |
+| `tag` | string | Match a single tag inside `payload.metadata.tags` array on the `run.started` entry. |
+| `page` | integer | 1-based page index, default `1`. Out-of-range values clamp to `1`. |
+| `limit` | integer | Page size, 1-100, default `50`. Out-of-range values fall back to the default. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "id": "run_a1b2c3",
+      "workspace_id": "ws_123",
+      "agent_id": "agt_viktor",
+      "agent_name": "Viktor",
+      "agent_slug": "viktor",
+      "crew_name": "Backend",
+      "chat_id": "chat_xyz",
+      "triggered_by": "user_42",
+      "trigger_type": "USER",
+      "status": "COMPLETED",
+      "started_at": "2026-04-30T10:00:00Z",
+      "finished_at": "2026-04-30T10:02:00Z",
+      "error_message": null,
+      "exit_code": 0,
+      "metadata": {"tags": ["urgent", "compliance"]},
+      "created_at": "2026-04-30T10:00:00Z"
+    }
+  ],
+  "stats": {
+    "running": 1,
+    "today": 12,
+    "failed": 2
+  },
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 12,
+    "total_pages": 1
+  }
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `data[].id` | string | The run's `trace_id`. |
+| `data[].status` | string | Computed from the terminal entry's type. `RUNNING` when no terminal has landed. |
+| `data[].started_at` | string? | RFC3339 from `run.started`. Null only on a corrupt row that lost its starter. |
+| `data[].finished_at` | string? | RFC3339 from the terminal entry. Null while still running. |
+| `data[].error_message` | string? | Pulled from `terminal.payload.error_message`. Null on success. |
+| `data[].exit_code` | integer? | Pulled from `terminal.payload.exit_code`. Null while running. |
+| `data[].metadata` | object? | Pulled from `started.payload.metadata`. Free-shape per orchestrator. |
+| `data[].agent_name` / `agent_slug` | string? | Enriched from the `agents` table by the handler (one extra workspace-scoped SELECT per page). |
+| `data[].crew_name` | string? | Enriched via the `agents.crew_id` → `crews.name` join. |
+| `stats.running` | integer | Distinct trace_ids with `run.started` and no terminal in the workspace. |
+| `stats.today` | integer | Distinct trace_ids with `run.started` `ts >= start-of-today UTC`. |
+| `stats.failed` | integer | Distinct trace_ids with `run.failed` or `run.timeout` today. |
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Invalid `status` value (must be one of the five enum values). |
+| 401 | No workspace context. |
+| 500 | DB error. |
+
+---
+
+## Tenancy
+
+- `workspace_id` is taken from the session context — never from a query parameter.
+- Cross-tenant trace IDs are filtered out at the journal store (`journal.ListRuns` requires a non-empty `WorkspaceID`).
+- Enrichment lookup (`agents` + `crews`) is workspace-scoped, so an agent ID collision across workspaces (test fixtures, restored backups) cannot attach foreign names to a row.
+
+## Related
+
+- [Crew Journal guide](/guides/crew-journal) — full event-type catalog and the `run.*` lifecycle.
+- [Journal API](/api-reference/journal) — the underlying read surface, including FTS search and SSE live tail with `trace_id` filtering for one run's spans.
+- [`crewship journal --trace-id <run-id>`](/cli/journal) — list every span (LLM call, exec, network egress) belonging to one run.
