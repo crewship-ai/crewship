@@ -25,6 +25,7 @@ import { AgentNode } from "./agent-node"
 import { AgentCardNode } from "./agent-card-node"
 import { AnimatedEdge } from "./animated-edge"
 import { CrewGroupNode } from "./crew-group-node"
+import { PipelineRunNode } from "./pipeline-run-node"
 import { STATUS_COLORS, CREW_COLORS, CREW_COLOR_DEFAULT, GRAPH_CHROME } from "@/lib/colors"
 import { PermissionEdge } from "./permission-edge"
 
@@ -48,6 +49,7 @@ const nodeTypes: NodeTypes = {
   agent: AgentNode,
   agentCard: AgentCardNode,
   crew: CrewGroupNode,
+  pipelineRun: PipelineRunNode,
 }
 
 const edgeTypes: EdgeTypes = {
