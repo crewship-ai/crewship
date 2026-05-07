@@ -335,6 +335,52 @@ func TestJournalHandler_Count_IgnoresCursorAndLimit(t *testing.T) {
 	}
 }
 
+// TestJournalHandler_Count_AcceptsOversizedLimit guards CodeRabbit's
+// finding on PR #283: when the count handler called parseJournalQuery
+// directly, oversized `limit` values triggered a `1..500` 400. The
+// fix strips both pagination params before parsing — verify a value
+// the list view would reject (limit=999) returns the full count here.
+func TestJournalHandler_Count_AcceptsOversizedLimit(t *testing.T) {
+	h, userID, wsID, _ := newJournalHandlerTest(t)
+	for i := 0; i < 3; i++ {
+		seedJournalRow(t, h, "j_o"+string(rune('a'+i)), wsID,
+			string(journal.EntryRunStarted), "info", "o", time.Time{})
+	}
+	req := httptest.NewRequest("GET", "/api/v1/journal/count?limit=999", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Count(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("count?limit=999: status=%d body=%s (want 200; pagination must be stripped)",
+			rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Total int64 `json:"total"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.Total != 3 {
+		t.Errorf("total=%d want 3", resp.Total)
+	}
+}
+
+// TestJournalHandler_Count_AcceptsMalformedCursor is the cursor-side
+// counterpart: a malformed `cursor` would normally fail decode in
+// parseJournalQuery, but is meaningless for count and must be silently
+// ignored so the badge still renders.
+func TestJournalHandler_Count_AcceptsMalformedCursor(t *testing.T) {
+	h, userID, wsID, _ := newJournalHandlerTest(t)
+	seedJournalRow(t, h, "j_one", wsID, string(journal.EntryRunStarted), "info", "o", time.Time{})
+
+	req := httptest.NewRequest("GET", "/api/v1/journal/count?cursor=garbage-no-separator", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Count(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("count?cursor=garbage: status=%d body=%s (want 200; pagination must be stripped)",
+			rr.Code, rr.Body.String())
+	}
+}
+
 func TestJournalHandler_SetPriority_RequiresOwnerOrAdmin(t *testing.T) {
 	h, userID, wsID, _ := newJournalHandlerTest(t)
 	seedJournalRow(t, h, "j_p", wsID, string(journal.EntryRunStarted), "info", "p", time.Time{})
@@ -532,6 +578,80 @@ func TestParseJournalQuery_TrimsWhitespace(t *testing.T) {
 		q.Types[0] != journal.EntryRunStarted ||
 		q.Types[1] != journal.EntryRunFailed {
 		t.Errorf("trim CSV: %v", q.Types)
+	}
+}
+
+// TestJournalHandler_Stream_LastEventIDResume covers the SSE resume
+// path: when the client reconnects with `Last-Event-ID: <previous>`,
+// the seed must skip everything older than (and including) that
+// entry so the client doesn't replay history it already processed.
+//
+// We cancel the request context after the seed lands but before the
+// poll ticker fires so the test exits deterministically without
+// waiting on the 1-second tick.
+func TestJournalHandler_Stream_LastEventIDResume(t *testing.T) {
+	h, userID, wsID, _ := newJournalHandlerTest(t)
+
+	// Seed three entries with strictly-increasing timestamps so the
+	// resume id has a well-defined "older" and "newer" set around it.
+	now := time.Now().UTC()
+	seedJournalRow(t, h, "j_s1", wsID, string(journal.EntryRunStarted), "info", "first", now.Add(-3*time.Minute))
+	seedJournalRow(t, h, "j_s2", wsID, string(journal.EntryRunStarted), "info", "second", now.Add(-2*time.Minute))
+	seedJournalRow(t, h, "j_s3", wsID, string(journal.EntryRunStarted), "info", "third", now.Add(-1*time.Minute))
+
+	cases := []struct {
+		name     string
+		header   string
+		wantSeed []string // ids that should appear in the seed batch
+	}{
+		{"no resume header — full seed", "", []string{"j_s1", "j_s2", "j_s3"}},
+		{"resume from middle", "j_s2", []string{"j_s3"}},
+		{"resume from latest — empty seed", "j_s3", []string{}},
+		{"unknown id — falls back to full seed",
+			"j_does_not_exist", []string{"j_s1", "j_s2", "j_s3"}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			req := httptest.NewRequestWithContext(ctx, "GET", "/api/v1/journal/stream", nil)
+			req = withWorkspaceUser(req, userID, wsID, "OWNER")
+			if c.header != "" {
+				req.Header.Set("Last-Event-ID", c.header)
+			}
+			rr := httptest.NewRecorder()
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				h.Stream(rr, req)
+			}()
+
+			// Give the seed a short window to land. The poll ticker
+			// runs every second, so 100ms is far inside the seed
+			// phase.  Then cancel so Stream returns.
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Stream did not return after ctx cancel")
+			}
+
+			// Parse the SSE body for `id:` lines so we can compare
+			// the seed batch ids without depending on event ordering
+			// across the data field.
+			body := rr.Body.String()
+			gotIDs := []string{}
+			for _, line := range strings.Split(body, "\n") {
+				if strings.HasPrefix(line, "id: ") {
+					gotIDs = append(gotIDs, strings.TrimPrefix(line, "id: "))
+				}
+			}
+			if !equalStringSet(gotIDs, c.wantSeed) {
+				t.Errorf("seed ids: got %v, want %v\n--- body ---\n%s", gotIDs, c.wantSeed, body)
+			}
+		})
 	}
 }
 

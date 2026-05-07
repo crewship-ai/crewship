@@ -36,23 +36,25 @@ var validSeverities = map[string]struct{}{
 }
 
 // validateCSV parses a comma-separated list and rejects values that
-// aren't in `allowed`. The error message lists the offender plus the
-// allowed set so users can self-correct without consulting docs.
+// aren't in `allowed`. Empty items (`warn,` or `,high`) are also
+// rejected — those almost always indicate a typo that the server-
+// side parser would silently drop, which is harder to diagnose than a
+// fast-fail at the CLI edge.
 func validateCSV(label, raw string, allowed map[string]struct{}) error {
 	if raw == "" {
 		return nil
 	}
 	for _, s := range strings.Split(raw, ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" {
+			return fmt.Errorf("invalid --%s: empty list item (got %q)", label, raw)
 		}
-		if _, ok := allowed[s]; !ok {
+		if _, ok := allowed[trimmed]; !ok {
 			keys := make([]string, 0, len(allowed))
 			for k := range allowed {
 				keys = append(keys, k)
 			}
-			return fmt.Errorf("invalid --%s value %q (allowed: %s)", label, s, strings.Join(keys, "|"))
+			return fmt.Errorf("invalid --%s value %q (allowed: %s)", label, trimmed, strings.Join(keys, "|"))
 		}
 	}
 	return nil
@@ -526,6 +528,7 @@ Examples:
   crewship journal count
   crewship journal count --severity error --since 24h
   crewship journal count --type budget.exceeded`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err

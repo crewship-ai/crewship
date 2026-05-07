@@ -159,7 +159,10 @@ func TestValidateCSV(t *testing.T) {
 		{"single allowed", "a", false},
 		{"multiple allowed", "a,b,c", false},
 		{"trim whitespace", " a , b ", false},
-		{"empty segments tolerated", "a,,b", false},
+		{"empty segment rejected", "a,,b", true},
+		{"trailing comma rejected", "a,", true},
+		{"leading comma rejected", ",a", true},
+		{"whitespace-only segment rejected", "a, ,b", true},
 		{"single bad", "x", true},
 		{"mixed bad", "a,x", true},
 	}

@@ -100,9 +100,39 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // nginx: don't buffer
 
+	// Last-Event-ID resume: SSE clients (browsers and our CLI) send the
+	// last successfully-seen entry id back when they reconnect after a
+	// drop. Honour it by looking the entry up so we know its ts, then
+	// seed only the entries strictly newer than that watermark — the
+	// client already has everything up to and including the resume id.
+	// If lookup fails (id from another tenant, expired row, malformed)
+	// fall through to the regular full seed so the stream still
+	// produces useful output rather than silently truncating.
+	resumeID := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	var (
+		lastSeenTS string
+		lastSeenID string
+	)
+	if resumeID != "" {
+		if resumed, err := journal.Get(r.Context(), h.db, workspaceID, resumeID); err == nil && resumed != nil {
+			lastSeenTS = resumed.TS.UTC().Format(time.RFC3339Nano)
+			lastSeenID = resumed.ID
+		} else if err != nil {
+			h.logger.Warn("journal stream resume lookup failed", "err", err, "resume_id", resumeID)
+		}
+	}
+
 	// Seed with a replay of the most recent N events so a fresh client
 	// paints the full current view before switching to live updates.
-	entries, _, err := journal.List(r.Context(), h.db, q)
+	// On a Last-Event-ID resume the client already has the older
+	// history, so the seed is the gap between resumeID and now.
+	seedQuery := q
+	if lastSeenTS != "" {
+		if t, err := time.Parse(time.RFC3339Nano, lastSeenTS); err == nil {
+			seedQuery.Since = t
+		}
+	}
+	entries, _, err := journal.List(r.Context(), h.db, seedQuery)
 	if err != nil {
 		// Don't abort the stream on a transient seed failure — the
 		// poll loop below can still carry live traffic once the DB
@@ -110,8 +140,23 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		// view was empty.
 		h.logger.Warn("journal stream seed failed", "err", err)
 	} else {
-		for _, e := range entries {
+		// `entries` is newest-first; iterate reversed so the client
+		// timeline appends in chronological order. Filter out the
+		// resume id itself plus anything strictly older — the >= bound
+		// in `Since` is inclusive of the watermark instant, so the
+		// resume row would otherwise echo back to the client.
+		for i := len(entries) - 1; i >= 0; i-- {
+			e := entries[i]
+			if lastSeenID != "" && e.ID == lastSeenID {
+				continue
+			}
+			ts := e.TS.UTC().Format(time.RFC3339Nano)
+			if ts < lastSeenTS || (ts == lastSeenTS && lastSeenID != "" && e.ID <= lastSeenID) {
+				continue
+			}
 			writeSSEEvent(w, "entry", e)
+			lastSeenTS = ts
+			lastSeenID = e.ID
 		}
 		flusher.Flush()
 	}
@@ -122,11 +167,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// every entry with the same ts as the last one we saw. The DB
 	// ORDER BY (ts DESC, id DESC) in journal.List guarantees the tie-
 	// breaker is deterministic.
-	var lastSeenTS, lastSeenID string
-	if len(entries) > 0 {
-		lastSeenTS = entries[0].TS.UTC().Format(time.RFC3339Nano)
-		lastSeenID = entries[0].ID
-	} else {
+	if lastSeenTS == "" {
+		// Brand-new client (no Last-Event-ID) and the seed slice was
+		// empty — start the live tail from "now" so the next poll
+		// produces fresh entries rather than re-emitting history.
 		lastSeenTS = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 
@@ -339,16 +383,29 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
 		return
 	}
-	q, err := parseJournalQuery(r, workspaceID)
+	// Strip pagination params from the request URL before parsing so a
+	// stray `?limit=999` or malformed `?cursor=…` doesn't 400 a count
+	// request that has no use for either. parseJournalQuery validates
+	// `limit` against 1..500 and decodes `cursor` strictly — neither
+	// bound is meaningful when the answer is a single integer over the
+	// full result set.
+	stripped := r.Clone(r.Context())
+	if rawQ := stripped.URL.Query(); rawQ.Has("limit") || rawQ.Has("cursor") {
+		rawQ.Del("limit")
+		rawQ.Del("cursor")
+		// URL.Query() returns a copy; re-encode onto a clone of the URL
+		// so the rest of the handler stack still sees the unmodified
+		// request if anything were to read it later.
+		newURL := *stripped.URL
+		newURL.RawQuery = rawQ.Encode()
+		stripped.URL = &newURL
+	}
+
+	q, err := parseJournalQuery(stripped, workspaceID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	// Cursor + limit have no meaning for an unbounded count; explicitly
-	// zero them so a stray ?cursor=… on the request doesn't trim the
-	// total to a single page.
-	q.Cursor = ""
-	q.Limit = 0
 
 	n, err := journal.Count(r.Context(), h.db, q)
 	if err != nil {

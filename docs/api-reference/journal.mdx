@@ -164,7 +164,6 @@ Returns one entry by ID, workspace-scoped. The response body is a single object 
 
 | Status | Condition |
 |---|---|
-| 400 | Missing `id` path parameter. |
 | 401 | No workspace context. |
 | 404 | Unknown entry, OR an entry that exists but belongs to another workspace. The shape matches "not found" — existence is not leaked across tenants. |
 
@@ -234,7 +233,7 @@ Annotate one entry with an importance marker (`normal`, `high`, `pin`, `permanen
 
 | Status | Condition |
 |---|---|
-| 400 | Bad JSON body, missing `id`, or unknown priority value. |
+| 400 | Bad JSON body or unknown priority value. |
 | 401 | No workspace context. |
 | 403 | Caller is not OWNER/ADMIN on the workspace. |
 | 404 | Entry not found, OR exists in another workspace. |
