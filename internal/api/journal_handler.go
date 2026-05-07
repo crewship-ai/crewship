@@ -295,6 +295,70 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 	return q, nil
 }
 
+// Get serves GET /api/v1/journal/{id}. Returns a single entry,
+// scoped to the caller's workspace. Cross-tenant IDs return 404 with
+// the same shape as "not found" so existence is not leaked across
+// workspace boundaries — same contract every other read handler in
+// this package follows.
+func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	entryID := r.PathValue("id")
+	if entryID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "entry id required"})
+		return
+	}
+
+	entry, err := journal.Get(r.Context(), h.db, workspaceID, entryID)
+	if err != nil {
+		h.logger.Error("journal get failed", "err", err, "entry_id", entryID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "journal get failed"})
+		return
+	}
+	if entry == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		return
+	}
+	// Reuse the list serializer so single-entry shape stays identical to
+	// the array form a client just paged through. The slice form is the
+	// only one that survived as the canonical serialiser.
+	writeJSON(w, http.StatusOK, serializeEntries([]journal.Entry{*entry})[0])
+}
+
+// Count serves GET /api/v1/journal/count. Returns the total number of
+// entries matching the same query parameters as List, ignoring cursor
+// and limit. The UI uses this to render result-set badges that stay
+// honest under filter changes — without it the only way to know the
+// total was to page through every entry.
+func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	q, err := parseJournalQuery(r, workspaceID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	// Cursor + limit have no meaning for an unbounded count; explicitly
+	// zero them so a stray ?cursor=… on the request doesn't trim the
+	// total to a single page.
+	q.Cursor = ""
+	q.Limit = 0
+
+	n, err := journal.Count(r.Context(), h.db, q)
+	if err != nil {
+		h.logger.Error("journal count failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "journal count failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"total": n})
+}
+
 // SetPriority serves POST /api/v1/journal/{id}/priority. Body:
 //
 //	{"priority": "permanent|high|pin|normal", "reason": "..."}

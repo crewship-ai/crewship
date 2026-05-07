@@ -22,6 +22,7 @@ CREATE TABLE journal_entries (
   ts           TEXT NOT NULL,             -- RFC3339Nano, milli precision
   entry_type   TEXT NOT NULL,             -- see catalog below
   severity     TEXT NOT NULL DEFAULT 'info',
+  priority     TEXT NOT NULL DEFAULT 'normal', -- normal|high|pin|permanent
   actor_type   TEXT NOT NULL,
   actor_id     TEXT,
   summary      TEXT NOT NULL,             -- one-line human string
@@ -32,6 +33,8 @@ CREATE TABLE journal_entries (
   expires_at   TEXT
 );
 ```
+
+A contentless FTS5 virtual table `journal_entries_fts` (migration 55) mirrors `summary` and `payload`, with insert/update/delete triggers that keep it in sync with the base table.
 
 Entries are immutable -- corrections are new entries with `refs.parent_entry_id`. IDs are 64-bit random hex (`j_a1b2c3d4e5f60718`).
 
@@ -160,7 +163,9 @@ Emit is asynchronous: entries are queued (buffer 1024), a background goroutine b
 
 - `GET /api/v1/journal` -- paginated list, newest first. See the [API reference](/api-reference/journal).
 - `GET /api/v1/journal/stream` -- SSE live tail; seeds with the most recent 50 entries, polls every 1s, emits `event: entry` frames, and heartbeats every 15s. Reconnect with `Last-Event-ID` to skip already-seen rows.
-- `GET /api/v1/journal/{id}` -- single entry (scoped to workspace).
+- `GET /api/v1/journal/count` -- total matching count for a filter set; ignores cursor/limit so the badge stays honest.
+- `GET /api/v1/journal/{id}` -- single entry (scoped to workspace; cross-tenant IDs return 404).
+- `POST /api/v1/journal/{id}/priority` -- annotate an entry with `normal`/`high`/`pin`/`permanent`. OWNER or ADMIN only; emits a `memory.priority_changed` audit row.
 
 ### CLI
 
@@ -170,9 +175,13 @@ crewship journal --crew backend-team --since 24h
 crewship journal --severity warn,error
 crewship journal --type peer.escalation,keeper.decision --lines 100
 crewship journal --mission MIS-42 --format json
+crewship journal --follow                        # live tail via SSE
+crewship journal get j_a1b2c3d4                  # single entry
+crewship journal count --severity error --since 24h
+crewship journal priority j_a1b2c3d4 --mark permanent --reason "FX rule"
 ```
 
-See [`crewship journal`](/cli/journal) for all flags. The CLI does not yet implement SSE -- use the web UI `/journal` for live tail.
+See [`crewship journal`](/cli/journal) for the full flag reference. The CLI implements live tail via SSE (`--follow`) with bounded reconnect backoff and `Last-Event-ID` resume.
 
 ### Filtering
 
@@ -183,9 +192,15 @@ Every filter is AND-combined and indexed at the DB level:
 | `crew_id` | `--crew` | `crew_id = ?` |
 | `agent_id` | `--agent` | `agent_id = ?` |
 | `mission_id` | `--mission` | `mission_id = ?` |
-| `entry_type` | `--type` | CSV `IN (?,?,...)` |
+| `trace_id` | `--trace-id` | `trace_id = ?` (one run's spans) |
+| `crew_ids` | -- | CSV `crew_id IN (?,?,...)` (takes precedence over `crew_id`) |
+| `agent_ids` | -- | CSV `agent_id IN (?,?,...)` (takes precedence over `agent_id`) |
+| `entry_type` | `--type` | CSV `entry_type IN (?,?,...)` |
+| `exclude_entry_type` | `--exclude-type` | CSV `entry_type NOT IN (?,?,...)` |
 | `severity` | `--severity` | CSV `IN (?,?,...)` |
-| `since`, `until` | `--since` | `ts >= ?` / `ts <= ?` |
+| `actor_type` | `--actor-type` | CSV `IN (?,?,...)` |
+| `priority` | `--priority` | CSV `IN (?,?,...)` |
+| `since`, `until` | `--since` (`--until` on `count`) | `ts >= ?` / `ts <= ?` |
 | `q` | `--query` / `-q` | FTS5 MATCH on `summary` + `payload` (see below) |
 | `cursor` | -- | keyset `(ts, id) <` prior page |
 

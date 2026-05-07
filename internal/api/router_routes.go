@@ -350,6 +350,12 @@ func (r *Router) registerRoutes() {
 	jh := NewJournalHandler(r.db, r.logger, r.Journal())
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
+	r.mux.Handle("GET /api/v1/journal/count", authed(wsCtx(http.HandlerFunc(jh.Count))))
+	// Single-entry GET — needed by deep-links from the timeline (e.g. a
+	// shared URL pointing at one keeper.decision row) and by the CLI's
+	// `journal get <id>`. Workspace-scoped; cross-tenant IDs return 404
+	// with the same shape as "not found".
+	r.mux.Handle("GET /api/v1/journal/{id}", authed(wsCtx(http.HandlerFunc(jh.Get))))
 	r.mux.Handle("POST /api/v1/journal/{id}/priority", authed(wsCtx(http.HandlerFunc(jh.SetPriority))))
 	// Lookup table for journal-card enrichment (crew/agent/mission names
 	// + crew icons & palette colors). Frontend fetches once on mount;
