@@ -28,7 +28,24 @@ export type EntryGroup =
   | "skill"
   | "memory"
   | "system"
+  | "audit"
+  | "provisioning"
+  | "chat"
   | "other"
+
+/**
+ * Higher-level bundles for the Timeline type-chip row. Bundles let
+ * users filter by domain ("show me everything Security-flavoured")
+ * without having to click 4 different chips. Each base group belongs
+ * to exactly one bundle; bundle membership is stable enough that a
+ * Record<EntryGroup, EntryBundle> can encode it without lookup tables.
+ */
+export type EntryBundle =
+  | "runtime"     // exec / network / file / container
+  | "lifecycle"   // run / mission / assignment / approval / provisioning
+  | "security"    // keeper / audit
+  | "ai"          // chat / cost / skill / memory
+  | "workspace"   // peer / system / other
 
 export const SEVERITY_COLOR: Record<JournalSeverity, string> = {
   info: "#38bdf8",   // sky-400
@@ -45,20 +62,23 @@ export const SEVERITY_BG_CLASS: Record<JournalSeverity, string> = {
 }
 
 export const GROUP_COLOR: Record<EntryGroup, string> = {
-  exec: "#34d399",       // emerald
-  network: "#22d3ee",    // cyan
-  file: "#94a3b8",       // slate
-  container: "#818cf8",  // indigo
-  run: "#fb923c",        // orange
-  keeper: "#c084fc",     // purple
-  peer: "#f472b6",       // pink
-  assignment: "#60a5fa", // blue
-  approval: "#fbbf24",   // amber
-  mission: "#fb7185",    // rose
-  cost: "#fde047",       // yellow
-  skill: "#5eead4",      // teal
-  memory: "#a3e635",     // lime
-  system: "#9ca3af",     // gray
+  exec: "#34d399",        // emerald
+  network: "#22d3ee",     // cyan
+  file: "#94a3b8",        // slate
+  container: "#818cf8",   // indigo
+  run: "#fb923c",         // orange
+  keeper: "#c084fc",      // purple
+  peer: "#f472b6",        // pink
+  assignment: "#60a5fa",  // blue
+  approval: "#fbbf24",    // amber
+  mission: "#fb7185",     // rose
+  cost: "#fde047",        // yellow
+  skill: "#5eead4",       // teal
+  memory: "#a3e635",      // lime
+  system: "#9ca3af",      // gray
+  audit: "#e879f9",       // fuchsia — distinct from keeper purple
+  provisioning: "#7dd3fc", // sky-300 — neighbours indigo/cyan family for "container building"
+  chat: "#fdba74",        // orange-300 — warm, distinct from cost yellow
   other: "#9ca3af",
 }
 
@@ -77,6 +97,9 @@ export const GROUP_LABEL: Record<EntryGroup, string> = {
   skill: "skill",
   memory: "memory",
   system: "system",
+  audit: "audit",
+  provisioning: "provisioning",
+  chat: "chat",
   other: "other",
 }
 
@@ -86,18 +109,58 @@ export const GROUP_ORDER: EntryGroup[] = [
   "network",
   "file",
   "container",
+  "provisioning",
   "run",
-  "keeper",
-  "peer",
+  "mission",
   "assignment",
   "approval",
-  "mission",
+  "chat",
+  "peer",
+  "keeper",
+  "audit",
   "cost",
   "skill",
   "memory",
   "system",
   "other",
 ]
+
+/**
+ * Bundle membership — used by the Timeline toolbar's "5-bundle" chip
+ * mode to collapse 18 base groups into 5 user-meaningful domains.
+ * Toggling a bundle toggles every base group inside it.
+ */
+export const GROUP_TO_BUNDLE: Record<EntryGroup, EntryBundle> = {
+  exec: "runtime",
+  network: "runtime",
+  file: "runtime",
+  container: "runtime",
+  run: "lifecycle",
+  mission: "lifecycle",
+  assignment: "lifecycle",
+  approval: "lifecycle",
+  provisioning: "lifecycle",
+  keeper: "security",
+  audit: "security",
+  chat: "ai",
+  cost: "ai",
+  skill: "ai",
+  memory: "ai",
+  peer: "workspace",
+  system: "workspace",
+  other: "workspace",
+}
+
+export const BUNDLE_LABEL: Record<EntryBundle, string> = {
+  runtime: "Runtime",
+  lifecycle: "Lifecycle",
+  security: "Security",
+  ai: "AI",
+  workspace: "Workspace",
+}
+
+/** Render order for the bundle row when the toolbar is in bundle mode. */
+export const BUNDLE_ORDER: EntryBundle[] = ["runtime", "lifecycle", "security", "ai", "workspace"]
 
 const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "exec.command": "exec",
@@ -141,8 +204,12 @@ const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "llm.call": "cost",
   "llm.cache_hit": "cost",
   "skill.assigned": "skill",
+  "skill.unassigned": "skill",
+  "skill.imported": "skill",
+  "skill.deleted": "skill",
   "memory.updated": "memory",
   "memory.consolidated": "memory",
+  "memory.priority_changed": "memory",
   "summary.generated": "memory",
   "system.compaction": "system",
   "system.migration": "system",
@@ -157,6 +224,23 @@ const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "eval.run_started": "system",
   "eval.metric": "system",
   "eval.regression_detected": "system",
+  "credential.auto_assign_failed": "keeper",
+  "credential.auto_assign_empty": "keeper",
+  // Audit — workspace CRUD lifecycle (dual-emit from WriteAuditLog).
+  "audit.entity_created": "audit",
+  "audit.entity_updated": "audit",
+  "audit.entity_deleted": "audit",
+  "audit.entity_restored": "audit",
+  // Provisioning — container build lifecycle.
+  "provisioning.queued": "provisioning",
+  "provisioning.building": "provisioning",
+  "provisioning.complete": "provisioning",
+  "provisioning.failed": "provisioning",
+  // Chat — user↔agent conversation turns.
+  "chat.user_message": "chat",
+  "chat.agent_response": "chat",
+  // Agent runtime errors (panic, provider stream errors, etc.).
+  "agent.error": "system",
 }
 
 /** Short, dense label rendered inside the type pill on every log row. */
@@ -218,6 +302,23 @@ const TYPE_PILL_LABEL: Record<string, string> = {
   "eval.run_started": "eval",
   "eval.metric": "eval·m",
   "eval.regression_detected": "eval·reg",
+  "skill.unassigned": "skill−",
+  "skill.imported": "skill·imp",
+  "skill.deleted": "skill·del",
+  "memory.priority_changed": "memory·prio",
+  "credential.auto_assign_failed": "cred·auto·fail",
+  "credential.auto_assign_empty": "cred·auto·empty",
+  "audit.entity_created": "audit+",
+  "audit.entity_updated": "audit~",
+  "audit.entity_deleted": "audit−",
+  "audit.entity_restored": "audit↺",
+  "provisioning.queued": "prov·queue",
+  "provisioning.building": "prov·build",
+  "provisioning.complete": "prov·done",
+  "provisioning.failed": "prov·fail",
+  "chat.user_message": "chat·u",
+  "chat.agent_response": "chat·a",
+  "agent.error": "agent·err",
 }
 
 export function groupOf(entryType: string): EntryGroup {
