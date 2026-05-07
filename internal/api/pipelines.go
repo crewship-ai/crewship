@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -29,6 +31,13 @@ type PipelineHandler struct {
 	schedules  *pipeline.ScheduleStore // optional; nil → schedule endpoints return 503
 	runs       *pipeline.RunRegistry   // optional; nil → cancel endpoint returns 503
 	webhooks   *pipeline.WebhookStore  // optional; nil → webhook endpoints return 503
+	// saveTokenSecret signs the optional save_token returned by
+	// /test_run and verified by /save. Lets save flows skip the body-
+	// trust on last_test_run_at (callers can otherwise mint timestamps;
+	// see PIPELINES.md §17 threat model). When unset, save falls back
+	// to the timestamp-based gate. Production wiring sets this to the
+	// process internal token at boot.
+	saveTokenSecret []byte
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -58,6 +67,14 @@ func NewPipelineHandler(db *sql.DB, logger *slog.Logger, runner pipeline.AgentRu
 // the orchestrator boots, so we accept post-construction injection.
 func (h *PipelineHandler) SetRunner(r pipeline.AgentRunner) {
 	h.runner = r
+}
+
+// SetSaveTokenSecret enables the HMAC-signed save_token flow so save
+// callers don't have to body-trust last_test_run_at. Pass any
+// process-stable secret (server.go uses the existing internal token).
+// Without it, the timestamp-trust path remains the only gate-pass.
+func (h *PipelineHandler) SetSaveTokenSecret(secret []byte) {
+	h.saveTokenSecret = secret
 }
 
 // SetJournal wires a journal Emitter post-construction so journal
@@ -456,11 +473,43 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		Inputs:       body.SampleInputs,
 		Mode:         pipeline.ModeTestRun,
 	})
+	// Mint an HMAC save_token bound to (workspace, definition_hash,
+	// user) when the test_run passed AND a signing secret is wired.
+	// The token is the trustworthy proof that THIS user ran this DSL
+	// successfully — Save can verify it without trusting the body's
+	// last_test_run_at claim.
+	var saveToken string
+	if err == nil && res != nil && res.Status == "COMPLETED" && len(h.saveTokenSecret) > 0 {
+		user := UserFromContext(r.Context())
+		userID := ""
+		if user != nil {
+			userID = user.ID
+		}
+		defHash := definitionHashHex(body.Definition)
+		saveToken = signSaveToken(h.saveTokenSecret, workspaceID, defHash, userID, time.Now())
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, res)
+	// Wrap the RunResult with save_token. Embed the result's fields
+	// at the top level so existing clients (CLI watchers, UI dialog)
+	// see no shape change; new clients can opt in to the save_token
+	// flow by reading the extra field.
+	type testRunResponse struct {
+		*pipeline.RunResult
+		SaveToken string `json:"save_token,omitempty"`
+	}
+	writeJSON(w, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
+}
+
+// definitionHashHex is the same SHA-256 hex digest the Store uses for
+// pipeline.definition_hash. Lifted into the API layer so the save_token
+// signer can bind to "this exact DSL bytes" — keeping the signer
+// out of internal/pipeline avoids circular dependency.
+func definitionHashHex(def []byte) string {
+	sum := sha256.Sum256(def)
+	return hex.EncodeToString(sum[:])
 }
 
 // Delete soft-deletes a pipeline by slug.
@@ -1144,6 +1193,12 @@ type userSaveRequest struct {
 	// UI flows that have already test-run'd the definition through
 	// the /test_run endpoint and pass last_test_run_at + true here.
 	SkipTestGate bool `json:"skip_test_gate,omitempty"`
+	// SaveToken is the HMAC-signed proof returned by /test_run that
+	// THIS user just successfully ran THIS definition_hash. When
+	// present and valid, supersedes the body-trust on
+	// last_test_run_at — that field can be omitted entirely. See
+	// pipelines_save_token.go for the threat model rationale.
+	SaveToken string `json:"save_token,omitempty"`
 }
 
 // Save is the workspace-scoped save endpoint that backs the UI's
@@ -1229,15 +1284,37 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		},
 		LastTestRunPassed: body.LastTestRunPassed || body.SkipTestGate,
 	}
-	if body.SkipTestGate {
-		// Synthesize a fresh test-run timestamp so the store's
-		// gate doesn't fire. Audit trail still shows skip via
-		// the logger below.
+
+	// Three paths to clearing the test-gate gate, in priority order:
+	// 1. SaveToken (HMAC, no body trust) — preferred path
+	// 2. SkipTestGate (OWNER/ADMIN role-gated escape hatch)
+	// 3. body's last_test_run_at + last_test_run_passed (legacy body
+	//    trust, kept for sidecar back-compat; will be retired once all
+	//    callers migrate to SaveToken).
+	switch {
+	case body.SaveToken != "":
+		defHash := definitionHashHex(body.Definition)
+		if err := verifySaveToken(h.saveTokenSecret, body.SaveToken, workspaceID, defHash, user.ID); err != nil {
+			h.logger.Warn("pipeline save: save_token rejected", "user_id", user.ID, "slug", body.Slug, "err", err)
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"error": "save_token invalid (expired, malformed, or signed for a different definition/user)",
+			})
+			return
+		}
+		// Token verified — synthesize a passing-now timestamp so the
+		// store gate doesn't fire on the body's missing fields.
+		now := time.Now().UTC()
+		in.LastTestRunAt = &now
+		in.LastTestRunPassed = true
+		h.logger.Info("pipeline save: cleared via save_token", "user_id", user.ID, "slug", body.Slug)
+	case body.SkipTestGate:
 		now := time.Now().UTC()
 		in.LastTestRunAt = &now
 		h.logger.Info("pipeline save: test gate skipped", "user_id", user.ID, "role", role, "slug", body.Slug)
-	} else if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
-		in.LastTestRunAt = &t
+	default:
+		if t, err := parseRFC3339(body.LastTestRunAt); err == nil {
+			in.LastTestRunAt = &t
+		}
 	}
 
 	saved, err := h.store.Save(r.Context(), in)
