@@ -107,6 +107,16 @@ interface LogsPanelProps {
    */
   traceId?: string
   onClearTraceId?: () => void
+
+  /**
+   * Detail-row jump handlers passed through to LogsList. Wire each one
+   * to the corresponding setter on the page (setTraceId, setAgentId,
+   * setCrewId) so clicking an ID in an expanded entry zooms the
+   * filter to that entity in one tap.
+   */
+  onSelectTrace?: (traceId: string) => void
+  onSelectAgent?: (agentId: string) => void
+  onSelectCrew?: (crewId: string) => void
 }
 
 /**
@@ -147,6 +157,9 @@ export function LogsPanel({
   cappedAt,
   traceId,
   onClearTraceId,
+  onSelectTrace,
+  onSelectAgent,
+  onSelectCrew,
 }: LogsPanelProps) {
   const [query, setQuery] = useState("")
   // Severity + muted are controlled when the parent passes both the
@@ -408,6 +421,9 @@ export function LogsPanel({
                   followTail={live}
                   newestFirst={newestFirst}
                   onEndReached={handleEndReached}
+                  onSelectTrace={onSelectTrace}
+                  onSelectAgent={onSelectAgent}
+                  onSelectCrew={onSelectCrew}
                 />
               </div>
               {(loadingMore || (hasMore === false && visibleCount > 0) || cappedAt) && (
