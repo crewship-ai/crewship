@@ -511,6 +511,14 @@ func (h *PipelineHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 			limit = n
 		}
 	}
+	// include_steps=1 widens the filter to also return
+	// pipeline.step.* entries so the UI can render a waterfall
+	// timeline for each run. Default off to keep the list-page
+	// payload small (a 5-step pipeline run produces 11 entries:
+	// 1 run.started + 5 step.started + 5 step.completed +
+	// 1 run.completed; multiply by 50 runs and the response
+	// balloons). Detail panel passes ?include_steps=1.
+	includeSteps := r.URL.Query().Get("include_steps") == "1"
 
 	// We index pipeline runs purely through journal_entries.
 	// json_extract is supported by modernc.org/sqlite + every
@@ -518,16 +526,19 @@ func (h *PipelineHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	// the pipeline_id filter rather than carrying a "fast path
 	// vs fallback" branch (the previous version had a 7-column
 	// fast path the scanner couldn't decode — dead code per
-	// CodeRabbit). Run-level entries only — step entries fan
-	// out per run and would dominate the list.
+	// CodeRabbit).
+	entryFilter := "pipeline.run.%"
+	if includeSteps {
+		entryFilter = "pipeline.%"
+	}
 	rows, err := h.db.QueryContext(r.Context(), `
 SELECT id, ts, entry_type, severity, summary, payload
 FROM journal_entries
 WHERE workspace_id = ?
-  AND entry_type LIKE 'pipeline.run.%'
+  AND entry_type LIKE ?
   AND json_extract(payload, '$.pipeline_id') = ?
 ORDER BY ts DESC
-LIMIT ?`, workspaceID, p.ID, limit)
+LIMIT ?`, workspaceID, entryFilter, p.ID, limit)
 	if err != nil {
 		h.logger.Error("pipeline list runs: query", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list runs"})

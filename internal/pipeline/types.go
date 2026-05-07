@@ -609,9 +609,9 @@ type PipelineResolver interface {
 // output by ID for richer caller logic. WouldExecute is populated
 // only when Mode == ModeDryRun.
 type RunResult struct {
-	RunID        string
-	PipelineID   string
-	PipelineSlug string
+	RunID        string `json:"run_id"`
+	PipelineID   string `json:"pipeline_id"`
+	PipelineSlug string `json:"pipeline_slug"`
 	// Status is one of:
 	//   COMPLETED  — all steps passed
 	//   FAILED     — a step errored or its validation/outcome gate
@@ -623,20 +623,20 @@ type RunResult struct {
 	//                response is a recovery handle, not a fresh
 	//                execution. RunID points at the original run.
 	//   DRY_RUN_OK — preview mode, nothing actually executed
-	Status       string
-	Output       string
-	StepOutputs  map[string]string
-	WouldExecute []DryRunStep
-	DurationMs   int64
-	CostUSD      float64
-	FailedAtStep string // empty unless Status == FAILED
-	ErrorMessage string
+	Status       string            `json:"status"`
+	Output       string            `json:"output"`
+	StepOutputs  map[string]string `json:"step_outputs"`
+	WouldExecute []DryRunStep      `json:"would_execute,omitempty"`
+	DurationMs   int64             `json:"duration_ms"`
+	CostUSD      float64           `json:"cost_usd"`
+	FailedAtStep string            `json:"failed_at_step,omitempty"` // empty unless Status == FAILED
+	ErrorMessage string            `json:"error_message,omitempty"`
 	// Deduped is true when the run resolved via an idempotency key
 	// hit. Distinct from Status="DEDUPED" so callers can detect
 	// dedupe even when they don't pattern-match Status. The Status
 	// field is the wire-friendly form; Deduped is the structured
 	// flag.
-	Deduped bool
+	Deduped bool `json:"deduped,omitempty"`
 }
 
 // DryRunStep is one entry in WouldExecute: what the executor WOULD
