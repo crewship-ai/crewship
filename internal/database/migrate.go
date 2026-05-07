@@ -1064,6 +1064,12 @@ CREATE INDEX IF NOT EXISTS idx_journal_trace_id ON journal_entries(trace_id) WHE
 CREATE INDEX IF NOT EXISTS idx_journal_actor_ts ON journal_entries(actor_type, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHERE priority != 'normal';
 `},
+	// v78 introduces pipelines — declarative DSL documents persisted
+	// per-workspace, authored by AI agents (or users) and reusable
+	// across crews via the [AVAILABLE PIPELINES] system-prompt block.
+	// See .claude/context/prd/PIPELINES.md and
+	// migrate_consts_v78_pipelines.go for full design rationale.
+	{version: 78, name: "add_pipelines", sql: migrationAddPipelines},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
