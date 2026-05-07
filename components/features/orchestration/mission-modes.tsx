@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { ArrowLeft, FileText, GitFork, ListTodo } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import type { Mission, MissionTask, MissionTaskStatus } from "@/lib/types/mission"
 import { MissionSpecMode } from "./mission-spec-mode"
 import { MissionDocumentMode } from "./mission-document-mode"
@@ -23,7 +24,12 @@ interface MissionModesProps {
  * stays anchored regardless of which mode they're in.
  */
 export function MissionModes({ mission }: MissionModesProps) {
-  const [view, setView] = useState<"spec" | "doc" | "graph">("spec")
+  // Persisted per-user — engineers tend to live in graph view, PMs in
+  // doc, and a refresh shouldn't snap everyone back to spec.
+  const [view, setView] = useUserPreference<"spec" | "doc" | "graph">(
+    "orchestration.mission.viewMode",
+    "spec",
+  )
   const phases = useMemo(() => derivePhases(mission), [mission])
 
   return (
