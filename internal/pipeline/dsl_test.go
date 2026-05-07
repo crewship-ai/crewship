@@ -113,11 +113,12 @@ func TestValidate_RejectsDuplicateStepID(t *testing.T) {
 }
 
 func TestValidate_RejectsUnsupportedStepType(t *testing.T) {
-	// "http" is reserved for Phase 2 — must error in MVP.
+	// Truly unknown step type — http/code/wait/transform are now
+	// supported, so use a synthetic name guaranteed not to clash.
 	dsl := &DSL{
 		Name: "demo",
 		Steps: []Step{
-			{ID: "a", Type: "http"},
+			{ID: "a", Type: "totally_made_up_step_type"},
 		},
 	}
 	err := Validate(dsl, nil, nil)

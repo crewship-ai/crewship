@@ -103,6 +103,128 @@ type Step struct {
 	// call_pipeline fields (only populated when Type == StepCallPipeline)
 	PipelineSlug string         `json:"pipeline_slug,omitempty"`
 	NestedInputs map[string]any `json:"inputs,omitempty"`
+
+	// http fields (only populated when Type == StepHTTP).
+	// HTTP steps run a single outbound HTTP call without invoking
+	// any agent — useful for non-LLM workflow steps (Slack post,
+	// terraform plan webhook, status check). The runtime resolves
+	// CredentialRef against the workspace's credentials and injects
+	// the token into Headers (e.g. Authorization: Bearer <token>).
+	HTTP *HTTPStep `json:"http,omitempty"`
+
+	// code fields (Type == StepCode). Executes a script in a
+	// short-lived sandbox container with the agent's existing
+	// network/credential boundaries.
+	Code *CodeStep `json:"code,omitempty"`
+
+	// wait fields (Type == StepWait). Pauses the pipeline until
+	// the configured condition resolves: human approval, datetime,
+	// or event signal.
+	Wait *WaitStep `json:"wait,omitempty"`
+
+	// transform fields (Type == StepTransform). Pure-Go data
+	// reshaping between steps — jq-style projection over a previous
+	// step's output, no LLM, no network.
+	Transform *TransformStep `json:"transform,omitempty"`
+}
+
+// HTTPStep is an outbound HTTP call. Method + URL are required;
+// Body + Headers + CredentialRef are optional. The runtime applies
+// template substitution to URL, Body, and header VALUES so callers
+// can thread inputs and previous step outputs into the request.
+//
+// Security: the URL host is checked against the workspace's egress
+// allowlist (already enforced by the sidecar proxy on agent_run
+// steps; the pipeline runtime applies the same gate so a malicious
+// pipeline can't exfiltrate via http step). CredentialRef is
+// type-matched (e.g. "stripe", "slack") so a marketplace template
+// references credentials by purpose, never by ID.
+type HTTPStep struct {
+	Method        string            `json:"method"` // GET | POST | PUT | PATCH | DELETE
+	URL           string            `json:"url"`    // template-substituted before request
+	Headers       map[string]string `json:"headers,omitempty"`
+	Body          string            `json:"body,omitempty"` // template-substituted; raw string (caller controls JSON-encoding)
+	CredentialRef *CredentialRef    `json:"credential_ref,omitempty"`
+	// SuccessCodes is the set of HTTP status codes considered a
+	// successful response. Default: [200,201,202,204]. Anything
+	// outside the set triggers OnFail / escalate logic.
+	SuccessCodes []int `json:"success_codes,omitempty"`
+	// MaxResponseBytes caps how much of the body the executor
+	// reads back into the step output (output flows downstream as
+	// {{ steps.X.output }}). Default 1 MB; large responses are
+	// truncated with a clear marker so a pipeline doesn't OOM on
+	// a runaway endpoint.
+	MaxResponseBytes int `json:"max_response_bytes,omitempty"`
+}
+
+// CredentialRef points at a workspace credential by TYPE (purpose),
+// not by ID. The runtime resolves type → active credential at run
+// time. InjectAs controls how the credential value reaches the
+// request: "bearer" (Authorization: Bearer <value>), "header" with
+// HeaderName, or "query" with QueryName.
+type CredentialRef struct {
+	Type       string `json:"type"`
+	InjectAs   string `json:"inject_as,omitempty"`   // bearer | header | query (default bearer)
+	HeaderName string `json:"header_name,omitempty"` // when InjectAs == header
+	QueryName  string `json:"query_name,omitempty"`  // when InjectAs == query
+}
+
+// CodeStep runs a script in a sandbox container. Runtime is one of
+// "python" | "go" | "bash"; the container image is workspace-
+// configurable (defaults to debian-slim with the named runtime).
+//
+// Inputs are passed as environment variables (one per declared
+// input) so the script can read them without bespoke parsing. The
+// script's stdout becomes the step output; stderr lands in the
+// journal entry's error_message preview.
+//
+// Security: --cap-drop=ALL, no host mounts, network constrained by
+// the same egress allowlist as agent_run + http. Timeout enforced
+// at container level (runtime hard-kills at TimeoutSec; default
+// 300 s).
+type CodeStep struct {
+	Runtime string `json:"runtime"` // python | go | bash
+	Version string `json:"version,omitempty"`
+	Code    string `json:"code"`
+	// Env is additional environment variables passed to the
+	// process (in addition to inputs.* which are auto-mapped to
+	// CREWSHIP_INPUT_<NAME>).
+	Env map[string]string `json:"env,omitempty"`
+}
+
+// WaitStep pauses the run until the configured condition resolves.
+// Three kinds in MVP: human approval (token in DB, UI completes),
+// datetime (sleep until ISO timestamp), event (waits for a journal
+// event matching the filter).
+//
+// Wait steps don't burn tokens — they're a pure scheduler primitive
+// in the runtime. Long waits (>1 h) survive process restart via the
+// pipeline_runs DB row's saved cursor. The executor parks the
+// goroutine on a condition channel and resumes when the waitpoint
+// fires.
+type WaitStep struct {
+	Kind string `json:"kind"` // approval | datetime | event
+	// approval fields
+	ApprovalPrompt string `json:"approval_prompt,omitempty"`
+	// datetime fields
+	Until string `json:"until,omitempty"` // RFC3339 or template
+	// event fields
+	EventType   string `json:"event_type,omitempty"`
+	EventFilter string `json:"event_filter,omitempty"` // simple equality match on payload
+	// TimeoutSec wraps the wait — exhausting it falls through to OnFail.
+	// 0 = no timeout (wait forever).
+}
+
+// TransformStep is pure-Go data reshaping. No LLM, no network,
+// fully deterministic. Useful for wiring step outputs together
+// without calling another agent_run just to format JSON.
+//
+// Expression is a small jq-flavored subset: ".path", ".path | tostring",
+// ".items[0]", ".name + '-' + .surname". Full grammar in
+// internal/pipeline/transform.go (separate file for parser tests).
+type TransformStep struct {
+	Input      string `json:"input"`      // template-substituted; usually {{ steps.X.output }}
+	Expression string `json:"expression"` // jq-flavored projection
 }
 
 // StepType is the closed set of step kinds the executor recognises.
@@ -113,6 +235,10 @@ type StepType string
 const (
 	StepAgentRun     StepType = "agent_run"
 	StepCallPipeline StepType = "call_pipeline"
+	StepHTTP         StepType = "http"
+	StepCode         StepType = "code"
+	StepWait         StepType = "wait"
+	StepTransform    StepType = "transform"
 )
 
 // Complexity tags a step's reasoning depth, mapping to a workspace-

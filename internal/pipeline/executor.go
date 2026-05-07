@@ -35,6 +35,115 @@ type Executor struct {
 	pipes    PipelineResolver // for call_pipeline lookups; usually == store
 	runner   AgentRunner
 	emitter  Emitter
+
+	// egressAllowed gates the host of HTTP steps. Wired from server
+	// boot using the workspace's existing allowlist mechanism (the
+	// same one sidecar uses for agent_run egress). Nil = allow all,
+	// useful for tests; production wiring sets a real allowlist.
+	egressAllowed func(host string) bool
+
+	// credentialByType resolves a credential type ("slack", "stripe",
+	// etc.) to its decrypted value at run time. Nil = HTTP steps
+	// run without credential injection (public endpoints only).
+	credentialByType func(ctx context.Context, credType string) (string, error)
+
+	// codeRunner runs StepCode in a sandboxed container. Nil means
+	// code steps return a clear "not configured" error rather than
+	// trying to exec the script in-process.
+	codeRunner CodeRunner
+
+	// waitpoints persists wait step state so long sleeps survive
+	// process restarts. Nil = wait steps execute in-memory only
+	// (useful for tests; production wiring uses the WaitpointStore
+	// once Phase 2 lands).
+	waitpoints WaitpointStore
+}
+
+// WithEgressGate wires the HTTP allowlist. Builders can call this
+// pattern (NewExecutor + WithEgressGate + WithCredentialResolver +
+// WithCodeRunner + WithWaitpointStore) to compose an executor with
+// the optional capabilities turned on. The package's tests stay
+// functional with the bare NewExecutor.
+func (e *Executor) WithEgressGate(allowed func(host string) bool) *Executor {
+	e.egressAllowed = allowed
+	return e
+}
+
+// WithCredentialResolver wires HTTP credential injection. The
+// resolver receives the step's CredentialRef.Type and returns the
+// decrypted value (typically by querying the workspace credentials
+// table + encryption.Decrypt).
+func (e *Executor) WithCredentialResolver(fn func(ctx context.Context, credType string) (string, error)) *Executor {
+	e.credentialByType = fn
+	return e
+}
+
+// WithCodeRunner wires StepCode execution. Without it, code steps
+// return a clear error instead of silently no-op'ing.
+func (e *Executor) WithCodeRunner(r CodeRunner) *Executor {
+	e.codeRunner = r
+	return e
+}
+
+// WithWaitpointStore wires StepWait persistence. Without it, wait
+// steps execute in-memory and don't survive a process restart.
+func (e *Executor) WithWaitpointStore(s WaitpointStore) *Executor {
+	e.waitpoints = s
+	return e
+}
+
+// CodeRunner is the contract for executing StepCode. Production
+// wires a Docker-backed runner; tests can pass a stub. The
+// implementation is in internal/pipeline/runner_code.go.
+type CodeRunner interface {
+	RunCode(ctx context.Context, req CodeRunRequest) (CodeRunResult, error)
+}
+
+// CodeRunRequest is the input to a code-step run. Inputs from the
+// pipeline render context land in InputEnv keyed
+// CREWSHIP_INPUT_<NAME>; the runner is responsible for translating
+// to env vars in the container.
+type CodeRunRequest struct {
+	WorkspaceID string
+	Runtime     string // python | go | bash
+	Version     string
+	Code        string
+	InputEnv    map[string]string
+	TimeoutSec  int
+	MaxBytes    int // stdout cap
+}
+
+// CodeRunResult is the output of a code-step run. Stdout becomes
+// the step's downstream output; stderr lands in the journal entry
+// for diagnostic purposes only.
+type CodeRunResult struct {
+	Stdout     string
+	Stderr     string
+	ExitCode   int
+	DurationMs int64
+}
+
+// WaitpointStore persists wait step state so a sleep that exceeds
+// the process lifetime can resume after a restart. The interface is
+// minimal; the real schema lands in Phase 2 with full waitpoints.
+type WaitpointStore interface {
+	// CreateApproval mints a token that completes the waitpoint
+	// when called via /pipelines/waitpoints/{token}/approve.
+	CreateApproval(ctx context.Context, req WaitpointApprovalRequest) (string, error)
+	// WaitFor blocks until the named waitpoint resolves (returns
+	// approved=true|false on completion) or the context is cancelled.
+	WaitFor(ctx context.Context, token string) (bool, error)
+}
+
+// WaitpointApprovalRequest is the metadata stored alongside the
+// waitpoint so the inbox/UI can render a meaningful approval card.
+type WaitpointApprovalRequest struct {
+	WorkspaceID    string
+	PipelineRunID  string
+	StepID         string
+	Prompt         string
+	InvokingCrewID string
+	TimeoutSec     int
 }
 
 // NewExecutor wires the dependencies together. emitter and pipes may
@@ -292,6 +401,14 @@ func (e *Executor) runStep(
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
 	case StepCallPipeline:
 		return e.runCallPipelineStep(ctx, step, in, parentRender, depth)
+	case StepHTTP:
+		return e.runHTTPStep(ctx, step, parentRender)
+	case StepCode:
+		return e.runCodeStep(ctx, step, parentRender, in)
+	case StepWait:
+		return e.runWaitStep(ctx, step, parentRender, in, runID)
+	case StepTransform:
+		return e.runTransformStep(step, parentRender)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}
