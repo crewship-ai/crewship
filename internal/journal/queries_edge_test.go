@@ -444,16 +444,10 @@ func TestList_FiltersPriorities(t *testing.T) {
 	}
 }
 
-// TestList_TimeRange covers Since + Until simultaneously.
-//
-// NOTE: queries.go formats Since/Until as time.RFC3339Nano while
-// emit.go writes entries with a fixed "2006-01-02T15:04:05.000Z"
-// layout. RFC3339Nano omits the fractional seconds when nanos=0 ("Z"
-// instead of ".000Z") which lexicographically sorts BEFORE entries
-// stored with a literal ".000". Result: an entry with ts == Since (to
-// the millisecond) is silently excluded when Since lands on a whole
-// second. We pick fractional Since/Until here so the test passes
-// today; the format mismatch is a real bug filed as a follow-up.
+// TestList_TimeRange covers Since + Until simultaneously. The format
+// mismatch that used to drop whole-second exact matches is fixed via
+// formatTSBound; the dedicated regression test for that path lives in
+// TestList_SinceUntilBound_InclusiveOnExactMatch.
 func TestList_TimeRange(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
@@ -498,11 +492,15 @@ func TestList_TimeRange(t *testing.T) {
 	}
 }
 
-// TestList_SinceFormatMismatch_KnownBug pins the format-mismatch behavior
-// described above so a future fix flips this from "wrong" to "fixed". See
-// queries.go:107 (Since uses RFC3339Nano) vs emit.go (entries use a
-// fixed milli layout).
-func TestList_SinceFormatMismatch_KnownBug(t *testing.T) {
+// TestList_SinceUntilBound_InclusiveOnExactMatch pins the contract
+// that Since and Until are inclusive of the exact-instant row even
+// when the timestamp has zero milliseconds. Previously queries.go
+// formatted Since/Until as RFC3339Nano (which strips trailing zeros)
+// while entries persisted as `2006-01-02T15:04:05.000Z` (which always
+// emits the millis), so SQLite's lexicographic comparison silently
+// excluded the exact-match row. formatTSBound now picks one canonical
+// layout both sides use.
+func TestList_SinceUntilBound_InclusiveOnExactMatch(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
@@ -525,19 +523,73 @@ func TestList_SinceFormatMismatch_KnownBug(t *testing.T) {
 		t.Fatalf("flush: %v", err)
 	}
 
-	got, _, err := List(ctx, db, Query{
-		WorkspaceID: "ws_test",
-		Since:       wholeSec,
+	t.Run("since matches exactly", func(t *testing.T) {
+		got, _, err := List(ctx, db, Query{
+			WorkspaceID: "ws_test",
+			Since:       wholeSec,
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(got) != 1 {
+			t.Errorf("Since on exact whole-second timestamp: got %d entries, want 1", len(got))
+		}
 	})
-	if err != nil {
-		t.Fatalf("list: %v", err)
+
+	t.Run("until matches exactly", func(t *testing.T) {
+		got, _, err := List(ctx, db, Query{
+			WorkspaceID: "ws_test",
+			Until:       wholeSec,
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(got) != 1 {
+			t.Errorf("Until on exact whole-second timestamp: got %d entries, want 1", len(got))
+		}
+	})
+
+	t.Run("count agrees with list", func(t *testing.T) {
+		// Count also formats Since/Until — making sure both query
+		// builders pick up the same fix.
+		n, err := Count(ctx, db, Query{
+			WorkspaceID: "ws_test",
+			Since:       wholeSec,
+		})
+		if err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("Count Since on exact: got %d, want 1", n)
+		}
+	})
+}
+
+// TestFormatTSBound_RoundtripsWithEmitLayout pins the canonical bound
+// format. emit.go writes `2006-01-02T15:04:05.000Z`; this helper must
+// emit the identical layout so SQLite's string comparison treats them
+// as equal.
+func TestFormatTSBound_RoundtripsWithEmitLayout(t *testing.T) {
+	cases := []struct {
+		name string
+		t    time.Time
+		want string
+	}{
+		{"whole second", time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC),
+			"2026-04-30T10:00:00.000Z"},
+		{"with millis", time.Date(2026, 4, 30, 10, 0, 0, 123_000_000, time.UTC),
+			"2026-04-30T10:00:00.123Z"},
+		{"sub-milli truncated", time.Date(2026, 4, 30, 10, 0, 0, 123_456_789, time.UTC),
+			"2026-04-30T10:00:00.123Z"},
+		{"non-UTC normalised", time.Date(2026, 4, 30, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600)),
+			"2026-04-30T10:00:00.000Z"},
 	}
-	// Today's actual behavior: 0 because of format mismatch. Once the
-	// bug is fixed (Since/Until formatted with the same milli layout
-	// as entries), this assertion should be flipped to == 1.
-	if len(got) != 0 {
-		t.Logf("format mismatch bug appears fixed (got %d, want 1) — "+
-			"flip this assertion to: if len(got) != 1 { t.Fatal(...) }", len(got))
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatTSBound(c.t); got != c.want {
+				t.Errorf("formatTSBound(%v) = %q, want %q", c.t, got, c.want)
+			}
+		})
 	}
 }
 

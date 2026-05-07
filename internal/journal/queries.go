@@ -153,11 +153,11 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "ts >= ?")
-		args = append(args, q.Since.UTC().Format(time.RFC3339Nano))
+		args = append(args, formatTSBound(q.Since))
 	}
 	if !q.Until.IsZero() {
 		conds = append(conds, "ts <= ?")
-		args = append(args, q.Until.UTC().Format(time.RFC3339Nano))
+		args = append(args, formatTSBound(q.Until))
 	}
 	if q.Cursor != "" {
 		cTS, cID, err := decodeCursor(q.Cursor)
@@ -411,11 +411,11 @@ func Count(ctx context.Context, db *sql.DB, q Query) (int64, error) {
 	}
 	if !q.Since.IsZero() {
 		conds = append(conds, "ts >= ?")
-		args = append(args, q.Since.UTC().Format(time.RFC3339Nano))
+		args = append(args, formatTSBound(q.Since))
 	}
 	if !q.Until.IsZero() {
 		conds = append(conds, "ts <= ?")
-		args = append(args, q.Until.UTC().Format(time.RFC3339Nano))
+		args = append(args, formatTSBound(q.Until))
 	}
 	// Mirror List's FTS5 join so Count returns the same N as the
 	// paginated list — otherwise the badge contradicts what the user
@@ -447,6 +447,21 @@ func decodeCursor(s string) (string, string, error) {
 		return "", "", fmt.Errorf("missing separator")
 	}
 	return s[:i], s[i+1:], nil
+}
+
+// formatTSBound formats a Since/Until value with the same milli-precision
+// layout `emit.go` uses for stored entries. Without the matching format
+// SQLite's lexicographic comparison silently excludes entries whose `ts`
+// is the same instant as Since but stored with a literal ".000" while
+// the bound is encoded as RFC3339Nano without trailing zeros.
+//
+// Reads the trailing zero off the stored format too — `2026-04-30T10:00:00.000Z`
+// vs `2026-04-30T10:00:00Z` lexicographically sort with the literal ".000Z"
+// AFTER the bare "Z", so a Since lacking the suffix excludes the exact-
+// match row.  Picking one canonical format both sides use is the only
+// way to keep the inclusive bound actually inclusive.
+func formatTSBound(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 // parseJournalTS accepts both the milli-precision format we write and the
