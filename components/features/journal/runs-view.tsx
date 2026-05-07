@@ -23,6 +23,7 @@ import {
   XCircle,
 } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
@@ -44,6 +45,17 @@ import {
   statusLabel,
   toCanonicalStatus,
 } from "@/lib/runs-format"
+
+// Selectors for elements that should swallow row-level click/keypress
+// events. Hoisted so the per-render .map() doesn't reallocate them.
+const INTERACTIVE_SELECTOR =
+  'a,button,[role="button"],[role="link"],input,textarea,select'
+
+function isFromInteractiveChild(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  const hit = target.closest(INTERACTIVE_SELECTOR)
+  return hit !== null && hit !== target.closest("[data-row-root]")
+}
 
 interface Run {
   id: string
@@ -86,6 +98,7 @@ interface RunsViewProps {
 }
 
 export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
+  const router = useRouter()
   const [data, setData] = useState<RunsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -224,33 +237,45 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
         />
       </div>
 
-      {/* ── Filters ────────────────────────────────────────────── */}
+      {/* ── Status chips ───────────────────────────────────────── */}
+      {/* Replaces the legacy two-Select filter row with horizontal */}
+      {/* chips that show the count next to each status. Visual */}
+      {/* parity with the Timeline severity row keeps the two */}
+      {/* surfaces feeling like one product. Trigger filter stays */}
+      {/* as a Select — its values are noisier and rarely used. */}
       <div className="flex items-center gap-2 flex-wrap">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-7 w-[140px] text-xs">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">
-              All statuses
-            </SelectItem>
-            <SelectItem value="RUNNING" className="text-xs">
-              Running
-            </SelectItem>
-            <SelectItem value="COMPLETED" className="text-xs">
-              Completed
-            </SelectItem>
-            <SelectItem value="FAILED" className="text-xs">
-              Failed
-            </SelectItem>
-            <SelectItem value="CANCELLED" className="text-xs">
-              Cancelled
-            </SelectItem>
-            <SelectItem value="TIMEOUT" className="text-xs">
-              Timeout
-            </SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="inline-flex rounded border border-border/60 bg-card overflow-hidden">
+          {(["all", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"] as const).map((s) => {
+            const active = statusFilter === s
+            const label = s === "all" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setStatusFilter(s)}
+                aria-pressed={active}
+                className={cn(
+                  "h-7 px-2.5 text-[10px] font-mono uppercase tracking-wider flex items-center gap-1 transition-colors border-r border-border/60 last:border-r-0",
+                  active
+                    ? s === "FAILED"
+                      ? "bg-red-500/15 text-red-300"
+                      : s === "RUNNING"
+                        ? "bg-emerald-500/15 text-emerald-300"
+                        : s === "COMPLETED"
+                          ? "bg-sky-500/15 text-sky-300"
+                          : s === "TIMEOUT"
+                            ? "bg-amber-500/15 text-amber-300"
+                            : s === "CANCELLED"
+                              ? "bg-muted text-foreground"
+                              : "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
         <Select value={triggerFilter} onValueChange={setTriggerFilter}>
           <SelectTrigger className="h-7 w-[140px] text-xs">
             <SelectValue placeholder="All triggers" />
@@ -345,11 +370,26 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                       : run.status === "CANCELLED"
                         ? XCircle
                         : Play
+              const traceHref = `/journal?tab=timeline&trace_id=${encodeURIComponent(run.id)}`
               return (
                 <div
                   key={run.id}
+                  role="button"
+                  tabIndex={0}
+                  data-row-root
+                  onClick={(e) => {
+                    if (isFromInteractiveChild(e.target)) return
+                    router.push(traceHref)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return
+                    if (isFromInteractiveChild(e.target)) return
+                    e.preventDefault()
+                    router.push(traceHref)
+                  }}
+                  title={`Open trace ${run.id.slice(0, 8)} in Timeline`}
                   className={cn(
-                    "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors",
+                    "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40",
                     idx < runs.length - 1 && "border-b border-border/40",
                   )}
                   style={{
@@ -362,6 +402,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                   </span>
                   <Link
                     href={`/crews/agents/${run.agent_id}`}
+                    onClick={(e) => e.stopPropagation()}
                     className="text-xs font-medium truncate hover:underline"
                   >
                     {run.agent_name ?? <span className="text-muted-foreground/60">Unknown</span>}
@@ -398,6 +439,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                   </span>
                   <Link
                     href={`/crews/agents/${run.agent_id}`}
+                    onClick={(e) => e.stopPropagation()}
                     className="text-muted-foreground/60 hover:text-foreground transition-colors justify-self-end"
                     aria-label="Open agent"
                   >
