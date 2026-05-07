@@ -358,6 +358,12 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions", authed(wsCtx(http.HandlerFunc(pipes.ListVersions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", authed(wsCtx(http.HandlerFunc(pipes.Rollback))))
+	// Marketplace prep: portable JSON bundles for cross-workspace
+	// transfer. Export is read-only; import requires author_crew_id
+	// in the body since bundles are deliberately
+	// installation-independent.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/export", authed(wsCtx(http.HandlerFunc(pipes.ExportPipeline))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/import", authed(wsCtx(http.HandlerFunc(pipes.ImportPipeline))))
 	// Waitpoints — StepWait approval persistence + UI inbox surface.
 	// Pending waitpoints flow into the same Inbox as Keeper approvals.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints", authed(wsCtx(http.HandlerFunc(pipes.ListPendingWaitpoints))))

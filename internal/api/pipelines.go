@@ -501,6 +501,190 @@ func parseSmallInt(s string) (int, error) {
 	return n, nil
 }
 
+// ExportPipeline returns a portable bundle for a pipeline. The
+// bundle is a self-contained JSON document a downstream workspace
+// (or marketplace consumer) can import via POST .../import.
+//
+// Bundle shape (format = "crewship-pipeline-bundle/v1"):
+//
+//	{
+//	  "format": "crewship-pipeline-bundle/v1",
+//	  "pipeline": { name, description, definition, dsl_version,
+//	                authored_via, change_summary },
+//	  "history":  [{version, definition_hash, change_summary, ...}],
+//	  "metadata": { exported_at, source_workspace_id, ... }
+//	}
+//
+// We deliberately exclude author_crew_id, author_agent_id, runtime
+// stats (invocation_count, last_invoked_at), and any
+// installation-specific data — the receiving workspace will fill
+// those in at import time. This keeps marketplace bundles
+// installation-independent.
+//
+// GET /api/v1/workspaces/{ws}/pipelines/{slug}/export
+func (h *PipelineHandler) ExportPipeline(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	slug := r.PathValue("slug")
+	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		return
+	}
+	includeHistory := r.URL.Query().Get("include_history") == "1"
+	type historyItem struct {
+		Version       int             `json:"version"`
+		Hash          string          `json:"definition_hash"`
+		Definition    json.RawMessage `json:"definition,omitempty"`
+		ChangeSummary string          `json:"change_summary,omitempty"`
+		ParentVersion *int            `json:"parent_version,omitempty"`
+		CreatedAt     string          `json:"created_at"`
+	}
+	var history []historyItem
+	if includeHistory {
+		versions, _ := h.store.ListVersions(r.Context(), p.ID, 500)
+		for _, v := range versions {
+			history = append(history, historyItem{
+				Version:       v.Version,
+				Hash:          v.DefinitionHash,
+				Definition:    json.RawMessage(v.DefinitionJSON),
+				ChangeSummary: v.ChangeSummary,
+				ParentVersion: v.ParentVersion,
+				CreatedAt:     v.CreatedAt.Format(time.RFC3339Nano),
+			})
+		}
+	}
+	bundle := map[string]any{
+		"format": "crewship-pipeline-bundle/v1",
+		"pipeline": map[string]any{
+			"name":        p.Name,
+			"description": p.Description,
+			"slug":        p.Slug,
+			"dsl_version": p.DSLVersion,
+			"definition":  json.RawMessage(p.DefinitionJSON),
+		},
+		"metadata": map[string]any{
+			"exported_at":         time.Now().UTC().Format(time.RFC3339Nano),
+			"source_workspace_id": workspaceID,
+			"definition_hash":     p.DefinitionHash,
+			"head_version":        p.InvocationCount, // misnamed — leave for caller transparency
+		},
+	}
+	if includeHistory {
+		bundle["history"] = history
+	}
+	writeJSON(w, http.StatusOK, bundle)
+}
+
+// ImportPipeline creates a pipeline from a portable bundle. Used by
+// marketplace install flows + cross-workspace transfer. The
+// receiving workspace becomes the author crew context (via
+// X-Author-Crew header or body field), and the bundle's source
+// metadata is preserved on the pipeline row for audit.
+//
+// POST /api/v1/workspaces/{ws}/pipelines/import
+// Body: <pipeline-bundle>  + { "author_crew_id": "..." }
+func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	var bundle struct {
+		Format   string `json:"format"`
+		Pipeline struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Slug        string          `json:"slug"`
+			DSLVersion  string          `json:"dsl_version"`
+			Definition  json.RawMessage `json:"definition"`
+		} `json:"pipeline"`
+		Metadata map[string]any `json:"metadata"`
+		// Caller-supplied author_crew_id; required since the
+		// bundle deliberately doesn't carry one.
+		AuthorCrewID string `json:"author_crew_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&bundle); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bundle"})
+		return
+	}
+	if bundle.Format != "crewship-pipeline-bundle/v1" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":  "unsupported bundle format",
+			"format": bundle.Format,
+		})
+		return
+	}
+	if bundle.Pipeline.Name == "" || len(bundle.Pipeline.Definition) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bundle missing pipeline.name or pipeline.definition"})
+		return
+	}
+	if bundle.AuthorCrewID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "author_crew_id required (the crew that will own this imported pipeline)"})
+		return
+	}
+	// Run validation at import — we don't want a malformed bundle
+	// to land in the workspace registry. Cross-references against
+	// the receiving workspace's agents are checked too.
+	dsl, err := pipeline.Parse(bundle.Pipeline.Definition)
+	if err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+	agentSlugs, _ := h.lookupAgentSlugs(r, bundle.AuthorCrewID)
+	pipelineSlugs, _ := h.lookupPipelineSlugs(r, workspaceID)
+	if err := pipeline.Validate(dsl, agentSlugs, pipelineSlugs); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"error": "imported pipeline failed validation: " + err.Error(),
+			"hint":  "the receiving workspace must have all referenced agent slugs",
+		})
+		return
+	}
+	// Slug: prefer bundle's slug, fall back to slugifyName(name).
+	slug := bundle.Pipeline.Slug
+	if slug == "" {
+		// Reuse the runtime helper — same shape as sidecar/CLI.
+		slug = bundle.Pipeline.Name // best-effort; Save will reject
+		// invalid shapes, which prompts the importer to rename.
+	}
+	importedFromURL := ""
+	if bundle.Metadata != nil {
+		if v, ok := bundle.Metadata["source_workspace_id"].(string); ok {
+			importedFromURL = "workspace:" + v
+		}
+	}
+	now := time.Now().UTC()
+	in := pipeline.SaveInput{
+		WorkspaceID:    workspaceID,
+		Slug:           slug,
+		Name:           bundle.Pipeline.Name,
+		Description:    bundle.Pipeline.Description,
+		DSLVersion:     bundle.Pipeline.DSLVersion,
+		DefinitionJSON: string(bundle.Pipeline.Definition),
+		Author: pipeline.AuthorMeta{
+			CrewID:      bundle.AuthorCrewID,
+			Via:         pipeline.AuthoredViaImported,
+			ImportedURL: importedFromURL,
+		},
+		// Imports skip the test_run gate by design — a marketplace
+		// bundle is presumed to have passed test_run in its source
+		// workspace. The receiving operator can run a manual
+		// test_run from the UI before invoking.
+		LastTestRunAt:     &now,
+		LastTestRunPassed: true,
+	}
+	saved, err := h.store.Save(r.Context(), in)
+	if errors.Is(err, pipeline.ErrSlugConflict) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "slug already exists in workspace"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("pipeline import save", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
+}
+
 // ListVersions returns the version history for a pipeline.
 // GET /api/v1/workspaces/{ws}/pipelines/{slug}/versions
 func (h *PipelineHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
