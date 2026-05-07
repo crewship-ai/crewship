@@ -207,13 +207,23 @@ function groupRunsByRunId(rows: Array<{ id: string; ts: string; entry_type: stri
     }
     const g = groups.get(runId)!
     g.entries.push({ ts: r.ts, entry_type: r.entry_type, severity: r.severity, summary: r.summary, payload: r.payload })
-    if (r.entry_type === "pipeline.run.started") {
-      g.startedAt = r.ts
-      g.status = "running"
+    // Status determination is order-sensitive because the API returns
+    // events in DESC ts order. Without the guard, run.started (which
+    // appears LAST in DESC iteration) overwrites a previously-set
+    // "completed"/"failed" with "running" — UI then shows the run as
+    // perpetually Running. Treat completed/failed as terminal: once
+    // we observe one of those for a run_id, never downgrade.
+    if (g.status === "completed" || g.status === "failed") {
+      // terminal already; keep it
     } else if (r.entry_type === "pipeline.run.completed") {
       g.status = "completed"
     } else if (r.entry_type === "pipeline.run.failed") {
       g.status = "failed"
+    } else if (r.entry_type === "pipeline.run.started") {
+      g.status = "running"
+    }
+    if (r.entry_type === "pipeline.run.started") {
+      g.startedAt = r.ts
     }
   }
   return Array.from(groups.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt))

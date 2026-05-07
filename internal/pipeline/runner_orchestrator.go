@@ -181,12 +181,27 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		})
 	}
 
-	// 6. Build AgentRunRequest. CLI adapter + model + system prompt
-	//    all flow from ChatInfo unchanged — we don't second-guess
-	//    the resolver's choice. step.ModelOverride from the DSL
-	//    isn't applied here because per-step model swapping is a
-	//    Phase 2 feature of the LLM-direct runner; the orchestrator
-	//    path hands the prompt to whatever the agent's adapter is.
+	// 6. Build AgentRunRequest.
+	//
+	// Tier resolution honoring: when the executor's tier resolver
+	// produced a non-empty Adapter + Model on the request, those
+	// override the agent's defaults. This is the load-bearing wire
+	// for two-tier execution — without it a routine's
+	// `complexity: "fast"` would silently run on whatever model the
+	// agent was created with (typically Sonnet), defeating the cost
+	// reduction promise. The override flows into the CLI flag list
+	// so `claude --model claude-haiku-4-5-20251001` actually fires.
+	//
+	// We don't override SystemPrompt or ToolProfile — those are
+	// agent-defining and the routine doesn't get to mess with them.
+	cliAdapter := info.CLIAdapter
+	llmModel := info.LLMModel
+	if req.Adapter != "" {
+		cliAdapter = req.Adapter
+	}
+	if req.Model != "" {
+		llmModel = req.Model
+	}
 	// Pick the tighter of the two timeouts (agent default vs step
 	// override). When the agent has no configured timeout
 	// (info.TimeoutSecs == 0), the previous form `req.TimeoutSec <
@@ -213,8 +228,8 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		WorkspaceID:        info.WorkspaceID,
 		ChatID:             chatID,
 		ContainerID:        containerID,
-		CLIAdapter:         info.CLIAdapter,
-		LLMModel:           info.LLMModel,
+		CLIAdapter:         cliAdapter,
+		LLMModel:           llmModel,
 		SystemPrompt:       info.SystemPrompt,
 		UserMessage:        req.Prompt,
 		ToolProfile:        info.ToolProfile,
