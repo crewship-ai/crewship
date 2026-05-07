@@ -24,6 +24,7 @@ import { DockerOverview } from "@/components/features/orchestration/docker-overv
 import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import { IssuesBoardInline, IssuesListInline } from "@/components/features/orchestration/issues-inline"
 import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
 import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
@@ -92,7 +93,12 @@ export function OrchestrationLayout({
   // Issues state
   const [issues, setIssues] = useState<Mission[]>([])
   const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
-  const [issueViewMode, setIssueViewMode] = useState<"board" | "list">("board")
+  // Persisted per-user — most teams stick with one of board/list and a
+  // refresh shouldn't bounce them back to board if they prefer list.
+  const [issueViewMode, setIssueViewMode] = useUserPreference<"board" | "list">(
+    "orchestration.issues.viewMode",
+    "board",
+  )
   const [issueSearch, setIssueSearch] = useState("")
   const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
   const [issueComments, setIssueComments] = useState<IssueComment[]>([])

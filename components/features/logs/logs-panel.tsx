@@ -7,6 +7,7 @@ import type { JournalEntry } from "@/lib/types/journal"
 import { type EntryGroup } from "@/lib/journal-style"
 import { annotateEntries, filterEntries, type AnnotatedEntry } from "@/lib/journal-perf"
 import { buildMatcher } from "@/lib/log-search"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import { LogsToolbar, type SeverityFilter, type ScopeControl } from "./logs-toolbar"
 import { LogsTypeChips } from "./logs-type-chips"
 import { LogsHistogram } from "./logs-histogram"
@@ -182,10 +183,19 @@ export function LogsPanel({
     setInternalMuted(updater as React.SetStateAction<Set<EntryGroup>>)
   }, [onMutedChange, muted])
   const [internalLive, setInternalLive] = useState(true)
-  const [wrap, setWrap] = useState(false)
-  const [newestFirst, setNewestFirst] = useState(true)
-  const [dedup, setDedup] = useState(false)
-  const [statsCollapsed, setStatsCollapsed] = useState(false)
+  // View toggles persist per-user via /api/v1/me/preferences. The
+  // localStorage cache means first-paint never flashes the default;
+  // server sync keeps the choice consistent across devices.
+  const [wrap, setWrap] = useUserPreference<boolean>("journal.timeline.wrap", false)
+  const [newestFirst, setNewestFirst] = useUserPreference<boolean>(
+    "journal.timeline.newestFirst",
+    true,
+  )
+  const [dedup, setDedup] = useUserPreference<boolean>("journal.timeline.dedup", false)
+  const [statsCollapsed, setStatsCollapsed] = useUserPreference<boolean>(
+    "journal.timeline.statsCollapsed",
+    false,
+  )
   // Histogram bucket selection — client-side narrowing of the loaded
   // entries. Kept separate from `timeRange`/`customRange` because
   // changing those triggers a backend re-fetch (slow); a bucket
@@ -343,11 +353,11 @@ export function LogsPanel({
         live={live}
         onLiveToggle={onLiveToggle}
         wrap={wrap}
-        onWrapToggle={() => setWrap((v) => !v)}
+        onWrapToggle={() => setWrap(!wrap)}
         newestFirst={newestFirst}
-        onNewestToggle={() => setNewestFirst((v) => !v)}
+        onNewestToggle={() => setNewestFirst(!newestFirst)}
         dedup={dedup}
-        onDedupToggle={() => setDedup((v) => !v)}
+        onDedupToggle={() => setDedup(!dedup)}
         onExport={onExport}
         timeRange={timeRange}
         onTimeRangeChange={onTimeRangeChange}
