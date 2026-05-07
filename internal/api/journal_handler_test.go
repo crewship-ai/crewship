@@ -701,8 +701,11 @@ func TestJournalHandler_Stream_ResumePagingBeyondSeedCap(t *testing.T) {
 		t.Fatal("Stream did not return after ctx cancel")
 	}
 
-	// Every j_post* id must appear in the seed; the anchor itself
-	// must not (the resume contract is "give me what I haven't seen").
+	// Every j_post* id must appear exactly once in the seed; the
+	// anchor itself must not (the resume contract is "give me what I
+	// haven't seen"). Assert the full set rather than just count —
+	// otherwise a regression that emits the wrong 75 ids (e.g. a
+	// stale watermark sending duplicates) would still pass.
 	body := rr.Body.String()
 	gotIDs := []string{}
 	for _, line := range strings.Split(body, "\n") {
@@ -710,9 +713,13 @@ func TestJournalHandler_Stream_ResumePagingBeyondSeedCap(t *testing.T) {
 			gotIDs = append(gotIDs, strings.TrimPrefix(line, "id: "))
 		}
 	}
-	if len(gotIDs) != newer {
-		t.Errorf("seed ids: got %d, want %d (resume must page through gap)\nfirst 5: %v",
-			len(gotIDs), newer, firstN(gotIDs, 5))
+	wantIDs := make([]string, 0, newer)
+	for i := 0; i < newer; i++ {
+		wantIDs = append(wantIDs, fmt.Sprintf("j_post%03d", i))
+	}
+	if !equalStringSet(gotIDs, wantIDs) {
+		t.Errorf("seed ids mismatch: got %d ids, want %d\nfirst 5 got: %v\nfirst 5 want: %v",
+			len(gotIDs), len(wantIDs), firstN(gotIDs, 5), firstN(wantIDs, 5))
 	}
 	for _, id := range gotIDs {
 		if id == "j_anchor" {
