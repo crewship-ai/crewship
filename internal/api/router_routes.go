@@ -375,6 +375,11 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.CreateSchedule))))
 	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.UpdateSchedule))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteSchedule))))
+	// Run control — cancel + active list. The cancel API is the
+	// other half of concurrency control: a stuck run holds a slot
+	// until either it finishes or the operator pre-empts it.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active", authed(wsCtx(http.HandlerFunc(pipes.ListActiveRuns))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
 	// Internal /api/v1/internal/pipelines/save route is registered
 	// further down where `internalAuth` is in scope (alongside the
 	// other /internal endpoints). See line ~640 below.

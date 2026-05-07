@@ -268,6 +268,13 @@ var startCmd = &cobra.Command{
 				logger.Info("pipeline WS broadcaster wired (live event push)")
 			}
 
+			// Run registry — process-singleton tracker for cancel +
+			// concurrency. Lives for the binary's lifetime; no Stop
+			// needed because runs are tracked, not goroutines.
+			runRegistry := pipeline.NewRunRegistry()
+			srv.APIRouter().PipelinesHandler.SetRunRegistry(runRegistry)
+			logger.Info("pipeline run registry wired (cancel + concurrency_key gating)")
+
 			// Pipeline schedules — cron triggers for saved pipelines.
 			// The store backs the CRUD endpoints; the scheduler runs
 			// in-process and fires due schedules every 30s.
@@ -293,6 +300,11 @@ var startCmd = &cobra.Command{
 				if hub := srv.WSHub(); hub != nil {
 					schedExec = schedExec.WithWSBroadcaster(hub)
 				}
+				// Scheduler-driven runs MUST share the same registry
+				// as HTTP-driven runs — otherwise a cron + manual run
+				// of the same concurrency_key would slip past the gate.
+				schedExec = schedExec.WithRunRegistry(runRegistry).
+					WithIdempotencyStore(pipeline.NewIdempotencyStore(deps.DB))
 				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
 				scheduler.Start(ctx)
 				defer scheduler.Stop()

@@ -27,6 +27,7 @@ type PipelineHandler struct {
 	waitpoints pipeline.WaitpointStore // optional; nil → wait approval steps fall back to in-memory timeout
 	ws         pipeline.WSBroadcaster  // optional; nil → no live pipeline event push to frontend
 	schedules  *pipeline.ScheduleStore // optional; nil → schedule endpoints return 503
+	runs       *pipeline.RunRegistry   // optional; nil → cancel endpoint returns 503
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -102,6 +103,20 @@ func (h *PipelineHandler) Emitter() pipeline.Emitter {
 	return h.emitter
 }
 
+// SetRunRegistry wires the in-memory cancel + concurrency tracker.
+// Without it, /runs/{runId}/cancel returns 503 and the run-level
+// concurrency_key gate is silently skipped.
+func (h *PipelineHandler) SetRunRegistry(r *pipeline.RunRegistry) {
+	h.runs = r
+}
+
+// RunRegistry exposes the wired registry so the scheduler-side
+// executor can reuse it (the scheduler runs need to compete for the
+// same concurrency slots as HTTP runs).
+func (h *PipelineHandler) RunRegistry() *pipeline.RunRegistry {
+	return h.runs
+}
+
 // newExecutor centralises Executor construction so every handler
 // path picks up runner/emitter/waitpoints/ws wiring identically.
 // Refactored from the inline `pipeline.NewExecutor(...)` calls in
@@ -114,6 +129,15 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 	}
 	if h.ws != nil {
 		exec = exec.WithWSBroadcaster(h.ws)
+	}
+	if h.runs != nil {
+		exec = exec.WithRunRegistry(h.runs)
+	}
+	if h.db != nil {
+		// Idempotency store is cheap to reconstruct per-run — it's a
+		// thin DB wrapper with no goroutines. Keeping construction
+		// here means tests don't need to set it explicitly.
+		exec = exec.WithIdempotencyStore(pipeline.NewIdempotencyStore(h.db))
 	}
 	return exec
 }
@@ -289,6 +313,13 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	invokingCrew := r.Header.Get("X-Crewship-Invoking-Crew")
 	invokingAgent := r.Header.Get("X-Crewship-Invoking-Agent")
 
+	// Idempotency-Key header dedupes webhook redeliveries: a second
+	// request with the same key (within 24h) returns the original
+	// run id with status=DEDUPED instead of executing twice. Falls
+	// through silently if the executor's idempotency store isn't
+	// wired (tests, dev without DB).
+	idempotencyKey := r.Header.Get("Idempotency-Key")
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:      p.ID,
@@ -297,8 +328,19 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		InvokingAgentID: invokingAgent,
 		Inputs:          body.Inputs,
 		Mode:            pipeline.ModeRun,
+		IdempotencyKey:  idempotencyKey,
 	})
 	if err != nil {
+		// Concurrency rejection is a normal 429, not an internal
+		// error. Map before the catch-all.
+		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
+			w.Header().Set("Retry-After", "5")
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error":  "concurrency limit reached for this pipeline",
+				"reason": "another run with the same concurrency_key is already in flight",
+			})
+			return
+		}
 		h.logger.Error("pipeline run: exec", "error", err, "slug", slug)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

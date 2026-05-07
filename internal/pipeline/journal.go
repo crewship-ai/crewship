@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -225,6 +226,56 @@ func (c *pipelineEmitContext) emitStepFailed(ctx context.Context, step Step, err
 		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
 	c.broadcast("pipeline.step.failed", p)
+}
+
+// emitStepRetry records a transient failure that the retry policy
+// is going to swallow with a sleep. Distinct from emitStepFailed
+// (which is the terminal outcome) — the UI shows retry events as
+// amber breadcrumbs in the run timeline so observers can see
+// "this step needed 2 attempts" without the run going red.
+func (c *pipelineEmitContext) emitStepRetry(ctx context.Context, step Step, attempt int, errorMessage string, sleepFor time.Duration) {
+	if c == nil {
+		return
+	}
+	p := map[string]any{
+		"step_id":               step.ID,
+		"attempt":               attempt,
+		"error_message_preview": truncateForPreview(errorMessage),
+		"sleep_ms":              sleepFor.Milliseconds(),
+	}
+	_, _ = c.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: c.workspaceID,
+		CrewID:      c.authorCrewID,
+		Type:        journal.EntryPipelineStepFailed, // reuse step.failed type w/ attempt counter; dedicated type would require a journal migration
+		Severity:    journal.SeverityWarn,
+		ActorType:   journal.ActorOrchestrator,
+		ActorID:     c.runID,
+		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " retrying (attempt " + intToA(attempt) + ")",
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID, "kind", "retry"),
+	})
+	c.broadcast("pipeline.step.retry", p)
+}
+
+func intToA(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 func (c *pipelineEmitContext) emitValidationFailed(ctx context.Context, step Step, reason string, action OnFailAction) {

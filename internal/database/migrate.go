@@ -1081,6 +1081,11 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// "every day at 8 fetch email and summarize" use case without
 	// requiring an agent in the loop. See migrate_consts_v80*.go.
 	{version: 80, name: "add_pipeline_schedules", sql: migrationAddPipelineSchedules},
+	// v81 adds pipeline_run_idempotency — webhook redelivery dedupe.
+	// Cancel + concurrency state stays in-process (in-memory run
+	// registry) because both couple to Go contexts; only the
+	// idempotency reservation is durable. See migrate_consts_v81*.go.
+	{version: 81, name: "add_pipeline_run_support", sql: migrationAddPipelineRunSupport},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

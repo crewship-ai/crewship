@@ -28,7 +28,17 @@ type DSL struct {
 	EstimatedDurSec  int            `json:"estimated_duration_seconds,omitempty"`
 	EgressTargets    []string       `json:"egress_targets,omitempty"`
 	CredsRequired    []CredReq      `json:"credentials_required,omitempty"`
-	Steps            []Step         `json:"steps"`
+	// ConcurrencyKey gates how many runs of this pipeline can be in
+	// flight at once for the same workspace + key value. A typical
+	// pattern is `concurrency_key: "{{ inputs.account_id }}"` so the
+	// platform serialises per-tenant runs but lets unrelated tenants
+	// run in parallel. Empty = no gate (unlimited parallelism).
+	ConcurrencyKey string `json:"concurrency_key,omitempty"`
+	// MaxConcurrent is the cap on simultaneous runs for the resolved
+	// ConcurrencyKey. Defaults to 1 when ConcurrencyKey is set
+	// (serialised execution per key), ignored when key is empty.
+	MaxConcurrent int    `json:"max_concurrent,omitempty"`
+	Steps         []Step `json:"steps"`
 }
 
 // ExecutionTier overrides the workspace-level tier mapping for a single
@@ -94,6 +104,7 @@ type Step struct {
 	Validation    *Validation     `json:"validation,omitempty"`
 	Outcomes      *Outcomes       `json:"outcomes,omitempty"`
 	OnFail        OnFailAction    `json:"on_fail,omitempty"`
+	Retry         *RetryPolicy    `json:"retry,omitempty"`
 	Raw           json.RawMessage `json:"-"` // captured raw step body for type-specific re-decoding
 
 	// agent_run fields (only populated when Type == StepAgentRun)
@@ -268,6 +279,30 @@ const (
 	OnFailAbort        OnFailAction = "abort"
 	OnFailRetryStep    OnFailAction = "retry_step"
 )
+
+// RetryPolicy controls how the executor retries a failed step. This
+// is distinct from OnFail: OnFail kicks in after VALIDATION failure
+// (output didn't match the gate), Retry kicks in after the step
+// EXECUTION returned an error (HTTP 5xx, code timeout, network blip,
+// transient agent crash). Retry exhausts before OnFail engages, so
+// a step with both Retry=3 and OnFail=escalate_tier tries the same
+// tier 3 times then bumps tier on validation fail.
+//
+// Backoff modes:
+//   - "constant"    — InitialDelayMs between every attempt
+//   - "exponential" — InitialDelayMs * 2^(attempt-1), capped at MaxDelayMs
+//
+// RetryOn is an optional allowlist of substring matches against the
+// error message. Empty = retry on any error. Use this to scope
+// retries: e.g. ["timeout", "5"] only retries timeouts and 5xx,
+// never retries 4xx or validation errors.
+type RetryPolicy struct {
+	MaxAttempts    int      `json:"max_attempts"`
+	Backoff        string   `json:"backoff,omitempty"`          // constant | exponential (default constant)
+	InitialDelayMs int      `json:"initial_delay_ms,omitempty"` // default 1000
+	MaxDelayMs     int      `json:"max_delay_ms,omitempty"`     // default 60000
+	RetryOn        []string `json:"retry_on,omitempty"`
+}
 
 // Validation gates a step's output before its result is exposed to
 // downstream steps. Schema is a JSON Schema (draft 2020-12 subset);
@@ -543,7 +578,18 @@ type RunResult struct {
 	RunID        string
 	PipelineID   string
 	PipelineSlug string
-	Status       string // COMPLETED | FAILED | DRY_RUN_OK
+	// Status is one of:
+	//   COMPLETED  — all steps passed
+	//   FAILED     — a step errored or its validation/outcome gate
+	//                couldn't be satisfied
+	//   CANCELLED  — Cancel(runID) called via /runs/{id}/cancel
+	//                (or parent context tripped); the run stopped
+	//                between steps
+	//   DEDUPED    — idempotency key matched a prior run; this
+	//                response is a recovery handle, not a fresh
+	//                execution. RunID points at the original run.
+	//   DRY_RUN_OK — preview mode, nothing actually executed
+	Status       string
 	Output       string
 	StepOutputs  map[string]string
 	WouldExecute []DryRunStep
@@ -551,6 +597,12 @@ type RunResult struct {
 	CostUSD      float64
 	FailedAtStep string // empty unless Status == FAILED
 	ErrorMessage string
+	// Deduped is true when the run resolved via an idempotency key
+	// hit. Distinct from Status="DEDUPED" so callers can detect
+	// dedupe even when they don't pattern-match Status. The Status
+	// field is the wire-friendly form; Deduped is the structured
+	// flag.
+	Deduped bool
 }
 
 // DryRunStep is one entry in WouldExecute: what the executor WOULD

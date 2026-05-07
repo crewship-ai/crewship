@@ -62,6 +62,17 @@ type Executor struct {
 	// frontend clients. Nil = no broadcast (tests, headless mode);
 	// production wiring passes ws.Hub via WithWSBroadcaster.
 	ws WSBroadcaster
+
+	// runs is the in-memory registry that tracks live runs for
+	// cancel + concurrency. Nil = no concurrency gate, no
+	// cancellation; tests skip this. Production wiring passes a
+	// process-singleton RunRegistry.
+	runs *RunRegistry
+
+	// idempotency is the DB-backed dedupe store. Nil = no
+	// idempotency layer; the IdempotencyKey field on RunInput is
+	// silently ignored. Production wiring passes a real store.
+	idempotency *IdempotencyStore
 }
 
 // WithEgressGate wires the HTTP allowlist. Builders can call this
@@ -105,6 +116,25 @@ func (e *Executor) WithWaitpointStore(s WaitpointStore) *Executor {
 // catches up only on refresh.
 func (e *Executor) WithWSBroadcaster(b WSBroadcaster) *Executor {
 	e.ws = b
+	return e
+}
+
+// WithRunRegistry wires cancel + concurrency tracking. Without it,
+// the run registry features (Cancel API, concurrency_key gate) are
+// silently absent — the executor still runs, just without those
+// gates. One registry per process; production builds the singleton
+// at server boot and passes it here.
+func (e *Executor) WithRunRegistry(r *RunRegistry) *Executor {
+	e.runs = r
+	return e
+}
+
+// WithIdempotencyStore wires the dedupe layer. Without it, the
+// IdempotencyKey field on RunInput is silently ignored (every
+// request executes fresh). Production wires a DB-backed store at
+// boot.
+func (e *Executor) WithIdempotencyStore(s *IdempotencyStore) *Executor {
+	e.idempotency = s
 	return e
 }
 
@@ -188,6 +218,17 @@ func (e *Executor) WithPipelineResolver(p PipelineResolver) *Executor {
 // DSL, and dispatches to runDSL. Production callers (sidecar handler,
 // main API handler) hit this path; tests can also exercise runDSL
 // directly with an in-memory DSL.
+//
+// Run is the gateway for the four production-readiness gates:
+//  1. Idempotency — duplicate keys short-circuit to DEDUPED.
+//  2. Concurrency — registry rejects when key is at capacity.
+//  3. Cancellation — registry's child ctx is propagated downward.
+//  4. Retry — handled per-step inside runStep, not here.
+//
+// Order matters: idempotency BEFORE concurrency. A duplicate key
+// must NOT consume a concurrency slot — otherwise webhook
+// redeliveries thunder-herd a busy queue. Concurrency-rejected runs
+// also forget the idempotency reservation so the caller can retry.
 func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
 		in.Mode = ModeRun
@@ -202,7 +243,95 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	}
 	in.pipeline = p
 	in.dsl = dsl
-	return e.runDSL(ctx, in, 0)
+
+	// Pre-allocate the runID so idempotency reserves the same id
+	// the run will eventually emit to the journal.
+	preallocRunID := in.RunIDOverride
+	if preallocRunID == "" {
+		preallocRunID = generateRunID()
+	}
+	in.RunIDOverride = preallocRunID
+
+	// Idempotency check — if the caller supplied a key and we have
+	// a store, dedupe before doing anything else.
+	if in.IdempotencyKey != "" && e.idempotency != nil && in.Mode == ModeRun {
+		resolvedID, isNew, idemErr := e.idempotency.LookupOrReserve(
+			ctx, in.WorkspaceID, in.IdempotencyKey, preallocRunID, p.ID, DefaultIdempotencyTTL,
+		)
+		if idemErr != nil {
+			return nil, fmt.Errorf("executor: idempotency: %w", idemErr)
+		}
+		if !isNew {
+			// Duplicate — return a recovery handle pointing at the
+			// original run. The HTTP handler maps this to 200 with
+			// the original run's id so retried webhooks see a stable
+			// success response.
+			return &RunResult{
+				RunID:        resolvedID,
+				PipelineID:   p.ID,
+				PipelineSlug: p.Slug,
+				Status:       "DEDUPED",
+				Deduped:      true,
+			}, nil
+		}
+		// Fresh reservation — the actual run uses the id we just
+		// reserved (preallocRunID). RunIDOverride already carries it.
+	}
+
+	// Concurrency + cancel registration. Skipped in dry-run / test-
+	// run modes — those don't have side effects and shouldn't
+	// compete for production slots. Reservation goes against the
+	// rendered concurrency_key (template-substituted from inputs)
+	// so per-tenant gating works without DSL edits.
+	if e.runs != nil && in.Mode == ModeRun {
+		key := renderConcurrencyKey(dsl.ConcurrencyKey, in.Inputs)
+		regCtx, release, regErr := e.runs.Acquire(ctx, AcquireOpts{
+			RunID:          preallocRunID,
+			WorkspaceID:    in.WorkspaceID,
+			PipelineID:     p.ID,
+			PipelineSlug:   p.Slug,
+			ConcurrencyKey: key,
+			MaxConcurrent:  dsl.MaxConcurrent,
+		})
+		if regErr != nil {
+			// Free the idempotency reservation so the caller can
+			// retry the same key without waiting 24h. Best-effort —
+			// failure here just means the key stays reserved.
+			if in.IdempotencyKey != "" && e.idempotency != nil {
+				_ = e.idempotency.Forget(ctx, in.WorkspaceID, in.IdempotencyKey)
+			}
+			return nil, regErr
+		}
+		defer release()
+		ctx = regCtx
+	}
+
+	res, err := e.runDSL(ctx, in, 0)
+	// Translate context-cancellation into a CANCELLED status when
+	// the registry confirms the cancel was user-driven (vs. a parent
+	// ctx going away unexpectedly). The runDSL loop returns the
+	// partial result with FAILED in either case; we re-label here so
+	// the caller can distinguish "user pressed Cancel" from
+	// "unexpected shutdown."
+	if err == nil && res != nil && e.runs != nil && e.runs.IsCancelRequested(preallocRunID) {
+		res.Status = "CANCELLED"
+		if res.ErrorMessage == "" {
+			res.ErrorMessage = "run cancelled"
+		}
+	}
+	return res, err
+}
+
+// renderConcurrencyKey renders the DSL's concurrency_key template
+// against the inputs map. We only support `{{ inputs.X }}` here —
+// the full Render pipeline isn't reachable yet (no step outputs at
+// reservation time). Empty template → empty key (no gate).
+func renderConcurrencyKey(template string, inputs map[string]any) string {
+	if template == "" {
+		return ""
+	}
+	rc := RenderContext{Inputs: inputs, StepOutputs: map[string]string{}, Env: map[string]string{}}
+	return Render(template, rc)
 }
 
 // RunDefinition executes an in-memory DSL without a persisted
@@ -240,8 +369,18 @@ type RunInput struct {
 	InvokingAgentID string
 	Inputs          map[string]any
 	Mode            RunMode
-	pipeline        *Pipeline
-	dsl             *DSL
+	// IdempotencyKey, when non-empty, makes Run dedupe via the wired
+	// IdempotencyStore: a duplicate request with the same
+	// (workspace_id, key) within the TTL returns the original run id
+	// with Status="DEDUPED" instead of executing again.
+	IdempotencyKey string
+	// RunIDOverride lets the caller force a specific run id. Used by
+	// the idempotency layer to ensure the reserved id is the one the
+	// run actually emits to the journal. Leave empty for the default
+	// (executor generates a fresh id).
+	RunIDOverride string
+	pipeline      *Pipeline
+	dsl           *DSL
 }
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
@@ -267,7 +406,12 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		pipelineID = "draft-" + generateRunID()
 	}
 
-	runID := generateRunID()
+	// Honour the pre-allocated run id so idempotency reservations
+	// and registry entries match the journal trail.
+	runID := in.RunIDOverride
+	if runID == "" {
+		runID = generateRunID()
+	}
 	startedAt := time.Now()
 
 	emit := &pipelineEmitContext{
@@ -305,6 +449,24 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 	}
 
 	for i := range dsl.Steps {
+		// Cancel pre-emption — if the run was cancelled (or its
+		// parent ctx tripped) between steps, exit cleanly here so
+		// the partial result records FailedAtStep correctly. The
+		// outer Run() promotes this to Status=CANCELLED when the
+		// cancel was user-initiated.
+		if err := ctx.Err(); err != nil {
+			result.Status = "FAILED"
+			if i > 0 {
+				result.FailedAtStep = dsl.Steps[i-1].ID
+			} else if len(dsl.Steps) > 0 {
+				result.FailedAtStep = dsl.Steps[0].ID
+			}
+			result.ErrorMessage = err.Error()
+			emit.emitRunFailed(ctx, result.FailedAtStep, err.Error())
+			result.DurationMs = time.Since(startedAt).Milliseconds()
+			return result, nil
+		}
+
 		step := dsl.Steps[i]
 
 		stepStart := time.Now()
@@ -354,7 +516,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		case ModeRun, ModeTestRun:
 			emit.emitStepStarted(ctx, step, i, tier)
 
-			output, stepCost, stepDur, stepErr := e.runStep(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
+			output, stepCost, stepDur, stepErr := e.runStepWithRetry(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
 			if stepErr != nil {
 				result.Status = "FAILED"
 				result.FailedAtStep = step.ID
@@ -391,6 +553,151 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 	}
 
 	return result, nil
+}
+
+// runStepWithRetry wraps runStep with the per-step retry policy.
+// Distinct concern from OnFail (which handles validation failure):
+// retry covers EXECUTION error — the step's runner returned an
+// error before we could even validate. HTTP 5xx, code timeout,
+// network blip, transient agent crash all fit here.
+//
+// Order of operations on failure:
+//  1. The step's underlying runner errors (HTTP 5xx, etc.)
+//  2. retry policy decides: retry-and-sleep, or surface
+//  3. If retries exhausted (or no policy), return error to caller
+//  4. Caller (runDSL) marks run FAILED
+//
+// We don't retry on context cancellation — ctx.Err() short-circuits
+// out so a Cancel takes effect immediately rather than sleeping
+// through the backoff.
+func (e *Executor) runStepWithRetry(
+	ctx context.Context,
+	step Step,
+	renderedPrompt string,
+	primary AdapterModel,
+	fallback []AdapterModel,
+	in RunInput,
+	runID, pipelineID string,
+	emit *pipelineEmitContext,
+	parentRender RenderContext,
+	depth int,
+) (string, float64, int64, error) {
+	rp := step.Retry
+	if rp == nil || rp.MaxAttempts <= 1 {
+		return e.runStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
+	}
+
+	maxAttempts := rp.MaxAttempts
+	if maxAttempts > 10 {
+		// Cap to keep a runaway retry from monopolising the run
+		// budget. Trigger.dev defaults max=10; we follow.
+		maxAttempts = 10
+	}
+	initialDelay := time.Duration(rp.InitialDelayMs) * time.Millisecond
+	if initialDelay <= 0 {
+		initialDelay = time.Second
+	}
+	maxDelay := time.Duration(rp.MaxDelayMs) * time.Millisecond
+	if maxDelay <= 0 {
+		maxDelay = time.Minute
+	}
+
+	var (
+		lastOut string
+		lastDur int64
+		lastErr error
+		costSum float64
+	)
+	delay := initialDelay
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", costSum, 0, err
+		}
+		out, c, dur, err := e.runStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth)
+		costSum += c
+		if err == nil {
+			return out, costSum, dur, nil
+		}
+		lastOut, lastDur, lastErr = out, dur, err
+		if !shouldRetry(err, rp.RetryOn) || attempt == maxAttempts {
+			break
+		}
+		emit.emitStepRetry(ctx, step, attempt, err.Error(), delay)
+		select {
+		case <-ctx.Done():
+			return "", costSum, 0, ctx.Err()
+		case <-time.After(delay):
+		}
+		if rp.Backoff == "exponential" {
+			delay *= 2
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+		}
+	}
+	return lastOut, costSum, lastDur, lastErr
+}
+
+// shouldRetry tests whether the error matches the policy's RetryOn
+// allowlist. Empty list = retry on any error (most permissive).
+// Substring match is intentional — error wrapping makes exact-match
+// brittle, and the typical patterns ("timeout", "5xx", "rate limit")
+// are durable substrings.
+func shouldRetry(err error, retryOn []string) bool {
+	if err == nil {
+		return false
+	}
+	if len(retryOn) == 0 {
+		return true
+	}
+	msg := err.Error()
+	for _, sub := range retryOn {
+		if sub == "" {
+			continue
+		}
+		if containsCaseFold(msg, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsCaseFold is strings.Contains with ASCII case folding.
+// Keeps "Timeout" / "timeout" / "TIMEOUT" all matching the same
+// retry allowlist entry — error message casing is inconsistent
+// across runners and we don't want callers second-guessing it.
+func containsCaseFold(s, substr string) bool {
+	if len(substr) > len(s) {
+		return false
+	}
+	return indexCaseFold(s, substr) >= 0
+}
+
+func indexCaseFold(s, substr string) int {
+	if len(substr) == 0 {
+		return 0
+	}
+	for i := 0; i+len(substr) <= len(s); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			a := s[i+j]
+			b := substr[j]
+			if a >= 'A' && a <= 'Z' {
+				a += 'a' - 'A'
+			}
+			if b >= 'A' && b <= 'Z' {
+				b += 'a' - 'A'
+			}
+			if a != b {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 // runStep dispatches one non-dry-run step to either the AgentRunner
