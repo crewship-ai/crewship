@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ChevronRight, Loader2, CheckCircle2, XCircle, Eye } from "lucide-react"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { Badge } from "@/components/ui/badge"
@@ -30,6 +30,9 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
   const { runs, loading, error } = usePipelineRuns(workspaceId, slug)
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
   const [stepEvents, setStepEvents] = useState<Map<string, StepEvent[]>>(new Map())
+  // Track which slug the auto-expand has fired for, so switching
+  // routines re-arms it but re-rendering on data refresh doesn't.
+  const autoExpandedFor = useRef<string | null>(null)
 
   // Subscribe to step events for the currently-expanded run. We
   // accumulate in a Map keyed by run_id so jumping back to a run
@@ -60,6 +63,17 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
   // Group journal entries by run_id so each run renders as a single
   // expandable row with its lifecycle entries underneath.
   const grouped = groupRunsByRunId(runs)
+
+  // Auto-expand the most recent run on first load for this slug, so
+  // users land on a populated waterfall instead of having to manually
+  // open the row. Tracked per-slug so navigating between routines
+  // re-arms the auto-expand, but data refresh on the same slug doesn't.
+  useEffect(() => {
+    if (!grouped.length) return
+    if (autoExpandedFor.current === slug) return
+    autoExpandedFor.current = slug
+    setExpandedRunId(grouped[0].runId)
+  }, [grouped, slug])
 
   if (loading) return <div className="py-6 text-center text-xs text-muted-foreground">Loading runs…</div>
   if (error) return <div className="py-4 text-xs text-red-400">Error: {error}</div>
@@ -127,13 +141,17 @@ function RunWaterfall({
   liveSteps,
 }: {
   runId: string
-  journalEntries: Array<{ ts: string; entry_type: string; severity: string; summary: string }>
+  journalEntries: Array<{ ts: string; entry_type: string; severity: string; summary: string; payload?: unknown }>
   liveSteps: StepEvent[]
 }) {
   // Merge journal step entries + live step events, dedupe by step_id+kind.
+  // Payload extraction is defensive: the API may return payload as an
+  // object (parsed JSON) or a string (when an upstream JSON.parse
+  // failure pushed raw bytes through). We tolerate both rather than
+  // showing "No step events" when the actual data is present.
   const merged: Array<{ ts: string; kind: string; stepId: string; summary: string; severity: string }> = []
   for (const entry of journalEntries) {
-    const stepId = String(((entry as unknown) as { payload?: { step_id?: string } })?.payload?.step_id ?? "")
+    const stepId = extractStepID(entry.payload)
     if (entry.entry_type.startsWith("pipeline.step.") && stepId) {
       merged.push({
         ts: entry.ts,
@@ -227,6 +245,26 @@ function groupRunsByRunId(rows: Array<{ id: string; ts: string; entry_type: stri
     }
   }
   return Array.from(groups.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+}
+
+// extractStepID pulls the step_id from a journal entry's payload field,
+// tolerating three on-the-wire shapes: parsed object (the common case),
+// JSON-encoded string (when upstream serialized it twice), and absent.
+function extractStepID(payload: unknown): string {
+  if (!payload) return ""
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload) as { step_id?: unknown }
+      return typeof parsed.step_id === "string" ? parsed.step_id : ""
+    } catch {
+      return ""
+    }
+  }
+  if (typeof payload === "object" && payload !== null) {
+    const obj = payload as { step_id?: unknown }
+    return typeof obj.step_id === "string" ? obj.step_id : ""
+  }
+  return ""
 }
 
 function formatRelative(iso: string): string {
