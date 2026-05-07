@@ -30,6 +30,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/telemetry"
@@ -541,6 +542,27 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// reaches apiRouter. Both.
 			mux.Handle("/exposed/", apiRouter)
 			logger.Info("Go API routes mounted")
+
+			// Wire the pipeline AgentRunner now that the router has
+			// finished constructing its handlers. The router exposes
+			// PipelinesHandler so we can hand it the runner and
+			// journal emitter post-construction; before this call,
+			// /pipelines/.../run returns 503 because there's no
+			// runner attached.
+			//
+			// LLMRunner is the MVP runner — talks directly to the
+			// llm middleware without container provisioning. Phase
+			// 1.5 will add a full-orchestrator runner that satisfies
+			// the same AgentRunner interface and supports skills /
+			// MCP / tool loops; SetRunner is a single point of swap.
+			if apiRouter.PipelinesHandler != nil {
+				pipeRunner := pipeline.NewLLMRunner(deps.DB, s.journalWriter, logger)
+				apiRouter.PipelinesHandler.SetRunner(pipeRunner)
+				if s.journalWriter != nil {
+					apiRouter.PipelinesHandler.SetJournal(s.journalWriter)
+				}
+				logger.Info("pipeline runner wired (LLM-direct mode; full orchestrator integration is Phase 1.5)")
+			}
 		}
 		// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues
 		if deps.WebFS != nil {

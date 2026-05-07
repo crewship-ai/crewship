@@ -583,5 +583,85 @@ export {
   CREW_PADDING_BOTTOM,
   buildGraphData,
   buildFlatGraphData,
+  buildPipelineNodes,
 }
-export type { BuildInput }
+export type { BuildInput, PipelineForGraph }
+
+// PipelineForGraph is the trimmed shape buildPipelineNodes consumes.
+// Mirrors the relevant fields of usePipelines's Pipeline type so the
+// orchestration page can pass its rows through without a transform.
+interface PipelineForGraph {
+  id: string
+  slug: string
+  name: string
+  description?: string
+  invocation_count: number
+  last_invocation_status?: string
+  author_crew_id?: string
+}
+
+// buildPipelineNodes returns React Flow nodes for the workspace's
+// saved pipelines. The orchestration page calls this and concats
+// the result onto whichever main builder it's using
+// (buildGraphData / buildFlatGraphData).
+//
+// Layout strategy: pipelines lay out in a horizontal row beneath
+// the main graph at y = baselineY. We use a fixed pitch so the
+// row is predictable; if the workspace ever has 50+ pipelines
+// dagre will be a better fit, but for the test-feature scope
+// (a handful per workspace) this stays readable and dependency-
+// free.
+//
+// Each pipeline becomes a "pipelineRun"-typed node so it picks up
+// the PipelineRunNode component registered in WorkflowGraph's
+// nodeTypes. We render the node in "completed" state with the
+// invocation count as the displayed step count — this is a static
+// "registry card" view, not a live run. When live runs land,
+// buildPipelineRunNodes (a future helper) will emit per-run nodes
+// from journal entries; until then, the registry view is enough
+// to show the pipelines exist.
+function buildPipelineNodes(
+  pipelines: PipelineForGraph[],
+  opts: { baselineY?: number; xStart?: number; pitch?: number; crewNameById?: Map<string, string> } = {},
+): Node[] {
+  if (!pipelines || pipelines.length === 0) return []
+  const baselineY = opts.baselineY ?? 800
+  const xStart = opts.xStart ?? 0
+  const pitch = opts.pitch ?? 250
+  const crewNames = opts.crewNameById ?? new Map<string, string>()
+
+  return pipelines.map((p, i): Node => {
+    // Status maps: COMPLETED → completed, FAILED → failed, anything
+    // else → queued. The registry card represents the LAST observed
+    // invocation; per-run "running" indicators come from a separate
+    // future builder driven by WS events.
+    const last = (p.last_invocation_status || "").toUpperCase()
+    let status: "completed" | "failed" | "queued" = "queued"
+    if (last === "COMPLETED") status = "completed"
+    else if (last === "FAILED") status = "failed"
+
+    const authorLabel = p.author_crew_id
+      ? (crewNames.get(p.author_crew_id) ?? p.author_crew_id)
+      : undefined
+
+    return {
+      id: `pipeline:${p.id}`,
+      type: "pipelineRun",
+      position: { x: xStart + i * pitch, y: baselineY },
+      data: {
+        pipelineSlug: p.slug,
+        pipelineName: p.name,
+        runId: p.id, // for click-through to detail
+        status,
+        // Use invocation_count in place of step progress on the
+        // registry card — communicates "this pipeline ran N times"
+        // at a glance.
+        stepCount: p.invocation_count,
+        stepIndex: p.invocation_count,
+        authorCrewLabel: authorLabel,
+      },
+      draggable: false,
+      selectable: true,
+    }
+  })
+}
