@@ -1,10 +1,12 @@
 # Crewship Pipelines — MVP PRD
 
-**Verze:** 1.0
-**Datum:** 2026-05-07
-**Status:** Draft — implementace začíná v branchi `feat/pipelines-mvp`
+**Verze:** 1.1
+**Datum:** 2026-05-07 (rev. evening — see §17)
+**Status:** Implementation in `feat/pipelines-mvp` (#281); UI rename + page in `feat/routines-rename-and-page`
 **Companion docs:** `ORCHESTRATION.md`, `CREW-EXECUTION.md`, `DATABASE.md`, `SIDECAR.md`
 **Supersedes:** `MVP-ROBUST-FOUNDATION.md` (broader background-job MVP — replaced by this focused pipeline PRD per 2026-05-07 strategic narrowing)
+
+> **READ FIRST — §17 captures all decisions made AFTER this PRD was originally written.** Sections 1–16 are historical record of original 9-day MVP scope. Real implementation extended beyond MVP by ~60% of Phase 2 backlog and adopted "Routines" as the user-facing name. §17 is the current source of truth.
 
 ---
 
@@ -688,3 +690,187 @@ These were debated 2026-05-07 and **closed** for MVP:
 - Codebase ground truth audit: see memory `project_codebase_ground_truth_2026_05.md`
 - GitHub Actions YAML model + Ansible `--check` (dry-run) pattern as primary architectural inspirations.
 - n8n workflow JSON pattern as runtime data model precedent.
+
+---
+
+## 17. Implementation status & design update (2026-05-07 evening)
+
+This section is the **current source of truth**. Sections 1–16 capture original MVP scope and are kept as historical record; where they conflict with §17, §17 wins.
+
+### 17.1 Naming: UI label = "Routines", backend stays "pipelines"
+
+The user-facing label across web UI, CLI, agent system prompt and all marketing surfaces is **Routines**. The backend (database table, Go package `internal/pipeline`, HTTP routes `/api/v1/workspaces/{ws}/pipelines/...`, sidecar port 9119 path `/pipelines/...`) keeps the `pipelines` identifier — no breaking rename, no migration.
+
+**Rationale:**
+
+- "Pipeline" carries CI/CD baggage that confuses non-engineering users.
+- Crewship has three distinct compositional layers and each needs its own term:
+  - **Routine** — atomic, repeatable, deterministic AI automation (this feature). Ship-life metaphor: nudné rutinní úkoly, které musí být vždycky přesně stejné. Naval-context fit + accessible to non-technical users.
+  - **Recipe** — Marketplace template that bundles `crew + agents + integrations + routines + skills`. Out of scope for this PR; reserved for the Marketplace work.
+  - **(future) Cyclic Issue** — recurring user issue pattern. Term is now free since "Routines" took the autonomous-automation slot.
+- GitHub precedent: table `issue_events`, UI says "Issues". Backend identifier stability + user-facing rename.
+
+**Renames applied in this PR:**
+
+| Surface | Before | After |
+|---|---|---|
+| Agent system-prompt block | `[AVAILABLE PIPELINES]` | `[AVAILABLE ROUTINES]` |
+| Sidebar nav entry | (absent) | `Routines` (under `Work`) |
+| Orchestration tab | (absent) | `Routines` (5th tab) |
+| `/routines` route | (absent) | full clone of orchestration layout |
+| CLI subcommand | `crewship pipeline ...` | `crewship routine ...` (with `pipeline` alias for back-compat) |
+| Detail sheet header, run-node label, hook UI strings | `Pipeline` | `Routine` |
+
+Identifiers that **do NOT change**: `pipelines` table, `internal/pipeline` package, Go types (`*Pipeline`, `*PipelineRun`), HTTP route paths, `pipeline_*` migration files (v78–v82), `pipeline.*` journal entry types, `pipeline.*` WS event types.
+
+### 17.2 Beyond MVP — Phase 2 features that landed in #281
+
+The §1 / §12 / §15 lists declared the following as Phase 2 / out-of-scope. They got built anyway during the same branch and are part of this PR. Status:
+
+| Feature | Original status | Landed | Stability |
+|---|---|---|---|
+| Pipeline versioning + rollback | Phase 2 (`pipeline_versions`) | ✓ migration v79 + `versions.go` | Production-ready |
+| `http` step type | Phase 2 | ✓ `runner_http.go` | **Has SSRF bug — see §17.5** |
+| `code` step type | Phase 2 | ✓ `runner_code.go` | Optional wireup; rejects when sandbox not configured |
+| `wait` step type + waitpoints | Phase 2 | ✓ `runner_wait.go` + `waitpoints.go` (DB-backed) | **Has lost-wakeup race — see §17.5** |
+| `transform` step type | not listed | ✓ `runner_transform.go` (JSONPath / template) | Production-ready |
+| Cron triggers | Phase 2 (Routines integration) | ✓ migration v80 + `schedules.go` | Single-instance only (no leader election) |
+| Webhook triggers | not listed | ✓ migration v82 + `webhooks.go` (HMAC + rate limit) | **Has rate-limiter race — see §17.5** |
+| Idempotency keys | not listed | ✓ `idempotency.go` + migration v81 | **Has stale-row leak — see §17.5** |
+| Run registry (cancel + concurrency) | not listed | ✓ `run_registry.go` | In-memory only, no persistence across restart |
+| Cost cap per run | Phase 2 | ✓ `executor.go` cost cap | De-prioritized per user direction; not blocking |
+| Outcomes / rubric grading | Phase 2 | ✓ `outcomes.go` (separate grader agent) | Soft-fail-open on unparseable grader output |
+| DAG with `needs:` parallel | not listed | ✓ `dag.go` | **Has completion-bookkeeping bug — see §17.5** |
+| Conditional `if` | not listed | ✓ in `executor.go` | Production-ready |
+| Export/Import bundles | Phase 2 (Marketplace) | ✓ in `pipelines.go` API | UI dialog deferred — CLI only for now |
+
+Original scope was 9 days × 1 BE engineer + 1 day FE. Reality: ~17,200 LOC across 71 files, 23 commits. Backend over-delivered, frontend under-delivered (see §17.3).
+
+### 17.3 Frontend page architecture — `/routines` as clone of `/orchestration`
+
+#### 17.3.1 Why a new top-level page (not just a tab)
+
+Routines are **workspace-scoped, cross-mission assets**. Schedules, webhooks, waitpoints fire autonomously regardless of which mission/issue is open. They deserve a dedicated surface like `/skills` or `/credentials`, not just a sub-view inside `/orchestration`.
+
+#### 17.3.2 Layout = clone of `/orchestration`
+
+The `/orchestration` page (`components/features/orchestration/orchestration-layout.tsx`) is a tested 3-column layout the user explicitly endorsed. `/routines` reuses the same skeleton:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ Toolbar: [Routines][Graph][Timeline][Activity]  +New  ⬇Import  ⚙   │
+├──────────┬─────────────────────────────────────────┬──────────────────┤
+│ LEFT     │ MAIN                                    │ RIGHT (drawer)   │
+│ panel    │                                         │                  │
+│          │ Tab Routines: list/board view           │ Detail panel     │
+│ Saved    │   - filter (status, tags, owner)        │ for selected     │
+│ views    │   - sort (last run, usage, name)        │ routine:         │
+│          │                                         │                  │
+│ Status:  │ Tab Graph: existing PipelineRunNode +   │ Overview         │
+│ All      │   buildPipelineNodes (already wired)    │ Editor (Monaco)  │
+│ Active   │                                         │ Runs (waterfall) │
+│ Failed   │ Tab Timeline: routine runs over time    │ Versions         │
+│          │                                         │ Schedules CRUD   │
+│ Tags:    │ Tab Activity: filtered journal feed     │ Webhooks CRUD    │
+│ ...      │   (entry_type LIKE 'pipeline.%')        │ Waitpoints (HITL)│
+│          │                                         │                  │
+│ + saved  │                                         │ Toolbar:         │
+│ views    │                                         │ [Run][TestRun]   │
+│          │                                         │ [DryRun][Cancel] │
+└──────────┴─────────────────────────────────────────┴──────────────────┘
+```
+
+#### 17.3.3 Tabs in /routines (replaces orchestration's [Issues][Graph][Timeline][Activity])
+
+| Tab | Content | Backend source |
+|---|---|---|
+| **Routines** | List/board with saved-view filters; click → detail in right panel | `GET /pipelines` |
+| **Graph** | React Flow with `PipelineRunNode` only (no agent / mission nodes); shows live run status, cross-routine `call_pipeline` edges | `usePipelines` + WS `pipeline.run.*` |
+| **Timeline** | Vertical timeline of runs across all routines, last 24h / 7d / 30d windows | `GET /pipelines/{slug}/runs` aggregated |
+| **Activity** | Journal feed filtered to `pipeline.*` entry types | existing `journal_entries` query |
+
+#### 17.3.4 Detail panel sub-tabs (right column, opens on routine select)
+
+| Sub-tab | Content | Hook |
+|---|---|---|
+| **Overview** | Description, author, last run, total invocations, tier config, declared egress, credentials required | `usePipelines` |
+| **Editor** | Monaco DSL view, read-only in this PR; write/save = future PR | inline JSON |
+| **Runs** | Paginated runs list, filter by status, click → live waterfall with step-level WS events | `usePipelineRuns` + `pipeline.step.*` consumer |
+| **Versions** | Immutable history, diff viewer, rollback button | existing `useVersions` |
+| **Schedules** | List of cron schedules, add/edit/delete; cron expression input + human-readable preview | `usePipelineSchedules` (currently dead, wired in this PR) |
+| **Webhooks** | List of webhook endpoints + tokens, regenerate token, delete | new `usePipelineWebhooks` |
+| **Waitpoints** | Pending HITL approvals (inbox), approve/reject inline | new `usePipelineWaitpoints` |
+
+#### 17.3.5 Sidebar nav
+
+```
+Work
+  Dashboard
+  Orchestration
+  Crews
+  Routines      ← NEW (icon: ScrollText / Repeat / Anchor)
+Configure
+  Skills
+  Marketplace
+  Credentials
+  Integrations
+Monitor
+  Journal
+System
+  Settings
+  Admin
+```
+
+`/routines` lives under **Work** (same level as Orchestration), not Configure — a routine is something you run + monitor, not something you configure once and forget.
+
+#### 17.3.6 Existing `/orchestration` integration
+
+The 5th tab `Routines` is also added to the existing orchestration layout (`ORCH_TABS`) for cross-context discovery. Inside orchestration, the Routines tab shows the same list but in a compact view; clicking a routine opens the existing `pipeline-detail-sheet.tsx` side-sheet (already implemented). This gives users a way to invoke a routine while staying in mission context.
+
+The existing graph integration (`PipelineRunNode` rendered by `buildPipelineNodes` in `workflow-graph.tsx`) is preserved — pipeline runs invoked from within orchestration continue to render as nodes in the agent graph.
+
+### 17.4 Step-level WS events — wire the consumer
+
+`use-realtime.tsx` already typed `pipeline.step.started/completed/failed/validation_failed` events at line 40-46. Backend broadcasts them via `WSBroadcaster`. Until this PR, no client subscribed → broadcast into void.
+
+The Runs sub-tab waterfall (§17.3.4) is the primary consumer: each step lights up live as the agent's CLI adapter completes it, no polling.
+
+### 17.5 Known stability issues addressed in this PR
+
+The branch shipped 7 real bugs alongside the new features. They're fixed in the same PR (under §17 stabilization commits):
+
+1. **`dag.go:218-222` — DAG completes failed steps.** `wg.Wait()` loop unconditionally marks `completed[s.ID]=true` even when the step errored, causing downstream branches to advance with empty inputs. Fix: only mark completed when no error.
+2. **`dag.go:243-249` — final output picker wrong for DAGs.** Picks last in source order; should pick the leaf node. Fix: traverse to find the unique terminal step.
+3. **`waitpoints.go:113-149` — lost-wakeup race.** `WaitFor` registers listener after `checkDecided`; completer fire in between drops to `default`. Fix: register listener first, then re-check decided state.
+4. **`webhooks.go:255-271` — rate-limiter lost update.** Counter `windows[key]` increment runs outside the mutex. Fix: hold the lock through both lookup and increment, or use `atomic.Int64` per key.
+5. **`idempotency.go:66-104` — stale-row leak.** `DELETE expired` failure is swallowed; subsequent `SELECT` returns expired row as if live. Fix: propagate sweep error or filter `expires_at > now` in the SELECT.
+6. **`runner_http.go:84-85` — SSRF via redirect.** `http.Client` follows redirects; allowlist checked only on initial host. Fix: install `CheckRedirect` callback that re-validates the redirected host against the egress allowlist.
+7. **`runner_orchestrator.go:309` — cross-workspace agent execution.** Agent slug lookup omits workspace_id constraint. Fix: `JOIN crews ON crews.workspace_id = ?`.
+8. **`dsl.go:317-321` — template validation incomplete.** Only `Prompt` and `NestedInputs` validated; templates in `step.HTTP.URL/Body/Headers`, `step.Wait.Until`, `step.Code.Code`, `step.Transform.*`, `step.If` skip validation. Fix: extend `validateTemplates` to walk all template-bearing fields.
+9. **`executor.go:711-717` — backoff without jitter.** Exponential backoff causes thundering herd. Fix: add full jitter (random value in `[0, computed_delay)`).
+10. **`waitpoints.go:31-34` — recovery scan promised but absent.** Pending waitpoints in DB after restart have no goroutine waiting on them. Fix: server boot calls `RecoverPending(ctx)` which re-attaches goroutines.
+
+### 17.6 Persistence promise vs reality
+
+§13 risk row 1 ("In-process executor + binary restart = run dies") is honest. But `bdca1fa "production-readiness"` and `c950a60 "production WaitpointStore"` commit messages overstate stability. Until pipeline runs persist as DB rows with checkpoint state, hard-kill loses active runs.
+
+**This PR does NOT add full run persistence.** A dedicated `pipeline_runs` table with `status` column and `current_step_id` checkpoint is the right next-step but is scoped to a follow-up PR (`feat/routines-run-persistence`). For this PR:
+- Recovery scan re-attaches goroutines for pending waitpoints (§17.5 #10) — partial protection
+- Idempotency layer dedupes accidental re-trigger after manual recovery
+- Documented honestly: hard-kill = active runs interrupted, journal logs `run.started` without matching `run.completed/failed`
+
+### 17.7 Out of scope (still)
+
+- Captain LLM integration as routine author orchestrator
+- Marketplace UI for routines
+- NL → cron expression converter (Foundation PRD)
+- Errors fingerprinting + bulk replay (Foundation PRD)
+- Auto-disable after N consecutive failures
+- Inbound MCP server exposing routines as MCP tools
+- Distributed scheduler with leader election
+- `pipeline_runs` dedicated table with status enum + checkpoint
+- Editor write-mode (Monaco read-only in this PR; `PATCH` exists in API but UI is view-only)
+
+### 17.8 Cost cap deprioritization
+
+Per user direction 2026-05-07 evening: cost cap implementation in this branch is **NOT a blocker**. Functional correctness, visibility, auditability, and CLI parity take priority. Cost-related UX (estimate vs actual, daily caps, alerting) is deferred to a dedicated PR after stabilization.
