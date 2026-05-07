@@ -7,11 +7,10 @@ import {
   Activity,
   BookOpen,
   DollarSign,
-  LineChart,
   ListOrdered,
+  Lock,
   Radio,
   RadioTower,
-  Shield,
   Zap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -21,9 +20,6 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import { RunsView } from "@/components/features/journal/runs-view"
-import { AuditView } from "@/components/features/journal/audit-view"
-import { SpendView } from "@/components/features/journal/spend-view"
-import { EvalView } from "@/components/features/journal/eval-view"
 import { LogsPanel } from "@/components/features/logs/logs-panel"
 import { ResourcesStrip } from "@/components/features/logs/resources-strip"
 import { sinceFromTimeRange, type CustomRange, type TimeRange } from "@/components/features/logs/time-range-picker"
@@ -54,7 +50,7 @@ interface AgentSummary {
   crew?: { avatar_style?: string | null } | null
 }
 
-type JournalTab = "timeline" | "runs" | "eval" | "audit" | "spend"
+type JournalTab = "timeline" | "runs" | "spend"
 
 interface TabDef {
   id: JournalTab
@@ -62,25 +58,31 @@ interface TabDef {
   icon: typeof ListOrdered
   /** When true, only OWNER/ADMIN see the tab. */
   adminOnly?: boolean
+  /**
+   * Locked tabs render with a "Soon" badge and a lock icon, and the
+   * click handler is a no-op so activeTab never lands on them.
+   */
+  locked?: boolean
 }
 
 const ALL_TABS: TabDef[] = [
   { id: "timeline", label: "Timeline", icon: ListOrdered },
   { id: "runs", label: "Runs", icon: Activity },
-  { id: "eval", label: "Eval", icon: LineChart },
-  { id: "audit", label: "Audit", icon: Shield, adminOnly: true },
-  { id: "spend", label: "Spend", icon: DollarSign, adminOnly: true },
+  { id: "spend", label: "Spend", icon: DollarSign, adminOnly: true, locked: true },
 ]
 
 /**
  * Crew Journal — workspace-wide records center.
  *
- * Five tabs render different immutable record types under one roof:
  *   - Timeline: runtime events from `journal_entries` (Grafana-style)
- *   - Runs:     agent run aggregates from `/api/v1/runs`
- *   - Eval:     eval.* journal projection
- *   - Audit:    entity CRUD log from `/api/v1/audit` (admin-only)
- *   - Spend:    cost ledger from `/api/v1/paymaster/*` (admin-only)
+ *   - Runs:     agent run aggregates derived from journal `run.*` entries
+ *   - Spend:    cost ledger surface — currently locked behind a "Soon"
+ *               badge until LLM-cost attribution is prioritized.
+ *
+ * Audit log moved to `/settings?tab=audit` (admin compliance view).
+ * Eval / quartermaster replay surface was removed; the backend emit
+ * machinery in `internal/quartermaster/` is preserved as a nice-to-have
+ * to revisit when there are >=2 production missions worth comparing.
  *
  * Per-tab RBAC hides admin-only tabs entirely from non-admins so they
  * never see a "click here for 403" affordance.
@@ -142,11 +144,16 @@ export default function JournalPage() {
   }, [])
   const [activeTab, setActiveTab] = useState<JournalTab>(initialTab)
 
-  // If admin permissions resolve to non-admin, demote out of an admin-only tab.
+  // If admin permissions resolve to non-admin OR a deeplink lands on a
+  // locked tab, demote back to timeline. Locked check fires regardless
+  // of role so even admins can't snap into an unimplemented surface via
+  // a stale bookmark.
   useEffect(() => {
     if (rolesLoading) return
     const tabDef = ALL_TABS.find((t) => t.id === activeTab)
-    if (tabDef?.adminOnly && !isAdmin) setActiveTab("timeline")
+    if (!tabDef || tabDef.locked || (tabDef.adminOnly && !isAdmin)) {
+      setActiveTab("timeline")
+    }
   }, [activeTab, isAdmin, rolesLoading])
 
   // Crew + agent options for the toolbar selects.
@@ -360,31 +367,52 @@ export default function JournalPage() {
         aria-label="Journal views"
         className="shrink-0 flex items-center h-9 bg-card border-b border-border/60 px-2 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
       >
-        {visibleTabs.map(({ id, label, icon: Icon, adminOnly }) => (
-          <motion.button
-            key={id}
-            role="tab"
-            aria-selected={activeTab === id}
-            onClick={() => setActiveTab(id)}
-            whileHover={{ y: -1 }}
-            whileTap={{ y: 0, scale: 0.97 }}
-            transition={{ duration: 0.12 }}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-colors duration-100 relative top-px whitespace-nowrap shrink-0",
-              activeTab === id
-                ? "border-blue-400 text-blue-400"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            <Icon className="h-3 w-3 opacity-75" />
-            {label}
-            {adminOnly && (
-              <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-mono">
-                admin
-              </span>
-            )}
-          </motion.button>
-        ))}
+        {visibleTabs.map(({ id, label, icon: Icon, adminOnly, locked }) => {
+          const isActive = activeTab === id
+          return (
+            <motion.button
+              key={id}
+              role="tab"
+              aria-selected={isActive}
+              aria-disabled={locked || undefined}
+              onClick={() => {
+                // Locked tabs never accept activation. Clicks fall
+                // through to the cursor-not-allowed style so the user
+                // sees the tooltip but the URL/state stays put.
+                if (locked) return
+                setActiveTab(id)
+              }}
+              whileHover={locked ? undefined : { y: -1 }}
+              whileTap={locked ? undefined : { y: 0, scale: 0.97 }}
+              transition={{ duration: 0.12 }}
+              title={locked ? `${label} — coming soon` : undefined}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-colors duration-100 relative top-px whitespace-nowrap shrink-0",
+                locked
+                  ? "border-transparent text-muted-foreground/40 cursor-not-allowed"
+                  : isActive
+                    ? "border-blue-400 text-blue-400"
+                    : "border-transparent text-muted-foreground hover:text-foreground/80",
+              )}
+            >
+              <Icon className="h-3 w-3 opacity-75" />
+              {label}
+              {locked && (
+                <>
+                  <Lock className="h-2.5 w-2.5 opacity-60" />
+                  <span className="text-[9px] uppercase tracking-wider text-amber-400/70 font-mono">
+                    soon
+                  </span>
+                </>
+              )}
+              {adminOnly && !locked && (
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 font-mono">
+                  admin
+                </span>
+              )}
+            </motion.button>
+          )
+        })}
       </div>
 
       {/* ---- Tab content (animated swap) ---- */}
@@ -447,45 +475,6 @@ export default function JournalPage() {
             className="flex-1 min-h-0 overflow-auto p-4"
           >
             <RunsView workspaceId={workspaceId} workspaceLoading={wsLoading} />
-          </motion.div>
-        )}
-
-        {activeTab === "eval" && (
-          <motion.div
-            key="eval"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-hidden"
-          >
-            <EvalView />
-          </motion.div>
-        )}
-
-        {activeTab === "audit" && isAdmin && (
-          <motion.div
-            key="audit"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-hidden"
-          >
-            <AuditView />
-          </motion.div>
-        )}
-
-        {activeTab === "spend" && isAdmin && (
-          <motion.div
-            key="spend"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="flex-1 min-h-0 overflow-hidden"
-          >
-            <SpendView />
           </motion.div>
         )}
       </AnimatePresence>
