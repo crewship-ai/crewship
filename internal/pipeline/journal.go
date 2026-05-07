@@ -228,6 +228,32 @@ func (c *pipelineEmitContext) emitStepFailed(ctx context.Context, step Step, err
 	c.broadcast("pipeline.step.failed", p)
 }
 
+// emitStepSkipped records that a step was skipped because its If
+// condition evaluated to false. Distinct from failed (the step
+// didn't even attempt execution) and from validation_failed (it
+// ran but failed a gate). UI surfaces these as a greyed-out node
+// with the condition string in the tooltip.
+func (c *pipelineEmitContext) emitStepSkipped(ctx context.Context, step Step, condition string) {
+	if c == nil {
+		return
+	}
+	p := map[string]any{
+		"step_id":   step.ID,
+		"condition": condition,
+	}
+	_, _ = c.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: c.workspaceID,
+		CrewID:      c.authorCrewID,
+		Type:        journal.EntryPipelineStepCompleted, // reuse step.completed type with kind=skipped marker
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorOrchestrator,
+		ActorID:     c.runID,
+		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " skipped (if=false)",
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID, "kind", "skipped"),
+	})
+	c.broadcast("pipeline.step.skipped", p)
+}
+
 // emitStepRetry records a transient failure that the retry policy
 // is going to swallow with a sleep. Distinct from emitStepFailed
 // (which is the terminal outcome) — the UI shows retry events as

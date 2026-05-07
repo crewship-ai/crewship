@@ -275,6 +275,15 @@ var startCmd = &cobra.Command{
 			srv.APIRouter().PipelinesHandler.SetRunRegistry(runRegistry)
 			logger.Info("pipeline run registry wired (cancel + concurrency_key gating)")
 
+			// Webhook store — event-driven triggers. Dispatch is
+			// public (no auth middleware); auth comes from the token
+			// in the URL plus optional HMAC.
+			if deps.DB != nil {
+				webhookStore := pipeline.NewWebhookStore(deps.DB)
+				srv.APIRouter().PipelinesHandler.SetWebhookStore(webhookStore)
+				logger.Info("pipeline webhooks wired (event-driven triggers; HMAC + per-token rate limit)")
+			}
+
 			// Pipeline schedules — cron triggers for saved pipelines.
 			// The store backs the CRUD endpoints; the scheduler runs
 			// in-process and fires due schedules every 30s.

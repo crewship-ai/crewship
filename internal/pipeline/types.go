@@ -37,8 +37,19 @@ type DSL struct {
 	// MaxConcurrent is the cap on simultaneous runs for the resolved
 	// ConcurrencyKey. Defaults to 1 when ConcurrencyKey is set
 	// (serialised execution per key), ignored when key is empty.
-	MaxConcurrent int    `json:"max_concurrent,omitempty"`
-	Steps         []Step `json:"steps"`
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
+	// MaxCostUSD is a hard guardrail on the run's accumulated cost.
+	// The executor checks this between steps; the first step whose
+	// completion pushes the running total above the cap triggers a
+	// FAILED status with FailedAtStep set to that step. 0 = no cap.
+	//
+	// This is a budget gate, not a forecast — by the time the cap
+	// trips the work has already been done (and paid for). Use the
+	// estimated_cost_usd planning metadata to AVOID runaway
+	// pipelines; use MaxCostUSD to STOP one already in flight from
+	// going further into the red.
+	MaxCostUSD float64 `json:"max_cost_usd,omitempty"`
+	Steps      []Step  `json:"steps"`
 }
 
 // ExecutionTier overrides the workspace-level tier mapping for a single
@@ -96,16 +107,39 @@ type CredReq struct {
 // wait, transform, branch) are deferred to Phase 2; the parser
 // rejects them with a clear error at save time.
 type Step struct {
-	ID            string          `json:"id"`
-	Type          StepType        `json:"type"`
-	Complexity    Complexity      `json:"complexity,omitempty"`
-	ModelOverride string          `json:"model_override,omitempty"`
-	TimeoutSec    int             `json:"timeout_seconds,omitempty"`
-	Validation    *Validation     `json:"validation,omitempty"`
-	Outcomes      *Outcomes       `json:"outcomes,omitempty"`
-	OnFail        OnFailAction    `json:"on_fail,omitempty"`
-	Retry         *RetryPolicy    `json:"retry,omitempty"`
-	Raw           json.RawMessage `json:"-"` // captured raw step body for type-specific re-decoding
+	ID            string       `json:"id"`
+	Type          StepType     `json:"type"`
+	Complexity    Complexity   `json:"complexity,omitempty"`
+	ModelOverride string       `json:"model_override,omitempty"`
+	TimeoutSec    int          `json:"timeout_seconds,omitempty"`
+	Validation    *Validation  `json:"validation,omitempty"`
+	Outcomes      *Outcomes    `json:"outcomes,omitempty"`
+	OnFail        OnFailAction `json:"on_fail,omitempty"`
+	Retry         *RetryPolicy `json:"retry,omitempty"`
+	// If is a template-substituted condition. The step is skipped
+	// when the rendered string is falsey (empty, "false", "0",
+	// "null", "no" — case-insensitive). Closes the GitHub Actions
+	// `if:` parity gap: callers can branch on input flags ("dry_run")
+	// or on prior step outputs ("{{ steps.classify.output }}").
+	//
+	// Skipped steps record output "<skipped>" and emit
+	// pipeline.step.skipped — they don't trip OnFail because
+	// "didn't run" is a structurally different outcome from "ran
+	// and failed."
+	If string `json:"if,omitempty"`
+	// Needs declares the step IDs this step depends on. The DAG
+	// scheduler uses Needs to compute layers — steps with empty
+	// Needs run first; steps whose Needs are all complete run next,
+	// in parallel. Empty list (default) keeps GitHub Actions parity:
+	// no needs = depends on the previous step in source order.
+	//
+	// A step with explicit Needs OPTS IN to the DAG scheduler. When
+	// any step in the DSL has Needs, the executor switches from
+	// linear mode (each step waits for the previous) to DAG mode
+	// (steps run when their dependencies complete). This keeps
+	// existing single-thread pipelines working unchanged.
+	Needs []string        `json:"needs,omitempty"`
+	Raw   json.RawMessage `json:"-"` // captured raw step body for type-specific re-decoding
 
 	// agent_run fields (only populated when Type == StepAgentRun)
 	AgentSlug string `json:"agent_slug,omitempty"`

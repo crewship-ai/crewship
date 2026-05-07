@@ -1086,6 +1086,10 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// registry) because both couple to Go contexts; only the
 	// idempotency reservation is durable. See migrate_consts_v81*.go.
 	{version: 81, name: "add_pipeline_run_support", sql: migrationAddPipelineRunSupport},
+	// v82 adds pipeline_webhooks — event-driven trigger surface
+	// alongside cron schedules. Closes the "Stripe webhook fires
+	// pipeline" use case. See migrate_consts_v82*.go.
+	{version: 82, name: "add_pipeline_webhooks", sql: migrationAddPipelineWebhooks},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

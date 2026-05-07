@@ -28,6 +28,7 @@ type PipelineHandler struct {
 	ws         pipeline.WSBroadcaster  // optional; nil → no live pipeline event push to frontend
 	schedules  *pipeline.ScheduleStore // optional; nil → schedule endpoints return 503
 	runs       *pipeline.RunRegistry   // optional; nil → cancel endpoint returns 503
+	webhooks   *pipeline.WebhookStore  // optional; nil → webhook endpoints return 503
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -115,6 +116,13 @@ func (h *PipelineHandler) SetRunRegistry(r *pipeline.RunRegistry) {
 // same concurrency slots as HTTP runs).
 func (h *PipelineHandler) RunRegistry() *pipeline.RunRegistry {
 	return h.runs
+}
+
+// SetWebhookStore wires pipeline_webhooks persistence + dispatch.
+// Without it, the webhook CRUD endpoints + the public dispatch
+// endpoint return 503.
+func (h *PipelineHandler) SetWebhookStore(s *pipeline.WebhookStore) {
+	h.webhooks = s
 }
 
 // newExecutor centralises Executor construction so every handler

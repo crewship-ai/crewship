@@ -322,6 +322,48 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	return res, err
 }
 
+// evalIfCondition decides whether a step.If render result counts as
+// "true". Empty + the obvious falsey strings short-circuit to false;
+// everything else is true. Case-insensitive to match how YAML/JSON
+// values flow through templates ("False" from a Python service still
+// reads as falsey).
+//
+// Mirrors GitHub Actions' `if:` evaluator on the easy cases (no full
+// expression language — that's a deeper rabbit hole and Render
+// already covers the substitution side).
+func evalIfCondition(rendered string) bool {
+	s := rendered
+	// Trim ASCII whitespace without importing strings (keeps the
+	// hot path allocation-free).
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
+		s = s[1:]
+	}
+	for len(s) > 0 {
+		last := s[len(s)-1]
+		if last != ' ' && last != '\t' && last != '\n' && last != '\r' {
+			break
+		}
+		s = s[:len(s)-1]
+	}
+	if s == "" {
+		return false
+	}
+	// ASCII fold for the falsey-literal check
+	low := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		low[i] = c
+	}
+	switch string(low) {
+	case "false", "0", "null", "nil", "no", "off":
+		return false
+	}
+	return true
+}
+
 // renderConcurrencyKey renders the DSL's concurrency_key template
 // against the inputs map. We only support `{{ inputs.X }}` here —
 // the full Render pipeline isn't reachable yet (no step outputs at
@@ -478,6 +520,19 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		}
 		renderedPrompt := Render(step.Prompt, ctxRender)
 
+		// Conditional execution. We evaluate the rendered If string
+		// for truthiness BEFORE tier resolution / runner dispatch so
+		// a skipped step doesn't burn any tokens or DB lookups.
+		// Skipped steps still appear in the journal so observers see
+		// "this branch wasn't taken."
+		if step.If != "" {
+			if !evalIfCondition(Render(step.If, ctxRender)) {
+				emit.emitStepSkipped(ctx, step, step.If)
+				result.StepOutputs[step.ID] = "<skipped>"
+				continue
+			}
+		}
+
 		tier, fallback, err := e.resolver.Resolve(ctx, in.WorkspaceID, step)
 		if err != nil {
 			result.Status = "FAILED"
@@ -531,6 +586,24 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 			result.StepOutputs[step.ID] = output
 			result.CostUSD += stepCost
 			emit.emitStepCompleted(ctx, step, output, stepDur, stepCost)
+
+			// Cost-cap gate. Checked AFTER the step completes (we
+			// can't refund work already done) but BEFORE the next
+			// step kicks off so a runaway pipeline halts as soon as
+			// the budget is breached. Per-RunInput max would also
+			// be useful but DSL-level is the more common case
+			// (templates pin the budget regardless of caller).
+			if dsl.MaxCostUSD > 0 && result.CostUSD > dsl.MaxCostUSD {
+				result.Status = "FAILED"
+				result.FailedAtStep = step.ID
+				result.ErrorMessage = fmt.Sprintf("cost cap exceeded: $%.4f > $%.4f after step %q", result.CostUSD, dsl.MaxCostUSD, step.ID)
+				emit.emitRunFailed(ctx, step.ID, result.ErrorMessage)
+				if in.Mode == ModeRun && in.pipeline != nil {
+					_ = e.store.RecordInvocation(ctx, in.pipeline.ID, "FAILED")
+				}
+				result.DurationMs = time.Since(startedAt).Milliseconds()
+				return result, nil
+			}
 		}
 		_ = stepStart
 	}

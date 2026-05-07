@@ -380,6 +380,15 @@ func (r *Router) registerRoutes() {
 	// until either it finishes or the operator pre-empts it.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active", authed(wsCtx(http.HandlerFunc(pipes.ListActiveRuns))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
+	// Pipeline webhooks — event-driven trigger surface alongside
+	// cron schedules. CRUD requires auth; the public dispatch
+	// endpoint authenticates via the token + optional HMAC instead.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks", authed(wsCtx(http.HandlerFunc(pipes.ListWebhooks))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks", authed(wsCtx(http.HandlerFunc(pipes.CreateWebhook))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteWebhook))))
+	// Public dispatch — no `authed` wrapper. The token in the path
+	// is the auth surface; signing_secret + HMAC layered on top.
+	r.mux.HandleFunc("POST /api/v1/webhooks/{token}", pipes.FireWebhook)
 	// Internal /api/v1/internal/pipelines/save route is registered
 	// further down where `internalAuth` is in scope (alongside the
 	// other /internal endpoints). See line ~640 below.
