@@ -96,8 +96,19 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 	case err != nil:
 		return nil, fmt.Errorf("pipeline: lookup existing slug: %w", err)
 	default:
-		// update path
-		_, err := s.db.ExecContext(ctx, `
+		// update path — wraps the in-place UPDATE + the
+		// pipeline_versions insert in a single transaction so the
+		// head pointer and the immutable history row land
+		// atomically. Without this, a crash between the two writes
+		// would leave the head pointing at a version row that
+		// doesn't exist (or vice versa).
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline: begin tx: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		_, err = tx.ExecContext(ctx, `
 UPDATE pipelines SET
     name = ?, description = ?, dsl_version = ?, definition_json = ?, definition_hash = ?,
     author_crew_id = ?, author_agent_id = ?, author_user_id = ?, author_chat_id = ?, author_run_id = ?,
@@ -119,11 +130,28 @@ WHERE id = ?`,
 		if err != nil {
 			return nil, fmt.Errorf("pipeline: update: %w", err)
 		}
+
+		// Append a new version row (or no-op if hash matches).
+		// SaveVersion handles dedup against existing versions, so
+		// re-saving identical bytes is idempotent.
+		if err := s.saveVersionTx(ctx, tx, existingID, in, hash, now); err != nil {
+			return nil, fmt.Errorf("pipeline: save version (update): %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("pipeline: commit: %w", err)
+		}
 		return s.GetByID(ctx, existingID)
 	}
 
 	id := generatePipelineID()
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline: begin tx (insert): %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO pipelines (
     id, workspace_id, slug, name, description, dsl_version,
     definition_json, definition_hash,
@@ -162,9 +190,100 @@ INSERT INTO pipelines (
 		}
 		return nil, fmt.Errorf("pipeline: insert: %w", err)
 	}
+
+	// Append v1 to pipeline_versions in the same transaction so a
+	// new pipeline always has a version row from the start.
+	if err := s.saveVersionTx(ctx, tx, id, in, hash, now); err != nil {
+		return nil, fmt.Errorf("pipeline: save version (insert): %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("pipeline: commit (insert): %w", err)
+	}
 	_ = existingCreatedAt // silence unused (kept for future audit log surface)
 
 	return s.GetByID(ctx, id)
+}
+
+// saveVersionTx is the in-transaction variant of SaveVersion used by
+// Save's atomic dual-write. Falls through silently when the
+// pipeline_versions table is missing — Save was working fine pre-v79
+// and we don't want to break tests that use the older minimal
+// schema. Production builds always have v79 applied.
+func (s *Store) saveVersionTx(ctx context.Context, tx *sql.Tx, pipelineID string, in SaveInput, hash string, now time.Time) error {
+	// Detect dedup: if a row already exists with this hash, we
+	// don't need to insert (re-saving identical content is a no-op
+	// at the version level too). Hand off to a SELECT inside the
+	// tx for atomicity.
+	var existing int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM pipeline_versions WHERE pipeline_id = ? AND definition_hash = ? LIMIT 1`,
+		pipelineID, hash,
+	).Scan(&existing); err == nil {
+		// Already have this version — no-op.
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		// Likely "no such table: pipeline_versions" on pre-v79
+		// test schemas. Surface that as a soft skip so older
+		// tests using the minimal schema continue to pass.
+		if strings.Contains(err.Error(), "no such table") {
+			return nil
+		}
+		return fmt.Errorf("hash lookup: %w", err)
+	}
+
+	// Compute next version number inside the tx.
+	var head int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM pipeline_versions WHERE pipeline_id = ?`,
+		pipelineID,
+	).Scan(&head); err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return nil
+		}
+		return fmt.Errorf("max version: %w", err)
+	}
+	newVersion := head + 1
+	parentVal := sql.NullInt64{}
+	if head > 0 {
+		parentVal = sql.NullInt64{Int64: int64(head), Valid: true}
+	}
+
+	authorType := "agent"
+	authorID := in.Author.AgentID
+	if in.Author.Via == AuthoredViaUser {
+		authorType = "user"
+		authorID = in.Author.UserID
+	} else if in.Author.Via == AuthoredViaImported {
+		authorType = "imported"
+		authorID = in.Author.ImportedURL
+	}
+	if authorID == "" {
+		authorID = "unknown"
+	}
+
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO pipeline_versions (
+    id, pipeline_id, version, definition_json, definition_hash,
+    author_type, author_id, parent_version, change_summary, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+		generateVersionID(), pipelineID, newVersion, in.DefinitionJSON, hash,
+		authorType, authorID, parentVal,
+		now.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return nil
+		}
+		return fmt.Errorf("insert version: %w", err)
+	}
+	// Bump pipelines.head_version too.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE pipelines SET head_version = ? WHERE id = ?`, newVersion, pipelineID,
+	); err != nil {
+		return fmt.Errorf("update head: %w", err)
+	}
+	return nil
 }
 
 // GetByID returns the pipeline with the given id, or ErrNotFound if

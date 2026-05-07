@@ -100,27 +100,29 @@ func TestVersions_DifferentContentBumpsVersion(t *testing.T) {
 	defer db.Close()
 	store := NewStore(db)
 	ctx := context.Background()
+	// Save creates v1 atomically (dual-write); explicit SaveVersion
+	// calls below add v2, v3.
 	saved, _ := store.Save(ctx, validSaveInput("p1"))
 
 	_, err := store.SaveVersion(ctx, SaveVersionInput{
-		PipelineID: saved.ID, DefinitionJSON: `{"name":"v1","steps":[]}`,
+		PipelineID: saved.ID, DefinitionJSON: `{"name":"manual_v1","steps":[]}`,
 		AuthorType: "agent", AuthorID: "a1",
 	})
 	if err != nil {
-		t.Fatalf("v1: %v", err)
+		t.Fatalf("manual v1: %v", err)
 	}
-	v2, err := store.SaveVersion(ctx, SaveVersionInput{
-		PipelineID: saved.ID, DefinitionJSON: `{"name":"v2","steps":[]}`,
+	v3, err := store.SaveVersion(ctx, SaveVersionInput{
+		PipelineID: saved.ID, DefinitionJSON: `{"name":"manual_v2","steps":[]}`,
 		AuthorType: "agent", AuthorID: "a1", ChangeSummary: "added step",
 	})
 	if err != nil {
-		t.Fatalf("v2: %v", err)
+		t.Fatalf("manual v2: %v", err)
 	}
-	if v2.Version != 2 {
-		t.Errorf("v2: got %d", v2.Version)
+	if v3.Version != 3 {
+		t.Errorf("expected v3 (Save=v1, manual=v2, manual=v3), got %d", v3.Version)
 	}
-	if v2.ParentVersion == nil || *v2.ParentVersion != 1 {
-		t.Errorf("v2 parent should be 1, got %v", v2.ParentVersion)
+	if v3.ParentVersion == nil || *v3.ParentVersion != 2 {
+		t.Errorf("v3 parent should be 2, got %v", v3.ParentVersion)
 	}
 }
 
@@ -129,15 +131,17 @@ func TestVersions_ListReturnsNewestFirst(t *testing.T) {
 	defer db.Close()
 	store := NewStore(db)
 	ctx := context.Background()
+	// Save creates v1 from validSaveInput; subsequent SaveVersion
+	// calls add v2 and v3 with distinct content.
 	saved, _ := store.Save(ctx, validSaveInput("p1"))
 
-	for i, json := range []string{`{"v":"1"}`, `{"v":"2"}`, `{"v":"3"}`} {
+	for i, json := range []string{`{"v":"manual1"}`, `{"v":"manual2"}`} {
 		_, err := store.SaveVersion(ctx, SaveVersionInput{
 			PipelineID: saved.ID, DefinitionJSON: json,
 			AuthorType: "agent", AuthorID: "a", ChangeSummary: string(rune('a' + i)),
 		})
 		if err != nil {
-			t.Fatalf("save v%d: %v", i+1, err)
+			t.Fatalf("save manual %d: %v", i+1, err)
 		}
 	}
 	out, err := store.ListVersions(ctx, saved.ID, 0)
@@ -158,12 +162,11 @@ func TestVersions_Rollback(t *testing.T) {
 	defer db.Close()
 	store := NewStore(db)
 	ctx := context.Background()
+	// Save creates v1; adding two more SaveVersion calls = v2, v3.
 	saved, _ := store.Save(ctx, validSaveInput("p1"))
 
-	v1Json := `{"v":"1"}`
-	v2Json := `{"v":"2"}`
-	v3Json := `{"v":"3"}`
-	_, _ = store.SaveVersion(ctx, SaveVersionInput{PipelineID: saved.ID, DefinitionJSON: v1Json, AuthorType: "agent", AuthorID: "a"})
+	v2Json := `{"v":"manual_v2"}`
+	v3Json := `{"v":"manual_v3"}`
 	_, _ = store.SaveVersion(ctx, SaveVersionInput{PipelineID: saved.ID, DefinitionJSON: v2Json, AuthorType: "agent", AuthorID: "a"})
 	_, _ = store.SaveVersion(ctx, SaveVersionInput{PipelineID: saved.ID, DefinitionJSON: v3Json, AuthorType: "agent", AuthorID: "a"})
 
@@ -174,7 +177,7 @@ func TestVersions_Rollback(t *testing.T) {
 	if rolledBack.DefinitionJSON != v2Json {
 		t.Errorf("rolled-back DSL: got %q", rolledBack.DefinitionJSON)
 	}
-	// History should still have v3 (rollback doesn't delete)
+	// History should still have v1, v2, v3 (rollback doesn't delete)
 	versions, _ := store.ListVersions(ctx, saved.ID, 0)
 	if len(versions) != 3 {
 		t.Errorf("rollback should preserve history; got %d versions", len(versions))
