@@ -254,7 +254,17 @@ var startCmd = &cobra.Command{
 				wpStore := pipeline.NewSQLWaitpointStore(deps.DB)
 				defer wpStore.Close()
 				srv.APIRouter().PipelinesHandler.SetWaitpointStore(wpStore)
-				logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)")
+				// Recovery scan: pending waitpoints from the previous
+				// process lifetime have no goroutine parked on them
+				// (run state is in-memory only). Sweep elapsed-timeout
+				// rows eagerly and log how many remain so abnormal
+				// accumulation is observable at boot.
+				if timedOut, pending, err := wpStore.RecoverPending(ctx); err != nil {
+					logger.Warn("pipeline waitpoint recovery scan failed", "error", err)
+				} else {
+					logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)",
+						"recovered_timed_out", timedOut, "stranded_pending", pending)
+				}
 			}
 
 			// Wire WS broadcaster so pipeline run + step events

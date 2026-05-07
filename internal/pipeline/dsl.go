@@ -323,16 +323,26 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	return nil
 }
 
-// validateTemplatesInStep checks every {{ ... }} placeholder in the
-// step's prompt and nested-input values. Each placeholder must resolve
-// against either inputs.X (for any declared input) or steps.Y.output
-// (for a Y that has executed before this step in the linear order).
+// validateTemplatesInStep checks every {{ ... }} placeholder across
+// ALL template-bearing fields of the step. Each placeholder must
+// resolve against either inputs.X (for any declared input) or
+// steps.Y.output (for a Y that has executed before this step).
 //
 // The MVP DSL is sequential, so "earlier" simply means "appears before
 // this step in dsl.Steps". When we add parallel/branch step types
 // we'll need a proper DAG topological ordering.
+//
+// Coverage extends beyond Prompt + NestedInputs to: If condition,
+// HTTP (URL / Body / Headers), Wait (Until / EventFilter), Code
+// (Code / Env values), Transform (Input / Expression). Without this
+// breadth, a malformed template in (e.g.) HTTP.URL passes save and
+// crashes the runtime — discovered at first invocation rather than
+// at author time.
 func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error {
 	walk := func(s string) error {
+		if s == "" {
+			return nil
+		}
 		matches := templateRE.FindAllStringSubmatch(s, -1)
 		for _, m := range matches {
 			ref := strings.TrimSpace(m[1])
@@ -342,6 +352,8 @@ func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error
 		}
 		return nil
 	}
+
+	// agent_run prompt + nested inputs (existing coverage)
 	if err := walk(st.Prompt); err != nil {
 		return err
 	}
@@ -352,6 +364,62 @@ func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error
 			}
 		}
 	}
+
+	// Conditional `if` expression
+	if err := walk(st.If); err != nil {
+		return err
+	}
+
+	// HTTP step fields
+	if st.HTTP != nil {
+		if err := walk(st.HTTP.URL); err != nil {
+			return err
+		}
+		if err := walk(st.HTTP.Body); err != nil {
+			return err
+		}
+		for _, v := range st.HTTP.Headers {
+			if err := walk(v); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Wait step fields
+	if st.Wait != nil {
+		if err := walk(st.Wait.Until); err != nil {
+			return err
+		}
+		if err := walk(st.Wait.EventFilter); err != nil {
+			return err
+		}
+		if err := walk(st.Wait.ApprovalPrompt); err != nil {
+			return err
+		}
+	}
+
+	// Code step fields
+	if st.Code != nil {
+		if err := walk(st.Code.Code); err != nil {
+			return err
+		}
+		for _, v := range st.Code.Env {
+			if err := walk(v); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Transform step fields
+	if st.Transform != nil {
+		if err := walk(st.Transform.Input); err != nil {
+			return err
+		}
+		if err := walk(st.Transform.Expression); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

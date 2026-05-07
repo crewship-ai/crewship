@@ -65,6 +65,39 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 	return s
 }
 
+// RecoverPending eagerly sweeps any waitpoints whose timeout already
+// elapsed (the regular sweeper would catch them within 30 s, but at
+// boot we want fast cleanup) and reports how many pending entries
+// remain. Pending waitpoints from before this process started are
+// "stranded" — the goroutine that called WaitFor is gone with the
+// previous lifetime. Approving them via the inbox still updates the
+// DB (the row is real), but the parent run cannot resume because its
+// in-memory state is lost. This method does NOT auto-mark them as
+// abandoned so an operator can still see + decide on them; the count
+// flows to the boot log so abnormal accumulation is visible.
+//
+// Returns (timedOutCount, pendingCount, err). The server's main.go
+// calls this once before declaring readiness.
+func (s *SQLWaitpointStore) RecoverPending(ctx context.Context) (timedOut int, pending int, err error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	res, err := s.db.ExecContext(ctx, `
+UPDATE pipeline_waitpoints
+SET status = 'timed_out', decided_at = ?
+WHERE status = 'pending' AND timeout_at <= ?`, now, now)
+	if err != nil {
+		return 0, 0, fmt.Errorf("waitpoints: recover sweep: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	timedOut = int(n)
+
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pipeline_waitpoints WHERE status = 'pending'`,
+	).Scan(&pending); err != nil {
+		return timedOut, 0, fmt.Errorf("waitpoints: recover count: %w", err)
+	}
+	return timedOut, pending, nil
+}
+
 // Close stops the timeout sweeper. Safe to call multiple times.
 func (s *SQLWaitpointStore) Close() {
 	s.mu.Lock()
@@ -112,23 +145,23 @@ INSERT INTO pipeline_waitpoints (
 // WaitFor blocks until the waitpoint resolves or ctx is cancelled.
 // Returns approved=true on approval, false on denial / timeout /
 // cancellation.
+//
+// Order of operations is critical for avoiding the lost-wakeup race:
+// the listener channel is registered BEFORE the decided-state DB
+// check, so CompleteApproval racing with us either delivers to the
+// channel or we observe its DB write — never both miss. Without the
+// pre-registration, CompleteApproval firing between checkDecided and
+// listener-insert would signal to a nonexistent channel and the
+// goroutine would park forever.
 func (s *SQLWaitpointStore) WaitFor(ctx context.Context, token string) (bool, error) {
 	s.mu.Lock()
 	ch, ok := s.listeners[token]
 	if !ok {
-		// Caller might have lost the in-memory channel (e.g. after
-		// process restart). Try to recover by checking DB state —
-		// if already decided, return the decision; if pending,
-		// register a fresh channel and wait.
-		s.mu.Unlock()
-		decided, approved, err := s.checkDecided(ctx, token)
-		if err != nil {
-			return false, err
-		}
-		if decided {
-			return approved, nil
-		}
-		s.mu.Lock()
+		// Pre-register the listener while holding the mutex so any
+		// CompleteApproval that arrives after this point has a
+		// channel to deliver to. The DB re-check below covers the
+		// case where CompleteApproval already fired before we
+		// pre-registered.
 		ch = make(chan waitDecision, 1)
 		s.listeners[token] = ch
 	}
@@ -139,6 +172,20 @@ func (s *SQLWaitpointStore) WaitFor(ctx context.Context, token string) (bool, er
 		delete(s.listeners, token)
 		s.mu.Unlock()
 	}()
+
+	// Now that the listener is registered, re-check DB state. If
+	// CompleteApproval ran before our listener was in place, the
+	// signal hit `default` (no listener) — but the DB write is
+	// committed, so checkDecided observes it. If CompleteApproval
+	// runs AFTER listener registration, it delivers to the channel
+	// directly. Either way, no lost wake-up.
+	decided, approved, err := s.checkDecided(ctx, token)
+	if err != nil {
+		return false, err
+	}
+	if decided {
+		return approved, nil
+	}
 
 	select {
 	case d := <-ch:
