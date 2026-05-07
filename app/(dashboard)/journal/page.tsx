@@ -603,6 +603,7 @@ function AnomalyBadge({
     <button
       type="button"
       onClick={onClick}
+      aria-label={`Focus ${errCount} error or warning events from the last 5 minutes`}
       className="inline-flex items-center gap-1.5 h-5 px-2 rounded-full border border-red-500/40 bg-red-500/10 text-[10px] font-mono text-red-300 hover:bg-red-500/20 transition-colors"
       title={`${errCount} error/warn events in the last 5 minutes — click to focus`}
     >

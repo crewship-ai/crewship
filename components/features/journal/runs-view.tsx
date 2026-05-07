@@ -46,6 +46,17 @@ import {
   toCanonicalStatus,
 } from "@/lib/runs-format"
 
+// Selectors for elements that should swallow row-level click/keypress
+// events. Hoisted so the per-render .map() doesn't reallocate them.
+const INTERACTIVE_SELECTOR =
+  'a,button,[role="button"],[role="link"],input,textarea,select'
+
+function isFromInteractiveChild(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  const hit = target.closest(INTERACTIVE_SELECTOR)
+  return hit !== null && hit !== target.closest("[data-row-root]")
+}
+
 interface Run {
   id: string
   agent_id: string
@@ -360,18 +371,6 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                         ? XCircle
                         : Play
               const traceHref = `/journal?tab=timeline&trace_id=${encodeURIComponent(run.id)}`
-              // Keep row clicks/keypresses from hijacking interactions
-              // that originate inside nested links, buttons, or inputs
-              // (e.g. the agent Link below). Without this guard, pressing
-              // Enter on a focused inner Link would also navigate to the
-              // run trace, swallowing the user's actual choice.
-              const INTERACTIVE_SELECTOR =
-                'a,button,[role="button"],[role="link"],input,textarea,select'
-              const isFromInteractiveChild = (target: EventTarget | null) => {
-                if (!(target instanceof Element)) return false
-                const hit = target.closest(INTERACTIVE_SELECTOR)
-                return hit !== null && hit !== target.closest("[data-row-root]")
-              }
               return (
                 <div
                   key={run.id}
@@ -390,7 +389,7 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                   }}
                   title={`Open trace ${run.id.slice(0, 8)} in Timeline`}
                   className={cn(
-                    "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer focus:outline-none focus:bg-white/[0.04]",
+                    "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40",
                     idx < runs.length - 1 && "border-b border-border/40",
                   )}
                   style={{
