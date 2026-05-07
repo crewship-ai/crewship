@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crewship.io/schemas/routine.v1.json",
+  "title": "Crewship Routine DSL",
+  "description": "Workspace-scoped declarative AI workflow recipe. Same shape the server's pipeline.Parse + pipeline.Validate functions accept. Add `\"$schema\": \"./schemas/routine.v1.json\"` (or the published URL) to a routine.json to get inline editor validation + autocomplete in VSCode, JetBrains, etc.",
+  "type": "object",
+  "required": ["dsl_version", "name", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "description": "JSON Schema reference (informational; runtime ignores)." },
+    "dsl_version": {
+      "type": "string",
+      "enum": ["1.0"],
+      "description": "DSL schema version. Forward-compat field; server rejects unknown values."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]?$",
+      "description": "Workspace-unique slug. Kebab-case, 1-64 chars, alpha-num + hyphens, no leading/trailing hyphen."
+    },
+    "display_name": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Human-readable label rendered in lists. Optional; falls back to `name` when absent."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 1000,
+      "description": "One-line summary shown in the [AVAILABLE ROUTINES] system-prompt block + UI lists."
+    },
+    "inputs": {
+      "type": "array",
+      "description": "Declared input parameters. Each input is template-substitutable as {{ inputs.<name> }}.",
+      "items": { "$ref": "#/$defs/InputSpec" }
+    },
+    "outputs": {
+      "type": "array",
+      "description": "Declared output names. Read from the final step's output by name. MVP: documentary + UI rendering only.",
+      "items": { "$ref": "#/$defs/OutputSpec" }
+    },
+    "execution_tier": {
+      "$ref": "#/$defs/TierOverride",
+      "description": "Optional override of workspace tier mapping. Per-step `complexity` still wins; this sets the default."
+    },
+    "estimated_cost_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Author estimate. UI surfaces cost overruns; not enforced."
+    },
+    "estimated_duration_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Author estimate. Not enforced."
+    },
+    "max_cost_usd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Runtime cost cap. Run aborts with FAILED status if cumulative cost exceeds this between steps."
+    },
+    "egress_targets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Declared outbound hostnames. Enforced for `http` step type via the workspace egress allowlist."
+    },
+    "credentials_required": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CredReq" },
+      "description": "Declared credential needs. Type-matched, not ID-matched, so the routine ports across workspaces."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Step" },
+      "description": "Ordered (or DAG-structured via needs[]) sequence of steps. At least one step required."
+    }
+  },
+  "$defs": {
+    "InputSpec": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "description": "Identifier used in {{ inputs.<name> }} substitution. C-style: starts with letter or _."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["string", "integer", "number", "boolean", "array", "object"]
+        },
+        "required": { "type": "boolean", "default": false },
+        "default": {
+          "description": "Default value if input is omitted at invocation. Type must match `type`."
+        },
+        "description": { "type": "string", "maxLength": 500 },
+        "min": { "type": "number", "description": "Minimum (numeric types only). *float64 for decimal support." },
+        "max": { "type": "number", "description": "Maximum (numeric types only)." }
+      }
+    },
+    "OutputSpec": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["string", "integer", "number", "boolean", "array", "object"] },
+        "description": { "type": "string" }
+      }
+    },
+    "CredReq": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "description": "Credential type the runtime resolves at run time (e.g. 'anthropic', 'github', 'stripe')." },
+        "scope": { "type": "string", "description": "Optional scope / role hint (e.g. 'read', 'write', 'admin')." }
+      }
+    },
+    "TierOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferred": { "type": "string", "enum": ["trivial", "fast", "moderate", "smart"] },
+        "fallback": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["trivial", "fast", "moderate", "smart"] }
+        }
+      }
+    },
+    "Step": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]*$",
+          "description": "Unique within this routine. Referenced via {{ steps.<id>.output }}."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform"]
+        },
+        "complexity": {
+          "type": "string",
+          "enum": ["trivial", "fast", "moderate", "smart"],
+          "description": "Tier hint resolved against workspace.execution_tiers_json."
+        },
+        "model_override": {
+          "type": "string",
+          "description": "Explicit (adapter, model) pin that wins over `complexity` resolution."
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Step-level timeout. Tighter of (agent default, this) wins."
+        },
+        "if": {
+          "type": "string",
+          "description": "Optional template-rendered boolean. False → step skipped."
+        },
+        "needs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "DAG dependency. Independent steps with disjoint needs[] execute in parallel."
+        },
+        "on_fail": {
+          "type": "string",
+          "enum": ["escalate_tier", "abort", "retry_step"],
+          "default": "escalate_tier",
+          "description": "Behavior when step's validation gate fails."
+        },
+        "validation": { "$ref": "#/$defs/Validation" },
+        "agent_slug": { "type": "string", "description": "Used by agent_run." },
+        "prompt": { "type": "string", "description": "Used by agent_run + call_pipeline." },
+        "nested_inputs": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Used by call_pipeline. Inputs forwarded to the nested routine."
+        },
+        "pipeline_slug": { "type": "string", "description": "Used by call_pipeline." },
+        "http": { "$ref": "#/$defs/HTTPStep" },
+        "code": { "$ref": "#/$defs/CodeStep" },
+        "wait": { "$ref": "#/$defs/WaitStep" },
+        "transform": { "$ref": "#/$defs/TransformStep" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "agent_run" } } },
+          "then": { "required": ["agent_slug", "prompt"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "call_pipeline" } } },
+          "then": { "required": ["pipeline_slug"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "http" } } },
+          "then": { "required": ["http"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "code" } } },
+          "then": { "required": ["code"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "wait" } } },
+          "then": { "required": ["wait"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "transform" } } },
+          "then": { "required": ["transform"] }
+        }
+      ]
+    },
+    "Validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Step output gate. Schema is JSON Schema draft 2020-12 subset; must_not_contain / must_contain / min_length / max_length are Crewship extensions.",
+      "properties": {
+        "schema": {
+          "description": "JSON Schema draft 2020-12 subset: type, required, properties, items, pattern, format, enum, minLength, maxLength, minimum, maximum, etc.",
+          "type": "object"
+        },
+        "must_not_contain": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Output must include none of these substrings. Credential-leak tripwire."
+        },
+        "must_contain": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Output must include all of these substrings."
+        },
+        "min_length": { "type": "integer", "minimum": 0 },
+        "max_length": { "type": "integer", "minimum": 0 },
+        "on_validation_fail": {
+          "type": "string",
+          "enum": ["escalate_tier", "abort", "retry_step"]
+        }
+      }
+    },
+    "HTTPStep": {
+      "type": "object",
+      "required": ["method", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "url": { "type": "string", "description": "Template-substitutable. Host enforced against egress allowlist + redirect targets." },
+        "body": { "type": "string", "description": "Template-substitutable raw body string (typically JSON)." },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Header values are template-substitutable; KEYS are NOT (security: prevents Authorization overwrite)."
+        },
+        "credential_ref": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "type": "string" },
+            "inject_as": { "type": "string", "enum": ["bearer", "header", "query"], "default": "bearer" },
+            "header_name": { "type": "string" },
+            "query_name": { "type": "string" }
+          }
+        },
+        "max_response_bytes": { "type": "integer", "minimum": 1, "default": 1000000 },
+        "success_codes": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 100, "maximum": 599 },
+          "default": [200, 201, 202, 204]
+        }
+      }
+    },
+    "CodeStep": {
+      "type": "object",
+      "required": ["runtime", "code"],
+      "additionalProperties": false,
+      "properties": {
+        "runtime": { "type": "string", "enum": ["python", "go", "bash"] },
+        "version": { "type": "string", "description": "Optional runtime version pin." },
+        "code": { "type": "string", "description": "Script body. Template-substitutable. Inputs auto-mapped to CREWSHIP_INPUT_<NAME> env vars." },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Additional env vars (template-substitutable values)."
+        }
+      }
+    },
+    "WaitStep": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["approval", "datetime", "event"] },
+        "approval_prompt": { "type": "string" },
+        "until": { "type": "string", "description": "RFC3339 timestamp or template (datetime kind)." },
+        "event_type": { "type": "string" },
+        "event_filter": { "type": "string", "description": "Simple equality match on payload." },
+        "timeout_sec": { "type": "integer", "minimum": 1, "description": "Hard timeout. 0 = no timeout (wait forever; not recommended)." }
+      }
+    },
+    "TransformStep": {
+      "type": "object",
+      "required": ["input", "expression"],
+      "additionalProperties": false,
+      "properties": {
+        "input": { "type": "string", "description": "Template-substitutable; usually {{ steps.X.output }}." },
+        "expression": { "type": "string", "description": "jq-flavored projection: '.path' / '.items[0]' / '.a + .b' etc." }
+      }
+    }
+  }
+}
