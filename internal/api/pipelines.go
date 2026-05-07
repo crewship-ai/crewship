@@ -501,6 +501,138 @@ func parseSmallInt(s string) (int, error) {
 	return n, nil
 }
 
+// ListVersions returns the version history for a pipeline.
+// GET /api/v1/workspaces/{ws}/pipelines/{slug}/versions
+func (h *PipelineHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	slug := r.PathValue("slug")
+	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("pipeline list versions: load", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		return
+	}
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := parseSmallInt(v); err == nil {
+			limit = n
+		}
+	}
+	versions, err := h.store.ListVersions(r.Context(), p.ID, limit)
+	if err != nil {
+		h.logger.Error("pipeline list versions: query", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list versions"})
+		return
+	}
+	type versionRow struct {
+		Version       int    `json:"version"`
+		Hash          string `json:"definition_hash"`
+		AuthorType    string `json:"author_type"`
+		AuthorID      string `json:"author_id"`
+		ParentVersion *int   `json:"parent_version,omitempty"`
+		ChangeSummary string `json:"change_summary,omitempty"`
+		CreatedAt     string `json:"created_at"`
+	}
+	out := make([]versionRow, 0, len(versions))
+	for _, v := range versions {
+		out = append(out, versionRow{
+			Version:       v.Version,
+			Hash:          v.DefinitionHash,
+			AuthorType:    v.AuthorType,
+			AuthorID:      v.AuthorID,
+			ParentVersion: v.ParentVersion,
+			ChangeSummary: v.ChangeSummary,
+			CreatedAt:     v.CreatedAt.Format(time.RFC3339Nano),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// GetVersion returns one specific version including the full DSL.
+// GET /api/v1/workspaces/{ws}/pipelines/{slug}/versions/{n}
+func (h *PipelineHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	slug := r.PathValue("slug")
+	versionStr := r.PathValue("n")
+	versionNum, perr := parseSmallInt(versionStr)
+	if perr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version must be a positive integer"})
+		return
+	}
+	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		return
+	}
+	v, err := h.store.GetVersion(r.Context(), p.ID, versionNum)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":         v.Version,
+		"definition_hash": v.DefinitionHash,
+		"definition":      json.RawMessage(v.DefinitionJSON),
+		"author_type":     v.AuthorType,
+		"author_id":       v.AuthorID,
+		"parent_version":  v.ParentVersion,
+		"change_summary":  v.ChangeSummary,
+		"created_at":      v.CreatedAt.Format(time.RFC3339Nano),
+	})
+}
+
+// Rollback rolls the head pointer + definition_json back to a
+// previous version. History is preserved (rollback doesn't delete).
+// POST /api/v1/workspaces/{ws}/pipelines/{slug}/rollback
+// Body: { "version": N }
+func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	slug := r.PathValue("slug")
+	var body struct {
+		Version int `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if body.Version < 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "version must be >= 1"})
+		return
+	}
+	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		return
+	}
+	rolled, err := h.store.Rollback(r.Context(), p.ID, body.Version)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("pipeline rollback", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, toPipelineResponse(rolled, true))
+}
+
 // ApproveWaitpoint completes a pending wait-step approval. POST
 // /api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve
 // Body: { "approved": true|false, "comment": "..." }
