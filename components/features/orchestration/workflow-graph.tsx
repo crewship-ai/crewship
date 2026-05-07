@@ -29,7 +29,8 @@ import { PipelineRunNode } from "./pipeline-run-node"
 import { STATUS_COLORS, CREW_COLORS, CREW_COLOR_DEFAULT, GRAPH_CHROME } from "@/lib/colors"
 import { PermissionEdge } from "./permission-edge"
 
-import { buildFlatGraphData, buildGraphData } from "./workflow-graph-builders"
+import { buildFlatGraphData, buildGraphData, buildPipelineNodes } from "./workflow-graph-builders"
+import type { PipelineForGraph } from "./workflow-graph-builders"
 
 export interface WorkflowGraphRef {
   focusActive: () => void
@@ -40,6 +41,19 @@ interface WorkflowGraphProps {
   crews?: CrewSummary[]
   agents?: AgentSummary[]
   connections?: CrewConnection[]
+  /**
+   * Optional list of saved pipelines. When supplied, each pipeline
+   * renders as a `pipelineRun` node along the bottom of the graph
+   * acting as the workspace's pipeline registry. Empty / nil hides
+   * the pipeline row entirely so workspaces without pipelines don't
+   * show an empty band.
+   */
+  pipelines?: PipelineForGraph[]
+  /**
+   * Click handler for pipeline-run nodes. Receives the pipeline id;
+   * the parent layout typically opens the run-detail side-sheet.
+   */
+  onPipelineClick?: (pipelineId: string) => void
   onTaskClick?: (task: MissionTask) => void
   highlightAgentSlug?: string | null
 }
@@ -59,7 +73,7 @@ const edgeTypes: EdgeTypes = {
 
 
 function WorkflowGraphInner(
-  { missions, crews, agents, connections, onTaskClick, highlightAgentSlug }: WorkflowGraphProps,
+  { missions, crews, agents, connections, pipelines, onPipelineClick, onTaskClick, highlightAgentSlug }: WorkflowGraphProps,
   ref: React.ForwardedRef<WorkflowGraphRef>
 ) {
   const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(new Set())
@@ -81,8 +95,11 @@ function WorkflowGraphInner(
   const hasCrewData = !!(crews && crews.length > 0 && agents)
 
   const graphData = useMemo(() => {
+    // Re-using ReactFlow's Edge type avoids a self-referential
+    // `typeof graphData.edges` annotation which TS rejects (TS2502).
+    let data: { nodes: Node[]; edges: import("@xyflow/react").Edge[] }
     if (hasCrewData) {
-      return buildGraphData({
+      data = buildGraphData({
         missions,
         crews: crews!,
         agents: agents!,
@@ -90,9 +107,29 @@ function WorkflowGraphInner(
         collapsedCrews,
         onToggleCollapse: toggleCollapse,
       })
+    } else {
+      data = buildFlatGraphData(missions)
     }
-    return buildFlatGraphData(missions)
-  }, [missions, crews, agents, connections, collapsedCrews, toggleCollapse, hasCrewData])
+    // Append the pipeline registry row beneath the main graph. We
+    // build a crew_id → name map so the PipelineRunNode can render
+    // "authored by Marketing" instead of the raw crew_id. Click
+    // handler is threaded onto each node's data so the parent's
+    // onPipelineClick fires when the user clicks a pipeline card.
+    if (pipelines && pipelines.length > 0) {
+      const crewNames = new Map<string, string>()
+      for (const c of crews ?? []) {
+        if (c.id && c.name) crewNames.set(c.id, c.name)
+      }
+      const pipelineNodes = buildPipelineNodes(pipelines, { crewNameById: crewNames })
+      // Inject the click handler into each node's data shape — React
+      // Flow passes data straight to the node component.
+      for (const n of pipelineNodes) {
+        if (n.data) (n.data as Record<string, unknown>).onClick = onPipelineClick
+      }
+      data = { nodes: [...data.nodes, ...pipelineNodes], edges: data.edges }
+    }
+    return data
+  }, [missions, crews, agents, connections, pipelines, onPipelineClick, collapsedCrews, toggleCollapse, hasCrewData])
 
   const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)
   const [edgesState, setEdges, onEdgesChange] = useEdgesState(graphData.edges)

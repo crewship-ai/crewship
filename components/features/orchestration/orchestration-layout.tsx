@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
+import { usePipelines } from "@/hooks/use-pipelines"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
 // TemplateGallery removed — workflow templates not needed in orchestration UI yet
@@ -113,6 +114,13 @@ export function OrchestrationLayout({
   const [savedViewsOpen, setSavedViewsOpen] = useState(false)
 
   // graphRef removed — was unused
+
+  // Pipelines surface in the Graph tab as a registry row of
+  // pipelineRun nodes along the bottom. Fetched once on mount + on
+  // refresh; the WS hub will eventually push pipeline.run.* events
+  // to update node status live, but for MVP polling on-demand is
+  // enough — pipelines change rarely (agent saves, user invokes).
+  const { pipelines } = usePipelines(workspaceId)
 
   // Auto-collapse left panel on mobile
   useEffect(() => {
@@ -633,6 +641,15 @@ export function OrchestrationLayout({
                 crews={crews}
                 agents={agents}
                 connections={connections}
+                pipelines={pipelines}
+                onPipelineClick={(id) => {
+                  // Phase 1.5 will route this into a run-detail
+                  // side-sheet once DetailContext gains a pipeline
+                  // variant. For MVP we log the id; the click is
+                  // already visible in the React Flow node selection.
+                  // eslint-disable-next-line no-console
+                  console.debug("pipeline click", id)
+                }}
                 onTaskClick={handleNodeClick}
                 highlightAgentSlug={selectedAgentSlug}
               />
