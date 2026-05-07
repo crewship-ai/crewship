@@ -626,6 +626,169 @@ func TestList_LimitDefault100(t *testing.T) {
 	}
 }
 
+// TestCount_FTSAndCrossFilter exercises the FTS5 join + structural
+// AND combine on the count path. The List counterpart is in
+// queries_fts_test.go; without the equivalent for Count the badge
+// could disagree with the page even after the FTS5-mirror fix.
+func TestCount_FTSAndCrossFilter(t *testing.T) {
+	db := openTestDBWithFTS(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{})
+	defer w.Close()
+	ctx := context.Background()
+
+	emit := func(typ EntryType, sev Severity, summary string) {
+		_, _ = w.Emit(ctx, Entry{
+			WorkspaceID: "ws_test",
+			Type:        typ,
+			Severity:    sev,
+			ActorType:   ActorAgent,
+			Summary:     summary,
+		})
+	}
+	emit(EntryRunStarted, SeverityInfo, "deploy production webhook")
+	emit(EntryRunStarted, SeverityWarn, "deploy retry after timeout")
+	emit(EntryLLMCall, SeverityInfo, "call sonnet about deploy")
+	emit(EntryLLMCall, SeverityInfo, "irrelevant")
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		q    Query
+		want int64
+	}{
+		{"FTS only — three matches", Query{WorkspaceID: "ws_test", FTSQuery: "deploy"}, 3},
+		{"FTS + type — two matches",
+			Query{WorkspaceID: "ws_test", FTSQuery: "deploy", Types: []EntryType{EntryRunStarted}}, 2},
+		{"FTS + severity — one match",
+			Query{WorkspaceID: "ws_test", FTSQuery: "deploy", Severities: []Severity{SeverityWarn}}, 1},
+		{"FTS misses everything", Query{WorkspaceID: "ws_test", FTSQuery: "xyzzy"}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Count(ctx, db, c.q)
+			if err != nil {
+				t.Fatalf("count: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("count = %d, want %d", got, c.want)
+			}
+			// And list/count must agree — same filter set, same N.
+			rows, _, err := List(ctx, db, c.q)
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if int64(len(rows)) != c.want {
+				t.Errorf("list = %d rows, count = %d, want both %d", len(rows), got, c.want)
+			}
+		})
+	}
+}
+
+// TestCount_PriorityFilter pins the priority dimension on the count
+// path. List has the test (TestList_FiltersPriorities) — Count
+// previously dropped this filter, so a regression that re-introduces
+// the drop would silently overcount permanent / pin entries.
+func TestCount_PriorityFilter(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{})
+	defer w.Close()
+	ctx := context.Background()
+
+	emit := func(p Priority) {
+		_, _ = w.Emit(ctx, Entry{
+			WorkspaceID: "ws_test",
+			Type:        EntryRunStarted,
+			Priority:    p,
+			ActorType:   ActorAgent,
+			Summary:     "p",
+		})
+	}
+	emit(PriorityNormal)
+	emit(PriorityHigh)
+	emit(PriorityPin)
+	emit(PriorityPermanent)
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	got, err := Count(ctx, db, Query{
+		WorkspaceID: "ws_test",
+		Priorities:  []Priority{PriorityPin, PriorityPermanent},
+	})
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("priority count = %d, want 2", got)
+	}
+}
+
+// TestRunStats_RequiresWorkspace mirrors the workspace-required guards
+// already in place for List/Count/ListRuns. Empty workspace short-
+// circuits before touching the DB.
+func TestRunStats_RequiresWorkspace(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	_, err := RunStats(context.Background(), db, "")
+	if err == nil {
+		t.Fatal("want error for empty workspace_id")
+	}
+	if !strings.Contains(err.Error(), "workspace_id") {
+		t.Errorf("error should reference workspace_id: %v", err)
+	}
+}
+
+// TestRunStats_WorkspaceIsolation pins the cross-tenant guard on the
+// stats path. A run.started in another workspace must not leak into
+// the caller's running count even when trace_id collides — the
+// je2.workspace_id = je1.workspace_id condition in the SQL is
+// load-bearing.
+func TestRunStats_WorkspaceIsolation(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO workspaces (id) VALUES ('ws_other')`); err != nil {
+		t.Fatal(err)
+	}
+	w := NewWriter(db, quietLogger(), WriterOptions{})
+	defer w.Close()
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	// Same trace_id in both workspaces — the foreign workspace's
+	// terminal entry must not satisfy the inner NOT EXISTS in the
+	// running-count query for ws_test.
+	emitRunNS := func(ws, traceID, kind string, ts time.Time) {
+		_, _ = w.Emit(ctx, Entry{
+			WorkspaceID: ws,
+			Type:        EntryType(kind),
+			ActorType:   ActorSidecar,
+			Summary:     kind,
+			TraceID:     traceID,
+			TS:          ts,
+		})
+	}
+	emitRunNS("ws_test", "shared", "run.started", now.Add(-3*time.Minute))
+	emitRunNS("ws_other", "shared", "run.completed", now.Add(-1*time.Minute))
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	stats, err := RunStats(ctx, db, "ws_test")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	// ws_test has run.started but NO terminal entry of its own; the
+	// other workspace's terminal must not suppress this.
+	if stats.Running != 1 {
+		t.Errorf("running cross-tenant leak: got %d, want 1", stats.Running)
+	}
+}
+
 // TestCount_HonoursAllFilters mirrors the bug-fix history in queries.go: a
 // regression once made Count ignore Type/Severity/Until/FTS filters,
 // causing the badge total to disagree with the paged result. Belt-and-

@@ -230,3 +230,70 @@ func TestJournalCmd_QueryShorthand(t *testing.T) {
 		t.Errorf("--query shorthand: %v", q)
 	}
 }
+
+// TestJournalGetCmd_RequiresExactlyOneArg pins cobra.ExactArgs(1) on
+// `journal get`. Zero args (no entry id) and two args (typo) both
+// have to fail rather than fall through to a partial request.
+func TestJournalGetCmd_RequiresExactlyOneArg(t *testing.T) {
+	cases := []struct {
+		name   string
+		args   []string
+		wantOK bool
+	}{
+		{"zero args rejected", []string{}, false},
+		{"one arg accepted", []string{"j_abc"}, true},
+		{"two args rejected", []string{"j_abc", "j_def"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := journalGetCmd.Args(journalGetCmd, c.args)
+			if c.wantOK && err != nil {
+				t.Errorf("Args(%v) = %v, want nil", c.args, err)
+			}
+			if !c.wantOK && err == nil {
+				t.Errorf("Args(%v) = nil, want error", c.args)
+			}
+		})
+	}
+}
+
+// TestJournalCountCmd_RejectsPositionalArgs pins cobra.NoArgs on
+// `journal count` — addressing CodeRabbit's PR #283 finding. A typo
+// like `crewship journal count error` would otherwise silently run
+// the unfiltered count and confuse the user.
+func TestJournalCountCmd_RejectsPositionalArgs(t *testing.T) {
+	cases := []struct {
+		name   string
+		args   []string
+		wantOK bool
+	}{
+		{"no args accepted", []string{}, true},
+		{"one positional rejected", []string{"error"}, false},
+		{"two positional rejected", []string{"error", "warn"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := journalCountCmd.Args(journalCountCmd, c.args)
+			if c.wantOK && err != nil {
+				t.Errorf("Args(%v) = %v, want nil", c.args, err)
+			}
+			if !c.wantOK && err == nil {
+				t.Errorf("Args(%v) = nil, want error", c.args)
+			}
+		})
+	}
+}
+
+// TestJournalPriorityCmd_RequiresExactlyOneArg mirrors the get test —
+// the priority subcommand declares ExactArgs(1) for the entry id.
+func TestJournalPriorityCmd_RequiresExactlyOneArg(t *testing.T) {
+	if err := journalPriorityCmd.Args(journalPriorityCmd, []string{}); err == nil {
+		t.Errorf("zero args should be rejected")
+	}
+	if err := journalPriorityCmd.Args(journalPriorityCmd, []string{"a", "b"}); err == nil {
+		t.Errorf("two args should be rejected")
+	}
+	if err := journalPriorityCmd.Args(journalPriorityCmd, []string{"j_abc"}); err != nil {
+		t.Errorf("one arg should be accepted: %v", err)
+	}
+}
