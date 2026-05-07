@@ -492,6 +492,17 @@ type SaveInput struct {
 	// mint a passing gate by claiming a fake distant-future
 	// timestamp — the server's clock is the source of truth for
 	// freshness.
+	//
+	// THREAT MODEL: a malicious in-process caller can still set
+	// LastTestRunPassed=true + LastTestRunAt=now() and bypass the
+	// real test_run. RBAC mitigates this for the user-facing save
+	// path (MANAGER+ role required, skip_test_gate OWNER/ADMIN
+	// only); the sidecar internal path is bound by X-Internal-Token
+	// shared with the server process so a non-Crewship process can't
+	// reach it. A future enhancement (tracked in the routines
+	// follow-up) replaces this with a signed save_token returned by
+	// /test_run that Save validates via HMAC, removing the trust
+	// requirement on the body entirely.
 	LastTestRunAt     *time.Time
 	LastTestRunPassed bool
 	// ExecutionTierJSON optional override of workspace tier mapping.
