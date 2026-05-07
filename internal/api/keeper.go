@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -62,6 +63,12 @@ type KeeperHandler struct {
 	container     provider.ContainerProvider
 	broadcaster   KeeperBroadcaster
 	conversations ConversationReader
+	// journal mirrors keeper.request / keeper.decision / keeper.execute
+	// events into the unified Crew Journal. nil maps to noopEmitter so
+	// the keeper_requests table remains the source of truth for the
+	// dedicated keeper UI even when journal isn't wired (tests, early
+	// bring-up). Set via SetJournal at router setup.
+	journal journal.Emitter
 }
 
 // NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.
@@ -72,7 +79,20 @@ func NewKeeperHandler(db *sql.DB, internalToken string, gk gatekeeper.Evaluator,
 		logger:        logger,
 		internalToken: internalToken,
 		gatekeeper:    gk,
+		journal:       noopEmitter{},
 	}
+}
+
+// SetJournal wires a journal emitter so keeper request and decision
+// events surface in the Crew Journal alongside agent operational
+// activity. Pass nil (or skip the call) to keep keeper events confined
+// to the keeper_requests table.
+func (h *KeeperHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // WithSecrets attaches a SecretGetter used by HandleExecute to retrieve plaintext values.

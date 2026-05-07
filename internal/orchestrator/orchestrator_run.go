@@ -37,6 +37,36 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.mu.RUnlock()
 
+	// Capture the user prompt that triggered this run as a journal
+	// entry. Lands in the Timeline as the "what kicked this off"
+	// signal — without it, a viewer scrolling through exec.command +
+	// network.egress can't reconstruct WHY the agent was doing those
+	// things. Best-effort: a journal hiccup never aborts the run.
+	if req.UserMessage != "" {
+		userPreview := req.UserMessage
+		if len(userPreview) > 240 {
+			userPreview = userPreview[:240] + "…"
+		}
+		_, _ = o.getJournal().Emit(ctx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
+			Type:        "chat.user_message",
+			Severity:    "info",
+			ActorType:   "user",
+			ActorID:     req.AgentID, // best available; agents-context call sites rarely carry user_id
+			Summary:     fmt.Sprintf("user → %s: %s", req.AgentSlug, userPreview),
+			Payload: map[string]any{
+				"chat_id":      req.ChatID,
+				"agent_slug":   req.AgentSlug,
+				"content":      req.UserMessage,
+				"length_chars": len(req.UserMessage),
+			},
+			Refs: map[string]any{"chat_id": req.ChatID},
+		})
+	}
+
 	// Harbor Master: gate the run before we spend containers/tokens on
 	// something a human should approve. ApprovalMode comes off the
 	// request — ModeNone short-circuits with Approved, ModeSync blocks
@@ -638,7 +668,60 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Wrap handler with credential scrubbing to prevent secret leakage
 	// in agent output (prompt injection defense).
 	scrubHandler := o.wrapScrubHandler(handler)
-	o.streamOutput(execCtx, result, req, scrubHandler)
+	// Tap text events flowing to the user so we can emit one
+	// chat.agent_response journal entry at end-of-run with the
+	// agent's full reply. Capped buffer (8 KB) keeps memory bounded
+	// for chatty replies while still preserving the typical "thinking
+	// + final answer" payload size.
+	const responseCap = 8 * 1024
+	var responseBuf strings.Builder
+	tappedHandler := EventHandler(func(event AgentEvent) {
+		if event.Type == "text" && responseBuf.Len() < responseCap {
+			remaining := responseCap - responseBuf.Len()
+			if len(event.Content) <= remaining {
+				responseBuf.WriteString(event.Content)
+			} else {
+				responseBuf.WriteString(event.Content[:remaining])
+			}
+		}
+		if scrubHandler != nil {
+			scrubHandler(event)
+		}
+	})
+	o.streamOutput(execCtx, result, req, tappedHandler)
+	if response := strings.TrimSpace(responseBuf.String()); response != "" {
+		responseSummary := response
+		if len(responseSummary) > 240 {
+			responseSummary = responseSummary[:240] + "…"
+		}
+		// Emit fires regardless of cancellation — context.Background
+		// guarantees the entry lands even on a stop. The truncation
+		// happens at the buffer level upstream, so length_chars is the
+		// true reply size while `content` is the captured prefix.
+		emitCtx := ctx
+		if emitCtx.Err() != nil {
+			emitCtx = context.Background()
+		}
+		_, _ = o.getJournal().Emit(emitCtx, JournalEntry{
+			WorkspaceID: req.WorkspaceID,
+			CrewID:      req.CrewID,
+			AgentID:     req.AgentID,
+			MissionID:   req.MissionID,
+			Type:        "chat.agent_response",
+			Severity:    "info",
+			ActorType:   "agent",
+			ActorID:     req.AgentID,
+			Summary:     fmt.Sprintf("%s → user: %s", req.AgentSlug, responseSummary),
+			Payload: map[string]any{
+				"chat_id":      req.ChatID,
+				"agent_slug":   req.AgentSlug,
+				"content":      response,
+				"length_chars": responseBuf.Len(),
+				"truncated":    responseBuf.Len() >= responseCap,
+			},
+			Refs: map[string]any{"chat_id": req.ChatID},
+		})
+	}
 
 	// If context was cancelled (user pressed stop), clean up with a fresh
 	// context and return a cancellation error. The reader close in streamOutput

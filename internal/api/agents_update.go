@@ -215,7 +215,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			changes[jsonKey] = val
 		}
 	}
-	WriteAuditLog(r.Context(), h.db, "update", "AGENT", agentID, userID, workspaceID, changes)
+	WriteAuditLog(r.Context(), h.db, h.journal, "update", "AGENT", agentID, userID, workspaceID, changes)
 
 	// Notify scheduler of schedule changes
 	if h.scheduleUpdater != nil {

@@ -242,7 +242,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if user != nil {
 		userID = user.ID
 	}
-	WriteAuditLog(r.Context(), h.db, "delete", "AGENT", agentID, userID, workspaceID, nil)
+	WriteAuditLog(r.Context(), h.db, h.journal, "delete", "AGENT", agentID, userID, workspaceID, nil)
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 

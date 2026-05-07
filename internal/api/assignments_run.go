@@ -143,6 +143,39 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"task":   body.Task,
 		})
 
+	// Mirror to the journal so the assignment lifecycle (created →
+	// running → completed/failed) shows up in the unified Timeline.
+	// Severity stays at info because creation is routine — escalate to
+	// warn/error only on failure terminal states.
+	taskPreviewForSummary := body.Task
+	if len(taskPreviewForSummary) > 120 {
+		taskPreviewForSummary = taskPreviewForSummary[:120] + "…"
+	}
+	// MissionID intentionally NOT set — body.ChatID is a chat session
+	// id, which only sometimes corresponds to a row in `missions`
+	// (group_id linkage). Setting it would FK-fail under tests + any
+	// non-mission assignment. chat_id lives in payload + refs instead.
+	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		CrewID:      body.CrewID,
+		AgentID:     target.ID,
+		Type:        journal.EntryAssignmentCreate,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorAgent,
+		ActorID:     assignedByID,
+		Summary:     fmt.Sprintf("assigned %s → %s: %s", body.TargetSlug, target.Name, taskPreviewForSummary),
+		Payload: map[string]any{
+			"assignment_id": assignmentID,
+			"chat_id":       body.ChatID,
+			"target_slug":   body.TargetSlug,
+			"target_id":     target.ID,
+			"task":          body.Task,
+		},
+		Refs: map[string]any{"assignment_id": assignmentID, "chat_id": body.ChatID},
+	}); jerr != nil {
+		h.logger.Warn("assignment journal emit (create) failed", "error", jerr, "assignment_id", assignmentID)
+	}
+
 	h.logger.Info("assignment created",
 		"assignment_id", assignmentID,
 		"target", body.TargetSlug,
@@ -170,6 +203,41 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		_, _ = h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
 			commentID, body.ChatID, assignedByID, commentBody, now, now)
+
+		// Mirror the comment into the journal so mission discussion
+		// shows up in the unified Timeline alongside operational
+		// events. Mission comments today are sparse (auto-generated
+		// "X assigned work to Y") so volume is bounded.
+		commentSummary := commentBody
+		if len(commentSummary) > 200 {
+			commentSummary = commentSummary[:200] + "…"
+		}
+		// Mission comment emit lands under the existing missions row
+		// (we already verified `missionExists == 1` above), so passing
+		// MissionID is safe here. Other branches in this file
+		// deliberately skip MissionID because their ChatID is not
+		// guaranteed to have a corresponding missions row.
+		if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
+			WorkspaceID: body.WorkspaceID,
+			AgentID:     assignedByID,
+			MissionID:   body.ChatID,
+			Type:        journal.EntryMissionComment,
+			Severity:    journal.SeverityInfo,
+			ActorType:   journal.ActorAgent,
+			ActorID:     assignedByID,
+			Summary:     commentSummary,
+			Payload: map[string]any{
+				"comment_id":  commentID,
+				"mission_id":  body.ChatID,
+				"author_name": assignerName,
+				"target_name": target.Name,
+				"target_slug": target.Slug,
+				"body":        commentBody,
+			},
+			Refs: map[string]any{"comment_id": commentID, "mission_id": body.ChatID},
+		}); jerr != nil {
+			h.logger.Warn("mission comment journal emit failed", "error", jerr, "comment_id", commentID)
+		}
 
 		// Update assignee on the issue to the target agent
 		_, _ = h.db.ExecContext(r.Context(),
@@ -248,6 +316,32 @@ func (h *AssignmentHandler) runAssignment(
 	if _, err := h.db.ExecContext(ctx,
 		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
 		h.logger.Error("update assignment to running", "error", err, "assignment_id", assignmentID)
+	}
+	// Mirror RUNNING to the journal so the Timeline records the
+	// kick-off. Without this the gap between "created" and the first
+	// exec.command can be seconds-to-minutes (image pull, container
+	// boot) and the user has no signal that work is actually happening.
+	// As with assignment.created above, omit MissionID to avoid the FK
+	// failure when body.ChatID is a chat session that has no missions
+	// row. trace_id ties the entry back to the run; chat_id lives in
+	// payload + refs.
+	if _, jerr := h.journal.Emit(ctx, journal.Entry{
+		WorkspaceID: body.WorkspaceID,
+		AgentID:     target.ID,
+		Type:        journal.EntryAssignmentRun,
+		Severity:    journal.SeverityInfo,
+		ActorType:   journal.ActorOrchestrator,
+		Summary:     fmt.Sprintf("assignment %s running on %s", shortRunID(assignmentID), body.TargetSlug),
+		Payload: map[string]any{
+			"assignment_id": assignmentID,
+			"target_slug":   body.TargetSlug,
+			"target_id":     target.ID,
+			"started_at":    now,
+		},
+		Refs:    map[string]any{"assignment_id": assignmentID, "chat_id": body.ChatID},
+		TraceID: runID,
+	}); jerr != nil {
+		h.logger.Warn("assignment journal emit (running) failed", "error", jerr, "assignment_id", assignmentID)
 	}
 	broadcastChannelEvent(h.hub, "session", body.ChatID, "assignment_running",
 		map[string]string{

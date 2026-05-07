@@ -117,7 +117,7 @@ func TestWriteAuditLog(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	WriteAuditLog(context.Background(), db, "test_action", "ENTITY", "ent-123",
+	WriteAuditLog(context.Background(), db, nil, "test_action", "ENTITY", "ent-123",
 		userID, wsID, map[string]interface{}{"key": "value"})
 
 	var count int
@@ -129,7 +129,7 @@ func TestWriteAuditLog(t *testing.T) {
 	}
 
 	// Nil metadata path
-	WriteAuditLog(context.Background(), db, "no_meta", "ENTITY", "ent-456", userID, wsID, nil)
+	WriteAuditLog(context.Background(), db, nil, "no_meta", "ENTITY", "ent-456", userID, wsID, nil)
 	var meta string
 	if err := db.QueryRow("SELECT metadata FROM audit_logs WHERE action = 'no_meta'").Scan(&meta); err != nil {
 		t.Fatalf("scan: %v", err)
