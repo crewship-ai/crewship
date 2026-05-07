@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 // Pipeline mirrors the wire shape returned by GET
 // /api/v1/workspaces/{ws}/pipelines (list endpoint, no definition).
@@ -98,6 +99,13 @@ export function usePipelines(workspaceId: string | null | undefined) {
       abortRef.current?.abort()
     }
   }, [refresh])
+
+  // Live refresh on pipeline events. Pipeline saves and runs change
+  // invocation_count + last_invocation_status, which the registry
+  // row in the Graph view needs to render fresh data without a
+  // page reload. Cheap because the list endpoint is small + cached.
+  useRealtimeEvent("pipeline.run.completed", refresh)
+  useRealtimeEvent("pipeline.run.failed", refresh)
 
   return { pipelines, loading, error, refresh }
 }

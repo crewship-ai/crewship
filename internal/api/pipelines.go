@@ -25,6 +25,7 @@ type PipelineHandler struct {
 	runner     pipeline.AgentRunner
 	emitter    pipeline.Emitter
 	waitpoints pipeline.WaitpointStore // optional; nil → wait approval steps fall back to in-memory timeout
+	ws         pipeline.WSBroadcaster  // optional; nil → no live pipeline event push to frontend
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -68,6 +69,30 @@ func (h *PipelineHandler) SetJournal(e pipeline.Emitter) {
 // (useful for dev, broken for any real approval workflow).
 func (h *PipelineHandler) SetWaitpointStore(w pipeline.WaitpointStore) {
 	h.waitpoints = w
+}
+
+// SetWSBroadcaster wires the WebSocket hub so pipeline run + step
+// events stream live to subscribed clients (PipelineRunNode in the
+// graph updates without polling). Without it, the frontend catches
+// up via journal polling only.
+func (h *PipelineHandler) SetWSBroadcaster(b pipeline.WSBroadcaster) {
+	h.ws = b
+}
+
+// newExecutor centralises Executor construction so every handler
+// path picks up runner/emitter/waitpoints/ws wiring identically.
+// Refactored from the inline `pipeline.NewExecutor(...)` calls in
+// Run/DryRun/TestRun so a future capability (cost cap, PII gate)
+// only needs to be wired once.
+func (h *PipelineHandler) newExecutor() *pipeline.Executor {
+	exec := pipeline.NewExecutor(h.store, h.resolver, h.runner, h.emitter)
+	if h.waitpoints != nil {
+		exec = exec.WithWaitpointStore(h.waitpoints)
+	}
+	if h.ws != nil {
+		exec = exec.WithWSBroadcaster(h.ws)
+	}
+	return exec
 }
 
 // pipelineResponse is the wire shape returned by GET endpoints. We
@@ -241,7 +266,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	invokingCrew := r.Header.Get("X-Crewship-Invoking-Crew")
 	invokingAgent := r.Header.Get("X-Crewship-Invoking-Agent")
 
-	exec := pipeline.NewExecutor(h.store, h.resolver, h.runner, h.emitter)
+	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:      p.ID,
 		WorkspaceID:     workspaceID,
@@ -282,7 +307,7 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	exec := pipeline.NewExecutor(h.store, h.resolver, h.runner, h.emitter)
+	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:  p.ID,
 		WorkspaceID: workspaceID,
@@ -351,7 +376,7 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exec := pipeline.NewExecutor(h.store, h.resolver, h.runner, h.emitter)
+	exec := h.newExecutor()
 	res, err := exec.RunDefinition(r.Context(), dsl, pipeline.RunInput{
 		WorkspaceID:  workspaceID,
 		AuthorCrewID: body.AuthorCrewID,

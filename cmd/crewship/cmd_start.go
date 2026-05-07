@@ -256,6 +256,17 @@ var startCmd = &cobra.Command{
 				srv.APIRouter().PipelinesHandler.SetWaitpointStore(wpStore)
 				logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)")
 			}
+
+			// Wire WS broadcaster so pipeline run + step events
+			// reach subscribed frontend clients live (PipelineRunNode
+			// status updates without polling). Without it, the UI
+			// only catches up via journal poll. wsHub is exposed
+			// via Server.WSHub() in production; tests skip this
+			// branch when wsHub is nil.
+			if hub := srv.WSHub(); hub != nil {
+				srv.APIRouter().PipelinesHandler.SetWSBroadcaster(hub)
+				logger.Info("pipeline WS broadcaster wired (live event push)")
+			}
 		}
 
 		// Start OAuth token refresh worker (refreshes tokens expiring soon)

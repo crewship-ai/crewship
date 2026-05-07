@@ -57,6 +57,11 @@ type Executor struct {
 	// (useful for tests; production wiring uses the WaitpointStore
 	// once Phase 2 lands).
 	waitpoints WaitpointStore
+
+	// ws is the WebSocket hub for live event push to subscribed
+	// frontend clients. Nil = no broadcast (tests, headless mode);
+	// production wiring passes ws.Hub via WithWSBroadcaster.
+	ws WSBroadcaster
 }
 
 // WithEgressGate wires the HTTP allowlist. Builders can call this
@@ -89,6 +94,17 @@ func (e *Executor) WithCodeRunner(r CodeRunner) *Executor {
 // steps execute in-memory and don't survive a process restart.
 func (e *Executor) WithWaitpointStore(s WaitpointStore) *Executor {
 	e.waitpoints = s
+	return e
+}
+
+// WithWSBroadcaster wires the WebSocket hub for live pipeline
+// event push. Frontend clients subscribed to the workspace channel
+// receive pipeline.run.* and pipeline.step.* events as they
+// happen, so PipelineRunNode status updates without polling.
+// Without it, journal entries still land for backfill but the UI
+// catches up only on refresh.
+func (e *Executor) WithWSBroadcaster(b WSBroadcaster) *Executor {
+	e.ws = b
 	return e
 }
 
@@ -256,6 +272,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 
 	emit := &pipelineEmitContext{
 		emitter:         e.emitter,
+		ws:              e.ws,
 		workspaceID:     in.WorkspaceID,
 		authorCrewID:    in.AuthorCrewID,
 		invokingCrewID:  in.InvokingCrewID,

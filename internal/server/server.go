@@ -715,4 +715,12 @@ func (s *Server) APIRouter() *goapi.Router {
 	return s.apiRouter
 }
 
+// WSHub exposes the WebSocket hub for subsystems (e.g. pipeline
+// runtime) that need to push live events to subscribed clients.
+// Returns nil before the server fully boots; callers must
+// nil-check before subscribing.
+func (s *Server) WSHub() *ws.Hub {
+	return s.wsHub
+}
+
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,

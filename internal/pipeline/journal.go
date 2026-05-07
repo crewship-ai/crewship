@@ -18,6 +18,16 @@ type Emitter interface {
 	Emit(ctx context.Context, e journal.Entry) (string, error)
 }
 
+// WSBroadcaster is the narrow contract the executor needs from the
+// WebSocket hub for live pipeline event push. ws.Hub satisfies it;
+// tests can pass nil (no broadcast) or a fake. The executor uses
+// this to push pipeline.run.* + pipeline.step.* events to clients
+// subscribed on the workspace channel, so the Graph view updates
+// PipelineRunNode status without polling.
+type WSBroadcaster interface {
+	BroadcastWorkspace(workspaceID, eventType string, payload any)
+}
+
 // nopEmitter swallows all entries. Returned by ensureEmitter when
 // the executor is constructed without a journal — useful for
 // dry-run-only paths and unit tests that don't care about journal
@@ -69,6 +79,7 @@ func truncateForPreview(s string) string {
 // through the helpers so each emit site stays a one-liner.
 type pipelineEmitContext struct {
 	emitter         Emitter
+	ws              WSBroadcaster // nil = no live push
 	workspaceID     string
 	authorCrewID    string
 	invokingCrewID  string
@@ -78,12 +89,40 @@ type pipelineEmitContext struct {
 	runID           string
 }
 
+// broadcast pushes a typed event to the workspace channel. Centralised
+// here so every emit site gets WS push for free without each helper
+// duplicating the nil check + payload shape. Mirror of journal Emit
+// shape so frontend handlers can switch on event type.
+func (c *pipelineEmitContext) broadcast(eventType string, payload map[string]any) {
+	if c == nil || c.ws == nil || c.workspaceID == "" {
+		return
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	// Always include the run + pipeline pair so the frontend can
+	// route the event to the right PipelineRunNode without parsing
+	// nested fields.
+	payload["pipeline_id"] = c.pipelineID
+	payload["pipeline_slug"] = c.pipelineSlug
+	payload["run_id"] = c.runID
+	c.ws.BroadcastWorkspace(c.workspaceID, eventType, payload)
+}
+
 // emitRunStarted records that a pipeline run kicked off. summaryArgs
 // land in the entry's Summary; payload carries the full breakdown so
 // the Graph view can render run cards without a separate query.
 func (c *pipelineEmitContext) emitRunStarted(ctx context.Context, mode RunMode, inputsPreview string, stepCount int) {
 	if c == nil {
 		return
+	}
+	payload := map[string]any{
+		"mode":              string(mode),
+		"author_crew_id":    c.authorCrewID,
+		"invoking_crew_id":  c.invokingCrewID,
+		"invoking_agent_id": c.invokingAgentID,
+		"step_count":        stepCount,
+		"inputs_preview":    truncateForPreview(inputsPreview),
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -94,23 +133,41 @@ func (c *pipelineEmitContext) emitRunStarted(ctx context.Context, mode RunMode, 
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
 		Summary:     "Pipeline " + c.pipelineSlug + " started",
-		Payload: map[string]any{
-			"pipeline_id":       c.pipelineID,
-			"pipeline_slug":     c.pipelineSlug,
-			"run_id":            c.runID,
-			"mode":              string(mode),
-			"author_crew_id":    c.authorCrewID,
-			"invoking_crew_id":  c.invokingCrewID,
-			"invoking_agent_id": c.invokingAgentID,
-			"step_count":        stepCount,
-			"inputs_preview":    truncateForPreview(inputsPreview),
-		},
+		Payload:     mergePayload(payload, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
+	c.broadcast("pipeline.run.started", payload)
+}
+
+// mergePayload returns a new map with the base payload plus the
+// supplied key/value pairs. Used to keep journal Entry payload + WS
+// broadcast payload alignment without mutating the caller's map.
+// Variadic pairs follow the slog/log/value convention: even-indexed
+// args are keys (strings), odd-indexed are values.
+func mergePayload(base map[string]any, kv ...any) map[string]any {
+	out := make(map[string]any, len(base)+len(kv)/2)
+	for k, v := range base {
+		out[k] = v
+	}
+	for i := 0; i+1 < len(kv); i += 2 {
+		key, ok := kv[i].(string)
+		if !ok {
+			continue
+		}
+		out[key] = kv[i+1]
+	}
+	return out
 }
 
 func (c *pipelineEmitContext) emitStepStarted(ctx context.Context, step Step, stepIndex int, tier AdapterModel) {
 	if c == nil {
 		return
+	}
+	p := map[string]any{
+		"step_id":      step.ID,
+		"step_index":   stepIndex,
+		"step_type":    string(step.Type),
+		"tier_adapter": tier.Adapter,
+		"tier_model":   tier.Model,
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -120,22 +177,20 @@ func (c *pipelineEmitContext) emitStepStarted(ctx context.Context, step Step, st
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
 		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " started",
-		Payload: map[string]any{
-			"pipeline_id":   c.pipelineID,
-			"pipeline_slug": c.pipelineSlug,
-			"run_id":        c.runID,
-			"step_id":       step.ID,
-			"step_index":    stepIndex,
-			"step_type":     string(step.Type),
-			"tier_adapter":  tier.Adapter,
-			"tier_model":    tier.Model,
-		},
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
+	c.broadcast("pipeline.step.started", p)
 }
 
 func (c *pipelineEmitContext) emitStepCompleted(ctx context.Context, step Step, output string, durationMs int64, costUSD float64) {
 	if c == nil {
 		return
+	}
+	p := map[string]any{
+		"step_id":        step.ID,
+		"output_preview": truncateForPreview(output),
+		"duration_ms":    durationMs,
+		"cost_usd":       costUSD,
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -145,21 +200,19 @@ func (c *pipelineEmitContext) emitStepCompleted(ctx context.Context, step Step, 
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
 		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " completed",
-		Payload: map[string]any{
-			"pipeline_id":    c.pipelineID,
-			"pipeline_slug":  c.pipelineSlug,
-			"run_id":         c.runID,
-			"step_id":        step.ID,
-			"output_preview": truncateForPreview(output),
-			"duration_ms":    durationMs,
-			"cost_usd":       costUSD,
-		},
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
+	c.broadcast("pipeline.step.completed", p)
 }
 
 func (c *pipelineEmitContext) emitStepFailed(ctx context.Context, step Step, errorClass, errorMessage string) {
 	if c == nil {
 		return
+	}
+	p := map[string]any{
+		"step_id":               step.ID,
+		"error_class":           errorClass,
+		"error_message_preview": truncateForPreview(errorMessage),
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -169,20 +222,19 @@ func (c *pipelineEmitContext) emitStepFailed(ctx context.Context, step Step, err
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
 		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " failed",
-		Payload: map[string]any{
-			"pipeline_id":           c.pipelineID,
-			"pipeline_slug":         c.pipelineSlug,
-			"run_id":                c.runID,
-			"step_id":               step.ID,
-			"error_class":           errorClass,
-			"error_message_preview": truncateForPreview(errorMessage),
-		},
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
+	c.broadcast("pipeline.step.failed", p)
 }
 
 func (c *pipelineEmitContext) emitValidationFailed(ctx context.Context, step Step, reason string, action OnFailAction) {
 	if c == nil {
 		return
+	}
+	p := map[string]any{
+		"step_id": step.ID,
+		"reason":  reason,
+		"action":  string(action),
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -192,20 +244,18 @@ func (c *pipelineEmitContext) emitValidationFailed(ctx context.Context, step Ste
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
 		Summary:     "Pipeline " + c.pipelineSlug + " step " + step.ID + " validation failed",
-		Payload: map[string]any{
-			"pipeline_id":   c.pipelineID,
-			"pipeline_slug": c.pipelineSlug,
-			"run_id":        c.runID,
-			"step_id":       step.ID,
-			"reason":        reason,
-			"action":        string(action),
-		},
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
+	c.broadcast("pipeline.step.validation_failed", p)
 }
 
 func (c *pipelineEmitContext) emitRunCompleted(ctx context.Context, totalDurationMs int64, totalCostUSD float64) {
 	if c == nil {
 		return
+	}
+	p := map[string]any{
+		"total_duration_ms": totalDurationMs,
+		"total_cost_usd":    totalCostUSD,
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -216,19 +266,18 @@ func (c *pipelineEmitContext) emitRunCompleted(ctx context.Context, totalDuratio
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
 		Summary:     "Pipeline " + c.pipelineSlug + " completed",
-		Payload: map[string]any{
-			"pipeline_id":       c.pipelineID,
-			"pipeline_slug":     c.pipelineSlug,
-			"run_id":            c.runID,
-			"total_duration_ms": totalDurationMs,
-			"total_cost_usd":    totalCostUSD,
-		},
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
+	c.broadcast("pipeline.run.completed", p)
 }
 
 func (c *pipelineEmitContext) emitRunFailed(ctx context.Context, failedStepID, errorMessage string) {
 	if c == nil {
 		return
+	}
+	p := map[string]any{
+		"failed_at_step": failedStepID,
+		"error_message":  truncateForPreview(errorMessage),
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -239,12 +288,7 @@ func (c *pipelineEmitContext) emitRunFailed(ctx context.Context, failedStepID, e
 		ActorType:   journal.ActorOrchestrator,
 		ActorID:     c.runID,
 		Summary:     "Pipeline " + c.pipelineSlug + " failed at step " + failedStepID,
-		Payload: map[string]any{
-			"pipeline_id":    c.pipelineID,
-			"pipeline_slug":  c.pipelineSlug,
-			"run_id":         c.runID,
-			"failed_at_step": failedStepID,
-			"error_message":  truncateForPreview(errorMessage),
-		},
+		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
+	c.broadcast("pipeline.run.failed", p)
 }
