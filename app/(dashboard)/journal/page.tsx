@@ -579,8 +579,17 @@ function AnomalyBadge({
   entries: Array<{ ts: string; severity?: string }>
   onClick: () => void
 }) {
+  // Wall-clock tick keeps the rolling window honest when no new entries
+  // arrive: without it the cutoff would freeze at the timestamp of the
+  // most recent render, so a quiet stream of errors three minutes ago
+  // would keep firing the badge forever instead of aging out.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
   const errCount = useMemo(() => {
-    const cutoff = Date.now() - ANOMALY_WINDOW_MS
+    const cutoff = now - ANOMALY_WINDOW_MS
     let n = 0
     for (const e of entries) {
       if (e.severity !== "error" && e.severity !== "warn") continue
@@ -588,7 +597,7 @@ function AnomalyBadge({
       if (Number.isFinite(t) && t >= cutoff) n++
     }
     return n
-  }, [entries])
+  }, [entries, now])
   if (errCount < ANOMALY_THRESHOLD) return null
   return (
     <button

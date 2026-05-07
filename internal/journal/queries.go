@@ -22,9 +22,9 @@ type Query struct {
 	// AgentID. When non-empty they take precedence — the SQL emits an
 	// IN-clause covering every supplied id. Single-valued fields are
 	// kept for backwards compatibility with existing call sites.
-	CrewIDs    []string
-	AgentIDs   []string
-	Types      []EntryType
+	CrewIDs  []string
+	AgentIDs []string
+	Types    []EntryType
 	// ExcludeTypes filters out entries of the listed types. Useful for
 	// "show me everything except container.metrics" without having to
 	// maintain a 50-element inclusion list. Combines AND with Types

@@ -398,7 +398,6 @@ func startCatalogRefresh(catalog *devcontainer.CatalogFetcher, runtimes *devcont
 	}()
 }
 
-
 // rehydrateContainers re-registers crew containers that survived a
 // previous crewshipd process with the stats collector + file watcher.
 // Stats collection and the listening-port scanner only see containers

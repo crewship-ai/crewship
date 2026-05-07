@@ -359,17 +359,34 @@ export function RunsView({ workspaceId, workspaceLoading }: RunsViewProps) {
                       : run.status === "CANCELLED"
                         ? XCircle
                         : Play
+              const traceHref = `/journal?tab=timeline&trace_id=${encodeURIComponent(run.id)}`
+              // Keep row clicks/keypresses from hijacking interactions
+              // that originate inside nested links, buttons, or inputs
+              // (e.g. the agent Link below). Without this guard, pressing
+              // Enter on a focused inner Link would also navigate to the
+              // run trace, swallowing the user's actual choice.
+              const INTERACTIVE_SELECTOR =
+                'a,button,[role="button"],[role="link"],input,textarea,select'
+              const isFromInteractiveChild = (target: EventTarget | null) => {
+                if (!(target instanceof Element)) return false
+                const hit = target.closest(INTERACTIVE_SELECTOR)
+                return hit !== null && hit !== target.closest("[data-row-root]")
+              }
               return (
                 <div
                   key={run.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => router.push(`/journal?tab=timeline&trace_id=${run.id}`)}
+                  data-row-root
+                  onClick={(e) => {
+                    if (isFromInteractiveChild(e.target)) return
+                    router.push(traceHref)
+                  }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      router.push(`/journal?tab=timeline&trace_id=${run.id}`)
-                    }
+                    if (e.key !== "Enter" && e.key !== " ") return
+                    if (isFromInteractiveChild(e.target)) return
+                    e.preventDefault()
+                    router.push(traceHref)
                   }}
                   title={`Open trace ${run.id.slice(0, 8)} in Timeline`}
                   className={cn(
