@@ -1015,7 +1015,15 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "waitpoint store does not support completion"})
 		return
 	}
-	deciderID := "" // TODO: pull from JWT user when auth middleware exposes it on ctx
+	// Decider identity from the JWT user context — same path the
+	// rest of the routine handlers use. Empty string when the
+	// request didn't go through authedMw (test paths without auth);
+	// the waitpoint row's decided_by_user_id ends up NULL in that
+	// case, which is fine for downstream audit queries.
+	deciderID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		deciderID = user.ID
+	}
 	payload := body.Comment
 	if err := wp.CompleteApproval(r.Context(), token, body.Approved, deciderID, payload); err != nil {
 		// pipeline.ErrAlreadyDecided → 409
