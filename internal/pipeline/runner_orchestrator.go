@@ -184,21 +184,28 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	// 6. Build AgentRunRequest.
 	//
 	// Tier resolution honoring: when the executor's tier resolver
-	// produced a non-empty Adapter + Model on the request, those
-	// override the agent's defaults. This is the load-bearing wire
-	// for two-tier execution — without it a routine's
-	// `complexity: "fast"` would silently run on whatever model the
-	// agent was created with (typically Sonnet), defeating the cost
-	// reduction promise. The override flows into the CLI flag list
-	// so `claude --model claude-haiku-4-5-20251001` actually fires.
+	// produced a non-empty Model on the request, override the agent's
+	// default. This is the load-bearing wire for two-tier execution
+	// — without it a routine's `complexity: "fast"` would silently
+	// run on whatever model the agent was created with (typically
+	// Sonnet), defeating the cost reduction promise.
 	//
-	// We don't override SystemPrompt or ToolProfile — those are
-	// agent-defining and the routine doesn't get to mess with them.
+	// CLIAdapter is intentionally NOT overridden from req.Adapter:
+	// (a) the workspace tier config's "adapter" field is shorthand
+	// ("claude" / "gemini") not the orchestrator's constants
+	// ("CLAUDE_CODE" / "GEMINI_CLI"), so direct override produces
+	// an unrecognized adapter and falls through to a bare CLI invocation
+	// missing system prompt / mcp config / etc.;
+	// (b) the dominant tier-swap use-case is cheap-vs-expensive on the
+	// SAME provider (Haiku → Opus), where adapter stays constant and
+	// only model changes;
+	// (c) cross-adapter swap (Claude → Gemini) is a rare advanced
+	// case worth a follow-up that maps shorthand → constant.
+	//
+	// SystemPrompt and ToolProfile likewise stay agent-defined — the
+	// routine doesn't get to mess with persona or tool whitelist.
 	cliAdapter := info.CLIAdapter
 	llmModel := info.LLMModel
-	if req.Adapter != "" {
-		cliAdapter = req.Adapter
-	}
 	if req.Model != "" {
 		llmModel = req.Model
 	}
