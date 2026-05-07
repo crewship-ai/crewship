@@ -182,9 +182,18 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	//    isn't applied here because per-step model swapping is a
 	//    Phase 2 feature of the LLM-direct runner; the orchestrator
 	//    path hands the prompt to whatever the agent's adapter is.
+	// Pick the tighter of the two timeouts (agent default vs step
+	// override). When the agent has no configured timeout
+	// (info.TimeoutSecs == 0), the previous form `req.TimeoutSec <
+	// timeoutSecs` evaluated to `N < 0` → false and silently
+	// dropped the step's requested timeout. The fix: apply the
+	// step override whenever it's positive AND either the agent
+	// has no default OR the step is tighter.
 	timeoutSecs := info.TimeoutSecs
-	if req.TimeoutSec > 0 && req.TimeoutSec < timeoutSecs {
-		timeoutSecs = req.TimeoutSec
+	if req.TimeoutSec > 0 {
+		if timeoutSecs == 0 || req.TimeoutSec < timeoutSecs {
+			timeoutSecs = req.TimeoutSec
+		}
 	}
 	if timeoutSecs == 0 {
 		timeoutSecs = 600 // 10-minute default; agents that need
