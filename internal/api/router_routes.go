@@ -353,6 +353,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
+	// Waitpoints — StepWait approval persistence + UI inbox surface.
+	// Pending waitpoints flow into the same Inbox as Keeper approvals.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints", authed(wsCtx(http.HandlerFunc(pipes.ListPendingWaitpoints))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", authed(wsCtx(http.HandlerFunc(pipes.ApproveWaitpoint))))
 	// Internal /api/v1/internal/pipelines/save route is registered
 	// further down where `internalAuth` is in scope (alongside the
 	// other /internal endpoints). See line ~640 below.

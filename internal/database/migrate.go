@@ -1070,6 +1070,12 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// See .claude/context/prd/PIPELINES.md and
 	// migrate_consts_v78_pipelines.go for full design rationale.
 	{version: 78, name: "add_pipelines", sql: migrationAddPipelines},
+	// v79 adds pipeline versioning + waitpoints. Versioning makes
+	// the in-place edits from v78 immutable history (each save = new
+	// row, head_version pointer on pipelines), so rollback + audit
+	// + marketplace integrity are real. Waitpoints persist
+	// approval-step tokens so a wait survives process restarts.
+	{version: 79, name: "add_pipeline_versions_and_waitpoints", sql: migrationAddPipelineVersionsAndWaitpoints},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

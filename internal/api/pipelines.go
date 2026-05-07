@@ -18,12 +18,13 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
-	db       *sql.DB
-	logger   *slog.Logger
-	store    *pipeline.Store
-	resolver *pipeline.Resolver
-	runner   pipeline.AgentRunner
-	emitter  pipeline.Emitter
+	db         *sql.DB
+	logger     *slog.Logger
+	store      *pipeline.Store
+	resolver   *pipeline.Resolver
+	runner     pipeline.AgentRunner
+	emitter    pipeline.Emitter
+	waitpoints pipeline.WaitpointStore // optional; nil → wait approval steps fall back to in-memory timeout
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -59,6 +60,14 @@ func (h *PipelineHandler) SetRunner(r pipeline.AgentRunner) {
 // emission lands in production but stays no-op in tests.
 func (h *PipelineHandler) SetJournal(e pipeline.Emitter) {
 	h.emitter = e
+}
+
+// SetWaitpointStore wires the production WaitpointStore so StepWait
+// approval steps persist their token state across process restarts.
+// Without it, approval steps fall back to in-memory + 60s timeout
+// (useful for dev, broken for any real approval workflow).
+func (h *PipelineHandler) SetWaitpointStore(w pipeline.WaitpointStore) {
+	h.waitpoints = w
 }
 
 // pipelineResponse is the wire shape returned by GET endpoints. We
@@ -490,6 +499,99 @@ func parseSmallInt(s string) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// ApproveWaitpoint completes a pending wait-step approval. POST
+// /api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve
+// Body: { "approved": true|false, "comment": "..." }
+//
+// Reaches into the wired WaitpointStore (production: SQLWaitpointStore
+// from internal/pipeline). The corresponding pipeline run goroutine
+// is parked on WaitFor(token); this call wakes it.
+func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Request) {
+	if h.waitpoints == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "waitpoint store not wired"})
+		return
+	}
+	token := r.PathValue("token")
+	if token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "token required"})
+		return
+	}
+	var body struct {
+		Approved bool   `json:"approved"`
+		Comment  string `json:"comment"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+	}
+	// We accept either the SQLWaitpointStore concrete type or any
+	// other implementation that satisfies the interface. The
+	// CompleteApproval call is a method on the SQL store, but the
+	// interface only exposes WaitFor + CreateApproval — so we type-
+	// assert here. Production wiring always uses the SQL store.
+	type approver interface {
+		CompleteApproval(ctx context.Context, token string, approved bool, deciderUserID, payload string) error
+	}
+	wp, ok := h.waitpoints.(approver)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "waitpoint store does not support completion"})
+		return
+	}
+	deciderID := "" // TODO: pull from JWT user when auth middleware exposes it on ctx
+	payload := body.Comment
+	if err := wp.CompleteApproval(r.Context(), token, body.Approved, deciderID, payload); err != nil {
+		// pipeline.ErrAlreadyDecided → 409
+		if err.Error() == "waitpoint: already decided or expired" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		h.logger.Error("waitpoint complete", "error", err, "token", token)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": body.Approved})
+}
+
+// ListPendingWaitpoints returns the workspace's pending approval
+// waitpoints so the inbox UI can render approval cards. GET
+// /api/v1/workspaces/{ws}/pipelines/waitpoints
+func (h *PipelineHandler) ListPendingWaitpoints(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	rows, err := h.db.QueryContext(r.Context(), `
+SELECT token, pipeline_run_id, step_id, kind, COALESCE(prompt, ''), COALESCE(invoking_crew_id, ''),
+       timeout_at, created_at
+FROM pipeline_waitpoints
+WHERE workspace_id = ? AND status = 'pending'
+ORDER BY created_at DESC
+LIMIT 200`, workspaceID)
+	if err != nil {
+		h.logger.Error("waitpoints list", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list waitpoints"})
+		return
+	}
+	defer rows.Close()
+	type wpRow struct {
+		Token          string `json:"token"`
+		PipelineRunID  string `json:"pipeline_run_id"`
+		StepID         string `json:"step_id"`
+		Kind           string `json:"kind"`
+		Prompt         string `json:"prompt"`
+		InvokingCrewID string `json:"invoking_crew_id,omitempty"`
+		TimeoutAt      string `json:"timeout_at"`
+		CreatedAt      string `json:"created_at"`
+	}
+	out := make([]wpRow, 0, 50)
+	for rows.Next() {
+		var r wpRow
+		if err := rows.Scan(&r.Token, &r.PipelineRunID, &r.StepID, &r.Kind, &r.Prompt, &r.InvokingCrewID, &r.TimeoutAt, &r.CreatedAt); err == nil {
+			out = append(out, r)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // lookupAgentSlugs returns the set of agent slugs that exist in the

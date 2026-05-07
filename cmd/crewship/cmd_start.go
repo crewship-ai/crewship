@@ -245,6 +245,17 @@ var startCmd = &cobra.Command{
 				srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
 				logger.Info("pipeline runner wired (orchestrator mode — agent runs in its container via CLI adapter)")
 			}
+
+			// Wire production WaitpointStore so StepWait approvals
+			// persist across restarts and the inbox UI can fire
+			// /pipelines/waitpoints/{token}/approve. Without this,
+			// approval steps timeout after 60s in-memory only.
+			if deps.DB != nil {
+				wpStore := pipeline.NewSQLWaitpointStore(deps.DB)
+				defer wpStore.Close()
+				srv.APIRouter().PipelinesHandler.SetWaitpointStore(wpStore)
+				logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)")
+			}
 		}
 
 		// Start OAuth token refresh worker (refreshes tokens expiring soon)
