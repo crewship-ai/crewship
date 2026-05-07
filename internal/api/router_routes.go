@@ -339,6 +339,29 @@ func (r *Router) registerRoutes() {
 	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/bulk-import", authed(wsCtx(http.HandlerFunc(skillBulk.Import))))
 
+	// Pipelines — declarative DSL workflows persisted per-workspace and
+	// reusable across crews. Runner is wired post-construction by the
+	// orchestrator boot path; an unwired runner returns 503 from /run
+	// and /test_run so the rest of the surface (List/Get/Delete/DryRun)
+	// stays usable for read-only inspection during boot.
+	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	r.PipelinesHandler = pipes // expose for orchestrator wiring
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", authed(wsCtx(http.HandlerFunc(pipes.Run))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
+	// Internal route for sidecar→main forwarding. The sidecar
+	// trusts the agent's claim about author identity (IPC has the
+	// agent's own crew/agent IDs); the main API trusts the
+	// X-Internal-Token via the internal middleware. We do NOT use
+	// authed/wsCtx here because internal endpoints are mounted
+	// under their own middleware chain in router.go via the
+	// authRateLimitedMux + internal-token check.
+	r.mux.Handle("POST /api/v1/internal/pipelines/save", authed(http.HandlerFunc(pipes.InternalSave)))
+
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
 
