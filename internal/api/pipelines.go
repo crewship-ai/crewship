@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -267,7 +268,10 @@ func (h *PipelineHandler) DryRun(w http.ResponseWriter, r *http.Request) {
 	}
 	var body runRequestBody
 	if r.ContentLength > 0 {
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
 	}
 	exec := pipeline.NewExecutor(h.store, h.resolver, h.runner, h.emitter)
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
@@ -402,39 +406,25 @@ func (h *PipelineHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// We index pipeline runs purely through journal_entries.
-	// payload->>'pipeline_id' is the join column; SQLite supports
-	// json_extract since 3.38 which is ages ago. Filter to the
-	// run-level entries only — step entries fan out per run, which
-	// is too noisy for the index list.
+	// json_extract is supported by modernc.org/sqlite + every
+	// recent mainline SQLite (>= 3.38), so we use it inline for
+	// the pipeline_id filter rather than carrying a "fast path
+	// vs fallback" branch (the previous version had a 7-column
+	// fast path the scanner couldn't decode — dead code per
+	// CodeRabbit). Run-level entries only — step entries fan
+	// out per run and would dominate the list.
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT id, run_id_from_payload(payload) AS run_id, ts, entry_type, severity,
-       summary, payload
-FROM (
-    SELECT id, ts, entry_type, severity, summary, payload,
-           json_extract(payload, '$.pipeline_id') AS pid
-    FROM journal_entries
-    WHERE workspace_id = ?
-      AND entry_type LIKE 'pipeline.run.%'
-)
-WHERE pid = ?
+SELECT id, ts, entry_type, severity, summary, payload
+FROM journal_entries
+WHERE workspace_id = ?
+  AND entry_type LIKE 'pipeline.run.%'
+  AND json_extract(payload, '$.pipeline_id') = ?
 ORDER BY ts DESC
 LIMIT ?`, workspaceID, p.ID, limit)
 	if err != nil {
-		// Fallback for SQLite builds without json_extract: pull all
-		// pipeline.run.* entries for the workspace and filter in Go.
-		// Cheap on workspaces with low pipeline activity; if it
-		// becomes a hot path we'll add a stored generated column.
-		rows, err = h.db.QueryContext(r.Context(), `
-SELECT id, ts, entry_type, severity, summary, payload
-FROM journal_entries
-WHERE workspace_id = ? AND entry_type LIKE 'pipeline.run.%'
-ORDER BY ts DESC
-LIMIT ?`, workspaceID, limit*5)
-		if err != nil {
-			h.logger.Error("pipeline list runs: query", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list runs"})
-			return
-		}
+		h.logger.Error("pipeline list runs: query", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list runs"})
+		return
 	}
 	defer rows.Close()
 
@@ -453,28 +443,19 @@ LIMIT ?`, workspaceID, limit*5)
 		var (
 			e          runEntry
 			payloadRaw string
-			runIDExt   sql.NullString
-			cols       = []any{&e.ID, &e.Timestamp, &e.EntryType, &e.Severity, &e.Summary, &payloadRaw}
 		)
-		// We only support the fallback 6-col query for now; the
-		// computed run_id column is a Phase 2 optimisation that
-		// requires a SQL function. Today, run_id is parsed from the
-		// payload JSON below.
-		_ = runIDExt
-		if err := rows.Scan(cols...); err != nil {
+		if err := rows.Scan(&e.ID, &e.Timestamp, &e.EntryType, &e.Severity, &e.Summary, &payloadRaw); err != nil {
 			h.logger.Warn("pipeline list runs: scan", "error", err)
 			continue
 		}
-		if runIDExt.Valid {
-			e.RunID = runIDExt.String
-		}
-		// In the fallback path we filter pipeline_id client-side.
+		// SQL already filtered by pipeline_id; we still parse the
+		// payload to surface run_id (and confirm pipeline_id) on
+		// the wire. JSON parse failures are non-fatal — surface
+		// the row anyway so a malformed payload doesn't hide a
+		// real run from the dashboard.
 		var meta map[string]any
 		if err := json.Unmarshal([]byte(payloadRaw), &meta); err == nil {
 			if pid, ok := meta["pipeline_id"].(string); ok {
-				if pid != p.ID {
-					continue
-				}
 				e.PipelineID = pid
 			}
 			if rid, ok := meta["run_id"].(string); ok {
@@ -483,9 +464,9 @@ LIMIT ?`, workspaceID, limit*5)
 		}
 		e.Payload = json.RawMessage(payloadRaw)
 		out = append(out, e)
-		if len(out) >= limit {
-			break
-		}
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Warn("pipeline list runs: rows iteration", "error", err)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -509,6 +490,79 @@ func parseSmallInt(s string) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// lookupAgentSlugs returns the set of agent slugs that exist in the
+// given crew. Used by InternalSave's semantic-validation pass so
+// pipelines referencing unknown agents are rejected before they hit
+// the registry. Returns an empty (non-nil) set when the crew has no
+// agents — pipeline.Validate distinguishes nil ("skip the check")
+// from non-nil-but-empty ("crew has nothing").
+func (h *PipelineHandler) lookupAgentSlugs(r *http.Request, crewID string) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	if crewID == "" {
+		return out, nil
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT slug FROM agents WHERE crew_id = ? AND deleted_at IS NULL`, crewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err == nil {
+			out[slug] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// lookupPipelineSlugs returns the set of pipeline slugs already
+// registered in the workspace. Used by InternalSave's semantic
+// validation so call_pipeline references can be flagged when the
+// target slug is unknown. The validator treats unknown targets as
+// non-fatal (warn-shape) so a pair of related pipelines saved in
+// one session can reference each other.
+func (h *PipelineHandler) lookupPipelineSlugs(r *http.Request, workspaceID string) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	if workspaceID == "" {
+		return out, nil
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT slug FROM pipelines WHERE workspace_id = ? AND deleted_at IS NULL`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err == nil {
+			out[slug] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// cycleResolver returns a closure that pipeline.CycleDetect uses to
+// walk the call_pipeline graph. The closure loads the target
+// pipeline's DSL from the workspace registry. Errors fall through
+// as "unknown target" — CycleDetect explicitly tolerates that and
+// stops walking the unreachable branch (no false positives).
+func (h *PipelineHandler) cycleResolver(ctx context.Context, workspaceID string) func(slug string) (*pipeline.DSL, error) {
+	return func(slug string) (*pipeline.DSL, error) {
+		row, err := h.store.GetBySlug(ctx, workspaceID, slug)
+		if err != nil {
+			return nil, err
+		}
+		return pipeline.Parse([]byte(row.DefinitionJSON))
+	}
 }
 
 // parseRFC3339 wraps time.Parse with both nano + plain RFC3339 so
@@ -562,12 +616,42 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 
 	// Parse + validate before save so the agent gets a clean error
 	// message at this layer rather than at the next /run.
+	//
+	// Semantic checks: pass real agent + pipeline slug sets so the
+	// validator catches cross-crew references (agent_slug not in the
+	// author crew, call_pipeline target not in the workspace) at
+	// save time rather than letting them blow up at first run.
+	// Cycle detection runs in a separate pass with a workspace-
+	// scoped resolver since CycleDetect needs to walk the call
+	// graph beyond `dsl` itself.
 	dsl, err := pipeline.Parse(body.Definition)
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := pipeline.Validate(dsl, nil, nil); err != nil {
+	agentSlugs, err := h.lookupAgentSlugs(r, body.AuthorCrewID)
+	if err != nil {
+		h.logger.Warn("pipeline internal save: lookup agent slugs", "error", err, "crew", body.AuthorCrewID)
+		// Non-fatal: fall back to nil-set validation (the original
+		// schema-only path) rather than blocking the save on a
+		// crew lookup hiccup. The runtime still surfaces unknown
+		// agent_slug at first invocation.
+		agentSlugs = nil
+	}
+	pipelineSlugs, err := h.lookupPipelineSlugs(r, body.WorkspaceID)
+	if err != nil {
+		h.logger.Warn("pipeline internal save: lookup pipeline slugs", "error", err, "workspace", body.WorkspaceID)
+		pipelineSlugs = nil
+	}
+	if err := pipeline.Validate(dsl, agentSlugs, pipelineSlugs); err != nil {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+	// Cycle detection over the workspace's saved pipelines plus this
+	// candidate. The resolver loads target DSLs lazily; nodes that
+	// aren't in the workspace yet stop the walk on that branch (no
+	// false positives — see pipeline.CycleDetect docstring).
+	if err := pipeline.CycleDetect(dsl, h.cycleResolver(r.Context(), body.WorkspaceID)); err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}

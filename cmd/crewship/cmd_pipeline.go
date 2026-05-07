@@ -95,6 +95,7 @@ var pipelineListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -145,6 +146,7 @@ var pipelineGetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -240,15 +242,19 @@ reuse contract).`,
 		// CLI surfaces the same gate the sidecar enforces for
 		// in-container agents.
 		fmt.Println("Running test_run gate against the execution tier...")
-		testBody, _ := json.Marshal(map[string]any{
+		testBody, err := json.Marshal(map[string]any{
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrew,
 			"sample_inputs":  sampleInputs,
 		})
+		if err != nil {
+			return fmt.Errorf("marshal test_run body: %w", err)
+		}
 		testResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/test_run", ws), bytes.NewReader(testBody))
 		if err != nil {
 			return err
 		}
+		defer testResp.Body.Close()
 		if err := cli.CheckError(testResp); err != nil {
 			return fmt.Errorf("test_run failed: %w", err)
 		}
@@ -275,7 +281,7 @@ reuse contract).`,
 		// because user-driven save flows from the CLI need to land
 		// here too.
 		nowRFC := time.Now().UTC().Format(time.RFC3339Nano)
-		saveBody, _ := json.Marshal(map[string]any{
+		saveBody, err := json.Marshal(map[string]any{
 			"workspace_id":         ws,
 			"slug":                 slugifyName(name),
 			"name":                 name,
@@ -286,10 +292,14 @@ reuse contract).`,
 			"last_test_run_at":     nowRFC,
 			"last_test_run_passed": true,
 		})
+		if err != nil {
+			return fmt.Errorf("marshal save body: %w", err)
+		}
 		saveResp, err := client.Post("/api/v1/internal/pipelines/save", bytes.NewReader(saveBody))
 		if err != nil {
 			return err
 		}
+		defer saveResp.Body.Close()
 		if err := cli.CheckError(saveResp); err != nil {
 			return err
 		}
@@ -297,7 +307,14 @@ reuse contract).`,
 		if err := json.NewDecoder(saveResp.Body).Decode(&saved); err != nil {
 			return fmt.Errorf("decode save response: %w", err)
 		}
-		fmt.Printf("Saved pipeline %s (id=%s, hash=%s)\n", saved.Slug, saved.ID, saved.DefinitionHash[:12])
+		// Guard against unexpectedly short hash so a server change
+		// (or a future migration that stores hashes differently)
+		// doesn't crash the CLI with a slice-out-of-range panic.
+		shortHash := saved.DefinitionHash
+		if len(shortHash) > 12 {
+			shortHash = shortHash[:12]
+		}
+		fmt.Printf("Saved pipeline %s (id=%s, hash=%s)\n", saved.Slug, saved.ID, shortHash)
 		fmt.Printf("Invoke with: crewship pipeline run %s\n", saved.Slug)
 		return nil
 	},
@@ -334,6 +351,7 @@ var pipelineRunCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -406,6 +424,7 @@ var pipelineDryRunCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -472,6 +491,7 @@ var pipelineDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
@@ -502,6 +522,7 @@ var pipelineRunsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}

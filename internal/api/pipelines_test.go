@@ -92,6 +92,10 @@ func openSmokeDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	// :memory: is per-connection — pin the pool to one connection so
+	// schemata stays visible across queries.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if _, err := db.ExecContext(context.Background(), pipelineSmokeSchema); err != nil {
 		_ = db.Close()
 		t.Fatalf("schema: %v", err)

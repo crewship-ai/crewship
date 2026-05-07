@@ -396,6 +396,12 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 			out[id] = name
 		}
 	}
+	if err := rows.Err(); err != nil {
+		// Partial map — log so a context-cancellation or driver
+		// error doesn't silently downgrade [AVAILABLE PIPELINES]
+		// "authored by Marketing" rows to "authored by crew_xyz".
+		h.logger.Warn("lookupCrewNamesForWorkspace: rows iteration", "workspace_id", workspaceID, "error", err)
+	}
 	return out
 }
 

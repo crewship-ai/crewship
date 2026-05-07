@@ -101,13 +101,24 @@ function PipelineRunNodeImpl({ data }: NodeProps) {
   return (
     <div
       onClick={() => d.onClick?.(d.runId)}
+      onKeyDown={(e) => {
+        // Tab + Enter / Space activation matches WCAG button
+        // semantics. Without this, keyboard users with role=button
+        // can focus the node but can't trigger it.
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          d.onClick?.(d.runId)
+        }
+      }}
       className={cn(
         "group relative w-[220px] cursor-pointer rounded-md border px-3 py-2 transition-all",
         cfg.border,
         cfg.bg,
         "hover:border-foreground/40 hover:shadow-md",
+        "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-background",
       )}
       role="button"
+      tabIndex={0}
       aria-label={`Pipeline run ${title} (${cfg.label})`}
     >
       {/* Header: pipeline icon + status icon + slug */}

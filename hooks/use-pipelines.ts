@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 // Pipeline mirrors the wire shape returned by GET
 // /api/v1/workspaces/{ws}/pipelines (list endpoint, no definition).
@@ -50,16 +50,28 @@ export function usePipelines(workspaceId: string | null | undefined) {
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Track the in-flight controller so a workspace switch (or rapid
+  // refresh) can cancel the previous request. Without this, an
+  // older response could resolve last and overwrite state for the
+  // newer workspace — visible as the wrong pipelines list flashing
+  // when the user switches contexts.
+  const abortRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
     if (!workspaceId) {
       setPipelines([])
       return
     }
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines`)
+      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines`, {
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted) return
       if (!res.ok) {
         // 4xx/5xx — keep prior list rather than wiping it; just
         // surface the error in case the caller wants to render a
@@ -70,16 +82,21 @@ export function usePipelines(workspaceId: string | null | undefined) {
         return
       }
       const data: Pipeline[] = await res.json()
+      if (controller.signal.aborted) return
       setPipelines(Array.isArray(data) ? data : [])
     } catch (e) {
+      if (controller.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [workspaceId])
 
   useEffect(() => {
     refresh()
+    return () => {
+      abortRef.current?.abort()
+    }
   }, [refresh])
 
   return { pipelines, loading, error, refresh }
@@ -92,34 +109,48 @@ export function usePipelineRuns(workspaceId: string | null | undefined, slug: st
   const [runs, setRuns] = useState<PipelineRunSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Same stale-fetch guard as usePipelines — switching slugs
+  // rapidly must not let an older response overwrite state for
+  // the newer slug.
+  const abortRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
     if (!workspaceId || !slug) {
       setRuns([])
       return
     }
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     setError(null)
     try {
       const res = await fetch(
         `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/runs?limit=50`,
+        { signal: controller.signal },
       )
+      if (controller.signal.aborted) return
       if (!res.ok) {
         setError(`pipeline runs: ${res.status}`)
         setLoading(false)
         return
       }
       const data: PipelineRunSummary[] = await res.json()
+      if (controller.signal.aborted) return
       setRuns(Array.isArray(data) ? data : [])
     } catch (e) {
+      if (controller.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [workspaceId, slug])
 
   useEffect(() => {
     refresh()
+    return () => {
+      abortRef.current?.abort()
+    }
   }, [refresh])
 
   return { runs, loading, error, refresh }

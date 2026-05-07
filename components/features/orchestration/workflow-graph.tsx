@@ -319,13 +319,19 @@ function WorkflowGraphInner(
     setHighlightedNodeId(null)
   }, [])
 
-  if (missions.length === 0) {
+  // Empty state ONLY when there's nothing to render at all. With
+  // pipelines, the graph stays useful even when there are no
+  // missions yet — the registry row of saved pipelines is reason
+  // enough to show the canvas. Falling through to the canvas
+  // when missions=0 but pipelines>0 is what makes the pipelines-
+  // first workflow visible to fresh workspaces.
+  if (missions.length === 0 && (!pipelines || pipelines.length === 0)) {
     return (
       <div className="rounded-xl border border-border bg-card p-16">
         <EmptyState
           icon={Workflow}
-          title="No missions yet"
-          description="Create a mission from a crew's lead agent to see the workflow graph here"
+          title="No missions or pipelines yet"
+          description="Create a mission from a crew's lead agent — or save a pipeline — to see the workflow graph here"
         />
       </div>
     )

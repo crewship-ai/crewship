@@ -70,6 +70,14 @@ func openStoreTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	// In-memory SQLite (":memory:") gives each connection its OWN
+	// independent database. database/sql opens a pool of
+	// connections lazily, so a writer connection schemata can be
+	// invisible to a later reader connection — silent test
+	// flakiness. Pinning the pool to a single connection makes
+	// the test DB behave like a single shared in-memory DB.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if _, err := db.ExecContext(context.Background(), schemaSQL); err != nil {
 		_ = db.Close()
 		t.Fatalf("schema: %v", err)

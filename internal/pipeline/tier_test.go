@@ -22,6 +22,10 @@ func openTierTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
+	// Pin to one connection so :memory: schema is visible across all
+	// queries (see store_test.go for the full rationale).
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if _, err := db.ExecContext(context.Background(), tierSchemaSQL); err != nil {
 		_ = db.Close()
 		t.Fatalf("schema: %v", err)
@@ -53,7 +57,10 @@ func TestResolver_OverrideWithoutAdapterPrefix(t *testing.T) {
 	r := NewResolver(db)
 
 	step := Step{ModelOverride: "claude-haiku-4-5-20251001"}
-	primary, _, _ := r.Resolve(context.Background(), "ws_default", step)
+	primary, _, err := r.Resolve(context.Background(), "ws_default", step)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
 	if primary.Adapter != "claude" {
 		t.Errorf("default adapter should be claude, got %q", primary.Adapter)
 	}
@@ -68,7 +75,10 @@ func TestResolver_FallsBackToPackageDefaults_OnEmptyMapping(t *testing.T) {
 	r := NewResolver(db)
 
 	step := Step{Complexity: ComplexityModerate}
-	primary, _, _ := r.Resolve(context.Background(), "ws_default", step)
+	primary, _, err := r.Resolve(context.Background(), "ws_default", step)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
 	// Workspace has '{}' → no mapping → defaultTier(moderate).
 	if primary.Adapter != "claude" || primary.Model != "claude-sonnet-4-6" {
 		t.Errorf("expected default sonnet, got %+v", primary)
@@ -82,14 +92,20 @@ func TestResolver_UsesWorkspaceCustomMapping(t *testing.T) {
 
 	// ws_custom maps trivial → ollama/llama3.2:8b
 	step := Step{Complexity: ComplexityTrivial}
-	primary, _, _ := r.Resolve(context.Background(), "ws_custom", step)
+	primary, _, err := r.Resolve(context.Background(), "ws_custom", step)
+	if err != nil {
+		t.Fatalf("resolve trivial: %v", err)
+	}
 	if primary.Adapter != "ollama" || primary.Model != "llama3.2:8b" {
 		t.Errorf("expected ollama/llama3.2:8b, got %+v", primary)
 	}
 
 	// ws_custom maps smart → openai/gpt-5
 	step = Step{Complexity: ComplexitySmart}
-	primary, _, _ = r.Resolve(context.Background(), "ws_custom", step)
+	primary, _, err = r.Resolve(context.Background(), "ws_custom", step)
+	if err != nil {
+		t.Fatalf("resolve smart: %v", err)
+	}
 	if primary.Adapter != "openai" || primary.Model != "gpt-5" {
 		t.Errorf("expected openai/gpt-5, got %+v", primary)
 	}
@@ -100,7 +116,10 @@ func TestResolver_NoComplexityDefaultsToModerate(t *testing.T) {
 	defer db.Close()
 	r := NewResolver(db)
 
-	primary, _, _ := r.Resolve(context.Background(), "ws_default", Step{})
+	primary, _, err := r.Resolve(context.Background(), "ws_default", Step{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
 	// Step has no complexity, no override → default moderate → sonnet.
 	if primary.Model != "claude-sonnet-4-6" {
 		t.Errorf("expected moderate→sonnet, got %+v", primary)

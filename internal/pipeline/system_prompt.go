@@ -97,11 +97,20 @@ func BuildSystemPromptBlock(ctx context.Context, store *Store, workspaceID strin
 // oneLine collapses any whitespace run in s to a single space and
 // trims, so descriptions written with newlines render as one line in
 // the system prompt without breaking the bracketed structure.
+//
+// Truncation walks back to a UTF-8 rune boundary before slicing so
+// multi-byte characters at the cap boundary (CJK, emoji,
+// diacritics) don't get corrupted into invalid UTF-8.
 func oneLine(s string) string {
 	fields := strings.Fields(s)
 	out := strings.Join(fields, " ")
-	if len(out) > 200 {
-		out = out[:200] + "…"
+	const cap = 200
+	if len(out) <= cap {
+		return out
 	}
-	return out
+	cut := cap
+	for cut > 0 && cut > cap-4 && (out[cut]&0xc0) == 0x80 {
+		cut--
+	}
+	return out[:cut] + "…"
 }

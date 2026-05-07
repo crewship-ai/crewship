@@ -44,14 +44,21 @@ type ExecutionTier struct {
 // InputSpec declares one named input the pipeline accepts. Type matches
 // JSON Schema primitive types so the validation layer can reuse the
 // same semantics for inputs and step outputs.
+//
+// Min/Max are float64 so they cover both `type: integer` and
+// `type: number` inputs. JSON numbers don't distinguish ints from
+// floats on the wire, so the validator coerces — typing the bounds
+// as *int would silently truncate fractional caps for number inputs
+// (e.g. Max=0.5 would round to 0). Validation rejects fractional
+// bounds when the input Type is "integer".
 type InputSpec struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"` // string | integer | number | boolean | array | object
-	Required    bool   `json:"required,omitempty"`
-	Default     any    `json:"default,omitempty"`
-	Description string `json:"description,omitempty"`
-	Min         *int   `json:"min,omitempty"`
-	Max         *int   `json:"max,omitempty"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"` // string | integer | number | boolean | array | object
+	Required    bool     `json:"required,omitempty"`
+	Default     any      `json:"default,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Min         *float64 `json:"min,omitempty"`
+	Max         *float64 `json:"max,omitempty"`
 }
 
 // OutputSpec declares one named output the pipeline produces. Outputs
@@ -222,6 +229,14 @@ type SaveInput struct {
 	// handler has confirmed a test_run within the gate window. The
 	// store does NOT enforce the freshness rule itself — the handler
 	// does, because the gate is policy, not persistence.
+	// LastTestRunAt + LastTestRunPassed encode "the caller already
+	// ran the test_run gate and these are its results". The store's
+	// Save method does NOT trust these naively: it validates the
+	// timestamp is recent (within testRunFreshness) AND not in the
+	// future, both against time.Now() server-side. Callers cannot
+	// mint a passing gate by claiming a fake distant-future
+	// timestamp — the server's clock is the source of truth for
+	// freshness.
 	LastTestRunAt     *time.Time
 	LastTestRunPassed bool
 	// ExecutionTierJSON optional override of workspace tier mapping.

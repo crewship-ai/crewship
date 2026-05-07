@@ -387,9 +387,12 @@ func TestExecutor_MustNotContain_Banned(t *testing.T) {
 			},
 		},
 	}
-	res, _ := exec.RunDefinition(context.Background(), dsl, RunInput{
+	res, runErr := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
+	if runErr != nil {
+		t.Fatalf("unexpected executor error: %v", runErr)
+	}
 	if res.Status != "FAILED" {
 		t.Errorf("expected FAILED for banned-token output, got %q", res.Status)
 	}
@@ -412,9 +415,12 @@ func TestExecutor_RunnerError_SurfacesAsStepFailure(t *testing.T) {
 			{ID: "a", Type: StepAgentRun, AgentSlug: "agent_lead", Prompt: "x", OnFail: OnFailAbort},
 		},
 	}
-	res, _ := exec.RunDefinition(context.Background(), dsl, RunInput{
+	res, runErr := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
+	if runErr != nil {
+		t.Fatalf("unexpected executor error: %v", runErr)
+	}
 	if res.Status != "FAILED" {
 		t.Errorf("expected FAILED, got %q", res.Status)
 	}
@@ -489,9 +495,12 @@ func TestExecutor_CallPipeline_TargetNotFound(t *testing.T) {
 			{ID: "call_ghost", Type: StepCallPipeline, PipelineSlug: "ghost"},
 		},
 	}
-	res, _ := exec.RunDefinition(context.Background(), dsl, RunInput{
+	res, runErr := exec.RunDefinition(context.Background(), dsl, RunInput{
 		WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun,
 	})
+	if runErr != nil {
+		t.Fatalf("unexpected executor error: %v", runErr)
+	}
 	if res.Status != "FAILED" {
 		t.Errorf("expected FAILED for unknown call_pipeline target, got %q", res.Status)
 	}

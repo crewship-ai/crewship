@@ -228,7 +228,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		case ModeRun, ModeTestRun:
 			emit.emitStepStarted(ctx, step, i, tier)
 
-			output, stepCost, stepDur, stepErr := e.runStep(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit)
+			output, stepCost, stepDur, stepErr := e.runStep(ctx, step, renderedPrompt, tier, fallback, in, runID, pipelineID, emit, ctxRender, depth)
 			if stepErr != nil {
 				result.Status = "FAILED"
 				result.FailedAtStep = step.ID
@@ -283,13 +283,15 @@ func (e *Executor) runStep(
 	in RunInput,
 	runID, pipelineID string,
 	emit *pipelineEmitContext,
+	parentRender RenderContext,
+	depth int,
 ) (output string, costUSD float64, durationMs int64, err error) {
 
 	switch step.Type {
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
 	case StepCallPipeline:
-		return e.runCallPipelineStep(ctx, step, in)
+		return e.runCallPipelineStep(ctx, step, in, parentRender, depth)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}
@@ -390,7 +392,13 @@ func (e *Executor) runAgentStep(
 // nested pipeline, parsing its DSL, and invoking runDSL recursively
 // with depth+1. Cycle detection at save time prevents loops; the
 // depth ceiling here is the safety net.
-func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent RunInput) (string, float64, int64, error) {
+//
+// parentRender + depth are threaded from the calling runDSL frame so
+// (a) nested input templates resolve against the parent's actual
+// inputs and step outputs (not against literal placeholders), and
+// (b) recursion depth accumulates across levels — without that the
+// safety ceiling never fires for legitimately deep call chains.
+func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent RunInput, parentRender RenderContext, depth int) (string, float64, int64, error) {
 	stepStart := time.Now()
 	target, err := e.pipes.GetBySlug(ctx, parent.WorkspaceID, step.PipelineSlug)
 	if err != nil {
@@ -404,15 +412,20 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 		return "", 0, 0, fmt.Errorf("call_pipeline: parse target: %w", err)
 	}
 
-	// Resolve nested inputs by rendering them against the parent
-	// step's render context. The parent context isn't available
-	// here — we approximate by re-rendering each value at this
-	// point, but the parent's prompt-rendering already happened
-	// before runStep was called. For MVP we accept that nested
-	// inputs use literal values (caller can pre-render).
+	// Render nested input values against the parent's render context
+	// before handing them to the nested run. String values pass
+	// through Render (templates resolved); non-string values land
+	// verbatim. Maps/slices are not deep-rendered — DSL authors who
+	// need that should use a transform step (Phase 2). Today most
+	// nested-input use cases are scalar pass-through or single-level
+	// templated strings.
 	nestedInputs := make(map[string]any, len(step.NestedInputs))
 	for k, v := range step.NestedInputs {
-		nestedInputs[k] = v
+		if s, ok := v.(string); ok {
+			nestedInputs[k] = Render(s, parentRender)
+		} else {
+			nestedInputs[k] = v
+		}
 	}
 
 	nestedIn := RunInput{
@@ -426,7 +439,10 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 		pipeline:        target,
 		dsl:             dsl,
 	}
-	nested, err := e.runDSL(ctx, nestedIn, 0) // depth restart per nested run; outer depth handled by caller
+	// depth+1 so the runtime safety ceiling fires for legitimately
+	// deep chains (A→B→C→...). Save-time cycle detection catches
+	// loops; this ceiling catches accidental long chains.
+	nested, err := e.runDSL(ctx, nestedIn, depth+1)
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
 	}

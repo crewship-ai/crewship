@@ -62,7 +62,18 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 	if !in.LastTestRunPassed {
 		return nil, ErrTestRunGateFailed
 	}
-	if in.LastTestRunAt == nil || time.Since(*in.LastTestRunAt) > testRunFreshness {
+	// Freshness check uses time.Since (server clock) so a caller
+	// cannot mint a passing gate by claiming a stale timestamp.
+	// Future timestamps are also rejected — without this check, a
+	// claim of last_test_run_at = "year 9999" would always look
+	// fresh because Since returns negative durations. We allow a
+	// small clock-skew tolerance (1 minute) so distributed callers
+	// with mildly drifting clocks don't get spurious failures.
+	if in.LastTestRunAt == nil {
+		return nil, ErrTestRunGateFailed
+	}
+	since := time.Since(*in.LastTestRunAt)
+	if since > testRunFreshness || since < -1*time.Minute {
 		return nil, ErrTestRunGateFailed
 	}
 	if in.Author.Via == "" {

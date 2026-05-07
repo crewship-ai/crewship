@@ -353,14 +353,9 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
-	// Internal route for sidecar→main forwarding. The sidecar
-	// trusts the agent's claim about author identity (IPC has the
-	// agent's own crew/agent IDs); the main API trusts the
-	// X-Internal-Token via the internal middleware. We do NOT use
-	// authed/wsCtx here because internal endpoints are mounted
-	// under their own middleware chain in router.go via the
-	// authRateLimitedMux + internal-token check.
-	r.mux.Handle("POST /api/v1/internal/pipelines/save", authed(http.HandlerFunc(pipes.InternalSave)))
+	// Internal /api/v1/internal/pipelines/save route is registered
+	// further down where `internalAuth` is in scope (alongside the
+	// other /internal endpoints). See line ~640 below.
 
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
@@ -632,6 +627,10 @@ func (r *Router) registerRoutes() {
 	}
 	internal.SetJournal(r.Journal())
 	internalAuth := internal.requireInternal
+	// Pipeline save — sidecar→main forward. Trust comes from
+	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
+	// regular JWT-authed users hit the public surface instead.
+	r.mux.Handle("POST /api/v1/internal/pipelines/save", internalAuth(http.HandlerFunc(pipes.InternalSave)))
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))

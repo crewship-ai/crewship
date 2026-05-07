@@ -43,15 +43,25 @@ func ensureEmitter(e Emitter) Emitter {
 const previewLen = 500
 
 // truncateForPreview returns s if it fits within previewLen, else
-// truncates it and appends a "...(N truncated)" tail so consumers
-// know there's more they're not seeing. Counted by bytes, which
-// is fine for English-heavy LLM outputs but undercounts for
-// multi-byte UTF-8; we accept the conservative cut.
+// truncates it on a UTF-8 rune boundary and appends a marker so
+// consumers know there's more they're not seeing. Slicing on a byte
+// boundary would corrupt multi-byte sequences (e.g. cutting a 2-byte
+// CJK character in half) and produce invalid UTF-8 in journal
+// payloads — JSON encoders downstream replace those with U+FFFD,
+// silently losing information.
 func truncateForPreview(s string) string {
 	if len(s) <= previewLen {
 		return s
 	}
-	return s[:previewLen] + "...(truncated)"
+	cut := previewLen
+	// Walk back from the byte boundary until we land on a rune
+	// start. UTF-8 continuation bytes have the bit pattern 10xx
+	// xxxx; ASCII and rune-start bytes do not. Bound the
+	// loop so we never scan more than 4 bytes (max UTF-8 length).
+	for cut > 0 && cut > previewLen-4 && (s[cut]&0xc0) == 0x80 {
+		cut--
+	}
+	return s[:cut] + "...(truncated)"
 }
 
 // pipelineEmitContext bundles every value the journal helpers need to
