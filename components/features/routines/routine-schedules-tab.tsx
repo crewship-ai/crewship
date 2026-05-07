@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { RoutineListSkeleton } from "./routine-skeletons"
 
 // RoutineSchedulesTab — cron-trigger CRUD for one routine. Wires the
 // previously-dead usePipelineSchedules hook to actual UI. List shows
@@ -84,8 +85,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
     }
   }
 
-  if (loading && ours.length === 0)
-    return <div className="py-6 text-center text-xs text-muted-foreground">Loading schedules…</div>
+  if (loading && ours.length === 0) return <RoutineListSkeleton rows={2} />
 
   return (
     <div className="space-y-3">

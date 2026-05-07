@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { RoutineListSkeleton } from "./routine-skeletons"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 // RoutineWaitpointsTab — HITL approval inbox for pending wait-step
@@ -95,8 +96,7 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
     }
   }
 
-  if (loading && pending.length === 0)
-    return <div className="py-6 text-center text-xs text-muted-foreground">Loading waitpoints…</div>
+  if (loading && pending.length === 0) return <RoutineListSkeleton rows={2} />
 
   return (
     <div className="space-y-2">

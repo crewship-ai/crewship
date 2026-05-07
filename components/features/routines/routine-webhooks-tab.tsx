@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { RoutineListSkeleton } from "./routine-skeletons"
 
 // RoutineWebhooksTab — event-driven trigger CRUD. Token + signing
 // secret are revealed once on create (Stripe-style); thereafter the
@@ -69,8 +70,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
     }
   }
 
-  if (loading && ours.length === 0)
-    return <div className="py-6 text-center text-xs text-muted-foreground">Loading webhooks…</div>
+  if (loading && ours.length === 0) return <RoutineListSkeleton rows={2} />
 
   return (
     <div className="space-y-3">

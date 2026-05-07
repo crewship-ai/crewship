@@ -6,6 +6,7 @@ import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
+import { RoutineRunsSkeleton } from "./routine-skeletons"
 
 // RoutineRunsTab — list of recent runs for one routine. Click to
 // expand a run inline and see step-level waterfall. Step events come
@@ -75,7 +76,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
     setExpandedRunId(grouped[0].runId)
   }, [grouped, slug])
 
-  if (loading) return <div className="py-6 text-center text-xs text-muted-foreground">Loading runs…</div>
+  if (loading) return <RoutineRunsSkeleton rows={3} />
   if (error) return <div className="py-4 text-xs text-red-400">Error: {error}</div>
   if (grouped.length === 0)
     return (

@@ -5,6 +5,7 @@ import { RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
+import { RoutineListSkeleton } from "./routine-skeletons"
 
 // RoutineVersionsTab — immutable version history with rollback.
 // Mirrors the Versions tab in the existing pipeline-detail-sheet but
@@ -77,7 +78,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
     }
   }
 
-  if (loading) return <div className="py-6 text-center text-xs text-muted-foreground">Loading versions…</div>
+  if (loading) return <RoutineListSkeleton rows={3} />
   if (error) return <div className="py-4 text-xs text-red-400">Error: {error}</div>
   if (versions.length === 0)
     return (
