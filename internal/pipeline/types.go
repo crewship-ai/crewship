@@ -6,6 +6,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -251,3 +252,117 @@ const (
 	OrderByRecent
 	OrderByName
 )
+
+// RunMode controls whether the executor performs side effects, runs
+// the pipeline against real agents to validate the DSL, or just
+// reports what it would have done.
+//
+//   - ModeRun: live invocation. Agents are called, side effects
+//     happen, journal entries land, invocation_count increments.
+//   - ModeTestRun: identical to ModeRun in mechanics, but the run
+//     does NOT increment invocation_count and is marked in the
+//     journal as a test run. Used by the save endpoint to enforce
+//     the test-run gate.
+//   - ModeDryRun: no agent invocation. Templates are rendered against
+//     inputs, the executor walks the step list and reports what it
+//     WOULD have done (Ansible --check). Returns a structured
+//     "would_execute" report. No journal entries beyond a single
+//     pipeline.dry_run audit row.
+type RunMode string
+
+const (
+	ModeRun     RunMode = "run"
+	ModeTestRun RunMode = "test_run"
+	ModeDryRun  RunMode = "dry_run"
+)
+
+// AgentRunner is the narrow contract the executor needs from the
+// orchestrator. The pipeline package depends on this interface
+// rather than on internal/orchestrator directly so:
+//  1. Tests can inject a deterministic mock without spinning up a
+//     real Docker container.
+//  2. The orchestrator package owns the wire-up adapter (in a
+//     separate file) and pipeline stays a leaf package.
+//  3. Future runtimes (e.g. local-only agent execution via Ollama)
+//     can satisfy the same interface.
+//
+// RunStep is synchronous from the executor's POV: it blocks until
+// the step finishes, returning the agent's final output as a string.
+// The orchestrator implementation buffers streaming events
+// internally and only returns once the run reaches a terminal state.
+type AgentRunner interface {
+	RunStep(ctx context.Context, req AgentStepRequest) (AgentStepResult, error)
+}
+
+// AgentStepRequest is the input to AgentRunner.RunStep. WorkspaceID
+// + AuthorCrewID + AgentSlug uniquely identify which agent to
+// invoke; the runner is responsible for translating slug → agent
+// row in the author crew (this is where author-crew-context
+// execution actually takes effect).
+type AgentStepRequest struct {
+	WorkspaceID  string
+	AuthorCrewID string
+	AgentSlug    string
+	Adapter      string
+	Model        string
+	Prompt       string
+	TimeoutSec   int
+	// Provenance for the orchestrator's own journal/audit:
+	PipelineID      string
+	PipelineRunID   string
+	StepID          string
+	InvokingCrewID  string
+	InvokingAgentID string
+}
+
+// AgentStepResult is the executor's view of a completed step. The
+// orchestrator collects token counts + cost via its existing
+// paymaster middleware; the pipeline package does not double-count.
+type AgentStepResult struct {
+	Output     string // final assistant message text
+	DurationMs int64
+	CostUSD    float64
+	TokensIn   int
+	TokensOut  int
+}
+
+// PipelineResolver is how the executor looks up a pipeline by slug
+// when it encounters a call_pipeline step. Implemented by *Store
+// for production; tests can pass a fake to exercise composition
+// paths without DB writes.
+type PipelineResolver interface {
+	GetBySlug(ctx context.Context, workspaceID, slug string) (*Pipeline, error)
+}
+
+// RunResult is what Executor.Run returns to the caller. Output
+// holds the final step's output; StepOutputs holds every step's
+// output by ID for richer caller logic. WouldExecute is populated
+// only when Mode == ModeDryRun.
+type RunResult struct {
+	RunID        string
+	PipelineID   string
+	PipelineSlug string
+	Status       string // COMPLETED | FAILED | DRY_RUN_OK
+	Output       string
+	StepOutputs  map[string]string
+	WouldExecute []DryRunStep
+	DurationMs   int64
+	CostUSD      float64
+	FailedAtStep string // empty unless Status == FAILED
+	ErrorMessage string
+}
+
+// DryRunStep is one entry in WouldExecute: what the executor WOULD
+// have done at this step in ModeDryRun. Mirrors AgentStepRequest
+// but with rendered prompts and resolved tier so a UI / caller
+// can inspect exactly what would be sent on a live run.
+type DryRunStep struct {
+	StepID         string  `json:"step_id"`
+	StepType       string  `json:"step_type"`
+	WouldCallAgent string  `json:"would_call_agent,omitempty"`
+	WouldCallSlug  string  `json:"would_call_pipeline,omitempty"`
+	WouldPass      string  `json:"would_pass,omitempty"`
+	TierAdapter    string  `json:"tier_adapter,omitempty"`
+	TierModel      string  `json:"tier_model,omitempty"`
+	EstimatedCost  float64 `json:"estimated_cost_usd,omitempty"`
+}
