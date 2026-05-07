@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
@@ -213,6 +214,36 @@ var startCmd = &cobra.Command{
 				if apiRouter := srv.APIRouter(); apiRouter != nil {
 					apiRouter.SetScheduler(sched)
 				}
+			}
+		}
+
+		// Wire the pipeline AgentRunner. Pipelines route every step
+		// through the same orchestrator path the scheduler uses —
+		// the agent runs in its real container, with its real CLI
+		// adapter (Claude Code / Codex / Gemini / etc.), no raw
+		// LLM API key required. This is the "reuse the firm's own
+		// employees" model: the agent the author crew already
+		// configured for chat use also handles pipeline steps.
+		//
+		// Wired here (not in server.go) because the runner needs
+		// chatbridge.ChatResolver, which is constructed in this
+		// file. The router exposes PipelinesHandler so the runner
+		// can be plugged in post-router-construction.
+		if deps.DB != nil && deps.Container != nil && srv.APIRouter() != nil && srv.APIRouter().PipelinesHandler != nil {
+			pipeRunner, err := pipeline.NewOrchestratorRunner(pipeline.OrchestratorRunnerDeps{
+				DB:        deps.DB,
+				Orch:      srv.Orchestrator(),
+				Container: deps.Container,
+				Resolver:  resolver,
+				LogWriter: srv.LogWriter(),
+				ConvStore: srv.ConversationStore(),
+				Logger:    logger,
+			})
+			if err != nil {
+				logger.Error("pipeline orchestrator runner construct failed", "error", err)
+			} else {
+				srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
+				logger.Info("pipeline runner wired (orchestrator mode — agent runs in its container via CLI adapter)")
 			}
 		}
 

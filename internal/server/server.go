@@ -30,7 +30,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
-	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
 	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/telemetry"
@@ -543,25 +542,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			mux.Handle("/exposed/", apiRouter)
 			logger.Info("Go API routes mounted")
 
-			// Wire the pipeline AgentRunner now that the router has
-			// finished constructing its handlers. The router exposes
-			// PipelinesHandler so we can hand it the runner and
-			// journal emitter post-construction; before this call,
-			// /pipelines/.../run returns 503 because there's no
-			// runner attached.
+			// Pipeline AgentRunner is wired in cmd_start.go after
+			// the chatbridge.ChatResolver is built — the runner
+			// needs the resolver + IPC base URL to look up agent
+			// configs the same way the chat handler does. Until
+			// the runner is wired, /pipelines/.../run returns 503.
 			//
-			// LLMRunner is the MVP runner — talks directly to the
-			// llm middleware without container provisioning. Phase
-			// 1.5 will add a full-orchestrator runner that satisfies
-			// the same AgentRunner interface and supports skills /
-			// MCP / tool loops; SetRunner is a single point of swap.
-			if apiRouter.PipelinesHandler != nil {
-				pipeRunner := pipeline.NewLLMRunner(deps.DB, s.journalWriter, logger)
-				apiRouter.PipelinesHandler.SetRunner(pipeRunner)
-				if s.journalWriter != nil {
-					apiRouter.PipelinesHandler.SetJournal(s.journalWriter)
-				}
-				logger.Info("pipeline runner wired (LLM-direct mode; full orchestrator integration is Phase 1.5)")
+			// We attach the journal emitter here because that
+			// dependency is local to the server, not the start
+			// command. Runner attach happens in cmd_start.go.
+			if apiRouter.PipelinesHandler != nil && s.journalWriter != nil {
+				apiRouter.PipelinesHandler.SetJournal(s.journalWriter)
 			}
 		}
 		// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues
