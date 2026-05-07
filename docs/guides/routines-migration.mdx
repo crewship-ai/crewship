@@ -1,0 +1,162 @@
+---
+title: "Routines: Migration & Compatibility"
+description: "Naming change Pipeline → Routine, what stays the same, what's new, and how existing automations keep working without changes."
+icon: "arrow-right-arrow-left"
+---
+
+import { Note, Warning, Info, Tip } from '/snippets/mintlify-stub.mdx'
+
+This page is for users who used the earlier `pipelines` API or CLI before the [Routines](/guides/routines) feature was finalized. **TL;DR: nothing breaks.** The user-facing label changed from "Pipeline" to "Routine", but every backend identifier — table, package, route paths, journal types, WS event types, command-line aliases — stays the same. Existing scripts, agents, and saved pipelines keep working.
+
+## What changed
+
+### User-facing label: Pipeline → Routine
+
+| Surface | Before | After |
+|---------|--------|-------|
+| Sidebar entry | (absent) | **Routines** under *Work* |
+| Orchestration tab | (4 tabs) | 5th tab **Routines** |
+| Page route | (absent) | **`/routines`** full management page |
+| Detail panel header | "Pipeline" | "Routine" |
+| Agent system prompt | `[AVAILABLE PIPELINES]` | `[AVAILABLE ROUTINES]` |
+| CLI primary name | `crewship pipeline ...` | **`crewship routine ...`** (`pipeline` alias kept) |
+| Bundle filename | `pipeline-<slug>-bundle.json` | `routine-<slug>-bundle.json` |
+
+### What stays the same (backwards-compatible)
+
+| Backend surface | Identifier |
+|-----------------|------------|
+| Database table | `pipelines` (unchanged) |
+| Go package | `internal/pipeline` (unchanged) |
+| HTTP routes | `/api/v1/.../pipelines/*` (unchanged) |
+| Sidecar routes | `localhost:9119/pipelines/*` (unchanged) |
+| Journal entry types | `pipeline.run.*`, `pipeline.step.*` (unchanged) |
+| WS event types | `pipeline.run.*`, `pipeline.step.*` (unchanged) |
+| CLI alias | `crewship pipeline X` still works (`routine` is preferred) |
+| Database migrations | v78–v82 apply once on first boot; unchanged |
+
+<Info>
+The naming split mirrors GitHub's pattern: their underlying table is `issue_events` but the UI says "Issues". Backend stability + user-facing rename, no breaking change.
+</Info>
+
+## What's new beyond the rename
+
+Beyond the rename itself, the same release shipped the following net-new capabilities:
+
+### Triggers
+
+- **Cron schedules** — recurring auto-fire on cron expression. New tables: `pipeline_schedules` (v80). New CLI: `crewship routine schedules ...`.
+- **Webhooks** — token-addressed event triggers with optional HMAC signing, per-token rate limiting. New tables: `pipeline_webhooks` (v82), `pipeline_run_idempotency` (v81). New CLI: `crewship routine webhooks ...`.
+
+### Versioning
+
+- **Immutable history + rollback** — every save creates a new `pipeline_versions` row (v79). `crewship routine versions <slug>`, `crewship routine rollback <slug> --to N`.
+
+### Step types
+
+- **6 step types** instead of MVP's 2: `agent_run`, `call_pipeline`, `http`, `code`, `wait`, `transform`. See [Step types reference](/guides/routines#step-types).
+- **DAG with `needs[]`** — independent steps execute in parallel.
+- **Conditional `if`** — any step can carry a template-rendered boolean to skip itself.
+
+### HITL
+
+- **Waitpoints** — DB-backed approval primitive (v79). `wait` step of `kind: approval` parks the run goroutine on a token; approve via CLI (`crewship routine waitpoints approve <token>`), UI inbox, or API.
+
+### UX
+
+- **`/routines` page** — dedicated full-management surface as a clone of `/orchestration`. Three-column layout with filter sidebar, 4 main tabs, and a 7-tab detail panel.
+- **+ New routine dialog** — JSON DSL editor with 3 starter templates and Test & Save flow.
+- **Live waterfall** — Runs sub-tab subscribes to step-level WebSocket events.
+
+### Tooling
+
+- **`crewship routine validate file.json`** — offline DSL parse + validate, exit 0/1 for CI gates.
+- **`crewship routine watch <slug>`** — live event stream, ANSI-coloured by default, `--json` for jq pipelines.
+- **`crewship routine logs <run_id> --slug X`** — one-shot post-mortem dump for a specific run.
+- **JSON Schema** at `schemas/routine.v1.json` — IDE autocomplete + inline validation when authoring DSL files.
+
+### Security
+
+- **HMAC `save_token`** — `/test_run` returns a signed token bound to (workspace, definition_hash, user_id, ts). `/save` verifies the token instead of trusting `last_test_run_at` body claims. Closes the test-gate spoofing surface flagged in the original review.
+- **CheckRedirect on HTTP step** — egress allowlist re-validated on every 3xx hop, blocking SSRF via redirect chains.
+- **JOIN on workspace_id** in agent slug resolution — eliminates cross-workspace agent execution surface.
+
+## Migration paths
+
+### "I'm using the CLI"
+
+Nothing to change. `crewship pipeline list` keeps working as an alias for `crewship routine list`. New subcommands (schedules / webhooks / waitpoints / validate / watch / logs) are only available under the `routine` name; pipeline alias doesn't expose them. Recommended: switch your scripts to `routine` so both old and new commands are available.
+
+### "I'm using the API"
+
+Nothing to change. All `/api/v1/.../pipelines/*` route paths are unchanged. The new endpoints (`/api/v1/workspaces/{ws}/pipelines/save` for UI authoring + `/api/v1/workspaces/{ws}/pipeline-schedules`, `/api/v1/workspaces/{ws}/pipeline-webhooks` etc.) are additive.
+
+The `/test_run` response now includes a `save_token` field (omitempty); legacy clients that ignore unknown fields see no change.
+
+### "My agents author pipelines via the sidecar"
+
+Nothing to change. The sidecar `localhost:9119/pipelines/*` paths are unchanged. The agent system prompt now says `[AVAILABLE ROUTINES]` instead of `[AVAILABLE PIPELINES]`, but agents read the bracket label as a section header, not a method name — they still POST to `/pipelines/save` and `/pipelines/{slug}/run`.
+
+<Tip>
+If you have skills or agent personas that explicitly mention "pipeline" in their prompts, consider updating them to "routine" for user-facing consistency. The agents themselves don't care — but humans reading agent transcripts will see "I created a pipeline" vs "I created a routine".
+</Tip>
+
+### "I have a saved bundle export from before the rename"
+
+Bundles are forward-compatible. The export format (`crewship-pipeline-bundle/v1`) is unchanged. Re-import works: `crewship routine import bundle.json`. The bundle filename format changed (`pipeline-<slug>-bundle.json` → `routine-<slug>-bundle.json`) but the filename has no semantic meaning — only the JSON shape inside matters.
+
+## Database migrations
+
+Five migrations land in this release:
+
+| Version | Purpose | Idempotent? |
+|---------|---------|-------------|
+| v78 | `pipelines` table + `workspaces.execution_tiers_json` | ✓ |
+| v79 | `pipeline_versions` + `pipeline_waitpoints` | ✓ |
+| v80 | `pipeline_schedules` | ✓ |
+| v81 | `pipeline_run_idempotency` | ✓ |
+| v82 | `pipeline_webhooks` | ✓ |
+
+All migrations apply automatically on first boot of a server with the new binary. Backup integrity is preserved — `crewship backup create` includes the new tables. Rollback path: `restore.go` for v78 returns nil (data-bearing tables can't be partial-rolled-back); for downstream rollback use the archive snapshot from before the upgrade.
+
+<Warning>
+Multi-instance dev (`/opt/crewship_N` ports 808N) shares a single SQLite file by default. Migrations run once on first-instance boot. If you have stale instances on older binaries, restart them in version order so they don't try to apply already-applied migrations.
+</Warning>
+
+## Tier override behavior change
+
+Routines whose steps declare `complexity: "fast"` (or any other tier) now actually pin the agent's CLI to the resolved model (`claude --model claude-haiku-4-5-20251001`). Previously the override was silently dropped and the agent's default model ran every step.
+
+**Before** (silent drop): a routine with `complexity: "fast"` on Tomas (default model: Sonnet) ran on Sonnet at ~$0.06/run.
+
+**After** (override honored): same routine runs on Haiku at ~$0.003/run. ~20× cheaper, ~3× faster.
+
+Cost dashboards may show a step-down in pipeline-attributed LLM cost after this release. That's the expected behaviour finally landing — not a metering glitch.
+
+## CodeRabbit-flagged fixes carried forward
+
+The original PR review flagged 23 inline issues. The vast majority were addressed in the original `7715ee7` sweep; the remaining items shipped with this release. See the [CHANGELOG](/CHANGELOG.md) for the full list, or [PIPELINES.md §17.5](./../../.claude/context/prd/PIPELINES.md) for the bug-list with rationale per fix.
+
+Highlights for security/stability-conscious users:
+- **DAG completion bookkeeping** — failed steps no longer mark `completed=true` (would have let downstream branches advance with empty inputs)
+- **Waitpoint lost-wakeup race** — listener pre-registration eliminates the timing window
+- **Webhook rate-limiter** — counter increment now atomic under mutex
+- **Idempotency stale-row** — sweep failure no longer leaks dead `run_id`s through subsequent reads
+- **SSRF via redirect** — already covered above
+- **Cross-workspace agent execution** — already covered above
+- **Template validation breadth** — bad templates in HTTP/Wait/Code/Transform/If fields now reject at save instead of crashing at runtime
+
+## Things still deferred (not in this release)
+
+| Feature | Status |
+|---------|--------|
+| Persistent run state (`pipeline_runs` table with status enum + checkpoint) | Follow-up PR. Currently runs are in-memory; restart loses active runs. Pending waitpoints survive (DB-backed); active step execution does not. |
+| Distributed scheduler with leader election | Follow-up. Single-instance only — running multiple replicas would double-fire schedules. |
+| Monaco DSL editor write mode in UI | Follow-up. UI is read-only; authoring works through CLI / agent / API. |
+| NL → cron expression converter | Foundation PRD scope; not in MVP. |
+| Errors fingerprinting + bulk replay | Foundation PRD scope. |
+| Auto-disable after N consecutive failures | Foundation PRD scope. |
+| Inbound MCP server exposing routines as MCP tools | Future. |
+| Cross-adapter tier swap (Claude → Gemini) | Same-provider model swap works (Haiku → Opus). Cross-provider adapter constants need shorthand→constant mapping. |
+
+See [PIPELINES.md §17.7](./../../.claude/context/prd/PIPELINES.md) for the full deferred-features list and the rationale per item.

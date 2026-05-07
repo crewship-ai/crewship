@@ -197,17 +197,66 @@ function RoutineRow({
 }
 
 function EmptyState() {
+  // Three quickstart paths surface the same flows the docs explain.
+  // Visual quickstart > a single explanation paragraph because users
+  // who land here cold scan more than they read. Each card dives at
+  // the concrete next click (routes that are wired in this PR), no
+  // dead ends.
+  const quickstarts: Array<{
+    icon: string
+    title: string
+    description: string
+    cta: string
+    href?: string
+  }> = [
+    {
+      icon: "+",
+      title: "Create from a template",
+      description: "Open the New routine dialog and pick a starter (Empty / Summarize / Two-step). Edit the JSON DSL, then Test & Save.",
+      cta: "Click + New routine in the toolbar above",
+    },
+    {
+      icon: "⬇",
+      title: "Import from another workspace",
+      description: "Bundle JSON exports from another Crewship workspace drop in via Import. Slugs are preserved; conflicts update the existing routine.",
+      cta: "Click Import in the toolbar above",
+    },
+    {
+      icon: "🤖",
+      title: "Let an agent author one",
+      description: "Agents that spot a repetitive pattern call POST localhost:9119/pipelines/save from inside their container. The next [AVAILABLE ROUTINES] block advertises the new routine to other crews.",
+      cta: "Open any chat with an authoring-tier agent",
+    },
+  ]
+
   return (
-    <div className="flex flex-1 items-center justify-center p-12">
-      <div className="text-center">
+    <div className="flex flex-1 flex-col items-center justify-center p-12">
+      <div className="mb-8 max-w-xl text-center">
         <ScrollText className="mx-auto mb-4 h-12 w-12 text-muted-foreground/40" />
-        <h3 className="mb-1 text-sm font-medium">No routines in this workspace yet</h3>
-        <p className="max-w-md text-xs text-muted-foreground">
-          Routines are repeatable AI workflow recipes. Agents author them via the sidecar API
-          when they discover a repetitive pattern, or you can import a bundle exported from
-          another workspace via the Import button above.
+        <h3 className="mb-2 text-sm font-medium">No routines in this workspace yet</h3>
+        <p className="text-xs text-muted-foreground">
+          Routines are repeatable AI workflow recipes — workspace-scoped, declarative, AI-authored or hand-written.
+          Three ways to get the first one in:
         </p>
       </div>
+      <div className="grid w-full max-w-3xl grid-cols-1 gap-3 md:grid-cols-3">
+        {quickstarts.map((q) => (
+          <div
+            key={q.title}
+            className="rounded-md border border-white/[0.06] bg-card/40 p-4"
+          >
+            <div className="mb-2 inline-flex h-7 w-7 items-center justify-center rounded-md bg-blue-500/15 text-sm text-blue-300">
+              {q.icon}
+            </div>
+            <h4 className="mb-1 text-xs font-medium">{q.title}</h4>
+            <p className="mb-3 text-[11px] text-muted-foreground leading-relaxed">{q.description}</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70">{q.cta}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-6 max-w-xl text-center text-[11px] text-muted-foreground/70">
+        See the <a className="underline" href="/docs/guides/routines">Routines guide</a> for the DSL spec, all 6 step types, two-tier execution, validation gates, and trigger setup.
+      </p>
     </div>
   )
 }

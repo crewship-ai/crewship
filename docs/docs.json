@@ -34,6 +34,7 @@
               "guides/skills-format",
               "guides/orchestration",
               "guides/routines",
+              "guides/routines-migration",
               "guides/cli-adapters",
               "guides/cli/claude-code",
               "guides/cli/codex",
