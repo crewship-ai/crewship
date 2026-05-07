@@ -157,3 +157,75 @@ func TestHTTPStep_MaxResponseBytesTruncates(t *testing.T) {
 		t.Errorf("expected truncation marker, got len=%d", len(out))
 	}
 }
+
+// TestHTTPStep_SSRFViaRedirectBlocked targets the security fix from
+// the routines stabilization commit. Without the CheckRedirect guard,
+// an allowed host could 302-redirect into a blocked host (e.g. AWS
+// IMDS at 169.254.169.254 or localhost) and leak metadata into the
+// step output. The fix re-validates every redirect target against
+// the egress allowlist.
+//
+// Setup: two servers — `allowed` (allowlisted) returns a 302 to
+// `blocked` (NOT allowlisted). The egress gate accepts only
+// `allowed.URL`'s host. With the CheckRedirect fix, the step fails
+// at the redirect rather than succeeding with `blocked`'s body.
+func TestHTTPStep_SSRFViaRedirectBlocked(t *testing.T) {
+	blockedHits := 0
+	blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		blockedHits++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("internal-metadata-secret"))
+	}))
+	defer blocked.Close()
+
+	allowed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, blocked.URL, http.StatusFound)
+	}))
+	defer allowed.Close()
+
+	allowedHost := mustParseHost(t, allowed.URL)
+	blockedHost := mustParseHost(t, blocked.URL)
+
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	exec := NewExecutor(store, resolver, nil, nil).WithEgressGate(func(host string) bool {
+		return host == allowedHost // ONLY the entrypoint, NOT the redirect target
+	})
+
+	step := Step{
+		ID:   "fetch",
+		Type: StepHTTP,
+		HTTP: &HTTPStep{Method: "GET", URL: allowed.URL},
+	}
+	out, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{})
+	if err == nil {
+		t.Fatalf("SSRF leak: expected redirect to be blocked; got out=%q", out)
+	}
+	if !strings.Contains(err.Error(), blockedHost) ||
+		!strings.Contains(err.Error(), "blocked by egress allowlist") {
+		t.Errorf("expected redirect-blocked error mentioning host, got %v", err)
+	}
+	if strings.Contains(out, "internal-metadata-secret") {
+		t.Errorf("blocked server's body leaked into step output: %q", out)
+	}
+	if blockedHits > 0 {
+		t.Errorf("blocked server should never have been hit; got %d hits", blockedHits)
+	}
+}
+
+// mustParseHost extracts the host:port from a test-server URL. We
+// don't pull in net/url import surface beyond what runner_http_test
+// already needs; httptest URLs are always well-formed.
+func mustParseHost(t *testing.T, raw string) string {
+	t.Helper()
+	// Strip the scheme — formats are http://host:port[/path]
+	const prefix = "http://"
+	if !strings.HasPrefix(raw, prefix) {
+		t.Fatalf("unexpected test server URL format: %s", raw)
+	}
+	rest := strings.TrimPrefix(raw, prefix)
+	if i := strings.IndexByte(rest, '/'); i >= 0 {
+		rest = rest[:i]
+	}
+	return rest
+}
