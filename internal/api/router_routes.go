@@ -368,6 +368,13 @@ func (r *Router) registerRoutes() {
 	// Pending waitpoints flow into the same Inbox as Keeper approvals.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints", authed(wsCtx(http.HandlerFunc(pipes.ListPendingWaitpoints))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", authed(wsCtx(http.HandlerFunc(pipes.ApproveWaitpoint))))
+	// Pipeline schedules — cron triggers for saved pipelines (the
+	// Routines integration). CRUD-only; the scheduler runs in-process
+	// in cmd_start and reads the table directly.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.ListSchedules))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.CreateSchedule))))
+	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.UpdateSchedule))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteSchedule))))
 	// Internal /api/v1/internal/pipelines/save route is registered
 	// further down where `internalAuth` is in scope (alongside the
 	// other /internal endpoints). See line ~640 below.

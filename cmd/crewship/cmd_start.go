@@ -267,6 +267,37 @@ var startCmd = &cobra.Command{
 				srv.APIRouter().PipelinesHandler.SetWSBroadcaster(hub)
 				logger.Info("pipeline WS broadcaster wired (live event push)")
 			}
+
+			// Pipeline schedules — cron triggers for saved pipelines.
+			// The store backs the CRUD endpoints; the scheduler runs
+			// in-process and fires due schedules every 30s.
+			//
+			// Single-instance: running multiple replicas would
+			// double-fire (no leader election yet); deferring leader
+			// election until we have a multi-replica deployment story.
+			if deps.DB != nil && srv.APIRouter().PipelinesHandler != nil {
+				schedStore := pipeline.NewScheduleStore(deps.DB)
+				srv.APIRouter().PipelinesHandler.SetScheduleStore(schedStore)
+				// Build a fresh executor for the scheduler. Reusing
+				// the handler's lazy newExecutor would couple scheduler
+				// lifetime to a specific HTTP request scope; wiring an
+				// independent executor is cleaner.
+				ph := srv.APIRouter().PipelinesHandler
+				schedPipelineStore := pipeline.NewStore(deps.DB)
+				schedExec := pipeline.NewExecutor(
+					schedPipelineStore,
+					pipeline.NewResolver(deps.DB),
+					ph.Runner(),
+					ph.Emitter(),
+				)
+				if hub := srv.WSHub(); hub != nil {
+					schedExec = schedExec.WithWSBroadcaster(hub)
+				}
+				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
+				scheduler.Start(ctx)
+				defer scheduler.Stop()
+				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
+			}
 		}
 
 		// Start OAuth token refresh worker (refreshes tokens expiring soon)

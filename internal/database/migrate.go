@@ -1076,6 +1076,11 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// + marketplace integrity are real. Waitpoints persist
 	// approval-step tokens so a wait survives process restarts.
 	{version: 79, name: "add_pipeline_versions_and_waitpoints", sql: migrationAddPipelineVersionsAndWaitpoints},
+	// v80 adds pipeline_schedules — cron-like triggers that fire
+	// a saved pipeline on a recurring schedule. Closes Pavel's
+	// "every day at 8 fetch email and summarize" use case without
+	// requiring an agent in the loop. See migrate_consts_v80*.go.
+	{version: 80, name: "add_pipeline_schedules", sql: migrationAddPipelineSchedules},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

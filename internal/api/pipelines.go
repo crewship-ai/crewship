@@ -26,6 +26,7 @@ type PipelineHandler struct {
 	emitter    pipeline.Emitter
 	waitpoints pipeline.WaitpointStore // optional; nil → wait approval steps fall back to in-memory timeout
 	ws         pipeline.WSBroadcaster  // optional; nil → no live pipeline event push to frontend
+	schedules  *pipeline.ScheduleStore // optional; nil → schedule endpoints return 503
 }
 
 // NewPipelineHandler wires the pipeline subsystem against an
@@ -77,6 +78,28 @@ func (h *PipelineHandler) SetWaitpointStore(w pipeline.WaitpointStore) {
 // up via journal polling only.
 func (h *PipelineHandler) SetWSBroadcaster(b pipeline.WSBroadcaster) {
 	h.ws = b
+}
+
+// SetScheduleStore wires the pipeline_schedules persistence layer
+// so the schedule CRUD endpoints have something to talk to.
+// Without it, those endpoints reply 503 (the rest of the pipeline
+// surface keeps working).
+func (h *PipelineHandler) SetScheduleStore(s *pipeline.ScheduleStore) {
+	h.schedules = s
+}
+
+// Runner exposes the wired AgentRunner so the in-process scheduler
+// can build its own Executor with the same runner the HTTP path uses.
+// Returns nil if SetRunner hasn't been called yet.
+func (h *PipelineHandler) Runner() pipeline.AgentRunner {
+	return h.runner
+}
+
+// Emitter exposes the journal Emitter so the scheduler can wire
+// pipeline.run.* events into the journal stream the same way HTTP
+// runs do. Returns nil if SetJournal hasn't been called.
+func (h *PipelineHandler) Emitter() pipeline.Emitter {
+	return h.emitter
 }
 
 // newExecutor centralises Executor construction so every handler
