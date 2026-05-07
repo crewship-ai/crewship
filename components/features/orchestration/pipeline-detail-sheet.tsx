@@ -144,7 +144,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `pipeline-${slug}-bundle.json`
+    a.download = `routine-${slug}-bundle.json`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -155,7 +155,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <GitBranch className="h-4 w-4" />
-            {pipeline?.name ?? slug ?? "Pipeline"}
+            {pipeline?.name ?? slug ?? "Routine"}
           </SheetTitle>
           {pipeline?.description && (
             <p className="text-sm text-muted-foreground">{pipeline.description}</p>
@@ -284,7 +284,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
             <TabsContent value="runs" className="mt-4">
               {runs.length === 0 ? (
                 <div className="py-6 text-center text-sm text-muted-foreground">
-                  No runs yet — invoke the pipeline to see activity here.
+                  No runs yet — invoke the routine to see activity here.
                 </div>
               ) : (
                 <ul className="space-y-1.5">
