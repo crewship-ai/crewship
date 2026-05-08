@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -206,7 +207,12 @@ type fetchedRoutine struct {
 func fetchRoutineForDoctor(client interface {
 	Get(string) (*http.Response, error)
 }, ws, slug string) (fetchedRoutine, bool) {
-	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s", ws, slug))
+	// Both ws and slug are escaped as path segments. Mirrors the
+	// fix in slug_suggest.go (CR2): a workspace id or routine slug
+	// containing reserved characters (slash, hash, %) would
+	// otherwise produce a malformed request that 404s under a
+	// confusing path instead of failing on the actual lookup.
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s", url.PathEscape(ws), url.PathEscape(slug)))
 	if err != nil || resp == nil {
 		return fetchedRoutine{}, false
 	}
@@ -257,7 +263,7 @@ func checkAuthorCrew(client interface {
 			Hint:    "the routine has no owner crew — re-save with --author-crew",
 		}
 	}
-	resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/provision", crewID))
+	resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/provision", url.PathEscape(crewID)))
 	if err != nil || resp == nil {
 		return doctorCheck{
 			Name:    "author_crew",
@@ -399,7 +405,9 @@ func fetchAgentSlugsForCrew(client interface {
 	// Workspace ID is auto-injected as ?workspace_id by the client;
 	// we just supply the crew filter. The list endpoint scopes by
 	// workspace + filter, returning only agents in this crew.
-	resp, err := client.Get(fmt.Sprintf("/api/v1/agents?crew_id=%s", crewID))
+	// crewID is escaped as a query value (not a path segment) so
+	// it survives any reserved character intact.
+	resp, err := client.Get(fmt.Sprintf("/api/v1/agents?crew_id=%s", url.QueryEscape(crewID)))
 	if err != nil || resp == nil {
 		return nil
 	}

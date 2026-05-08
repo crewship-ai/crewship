@@ -120,43 +120,46 @@ func TestEvalScenarios_ParseAndValidate(t *testing.T) {
 func TestEvalScenarios_AgentReferencesResolve(t *testing.T) {
 	agentsByCrew := buildAgentSlugSetPerCrew()
 	for _, scenario := range seeddata.EvalScenarios {
-		// Steps come in as []map[string]interface{} when authored
-		// directly in Go and as []interface{} when round-tripped
-		// through JSON. Accept either shape so the test is robust
-		// to either authoring style — a future move to load
-		// scenarios from JSON files would otherwise silently skip
-		// the assertion.
-		stepsList, ok := stepsAsInterfaceSlice(scenario.Definition["steps"])
-		if !ok {
-			t.Errorf("%s: steps is not a slice (got %T)", scenario.Slug, scenario.Definition["steps"])
-			continue
-		}
-		crewAgents, hasCrewMap := agentsByCrew[scenario.CrewSlug]
-		if !hasCrewMap {
-			t.Errorf("%s: author crew %q has no seeded agents", scenario.Slug, scenario.CrewSlug)
-			continue
-		}
-		for i, raw := range stepsList {
-			step, ok := raw.(map[string]interface{})
+		scenario := scenario // capture for subtest closure
+		t.Run(scenario.Slug, func(t *testing.T) {
+			// Steps come in as []map[string]interface{} when authored
+			// directly in Go and as []interface{} when round-tripped
+			// through JSON. Accept either shape so the test is robust
+			// to either authoring style — a future move to load
+			// scenarios from JSON files would otherwise silently skip
+			// the assertion.
+			stepsList, ok := stepsAsInterfaceSlice(scenario.Definition["steps"])
 			if !ok {
-				t.Errorf("%s: step[%d] is not a map (got %T)", scenario.Slug, i, raw)
-				continue
+				t.Errorf("steps is not a slice (got %T)", scenario.Definition["steps"])
+				return
 			}
-			if slug, _ := step["agent_slug"].(string); slug != "" {
-				if _, found := crewAgents[slug]; !found {
-					t.Errorf("%s: step[%d] references agent_slug %q which is NOT in author crew %q",
-						scenario.Slug, i, slug, scenario.CrewSlug)
+			crewAgents, hasCrewMap := agentsByCrew[scenario.CrewSlug]
+			if !hasCrewMap {
+				t.Errorf("author crew %q has no seeded agents", scenario.CrewSlug)
+				return
+			}
+			for i, raw := range stepsList {
+				step, ok := raw.(map[string]interface{})
+				if !ok {
+					t.Errorf("step[%d] is not a map (got %T)", i, raw)
+					continue
 				}
-			}
-			if outcomes, ok := step["outcomes"].(map[string]interface{}); ok {
-				if grader, _ := outcomes["grader_agent_slug"].(string); grader != "" {
-					if _, found := crewAgents[grader]; !found {
-						t.Errorf("%s: step[%d] outcomes.grader_agent_slug %q is NOT in author crew %q",
-							scenario.Slug, i, grader, scenario.CrewSlug)
+				if slug, _ := step["agent_slug"].(string); slug != "" {
+					if _, found := crewAgents[slug]; !found {
+						t.Errorf("step[%d] references agent_slug %q which is NOT in author crew %q",
+							i, slug, scenario.CrewSlug)
+					}
+				}
+				if outcomes, ok := step["outcomes"].(map[string]interface{}); ok {
+					if grader, _ := outcomes["grader_agent_slug"].(string); grader != "" {
+						if _, found := crewAgents[grader]; !found {
+							t.Errorf("step[%d] outcomes.grader_agent_slug %q is NOT in author crew %q",
+								i, grader, scenario.CrewSlug)
+						}
 					}
 				}
 			}
-		}
+		})
 	}
 }
 
