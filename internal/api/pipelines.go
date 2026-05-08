@@ -29,6 +29,7 @@ type PipelineHandler struct {
 	schedules  *pipeline.ScheduleStore // optional; nil → schedule endpoints return 503
 	runs       *pipeline.RunRegistry   // optional; nil → cancel endpoint returns 503
 	webhooks   *pipeline.WebhookStore  // optional; nil → webhook endpoints return 503
+	runStore   *pipeline.RunStore      // optional; nil → list-runs falls back to journal LIKE scan, no persistence
 	// saveTokenSecret signs the optional save_token returned by
 	// /test_run and verified by /save. Lets save flows skip the body-
 	// trust on last_test_run_at (callers can otherwise mint timestamps;
@@ -73,6 +74,16 @@ func (h *PipelineHandler) SetRunner(r pipeline.AgentRunner) {
 // Without it, the timestamp-trust path remains the only gate-pass.
 func (h *PipelineHandler) SetSaveTokenSecret(secret []byte) {
 	h.saveTokenSecret = secret
+}
+
+// SetRunStore wires the pipeline_runs persistence layer (migration
+// v83). The executor created via newExecutor in this handler picks
+// up the store via WithRunStore, and the ListRuns API hits this
+// store directly when present (column-typed reads beat LIKE-scanning
+// journal_entries). Without it, runs persist only in journal_entries
+// and list-runs falls back to the legacy scan path.
+func (h *PipelineHandler) SetRunStore(s *pipeline.RunStore) {
+	h.runStore = s
 }
 
 // SetJournal wires a journal Emitter post-construction so journal
@@ -161,6 +172,9 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		// thin DB wrapper with no goroutines. Keeping construction
 		// here means tests don't need to set it explicitly.
 		exec = exec.WithIdempotencyStore(pipeline.NewIdempotencyStore(h.db))
+	}
+	if h.runStore != nil {
+		exec = exec.WithRunStore(h.runStore)
 	}
 	return exec
 }

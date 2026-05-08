@@ -283,6 +283,21 @@ var startCmd = &cobra.Command{
 					logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)",
 						"recovered_timed_out", timedOut, "stranded_pending", pending)
 				}
+
+				// Wire RunStore (migration v83) so the executor
+				// persists per-run state alongside journal_entries
+				// and the boot recovery scan can mark previously
+				// in-flight runs interrupted. The PipelinesHandler
+				// holds the store reference; newExecutor() picks it
+				// up via WithRunStore on every handler path.
+				runStore := pipeline.NewRunStore(deps.DB)
+				srv.APIRouter().PipelinesHandler.SetRunStore(runStore)
+				if interrupted, err := runStore.RecoverInterruptedAtBoot(ctx); err != nil {
+					logger.Warn("pipeline_runs recovery scan failed", "error", err)
+				} else {
+					logger.Info("pipeline_runs store wired (persistent per-run state; v83)",
+						"interrupted_recovered", interrupted)
+				}
 			}
 
 			// Wire WS broadcaster so pipeline run + step events
