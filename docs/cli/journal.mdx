@@ -6,13 +6,16 @@ icon: "book-open"
 
 # crewship journal
 
-Read the [Crew Journal](/guides/crew-journal) -- the canonical append-only event stream for every observable action in the platform. Filter by crew, agent, mission, entry type, severity, or time window.
+Read the [Crew Journal](/guides/crew-journal) -- the canonical append-only event stream for every observable action in the platform. Filter by crew, agent, mission, entry type, severity, actor, priority, trace, or time window.
 
 ```bash
 crewship journal [flags]
+crewship journal get <entry-id>
+crewship journal count [flags]
+crewship journal priority <entry-id> --mark <marker> [--reason <text>]
 ```
 
-There are no subcommands -- the top-level command is the list view. `--follow` opens an SSE connection to `/api/v1/journal/stream` and prints entries as they arrive (Ctrl-C to exit). The CLI auto-reconnects on transient failure with bounded exponential backoff (1 s → 30 s) and threads `Last-Event-ID` so a brief disconnect resumes without dropping or duplicating entries. For pretty in-browser viewing, the web UI `/journal` page is also available.
+The top-level command is the list view. `--follow` opens an SSE connection to `/api/v1/journal/stream` and prints entries as they arrive (Ctrl-C to exit). The CLI auto-reconnects on transient failure with bounded exponential backoff (1 s → 30 s) and threads `Last-Event-ID` so a brief disconnect resumes without dropping or duplicating entries. For pretty in-browser viewing, the web UI `/journal` page is also available.
 
 ## Flags
 
@@ -22,13 +25,17 @@ There are no subcommands -- the top-level command is the list view. `--follow` o
 | `--crew` | `string` | | Filter by crew slug or ID. |
 | `--agent` | `string` | | Filter by agent ID. |
 | `--mission` | `string` | | Filter by mission ID. |
+| `--trace-id` | `string` | | Narrow to a single run's spans (`trace_id` == run id). |
 | `--type` | `string` | | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). |
+| `--exclude-type` | `string` | | Comma-separated entry types to exclude (NOT IN). Useful for hiding `container.metrics` noise. |
 | `--severity` | `string` | | Comma-separated severities (`info`, `notice`, `warn`, `error`). |
+| `--actor-type` | `string` | | Comma-separated actors (`agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`). |
+| `--priority` | `string` | | Comma-separated priorities (`normal`, `high`, `pin`, `permanent`). |
+| `--query` / `-q` | `string` | | Server-side FTS5 search across `summary` + `payload`. Bounded to 200 chars. |
 | `--since` | `string` | | Time window (`1h`, `24h`, `7d`, or RFC3339). |
-| `--query` / `-q` | `string` | | Server-side FTS5 search across `summary` + `payload`. PR #234 wired the query path; the underlying virtual table comes from migration 55 (the memory-uplift PR #212, which also indexed memory). |
 | `--follow` | `bool` | `false` | Live tail via SSE — Ctrl-C to exit, reconnects on transient failure. |
 
-Global output flags apply: `--format table|json|yaml` (default table).
+Global output flags apply: `--format text|json|yaml` (default text). Enum values for `--severity`, `--actor-type`, and `--priority` are validated client-side before the request goes out, so a typo fails fast with a list of allowed values.
 
 ## Examples
 
@@ -49,8 +56,17 @@ crewship journal --type peer.escalation,keeper.decision --lines 100
 crewship journal --mission MIS-42 --format json
 
 # Full-text search across summary + payload
-crewship journal --query "OOM" --since 24h
+crewship journal --query "OOMKilled" --since 24h
 crewship journal -q "ratelimit" --severity warn,error
+
+# One run's full trace, including LLM/exec/network spans
+crewship journal --trace-id <run-id>
+
+# Hide container.metrics noise from a long timeline
+crewship journal --exclude-type container.metrics,exec.output_chunk --lines 200
+
+# Only operator-pinned entries
+crewship journal --priority pin,permanent
 
 # Live tail — print entries as they arrive (Ctrl-C to exit)
 crewship journal --follow
@@ -58,9 +74,49 @@ crewship journal --follow --severity warn,error
 crewship journal --follow --crew backend-team
 ```
 
-For free-text "did we discuss this before?" lookups across the journal,
-prefer `crewship recall <query>` — same backing endpoint, snippet-card
-rendering optimised for question-answering.
+For free-text "did we discuss this before?" lookups across the journal, prefer `crewship recall <query>` — same backing endpoint, snippet-card rendering optimised for question-answering.
+
+## `crewship journal get`
+
+Fetch a single entry by ID. Output respects `--format` (`text`, `json`, `yaml`); the text format prints the same single-line summary the list view uses, then indents the entry's `payload` and `refs` underneath so you can see the full structured detail at a glance.
+
+```bash
+crewship journal get j_a1b2c3d4
+crewship journal get j_a1b2c3d4 --format json | jq .payload
+```
+
+The endpoint is workspace-scoped — IDs from another workspace come back as `404` with the same shape as "not found" (no cross-tenant existence leak).
+
+## `crewship journal count`
+
+Print the total number of entries that match a filter set. Identical filter flags to the list view (minus `--lines` / `--follow`); `--cursor` and `--limit` are silently ignored — count is always over the full result set.
+
+```bash
+crewship journal count
+crewship journal count --severity error --since 24h
+crewship journal count --type budget.exceeded
+crewship journal count --query "OOMKilled" --format json
+```
+
+Default text output is the bare integer for shell scripting:
+
+```bash
+if [ "$(crewship journal count --type budget.exceeded --since 1h)" -gt 0 ]; then
+  pagerduty-trigger "Budget exceeded in last hour"
+fi
+```
+
+## `crewship journal priority`
+
+Annotate one entry with a priority marker (`normal`, `high`, `pin`, `permanent`). Requires OWNER or ADMIN on the workspace. Marker affects compaction and recall — see the [Crew Journal guide](/guides/crew-journal#priority-markers) for the semantics.
+
+```bash
+crewship journal priority j_abc --mark permanent --reason "FX compliance rule"
+crewship journal priority j_abc --mark pin --reason "team playbook entry"
+crewship journal priority j_abc --mark normal
+```
+
+The `--mark` value is validated client-side before the request goes out. Each invocation also writes a `memory.priority_changed` audit entry to the journal carrying the previous and new priority plus the supplied reason — so the curation history is itself queryable.
 
 ## Sample output
 
@@ -70,7 +126,7 @@ rendering optimised for question-answering.
 2026-04-17 10:24:15  [error   ]  budget.exceeded         system      crew/day at 103.2% ($51.62 / $50.00)
 ```
 
-Columns: timestamp, severity chip (color-coded), entry type (bold), actor type, summary.
+Columns: timestamp, severity chip (color-coded — gray=info/default, cyan=notice, yellow=warn, red=error), entry type (bold), actor type, summary.
 
 ## Entry type catalog
 
@@ -84,18 +140,21 @@ See the [Crew Journal guide](/guides/crew-journal#entry-type-catalog) for the fu
 | `approval.requested,approval.granted,approval.denied,approval.timeout` | HITL audit. |
 | `hook.fired,hook.blocked` | Lifecycle hook activity. |
 | `eval.regression_detected` | Eval surfaced regression. |
+| `run.started,run.completed,run.failed,run.cancelled,run.timeout` | Run lifecycle (`/runs` page is folded into `/journal` since PR #234). |
 
-## Parsing `--since`
+## Parsing `--since` / `--until`
 
 Accepted formats:
 
 - Duration suffixes: `30m`, `1h`, `24h`, `7d` (the `d` suffix is handled locally; Go's `time.ParseDuration` doesn't support it).
 - RFC3339: `2026-04-17T00:00:00Z`.
 
+`--until` is supported on `journal count` (lower bound is `--since`, upper bound is `--until`); the list view doesn't currently expose `--until` because the default ordering is "newest first" and pagination uses a cursor.
+
 ## Notes
 
 - Output is scoped to the caller's workspace automatically -- there is no way to query another workspace from the CLI.
-- Pagination is keyset-based on the server; the CLI does not currently expose the cursor (it fetches `--lines` rows and stops).
+- Pagination is keyset-based on the server; the list view doesn't expose the cursor (it fetches `--lines` rows and stops). For paged programmatic access, prefer the JSON output of the [`/api/v1/journal`](/api-reference/journal#list-entries) endpoint.
 - For structured programmatic access prefer `--format json`.
 
 ## Related
