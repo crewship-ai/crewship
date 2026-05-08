@@ -228,13 +228,18 @@ func fetchRoutineForDoctor(client interface {
 	if v, ok := raw["author_crew_id"]; ok {
 		_ = json.Unmarshal(v, &out.AuthorCrewID)
 	}
-	if v, ok := raw["definition_parsed"]; ok {
-		_ = json.Unmarshal(v, &out.Definition)
-	} else if v, ok := raw["definition_json"]; ok {
-		// Some endpoints serialise definition as a string; decode
-		// it on the second pass.
+	// Production endpoint returns a parsed `definition` object.
+	// Older / alternate shapes used `definition_parsed` / a raw
+	// `definition_json` string; we accept all three so doctor
+	// stays useful across server versions.
+	switch {
+	case raw["definition"] != nil:
+		_ = json.Unmarshal(raw["definition"], &out.Definition)
+	case raw["definition_parsed"] != nil:
+		_ = json.Unmarshal(raw["definition_parsed"], &out.Definition)
+	case raw["definition_json"] != nil:
 		var s string
-		if json.Unmarshal(v, &s) == nil {
+		if json.Unmarshal(raw["definition_json"], &s) == nil {
 			_ = json.Unmarshal([]byte(s), &out.Definition)
 		}
 	}
@@ -252,7 +257,7 @@ func checkAuthorCrew(client interface {
 			Hint:    "the routine has no owner crew — re-save with --author-crew",
 		}
 	}
-	resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/provision/status", crewID))
+	resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/provision", crewID))
 	if err != nil || resp == nil {
 		return doctorCheck{
 			Name:    "author_crew",
@@ -391,7 +396,10 @@ func checkAgentSlugs(client interface {
 func fetchAgentSlugsForCrew(client interface {
 	Get(string) (*http.Response, error)
 }, crewID string) map[string]struct{} {
-	resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/agents", crewID))
+	// Workspace ID is auto-injected as ?workspace_id by the client;
+	// we just supply the crew filter. The list endpoint scopes by
+	// workspace + filter, returning only agents in this crew.
+	resp, err := client.Get(fmt.Sprintf("/api/v1/agents?crew_id=%s", crewID))
 	if err != nil || resp == nil {
 		return nil
 	}
