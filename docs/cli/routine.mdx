@@ -101,14 +101,78 @@ Invoke a saved routine against the live execution tier.
 ```bash
 crewship routine run summarize-text --inputs '{"text":"..."}'
 crewship routine run pr-review-structured --inputs '{"diff":"..."}' --invoking-crew crew_eng
+
+# Force every agent_run step onto a specific tier (eval / debug)
+crewship routine run eval-extract-emails --tier-override fast
+crewship routine run eval-extract-emails --tier-override smart
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--inputs` | JSON inputs for the run |
 | `--invoking-crew` | crew_id recorded as the invoker (cross-crew reuse audit) |
+| `--tier-override` | force every `agent_run` step onto `trivial`/`fast`/`moderate`/`smart`. Step-level `model_override` still wins. Empty (default) = use authored complexity. Used by the eval suite to diff weak vs strong worker tiers without DSL changes. |
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
+
+---
+
+## `crewship eval scenarios`
+
+Batch-run the workspace's `eval-*` routines across one or more tiers and report a pass-rate matrix. The canonical "weak vs strong agent same outcome?" harness — same DSL, same inputs, only the resolved tier differs across cells.
+
+```bash
+# Default: every eval-* routine, once, at the workspace's authored tier
+crewship eval scenarios
+
+# Targeted sweep with N runs per (scenario, tier) cell
+crewship eval scenarios --scenarios eval-extract-emails,eval-classify-sentiment \
+                        --tiers fast,smart --runs 5
+
+# Machine-readable output for CI / regression dashboards
+crewship eval scenarios --runs 3 --tiers fast,smart -f json
+crewship eval scenarios --runs 3 --tiers fast,smart -f markdown
+```
+
+| Flag | Description |
+|------|-------------|
+| `--scenarios` | comma-separated routine slugs (default: every routine whose slug starts with `eval-`) |
+| `--tiers` | comma-separated tier overrides. Empty = use authored complexity. |
+| `--runs` | runs per (scenario, tier) cell (default 1) |
+| `--inputs` | JSON inputs forwarded to every run (default: each routine's authored defaults) |
+| `--fail-fast` | abort on the first non-pass instead of running every cell |
+
+Output (table format): rows = scenarios, columns = tiers, cells = `pass/total  $avg-cost`. A cell with `5/5 $0.0012` means every run passed the routine's gate at that tier. Use the JSON or markdown formats for downstream tooling.
+
+---
+
+## `crewship eval compare <slug>`
+
+Run ONE eval scenario back-to-back on two tiers and report a head-to-head verdict. Use this when investigating a specific scenario rather than sweeping the whole suite.
+
+```bash
+crewship eval compare eval-extract-emails
+crewship eval compare eval-syllogism-reasoning --tier-a moderate --tier-b smart
+crewship eval compare eval-classify-sentiment -f markdown
+```
+
+| Flag | Description |
+|------|-------------|
+| `--tier-a` | tier override for side A (default `fast`) |
+| `--tier-b` | tier override for side B (default `smart`) |
+| `--inputs` | JSON inputs forwarded to both sides |
+
+Verdict (top of output):
+
+| Verdict | Meaning |
+|---------|---------|
+| `AGREE-PASS` | both tiers passed the routine's gate |
+| `AGREE-FAIL` | both tiers failed (regression on the routine itself, not a tier-strength signal) |
+| `DIVERGE-A-PASS` | only side A passed — weak-tier-only or strong-tier-only path discovered |
+| `DIVERGE-B-PASS` | only side B passed |
+| `AMBIGUOUS` | at least one side errored at transport level — verdict can't be cleanly assigned |
+
+Output text identity is NOT asserted — two LLM runs are rarely identical at the byte level. The verdict is about gate-pass agreement, not text agreement.
 
 ---
 

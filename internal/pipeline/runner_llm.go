@@ -207,12 +207,25 @@ func (r *LLMRunner) providerForWorkspace(ctx context.Context, workspaceID string
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspace_id required")
 	}
+	// Match either API_KEY (Messages API) or AI_CLI_TOKEN (OAuth
+	// for Claude Code CLI). Both are valid Anthropic auth surfaces;
+	// the seed picks AI_CLI_TOKEN when SEED_ANTHROPIC_API_KEY starts
+	// with sk-ant-oat (OAuth flow), otherwise API_KEY. We accept
+	// both here and let the Anthropic SDK reject if a given token
+	// doesn't carry Messages-API scope — the runtime error is clearer
+	// than a "no credential" message would be when one is actually
+	// present.
+	//
+	// Order matters: ASC by created_at so a later-rotated key wins
+	// over an older one when both are present and ACTIVE. The seed
+	// only ever creates one row per workspace so this only matters
+	// in operator-rotated workspaces.
 	var encryptedValue string
 	err := r.db.QueryRowContext(ctx, `
 SELECT encrypted_value FROM credentials
 WHERE workspace_id = ?
   AND provider = 'ANTHROPIC'
-  AND type = 'API_KEY'
+  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
   AND status = 'ACTIVE'
   AND deleted_at IS NULL
 ORDER BY created_at ASC
