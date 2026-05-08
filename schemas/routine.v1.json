@@ -131,6 +131,7 @@
     "Step": {
       "type": "object",
       "required": ["id", "type"],
+      "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",

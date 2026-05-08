@@ -100,7 +100,22 @@ var routineWebhooksListCmd = &cobra.Command{
 		}
 		jsonOut, _ := cmd.Flags().GetBool("json")
 		if jsonOut {
-			b, _ := json.MarshalIndent(rows, "", "  ")
+			// Redact tokens + secrets from --json output. The list
+			// endpoint returns webhook tokens (the public URL
+			// segment) and signing_secret_set flags; piping --json
+			// to a log/share could leak the public URL or
+			// inadvertently confirm secret-set state for sensitive
+			// webhooks. The user can fetch the full record via the
+			// `url` subcommand when they explicitly need it.
+			redacted := make([]webhookRow, len(rows))
+			for i, r := range rows {
+				redacted[i] = r
+				if redacted[i].Token != "" {
+					redacted[i].Token = redactedShort(redacted[i].Token)
+				}
+				redacted[i].SigningSecret = ""
+			}
+			b, _ := json.MarshalIndent(redacted, "", "  ")
 			fmt.Println(string(b))
 			return nil
 		}
@@ -182,7 +197,18 @@ var routineWebhooksCreateCmd = &cobra.Command{
 			return err
 		}
 		var w webhookRow
-		_ = json.NewDecoder(resp.Body).Decode(&w)
+		if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+			// Server returned 2xx but we can't parse the body —
+			// don't claim "Webhook created" because the user has
+			// no token to copy. Fail loudly so the operator knows
+			// to check the workspace via /webhooks list.
+			return fmt.Errorf("webhook may have been created but response decode failed: %w (run 'crewship routine webhooks list --slug %s' to verify)", err, slug)
+		}
+		if w.Token == "" {
+			// Decode succeeded structurally but the token field is
+			// empty — same risk profile, same surface to user.
+			return fmt.Errorf("webhook server response missing token; run 'crewship routine webhooks list --slug %s' to verify creation", slug)
+		}
 		baseURL, _ := cmd.Flags().GetString("base-url")
 		if baseURL == "" {
 			baseURL = clientBaseURL(client)
@@ -304,6 +330,18 @@ func clientBaseURL(c *cli.Client) string {
 
 // _ = http.NoBody // (kept for future force-fire endpoint)
 var _ = http.NoBody
+
+// redactedShort returns the last 4 chars of s prefixed with "***" for
+// log-safe display of secret-bearing identifiers (webhook tokens,
+// API keys, etc.). Short enough that operators recognize the value
+// they previously copied; opaque enough that --json output piped
+// into a shared log file doesn't expose it.
+func redactedShort(s string) string {
+	if len(s) <= 4 {
+		return "****"
+	}
+	return "***" + s[len(s)-4:]
+}
 
 func init() {
 	routineWebhooksListCmd.Flags().String("slug", "", "filter to webhooks targeting this routine slug")

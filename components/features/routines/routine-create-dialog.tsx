@@ -150,7 +150,27 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     }
   }, [open, workspaceId, crews.length])
 
+  // Parse the DSL JSON for slug-preview without touching state in render.
+  // useMemo runs only when dslJson changes; setParseError stays in
+  // event handlers (handleTestRun / handleSave) so render is pure.
+  // Critical: this useMemo must execute on EVERY render regardless of
+  // `open` so React's hooks contract holds. The `if (!open) return null`
+  // below sits AFTER all hook declarations for that reason — moving it
+  // up changes the hook call count between mounts and triggers
+  // react-hooks/rules-of-hooks. CodeRabbit caught this as a critical
+  // bug: open→close→open transitions would crash with "Rendered more
+  // hooks than during the previous render".
+  const parsedDSL = useMemo<Record<string, unknown> | null>(() => {
+    try {
+      return JSON.parse(dslJson) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }, [dslJson])
+
   if (!open) return null
+
+  const slug = (parsedDSL?.["name"] as string) || "my-routine"
 
   const applyTemplate = (templateId: string) => {
     const tpl = STARTER_TEMPLATES.find((t) => t.id === templateId)
@@ -161,18 +181,6 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     setTestResult(null)
     setSaveToken(null) // template change → DSL change → bound token invalid
   }
-
-  // Parse the DSL JSON for slug-preview without touching state in render.
-  // useMemo runs only when dslJson changes; setParseError stays in
-  // event handlers (handleTestRun / handleSave) so render is pure.
-  const parsedDSL = useMemo<Record<string, unknown> | null>(() => {
-    try {
-      return JSON.parse(dslJson) as Record<string, unknown>
-    } catch {
-      return null
-    }
-  }, [dslJson])
-  const slug = (parsedDSL?.["name"] as string) || "my-routine"
 
   // Helper for handlers — re-parses with explicit error capture for
   // the inline UI feedback. Distinct from parsedDSL so the render

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { X, Play, FlaskConical, Eye, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
@@ -55,24 +55,40 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  // abortRef tracks the in-flight fetch so a fast workspace/slug
+  // switch cancels stale work. Without this, a slow network +
+  // rapid-fire selection could race-overwrite the panel with the
+  // wrong routine's data.
+  const abortRef = useRef<AbortController | null>(null)
 
   const fetchRoutine = async () => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`)
+      const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}`, {
+        signal: ctrl.signal,
+      })
+      if (ctrl.signal.aborted) return
       if (!res.ok) throw new Error(`fetch routine: ${res.status}`)
       const r: RoutineDetail = await res.json()
+      if (ctrl.signal.aborted) return
       setRoutine(r)
     } catch (e) {
+      if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (!ctrl.signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
     fetchRoutine()
+    return () => {
+      abortRef.current?.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, slug])
 

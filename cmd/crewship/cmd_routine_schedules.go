@@ -280,13 +280,13 @@ var routineSchedulesNowCmd = &cobra.Command{
 			return err
 		}
 		defer resp.Body.Close()
-		// 404 means the /run endpoint isn't yet wired — fall back to a
-		// PATCH that flips enabled false→true so the next 30s tick
-		// fires. Best-effort hint when the canonical endpoint isn't
-		// available on the deployed server.
+		// 404 means the /run endpoint isn't yet wired on the
+		// server. Surface as a non-zero error so CI scripts that
+		// chained `routine schedules now <id> && next-step` don't
+		// silently swallow the missing capability and assume the
+		// schedule fired.
 		if resp.StatusCode == http.StatusNotFound {
-			fmt.Println("Force-fire endpoint unavailable on this server; toggle disable/enable to fire on next 30s tick instead.")
-			return nil
+			return fmt.Errorf("force-fire endpoint unavailable on this server; toggle disable/enable to fire on next 30s tick instead")
 		}
 		if err := cli.CheckError(resp); err != nil {
 			return err

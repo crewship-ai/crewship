@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Activity, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -30,29 +30,43 @@ export function RoutinesActivityView({ workspaceId }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [severity, setSeverity] = useState<"all" | "info" | "warning" | "error">("all")
+  // abortRef cancels the prior in-flight fetch when workspace
+  // changes or a refresh fires; without this, a slow request
+  // could race a fresh one and overwrite newer state with stale
+  // entries.
+  const abortRef = useRef<AbortController | null>(null)
 
   const fetchEntries = async () => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     setLoading(true)
     setError(null)
     try {
       const url = `/api/v1/workspaces/${workspaceId}/journal?entry_type_prefix=pipeline.&limit=300`
-      const res = await fetch(url)
+      const res = await fetch(url, { signal: ctrl.signal })
+      if (ctrl.signal.aborted) return
       if (!res.ok) {
         setError(`journal: ${res.status}`)
         setEntries([])
         return
       }
       const data: JournalEntry[] = await res.json()
+      if (ctrl.signal.aborted) return
       setEntries(Array.isArray(data) ? data : [])
     } catch (e) {
+      if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (!ctrl.signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
     fetchEntries()
+    return () => {
+      abortRef.current?.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId])
 

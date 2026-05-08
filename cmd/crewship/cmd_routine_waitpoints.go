@@ -84,8 +84,13 @@ var routineWaitpointsListCmd = &cobra.Command{
 			if len(prompt) > 60 {
 				prompt = prompt[:57] + "..."
 			}
+			// The token is the only identifier waitpoints approve/
+			// reject accepts; truncating it here would leave users
+			// unable to act on the row. Show the full token; we
+			// still shortID() the run_id since that one is just a
+			// link target, not an action argument.
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				shortID(r.Token), shortID(r.PipelineRunID), r.StepID, r.Kind,
+				r.Token, shortID(r.PipelineRunID), r.StepID, r.Kind,
 				formatTimestamp(r.CreatedAt), formatTimestamp(r.TimeoutAt), prompt)
 		}
 		return w.Flush()
