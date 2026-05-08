@@ -177,10 +177,16 @@ func TestJournalHandler_List_Filters(t *testing.T) {
 			var resp struct {
 				Entries []map[string]any `json:"entries"`
 			}
-			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+			}
 			got := make([]string, 0, len(resp.Entries))
 			for _, e := range resp.Entries {
-				got = append(got, e["id"].(string))
+				id, ok := e["id"].(string)
+				if !ok {
+					t.Fatalf("entry id is not a string: %#v", e["id"])
+				}
+				got = append(got, id)
 			}
 			if !equalStringSet(got, c.want) {
 				t.Errorf("got %v want %v", got, c.want)
@@ -293,7 +299,9 @@ func TestJournalHandler_Count_Filters(t *testing.T) {
 			var resp struct {
 				Total int64 `json:"total"`
 			}
-			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+			}
 			if resp.Total != c.want {
 				t.Errorf("total=%d want %d", resp.Total, c.want)
 			}
@@ -330,7 +338,9 @@ func TestJournalHandler_Count_IgnoresCursorAndLimit(t *testing.T) {
 	var resp struct {
 		Total int64 `json:"total"`
 	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+	}
 	if resp.Total != 5 {
 		t.Errorf("total=%d want 5 (cursor/limit must be ignored)", resp.Total)
 	}
@@ -358,7 +368,9 @@ func TestJournalHandler_Count_AcceptsOversizedLimit(t *testing.T) {
 	var resp struct {
 		Total int64 `json:"total"`
 	}
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+	}
 	if resp.Total != 3 {
 		t.Errorf("total=%d want 3", resp.Total)
 	}
@@ -539,11 +551,19 @@ func TestParseJournalQuery_AllParams(t *testing.T) {
 	if !equalStringSet(q.AgentIDs, []string{"a2", "a3"}) {
 		t.Errorf("agent_ids: %v", q.AgentIDs)
 	}
-	if len(q.Types) != 2 || q.Types[0] != journal.EntryRunStarted ||
-		q.Types[1] != journal.EntryRunFailed {
+	gotTypes := make([]string, 0, len(q.Types))
+	for _, t := range q.Types {
+		gotTypes = append(gotTypes, string(t))
+	}
+	if !equalStringSet(gotTypes,
+		[]string{string(journal.EntryRunStarted), string(journal.EntryRunFailed)}) {
 		t.Errorf("types: %v", q.Types)
 	}
-	if len(q.ExcludeTypes) != 1 || q.ExcludeTypes[0] != journal.EntryContainerMetrics {
+	gotExcludeTypes := make([]string, 0, len(q.ExcludeTypes))
+	for _, t := range q.ExcludeTypes {
+		gotExcludeTypes = append(gotExcludeTypes, string(t))
+	}
+	if !equalStringSet(gotExcludeTypes, []string{string(journal.EntryContainerMetrics)}) {
 		t.Errorf("exclude types: %v", q.ExcludeTypes)
 	}
 	if len(q.Severities) != 2 {
@@ -552,9 +572,12 @@ func TestParseJournalQuery_AllParams(t *testing.T) {
 	if len(q.ActorTypes) != 2 {
 		t.Errorf("actor types: %v", q.ActorTypes)
 	}
-	if len(q.Priorities) != 2 ||
-		q.Priorities[0] != journal.PriorityHigh ||
-		q.Priorities[1] != journal.PriorityPermanent {
+	gotPriorities := make([]string, 0, len(q.Priorities))
+	for _, p := range q.Priorities {
+		gotPriorities = append(gotPriorities, string(p))
+	}
+	if !equalStringSet(gotPriorities,
+		[]string{string(journal.PriorityHigh), string(journal.PriorityPermanent)}) {
 		t.Errorf("priorities: %v", q.Priorities)
 	}
 	if q.Limit != 200 || q.Cursor != "cur" || q.FTSQuery != "hello" {
@@ -575,9 +598,12 @@ func TestParseJournalQuery_TrimsWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(q.Types) != 2 ||
-		q.Types[0] != journal.EntryRunStarted ||
-		q.Types[1] != journal.EntryRunFailed {
+	gotTypes := make([]string, 0, len(q.Types))
+	for _, t := range q.Types {
+		gotTypes = append(gotTypes, string(t))
+	}
+	if !equalStringSet(gotTypes,
+		[]string{string(journal.EntryRunStarted), string(journal.EntryRunFailed)}) {
 		t.Errorf("trim CSV: %v", q.Types)
 	}
 }

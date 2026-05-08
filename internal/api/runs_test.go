@@ -138,7 +138,9 @@ func TestRunHandler_List_StatusFilter(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 	var resp runListResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+	}
 	if len(resp.Data) != 1 || resp.Data[0].ID != "run_f" {
 		t.Errorf("status filter: got %+v want run_f", runIDs(resp.Data))
 	}
@@ -187,7 +189,9 @@ func TestRunHandler_List_PageBounds(t *testing.T) {
 				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 			}
 			var resp runListResponse
-			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+			}
 			if len(resp.Data) != c.wantData {
 				t.Errorf("data len=%d want %d", len(resp.Data), c.wantData)
 			}
@@ -213,7 +217,9 @@ func TestRunHandler_List_TriggerFilter(t *testing.T) {
 		t.Fatalf("status=%d", rr.Code)
 	}
 	var resp runListResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+	}
 	if len(resp.Data) != 1 || resp.Data[0].ID != "run_w" {
 		t.Errorf("trigger filter: %+v", runIDs(resp.Data))
 	}
@@ -252,7 +258,9 @@ func TestRunHandler_List_CrossTenantHidden(t *testing.T) {
 		t.Fatalf("status=%d", rr.Code)
 	}
 	var resp runListResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v\nbody: %s", err, rr.Body.String())
+	}
 	for _, r := range resp.Data {
 		if r.ID == "cross_tenant_run" {
 			t.Errorf("cross-tenant leak: saw %s", r.ID)
