@@ -1,18 +1,28 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, Loader2, CheckCircle2, XCircle, Eye } from "lucide-react"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
+import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { RoutineRunsSkeleton } from "./routine-skeletons"
 
 // RoutineRunsTab — list of recent runs for one routine. Click to
-// expand a run inline and see step-level waterfall. Step events come
-// from the WS broadcaster (until now broadcast into void); we
-// subscribe per-run and accumulate timeline locally so the waterfall
-// stays live even after the run completes.
+// expand a run inline and see step-level waterfall.
+//
+// Two-source rendering since the v83 pipeline_runs migration:
+// - List status / cost / duration columns prefer pipeline_runs
+//   records (column-typed, B-tree scan) when the server has the
+//   runStore wired.
+// - Step-level events for the expanded waterfall stay journal-backed
+//   (pipeline_runs has no per-step rows; the journal is canonical).
+// - When the server doesn't have runStore wired (legacy=true), we
+//   fall back to deriving the run list from journal events too.
+//
+// Live updates: WS broadcaster fires pipeline.run.* + pipeline.step.*
+// events; both hooks subscribe and refresh on relevant events.
 
 interface Props {
   workspaceId: string
@@ -28,7 +38,12 @@ interface StepEvent {
 }
 
 export function RoutineRunsTab({ workspaceId, slug }: Props) {
-  const { runs, loading, error } = usePipelineRuns(workspaceId, slug)
+  // Primary list source: pipeline_runs (v83). Cleaner shape, faster
+  // query. Falls back to journal-backed grouping when legacy=true.
+  const { records, legacy, loading: recordsLoading, error: recordsError } = usePipelineRunRecords(workspaceId, slug)
+  // Always fetch journal-backed runs — needed for step-level waterfall
+  // when a run is expanded (pipeline_runs has no per-step rows).
+  const { runs, loading: runsLoading, error: runsError } = usePipelineRuns(workspaceId, slug)
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
   const [stepEvents, setStepEvents] = useState<Map<string, StepEvent[]>>(new Map())
   // Track which slug the auto-expand has fired for, so switching
@@ -61,9 +76,34 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
   useRealtimeEvent("pipeline.step.failed", handleStepEvent("failed"))
   useRealtimeEvent("pipeline.step.validation_failed", handleStepEvent("validation_failed"))
 
-  // Group journal entries by run_id so each run renders as a single
-  // expandable row with its lifecycle entries underneath.
-  const grouped = groupRunsByRunId(runs)
+  // The list view prefers `records` (column-typed) when available,
+  // and uses `groupRunsByRunId(runs)` as the legacy fallback. Both
+  // shapes are normalized to a common GroupedRun rendering interface
+  // so the row component below stays unchanged.
+  //
+  // When using records, we splice in journal entries for each run_id
+  // so the expanded waterfall still has step events to render. Records
+  // alone don't include step rows (those live in journal_entries).
+  const groupedJournal = groupRunsByRunId(runs)
+  const journalEntriesByRunID = useMemo(() => {
+    const m = new Map<string, GroupedRun["entries"]>()
+    for (const g of groupedJournal) m.set(g.runId, g.entries)
+    return m
+  }, [groupedJournal])
+  const grouped: GroupedRun[] = useMemo(() => {
+    if (legacy || records.length === 0) return groupedJournal
+    return records.map((r) => {
+      const g = toGroupedRun(r)
+      const journalEntries = journalEntriesByRunID.get(r.id)
+      if (journalEntries) g.entries = journalEntries
+      return g
+    })
+  }, [legacy, records, groupedJournal, journalEntriesByRunID])
+
+  // Loading + error fall back to whichever path is being used. When
+  // both succeed we prefer records' status (more authoritative).
+  const loading = legacy ? runsLoading : recordsLoading
+  const error = legacy ? runsError : (recordsError ?? runsError)
 
   // Auto-expand the most recent run on first load for this slug, so
   // users land on a populated waterfall instead of having to manually
@@ -283,4 +323,38 @@ function formatRelative(iso: string): string {
   const hr = Math.floor(min / 60)
   if (hr < 24) return `${hr}h ago`
   return new Date(iso).toLocaleDateString()
+}
+
+// toGroupedRun maps a v83 PipelineRunRecord to the GroupedRun shape
+// the row + waterfall components consume. Keeps the rendering layer
+// agnostic of the backing source (records vs. journal grouping). The
+// `entries` field stays empty here — caller splices in matching
+// journal entries from groupedJournal so the waterfall has step
+// events to render. When journal lookup misses (e.g., a run that's
+// older than the journal retention window), the row still renders
+// with status / cost / duration intact, just without the timeline.
+function toGroupedRun(r: PipelineRunRecord): GroupedRun {
+  let status: GroupedRun["status"] = "unknown"
+  switch (r.status) {
+    case "running":
+    case "queued":
+      status = "running"
+      break
+    case "completed":
+      status = "completed"
+      break
+    case "failed":
+    case "cancelled":
+    case "interrupted":
+      status = "failed"
+      break
+    default:
+      status = "unknown"
+  }
+  return {
+    runId: r.id,
+    status,
+    startedAt: r.started_at,
+    entries: [],
+  }
 }
