@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -54,6 +55,11 @@ func validateCSV(label, raw string, allowed map[string]struct{}) error {
 			for k := range allowed {
 				keys = append(keys, k)
 			}
+			// Map iteration order is randomised, but the error
+			// message is user-facing — sort so it's stable across
+			// runs (matters for snapshot tests, grep, and operator
+			// recall).
+			sort.Strings(keys)
 			return fmt.Errorf("invalid --%s value %q (allowed: %s)", label, trimmed, strings.Join(keys, "|"))
 		}
 	}

@@ -123,7 +123,7 @@ data: {...}
 - **Poll interval:** 1 second.
 - **Heartbeat:** `: heartbeat` comment every 15s to keep proxies from closing idle connections. Event handlers ignore comments.
 - **Watermark:** compound (ts, id) so bursts sharing a ms timestamp aren't partially dropped.
-- **Reconnect:** clients can use the SSE `Last-Event-ID` header; the server uses it as a lower bound so already-seen rows are skipped.
+- **Reconnect:** clients send the SSE `Last-Event-ID` header; the server looks the entry up, treats its `ts` as the lower bound, and pages through the gap (up to **500 entries**, 10 × 50-row pages) before switching to live polling. A disconnect that produced more than 500 matching entries truncates the older end of the gap and the server logs a `warn` — clients should reconcile by re-fetching `/api/v1/journal?since=<last-known-ts>` if they need a longer window.
 
 **Errors:**
 

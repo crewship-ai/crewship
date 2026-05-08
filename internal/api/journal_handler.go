@@ -154,6 +154,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	seedQuery.Limit = seedPageSize
 	seedQuery.Cursor = ""
 	collected := make([]journal.Entry, 0, seedPageSize)
+	hitCeiling := false
 	for page := 0; page < maxSeedPages; page++ {
 		entries, nextCursor, err := journal.List(r.Context(), h.db, seedQuery)
 		if err != nil {
@@ -170,6 +171,24 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		seedQuery.Cursor = nextCursor
+		// Last iteration that didn't break early — there are still
+		// older entries beyond the cap. Set the flag so the warn
+		// after the loop fires, and the live tail still picks up
+		// from the newest emitted watermark.
+		if page == maxSeedPages-1 {
+			hitCeiling = true
+		}
+	}
+	if hitCeiling {
+		// 500 rows is a deliberate ceiling on resume replay so a
+		// week-long disconnect doesn't synchronously stream a million
+		// rows on reconnect. Log at warn so operators can spot
+		// chronic over-the-cap clients (likely indicates a stuck poll
+		// loop or a UI bug holding a stale Last-Event-ID).
+		h.logger.Warn("journal stream seed hit replay ceiling — older gap entries truncated",
+			"workspace_id", workspaceID,
+			"resume_id", resumeID,
+			"max_rows", seedPageSize*maxSeedPages)
 	}
 	// `collected` is newest-first across all pages. Emit reversed so
 	// the client sees them in chronological order. Filter out the
