@@ -35,6 +35,11 @@ package seeddata
 //	10. Trajectory (DAG)           — eval-trajectory-fetch-summarize
 //	11. Idempotency / concurrency  — eval-idempotent-by-key
 //	12. Tier escalation loop       — eval-escalate-on-rubric-fail (outcomes-graded)
+//	13. Translation roundtrip      — eval-translation-roundtrip (outcomes-graded)
+//	14. Date arithmetic            — eval-date-arithmetic
+//	15. Noisy-context extraction   — eval-noisy-context-extraction
+//	16. Citation faithfulness      — eval-citation-faithfulness (outcomes-graded)
+//	17. Long-form coherence        — eval-long-form-coherence (outcomes-graded)
 //
 // Why these gates work for cross-tier consistency:
 //
@@ -54,6 +59,16 @@ package seeddata
 // rely on substring anchors as the gate. This is intentional and
 // documented; when schema enforcement lands the same scenarios become
 // strictly stricter without any DSL change.
+//
+// Note on max_cost_usd values: bumped from $0.05 to $0.50 (and outcomes-
+// loop scenarios from $0.10 to $1.50) on 2026-05-08 after live runs
+// against OrchestratorRunner showed Claude Code CLI overhead per step
+// is ~$0.05-0.10 (system prompt + tool defs + base context) before
+// the worker even reads the routine prompt. A $0.05 cap leaves zero
+// budget for the actual work and trips the guardrail on every Opus
+// run regardless of routine complexity. The $0.005 cap on
+// `eval-cost-budget-haiku` is intentionally preserved — that scenario's
+// whole purpose is to trip the cap on tier escalation.
 var EvalScenarios = []RoutineDef{
 	// ────────────────────────────────────────────────────────────────────
 	// 1. Pure transformation — extract-emails
@@ -73,7 +88,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: extract emails",
 			"description":        "Extract every email address from input text into a JSON array. Both fast and smart tiers should produce identical sorted output.",
 			"estimated_cost_usd": 0.001,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -131,7 +146,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: extract numbers (sorted)",
 			"description":        "Extract every integer from input text and return as a sorted JSON array.",
 			"estimated_cost_usd": 0.001,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -188,8 +203,8 @@ var EvalScenarios = []RoutineDef{
 			"name":               "eval-classify-sentiment",
 			"display_name":       "Eval: classify sentiment",
 			"description":        "Classify the sentiment of input text as positive, negative, or neutral. Cross-family graded.",
-			"estimated_cost_usd": 0.002,
-			"max_cost_usd":       0.05,
+			"estimated_cost_usd": 0.005,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -201,13 +216,6 @@ var EvalScenarios = []RoutineDef{
 					"required":    false,
 					"default":     "I absolutely love this product — it solved my problem on day one and the support team was wonderful.",
 					"description": "Text whose sentiment should be classified.",
-				},
-				{
-					"name":        "expected_label",
-					"type":        "string",
-					"required":    false,
-					"default":     "positive",
-					"description": "Optional ground-truth label for the grader to compare against (positive | negative | neutral).",
 				},
 			},
 			"outputs": []map[string]interface{}{
@@ -221,14 +229,18 @@ var EvalScenarios = []RoutineDef{
 					"complexity": "fast",
 					"on_fail":    "escalate_tier",
 					"prompt": "Classify the sentiment of the text below as exactly one of: positive, negative, neutral.\n" +
-						"Output MUST be exactly the line `sentiment: <label>` with the lowercase label and nothing else.\n" +
-						"Example: `sentiment: negative`\n\n" +
+						"Output MUST be exactly two lines:\n" +
+						"  Line 1: `sentiment: <label>`  where <label> is the lowercase classification\n" +
+						"  Line 2: `text-recap: <first 80 chars of the input text>`\n" +
+						"No other lines. No prose. No code fences.\n" +
+						"Example for negative input \"This is awful, refunding immediately.\":\n" +
+						"  sentiment: negative\n  text-recap: This is awful, refunding immediately.\n\n" +
 						"Text:\n{{ inputs.text }}",
 					"validation": map[string]interface{}{
-						"min_length":       len("sentiment: positive"),
-						"max_length":       len("sentiment: negative") + 8,
-						"must_contain":     []string{"sentiment:"},
-						"must_not_contain": []string{"```", "I think", "API_KEY=", "Bearer "},
+						"min_length":       len("sentiment: positive\ntext-recap: x"),
+						"max_length":       300,
+						"must_contain":     []string{"sentiment:", "text-recap:"},
+						"must_not_contain": []string{"```", "I think", "I would", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
 						"grader_agent_slug": agentSlugRef("eva"),
@@ -236,14 +248,16 @@ var EvalScenarios = []RoutineDef{
 						"on_fail":           "abort",
 						"criteria": []map[string]interface{}{
 							{
-								"name":        "matches_expected",
-								"rule":        "The classifier output's label matches the expected_label input. Compare case-insensitively.",
-								"description": "Exact-label agreement with ground truth.",
+								"name": "single_label",
+								"rule": "The output contains exactly one of these tokens: positive, negative, neutral. Never two of them. The label appears on the `sentiment:` line.",
 							},
 							{
-								"name":        "single_label",
-								"rule":        "The output contains exactly one of: positive, negative, neutral — never two of them at once.",
-								"description": "Catches hedging like 'mostly positive but somewhat negative'.",
+								"name": "label_matches_text",
+								"rule": "Read the text-recap line. Decide independently whether the sentiment is positive, negative, or neutral. The classifier's label must match your independent judgement. Only fail when the classifier is clearly wrong (e.g. labelled positive on hateful content); ambiguous cases pass.",
+							},
+							{
+								"name": "no_hedging",
+								"rule": "The output does not include hedging language (e.g. 'mostly positive but somewhat negative', 'I would say', 'it depends'). Just the bare label.",
 							},
 						},
 					},
@@ -271,7 +285,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: order JSON extraction",
 			"description":        "Reshape a free-text order summary into a structured JSON object with item, qty, unit_price, currency.",
 			"estimated_cost_usd": 0.002,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -333,7 +347,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: syllogism reasoning",
 			"description":        "Solve a transitive syllogism and return a JSON object with the answer and the intermediate steps.",
 			"estimated_cost_usd": 0.002,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -400,7 +414,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: prompt-injection resistance",
 			"description":        "Summarize hostile text that contains a prompt-injection payload. Output must NOT execute the embedded instructions.",
 			"estimated_cost_usd": 0.002,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -467,7 +481,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: faithfulness (RAG)",
 			"description":        "Answer a question strictly from supplied context. Hallucinated facts are caught by the cross-family grader.",
 			"estimated_cost_usd": 0.003,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -557,7 +571,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: cross-family judge",
 			"description":        "Fast-tier worker drafts a summary; smart-tier grader scores it on a strict rubric.",
 			"estimated_cost_usd": 0.004,
-			"max_cost_usd":       0.10,
+			"max_cost_usd":       1.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -693,7 +707,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: empty-input boundary",
 			"description":        "Worker must emit the exact sentinel `EMPTY_INPUT` when the input is empty or whitespace-only.",
 			"estimated_cost_usd": 0.001,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -751,7 +765,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: DAG trajectory (fetch-transform-summarize)",
 			"description":        "3-step DAG that fetches JSON, projects a field via transform, then summarizes. Trajectory equivalence test.",
 			"estimated_cost_usd": 0.003,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{"httpbin.org"},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -829,7 +843,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: idempotency (concurrency_key)",
 			"description":        "Routine gated by concurrency_key={{ inputs.key }}. Same key + same inputs ⇒ DEDUPED. Useful smoke for the dedupe path.",
 			"estimated_cost_usd": 0.001,
-			"max_cost_usd":       0.05,
+			"max_cost_usd":       0.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -888,7 +902,7 @@ var EvalScenarios = []RoutineDef{
 			"display_name":       "Eval: tier escalation on rubric fail",
 			"description":        "Worker on fast tier; smart-tier grader; on rubric miss the worker is escalated. Passes when rubric is met within max_iterations.",
 			"estimated_cost_usd": 0.005,
-			"max_cost_usd":       0.10,
+			"max_cost_usd":       1.50,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
@@ -946,6 +960,405 @@ var EvalScenarios = []RoutineDef{
 							{
 								"name": "technically_correct",
 								"rule": "The explanation is technically accurate. No factual errors about the topic.",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+
+	// ────────────────────────────────────────────────────────────────────
+	// 14. Translation roundtrip — semantic preservation
+	//
+	// Tests: a 2-step routine that translates EN → CZ in step 1 and
+	// CZ → EN in step 2 (as the same agent on a fresh prompt), then
+	// the grader judges whether the round-trip preserved meaning.
+	// Cross-tier robust because semantic preservation is mostly a
+	// world-knowledge task that both Haiku and Opus handle well on
+	// short, unambiguous inputs.
+	// ────────────────────────────────────────────────────────────────────
+	{
+		Slug:        "eval-translation-roundtrip",
+		Name:        "Eval: translation roundtrip (EN→CZ→EN)",
+		Description: "Translate EN→CZ then CZ→EN; grader judges whether the meaning survived.",
+		CrewSlug:    "research",
+		Definition: map[string]interface{}{
+			"dsl_version":        "1.0",
+			"name":               "eval-translation-roundtrip",
+			"display_name":       "Eval: translation roundtrip (EN→CZ→EN)",
+			"description":        "Translate EN→CZ then CZ→EN; grader judges whether the meaning survived.",
+			"estimated_cost_usd": 0.005,
+			"max_cost_usd":       0.50,
+			"egress_targets":     []string{},
+			"credentials_required": []map[string]interface{}{
+				{"type": "anthropic", "scope": "any"},
+			},
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "text",
+					"type":        "string",
+					"required":    false,
+					"default":     "The quarterly revenue increased by 12% despite the supply chain disruption in March.",
+					"description": "English sentence to translate roundtrip.",
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{"name": "back_translation", "type": "string"},
+			},
+			"steps": []map[string]interface{}{
+				{
+					"id":         "to_czech",
+					"type":       "agent_run",
+					"agent_slug": agentSlugRef("filip"),
+					"complexity": "fast",
+					"on_fail":    "escalate_tier",
+					"prompt": "Translate the following English sentence into Czech. " +
+						"Output ONLY the Czech translation — no English, no quotes, no explanation.\n\n" +
+						"English:\n{{ inputs.text }}",
+					"validation": map[string]interface{}{
+						"min_length":       5,
+						"max_length":       1000,
+						"must_not_contain": []string{"```", "Translation:", "API_KEY=", "Bearer "},
+					},
+				},
+				{
+					"id":         "back_to_english",
+					"type":       "agent_run",
+					"agent_slug": agentSlugRef("filip"),
+					"complexity": "fast",
+					"needs":      []string{"to_czech"},
+					"on_fail":    "escalate_tier",
+					"prompt": "Translate the following Czech sentence into English. " +
+						"Output ONLY the English translation — no Czech, no quotes, no explanation.\n\n" +
+						"Czech:\n{{ steps.to_czech.output }}",
+					"validation": map[string]interface{}{
+						"min_length":       5,
+						"max_length":       1000,
+						"must_not_contain": []string{"```", "Translation:", "API_KEY=", "Bearer "},
+					},
+					"outcomes": map[string]interface{}{
+						"grader_agent_slug": agentSlugRef("lucie"),
+						"max_iterations":    2,
+						"on_fail":           "abort",
+						"criteria": []map[string]interface{}{
+							{
+								"name": "preserves_meaning",
+								"rule": "The back-translated English sentence preserves the same factual meaning as the original input. Wording differences (e.g. 'rose' vs 'increased', 'logistics issue' vs 'supply chain disruption') are acceptable. Substantive divergence (different number, different time period, opposite sentiment) fails.",
+							},
+							{
+								"name": "preserves_numbers",
+								"rule": "Every number / percentage / date in the input also appears in the back-translation, possibly with different formatting (e.g. 12% vs twelve percent).",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+
+	// ────────────────────────────────────────────────────────────────────
+	// 15. Date arithmetic — narrow correctness window
+	//
+	// Tests: LLMs are notoriously weak at calendar math. This scenario
+	// asks for a date N days after a fixed reference and checks the
+	// output for the canonical answer. Cross-tier behaviour reveals
+	// itself sharply: weak models often miscount month boundaries
+	// (Feb→Mar, Aug→Sep). The gate uses must_contain on the exact
+	// expected date string in addition to the format anchor so a
+	// correct-by-luck wrong-explanation output still trips.
+	// ────────────────────────────────────────────────────────────────────
+	{
+		Slug:        "eval-date-arithmetic",
+		Name:        "Eval: date arithmetic (90 days)",
+		Description: "Compute the date exactly 90 days after a fixed reference. Tests calendar math, a known LLM weak point.",
+		CrewSlug:    "research",
+		Definition: map[string]interface{}{
+			"dsl_version":        "1.0",
+			"name":               "eval-date-arithmetic",
+			"display_name":       "Eval: date arithmetic (90 days)",
+			"description":        "Compute the date exactly 90 days after a fixed reference. Tests calendar math, a known LLM weak point.",
+			"estimated_cost_usd": 0.003,
+			"max_cost_usd":       0.50,
+			"egress_targets":     []string{},
+			"credentials_required": []map[string]interface{}{
+				{"type": "anthropic", "scope": "any"},
+			},
+			"inputs": []map[string]interface{}{
+				{
+					"name":        "start_date",
+					"type":        "string",
+					"required":    false,
+					"default":     "2026-05-08",
+					"description": "ISO-8601 start date.",
+				},
+				{
+					"name":        "days",
+					"type":        "integer",
+					"required":    false,
+					"default":     90,
+					"description": "Days to add.",
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{"name": "result_date", "type": "string"},
+			},
+			"steps": []map[string]interface{}{
+				{
+					"id":         "compute",
+					"type":       "agent_run",
+					"agent_slug": agentSlugRef("filip"),
+					"complexity": "fast",
+					"on_fail":    "escalate_tier",
+					"prompt": "Compute the date exactly {{ inputs.days }} days after {{ inputs.start_date }}. " +
+						"Output ONLY the result in `result: YYYY-MM-DD` format. No prose, no explanation, no code fences.\n\n" +
+						"Example: result: 2026-08-06",
+					"validation": map[string]interface{}{
+						"min_length":   len("result: 2026-08-06"),
+						"max_length":   60,
+						"must_contain": []string{"result:", "2026-08-06"}, // 2026-05-08 + 90 days = 2026-08-06
+						"must_not_contain": []string{
+							"```", "I think", "Let me", "Calculation:",
+							"API_KEY=", "Bearer ",
+						},
+					},
+				},
+			},
+		},
+	},
+
+	// ────────────────────────────────────────────────────────────────────
+	// 16. Noisy-context extraction — distractor resistance
+	//
+	// Tests: input contains the target fact PLUS several plausible
+	// distractor facts of the same shape. The worker must extract
+	// the correct value, not the easiest-to-reach one. Strong
+	// instruction-following models pin to the explicit instruction;
+	// weak ones latch onto whichever distractor scans more salient.
+	// ────────────────────────────────────────────────────────────────────
+	{
+		Slug:        "eval-noisy-context-extraction",
+		Name:        "Eval: noisy-context extraction",
+		Description: "Extract a specific field from a paragraph dense with similar distractor fields.",
+		CrewSlug:    "research",
+		Definition: map[string]interface{}{
+			"dsl_version":        "1.0",
+			"name":               "eval-noisy-context-extraction",
+			"display_name":       "Eval: noisy-context extraction",
+			"description":        "Extract a specific field from a paragraph dense with similar distractor fields.",
+			"estimated_cost_usd": 0.003,
+			"max_cost_usd":       0.50,
+			"egress_targets":     []string{},
+			"credentials_required": []map[string]interface{}{
+				{"type": "anthropic", "scope": "any"},
+			},
+			"inputs": []map[string]interface{}{
+				{
+					"name":     "text",
+					"type":     "string",
+					"required": false,
+					"default": "Customer notes from yesterday's meeting:\n" +
+						"- Phone numbers we tried: +420 234 567 890 (assistant), +1 555 0143 (US office), +44 20 7946 0958 (UK office).\n" +
+						"- Old PRIMARY contact (deprecated since 2024): +420 800 100 100.\n" +
+						"- New PRIMARY contact, effective immediately: +420 777 555 333.\n" +
+						"- Faxes (legacy systems only): +420 234 567 891, +420 234 567 892.\n" +
+						"Use the new PRIMARY for any escalation; the deprecated number forwards to a sales VM that's not monitored.",
+					"description": "Distractor-rich paragraph.",
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{"name": "primary_phone", "type": "string"},
+			},
+			"steps": []map[string]interface{}{
+				{
+					"id":         "extract_primary",
+					"type":       "agent_run",
+					"agent_slug": agentSlugRef("filip"),
+					"complexity": "fast",
+					"on_fail":    "escalate_tier",
+					"prompt": "From the customer notes below, extract the CURRENT primary contact phone number. " +
+						"Ignore deprecated numbers, assistant numbers, office numbers, and fax numbers. " +
+						"Output ONLY the line `primary: <phone>` with the international-format number and nothing else. " +
+						"No prose, no code fences, no explanation.\n\n" +
+						"Notes:\n{{ inputs.text }}",
+					"validation": map[string]interface{}{
+						"min_length":       len("primary: +420 777 555 333"),
+						"max_length":       80,
+						"must_contain":     []string{"primary:", "+420 777 555 333"},
+						"must_not_contain": []string{"```", "I think", "Note:", "deprecated", "assistant", "fax", "API_KEY=", "Bearer "},
+					},
+				},
+			},
+		},
+	},
+
+	// ────────────────────────────────────────────────────────────────────
+	// 17. Citation faithfulness — every claim cites a source
+	//
+	// Tests: a stricter cousin of eval-faithfulness-rag. The worker
+	// MUST tag every factual claim with `[source: "<exact quote>"]`
+	// referencing the supplied context. The grader checks that
+	// (a) every claim has a citation, (b) every citation is a
+	// substring of the context. This is the canonical RAG-grounded
+	// answer pattern that production agentic search needs.
+	// ────────────────────────────────────────────────────────────────────
+	{
+		Slug:        "eval-citation-faithfulness",
+		Name:        "Eval: citation faithfulness",
+		Description: "Answer a question and cite a verbatim quote from the context for every factual claim. Stricter cousin of eval-faithfulness-rag.",
+		CrewSlug:    "research",
+		Definition: map[string]interface{}{
+			"dsl_version":        "1.0",
+			"name":               "eval-citation-faithfulness",
+			"display_name":       "Eval: citation faithfulness",
+			"description":        "Answer a question and cite a verbatim quote from the context for every factual claim. Stricter cousin of eval-faithfulness-rag.",
+			"estimated_cost_usd": 0.005,
+			"max_cost_usd":       0.50,
+			"egress_targets":     []string{},
+			"credentials_required": []map[string]interface{}{
+				{"type": "anthropic", "scope": "any"},
+			},
+			"inputs": []map[string]interface{}{
+				{
+					"name":     "context",
+					"type":     "string",
+					"required": false,
+					"default": "Crewship is a self-hosted agent runtime. The current released version is 0.4.2, shipped on 2026-04-30. " +
+						"It supports six step types: agent_run, call_pipeline, http, code, wait, transform. " +
+						"The default execution tier mapping uses Anthropic Haiku-4.5 for fast, Sonnet-4.6 for moderate, Opus-4.7 for smart. " +
+						"Tier escalation triggers on validation failure when on_fail is set to escalate_tier.",
+				},
+				{
+					"name":     "question",
+					"type":     "string",
+					"required": false,
+					"default":  "What is the current Crewship version, what model does it use for the smart tier, and what triggers tier escalation?",
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{"name": "answer", "type": "string"},
+			},
+			"steps": []map[string]interface{}{
+				{
+					"id":         "answer_with_citations",
+					"type":       "agent_run",
+					"agent_slug": agentSlugRef("filip"),
+					"complexity": "fast",
+					"on_fail":    "escalate_tier",
+					"prompt": "Answer the question below using ONLY facts present in the context. " +
+						"For every factual claim in your answer, immediately follow it with `[source: \"<exact verbatim quote from the context>\"]`. " +
+						"The quote MUST be a verbatim substring of the context — no paraphrasing in citations. " +
+						"If a fact is not in the context, do NOT include it. Keep the answer to under 150 words.\n\n" +
+						"Context:\n{{ inputs.context }}\n\n" +
+						"Question:\n{{ inputs.question }}",
+					"validation": map[string]interface{}{
+						"min_length":       50,
+						"max_length":       2000,
+						"must_contain":     []string{"[source:"},
+						"must_not_contain": []string{"```", "API_KEY=", "Bearer "},
+					},
+					"outcomes": map[string]interface{}{
+						"grader_agent_slug": agentSlugRef("lucie"),
+						"max_iterations":    3,
+						"on_fail":           "escalate_tier",
+						"criteria": []map[string]interface{}{
+							{
+								"name": "every_claim_cited",
+								"rule": "Every factual claim in the answer is immediately followed by a [source: \"...\"] citation.",
+							},
+							{
+								"name": "citations_are_verbatim",
+								"rule": "Every quoted citation string is a verbatim substring of the context. If the citation paraphrases the context (e.g. citation says 'released April 30' but context says 'shipped on 2026-04-30'), fail.",
+							},
+							{
+								"name": "no_uncited_facts",
+								"rule": "The answer does not introduce facts that are not present in the context. Knowledge from the model's training data does not count as a citation.",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+
+	// ────────────────────────────────────────────────────────────────────
+	// 18. Long-form coherence — structured generation
+	//
+	// Tests: produce a 200-300 word structured explanation with
+	// required section headings. Tests output structure compliance
+	// over a longer generation horizon, where weak models tend to
+	// drift, omit sections, or merge them. Useful as a smoke test
+	// for routines that produce digest / report output downstream.
+	// ────────────────────────────────────────────────────────────────────
+	{
+		Slug:        "eval-long-form-coherence",
+		Name:        "Eval: long-form coherence",
+		Description: "Produce a 200-300 word structured explanation with required headings. Tests structure compliance over longer generation.",
+		CrewSlug:    "engineering",
+		Definition: map[string]interface{}{
+			"dsl_version":        "1.0",
+			"name":               "eval-long-form-coherence",
+			"display_name":       "Eval: long-form coherence",
+			"description":        "Produce a 200-300 word structured explanation with required headings. Tests structure compliance over longer generation.",
+			"estimated_cost_usd": 0.008,
+			"max_cost_usd":       0.50,
+			"egress_targets":     []string{},
+			"credentials_required": []map[string]interface{}{
+				{"type": "anthropic", "scope": "any"},
+			},
+			"inputs": []map[string]interface{}{
+				{
+					"name":     "topic",
+					"type":     "string",
+					"required": false,
+					"default":  "How idempotency keys make webhook redelivery safe in distributed task queues.",
+				},
+			},
+			"outputs": []map[string]interface{}{
+				{"name": "explanation", "type": "string"},
+			},
+			"steps": []map[string]interface{}{
+				{
+					"id":         "explain",
+					"type":       "agent_run",
+					"agent_slug": agentSlugRef("viktor"),
+					"complexity": "fast",
+					"on_fail":    "escalate_tier",
+					"prompt": "Write a structured explanation of the topic below. Use EXACTLY these three section headings, on their own lines, in this order:\n" +
+						"  ## Problem\n  ## Mechanism\n  ## Trade-offs\n" +
+						"Constraints:\n" +
+						"  - Total length: 200-300 words across all sections.\n" +
+						"  - Each section: 50-150 words.\n" +
+						"  - No bullet points anywhere.\n" +
+						"  - No code blocks. No code fences.\n" +
+						"  - No preamble before the first heading. No closing remark after the last section.\n\n" +
+						"Topic:\n{{ inputs.topic }}",
+					"validation": map[string]interface{}{
+						"min_length":       800,
+						"max_length":       3500,
+						"must_contain":     []string{"## Problem", "## Mechanism", "## Trade-offs"},
+						"must_not_contain": []string{"```", "- ", "* ", "API_KEY=", "Bearer "},
+					},
+					"outcomes": map[string]interface{}{
+						"grader_agent_slug": agentSlugRef("eva"),
+						"max_iterations":    3,
+						"on_fail":           "escalate_tier",
+						"criteria": []map[string]interface{}{
+							{
+								"name": "three_headings_present",
+								"rule": "The text contains exactly the three section headings `## Problem`, `## Mechanism`, `## Trade-offs`, in that order, each on its own line.",
+							},
+							{
+								"name": "word_count_in_range",
+								"rule": "The total word count across all three sections combined is between 200 and 300 words inclusive.",
+							},
+							{
+								"name": "each_section_has_content",
+								"rule": "Each of the three sections contains at least 50 words of substantive prose, not placeholder text.",
+							},
+							{
+								"name": "topic_relevance",
+								"rule": "The content of all three sections directly addresses the topic. None of the sections drift onto an unrelated subject.",
 							},
 						},
 					},
