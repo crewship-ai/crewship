@@ -153,9 +153,17 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	seedQuery.Limit = seedPageSize
 	seedQuery.Cursor = ""
+	// Fresh clients (no Last-Event-ID) get a single seedPageSize
+	// batch — same as the pre-paging contract, so a brand-new tab
+	// doesn't flood with up-to-500 historical rows. Resume clients
+	// page through the gap up to maxSeedPages.
+	pageBudget := 1
+	if hasWatermark {
+		pageBudget = maxSeedPages
+	}
 	collected := make([]journal.Entry, 0, seedPageSize)
 	hitCeiling := false
-	for page := 0; page < maxSeedPages; page++ {
+	for page := 0; page < pageBudget; page++ {
 		entries, nextCursor, err := journal.List(r.Context(), h.db, seedQuery)
 		if err != nil {
 			// Don't abort the stream on a transient seed failure —
@@ -172,10 +180,10 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 		seedQuery.Cursor = nextCursor
 		// Last iteration that didn't break early — there are still
-		// older entries beyond the cap. Set the flag so the warn
-		// after the loop fires, and the live tail still picks up
-		// from the newest emitted watermark.
-		if page == maxSeedPages-1 {
+		// older entries beyond the cap. Only treated as a ceiling
+		// hit when the caller asked for the full resume budget;
+		// fresh clients deliberately stop after one page.
+		if hasWatermark && page == pageBudget-1 {
 			hitCeiling = true
 		}
 	}

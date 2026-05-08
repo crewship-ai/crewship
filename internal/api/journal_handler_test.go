@@ -754,6 +754,75 @@ func TestJournalHandler_Stream_ResumePagingBeyondSeedCap(t *testing.T) {
 	}
 }
 
+// TestJournalHandler_Stream_FreshClient_BoundedSeed pins the contract
+// that a brand-new client (no Last-Event-ID header) gets at most one
+// seedPageSize batch — not the full resume budget. Without this guard
+// a freshly opened tab in a workspace with deep journal history would
+// flood with up to 500 rows on connect, defeating the bounded-seed
+// promise documented in the API reference.
+func TestJournalHandler_Stream_FreshClient_BoundedSeed(t *testing.T) {
+	h, userID, wsID, _ := newJournalHandlerTest(t)
+
+	// Seed 80 entries — well above seedPageSize (50) and resume
+	// would page to 500. With no Last-Event-ID the seed must cap
+	// at 50.
+	now := time.Now().UTC()
+	const total = 80
+	for i := 0; i < total; i++ {
+		seedJournalRow(t, h,
+			fmt.Sprintf("j_fresh%03d", i), wsID,
+			string(journal.EntryRunStarted), "info", "fresh",
+			now.Add(-time.Duration(total-i)*time.Second))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequestWithContext(ctx, "GET", "/api/v1/journal/stream", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	// Deliberately NO Last-Event-ID header.
+	rr := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Stream(rr, req)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stream did not return after ctx cancel")
+	}
+
+	body := rr.Body.String()
+	gotIDs := []string{}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "id: ") {
+			gotIDs = append(gotIDs, strings.TrimPrefix(line, "id: "))
+		}
+	}
+	const seedPageSize = 50
+	if len(gotIDs) != seedPageSize {
+		t.Errorf("fresh client seed: got %d entries, want exactly %d "+
+			"(no Last-Event-ID must NOT page through full resume budget)",
+			len(gotIDs), seedPageSize)
+	}
+	// And they must be the *newest* seedPageSize, not the oldest.
+	// j_fresh079 is the most recent row, so it must be in the seed.
+	hasNewest := false
+	for _, id := range gotIDs {
+		if id == "j_fresh079" {
+			hasNewest = true
+			break
+		}
+	}
+	if !hasNewest {
+		t.Errorf("seed did not contain newest entry j_fresh079; first 5: %v",
+			firstN(gotIDs, 5))
+	}
+}
+
 // firstN is a tiny readability helper for failure messages.
 func firstN(s []string, n int) []string {
 	if len(s) < n {
