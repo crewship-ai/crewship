@@ -361,9 +361,14 @@ var pipelineRunCmd = &cobra.Command{
 			}
 		}
 
+		tierOverride, _ := cmd.Flags().GetString("tier-override")
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
-		resp, err := client.Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, args[0]), map[string]any{"inputs": inputs})
+		runBody := map[string]any{"inputs": inputs}
+		if tierOverride != "" {
+			runBody["tier_override"] = tierOverride
+		}
+		resp, err := client.Do("POST", fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, args[0]), runBody)
 		if err != nil {
 			return err
 		}
@@ -628,6 +633,7 @@ func init() {
 
 	pipelineRunCmd.Flags().String("inputs", "", "JSON inputs for the run (e.g. '{\"since\":\"yesterday\"}')")
 	pipelineRunCmd.Flags().String("invoking-crew", "", "crew_id to record as the invoker (cross-crew reuse audit)")
+	pipelineRunCmd.Flags().String("tier-override", "", "force every agent_run step onto a tier (trivial|fast|moderate|smart). Step-level model_override still wins. Empty = use authored complexity.")
 
 	pipelineDryRunCmd.Flags().String("inputs", "", "JSON inputs for the dry-run preview")
 

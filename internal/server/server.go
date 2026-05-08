@@ -723,4 +723,16 @@ func (s *Server) WSHub() *ws.Hub {
 	return s.wsHub
 }
 
+// JournalWriter exposes the production journal writer so out-of-tree
+// boot wiring (cmd/crewship) can pass it to subsystems that need to
+// emit cost-ledger and run-trace entries through the same buffered
+// pipeline as the rest of the server. Notably the LLMRunner needs
+// it for llm.Middleware's paymaster + lookout layers.
+//
+// Returns nil when the server was constructed without a DB
+// (test-only path) — callers must nil-check.
+func (s *Server) JournalWriter() *journal.Writer {
+	return s.journalWriter
+}
+
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,
