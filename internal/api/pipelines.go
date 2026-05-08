@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -503,13 +501,13 @@ func (h *PipelineHandler) TestRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, testRunResponse{RunResult: res, SaveToken: saveToken})
 }
 
-// definitionHashHex is the same SHA-256 hex digest the Store uses for
-// pipeline.definition_hash. Lifted into the API layer so the save_token
-// signer can bind to "this exact DSL bytes" — keeping the signer
-// out of internal/pipeline avoids circular dependency.
+// definitionHashHex delegates to the pipeline package's exported
+// DefinitionHash so the save_token signer always agrees with the
+// Store's stored hash. Single-source-of-truth — the previous separate
+// implementation here could drift from store.go and silently break
+// save_token verification.
 func definitionHashHex(def []byte) string {
-	sum := sha256.Sum256(def)
-	return hex.EncodeToString(sum[:])
+	return pipeline.DefinitionHash(def)
 }
 
 // Delete soft-deletes a pipeline by slug.

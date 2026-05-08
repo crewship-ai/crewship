@@ -871,6 +871,15 @@ The branch shipped 7 real bugs alongside the new features. They're fixed in the 
 - `pipeline_runs` dedicated table with status enum + checkpoint
 - Editor write-mode (Monaco read-only in this PR; `PATCH` exists in API but UI is view-only)
 
+### 17.7.1 Shipped after PRD freeze
+
+The following items were originally listed as deferred but landed during the iteration on this PR:
+
+- **HMAC `save_token`** (commit `6b587fe`) — `/test_run` returns a signed token bound to (workspace_id, definition_hash, user_id, ts); `/save` verifies via HMAC instead of trusting body's `last_test_run_at`. Closes the test-gate body-trust loophole flagged earlier in this section. Backend + 10 unit tests + UI dialog wires the `save_token` from the test_run response into the save body.
+- **JSON Schema for the DSL** (`schemas/routine.v1.json`) — IDE autocomplete + inline validation in any json-schema-aware editor. Sync test against runtime StepType constants prevents schema drift.
+- **CLI parity** (18 routine subcommands) — schedules / webhooks / waitpoints / validate / watch / logs subcommands ship alongside the original 7. The `pipeline` alias is preserved for back-compat.
+- **Three documentation surfaces** — `docs/guides/routines.mdx` (user guide), `docs/cli/routine.mdx` (CLI reference), `docs/guides/routines-migration.mdx` (compatibility/upgrade guide).
+
 ### 17.8 Cost cap deprioritization
 
 Per user direction 2026-05-07 evening: cost cap implementation in this branch is **NOT a blocker**. Functional correctness, visibility, auditability, and CLI parity take priority. Cost-related UX (estimate vs actual, daily caps, alerting) is deferred to a dedicated PR after stabilization.

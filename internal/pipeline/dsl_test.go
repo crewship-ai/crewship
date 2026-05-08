@@ -413,6 +413,85 @@ func TestValidate_RejectsBadTemplateInTransformExpression(t *testing.T) {
 	}
 }
 
+// TestValidate_DAGStepsCanReferenceAncestorRegardlessOfSourceOrder
+// pins the DAG-aware template validation: when ANY step declares
+// needs[], the validator switches from source-order to transitive-
+// reach. A step can reference ancestor outputs even when the source
+// position would say "forward reference". Without this, the parallel-
+// execution promise of DAG mode was undermined by the validator
+// rejecting topologically-valid configs.
+func TestValidate_DAGStepsCanReferenceAncestorRegardlessOfSourceOrder(t *testing.T) {
+	// B appears BEFORE A in source, but B explicitly depends on A
+	// via needs:[A]. Topologically A runs first; B's prompt
+	// referencing {{ steps.A.output }} should validate.
+	dsl := &DSL{
+		Name: "dag",
+		Steps: []Step{
+			{ID: "B", Type: StepAgentRun, AgentSlug: "x",
+				Needs:  []string{"A"},
+				Prompt: "use {{ steps.A.output }}"},
+			{ID: "A", Type: StepAgentRun, AgentSlug: "x", Prompt: "first"},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err != nil {
+		t.Errorf("DAG step B referencing ancestor A rejected: %v", err)
+	}
+}
+
+// TestValidate_DAGRejectsReferenceToNonAncestor counter-test: a step
+// MUST NOT reference a sibling or descendant. Only declared transitive
+// ancestors are valid template targets in DAG mode — referencing a
+// peer that runs in parallel would be a real ordering bug.
+func TestValidate_DAGRejectsReferenceToNonAncestor(t *testing.T) {
+	dsl := &DSL{
+		Name: "dag",
+		Steps: []Step{
+			{ID: "root", Type: StepAgentRun, AgentSlug: "x", Prompt: "start"},
+			// peer1 + peer2 both depend on root but NOT on each other.
+			// peer1 illegally references peer2's output — they're
+			// running in parallel, no ordering guarantee.
+			{ID: "peer1", Type: StepAgentRun, AgentSlug: "x",
+				Needs:  []string{"root"},
+				Prompt: "{{ steps.peer2.output }}"},
+			{ID: "peer2", Type: StepAgentRun, AgentSlug: "x",
+				Needs:  []string{"root"},
+				Prompt: "second"},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil {
+		t.Error("expected rejection: peer1 cannot reference peer2 (parallel siblings, no ordering)")
+	}
+}
+
+// TestValidate_NestedTemplatesInCallPipelineInputs targets the bug
+// fixed by walkNestedTemplates: NestedInputs is `map[string]any` whose
+// values can themselves be objects/arrays/strings. Templates inside
+// the deeper layers were skipped by the old flat string-only walk and
+// crashed at runtime.
+func TestValidate_NestedTemplatesInCallPipelineInputs(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{ID: "a", Type: StepAgentRun, AgentSlug: "x", Prompt: "ok"},
+			{
+				ID:           "wrap",
+				Type:         StepCallPipeline,
+				PipelineSlug: "child",
+				NestedInputs: map[string]any{
+					"meta": map[string]any{
+						"forwarded": "{{ inputs.does_not_exist }}",
+					},
+				},
+			},
+		},
+	}
+	pipelineSlugs := map[string]struct{}{"child": {}}
+	if err := Validate(dsl, nil, pipelineSlugs); err == nil ||
+		!strings.Contains(err.Error(), "does_not_exist") {
+		t.Errorf("expected unknown-input error in nested NestedInputs, got %v", err)
+	}
+}
+
 // Positive control: known good templates across all fields pass.
 func TestValidate_AcceptsValidTemplatesAcrossAllFields(t *testing.T) {
 	dsl := &DSL{

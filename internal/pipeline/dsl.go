@@ -309,18 +309,68 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	for _, in := range dsl.Inputs {
 		inputNames[in.Name] = struct{}{}
 	}
-	earlierSteps := make(map[string]struct{}, len(dsl.Steps))
+
+	// "Earlier" determination: linear pipelines (no needs[] anywhere)
+	// use source order — the historical, predictable behaviour. DAG
+	// pipelines (any step has needs[]) compute a per-step set of
+	// reachable predecessors via the needs graph, so a step that
+	// references {{ steps.Y.output }} only needs Y in its transitive
+	// `needs` chain, regardless of source position. Without this, a
+	// DAG with `B (needs:[A])` placed BEFORE `A` in dsl.Steps would
+	// reject at save with "forward template ref" — that's a false
+	// negative for topologically-valid pipelines.
+	hasAnyNeeds := false
 	for _, st := range dsl.Steps {
-		// Validate templates in this step against inputs + earlier
-		// steps (forward-references are not allowed; output of step
-		// 5 cannot be templated into step 3).
-		if err := validateTemplatesInStep(st, inputNames, earlierSteps); err != nil {
-			return err
+		if len(st.Needs) > 0 {
+			hasAnyNeeds = true
+			break
 		}
-		earlierSteps[st.ID] = struct{}{}
+	}
+	if hasAnyNeeds {
+		// DAG mode: compute reachable predecessors per step.
+		stepByID := make(map[string]*Step, len(dsl.Steps))
+		for i := range dsl.Steps {
+			stepByID[dsl.Steps[i].ID] = &dsl.Steps[i]
+		}
+		for _, st := range dsl.Steps {
+			reachable := make(map[string]struct{})
+			collectReachableNeeds(st.ID, stepByID, reachable)
+			if err := validateTemplatesInStep(st, inputNames, reachable); err != nil {
+				return err
+			}
+		}
+	} else {
+		// Linear mode (preserve historical behaviour): source-order.
+		earlierSteps := make(map[string]struct{}, len(dsl.Steps))
+		for _, st := range dsl.Steps {
+			if err := validateTemplatesInStep(st, inputNames, earlierSteps); err != nil {
+				return err
+			}
+			earlierSteps[st.ID] = struct{}{}
+		}
 	}
 
 	return nil
+}
+
+// collectReachableNeeds walks the `needs` chain from stepID and
+// populates `out` with every transitive predecessor's ID. Used by
+// the DAG-mode template validator so a step can reference any
+// ancestor's output regardless of source position. Stop-loops are
+// handled by the cycle detector at save_time, but we guard here too
+// in case a malformed DSL gets validated outside the normal path.
+func collectReachableNeeds(stepID string, stepByID map[string]*Step, out map[string]struct{}) {
+	st, ok := stepByID[stepID]
+	if !ok {
+		return
+	}
+	for _, dep := range st.Needs {
+		if _, seen := out[dep]; seen {
+			continue
+		}
+		out[dep] = struct{}{}
+		collectReachableNeeds(dep, stepByID, out)
+	}
 }
 
 // validateTemplatesInStep checks every {{ ... }} placeholder across
@@ -328,9 +378,13 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 // resolve against either inputs.X (for any declared input) or
 // steps.Y.output (for a Y that has executed before this step).
 //
-// The MVP DSL is sequential, so "earlier" simply means "appears before
-// this step in dsl.Steps". When we add parallel/branch step types
-// we'll need a proper DAG topological ordering.
+// The "earlier" set is supplied by the caller in `earlier`. For
+// LINEAR pipelines (no needs[] anywhere) the caller passes a
+// running set of "steps seen so far in source order" — preserves the
+// pre-DAG validator behaviour. For DAG pipelines the caller passes
+// the step's transitive `needs` closure so a step that's later in
+// source order can still reference its declared predecessors. See
+// the call site in Validate for the dispatch.
 //
 // Coverage extends beyond Prompt + NestedInputs to: If condition,
 // HTTP (URL / Body / Headers), Wait (Until / EventFilter), Code
@@ -353,16 +407,16 @@ func validateTemplatesInStep(st Step, inputs, earlier map[string]struct{}) error
 		return nil
 	}
 
-	// agent_run prompt + nested inputs (existing coverage)
+	// agent_run prompt + nested inputs (recursive: NestedInputs can be
+	// nested objects/arrays — call_pipeline forwards a structured map
+	// of inputs to the child routine, and any string anywhere inside
+	// can carry a {{ ... }} template). Only walking top-level string
+	// values used to let bad templates inside nested objects pass save.
 	if err := walk(st.Prompt); err != nil {
 		return err
 	}
-	for _, v := range st.NestedInputs {
-		if str, ok := v.(string); ok {
-			if err := walk(str); err != nil {
-				return err
-			}
-		}
+	if err := walkNestedTemplates(st.NestedInputs, walk); err != nil {
+		return err
 	}
 
 	// Conditional `if` expression
@@ -627,4 +681,35 @@ func jsonPath(raw, path string) string {
 		}
 	}
 	return stringify(v)
+}
+
+// walkNestedTemplates recursively descends into a map / slice tree
+// applying `walk` to every string value found. call_pipeline's
+// NestedInputs is `map[string]any` whose values can themselves be
+// objects, arrays, or strings; templates inside the deeper layers
+// were skipped by the older flat string-only walk and crashed at
+// runtime. This recursion mirrors what the renderer does when it
+// substitutes — keeping save-time validation symmetric with run-time
+// behaviour.
+func walkNestedTemplates(v any, walk func(string) error) error {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case string:
+		return walk(t)
+	case map[string]any:
+		for _, child := range t {
+			if err := walkNestedTemplates(child, walk); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range t {
+			if err := walkNestedTemplates(child, walk); err != nil {
+				return err
+			}
+		}
+	}
+	// Other scalar types (int, float, bool) carry no templates — skip.
+	return nil
 }

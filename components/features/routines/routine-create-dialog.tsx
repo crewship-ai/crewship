@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { X, FlaskConical, Save, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -125,6 +125,11 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const [busy, setBusy] = useState<"none" | "testing" | "saving">("none")
   const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(null)
   const [skipTestGate, setSkipTestGate] = useState(false)
+  // saveToken captured from the most recent successful /test_run.
+  // Used by the subsequent /save call so the server can verify via
+  // HMAC instead of trusting body's last_test_run_at — closes the
+  // test-gate body-trust loophole. Cleared on edit + on save success.
+  const [saveToken, setSaveToken] = useState<string | null>(null)
 
   // Lazy-load crews on first open. Side effect lives in useEffect
   // (not in render body) so React's render pipeline isn't disturbed
@@ -154,9 +159,25 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     setDslJson(JSON.stringify(j, null, 2))
     setParseError(null)
     setTestResult(null)
+    setSaveToken(null) // template change → DSL change → bound token invalid
   }
 
-  const parseDSL = (): Record<string, unknown> | null => {
+  // Parse the DSL JSON for slug-preview without touching state in render.
+  // useMemo runs only when dslJson changes; setParseError stays in
+  // event handlers (handleTestRun / handleSave) so render is pure.
+  const parsedDSL = useMemo<Record<string, unknown> | null>(() => {
+    try {
+      return JSON.parse(dslJson) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }, [dslJson])
+  const slug = (parsedDSL?.["name"] as string) || "my-routine"
+
+  // Helper for handlers — re-parses with explicit error capture for
+  // the inline UI feedback. Distinct from parsedDSL so the render
+  // path stays side-effect-free.
+  const parseDSLWithError = (): Record<string, unknown> | null => {
     try {
       const parsed = JSON.parse(dslJson) as Record<string, unknown>
       setParseError(null)
@@ -167,34 +188,49 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
     }
   }
 
-  const slug = (parseDSL()?.["name"] as string) || "my-routine"
-
   const handleTestRun = async (): Promise<boolean> => {
-    const parsed = parseDSL()
+    const parsed = parseDSLWithError()
     if (!parsed) {
       toast.error("Definition is not valid JSON")
       return false
     }
     setBusy("testing")
     setTestResult(null)
+    setSaveToken(null)
     try {
       const res = await fetch(`/api/v1/workspaces/${workspaceId}/pipelines/test_run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ definition: parsed, sample_inputs: {} }),
       })
-      const data = (await res.json().catch(() => ({}))) as { passed?: boolean; error?: string; output?: string }
+      const data = (await res.json().catch(() => ({}))) as {
+        passed?: boolean
+        status?: string
+        error?: string
+        output?: string
+        save_token?: string
+      }
       if (!res.ok) {
         const msg = data.error ?? `HTTP ${res.status}`
         setTestResult({ passed: false, details: msg })
         toast.error("Test run failed", { description: msg })
         return false
       }
-      const passed = data.passed !== false
+      // status COMPLETED is the canonical pass signal; passed!=false
+      // is the legacy fallback for older servers that don't surface
+      // a status field. Prefer the explicit COMPLETED check so a
+      // status="FAILED" payload with passed missing doesn't read as a pass.
+      const passed = data.status === "COMPLETED" || (data.status === undefined && data.passed !== false)
       setTestResult({
         passed,
         details: passed ? `Passed${data.output ? ` (output: ${truncate(String(data.output), 120)})` : ""}` : data.error ?? "test_run reported failure",
       })
+      // Capture save_token if the server signed one. Server-side
+      // gating: only emitted when status==COMPLETED + signing
+      // secret wired. Consumed by handleSave below.
+      if (passed && data.save_token) {
+        setSaveToken(data.save_token)
+      }
       if (passed) {
         toast.success("Test run passed")
       } else {
@@ -212,7 +248,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   }
 
   const handleSave = async (assumeTestPassed: boolean) => {
-    const parsed = parseDSL()
+    const parsed = parseDSLWithError()
     if (!parsed) {
       toast.error("Definition is not valid JSON")
       return
@@ -228,11 +264,23 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         name: name || (parsed["name"] as string),
         description: description || (parsed["description"] as string | undefined) || "",
         definition: parsed,
-        last_test_run_passed: assumeTestPassed || skipTestGate,
         skip_test_gate: skipTestGate,
       }
-      if (assumeTestPassed && !skipTestGate) {
+      // Three priority paths to clearing the save's test-gate, mirroring
+      // the server-side priority in pipelines.go Save handler:
+      // 1. save_token (HMAC, no body trust) — preferred, captured from
+      //    the prior /test_run response when the server has signing wired.
+      // 2. skip_test_gate — OWNER/ADMIN-only escape hatch.
+      // 3. last_test_run_at + last_test_run_passed — legacy body-trust
+      //    fallback for servers without HMAC signing wired (graceful
+      //    degrade so this dialog works against older deployments).
+      if (saveToken) {
+        body.save_token = saveToken
+      } else if (assumeTestPassed && !skipTestGate) {
+        body.last_test_run_passed = true
         body.last_test_run_at = new Date().toISOString()
+      } else if (skipTestGate) {
+        body.last_test_run_passed = true
       }
       if (authorCrewId) body.author_crew_id = authorCrewId
 
@@ -365,6 +413,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                 setDslJson(e.target.value)
                 setParseError(null)
                 setTestResult(null)
+                setSaveToken(null) // edit → bound HMAC token invalid
               }}
               spellCheck={false}
               className="flex-1 resize-none bg-background p-3 font-mono text-[11px] leading-relaxed outline-none"

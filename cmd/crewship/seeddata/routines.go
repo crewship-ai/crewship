@@ -89,7 +89,11 @@ var Routines = []RoutineDef{
 			"display_name":       "Fetch URL and summarize",
 			"description":        "Fetch the contents of a URL via HTTP, then summarize in 3 bullets.",
 			"estimated_cost_usd": 0.002,
-			"egress_targets":     []string{"*"},
+			// Narrow allowlist on the seed routine so the demo doesn't
+			// double as an SSRF lab. Workspace admins can broaden via
+			// the routine editor; we leave production allowlisting to
+			// explicit operator decision rather than defaulting to "*".
+			"egress_targets": []string{"httpbin.org"},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
 			},

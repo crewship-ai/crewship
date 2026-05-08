@@ -77,7 +77,7 @@ var routineVersionsCmd = &cobra.Command{
 				summary = summary[:47] + "..."
 			}
 			fmt.Fprintf(w, "v%d\t%s\t%s\t%s\t%s/%s\t%s\t%s\n",
-				v.Version, isHead, parent, v.DefinitionHash[:12]+"…",
+				v.Version, isHead, parent, truncIDForCLI(v.DefinitionHash, 12),
 				v.AuthorType, truncIDForCLI(v.AuthorID, 12), v.CreatedAt, summary)
 		}
 		return w.Flush()
