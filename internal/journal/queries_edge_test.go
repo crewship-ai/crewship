@@ -444,16 +444,10 @@ func TestList_FiltersPriorities(t *testing.T) {
 	}
 }
 
-// TestList_TimeRange covers Since + Until simultaneously.
-//
-// NOTE: queries.go formats Since/Until as time.RFC3339Nano while
-// emit.go writes entries with a fixed "2006-01-02T15:04:05.000Z"
-// layout. RFC3339Nano omits the fractional seconds when nanos=0 ("Z"
-// instead of ".000Z") which lexicographically sorts BEFORE entries
-// stored with a literal ".000". Result: an entry with ts == Since (to
-// the millisecond) is silently excluded when Since lands on a whole
-// second. We pick fractional Since/Until here so the test passes
-// today; the format mismatch is a real bug filed as a follow-up.
+// TestList_TimeRange covers Since + Until simultaneously. The format
+// mismatch that used to drop whole-second exact matches is fixed via
+// formatTSBound; the dedicated regression test for that path lives in
+// TestList_SinceUntilBound_InclusiveOnExactMatch.
 func TestList_TimeRange(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
@@ -498,11 +492,15 @@ func TestList_TimeRange(t *testing.T) {
 	}
 }
 
-// TestList_SinceFormatMismatch_KnownBug pins the format-mismatch behavior
-// described above so a future fix flips this from "wrong" to "fixed". See
-// queries.go:107 (Since uses RFC3339Nano) vs emit.go (entries use a
-// fixed milli layout).
-func TestList_SinceFormatMismatch_KnownBug(t *testing.T) {
+// TestList_SinceUntilBound_InclusiveOnExactMatch pins the contract
+// that Since and Until are inclusive of the exact-instant row even
+// when the timestamp has zero milliseconds. Previously queries.go
+// formatted Since/Until as RFC3339Nano (which strips trailing zeros)
+// while entries persisted as `2006-01-02T15:04:05.000Z` (which always
+// emits the millis), so SQLite's lexicographic comparison silently
+// excluded the exact-match row. formatTSBound now picks one canonical
+// layout both sides use.
+func TestList_SinceUntilBound_InclusiveOnExactMatch(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 	ctx := context.Background()
@@ -525,19 +523,112 @@ func TestList_SinceFormatMismatch_KnownBug(t *testing.T) {
 		t.Fatalf("flush: %v", err)
 	}
 
-	got, _, err := List(ctx, db, Query{
-		WorkspaceID: "ws_test",
-		Since:       wholeSec,
+	t.Run("since matches exactly", func(t *testing.T) {
+		got, _, err := List(ctx, db, Query{
+			WorkspaceID: "ws_test",
+			Since:       wholeSec,
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(got) != 1 {
+			t.Errorf("Since on exact whole-second timestamp: got %d entries, want 1", len(got))
+		}
 	})
-	if err != nil {
-		t.Fatalf("list: %v", err)
+
+	t.Run("until matches exactly", func(t *testing.T) {
+		got, _, err := List(ctx, db, Query{
+			WorkspaceID: "ws_test",
+			Until:       wholeSec,
+		})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(got) != 1 {
+			t.Errorf("Until on exact whole-second timestamp: got %d entries, want 1", len(got))
+		}
+	})
+
+	t.Run("count agrees with list", func(t *testing.T) {
+		// Count also formats Since/Until — making sure both query
+		// builders pick up the same fix.
+		n, err := Count(ctx, db, Query{
+			WorkspaceID: "ws_test",
+			Since:       wholeSec,
+		})
+		if err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("Count Since on exact: got %d, want 1", n)
+		}
+	})
+}
+
+// TestFormatSinceBound covers the lower-bound formatter. Whole-milli
+// inputs round-trip identically; sub-milli inputs round UP so a stored
+// row at the same milli (which is older than the caller's sub-ms
+// intent) is correctly excluded.
+func TestFormatSinceBound(t *testing.T) {
+	cases := []struct {
+		name string
+		t    time.Time
+		want string
+	}{
+		{"whole second", time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC),
+			"2026-04-30T10:00:00.000Z"},
+		{"whole milli round-trips",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_000_000, time.UTC),
+			"2026-04-30T10:00:00.123Z"},
+		{"sub-milli ceils to next milli",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_000_001, time.UTC),
+			"2026-04-30T10:00:00.124Z"},
+		{"sub-milli mid-fraction ceils",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_500_000, time.UTC),
+			"2026-04-30T10:00:00.124Z"},
+		{"sub-milli at top of range ceils",
+			time.Date(2026, 4, 30, 10, 0, 0, 999_999_999, time.UTC),
+			"2026-04-30T10:00:01.000Z"},
+		{"non-UTC normalised",
+			time.Date(2026, 4, 30, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600)),
+			"2026-04-30T10:00:00.000Z"},
 	}
-	// Today's actual behavior: 0 because of format mismatch. Once the
-	// bug is fixed (Since/Until formatted with the same milli layout
-	// as entries), this assertion should be flipped to == 1.
-	if len(got) != 0 {
-		t.Logf("format mismatch bug appears fixed (got %d, want 1) — "+
-			"flip this assertion to: if len(got) != 1 { t.Fatal(...) }", len(got))
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatSinceBound(c.t); got != c.want {
+				t.Errorf("formatSinceBound(%v) = %q, want %q", c.t, got, c.want)
+			}
+		})
+	}
+}
+
+// TestFormatUntilBound covers the upper-bound formatter. Sub-milli
+// inputs FLOOR (truncate) so a stored row newer than the caller's
+// sub-ms intent is correctly excluded.
+func TestFormatUntilBound(t *testing.T) {
+	cases := []struct {
+		name string
+		t    time.Time
+		want string
+	}{
+		{"whole second", time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC),
+			"2026-04-30T10:00:00.000Z"},
+		{"whole milli round-trips",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_000_000, time.UTC),
+			"2026-04-30T10:00:00.123Z"},
+		{"sub-milli floors",
+			time.Date(2026, 4, 30, 10, 0, 0, 123_999_999, time.UTC),
+			"2026-04-30T10:00:00.123Z"},
+		{"non-UTC normalised",
+			time.Date(2026, 4, 30, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600)),
+			"2026-04-30T10:00:00.000Z"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatUntilBound(c.t); got != c.want {
+				t.Errorf("formatUntilBound(%v) = %q, want %q", c.t, got, c.want)
+			}
+		})
 	}
 }
 
@@ -571,6 +662,169 @@ func TestList_LimitDefault100(t *testing.T) {
 	}
 	if cursor == "" {
 		t.Error("want cursor for next page")
+	}
+}
+
+// TestCount_FTSAndCrossFilter exercises the FTS5 join + structural
+// AND combine on the count path. The List counterpart is in
+// queries_fts_test.go; without the equivalent for Count the badge
+// could disagree with the page even after the FTS5-mirror fix.
+func TestCount_FTSAndCrossFilter(t *testing.T) {
+	db := openTestDBWithFTS(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{})
+	defer w.Close()
+	ctx := context.Background()
+
+	emit := func(typ EntryType, sev Severity, summary string) {
+		_, _ = w.Emit(ctx, Entry{
+			WorkspaceID: "ws_test",
+			Type:        typ,
+			Severity:    sev,
+			ActorType:   ActorAgent,
+			Summary:     summary,
+		})
+	}
+	emit(EntryRunStarted, SeverityInfo, "deploy production webhook")
+	emit(EntryRunStarted, SeverityWarn, "deploy retry after timeout")
+	emit(EntryLLMCall, SeverityInfo, "call sonnet about deploy")
+	emit(EntryLLMCall, SeverityInfo, "irrelevant")
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		q    Query
+		want int64
+	}{
+		{"FTS only — three matches", Query{WorkspaceID: "ws_test", FTSQuery: "deploy"}, 3},
+		{"FTS + type — two matches",
+			Query{WorkspaceID: "ws_test", FTSQuery: "deploy", Types: []EntryType{EntryRunStarted}}, 2},
+		{"FTS + severity — one match",
+			Query{WorkspaceID: "ws_test", FTSQuery: "deploy", Severities: []Severity{SeverityWarn}}, 1},
+		{"FTS misses everything", Query{WorkspaceID: "ws_test", FTSQuery: "xyzzy"}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := Count(ctx, db, c.q)
+			if err != nil {
+				t.Fatalf("count: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("count = %d, want %d", got, c.want)
+			}
+			// And list/count must agree — same filter set, same N.
+			rows, _, err := List(ctx, db, c.q)
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if int64(len(rows)) != c.want {
+				t.Errorf("list = %d rows, count = %d, want both %d", len(rows), got, c.want)
+			}
+		})
+	}
+}
+
+// TestCount_PriorityFilter pins the priority dimension on the count
+// path. List has the test (TestList_FiltersPriorities) — Count
+// previously dropped this filter, so a regression that re-introduces
+// the drop would silently overcount permanent / pin entries.
+func TestCount_PriorityFilter(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{})
+	defer w.Close()
+	ctx := context.Background()
+
+	emit := func(p Priority) {
+		_, _ = w.Emit(ctx, Entry{
+			WorkspaceID: "ws_test",
+			Type:        EntryRunStarted,
+			Priority:    p,
+			ActorType:   ActorAgent,
+			Summary:     "p",
+		})
+	}
+	emit(PriorityNormal)
+	emit(PriorityHigh)
+	emit(PriorityPin)
+	emit(PriorityPermanent)
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	got, err := Count(ctx, db, Query{
+		WorkspaceID: "ws_test",
+		Priorities:  []Priority{PriorityPin, PriorityPermanent},
+	})
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if got != 2 {
+		t.Errorf("priority count = %d, want 2", got)
+	}
+}
+
+// TestRunStats_RequiresWorkspace mirrors the workspace-required guards
+// already in place for List/Count/ListRuns. Empty workspace short-
+// circuits before touching the DB.
+func TestRunStats_RequiresWorkspace(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	_, err := RunStats(context.Background(), db, "")
+	if err == nil {
+		t.Fatal("want error for empty workspace_id")
+	}
+	if !strings.Contains(err.Error(), "workspace_id") {
+		t.Errorf("error should reference workspace_id: %v", err)
+	}
+}
+
+// TestRunStats_WorkspaceIsolation pins the cross-tenant guard on the
+// stats path. A run.started in another workspace must not leak into
+// the caller's running count even when trace_id collides — the
+// je2.workspace_id = je1.workspace_id condition in the SQL is
+// load-bearing.
+func TestRunStats_WorkspaceIsolation(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO workspaces (id) VALUES ('ws_other')`); err != nil {
+		t.Fatal(err)
+	}
+	w := NewWriter(db, quietLogger(), WriterOptions{})
+	defer w.Close()
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	// Same trace_id in both workspaces — the foreign workspace's
+	// terminal entry must not satisfy the inner NOT EXISTS in the
+	// running-count query for ws_test.
+	emitRunNS := func(ws, traceID, kind string, ts time.Time) {
+		_, _ = w.Emit(ctx, Entry{
+			WorkspaceID: ws,
+			Type:        EntryType(kind),
+			ActorType:   ActorSidecar,
+			Summary:     kind,
+			TraceID:     traceID,
+			TS:          ts,
+		})
+	}
+	emitRunNS("ws_test", "shared", "run.started", now.Add(-3*time.Minute))
+	emitRunNS("ws_other", "shared", "run.completed", now.Add(-1*time.Minute))
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	stats, err := RunStats(ctx, db, "ws_test")
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	// ws_test has run.started but NO terminal entry of its own; the
+	// other workspace's terminal must not suppress this.
+	if stats.Running != 1 {
+		t.Errorf("running cross-tenant leak: got %d, want 1", stats.Running)
 	}
 }
 

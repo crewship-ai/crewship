@@ -87,7 +87,9 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	q.Limit = 50 // bound the initial batch so a long-idle reconnect doesn't flood
+	// `q.Limit` is left at the default; the seed loop and poll loop
+	// each pick their own batch size below (seedPageSize for the
+	// resume gap walk, 100 for live polls).
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -100,21 +102,124 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // nginx: don't buffer
 
+	// Last-Event-ID resume: SSE clients (browsers and our CLI) send the
+	// last successfully-seen entry id back when they reconnect after a
+	// drop. Honour it by looking the entry up so we know its ts, then
+	// seed every row strictly newer than that watermark — paging if a
+	// long disconnect produced more than one batch's worth of gap. If
+	// lookup fails (id from another tenant, expired row, malformed)
+	// fall through to the regular full seed so the stream still
+	// produces useful output rather than silently truncating.
+	resumeID := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	// Watermark uses time.Time + id pair throughout. A prior version
+	// kept the timestamp as an RFC3339Nano string and compared
+	// lexically; that breaks when one side strips trailing-zero
+	// fractional seconds (`Z` instead of `.000Z`) because the formats
+	// then sort against each other inconsistently. time.Before/After
+	// compares on the underlying instant regardless of how it was
+	// originally serialised.
+	var (
+		lastSeenTime time.Time
+		lastSeenID   string
+		hasWatermark bool
+	)
+	if resumeID != "" {
+		if resumed, err := journal.Get(r.Context(), h.db, workspaceID, resumeID); err == nil && resumed != nil {
+			lastSeenTime = resumed.TS.UTC()
+			lastSeenID = resumed.ID
+			hasWatermark = true
+		} else if err != nil {
+			h.logger.Warn("journal stream resume lookup failed", "err", err, "resume_id", resumeID)
+		}
+	}
+
 	// Seed with a replay of the most recent N events so a fresh client
 	// paints the full current view before switching to live updates.
-	entries, _, err := journal.List(r.Context(), h.db, q)
-	if err != nil {
-		// Don't abort the stream on a transient seed failure — the
-		// poll loop below can still carry live traffic once the DB
-		// recovers. Log so oncall can see why the client's initial
-		// view was empty.
-		h.logger.Warn("journal stream seed failed", "err", err)
-	} else {
-		for _, e := range entries {
-			writeSSEEvent(w, "entry", e)
-		}
-		flusher.Flush()
+	// On a Last-Event-ID resume the client already has the older
+	// history, so the seed is the gap between resumeID and now —
+	// paged so a disconnect that missed >seedPageSize entries doesn't
+	// drop the older end of the gap on the floor.
+	//
+	// Paging walks newest-first via the keyset Cursor (advancing the
+	// watermark via Since would land us back on the newest page every
+	// iteration because List is ordered DESC). Pages are collected
+	// then emitted in chronological order so the client timeline
+	// appends in the right direction across page boundaries.
+	const seedPageSize = 50
+	const maxSeedPages = 10 // 500-entry replay ceiling per resume
+	seedQuery := q
+	if hasWatermark {
+		seedQuery.Since = lastSeenTime
 	}
+	seedQuery.Limit = seedPageSize
+	seedQuery.Cursor = ""
+	// Fresh clients (no Last-Event-ID) get a single seedPageSize
+	// batch — same as the pre-paging contract, so a brand-new tab
+	// doesn't flood with up-to-500 historical rows. Resume clients
+	// page through the gap up to maxSeedPages.
+	pageBudget := 1
+	if hasWatermark {
+		pageBudget = maxSeedPages
+	}
+	collected := make([]journal.Entry, 0, seedPageSize)
+	hitCeiling := false
+	for page := 0; page < pageBudget; page++ {
+		entries, nextCursor, err := journal.List(r.Context(), h.db, seedQuery)
+		if err != nil {
+			// Don't abort the stream on a transient seed failure —
+			// the poll loop below can still carry live traffic once
+			// the DB recovers.
+			h.logger.Warn("journal stream seed failed", "err", err, "page", page)
+			break
+		}
+		collected = append(collected, entries...)
+		// nextCursor is empty when journal.List returned fewer than
+		// the limit (last page). No more pages to walk.
+		if nextCursor == "" {
+			break
+		}
+		seedQuery.Cursor = nextCursor
+		// Last iteration that didn't break early — there are still
+		// older entries beyond the cap. Only treated as a ceiling
+		// hit when the caller asked for the full resume budget;
+		// fresh clients deliberately stop after one page.
+		if hasWatermark && page == pageBudget-1 {
+			hitCeiling = true
+		}
+	}
+	if hitCeiling {
+		// 500 rows is a deliberate ceiling on resume replay so a
+		// week-long disconnect doesn't synchronously stream a million
+		// rows on reconnect. Log at warn so operators can spot
+		// chronic over-the-cap clients (likely indicates a stuck poll
+		// loop or a UI bug holding a stale Last-Event-ID).
+		h.logger.Warn("journal stream seed hit replay ceiling — older gap entries truncated",
+			"workspace_id", workspaceID,
+			"resume_id", resumeID,
+			"max_rows", seedPageSize*maxSeedPages)
+	}
+	// `collected` is newest-first across all pages. Emit reversed so
+	// the client sees them in chronological order. Filter out the
+	// resume id itself plus anything strictly older — the >= bound in
+	// `Since` is inclusive of the watermark instant, so the resume
+	// row would otherwise echo back to the client.
+	for i := len(collected) - 1; i >= 0; i-- {
+		e := collected[i]
+		ts := e.TS.UTC()
+		if hasWatermark {
+			if ts.Before(lastSeenTime) {
+				continue
+			}
+			if ts.Equal(lastSeenTime) && e.ID <= lastSeenID {
+				continue
+			}
+		}
+		writeSSEEvent(w, "entry", e)
+		lastSeenTime = ts
+		lastSeenID = e.ID
+		hasWatermark = true
+	}
+	flusher.Flush()
 
 	// Watermark is the compound (ts, id) of the last emitted entry so a
 	// burst of entries sharing a millisecond timestamp isn't partially
@@ -122,12 +227,11 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// every entry with the same ts as the last one we saw. The DB
 	// ORDER BY (ts DESC, id DESC) in journal.List guarantees the tie-
 	// breaker is deterministic.
-	var lastSeenTS, lastSeenID string
-	if len(entries) > 0 {
-		lastSeenTS = entries[0].TS.UTC().Format(time.RFC3339Nano)
-		lastSeenID = entries[0].ID
-	} else {
-		lastSeenTS = time.Now().UTC().Format(time.RFC3339Nano)
+	if !hasWatermark {
+		// Brand-new client (no Last-Event-ID) and the seed slice was
+		// empty — start the live tail from "now" so the next poll
+		// produces fresh entries rather than re-emitting history.
+		lastSeenTime = time.Now().UTC()
 	}
 
 	ticker := time.NewTicker(1 * time.Second)
@@ -147,7 +251,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case <-ticker.C:
 			poll := q
-			poll.Since, _ = time.Parse(time.RFC3339Nano, lastSeenTS)
+			poll.Since = lastSeenTime
 			poll.Cursor = ""
 			poll.Limit = 100
 			rows, _, err := journal.List(r.Context(), h.db, poll)
@@ -158,16 +262,19 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			// Emit oldest first so the client timeline appends in order.
 			for i := len(rows) - 1; i >= 0; i-- {
 				e := rows[i]
-				ts := e.TS.Format(time.RFC3339Nano)
+				ts := e.TS.UTC()
 				// Skip entries the client has already seen, tied by
 				// id when ts matches so burst-within-ms doesn't drop
 				// rows. id comparison is stable because the journal
-				// IDs are time-ordered hex tokens.
-				if ts < lastSeenTS || (ts == lastSeenTS && e.ID <= lastSeenID) {
+				// IDs are time-ordered hex tokens. Comparing on
+				// time.Time directly avoids the variable-width
+				// RFC3339Nano string sort (no fractional vs. .000
+				// quirks).
+				if ts.Before(lastSeenTime) || (ts.Equal(lastSeenTime) && e.ID <= lastSeenID) {
 					continue
 				}
 				writeSSEEvent(w, "entry", e)
-				lastSeenTS = e.TS.UTC().Format(time.RFC3339Nano)
+				lastSeenTime = ts
 				lastSeenID = e.ID
 			}
 			flusher.Flush()
@@ -293,6 +400,83 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 		q.FTSQuery = v
 	}
 	return q, nil
+}
+
+// Get serves GET /api/v1/journal/{id}. Returns a single entry,
+// scoped to the caller's workspace. Cross-tenant IDs return 404 with
+// the same shape as "not found" so existence is not leaked across
+// workspace boundaries — same contract every other read handler in
+// this package follows.
+func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	entryID := r.PathValue("id")
+	if entryID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "entry id required"})
+		return
+	}
+
+	entry, err := journal.Get(r.Context(), h.db, workspaceID, entryID)
+	if err != nil {
+		h.logger.Error("journal get failed", "err", err, "entry_id", entryID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "journal get failed"})
+		return
+	}
+	if entry == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		return
+	}
+	// Reuse the list serializer so single-entry shape stays identical to
+	// the array form a client just paged through. The slice form is the
+	// only one that survived as the canonical serialiser.
+	writeJSON(w, http.StatusOK, serializeEntries([]journal.Entry{*entry})[0])
+}
+
+// Count serves GET /api/v1/journal/count. Returns the total number of
+// entries matching the same query parameters as List, ignoring cursor
+// and limit. The UI uses this to render result-set badges that stay
+// honest under filter changes — without it the only way to know the
+// total was to page through every entry.
+func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	// Strip pagination params from the request URL before parsing so a
+	// stray `?limit=999` or malformed `?cursor=…` doesn't 400 a count
+	// request that has no use for either. parseJournalQuery validates
+	// `limit` against 1..500 and decodes `cursor` strictly — neither
+	// bound is meaningful when the answer is a single integer over the
+	// full result set.
+	stripped := r.Clone(r.Context())
+	if rawQ := stripped.URL.Query(); rawQ.Has("limit") || rawQ.Has("cursor") {
+		rawQ.Del("limit")
+		rawQ.Del("cursor")
+		// URL.Query() returns a copy; re-encode onto a clone of the URL
+		// so the rest of the handler stack still sees the unmodified
+		// request if anything were to read it later.
+		newURL := *stripped.URL
+		newURL.RawQuery = rawQ.Encode()
+		stripped.URL = &newURL
+	}
+
+	q, err := parseJournalQuery(stripped, workspaceID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	n, err := journal.Count(r.Context(), h.db, q)
+	if err != nil {
+		h.logger.Error("journal count failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "journal count failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"total": n})
 }
 
 // SetPriority serves POST /api/v1/journal/{id}/priority. Body:

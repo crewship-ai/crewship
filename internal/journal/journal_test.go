@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,6 +97,93 @@ func TestEmitAndList(t *testing.T) {
 	if got.Payload["question"] != "How do I deploy?" {
 		t.Errorf("payload roundtrip: %v", got.Payload)
 	}
+}
+
+func TestValidPriority(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Priority
+		want bool
+	}{
+		{"normal", PriorityNormal, true},
+		{"high", PriorityHigh, true},
+		{"pin", PriorityPin, true},
+		{"permanent", PriorityPermanent, true},
+		{"empty", "", false},
+		{"unknown", "urgent", false},
+		{"upper-case rejected", "PERMANENT", false},
+		{"trailing whitespace rejected", "high ", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ValidPriority(tc.in); got != tc.want {
+				t.Errorf("ValidPriority(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestValidate_DefaultsAndRejection covers the Validate() side effects
+// in addition to the existing happy-path TestValidate. Defaulting
+// Severity → info and Priority → normal is documented in types.go and
+// every Emit call site relies on it.
+func TestValidate_DefaultsAndRejection(t *testing.T) {
+	t.Run("defaults severity to info", func(t *testing.T) {
+		e := Entry{
+			WorkspaceID: "w",
+			Type:        EntryRunStarted,
+			ActorType:   ActorAgent,
+			Summary:     "x",
+		}
+		if err := e.Validate(); err != nil {
+			t.Fatalf("validate: %v", err)
+		}
+		if e.Severity != SeverityInfo {
+			t.Errorf("Severity defaulted to %q, want info", e.Severity)
+		}
+		if e.Priority != PriorityNormal {
+			t.Errorf("Priority defaulted to %q, want normal", e.Priority)
+		}
+	})
+
+	t.Run("rejects bad priority", func(t *testing.T) {
+		e := Entry{
+			WorkspaceID: "w",
+			Type:        EntryRunStarted,
+			ActorType:   ActorAgent,
+			Summary:     "x",
+			Priority:    "URGENT",
+		}
+		err := e.Validate()
+		if err == nil {
+			t.Fatal("want error for bad priority")
+		}
+		// Error message must mention the offending value plus the
+		// allowed set so users can self-correct.
+		msg := err.Error()
+		if !strings.Contains(msg, `"URGENT"`) {
+			t.Errorf("error should reference offending value: %v", err)
+		}
+		if !strings.Contains(msg, "normal") {
+			t.Errorf("error should list allowed values: %v", err)
+		}
+	})
+
+	t.Run("preserves explicit severity", func(t *testing.T) {
+		e := Entry{
+			WorkspaceID: "w",
+			Type:        EntryRunStarted,
+			ActorType:   ActorAgent,
+			Summary:     "x",
+			Severity:    SeverityWarn,
+		}
+		if err := e.Validate(); err != nil {
+			t.Fatalf("validate: %v", err)
+		}
+		if e.Severity != SeverityWarn {
+			t.Errorf("Severity overwrite: %q want warn", e.Severity)
+		}
+	})
 }
 
 func TestValidate(t *testing.T) {

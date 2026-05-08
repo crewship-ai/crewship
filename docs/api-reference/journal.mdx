@@ -4,7 +4,7 @@ description: "Read and stream the Crew Journal -- the canonical append-only even
 icon: "book-open"
 ---
 
-Every endpoint requires authentication and is workspace-scoped via the session context. There is no write endpoint -- entries come from backend code emitting via `journal.Writer`. See the [Crew Journal guide](/guides/crew-journal) for the data model and entry-type catalog.
+Every endpoint requires authentication and is workspace-scoped via the session context. The journal is **append-only at the entry level** — there is no endpoint that creates, mutates, or deletes a journal row's payload; entries come from backend code emitting via `journal.Writer`. The one writable surface is the operator-facing **priority marker** ([`POST /api/v1/journal/{id}/priority`](#set-entry-priority)), which updates only the `priority` column on an existing row and emits its own `memory.priority_changed` audit entry. See the [Crew Journal guide](/guides/crew-journal) for the data model and entry-type catalog.
 
 ---
 
@@ -16,16 +16,24 @@ GET /api/v1/journal
 
 **Query parameters:**
 
+All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predicates.
+
 | Param | Type | Description |
 |---|---|---|
-| `crew_id` | string | Filter by crew ID. |
-| `agent_id` | string | Filter by agent ID. |
+| `crew_id` | string | Filter by single crew ID. |
+| `agent_id` | string | Filter by single agent ID. |
 | `mission_id` | string | Filter by mission ID. |
-| `entry_type` | string | Comma-separated list (e.g. `peer.escalation,keeper.decision`). |
-| `severity` | string | Comma-separated: `info`, `notice`, `warn`, `error`. |
+| `trace_id` | string | Narrow to one run's spans (`trace_id` == run id). |
+| `crew_ids` | string | CSV multi-crew filter — takes precedence over `crew_id` when non-empty. |
+| `agent_ids` | string | CSV multi-agent filter — takes precedence over `agent_id` when non-empty. |
+| `entry_type` | string | CSV of entry types (e.g. `peer.escalation,keeper.decision`). |
+| `exclude_entry_type` | string | CSV of entry types to exclude (`NOT IN`). Useful for hiding `container.metrics` noise. AND-combines with `entry_type`. |
+| `severity` | string | CSV of `info`, `notice`, `warn`, `error`. |
+| `actor_type` | string | CSV of `agent`, `user`, `system`, `keeper`, `sidecar`, `orchestrator`. |
+| `priority` | string | CSV of `normal`, `high`, `pin`, `permanent`. Invalid values → 400. |
 | `since` | string | RFC3339 lower bound on `ts`. |
 | `until` | string | RFC3339 upper bound on `ts`. |
-| `q` | string | FTS5 search across `summary` + `payload` (added migration 55, PR #234). Bounded length; phrase-wrapped before MATCH. AND-combined with structural filters. |
+| `q` | string | FTS5 search across `summary` + `payload` (migration 55). Bounded to 200 chars; phrase-wrapped before MATCH; AND-combined with structural filters. |
 | `cursor` | string | Opaque pagination token from a prior response. |
 | `limit` | integer | 1-500, default 100. |
 
@@ -115,7 +123,7 @@ data: {...}
 - **Poll interval:** 1 second.
 - **Heartbeat:** `: heartbeat` comment every 15s to keep proxies from closing idle connections. Event handlers ignore comments.
 - **Watermark:** compound (ts, id) so bursts sharing a ms timestamp aren't partially dropped.
-- **Reconnect:** clients can use the SSE `Last-Event-ID` header; the server uses it as a lower bound so already-seen rows are skipped.
+- **Reconnect:** clients send the SSE `Last-Event-ID` header; the server looks the entry up, treats its `ts` as the lower bound, and pages through the gap (up to **500 entries**, 10 × 50-row pages) before switching to live polling. A disconnect that produced more than 500 matching entries truncates the older end of the gap and the server logs a `warn` — clients should reconcile by re-fetching `/api/v1/journal?since=<last-known-ts>` if they need a longer window.
 
 **Errors:**
 
@@ -133,11 +141,103 @@ data: {...}
 GET /api/v1/journal/{id}
 ```
 
-Returns one entry by ID, workspace-scoped. 404 for unknown or cross-tenant IDs (same shape, no existence leak).
+Returns one entry by ID, workspace-scoped. The response body is a single object whose shape matches one element of the `entries[]` array on List — same fields, same omitempty rules.
 
-**Response:** `200 OK` -- single entry object matching the `entries[]` schema above.
+**Response:** `200 OK`
 
-**Errors:** `404` if not found; `401` on missing workspace.
+```json
+{
+  "id": "j_a1b2c3d4e5f60718",
+  "workspace_id": "ws_123",
+  "ts": "2026-04-17T10:23:41.000Z",
+  "entry_type": "peer.escalation",
+  "severity": "warn",
+  "priority": "normal",
+  "actor_type": "agent",
+  "summary": "escalating DB migration to eva",
+  "payload": {"escalation_reason": "unsure about schema impact"},
+  "trace_id": "0af7651916cd43dd8448eb211c80319c"
+}
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 401 | No workspace context. |
+| 404 | Unknown entry, OR an entry that exists but belongs to another workspace. The shape matches "not found" — existence is not leaked across tenants. |
+
+---
+
+## Count entries
+
+```
+GET /api/v1/journal/count
+```
+
+Returns the total number of entries matching the same query parameters as List, ignoring `cursor` and `limit`. The UI uses this to render result-set badges that stay honest under filter changes — without it, the only way to know the total was to page through every entry.
+
+**Query parameters:** identical to [List](#list-entries), except `cursor` and `limit` are silently ignored.
+
+**Response:** `200 OK`
+
+```json
+{ "total": 1283 }
+```
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Bad query parameter (`since`, `until`, `priority`, oversized `q`, …). |
+| 401 | No workspace context. |
+| 500 | DB error. |
+
+---
+
+## Set entry priority
+
+```
+POST /api/v1/journal/{id}/priority
+```
+
+Annotate one entry with an importance marker (`normal`, `high`, `pin`, `permanent`). Marker affects compaction and recall — see the [Crew Journal guide](/guides/crew-journal#priority-markers).
+
+**Authorization:** caller must hold `OWNER` or `ADMIN` on the workspace. `MEMBER` and below get `403`.
+
+**Request body:**
+
+```json
+{ "priority": "permanent", "reason": "FX compliance constraint" }
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `priority` | string | yes | One of `normal`, `high`, `pin`, `permanent`. |
+| `reason` | string | no | Free-text rationale recorded on the audit emit. Empty is allowed but discouraged — the audit log is the only place the reason lives. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "j_a1b2c3d4e5f60718",
+  "priority": "permanent",
+  "previous": "normal",
+  "reason": "FX compliance constraint"
+}
+```
+
+**Side effect:** writes a `memory.priority_changed` audit entry to the journal whose `payload` carries `target_entry_id`, `previous_priority`, `new_priority`, and the supplied `reason`. The audit emit is best-effort — the priority update is durable even if the audit write fails (a warning is logged in that case).
+
+**Errors:**
+
+| Status | Condition |
+|---|---|
+| 400 | Bad JSON body or unknown priority value. |
+| 401 | No workspace context. |
+| 403 | Caller is not OWNER/ADMIN on the workspace. |
+| 404 | Entry not found, OR exists in another workspace. |
+| 500 | DB error. |
 
 ---
 
@@ -157,20 +257,28 @@ Returns workspace-scoped crews, agents, and missions for journal-card enrichment
     {"id":"crw_abc","slug":"backend","name":"Backend","icon":"server","color":"emerald"}
   ],
   "agents": [
-    {"id":"agt_xyz","slug":"viktor","name":"Viktor","crew_id":"crw_abc","avatar":"https://…"}
+    {"id":"agt_xyz","slug":"viktor","name":"Viktor","crew_id":"crw_abc","avatar_seed":"viktor","avatar_style":"pixel-art"}
   ],
   "missions": [
-    {"id":"MIS-42","title":"Migrate auth","status":"in_progress","crew_id":"crw_abc"}
+    {"id":"MIS-42","title":"Migrate auth","status":"IN_PROGRESS"}
   ]
 }
 ```
 
+Each list is capped at 1000 rows; workspaces beyond that get a useful subset. Empty lists are guaranteed non-`null` (the JSON arrays are always present), so the frontend can `.find()` without nil guards.
+
 | Field | Type | Description |
 |---|---|---|
-| `crews[].icon` | string | Lucide icon name (`server`, `code`, `rocket`, ...). |
-| `crews[].color` | string | Palette ID (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`). |
-| `agents[].crew_id` | string | Foreign key to a `crews[]` entry in this same payload. |
-| `missions[].status` | string | `pending`, `in_progress`, `completed`, `cancelled`, ... |
+| `crews[].id` | string | Stable crew ID. |
+| `crews[].slug` | string | Workspace-unique URL slug. |
+| `crews[].icon` | string? | Lucide icon name (`server`, `code`, `rocket`, ...). May be null. |
+| `crews[].color` | string? | Palette ID (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`). May be null. |
+| `agents[].crew_id` | string? | Foreign key to a `crews[]` entry in this same payload. May be null for crew-less agents. |
+| `agents[].avatar_seed` | string? | Deterministic seed; the frontend renders an avatar from this. |
+| `agents[].avatar_style` | string? | Avatar style hint (`pixel-art`, `lorelei`, ...). |
+| `missions[].status` | string | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`. |
+
+Soft-deleted crews and agents (`deleted_at IS NOT NULL`) are filtered out. Missions have no soft-delete column; all rows are returned, ordered by `created_at DESC` within the cap.
 
 The journal entries themselves never carry display strings — they store stable IDs only. This endpoint is the join surface used by every UI card.
 
