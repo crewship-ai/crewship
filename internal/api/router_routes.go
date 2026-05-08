@@ -353,6 +353,11 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
 	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
+	// run-records hits the v83 pipeline_runs table directly — column-typed
+	// reads beat the LIKE+json_extract scan ListRuns does over journal_entries.
+	// Returns 503 when runStore is not wired so legacy clients can fall
+	// back gracefully to /runs.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records", authed(wsCtx(http.HandlerFunc(pipes.ListRunRecords))))
 	// Versioning — every save creates an immutable history row;
 	// rollback flips head to a prior version (history preserved).
 	// User-facing save (UI "New routine" flow). MANAGER+ role

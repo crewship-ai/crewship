@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	mathrand "math/rand/v2"
 	"strconv"
 	"sync/atomic"
@@ -74,6 +76,12 @@ type Executor struct {
 	// idempotency layer; the IdempotencyKey field on RunInput is
 	// silently ignored. Production wiring passes a real store.
 	idempotency *IdempotencyStore
+
+	// runStore persists per-run state to pipeline_runs (migration v83).
+	// Nil = persistence disabled; runs stay in journal_entries +
+	// in-memory only (pre-v83 behaviour). Production wiring passes a
+	// real store at boot so list-active-runs + boot-recovery work.
+	runStore *RunStore
 }
 
 // WithEgressGate wires the HTTP allowlist. Builders can call this
@@ -136,6 +144,17 @@ func (e *Executor) WithRunRegistry(r *RunRegistry) *Executor {
 // boot.
 func (e *Executor) WithIdempotencyStore(s *IdempotencyStore) *Executor {
 	e.idempotency = s
+	return e
+}
+
+// WithRunStore wires the per-run persistence layer (pipeline_runs
+// table, migration v83). Without it, runs stay in journal_entries +
+// in-memory RunRegistry only — restart loses active-run audit
+// stories and the list-active-runs panel falls back to slow LIKE
+// scans of the journal. Production wiring passes a *RunStore here
+// at boot.
+func (e *Executor) WithRunStore(s *RunStore) *Executor {
+	e.runStore = s
 	return e
 }
 
@@ -489,6 +508,21 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 
 	if in.Mode != ModeDryRun && depth == 0 {
 		emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
+		// Persist the run row alongside the journal event when
+		// the RunStore is wired. Top-level only — nested
+		// call_pipeline runs reuse the parent's row id rather
+		// than minting their own (the call_pipeline trace lives
+		// in journal_entries; tying nested runs into pipeline_runs
+		// would conflate "this run completed" with "this nested
+		// step completed"). Failure is non-fatal: best-effort
+		// projection alongside the canonical journal.
+		e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt)
+		// Deferred terminal write — captures result via closure so
+		// every return path (linear / DAG / cost-cap / retry-
+		// exhaust / cancel) lands the same finalized row. The
+		// persist helper short-circuits when result is unset
+		// (recursive helper returns early).
+		defer e.persistRunTerminal(ctx, runID, in, pipelineID, result, startedAt)
 	}
 
 	// DAG dispatch — if any step declares `needs:` AND we're not in
@@ -1157,3 +1191,150 @@ func generateRunID() string {
 }
 
 var runIDCounter atomic.Uint64
+
+// persistRunStart inserts a fresh pipeline_runs row at run boundary
+// when the RunStore is wired. Best-effort: failures log a warning
+// and the run continues — journal_entries is canonical for audit,
+// pipeline_runs is the query-optimized projection. Used only at
+// depth==0 (top-level run) and skipped for ModeDryRun (no run row
+// for previews).
+//
+// Skips entirely when pipelineID is empty — that's the unsaved-draft
+// path used by RunDefinition (TestRun on a draft DSL). Inserting
+// with empty pipelineID would violate the FK on pipeline_runs and
+// fail the test_run gate; saved-pipeline runs always have a real
+// pipelineID via the in.pipeline.ID field.
+func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipelineID, pipelineSlug string, inputs map[string]any, startedAt time.Time) {
+	if e.runStore == nil {
+		return
+	}
+	if pipelineID == "" {
+		// Unsaved-draft run (TestRun on RunDefinition path) — no
+		// matching pipelines row exists yet, so the FK insert would
+		// fail. Skip the projection write; the journal entries that
+		// already fired are sufficient for audit on draft runs.
+		return
+	}
+	inputsRaw, _ := json.Marshal(inputs)
+	if string(inputsRaw) == "null" {
+		inputsRaw = []byte("{}")
+	}
+	rec := &RunRecord{
+		ID:              runID,
+		WorkspaceID:     in.WorkspaceID,
+		PipelineID:      pipelineID,
+		PipelineSlug:    pipelineSlug,
+		Status:          RunStatusRunning,
+		Mode:            in.Mode,
+		StartedAt:       startedAt,
+		InvokingCrewID:  in.InvokingCrewID,
+		InvokingAgentID: in.InvokingAgentID,
+		IdempotencyKey:  in.IdempotencyKey,
+		InputsJSON:      string(inputsRaw),
+	}
+	if err := e.runStore.Insert(ctx, rec); err != nil {
+		e.persistWarn("run start", runID, err)
+	}
+}
+
+// persistRunTerminal writes the finalized run state into pipeline_runs.
+// Called via defer from runDSL so every exit path (linear / DAG /
+// cost-cap / retry-exhaust / cancel) lands a coherent row. The
+// closure-captured `result` reflects whatever runDSL ultimately set
+// before returning. If result is nil (early-return path before
+// result was constructed), we mark the run failed with a generic
+// message so the row doesn't sit in 'running' forever.
+//
+// Skips entirely when pipelineID is empty (unsaved-draft path —
+// matches the persistRunStart skip so we never try to update a row
+// we never inserted).
+//
+// Uses a fresh context with a 5s timeout (NOT the run's ctx) because
+// the run's ctx may have been cancelled (user clicked Cancel, parent
+// deadline tripped). Persisting terminal state is the audit-of-
+// record action that MUST land regardless — without the fresh ctx,
+// MarkTerminal would fail with "context cancelled" and the row
+// would stay in 'running' forever. 5s is generous for a single
+// SQLite UPDATE.
+func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in RunInput, pipelineID string, result *RunResult, startedAt time.Time) {
+	if e.runStore == nil {
+		return
+	}
+	if pipelineID == "" {
+		// No row to update — see persistRunStart skip rationale.
+		return
+	}
+	// Fresh context decoupled from the run's ctx so cancellation
+	// doesn't drop the terminal write. We still cap at 5s so a hung
+	// DB doesn't leak goroutines forever via the defer.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dur := time.Since(startedAt).Milliseconds()
+	terminal := MarkTerminalInput{
+		RunID:      runID,
+		DurationMs: dur,
+	}
+	if result == nil {
+		terminal.Status = RunStatusFailed
+		terminal.ErrorMessage = "run aborted before result was constructed"
+		// If the run ctx was cancelled, surface the cancel cause for
+		// post-mortem clarity — distinguishes user-initiated cancel
+		// from a panic-style early return.
+		if runCtx.Err() != nil {
+			terminal.Status = RunStatusCancelled
+			terminal.ErrorMessage = "run cancelled: " + runCtx.Err().Error()
+		}
+	} else {
+		switch result.Status {
+		case "COMPLETED":
+			terminal.Status = RunStatusCompleted
+		case "FAILED":
+			terminal.Status = RunStatusFailed
+		case "CANCELLED":
+			terminal.Status = RunStatusCancelled
+		case "DRY_RUN_OK":
+			terminal.Status = RunStatusDryRunOK
+		case "DEDUPED":
+			// dedupe doesn't transition the existing row; leave it.
+			return
+		default:
+			terminal.Status = RunStatusFailed
+			terminal.ErrorMessage = "unknown terminal status: " + result.Status
+		}
+		terminal.Output = result.Output
+		if result.ErrorMessage != "" {
+			terminal.ErrorMessage = result.ErrorMessage
+		}
+		terminal.FailedAtStep = result.FailedAtStep
+		terminal.CostUSD = result.CostUSD
+		// Persist step outputs map so the run-detail UI can render
+		// per-step content even after the goroutine terminates.
+		if len(result.StepOutputs) > 0 {
+			if err := e.runStore.AppendStepOutput(ctx, runID, result.StepOutputs, result.CostUSD, dur); err != nil {
+				e.persistWarn("step outputs flush", runID, err)
+			}
+		}
+	}
+	if err := e.runStore.MarkTerminal(ctx, terminal); err != nil {
+		e.persistWarn("run terminal", runID, err)
+	}
+	_ = in // reserved for future invoking_user_id passthrough
+}
+
+// persistWarn centralises the "best-effort persistence failed" log
+// shape. pipeline_runs is a query-optimized projection; journal_entries
+// is the canonical audit log and that write succeeded by definition
+// (the emit happens before us). We don't escalate to error or fail the
+// run, but we DO log at WARN — silently dropping these turns
+// /run-records and boot recovery into a "silent wrong" surface in the
+// exact failure modes this projection is supposed to cover.
+func (e *Executor) persistWarn(stage, runID string, err error) {
+	if err == nil {
+		return
+	}
+	slog.Default().Warn("pipeline projection write failed",
+		"stage", stage,
+		"run_id", runID,
+		"error", err.Error(),
+	)
+}
