@@ -356,7 +356,12 @@ var startCmd = &cobra.Command{
 				// as HTTP-driven runs — otherwise a cron + manual run
 				// of the same concurrency_key would slip past the gate.
 				schedExec = schedExec.WithRunRegistry(runRegistry).
-					WithIdempotencyStore(pipeline.NewIdempotencyStore(deps.DB))
+					WithIdempotencyStore(pipeline.NewIdempotencyStore(deps.DB)).
+					WithRunStore(pipeline.NewRunStore(deps.DB))
+				// Without WithRunStore here, scheduled runs would
+				// never land in the pipeline_runs projection — the
+				// /run-records endpoint and boot-time interrupted
+				// recovery would silently skip cron-triggered runs.
 				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
 				scheduler.Start(ctx)
 				defer scheduler.Stop()

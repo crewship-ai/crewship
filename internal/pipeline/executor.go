@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	mathrand "math/rand/v2"
 	"strconv"
 	"sync/atomic"
@@ -1309,7 +1310,9 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 		// Persist step outputs map so the run-detail UI can render
 		// per-step content even after the goroutine terminates.
 		if len(result.StepOutputs) > 0 {
-			_ = e.runStore.AppendStepOutput(ctx, runID, result.StepOutputs, result.CostUSD, dur)
+			if err := e.runStore.AppendStepOutput(ctx, runID, result.StepOutputs, result.CostUSD, dur); err != nil {
+				e.persistWarn("step outputs flush", runID, err)
+			}
 		}
 	}
 	if err := e.runStore.MarkTerminal(ctx, terminal); err != nil {
@@ -1319,13 +1322,19 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 }
 
 // persistWarn centralises the "best-effort persistence failed" log
-// shape. We deliberately don't escalate to error — pipeline_runs is a
-// query-optimized projection; journal_entries is the canonical audit
-// log and that write succeeded by definition (the emit happens before
-// us). Drop silently for now; structured logging surface lands when
-// the executor takes a *slog.Logger field.
+// shape. pipeline_runs is a query-optimized projection; journal_entries
+// is the canonical audit log and that write succeeded by definition
+// (the emit happens before us). We don't escalate to error or fail the
+// run, but we DO log at WARN — silently dropping these turns
+// /run-records and boot recovery into a "silent wrong" surface in the
+// exact failure modes this projection is supposed to cover.
 func (e *Executor) persistWarn(stage, runID string, err error) {
-	_ = stage
-	_ = runID
-	_ = err
+	if err == nil {
+		return
+	}
+	slog.Default().Warn("pipeline projection write failed",
+		"stage", stage,
+		"run_id", runID,
+		"error", err.Error(),
+	)
 }

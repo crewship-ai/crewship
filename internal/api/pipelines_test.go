@@ -593,7 +593,9 @@ func TestPipelinesAPI_ListRunRecords_FilterByStatus(t *testing.T) {
 		{ID: "r3", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
 			Status: pipeline.RunStatusCompleted, StartedAt: now},
 	} {
-		_ = store.Insert(context.Background(), r)
+		if err := store.Insert(context.Background(), r); err != nil {
+			t.Fatalf("seed run %s: %v", r.ID, err)
+		}
 	}
 	h := NewPipelineHandler(db, slog.Default(), nil, nil)
 	h.SetRunStore(store)

@@ -53,6 +53,7 @@ export function usePipelineRunRecords(
   const refresh = useCallback(async () => {
     if (!workspaceId || !slug) {
       setRecords([])
+      setLegacy(false)
       return
     }
     abortRef.current?.abort()
@@ -73,16 +74,20 @@ export function usePipelineRunRecords(
         setRecords([])
         return
       }
+      // Any other non-503 outcome means /run-records IS the right
+      // surface; clear legacy so a previous 503 doesn't pin the UI to
+      // the journal fallback after the server recovers.
+      setLegacy(false)
       if (!res.ok) {
         setError(`run-records: ${res.status}`)
         return
       }
       const data: PipelineRunRecord[] = await res.json()
       if (ctrl.signal.aborted) return
-      setLegacy(false)
       setRecords(Array.isArray(data) ? data : [])
     } catch (e) {
       if (ctrl.signal.aborted) return
+      setLegacy(false)
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       if (!ctrl.signal.aborted) setLoading(false)
@@ -96,9 +101,12 @@ export function usePipelineRunRecords(
     }
   }, [refresh])
 
-  // Refresh on any pipeline run lifecycle event for this routine —
-  // started events appear as new records, completed/failed transition
-  // status. Cheap because list endpoint is small + typically cached.
+  // Refresh on the lifecycle events the backend actually emits over
+  // WebSocket. Cancelled runs surface as pipeline.run.failed with a
+  // "cancelled" reason; dry-run completion surfaces as
+  // pipeline.run.completed; interrupted transitions only happen at
+  // boot recovery (no live event), so the next manual refresh or
+  // page reload picks them up.
   useRealtimeEvent("pipeline.run.started", refresh)
   useRealtimeEvent("pipeline.run.completed", refresh)
   useRealtimeEvent("pipeline.run.failed", refresh)

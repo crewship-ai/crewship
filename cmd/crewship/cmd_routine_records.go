@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"text/tabwriter"
 
@@ -76,9 +77,10 @@ Examples:
 		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
-		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run-records?limit=%d", ws, slug, limit)
+		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run-records?limit=%d",
+			url.PathEscape(ws), url.PathEscape(slug), limit)
 		if statusFilter != "" {
-			path += "&status=" + statusFilter
+			path += "&status=" + url.QueryEscape(statusFilter)
 		}
 		resp, err := client.Get(path)
 		if err != nil {
