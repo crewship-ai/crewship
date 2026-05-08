@@ -130,8 +130,9 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   onClick={() => del(w)}
                   className="h-6 w-6 p-0 text-muted-foreground hover:text-red-400"
                   title="Delete"
+                  aria-label={`Delete webhook ${w.name || w.id}`}
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash2 className="h-3 w-3" aria-hidden="true" />
                 </Button>
               </div>
             </li>
@@ -219,8 +220,14 @@ function CreatedReveal({ webhook, onDismiss }: { webhook: PipelineWebhook; onDis
             The signing secret is only shown once. To rotate, delete and recreate.
           </p>
         </div>
-        <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={onDismiss}>
-          ×
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0"
+          onClick={onDismiss}
+          aria-label="Dismiss webhook reveal panel"
+        >
+          <span aria-hidden="true">×</span>
         </Button>
       </div>
       <div className="mt-3 space-y-2">
@@ -237,8 +244,9 @@ function CreatedReveal({ webhook, onDismiss }: { webhook: PipelineWebhook; onDis
                 variant="ghost"
                 onClick={() => setShowSecret((s) => !s)}
                 className="h-5 px-1.5 text-[10px]"
+                aria-label={showSecret ? "Hide signing secret" : "Show signing secret"}
               >
-                {showSecret ? <EyeOff className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
+                {showSecret ? <EyeOff className="h-2.5 w-2.5" aria-hidden="true" /> : <Eye className="h-2.5 w-2.5" aria-hidden="true" />}
                 {showSecret ? "Hide" : "Show"}
               </Button>
             </div>
@@ -251,8 +259,9 @@ function CreatedReveal({ webhook, onDismiss }: { webhook: PipelineWebhook; onDis
                 variant="ghost"
                 onClick={() => copy(webhook.signing_secret!, "secret")}
                 className="h-7 w-7 p-0"
+                aria-label="Copy signing secret"
               >
-                {copied === "secret" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {copied === "secret" ? <Check className="h-3 w-3" aria-hidden="true" /> : <Copy className="h-3 w-3" aria-hidden="true" />}
               </Button>
             </div>
           </div>
@@ -284,8 +293,14 @@ function RevealField({
         <code className={cn("flex-1 truncate rounded bg-background px-2 py-1 text-[11px]", mono && "font-mono")}>
           {value}
         </code>
-        <Button size="sm" variant="ghost" onClick={() => onCopy(value, copyKey)} className="h-7 w-7 p-0">
-          {copied === copyKey ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onCopy(value, copyKey)}
+          className="h-7 w-7 p-0"
+          aria-label={`Copy ${label.toLowerCase()}`}
+        >
+          {copied === copyKey ? <Check className="h-3 w-3" aria-hidden="true" /> : <Copy className="h-3 w-3" aria-hidden="true" />}
         </Button>
       </div>
     </div>

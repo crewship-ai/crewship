@@ -140,7 +140,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                     title={s.enabled ? "Disable" : "Enable"}
                     aria-label={`${s.enabled ? "Disable" : "Enable"} schedule ${s.name}`}
                   >
-                    {s.enabled ? <PowerOff className="h-3 w-3" /> : <Power className="h-3 w-3" />}
+                    {s.enabled ? <PowerOff className="h-3 w-3" aria-hidden="true" /> : <Power className="h-3 w-3" aria-hidden="true" />}
                   </Button>
                   <Button
                     size="sm"
@@ -150,7 +150,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                     title="Delete"
                     aria-label={`Delete schedule ${s.name}`}
                   >
-                    <Trash2 className="h-3 w-3" />
+                    <Trash2 className="h-3 w-3" aria-hidden="true" />
                   </Button>
                 </div>
               </div>

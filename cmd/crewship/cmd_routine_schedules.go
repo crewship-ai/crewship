@@ -143,12 +143,11 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		if name == "" {
 			name = fmt.Sprintf("%s schedule", slug)
 		}
-		if timezone == "" {
-			timezone = time.Local.String()
-			if timezone == "" || timezone == "Local" {
-				timezone = "UTC"
-			}
-		}
+		// Default to UTC server-side rather than guessing server's
+		// time.Local from the CLI host — running the CLI from a
+		// different timezone than the server would otherwise silently
+		// pin schedules to the operator's local time. Users who want
+		// host-local can pass --timezone $(date +%Z) explicitly.
 		inputs := map[string]interface{}{}
 		if inputsJSON != "" {
 			if err := json.Unmarshal([]byte(inputsJSON), &inputs); err != nil {
@@ -382,7 +381,7 @@ func init() {
 	routineSchedulesCreateCmd.Flags().String("slug", "", "target routine slug (REQUIRED)")
 	routineSchedulesCreateCmd.Flags().String("name", "", "human-readable schedule name (default: '<slug> schedule')")
 	routineSchedulesCreateCmd.Flags().String("cron", "", "5-field cron expression — e.g. '0 9 * * *' (REQUIRED)")
-	routineSchedulesCreateCmd.Flags().String("timezone", "", "IANA timezone (default: server local, falling back to UTC)")
+	routineSchedulesCreateCmd.Flags().String("timezone", "", "IANA timezone (default: UTC; pass --timezone $(date +%Z) for host-local)")
 	routineSchedulesCreateCmd.Flags().String("inputs", "", "JSON object passed as inputs on each tick (e.g. '{\"text\":\"…\"}')")
 	routineSchedulesCreateCmd.Flags().Bool("enabled", true, "create the schedule already enabled (default true)")
 

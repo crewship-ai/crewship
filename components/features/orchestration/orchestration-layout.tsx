@@ -341,7 +341,13 @@ export function OrchestrationLayout({
   }, [drawerOpen, drawerTab])
 
   const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) || null : null
-  const showRightPanel = detailContext.type !== "none" || selectedIssue !== null || (selectedProjectId !== null && !selectedIssue)
+  // Routines tab manages its own right-side detail (RoutinesDetailPanel
+  // inside RoutinesTab). Suppress the orchestration-level detail pane
+  // there so an issue/task selected from a previous tab doesn't bleed
+  // into the routines layout and shrink the routines list view.
+  const showRightPanel =
+    activeTab !== "routines" &&
+    (detailContext.type !== "none" || selectedIssue !== null || (selectedProjectId !== null && !selectedIssue))
 
   const handleIssueClose = useCallback(() => {
     setSelectedIssue(null)

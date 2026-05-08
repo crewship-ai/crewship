@@ -155,7 +155,7 @@ Templates are **regex substitution, not expression evaluation**. There is no ari
   "id": "review_summary",
   "type": "call_pipeline",
   "pipeline_slug": "human-approval-step",
-  "inputs": {
+  "nested_inputs": {
     "content": "{{ steps.summarize.output }}",
     "approver_role": "marketing_lead"
   }
@@ -233,7 +233,7 @@ Pure-Go data reshaping with a tiny jq-flavoured subset. No LLM, no network — f
 
 ### Conditional `if`
 
-Any step can carry `"if": "{{ inputs.skip == false }}"`. False → step skipped, marked `<skipped>` in StepOutputs.
+Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.
 
 ### DAG with `needs[]`
 
@@ -423,7 +423,11 @@ Signals the run goroutine; it stops at the next safe point and emits `pipeline.r
 
 ### Save returns 422 "save requires a fresh, passing test_run"
 
-The save endpoint requires `last_test_run_passed = true` AND a `last_test_run_at` within 5 minutes of the server clock. Run `/test_run` first, then save with the returned timestamp — or `--skip-test-gate` if your role is OWNER/ADMIN and you trust the DSL.
+The save endpoint requires the test gate cleared. Preferred path: call `/test_run`, capture the `save_token` from its response, and pass `"save_token": "<token>"` in the `/save` body. The token is a server-signed HMAC over `(workspace_id | definition_hash | user_id | issued_at)` and expires after 5 minutes — it cannot be forged from the client side.
+
+Alternatives:
+- `--skip-test-gate` (CLI) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate without running the test_run.
+- Legacy fallback: send `"last_test_run_at"` + `"last_test_run_passed"` in the body. Honoured for backwards compatibility, but trusts client-supplied values; new clients should always use `save_token`.
 
 ### Run starts but no step events appear in the UI
 
@@ -467,7 +471,7 @@ Probably a waitpoint without a matching listener (process restarted between the 
 | `routine webhooks ...` | Webhook CRUD |
 | `routine waitpoints ...` | HITL inbox + decisions |
 
-The `pipeline` alias is preserved for back-compat: every `crewship routine X` invocation also works as `crewship pipeline X`.
+The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pipeline list`, `pipeline run`, `pipeline get`, etc.). The post-rename additions — `schedules`, `webhooks`, `waitpoints`, `validate`, `watch`, `logs`, `records` — are only registered under `routine`, so scripts that need them must switch.
 
 ## Backend reference
 

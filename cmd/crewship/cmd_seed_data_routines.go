@@ -32,15 +32,22 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 	}
 
 	fmt.Fprintln(os.Stderr, "Creating routines...")
+	var (
+		eligible int
+		ok       int
+		conflict int
+		failed   int
+	)
 	for _, r := range seeddata.Routines {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		crewID, ok := crewIDs[r.CrewSlug]
-		if !ok {
+		crewID, exists := crewIDs[r.CrewSlug]
+		if !exists {
 			fmt.Fprintf(os.Stderr, "  ! Routine %s: skipped (crew %q not seeded)\n", r.Slug, r.CrewSlug)
 			continue
 		}
+		eligible++
 		body := map[string]interface{}{
 			"slug":                 r.Slug,
 			"name":                 r.Name,
@@ -54,22 +61,33 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 		resp, err := client.Post(path, body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  ! Routine %s: %v\n", r.Slug, err)
+			failed++
 			continue
 		}
 		switch {
 		case resp.StatusCode == http.StatusCreated:
 			fmt.Fprintf(os.Stderr, "  + Routine: %s (crew=%s)\n", r.Slug, r.CrewSlug)
+			ok++
 		case resp.StatusCode == http.StatusConflict:
 			fmt.Fprintf(os.Stderr, "  = Routine exists: %s\n", r.Slug)
+			conflict++
 		default:
 			// 5xx / 422 — surface the body so a misshapen DSL is
-			// debuggable. We deliberately don't fail-fast: a
-			// single broken routine shouldn't block the rest of
-			// the seed, mirroring how seedIssues tolerates
-			// individual failures.
+			// debuggable. Individual routine failures are tolerated
+			// (mirrors seedIssues), but if EVERY eligible routine
+			// fails with the same status we likely hit a server-side
+			// regression and should surface that to the operator.
 			fmt.Fprintf(os.Stderr, "  ! Routine %s: HTTP %d\n", r.Slug, resp.StatusCode)
+			failed++
 		}
 		_ = resp.Body.Close()
+	}
+	// If at least one routine was eligible (crew existed) and every
+	// single eligible attempt failed, treat that as an unexpected
+	// regression rather than silently returning nil. Conflicts count
+	// as success here — the routine already exists, which is fine.
+	if eligible > 0 && ok == 0 && conflict == 0 && failed == eligible {
+		return fmt.Errorf("seedRoutines: all %d eligible routines failed (likely server-side regression)", failed)
 	}
 	return nil
 }

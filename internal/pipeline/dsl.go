@@ -327,7 +327,14 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		}
 	}
 	if hasAnyNeeds {
-		// DAG mode: compute reachable predecessors per step.
+		// DAG mode: every Needs entry must reference a real step (and
+		// the graph must be acyclic) before we trust the reachable
+		// closure for template validation. Without this, a DSL with
+		// `needs: ["ghost"]` plus `{{ steps.ghost.output }}` slips
+		// past Save and only blows up at runtime in validateDAG.
+		if err := validateDAG(dsl); err != nil {
+			return fmt.Errorf("pipeline: %w", err)
+		}
 		stepByID := make(map[string]*Step, len(dsl.Steps))
 		for i := range dsl.Steps {
 			stepByID[dsl.Steps[i].ID] = &dsl.Steps[i]
@@ -365,6 +372,9 @@ func collectReachableNeeds(stepID string, stepByID map[string]*Step, out map[str
 		return
 	}
 	for _, dep := range st.Needs {
+		if _, exists := stepByID[dep]; !exists {
+			continue
+		}
 		if _, seen := out[dep]; seen {
 			continue
 		}

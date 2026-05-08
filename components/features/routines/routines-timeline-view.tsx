@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Clock } from "lucide-react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { Badge } from "@/components/ui/badge"
@@ -34,32 +34,43 @@ export function RoutinesTimelineView({ workspaceId, routines, onSelect }: Props)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [window, setWindow] = useState<"24h" | "7d" | "30d">("24h")
+  // abortRef: realtime events + window changes can fire fetches in
+  // quick succession; without cancellation the older request can
+  // resolve last and clobber the freshly-windowed result.
+  const abortRef = useRef<AbortController | null>(null)
 
   const fetchRuns = async () => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     setLoading(true)
     setError(null)
     try {
       const since = windowToISO(window)
       const url = `/api/v1/workspaces/${workspaceId}/journal?entry_type_prefix=pipeline.run.&since=${encodeURIComponent(since)}&limit=200`
-      const res = await fetch(url)
+      const res = await fetch(url, { signal: ctrl.signal })
+      if (ctrl.signal.aborted) return
       if (!res.ok) {
-        // Journal endpoint may not exist with this exact filter; fall
-        // back to a no-data view rather than crashing the tab.
         setError(`journal: ${res.status}`)
         setRuns([])
         return
       }
       const data: RunEntry[] = await res.json()
+      if (ctrl.signal.aborted) return
       setRuns(Array.isArray(data) ? data : [])
     } catch (e) {
+      if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (!ctrl.signal.aborted) setLoading(false)
     }
   }
 
   useEffect(() => {
     fetchRuns()
+    return () => {
+      abortRef.current?.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, window])
 

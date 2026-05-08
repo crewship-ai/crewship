@@ -100,6 +100,18 @@ func openSmokeDB(t *testing.T) *sql.DB {
 		_ = db.Close()
 		t.Fatalf("schema: %v", err)
 	}
+	// Seed every authenticated user the suite uses through withAuthCtx
+	// so author_user_id can satisfy the FK in pipelines / pipeline_runs.
+	// Without this, the happy-path tests only work because SQLite skips
+	// the FK enforcement; turning foreign_keys=ON would silently flip
+	// these to "constraint failed".
+	for _, uid := range []string{"user_1", "user_42", "admin_user", "u"} {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO users(id) VALUES(?)`, uid); err != nil {
+			_ = db.Close()
+			t.Fatalf("seed user %q: %v", uid, err)
+		}
+	}
 	return db
 }
 

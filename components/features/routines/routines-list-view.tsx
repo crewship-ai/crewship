@@ -56,8 +56,10 @@ export function RoutinesListView({ routines, loading, error, selectedSlug, onSel
       </div>
 
       {/* Table */}
-      {!loading && routines.length === 0 ? (
+      {!loading && !error && routines.length === 0 ? (
         <EmptyState />
+      ) : error && routines.length === 0 ? (
+        <ErrorState message={error} onRetry={onRefresh} />
       ) : (
         <div className="flex-1 overflow-auto">
           <table className="w-full text-xs">
@@ -208,6 +210,22 @@ function RoutineRow({
       </td>
       <td className="px-3 py-2.5 text-muted-foreground">{formatRelative(routine.updated_at)}</td>
     </tr>
+  )
+}
+
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center p-12">
+      <div className="mb-6 max-w-xl text-center">
+        <ScrollText className="mx-auto mb-4 h-12 w-12 text-red-400/40" />
+        <h3 className="mb-2 text-sm font-medium text-red-400">Failed to load routines</h3>
+        <p className="text-xs text-muted-foreground break-all">{message}</p>
+      </div>
+      <Button size="sm" variant="outline" onClick={onRetry} className="gap-1.5">
+        <RefreshCw className="h-3 w-3" />
+        Retry
+      </Button>
+    </div>
   )
 }
 

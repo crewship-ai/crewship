@@ -213,11 +213,12 @@ func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, token string, 
 	if !approved {
 		status = "denied"
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
-SET status = ?, decided_at = datetime('now','subsec'), decided_by_user_id = ?, decision_payload = ?
+SET status = ?, decided_at = ?, decided_by_user_id = ?, decision_payload = ?
 WHERE token = ? AND status = 'pending'`,
-		status, nullableStr(deciderUserID), nullableStr(payload), token,
+		status, now, nullableStr(deciderUserID), nullableStr(payload), token,
 	)
 	if err != nil {
 		return fmt.Errorf("waitpoints: update: %w", err)
@@ -287,10 +288,16 @@ func (s *SQLWaitpointStore) sweeper() {
 func (s *SQLWaitpointStore) sweepOnce() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// timeout_at is RFC3339Nano (set by CreateApproval); we compare
+	// against the same format. SQLite's `datetime('now','subsec')`
+	// emits "YYYY-MM-DD HH:MM:SS.sss" which does NOT lex-sort against
+	// RFC3339Nano values, so a naive compare lets some timeouts slip
+	// past the regular sweep until RecoverPending runs at next boot.
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	rows, err := s.db.QueryContext(ctx, `
 SELECT token FROM pipeline_waitpoints
-WHERE status = 'pending' AND timeout_at <= datetime('now','subsec')
-LIMIT 200`)
+WHERE status = 'pending' AND timeout_at <= ?
+LIMIT 200`, now)
 	if err != nil {
 		return
 	}
@@ -306,8 +313,8 @@ LIMIT 200`)
 	for _, tok := range expired {
 		_, _ = s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
-SET status = 'timed_out', decided_at = datetime('now','subsec')
-WHERE token = ? AND status = 'pending'`, tok)
+SET status = 'timed_out', decided_at = ?
+WHERE token = ? AND status = 'pending'`, now, tok)
 		s.mu.Lock()
 		if ch, ok := s.listeners[tok]; ok {
 			select {

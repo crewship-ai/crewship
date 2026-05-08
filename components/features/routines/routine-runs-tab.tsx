@@ -168,10 +168,14 @@ function RunWaterfall({
   }
   merged.sort((a, b) => a.ts.localeCompare(b.ts))
 
-  // Dedupe (same ts+stepId+kind) — live + journal can echo.
+  // Dedupe live + journal echoes WITHOUT collapsing legitimate
+  // retries: a step that fails, retries, and starts again emits two
+  // distinct started+failed pairs. Including the timestamp in the
+  // key keeps each retry attempt visible in the waterfall while
+  // still suppressing same-instant duplicates from the two sources.
   const seen = new Set<string>()
   const deduped = merged.filter((m) => {
-    const k = `${m.stepId}|${m.kind}`
+    const k = `${m.stepId}|${m.kind}|${m.ts}`
     if (seen.has(k)) return false
     seen.add(k)
     return true

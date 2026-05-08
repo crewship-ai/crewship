@@ -79,6 +79,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
     } catch (e) {
       if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
+      // Stale data from the previous slug would be misleading next
+      // to a "fetch failed" banner; clear so the panel reflects the
+      // current selection's failure state rather than the prior one.
+      setRoutine(null)
     } finally {
       if (!ctrl.signal.aborted) setLoading(false)
     }
@@ -149,8 +153,14 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
             </>
           )}
         </div>
-        <Button size="sm" variant="ghost" onClick={onClose} className="h-7 w-7 p-0">
-          <X className="h-3 w-3" />
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onClose}
+          className="h-7 w-7 p-0"
+          aria-label="Close routine details"
+        >
+          <X className="h-3 w-3" aria-hidden="true" />
         </Button>
       </div>
 
