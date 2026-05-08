@@ -72,8 +72,11 @@ func TestLockForCrew_OneCrewLockedOthersFree(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		muB := p.lockForCrew("crew-B")
+		// Acquiring muB IS the assertion — if it were the same mutex as
+		// crew-A's, Lock would block forever and the select below would
+		// hit the timeout.
 		muB.Lock()
-		muB.Unlock() //nolint:staticcheck // test asserts the lock can be acquired+released without contention from crew-A's held lock; the empty critical section IS the assertion
+		defer muB.Unlock()
 		close(done)
 	}()
 

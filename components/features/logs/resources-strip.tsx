@@ -1,11 +1,22 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Cpu, MemoryStick, Network, HardDrive } from "lucide-react"
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useJournalList } from "@/hooks/use-journal-list"
+import { useJournalStream } from "@/hooks/use-journal-stream"
 import type { JournalEntry } from "@/lib/types/journal"
 
 interface ResourcesStripProps {
-  entries: JournalEntry[]
+  /**
+   * Self-fetches `container.metrics` for the last 30 min so the parent
+   * timeline can server-side exclude metrics from its event log without
+   * starving the strip. workspaceId is required; crewId narrows the
+   * fetch when non-empty.
+   */
+  workspaceId: string | null
+  crewId?: string
   /**
    * "single" → entries already belong to one crew (sum across is the
    *   instantaneous reading per timestamp).
@@ -30,9 +41,41 @@ const POINTS = 60
 /**
  * Always-visible resources strip — 4 horizontal cells (CPU / MEM / NET / DISK)
  * with mini sparklines + latest value. Sourced from `container.metrics`
- * journal entries, last 30 minutes.
+ * journal entries, last 30 minutes. The strip self-fetches its data so
+ * the parent /journal timeline can hide metrics from its event log
+ * (default user preference) without starving this surface.
  */
-export function ResourcesStrip({ entries, mode = "single" }: ResourcesStripProps) {
+const STRIP_WINDOW_MS = 30 * 60 * 1000
+
+export function ResourcesStrip({ workspaceId, crewId, mode = "single" }: ResourcesStripProps) {
+  // since is computed once per mount; the 30-min sliding window aging
+  // is fine without a re-fetch — old samples drop off naturally as
+  // newer ones come in via SSE and the extract() cutoff filter trims
+  // anything older than 30 min.
+  const since = useMemo(() => new Date(Date.now() - STRIP_WINDOW_MS).toISOString(), [])
+  const params = useMemo<Record<string, string | undefined>>(
+    () => ({
+      entry_type: "container.metrics",
+      crew_id: crewId || undefined,
+      since,
+    }),
+    [crewId, since],
+  )
+
+  const { entries, prependLive } = useJournalList({
+    workspaceId,
+    params,
+    enabled: !!workspaceId,
+    limit: 500,
+    maxEntries: 1500,
+  })
+  useJournalStream({
+    workspaceId,
+    params,
+    enabled: !!workspaceId,
+    onEntry: prependLive,
+  })
+
   const s = useMemo<Series>(() => extract(entries, mode), [entries, mode])
 
   return (
@@ -98,22 +141,155 @@ function Cell({
   latest: number | null
   format: (v: number) => string
 }) {
+  const [open, setOpen] = useState(false)
+  const hasData = values.some((v) => typeof v === "number")
   return (
-    <div className="px-3 py-2 flex items-center gap-3 border-r border-border/50 last:border-r-0 min-w-0">
-      <div className="flex items-center gap-1.5 shrink-0 w-12">
-        <Icon className="h-3 w-3 text-muted-foreground" />
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Open ${label} history chart`}
+          className="px-3 py-2 flex items-center gap-3 border-r border-border/50 last:border-r-0 min-w-0 text-left hover:bg-white/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-500/40 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!hasData}
+        >
+          <div className="flex items-center gap-1.5 shrink-0 w-12">
+            <Icon className="h-3 w-3 text-muted-foreground" />
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              {label}
+            </span>
+          </div>
+          <div className="flex-1 min-w-0 h-7">
+            <Spark values={values} max={max} color={color} />
+          </div>
+          <div className="font-mono tabular-nums text-[12px] text-foreground shrink-0 w-16 text-right">
+            {latest === null ? <span className="text-muted-foreground/60">—</span> : format(latest)}
+          </div>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="center"
+        sideOffset={6}
+        className="w-[480px] p-0 border-border/60 bg-card/95 backdrop-blur"
+      >
+        <ChartPanel label={label} Icon={Icon} values={values} color={color} latest={latest} format={format} max={max} />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function ChartPanel({
+  label,
+  Icon,
+  values,
+  color,
+  latest,
+  format,
+  max,
+}: {
+  label: string
+  Icon: React.ComponentType<{ className?: string }>
+  values: (number | null)[]
+  color: string
+  latest: number | null
+  format: (v: number) => string
+  max?: number
+}) {
+  // Build a synthetic time axis: each sample maps to a relative offset
+  // (0 = oldest, 30 = now in minutes). The strip's source already
+  // downsamples to 60 evenly-spaced points across the 30-min window
+  // (POINTS=60, step = 30/60 = 0.5 min/sample).
+  const data = useMemo(() => {
+    const span = STRIP_WINDOW_MS
+    const stepMs = values.length > 1 ? span / (values.length - 1) : span
+    const start = Date.now() - span
+    return values.map((v, i) => ({
+      ts: start + i * stepMs,
+      value: typeof v === "number" ? v : null,
+    }))
+  }, [values])
+
+  const numeric = values.filter((v): v is number => typeof v === "number")
+  const peak = numeric.length > 0 ? Math.max(...numeric) : null
+  const avg =
+    numeric.length > 0 ? numeric.reduce((a, b) => a + b, 0) / numeric.length : null
+
+  return (
+    <div className="flex flex-col gap-2 p-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+          <Icon className="h-3.5 w-3.5" />
+          <span>{label}</span>
+          <span className="text-muted-foreground/60 normal-case tracking-normal">· last 30 min</span>
+        </div>
+        <div className="font-mono tabular-nums text-sm text-foreground">
+          {latest === null ? "—" : format(latest)}
+        </div>
       </div>
-      <div className="flex-1 min-w-0 h-7">
-        <Spark values={values} max={max} color={color} />
+      <div className="h-40 -mx-1">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id={`grad-${label}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+                <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+            <XAxis
+              dataKey="ts"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={fmtClock}
+              tick={{ fontSize: 10, fill: "rgba(255,255,255,0.45)" }}
+              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+              tickLine={false}
+              minTickGap={32}
+            />
+            <YAxis
+              tickFormatter={(v) => format(v as number)}
+              tick={{ fontSize: 10, fill: "rgba(255,255,255,0.45)" }}
+              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+              tickLine={false}
+              width={50}
+              domain={max !== undefined ? [0, max] : ["auto", "auto"]}
+            />
+            <Tooltip
+              contentStyle={{
+                background: "rgba(20,22,28,0.95)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 6,
+                fontSize: 11,
+              }}
+              labelFormatter={(v) => fmtClock(v as number)}
+              formatter={(v) =>
+                typeof v === "number" ? [format(v), label] : ["—", label]
+              }
+            />
+            <Area
+              type="monotone"
+              dataKey="value"
+              stroke={color}
+              strokeWidth={1.5}
+              fill={`url(#grad-${label})`}
+              isAnimationActive={false}
+              connectNulls={false}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
-      <div className="font-mono tabular-nums text-[12px] text-foreground shrink-0 w-16 text-right">
-        {latest === null ? <span className="text-muted-foreground/60">—</span> : format(latest)}
+      <div className="flex items-center gap-4 text-[10px] font-mono text-muted-foreground border-t border-border/40 pt-2">
+        <span>peak <span className="text-foreground/80">{peak === null ? "—" : format(peak)}</span></span>
+        <span>avg <span className="text-foreground/80">{avg === null ? "—" : format(avg)}</span></span>
+        <span>now <span className="text-foreground/80">{latest === null ? "—" : format(latest)}</span></span>
       </div>
     </div>
   )
+}
+
+function fmtClock(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
 }
 
 function Spark({

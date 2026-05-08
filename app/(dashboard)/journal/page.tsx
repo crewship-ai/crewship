@@ -19,6 +19,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import { RunsView } from "@/components/features/journal/runs-view"
 import { LogsPanel } from "@/components/features/logs/logs-panel"
 import { ResourcesStrip } from "@/components/features/logs/resources-strip"
@@ -158,7 +159,21 @@ export default function JournalPage() {
   // so we don't load the backend with redundant requests when a
   // working stream is already pushing events. Pollers (5s/10s/…) are
   // additive on top of SSE for users who want a hard freshness floor.
-  const [refreshRate, setRefreshRate] = useState<RefreshRate>("live")
+  const [refreshRate, setRefreshRate] = useUserPreference<RefreshRate>(
+    "journal.timeline.refreshRate",
+    "live",
+  )
+
+  // Per-user list of entry types to hide from the Timeline. Defaults to
+  // ["container.metrics"] — those are high-volume performance samples
+  // already visualised in the resources strip; rendering them in the
+  // event log buries everything else under stats noise. Users can flip
+  // them back on via the toolbar chip; the choice is persisted server-
+  // side via /api/v1/me/preferences so it survives reload + new device.
+  const [excludedTypes, setExcludedTypes] = useUserPreference<string[]>(
+    "journal.timeline.excludedTypes",
+    ["container.metrics"],
+  )
 
   // Initial tab from `?tab=`. Unknown / unauthorized values fall back
   // to timeline so a stale bookmark can never surface a 403.
@@ -298,8 +313,12 @@ export default function JournalPage() {
     // Server-side mute → exclude_entry_type. "other" can't be expanded
     // server-side (its membership is the complement of every known
     // type) so it remains client-only — entryTypesForGroups handles
-    // that gracefully by returning [] for "other".
-    const excludeTypes = entryTypesForGroups(muted)
+    // that gracefully by returning [] for "other". User-pref
+    // excludedTypes layers on top so the high-noise metric stream can
+    // be hidden without muting the whole "container" group (which
+    // would also drop snapshots + status changes).
+    const groupExcludes = entryTypesForGroups(muted)
+    const excludeTypes = Array.from(new Set([...groupExcludes, ...excludedTypes]))
     // structured.serverParams takes precedence over scope-level
     // filters when both are set so the user can use the search box to
     // pin one specific agent/crew/trace without first clearing the
@@ -318,7 +337,7 @@ export default function JournalPage() {
       since,
       until,
     }
-  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, structured])
+  }, [timeRange, customRange, crewId, agentId, traceId, severity, muted, excludedTypes, structured])
 
   // Only the Timeline tab consumes the journal list + SSE stream.
   const timelineEnabled = !wsLoading && activeTab === "timeline"
@@ -415,6 +434,21 @@ export default function JournalPage() {
           </Badge>
         )}
         {activeTab === "timeline" && <StreamStatusBadge status={streamStatus} />}
+        {activeTab === "timeline" && (
+          <AnomalyBadge
+            entries={entries}
+            onClick={() => {
+              setSeverity("error")
+              setTimeRange("5m")
+            }}
+          />
+        )}
+        {activeTab === "timeline" && (
+          <MetricsVisibilityChip
+            excludedTypes={excludedTypes}
+            onChange={setExcludedTypes}
+          />
+        )}
         <div className="flex-1" />
       </div>
 
@@ -491,7 +525,8 @@ export default function JournalPage() {
               className="overflow-hidden"
             >
               <ResourcesStrip
-                entries={entries}
+                workspaceId={workspaceId}
+                crewId={crewId}
                 mode={crewId ? "single" : "aggregate"}
               />
             </motion.div>
@@ -512,6 +547,9 @@ export default function JournalPage() {
                 onMutedChange={setMuted}
                 traceId={traceId}
                 onClearTraceId={() => setTraceId("")}
+                onSelectTrace={setTraceId}
+                onSelectAgent={setAgentId}
+                onSelectCrew={onCrewChange}
                 onServerSearch={setServerQuery}
                 onRefresh={handleRefresh}
                 loading={loading}
@@ -542,6 +580,113 @@ export default function JournalPage() {
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+/**
+ * Live error/warn count over the last ANOMALY_WINDOW_MS milliseconds,
+ * surfaced as a pulsing red pill in the header. Acts as a "you should
+ * look at this" signal so a viewer scrolling through routine
+ * exec.command + container.metrics traffic doesn't miss a fresh
+ * cluster of failures. Clicking jumps the filter to severity=error +
+ * time=5m so the pill always resolves to a useful narrowed view.
+ *
+ * Threshold (ANOMALY_THRESHOLD) deliberately starts low (>= 3) — false
+ * positives here are cheap (a quick glance) and false negatives are
+ * not (a missed cluster of run.failed events).
+ */
+const ANOMALY_WINDOW_MS = 5 * 60 * 1000
+const ANOMALY_THRESHOLD = 3
+
+function AnomalyBadge({
+  entries,
+  onClick,
+}: {
+  entries: Array<{ ts: string; severity?: string }>
+  onClick: () => void
+}) {
+  // Wall-clock tick keeps the rolling window honest when no new entries
+  // arrive: without it the cutoff would freeze at the timestamp of the
+  // most recent render, so a quiet stream of errors three minutes ago
+  // would keep firing the badge forever instead of aging out.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000)
+    return () => clearInterval(id)
+  }, [])
+  const errCount = useMemo(() => {
+    const cutoff = now - ANOMALY_WINDOW_MS
+    let n = 0
+    for (const e of entries) {
+      if (e.severity !== "error" && e.severity !== "warn") continue
+      const t = Date.parse(e.ts)
+      if (Number.isFinite(t) && t >= cutoff) n++
+    }
+    return n
+  }, [entries, now])
+  if (errCount < ANOMALY_THRESHOLD) return null
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Focus ${errCount} error or warning events from the last 5 minutes`}
+      className="inline-flex items-center gap-1.5 h-5 px-2 rounded-full border border-red-500/40 bg-red-500/10 text-[10px] font-mono text-red-300 hover:bg-red-500/20 transition-colors"
+      title={`${errCount} error/warn events in the last 5 minutes — click to focus`}
+    >
+      <span className="relative inline-flex">
+        <span className="absolute inline-flex h-1.5 w-1.5 rounded-full bg-red-400 opacity-75 animate-ping" />
+        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-400" />
+      </span>
+      <span className="tabular-nums">{errCount}</span>
+      <span className="opacity-80">in 5m</span>
+    </button>
+  )
+}
+
+/**
+ * Toggle for hiding/showing `container.metrics` in the timeline event
+ * stream. Metrics are visualised in the resources strip above; rendering
+ * them in the event log too produces a wall of stats noise that buries
+ * other event types. The chip persists user choice via
+ * useUserPreference (see "journal.timeline.excludedTypes"). Other entry
+ * types in excludedTypes are not exposed here yet — this is the
+ * highest-volume type by far and the only one users have flagged.
+ */
+function MetricsVisibilityChip({
+  excludedTypes,
+  onChange,
+}: {
+  excludedTypes: string[]
+  onChange: (next: string[]) => void
+}) {
+  const hidden = excludedTypes.includes("container.metrics")
+  const toggle = () => {
+    if (hidden) {
+      onChange(excludedTypes.filter((t) => t !== "container.metrics"))
+    } else {
+      onChange([...excludedTypes, "container.metrics"])
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-pressed={!hidden}
+      title={
+        hidden
+          ? "Metrics are hidden from the timeline (still visible in the resources strip). Click to show them inline."
+          : "Metrics are shown inline in the timeline. Click to hide them — they remain in the resources strip."
+      }
+      className={cn(
+        "inline-flex items-center gap-1.5 h-5 px-2 rounded-full border text-[10px] font-mono transition-colors",
+        hidden
+          ? "border-border/60 bg-card/50 text-muted-foreground hover:bg-card hover:text-foreground/80"
+          : "border-cyan-500/40 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20",
+      )}
+    >
+      <Activity className="h-3 w-3" />
+      <span>{hidden ? "metrics: hidden" : "metrics: shown"}</span>
+    </button>
   )
 }
 
