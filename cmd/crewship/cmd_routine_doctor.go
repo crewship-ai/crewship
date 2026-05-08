@@ -283,14 +283,14 @@ func checkAuthorCrew(client interface {
 		}
 	}
 	var status struct {
-		Status      string `json:"status"`
-		HasConfig   bool   `json:"has_config"`
-		CachedImage string `json:"cached_image"`
+		Status             string `json:"status"`
+		DevcontainerConfig string `json:"devcontainer_config"`
+		CachedImage        string `json:"cached_image"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		return doctorCheck{Name: "author_crew", Level: doctorWarn, Message: "could not decode crew status response"}
 	}
-	if !status.HasConfig {
+	if status.DevcontainerConfig == "" {
 		return doctorCheck{
 			Name:    "author_crew",
 			Level:   doctorWarn,
