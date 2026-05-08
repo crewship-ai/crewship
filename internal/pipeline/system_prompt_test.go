@@ -33,10 +33,10 @@ func TestBuildSystemPromptBlock_OnePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if !strings.Contains(out, "[AVAILABLE PIPELINES]") {
+	if !strings.Contains(out, "[AVAILABLE ROUTINES]") {
 		t.Error("missing header")
 	}
-	if !strings.Contains(out, "[END AVAILABLE PIPELINES]") {
+	if !strings.Contains(out, "[END AVAILABLE ROUTINES]") {
 		t.Error("missing footer")
 	}
 	if !strings.Contains(out, "slug: email-fetch") {

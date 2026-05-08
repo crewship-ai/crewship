@@ -81,7 +81,21 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 		}
 	}
 
-	client := http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+	// CheckRedirect re-validates the destination host against the
+	// egress allowlist on every 3xx hop. Without this, a sender that
+	// allows api.partner.com → 302 → 169.254.169.254 (AWS IMDS) or
+	// localhost or any other internal host would leak metadata into
+	// the step output. Default Go client follows up to 10 redirects;
+	// checking each is the only safe stance.
+	client := http.Client{
+		Timeout: time.Duration(timeoutSec) * time.Second,
+		CheckRedirect: func(redirReq *http.Request, _ []*http.Request) error {
+			if e.egressAllowed != nil && !e.egressAllowed(redirReq.URL.Host) {
+				return fmt.Errorf("http step %q redirect to %q blocked by egress allowlist", step.ID, redirReq.URL.Host)
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("http step %q request: %w", step.ID, err)

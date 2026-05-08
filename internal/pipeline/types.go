@@ -492,6 +492,17 @@ type SaveInput struct {
 	// mint a passing gate by claiming a fake distant-future
 	// timestamp — the server's clock is the source of truth for
 	// freshness.
+	//
+	// THREAT MODEL: a malicious in-process caller can still set
+	// LastTestRunPassed=true + LastTestRunAt=now() and bypass the
+	// real test_run. RBAC mitigates this for the user-facing save
+	// path (MANAGER+ role required, skip_test_gate OWNER/ADMIN
+	// only); the sidecar internal path is bound by X-Internal-Token
+	// shared with the server process so a non-Crewship process can't
+	// reach it. A future enhancement (tracked in the routines
+	// follow-up) replaces this with a signed save_token returned by
+	// /test_run that Save validates via HMAC, removing the trust
+	// requirement on the body entirely.
 	LastTestRunAt     *time.Time
 	LastTestRunPassed bool
 	// ExecutionTierJSON optional override of workspace tier mapping.
@@ -609,9 +620,9 @@ type PipelineResolver interface {
 // output by ID for richer caller logic. WouldExecute is populated
 // only when Mode == ModeDryRun.
 type RunResult struct {
-	RunID        string
-	PipelineID   string
-	PipelineSlug string
+	RunID        string `json:"run_id"`
+	PipelineID   string `json:"pipeline_id"`
+	PipelineSlug string `json:"pipeline_slug"`
 	// Status is one of:
 	//   COMPLETED  — all steps passed
 	//   FAILED     — a step errored or its validation/outcome gate
@@ -623,20 +634,20 @@ type RunResult struct {
 	//                response is a recovery handle, not a fresh
 	//                execution. RunID points at the original run.
 	//   DRY_RUN_OK — preview mode, nothing actually executed
-	Status       string
-	Output       string
-	StepOutputs  map[string]string
-	WouldExecute []DryRunStep
-	DurationMs   int64
-	CostUSD      float64
-	FailedAtStep string // empty unless Status == FAILED
-	ErrorMessage string
+	Status       string            `json:"status"`
+	Output       string            `json:"output"`
+	StepOutputs  map[string]string `json:"step_outputs"`
+	WouldExecute []DryRunStep      `json:"would_execute,omitempty"`
+	DurationMs   int64             `json:"duration_ms"`
+	CostUSD      float64           `json:"cost_usd"`
+	FailedAtStep string            `json:"failed_at_step,omitempty"` // empty unless Status == FAILED
+	ErrorMessage string            `json:"error_message,omitempty"`
 	// Deduped is true when the run resolved via an idempotency key
 	// hit. Distinct from Status="DEDUPED" so callers can detect
 	// dedupe even when they don't pattern-match Status. The Status
 	// field is the wire-friendly form; Deduped is the structured
 	// flag.
-	Deduped bool
+	Deduped bool `json:"deduped,omitempty"`
 }
 
 // DryRunStep is one entry in WouldExecute: what the executor WOULD

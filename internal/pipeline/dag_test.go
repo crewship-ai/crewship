@@ -334,3 +334,71 @@ func TestExecutor_DAG_FanOutObservesConcurrency(t *testing.T) {
 		t.Errorf("expected at least 5 concurrent leaves, observed max %d", got)
 	}
 }
+
+// TestExecutor_DAG_FinalOutputPicksLeaf validates the leaf-node
+// preference fixed in the routines stabilization commit. Multi-leaf
+// DAGs used to return whatever step was LAST in source order, which
+// is arbitrary. The fix prefers the first leaf (steps that no other
+// step references via `needs`) so authors can deterministically
+// position the "primary" terminal step first.
+func TestExecutor_DAG_FinalOutputPicksLeaf(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := newMockRunner()
+	runner.outputsBySlug["agent_fetch"] = []string{"fetch-data"}
+	runner.outputsBySlug["agent_summarize"] = []string{"primary-summary"}
+	runner.outputsBySlug["agent_audit"] = []string{"audit-log-line"}
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	// fetch is the root; summarize + audit are both leaves (neither
+	// referenced via needs by anything else). audit appears LAST in
+	// source order; with the bug, audit's output would win. With the
+	// fix, summarize wins because it's the first leaf in source order.
+	dsl := &DSL{Name: "x", Steps: []Step{
+		{ID: "fetch", Type: StepAgentRun, AgentSlug: "agent_fetch"},
+		{ID: "summarize", Type: StepAgentRun, AgentSlug: "agent_summarize", Needs: []string{"fetch"}},
+		{ID: "audit", Type: StepAgentRun, AgentSlug: "agent_audit", Needs: []string{"fetch"}},
+	}}
+	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "COMPLETED" {
+		t.Fatalf("status: %s err=%s", res.Status, res.ErrorMessage)
+	}
+	if res.Output != "primary-summary" {
+		t.Errorf("expected leaf preference (first-source-order leaf 'summarize'), got %q", res.Output)
+	}
+}
+
+// TestExecutor_DAG_FinalOutputLinearFallback verifies that the leaf
+// preference doesn't break the legacy linear-pipeline behaviour. With
+// no `needs:` declared anywhere, every step is technically a leaf;
+// the fallback takes the last-non-skipped in source order so existing
+// linear pipelines keep their pre-fix output semantics.
+func TestExecutor_DAG_FinalOutputLinearFallback(t *testing.T) {
+	store, resolver, cleanup := openExecutorTestDB(t)
+	defer cleanup()
+	runner := newMockRunner()
+	runner.outputsBySlug["a"] = []string{"first"}
+	runner.outputsBySlug["b"] = []string{"middle"}
+	runner.outputsBySlug["c"] = []string{"last"}
+	exec := NewExecutor(store, resolver, runner, nil)
+
+	dsl := &DSL{Name: "x", Steps: []Step{
+		{ID: "s1", Type: StepAgentRun, AgentSlug: "a"},
+		{ID: "s2", Type: StepAgentRun, AgentSlug: "b"},
+		{ID: "s3", Type: StepAgentRun, AgentSlug: "c"},
+	}}
+	res, err := exec.RunDefinition(context.Background(), dsl, RunInput{
+		WorkspaceID: "ws_test", AuthorCrewID: "crew_a",
+	})
+	if err != nil || res.Status != "COMPLETED" {
+		t.Fatalf("status: %s err=%v %s", res.Status, err, res.ErrorMessage)
+	}
+	if res.Output != "last" {
+		t.Errorf("linear fallback should pick last-non-skipped; got %q", res.Output)
+	}
+}

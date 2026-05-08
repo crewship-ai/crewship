@@ -36,6 +36,7 @@ Crewship is a self-hosted runtime for AI coding agents. Every crew gets its own 
 - **Approval gates** — risky actions pause for human sign-off (sync or async)
 - **Credential vault + Keeper** — AES-256-GCM encrypted keys; agent-side access guarded by a local LLM (Ollama)
 - **Skills as reusable playbooks** — author SKILL.md via `crewship skill init` (offline scaffold) or LLM-author via `skill create`, gate-import any git repo, assign to one agent or a whole crew; SPDX allowlist + prompt-injection scanner on every import; same skill body works across Claude Code, Codex, OpenCode, Factory Droid, Cursor
+- **Routines — declarative AI workflow recipes** — workspace-scoped JSON DSL recipes that any crew can invoke, AI-authored or hand-written; six step types (`agent_run`, `call_pipeline`, `http`, `code`, `wait`, `transform`) with DAG `needs[]` parallelism, conditional `if`, two-tier execution (smart authoring model → cheap executor), test-run gate before save, immutable version history, cron + HMAC-signed webhook triggers, HITL waitpoints, and bundle export/import. See [Routines guide](docs/guides/routines.mdx) and [`crewship routine`](docs/cli/routine.mdx) CLI reference.
 - **Crew-based organization** — group agents into crews with shared filesystem and lead-mode coordination
 - **Persistent agent identity** — agents have role, history, conversations, and a workspace they keep across runs
 - **Single binary** — Next.js static export embedded into the Go server; no Node.js at runtime

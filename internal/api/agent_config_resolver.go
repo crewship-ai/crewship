@@ -354,12 +354,14 @@ func (h *InternalHandler) loadAgentSystemPrompt(r *http.Request, data *agentConf
 		promptParts = append(promptParts, skillBlock)
 	}
 
-	// [AVAILABLE PIPELINES] section — appended after skills so the
-	// LLM treats pipelines as the larger-grained primitive it should
-	// reach for FIRST, with skills as the recipe library it falls
-	// back to when no pipeline fits. Failure here is non-fatal:
-	// pipelines are an optional layer, an error rendering the block
-	// must not block agent startup.
+	// [AVAILABLE ROUTINES] section — appended after skills so the
+	// LLM treats routines as the larger-grained primitive it should
+	// reach for FIRST, with skills as the lower-level library it falls
+	// back to when no routine fits. Failure here is non-fatal:
+	// routines are an optional layer, an error rendering the block
+	// must not block agent startup. (Internal identifier remains
+	// "pipeline" — table, package, route paths — but user-facing
+	// label is "Routine"; see PIPELINES.md §17.1.)
 	if data.wsID != "" {
 		store := pipeline.NewStore(h.db)
 		crewNames := h.lookupCrewNamesForWorkspace(r, data.wsID)
@@ -376,7 +378,7 @@ func (h *InternalHandler) loadAgentSystemPrompt(r *http.Request, data *agentConf
 
 // lookupCrewNamesForWorkspace returns a map of crew_id → crew_name for
 // every non-deleted crew in the workspace. Used to render readable
-// "authored by Crew X" labels in the [AVAILABLE PIPELINES] block.
+// "authored by Crew X" labels in the [AVAILABLE ROUTINES] block.
 // Failure returns an empty map — the block falls back to raw IDs.
 //
 // Cheap workspace-wide lookup (one query per system-prompt build) is
@@ -398,7 +400,7 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 	}
 	if err := rows.Err(); err != nil {
 		// Partial map — log so a context-cancellation or driver
-		// error doesn't silently downgrade [AVAILABLE PIPELINES]
+		// error doesn't silently downgrade [AVAILABLE ROUTINES]
 		// "authored by Marketing" rows to "authored by crew_xyz".
 		h.logger.Warn("lookupCrewNamesForWorkspace: rows iteration", "workspace_id", workspaceID, "error", err)
 	}

@@ -246,6 +246,24 @@ var startCmd = &cobra.Command{
 				logger.Info("pipeline runner wired (orchestrator mode — agent runs in its container via CLI adapter)")
 			}
 
+			// Wire HMAC secret for save_token signing. Reuses the
+			// process internal token — it's already required to be
+			// set + stable for the lifetime of the binary, so it
+			// satisfies the "process-stable secret" contract without
+			// adding new config surface. Token validity is bound to
+			// 5 minutes regardless, so internal-token rotation
+			// invalidates outstanding tokens by design.
+			if cfg.Auth.InternalToken == "" {
+				// Fail-fast: silent degrade to body-trust would defeat
+				// the threat-model closure that PIPELINES.md §17 calls
+				// out as a hard requirement. Better to refuse to start
+				// than to ship a server that quietly keeps the
+				// loophole open.
+				return fmt.Errorf("crewship start: cfg.Auth.InternalToken is required for save_token HMAC signing — set CREWSHIP_INTERNAL_TOKEN or auth.internal_token in config")
+			}
+			srv.APIRouter().PipelinesHandler.SetSaveTokenSecret([]byte(cfg.Auth.InternalToken))
+			logger.Info("pipeline save_token signing enabled (HMAC-SHA256 over internal token)")
+
 			// Wire production WaitpointStore so StepWait approvals
 			// persist across restarts and the inbox UI can fire
 			// /pipelines/waitpoints/{token}/approve. Without this,
@@ -254,7 +272,17 @@ var startCmd = &cobra.Command{
 				wpStore := pipeline.NewSQLWaitpointStore(deps.DB)
 				defer wpStore.Close()
 				srv.APIRouter().PipelinesHandler.SetWaitpointStore(wpStore)
-				logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)")
+				// Recovery scan: pending waitpoints from the previous
+				// process lifetime have no goroutine parked on them
+				// (run state is in-memory only). Sweep elapsed-timeout
+				// rows eagerly and log how many remain so abnormal
+				// accumulation is observable at boot.
+				if timedOut, pending, err := wpStore.RecoverPending(ctx); err != nil {
+					logger.Warn("pipeline waitpoint recovery scan failed", "error", err)
+				} else {
+					logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)",
+						"recovered_timed_out", timedOut, "stranded_pending", pending)
+				}
 			}
 
 			// Wire WS broadcaster so pipeline run + step events

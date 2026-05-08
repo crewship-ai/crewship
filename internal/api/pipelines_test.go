@@ -100,6 +100,18 @@ func openSmokeDB(t *testing.T) *sql.DB {
 		_ = db.Close()
 		t.Fatalf("schema: %v", err)
 	}
+	// Seed every authenticated user the suite uses through withAuthCtx
+	// so author_user_id can satisfy the FK in pipelines / pipeline_runs.
+	// Without this, the happy-path tests only work because SQLite skips
+	// the FK enforcement; turning foreign_keys=ON would silently flip
+	// these to "constraint failed".
+	for _, uid := range []string{"user_1", "user_42", "admin_user", "u"} {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO users(id) VALUES(?)`, uid); err != nil {
+			_ = db.Close()
+			t.Fatalf("seed user %q: %v", uid, err)
+		}
+	}
 	return db
 }
 
@@ -318,5 +330,145 @@ func TestPipelinesAPI_TestRun_RejectsBadDSL(t *testing.T) {
 	}
 	if runner.calls != 0 {
 		t.Errorf("invalid DSL should not reach runner; got %d calls", runner.calls)
+	}
+}
+
+// withAuthCtx fills user + role into the request context so handlers
+// hitting RoleFromContext / UserFromContext find what authedMw would
+// have placed there in production. Routine save tests need this since
+// the handler enforces RBAC + uses user.ID for author_user_id.
+func withAuthCtx(req *http.Request, userID, role string) *http.Request {
+	ctx := req.Context()
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: userID})
+	ctx = context.WithValue(ctx, ctxRole, role)
+	return req.WithContext(ctx)
+}
+
+func TestPipelinesAPI_Save_RequiresManagerRole(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	body := []byte(`{
+		"slug":"new-routine","name":"new","description":"x",
+		"definition":{"name":"new-routine","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]},
+		"last_test_run_passed":true,
+		"last_test_run_at":"` + now + `"}`)
+
+	for _, role := range []string{"VIEWER", "MEMBER"} {
+		req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
+		req = withAuthCtx(req, "user_1", role)
+		req.ContentLength = int64(len(body))
+		w := httptest.NewRecorder()
+		h.Save(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("role %q: expected 403, got %d (%s)", role, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestPipelinesAPI_Save_HappyPathManager(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	body := []byte(`{
+		"slug":"manager-saved","name":"by manager","description":"...",
+		"definition":{"name":"manager-saved","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]},
+		"author_crew_id":"crew_a",
+		"last_test_run_passed":true,
+		"last_test_run_at":"` + now + `"}`)
+
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
+	req = withAuthCtx(req, "user_42", "MANAGER")
+	req.ContentLength = int64(len(body))
+	w := httptest.NewRecorder()
+	h.Save(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var out pipelineResponse
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Slug != "manager-saved" {
+		t.Errorf("slug: got %q", out.Slug)
+	}
+	// Authorship recorded as user-API path
+	if out.AuthorUserID != "user_42" {
+		t.Errorf("author_user_id: got %q, want user_42", out.AuthorUserID)
+	}
+	if out.AuthoredVia != "user_api" {
+		t.Errorf("authored_via: got %q, want user_api", out.AuthoredVia)
+	}
+}
+
+func TestPipelinesAPI_Save_SkipTestGateForbiddenForManager(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+
+	body := []byte(`{
+		"slug":"skip-attempt","name":"x","description":"y",
+		"definition":{"name":"skip-attempt","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]},
+		"author_crew_id":"crew_a",
+		"skip_test_gate":true}`)
+
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
+	req = withAuthCtx(req, "user_42", "MANAGER")
+	req.ContentLength = int64(len(body))
+	w := httptest.NewRecorder()
+	h.Save(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("MANAGER + skip_test_gate must be 403, got %d (%s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "OWNER or ADMIN role") {
+		t.Errorf("expected role-required message, got %s", w.Body.String())
+	}
+}
+
+func TestPipelinesAPI_Save_SkipTestGateAllowedForAdmin(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+
+	body := []byte(`{
+		"slug":"admin-skip","name":"x","description":"y",
+		"definition":{"name":"admin-skip","steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]},
+		"author_crew_id":"crew_a",
+		"skip_test_gate":true}`)
+
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
+	req = withAuthCtx(req, "admin_user", "ADMIN")
+	req.ContentLength = int64(len(body))
+	w := httptest.NewRecorder()
+	h.Save(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("ADMIN + skip_test_gate should succeed, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestPipelinesAPI_Save_RejectsBadDSL(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+
+	body := []byte(`{
+		"slug":"bad","name":"x","description":"",
+		"definition":{"name":"bad","steps":[{"id":"a","type":"unsupported_type"}]}}`)
+
+	req := withWorkspaceCtx(httptest.NewRequest("POST", "/x", bytes.NewReader(body)), "ws_smoke")
+	req = withAuthCtx(req, "u", "ADMIN")
+	req.ContentLength = int64(len(body))
+	w := httptest.NewRecorder()
+	h.Save(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422 for unsupported step type, got %d", w.Code)
 	}
 }

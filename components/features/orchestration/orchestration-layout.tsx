@@ -7,7 +7,7 @@ import {
   FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, X,
-  CircleDot, FolderKanban,
+  CircleDot, FolderKanban, ScrollText,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,7 @@ import type { BreadcrumbItem } from "@/lib/store"
 import { LiveMessagesPanel, ExecLogPanel } from "@/components/features/orchestration/orchestration-drawer-panels"
 import { RightPanelContent } from "@/components/features/orchestration/right-panel-content"
 import { IssuesToolbarStrip } from "@/components/features/orchestration/issues-toolbar-strip"
+import { RoutinesTab } from "@/components/features/routines/routines-tab"
 
 type DrawerTab = "messages" | "exec" | "yaml" | "docker"
 
@@ -65,6 +66,7 @@ const ORCH_TABS = [
   { id: "graph", label: "Graph", icon: Workflow },
   { id: "timeline", label: "Timeline", icon: Clock },
   { id: "activity", label: "Activity", icon: Activity },
+  { id: "routines", label: "Routines", icon: ScrollText },
 ] as const
 
 export function OrchestrationLayout({
@@ -339,7 +341,13 @@ export function OrchestrationLayout({
   }, [drawerOpen, drawerTab])
 
   const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) || null : null
-  const showRightPanel = detailContext.type !== "none" || selectedIssue !== null || (selectedProjectId !== null && !selectedIssue)
+  // Routines tab manages its own right-side detail (RoutinesDetailPanel
+  // inside RoutinesTab). Suppress the orchestration-level detail pane
+  // there so an issue/task selected from a previous tab doesn't bleed
+  // into the routines layout and shrink the routines list view.
+  const showRightPanel =
+    activeTab !== "routines" &&
+    (detailContext.type !== "none" || selectedIssue !== null || (selectedProjectId !== null && !selectedIssue))
 
   const handleIssueClose = useCallback(() => {
     setSelectedIssue(null)
@@ -692,6 +700,11 @@ export function OrchestrationLayout({
               </motion.div>
             )}
 
+            {activeTab === "routines" && (
+              <motion.div key="routines" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="h-full overflow-hidden">
+                <RoutinesTab workspaceId={workspaceId} />
+              </motion.div>
+            )}
 
           </AnimatePresence>
         </div>

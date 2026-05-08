@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -705,10 +706,20 @@ func (e *Executor) runStepWithRetry(
 			break
 		}
 		emit.emitStepRetry(ctx, step, attempt, err.Error(), delay)
+		// Full jitter: actual sleep is uniform in [0, delay). Without
+		// jitter, N agents that hit the same upstream 429/5xx all
+		// retry in lockstep and stampede the recovery moment. AWS
+		// blogged the canonical analysis; Trigger.dev/Stripe follow
+		// the same pattern. We keep the deterministic upper bound
+		// for tests by floor'ing very small delays.
+		actualDelay := delay
+		if delay > 50*time.Millisecond {
+			actualDelay = time.Duration(mathrand.Int64N(int64(delay)))
+		}
 		select {
 		case <-ctx.Done():
 			return "", costSum, 0, ctx.Err()
-		case <-time.After(delay):
+		case <-time.After(actualDelay):
 		}
 		if rp.Backoff == "exponential" {
 			delay *= 2

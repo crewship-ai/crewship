@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Ship,
   BookOpen,
+  ScrollText,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -49,6 +50,7 @@ const navSections = [
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
       { title: "Orchestration", href: "/orchestration", icon: Workflow },
+      { title: "Routines", href: "/routines", icon: ScrollText },
       { title: "Crews", href: "/crews", icon: Ship },
     ],
   },

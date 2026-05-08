@@ -1,0 +1,371 @@
+---
+title: "Routine Commands"
+description: "Manage workspace routines — declarative AI workflow recipes with cron + webhook triggers, two-tier execution, HITL waitpoints, and immutable version history."
+icon: "scroll"
+---
+
+# crewship routine
+
+Manage workspace routines — AI-authored, repeatable workflow recipes that any crew can invoke.
+
+```bash
+crewship routine <subcommand> [flags]
+```
+
+**Alias:** `crewship pipeline` (back-compat — every `routine X` invocation also works as `pipeline X`)
+
+See [Routines guide](/guides/routines) for the conceptual overview.
+
+## Subcommands
+
+| Group | Command | Purpose |
+|-------|---------|---------|
+| Core | `list` | List workspace routines |
+| Core | `get <slug>` | Show routine detail with full DSL |
+| Core | `save` | Save a new routine from a JSON file |
+| Core | `run <slug>` | Invoke a routine against the live execution tier |
+| Core | `dry-run <slug>` | Preview what a routine would do without invoking agents |
+| Core | `delete <slug>` | Soft-delete a routine |
+| Core | `runs <slug>` | Show recent run history from journal |
+| Versions | `versions <slug>` | List version history |
+| Versions | `rollback <slug> --to N` | Roll back to version N |
+| Bundles | `export <slug>` | Export bundle JSON to stdout |
+| Bundles | `import [bundle.json]` | Import bundle from file or stdin |
+| Runs | `cancel <run_id>` | Cancel an in-flight run |
+| Runs | `watch <slug>` | Stream live run + step events |
+| Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
+| Triggers | `schedules ...` | Cron schedule CRUD |
+| Triggers | `webhooks ...` | Webhook CRUD |
+| HITL | `waitpoints ...` | Approval inbox + decisions |
+
+---
+
+## `crewship routine list`
+
+List workspace routines, sorted by usage by default.
+
+```bash
+crewship routine list
+crewship routine list --order recent
+crewship routine list --order name
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--order` | `popularity` | Sort: `popularity` (invocation_count DESC), `recent` (updated_at DESC), `name` (alpha) |
+
+**Output columns:** SLUG, INVOC, LAST STATUS, AUTHOR CREW, DESCRIPTION
+
+---
+
+## `crewship routine get <slug>`
+
+Show full routine detail including the DSL definition.
+
+```bash
+crewship routine get summarize-text
+```
+
+Output: human header (slug, name, author, invocations) + pretty-printed DSL JSON.
+
+---
+
+## `crewship routine save`
+
+Save a new routine from a JSON DSL file. Test_run gate runs first; if it fails, save aborts with a structured error pointing at the failing step.
+
+```bash
+crewship routine save \
+    --name "email-fetch-summarize" \
+    --description "Fetch new emails since a date and summarize." \
+    --definition email-fetch.json \
+    --author-crew crew_marketing \
+    --author-agent agent_lead
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--name` | ✓ | Human-readable name; slug derived from this |
+| `--description` | | One-line summary shown in `[AVAILABLE ROUTINES]` |
+| `--definition` | ✓ | Path to JSON DSL file |
+| `--author-crew` | ✓ | crew_id that owns this routine |
+| `--author-agent` | | agent_id that authored (optional but recommended) |
+| `--sample-inputs` | | JSON inputs the test_run uses |
+
+---
+
+## `crewship routine run <slug>`
+
+Invoke a saved routine against the live execution tier.
+
+```bash
+crewship routine run summarize-text --inputs '{"text":"..."}'
+crewship routine run pr-review-structured --inputs '{"diff":"..."}' --invoking-crew crew_eng
+```
+
+| Flag | Description |
+|------|-------------|
+| `--inputs` | JSON inputs for the run |
+| `--invoking-crew` | crew_id recorded as the invoker (cross-crew reuse audit) |
+
+Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
+
+---
+
+## `crewship routine dry-run <slug>`
+
+Preview what the routine WOULD execute without invoking agents. Returns a structured `would_execute` report with each step's resolved tier, rendered prompt, and estimated cost.
+
+```bash
+crewship routine dry-run summarize-text --inputs '{"text":"..."}'
+```
+
+Zero side effects — useful for "is this routine wired correctly?" without burning tokens.
+
+---
+
+## `crewship routine validate [file.json]`
+
+Offline DSL validation with **no server call**. Reads from the file argument or stdin if absent.
+
+```bash
+crewship routine validate routine.json
+cat routine.json | crewship routine validate
+crewship routine validate routine.json --json   # machine-readable
+```
+
+Exit code 0 = valid, 1 = invalid. CI-friendly:
+
+```yaml
+- name: Validate routine DSL
+  run: crewship routine validate routines/*.json
+```
+
+Runs the same parse + validate + step-id-uniqueness checks the server would, **except** cross-routine cycle detection (which needs the workspace's full call graph) and slug uniqueness (which needs the DB).
+
+---
+
+## `crewship routine watch <slug>`
+
+Stream live run + step events for a routine. Polls every 2s, dedupes events, prints in chronological order with ANSI colour by status.
+
+```bash
+crewship routine watch summarize-text
+crewship routine watch summarize-text --json | jq '.entry_type'
+crewship routine watch summarize-text --once     # exit on first run terminal
+crewship routine watch summarize-text --run-id <id>
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | false | JSON Lines instead of coloured text |
+| `--once` | false | Exit after the first run completes / fails |
+| `--run-id` | | Filter to events for one run_id only |
+| `--interval` | 2s | Poll interval (Go duration format) |
+
+Ctrl-C / SIGTERM exit cleanly.
+
+---
+
+## `crewship routine versions <slug>`
+
+```bash
+crewship routine versions summarize-text
+```
+
+**Output columns:** VERSION, HEAD, PARENT, HASH, AUTHOR, CREATED, SUMMARY. The `*` marker tags the current HEAD.
+
+## `crewship routine rollback <slug>`
+
+```bash
+crewship routine rollback summarize-text --to 3
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--to` | ✓ | Target version number to roll back to |
+
+Creates a new version on top of HEAD whose definition equals v3's. History is preserved; you can roll forward by another rollback.
+
+## `crewship routine export <slug>`
+
+```bash
+crewship routine export summarize-text > bundle.json
+crewship routine export summarize-text --include-history > bundle-with-versions.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--include-history` | Include all version chain entries (default: HEAD only) |
+
+Output: `crewship-pipeline-bundle/v1` JSON to stdout. Suitable for pipe to `routine import` or commit to git.
+
+## `crewship routine import [bundle.json]`
+
+```bash
+crewship routine import bundle.json
+cat bundle.json | crewship routine import
+crewship routine export src-routine | crewship routine import   # cross-workspace copy
+```
+
+Pre-validates JSON locally before sending — typos at the keyboard get a local error rather than a 400 from the server.
+
+## `crewship routine cancel <run_id>`
+
+```bash
+crewship routine cancel run_cmovn40h30001c57bb667
+```
+
+Signals the run goroutine. Run terminates at the next safe point and emits `pipeline.run.failed` with reason "cancelled". Already-terminal runs return 409.
+
+---
+
+## `crewship routine schedules`
+
+Manage cron-driven triggers. Scheduler runs in-process and ticks every 30s.
+
+### `schedules list`
+
+```bash
+crewship routine schedules list
+crewship routine schedules list --slug summarize-text
+crewship routine schedules list --json
+```
+
+**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, NEXT
+
+### `schedules create`
+
+```bash
+crewship routine schedules create \
+    --slug summarize-text \
+    --name "daily-summary" \
+    --cron "0 9 * * *" \
+    --timezone "Europe/Prague" \
+    --inputs '{"text":"daily input"}'
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--slug` | ✓ | Target routine slug |
+| `--cron` | ✓ | 5-field cron expression |
+| `--name` | | Schedule name (default: `"<slug> schedule"`) |
+| `--timezone` | | IANA timezone (default: server local, falling back to UTC) |
+| `--inputs` | | JSON object passed as inputs on each tick |
+| `--enabled` | | Create enabled (default true) |
+
+### `schedules update <id>`
+
+Pass any subset of `--cron / --timezone / --name / --enabled / --inputs` to update.
+
+### `schedules enable <id>` / `schedules disable <id>`
+
+Toggle without altering the cron expression.
+
+### `schedules now <id>`
+
+Force-fire ad-hoc (out-of-cycle invocation for testing).
+
+### `schedules delete <id>`
+
+```bash
+crewship routine schedules delete sch_abc123 --yes
+```
+
+`--yes` skips the confirmation prompt.
+
+---
+
+## `crewship routine webhooks`
+
+Manage event-driven triggers. Each webhook is token-addressed (POST to `/api/v1/webhooks/{token}`), optionally HMAC-signed for delivery integrity, and rate-limited per token.
+
+### `webhooks list`
+
+```bash
+crewship routine webhooks list
+crewship routine webhooks list --slug pr-review-structured
+```
+
+**Output columns:** ID, NAME, ROUTINE, HMAC, FIRES, LAST STATUS, RATE/MIN, ENABLED
+
+### `webhooks create`
+
+```bash
+crewship routine webhooks create \
+    --slug pr-review-structured \
+    --name "github-pr-reviews" \
+    --hmac-secret "$(openssl rand -hex 32)" \
+    --rate-limit 30
+```
+
+**Stripe-style secret reveal:** the signing secret is shown ONCE in the response. Save it now or rotate via delete+recreate.
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--slug` | ✓ | Target routine slug |
+| `--name` | | Webhook name (default: `"<slug> webhook"`) |
+| `--hmac-secret` | | HMAC signing secret — empty means no signature verification |
+| `--rate-limit` | | Max fires per minute (default 60) |
+| `--inputs-template` | | JSON template merged with the request body |
+| `--base-url` | | Override the public base URL printed |
+
+### `webhooks url <id>`
+
+Print the public URL without re-revealing the signing secret.
+
+### `webhooks delete <id>`
+
+```bash
+crewship routine webhooks delete wh_abc123 --yes
+```
+
+Existing senders using the deleted token will start getting 404s.
+
+---
+
+## `crewship routine waitpoints`
+
+Inspect + decide on pending HITL approval waitpoints.
+
+### `waitpoints list`
+
+```bash
+crewship routine waitpoints list
+crewship routine waitpoints list --json
+```
+
+**Output columns:** TOKEN, RUN ID, STEP, KIND, CREATED, TIMEOUT, PROMPT
+
+### `waitpoints show <token>`
+
+Full prompt + metadata for a single waitpoint.
+
+### `waitpoints approve <token>` / `waitpoints reject <token>`
+
+```bash
+crewship routine waitpoints approve wpt_abc123 --comment "LGTM"
+crewship routine waitpoints reject  wpt_abc123 --comment "needs revision"
+```
+
+The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
+
+---
+
+## Global flags
+
+All routine subcommands accept these global flags:
+
+| Flag | Env | Description |
+|------|-----|-------------|
+| `--server` | `CREWSHIP_SERVER` | Server URL (default `http://localhost:8080`) |
+| `--workspace` | `CREWSHIP_WORKSPACE` | Workspace ID or slug |
+| `--format` | | `table | json | yaml | quiet` |
+| `--no-color` | | Disable ANSI colour output |
+| `--verbose` | | Verbose request/response logging |
+
+## See also
+
+- [Routines guide](/guides/routines) — concepts, DSL spec, two-tier execution, troubleshooting
+- [CLI overview](/cli/overview) — global flags + auth
+- [Scheduling guide](/guides/scheduling) — recurring background work primitives
