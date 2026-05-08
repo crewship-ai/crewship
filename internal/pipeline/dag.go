@@ -215,9 +215,19 @@ func (e *Executor) runDAG(
 		}
 		wg.Wait()
 
+		// Only mark a step completed if it actually produced an
+		// output. Steps that returned early due to dagCtx cancel
+		// (a peer in the wave failed) left no entry in StepOutputs,
+		// and treating them as completed would let downstream
+		// branches advance with empty inputs on a future wave. The
+		// bail-out at firstErr below already handles fail-fast, but
+		// defense-in-depth keeps the invariant clean if someone later
+		// removes the bail.
 		resMu.Lock()
 		for _, sp := range ready {
-			completed[sp.ID] = true
+			if _, ok := result.StepOutputs[sp.ID]; ok {
+				completed[sp.ID] = true
+			}
 		}
 		resMu.Unlock()
 
@@ -235,16 +245,46 @@ func (e *Executor) runDAG(
 		}
 	}
 
-	// Final output: pick the last step in source order whose output
-	// is not <skipped>. The DAG doesn't have a single "final step,"
-	// so we use source-order fallback to keep the linear-mode
-	// expectation that result.Output reflects "the result."
+	// Final output: prefer leaf nodes (steps that no other step
+	// references via `needs`) — they're the actual terminals of the
+	// DAG. With multiple leaves we take the first leaf in source
+	// order so authors can deterministically position the "primary"
+	// terminal first. Fall back to last-non-skipped in source order
+	// for linear pipelines (zero `needs` everywhere) so behaviour
+	// stays unchanged for them.
 	resMu.Lock()
-	for i := len(dsl.Steps) - 1; i >= 0; i-- {
-		out := result.StepOutputs[dsl.Steps[i].ID]
-		if out != "" && out != "<skipped>" {
-			result.Output = out
-			break
+	referenced := make(map[string]bool, len(dsl.Steps))
+	hasNeeds := false
+	for _, s := range dsl.Steps {
+		if len(s.Needs) > 0 {
+			hasNeeds = true
+			for _, dep := range s.Needs {
+				referenced[dep] = true
+			}
+		}
+	}
+	if hasNeeds {
+		// Walk leaves in source order so the first non-empty leaf
+		// wins — predictable for authors.
+		for _, s := range dsl.Steps {
+			if referenced[s.ID] {
+				continue
+			}
+			out := result.StepOutputs[s.ID]
+			if out != "" && out != "<skipped>" {
+				result.Output = out
+				break
+			}
+		}
+	}
+	if result.Output == "" {
+		// Linear-pipeline fallback (or no leaf had output).
+		for i := len(dsl.Steps) - 1; i >= 0; i-- {
+			out := result.StepOutputs[dsl.Steps[i].ID]
+			if out != "" && out != "<skipped>" {
+				result.Output = out
+				break
+			}
 		}
 	}
 	resMu.Unlock()

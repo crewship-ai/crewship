@@ -113,8 +113,13 @@ func NewOrchestratorRunner(deps OrchestratorRunnerDeps) (*OrchestratorRunner, er
 // AgentRunRequest TimeoutSecs) so an unresponsive agent doesn't
 // hang the executor goroutine — the orchestrator enforces it.
 func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentStepResult, error) {
-	// 1. Resolve agent_id from (crew_id, agent_slug).
-	agentID, err := r.resolveAgentID(ctx, req.AuthorCrewID, req.AgentSlug)
+	// 1. Resolve agent_id from (workspace_id, crew_id, agent_slug).
+	// Workspace constraint is critical: the lookup must verify the
+	// crew belongs to the calling workspace, otherwise an
+	// AuthorCrewID pointing to a crew in another workspace would
+	// silently execute that workspace's agent on this workspace's
+	// data.
+	agentID, err := r.resolveAgentID(ctx, req.WorkspaceID, req.AuthorCrewID, req.AgentSlug)
 	if err != nil {
 		return AgentStepResult{}, fmt.Errorf("resolve agent: %w", err)
 	}
@@ -176,12 +181,34 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		})
 	}
 
-	// 6. Build AgentRunRequest. CLI adapter + model + system prompt
-	//    all flow from ChatInfo unchanged — we don't second-guess
-	//    the resolver's choice. step.ModelOverride from the DSL
-	//    isn't applied here because per-step model swapping is a
-	//    Phase 2 feature of the LLM-direct runner; the orchestrator
-	//    path hands the prompt to whatever the agent's adapter is.
+	// 6. Build AgentRunRequest.
+	//
+	// Tier resolution honoring: when the executor's tier resolver
+	// produced a non-empty Model on the request, override the agent's
+	// default. This is the load-bearing wire for two-tier execution
+	// — without it a routine's `complexity: "fast"` would silently
+	// run on whatever model the agent was created with (typically
+	// Sonnet), defeating the cost reduction promise.
+	//
+	// CLIAdapter is intentionally NOT overridden from req.Adapter:
+	// (a) the workspace tier config's "adapter" field is shorthand
+	// ("claude" / "gemini") not the orchestrator's constants
+	// ("CLAUDE_CODE" / "GEMINI_CLI"), so direct override produces
+	// an unrecognized adapter and falls through to a bare CLI invocation
+	// missing system prompt / mcp config / etc.;
+	// (b) the dominant tier-swap use-case is cheap-vs-expensive on the
+	// SAME provider (Haiku → Opus), where adapter stays constant and
+	// only model changes;
+	// (c) cross-adapter swap (Claude → Gemini) is a rare advanced
+	// case worth a follow-up that maps shorthand → constant.
+	//
+	// SystemPrompt and ToolProfile likewise stay agent-defined — the
+	// routine doesn't get to mess with persona or tool whitelist.
+	cliAdapter := info.CLIAdapter
+	llmModel := info.LLMModel
+	if req.Model != "" {
+		llmModel = req.Model
+	}
 	// Pick the tighter of the two timeouts (agent default vs step
 	// override). When the agent has no configured timeout
 	// (info.TimeoutSecs == 0), the previous form `req.TimeoutSec <
@@ -208,8 +235,8 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		WorkspaceID:        info.WorkspaceID,
 		ChatID:             chatID,
 		ContainerID:        containerID,
-		CLIAdapter:         info.CLIAdapter,
-		LLMModel:           info.LLMModel,
+		CLIAdapter:         cliAdapter,
+		LLMModel:           llmModel,
 		SystemPrompt:       info.SystemPrompt,
 		UserMessage:        req.Prompt,
 		ToolProfile:        info.ToolProfile,
@@ -297,20 +324,28 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 }
 
 // resolveAgentID looks up the agent row in the author crew with the
-// given slug. Returns ErrNotFound if no match — the executor will
-// surface that as a step failure with a clear "agent not found in
-// crew" error so the pipeline author can fix the slug.
-func (r *OrchestratorRunner) resolveAgentID(ctx context.Context, crewID, slug string) (string, error) {
-	if crewID == "" || slug == "" {
-		return "", errors.New("author_crew_id + agent_slug required")
+// given slug. The workspace_id JOIN guard ensures cross-workspace
+// pipeline invocations cannot accidentally (or maliciously) reach
+// agents that belong to a different workspace's crew. Returns
+// ErrNotFound semantics if no match — the executor surfaces that as
+// a step failure with a clear "agent not found in crew" error so the
+// pipeline author can fix the slug.
+func (r *OrchestratorRunner) resolveAgentID(ctx context.Context, workspaceID, crewID, slug string) (string, error) {
+	if workspaceID == "" || crewID == "" || slug == "" {
+		return "", errors.New("workspace_id + author_crew_id + agent_slug required")
 	}
 	var agentID string
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id FROM agents WHERE crew_id = ? AND slug = ? AND deleted_at IS NULL LIMIT 1`,
-		crewID, slug,
+		`SELECT a.id
+		   FROM agents a
+		   JOIN crews c ON c.id = a.crew_id
+		  WHERE a.crew_id = ? AND a.slug = ? AND a.deleted_at IS NULL
+		    AND c.workspace_id = ? AND c.deleted_at IS NULL
+		  LIMIT 1`,
+		crewID, slug, workspaceID,
 	).Scan(&agentID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("agent slug %q not found in crew %q", slug, crewID)
+		return "", fmt.Errorf("agent slug %q not found in crew %q within workspace", slug, crewID)
 	}
 	if err != nil {
 		return "", err

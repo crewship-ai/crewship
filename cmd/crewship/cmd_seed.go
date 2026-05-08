@@ -150,6 +150,20 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// ── Phase 9b: Routines (5 starter recipes) ──
+	// Runs BEFORE issues because routines depend only on crews and
+	// the issues phase can hit pre-existing 5xx on label/project
+	// re-creation in non-nuke seeds, aborting the entire seed before
+	// routines would land. Routines failure is non-fatal — a missing
+	// crew or DSL parse error logs but doesn't torpedo subsequent
+	// seed phases.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedRoutines(ctx, client, crewIDs); err != nil {
+		fmt.Fprintf(os.Stderr, "Routine seeding hit an error (continuing): %v\n", err)
+	}
+
 	// ── Phase 10: Issues ──
 	if !skipIssues {
 		if err := ctx.Err(); err != nil {

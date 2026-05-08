@@ -1,0 +1,493 @@
+---
+title: "Routines"
+description: "Declarative AI workflow recipes — workspace-scoped, AI-authored, repeatable, with cron + webhook + manual triggers, two-tier execution, HITL waitpoints, and immutable version history."
+---
+
+import { Card, CardGroup, Tabs, Tab, Note, Warning, Info } from '/snippets/mintlify-stub.mdx'
+
+## What is a Routine?
+
+A **Routine** is a declarative recipe for repeatable AI work. You author it once (or an agent authors it for you when it spots a repetitive pattern), it runs the same way every time, and it lives in your workspace as a reusable asset alongside crews, skills, and credentials.
+
+Each routine bundles:
+
+- A **JSON DSL definition** — inputs, outputs, ordered or DAG-structured steps, validation gates, declared egress, credential requirements
+- **Authorship metadata** — which crew, which agent (or user), via which path
+- **Triggers** — cron schedules and webhook tokens that fire it autonomously
+- **Run history** — every invocation as an immutable journal trace with step-level events
+- **Versions** — every save creates a new version; rollback is one API call
+
+Compared to other layers in Crewship:
+
+| Layer | Scope | Authoring | Use case |
+|-------|-------|-----------|----------|
+| **Routine** | atomic | AI-authored OR human DSL | One repeatable AI workflow |
+| **Recipe** *(future)* | composite | Marketplace template | Crew + agents + integrations + routines bundled |
+| **Cyclic Issue** *(future)* | issue-tracker | recurring user issue | "Standup every Monday" without leaving Issues |
+
+The user-facing label is **Routine** across web UI, CLI, agent system prompts and marketing surfaces. The backend identifier (database table, Go package, HTTP route paths) remains `pipelines` for backwards compatibility — see [§17.1 of the PRD](./../../.claude/context/prd/PIPELINES.md) for the rename rationale.
+
+<Note>
+**Naval theme.** Routines are the boring, accurate, repeated procedures a ship's crew runs every day — the equivalent of [naval drills](https://en.wikipedia.org/wiki/Drill_(naval)) in the Crewship metaphor. Programs your AI agents follow.
+</Note>
+
+## Three authoring paths
+
+Crewship is unusual among workflow systems because **agents author routines**, not just execute them. Three paths converge on the same `pipelines` table:
+
+<CardGroup cols={3}>
+  <Card title="Agent" icon="robot">
+    The most common path. An agent that's solved a repetitive problem twice posts to `http://localhost:9119/pipelines/save` from inside its container; the sidecar injects authorship and forwards to the main API. Next time `[AVAILABLE ROUTINES]` block in the system prompt advertises it to other crews.
+  </Card>
+  <Card title="UI" icon="browser">
+    Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author.
+  </Card>
+  <Card title="CLI" icon="terminal">
+    `crewship routine save --name "..." --definition file.json --author-crew <crew_id>`. Same test_run gate as UI. CI-friendly: validate offline first with `crewship routine validate file.json`, then save.
+  </Card>
+</CardGroup>
+
+## DSL anatomy
+
+Minimal valid routine:
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "summarize-text",
+  "description": "Summarize input text in 3 bullets.",
+  "inputs": [
+    { "name": "text", "type": "string", "required": true }
+  ],
+  "outputs": [
+    { "name": "summary", "type": "string" }
+  ],
+  "steps": [
+    {
+      "id": "summarize",
+      "type": "agent_run",
+      "agent_slug": "tomas",
+      "complexity": "fast",
+      "prompt": "Summarize: {{ inputs.text }}"
+    }
+  ]
+}
+```
+
+### Top-level fields
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `dsl_version` | string | Always `"1.0"` for now. Forward-compat field. |
+| `name` | string | Slug-friendly identifier. Workspace-unique. |
+| `display_name` | string | Optional pretty label. |
+| `description` | string | One-line summary; shown in lists + `[AVAILABLE ROUTINES]`. |
+| `inputs[]` | array of [InputSpec](#inputspec) | Declared parameters. |
+| `outputs[]` | array of OutputSpec | Read from the final step's output by name. Documentary in MVP. |
+| `steps[]` | array of [Step](#step-types) | Sequential by default; DAG with `needs:`. |
+| `execution_tier` | object | `{preferred, fallback}` overriding workspace default. |
+| `estimated_cost_usd` | number | Author estimate; UI surfaces overrun warnings. |
+| `egress_targets` | array of string | Declared outbound hosts. Enforced for `http` step. |
+| `credentials_required` | array of CredReq | Declared credential needs (`type` + `scope`). |
+| `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
+
+### InputSpec
+
+```json
+{
+  "name": "since",
+  "type": "string",
+  "required": false,
+  "default": "yesterday",
+  "description": "ISO date or 'yesterday'/'today'",
+  "min": 0,
+  "max": 100
+}
+```
+
+`type` is one of `string | integer | number | boolean | array | object`. `min` / `max` are `*float64` so decimal constraints work for `number` types.
+
+### Template substitution
+
+Anywhere a string is interpolated (prompt, http URL/body/headers, wait until, code, transform, conditional `if`), placeholder `{{ ... }}` resolves against:
+
+- `inputs.X` — declared input value
+- `steps.Y.output` — full text output of an earlier step
+- `steps.Y.output.path` — JSON path into a step's output (when output parses as JSON)
+- `env.AUTHOR_CREW_NAME` / etc. — read-only allowlist of execution context
+
+Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
+
+<Warning>
+Templates are **regex substitution, not expression evaluation**. There is no arithmetic, no function calls, no inline conditionals. If you need logic, add another step.
+</Warning>
+
+## Step types
+
+### `agent_run`
+
+```json
+{
+  "id": "summarize",
+  "type": "agent_run",
+  "agent_slug": "tomas",
+  "complexity": "fast",
+  "prompt": "Summarize: {{ inputs.text }}",
+  "model_override": null,
+  "timeout_seconds": 60,
+  "validation": {
+    "schema": { "type": "object", "required": ["title"] },
+    "must_not_contain": ["API_KEY=", "Bearer "],
+    "min_length": 30,
+    "on_validation_fail": "escalate_tier"
+  }
+}
+```
+
+`complexity` resolves through the workspace's `execution_tiers_json` mapping into `(adapter, model)`. With `complexity: "fast"`, the agent's CLI gets `--model claude-haiku-4-5-20251001` (or whatever the workspace mapped `fast` to). `model_override` is the explicit pin that wins over `complexity`.
+
+`on_validation_fail` is one of `escalate_tier | abort | retry_step` — `escalate_tier` walks the fallback chain (e.g., Haiku → Sonnet → Opus) until validation passes or the chain exhausts.
+
+### `call_pipeline`
+
+```json
+{
+  "id": "review_summary",
+  "type": "call_pipeline",
+  "pipeline_slug": "human-approval-step",
+  "nested_inputs": {
+    "content": "{{ steps.summarize.output }}",
+    "approver_role": "marketing_lead"
+  }
+}
+```
+
+Composition primitive. Save-time cycle detection rejects loops; runtime depth limit caps at 10 levels.
+
+### `http`
+
+```json
+{
+  "id": "fetch",
+  "type": "http",
+  "http": {
+    "method": "GET",
+    "url": "{{ inputs.url }}",
+    "max_response_bytes": 200000,
+    "success_codes": [200],
+    "credential_ref": { "type": "github", "inject_as": "bearer" }
+  },
+  "timeout_seconds": 30
+}
+```
+
+Egress allowlist enforced both pre-flight AND on every redirect (CheckRedirect callback). Allowlist set per-workspace. Credential injection schemes: `bearer` (default), `header` with explicit name, `query` with explicit name.
+
+### `wait`
+
+```json
+{
+  "id": "human_approval",
+  "type": "wait",
+  "wait": {
+    "kind": "approval",
+    "approval_prompt": "Approve summary?",
+    "timeout_sec": 86400
+  }
+}
+```
+
+Three kinds: `approval` (HITL token), `datetime` (sleep until ISO timestamp), `event` (filter on journal events). DB-backed waitpoint store survives process restart for `approval` kind; the recovery scan at boot reports stranded pending waitpoints.
+
+Approve via UI Inbox, CLI `crewship routine waitpoints approve <token>`, or API.
+
+### `code`
+
+```json
+{
+  "id": "process",
+  "type": "code",
+  "code": {
+    "runtime": "python",
+    "code": "import json\nprint(json.dumps({'sum': sum(input_nums)}))"
+  }
+}
+```
+
+Runs in a sandboxed container with `--cap-drop=ALL`, no host mounts, network constrained by the same egress allowlist. Inputs auto-mapped to `CREWSHIP_INPUT_<NAME>` env vars.
+
+### `transform`
+
+```json
+{
+  "id": "extract_emails",
+  "type": "transform",
+  "transform": {
+    "input": "{{ steps.fetch.output }}",
+    "expression": ".items[] | .email"
+  }
+}
+```
+
+Pure-Go data reshaping with a tiny jq-flavoured subset. No LLM, no network — fully deterministic. Useful for wiring step outputs without paying for another agent_run.
+
+### Conditional `if`
+
+Any step can carry `"if": "{{ inputs.run_summary }}"`. The placeholder is rendered as a plain string — empty / `false` / `0` / `no` / `off` (case-insensitive) → step skipped and marked `<skipped>` in StepOutputs; anything else counts as truthy. Templates are plain substitution, not expression evaluation, so put the boolean upstream (e.g. set `inputs.run_summary` from the caller) rather than writing `==` / `!=` inside the `if` value.
+
+### DAG with `needs[]`
+
+```json
+{ "id": "fetch_a", "type": "http", "http": {...} },
+{ "id": "fetch_b", "type": "http", "http": {...} },
+{ "id": "merge",
+  "type": "agent_run",
+  "needs": ["fetch_a", "fetch_b"],
+  "prompt": "Merge: {{ steps.fetch_a.output }} + {{ steps.fetch_b.output }}"
+}
+```
+
+Steps with no overlapping `needs` execute in parallel (one goroutine wave per ready set). Final output picks the unique leaf node; for multi-leaf DAGs the first leaf in source order wins.
+
+## Two-tier execution
+
+The economic value-prop: an Opus-class authoring model designs the routine, a Haiku-class executor model runs each invocation. Workspace `execution_tiers_json` maps complexity classes to `(adapter, model)`:
+
+```json
+{
+  "trivial":  { "primary": {"adapter":"claude","model":"claude-haiku-4-5-20251001"} },
+  "fast":     { "primary": {"adapter":"claude","model":"claude-haiku-4-5-20251001"},
+                "fallback":[{"adapter":"claude","model":"claude-sonnet-4-6"}] },
+  "moderate": { "primary": {"adapter":"claude","model":"claude-sonnet-4-6"} },
+  "smart":    { "primary": {"adapter":"claude","model":"claude-opus-4-7"} }
+}
+```
+
+Per-step `complexity` annotation drives the resolver. With `on_validation_fail: "escalate_tier"`, a failed validation walks the fallback chain — practically: Haiku tries first, Sonnet on validation fail, Opus on second fail.
+
+<Info>
+**Tier override at runtime.** The CLI flag `--model <model>` is constructed from the resolved tier and passed to the agent's CLI adapter, so a routine's `complexity: "fast"` actually fires Haiku, not the agent's default. `CLIAdapter` is preserved (so the agent's CLAUDE_CODE / GEMINI_CLI / etc. wiring stays intact); only the model name swaps.
+</Info>
+
+## Test-run gate
+
+Save endpoints (sidecar `/pipelines/save`, user `/api/v1/workspaces/{ws}/pipelines/save`, internal `/api/v1/internal/pipelines/save`) require a fresh passing test_run within the last 5 minutes — otherwise inline runs one against the execution tier.
+
+This is the **self-improvement loop**: an authoring agent that writes brittle DSL gets a structured failure report it can read and revise from. Without the gate, MVP would ship pipelines that pass schema but fail at runtime.
+
+`skip_test_gate: true` is honored only when the caller's role is OWNER or ADMIN; lower roles get 403. Useful for hand-crafted DSL from known-good templates (the seed flow uses it).
+
+## Triggers
+
+### Cron schedules
+
+```bash
+crewship routine schedules create --slug summarize-text \
+    --name "daily-summary" --cron "0 9 * * *" --timezone "Europe/Prague" \
+    --inputs '{"text":"…default"}'
+```
+
+5-field cron expression. Scheduler runs in-process and ticks every 30s, so minimum resolution is 1 minute. Single-instance only — running multiple replicas would double-fire (no leader election yet, see [§17.5 follow-up](./../../.claude/context/prd/PIPELINES.md)).
+
+### Webhooks
+
+```bash
+crewship routine webhooks create --slug pr-review-structured \
+    --hmac-secret "$(openssl rand -hex 32)" --rate-limit 30
+```
+
+Output reveals the public URL and signing secret **once** (Stripe-style). External services POST event payload to `/api/v1/webhooks/{token}`. With HMAC, sender includes header `X-Crewship-Signature: sha256=<hex_hmac_of_body>`, validated server-side via `hmac.Equal` (timing-safe). Rate limited per token, per minute, default 60.
+
+To rotate the secret: delete the webhook + create a new one. There is no in-place rotation by design.
+
+### Manual
+
+`crewship routine run <slug> --inputs '{...}'` or click the Run button in the UI detail panel. Same execution path.
+
+## Versioning + rollback
+
+Every save creates a new immutable row in `pipeline_versions` (v79 migration). The `pipelines.head_version` column points at the current. Rollback creates a NEW version on top of HEAD whose definition equals the target's:
+
+```bash
+crewship routine versions email-fetch
+crewship routine rollback email-fetch --to 3
+```
+
+History is preserved — you can roll forward to a future version by another rollback. There is no "delete version" — if a version was bad, the trail of "v3 → v4 (rollback to v2) → v5 (fix)" is the audit story you keep.
+
+## Bundle export / import
+
+Routines are portable across workspaces:
+
+```bash
+# Export from workspace A
+crewship routine export email-fetch --include-history > email-fetch.json
+
+# Import into workspace B
+cat email-fetch.json | crewship routine import
+```
+
+The bundle format is `crewship-pipeline-bundle/v1`: routine row + (optionally) the full version chain + change_summary annotations. Author identity is rewritten on import so the importing user becomes the new author. Slug is preserved; if it conflicts in the destination workspace the existing row updates (new version), or you change the bundle's slug before import.
+
+## HITL waitpoints
+
+A routine that includes a `wait` step of `kind: approval` parks the run goroutine on a DB-backed waitpoint. Operators decide via three paths:
+
+```bash
+# CLI
+crewship routine waitpoints list
+crewship routine waitpoints approve <token> --comment "LGTM"
+crewship routine waitpoints reject  <token> --comment "needs revision"
+
+# UI: /routines → routine → Wait sub-tab → click Approve / Reject
+# API: POST /api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve
+```
+
+The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
+
+## Validation gates and credential leak guards
+
+Each step's `validation` block runs after the step output materializes. The schema is a JSON Schema draft 2020-12 subset (most of `type`, `required`, `properties`, `items`, `pattern`, `format`, `enum`, etc.) plus three Crewship extensions:
+
+- `must_not_contain: ["API_KEY=", "Bearer "]` — output must include none of these substrings
+- `must_contain: ["##"]` — output must include all of these
+- `min_length` / `max_length` — convenience for non-JSON outputs
+
+The `must_not_contain` gate is the credential-leak tripwire: if an agent is about to leak a real API key in its output, the gate fails the step before downstream consumers see it. Pair with `on_validation_fail: "abort"` for hard stop, or `escalate_tier` if you want the higher model to retry without the leak.
+
+## Observability
+
+Every routine run emits a sequence of journal entries:
+
+- `pipeline.run.started` — once at run begin
+- `pipeline.step.started` — per step
+- `pipeline.step.completed` / `pipeline.step.failed` / `pipeline.step.validation_failed` — per step terminal
+- `pipeline.run.completed` / `pipeline.run.failed` — once at run end
+
+Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
+
+For terminal-side observability: `crewship routine watch <slug>` polls the runs endpoint and prints events as ANSI-coloured timeline; `--json` for JSON Lines piping into `jq`; `--once` exits after the first run terminates (CI-friendly).
+
+## RBAC
+
+| Role | Read | Run | Save | Schedules / Webhooks | `skip_test_gate` |
+|------|:----:|:---:|:----:|:--------------------:|:----------------:|
+| VIEWER | ✓ | — | — | — | — |
+| MEMBER | ✓ | ✓ | — | — | — |
+| MANAGER | ✓ | ✓ | ✓ | ✓ | — |
+| ADMIN | ✓ | ✓ | ✓ | ✓ | ✓ |
+| OWNER | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+## Common patterns
+
+### "Run this routine every day at 9 AM"
+
+```bash
+crewship routine schedules create --slug daily-status-digest \
+    --cron "0 9 * * *" --timezone "Europe/Prague"
+```
+
+### "Trigger this routine from a GitHub Actions hook"
+
+```bash
+crewship routine webhooks create --slug pr-review-structured \
+    --hmac-secret "$(openssl rand -hex 32)" --rate-limit 30
+# Use the printed token + secret as Settings → Webhooks in the GH repo.
+```
+
+### "Validate routine DSL in CI before committing"
+
+```yaml
+- run: crewship routine validate routines/*.json
+```
+
+Exit code 1 on any invalid file.
+
+### "Discover what an agent is about to do, without running it"
+
+```bash
+crewship routine dry-run summarize-text --inputs '{"text":"..."}'
+```
+
+Returns a `would_execute` report with which agent, which tier, the rendered prompt, and an estimated cost. Zero side effects.
+
+### "Cancel an in-flight run"
+
+```bash
+crewship routine cancel <run_id>
+```
+
+Signals the run goroutine; it stops at the next safe point and emits `pipeline.run.failed` with reason "cancelled".
+
+## Troubleshooting
+
+### Save returns 422 "save requires a fresh, passing test_run"
+
+The save endpoint requires the test gate cleared. Preferred path: call `/test_run`, capture the `save_token` from its response, and pass `"save_token": "<token>"` in the `/save` body. The token is a server-signed HMAC over `(workspace_id | definition_hash | user_id | issued_at)` and expires after 5 minutes — it cannot be forged from the client side.
+
+Alternatives:
+- `--skip-test-gate` (CLI) / `"skip_test_gate": true` (API) if your role is OWNER/ADMIN and you trust the DSL — bypasses the gate without running the test_run.
+- Legacy fallback: send `"last_test_run_at"` + `"last_test_run_passed"` in the body. Honoured for backwards compatibility, but trusts client-supplied values; new clients should always use `save_token`.
+
+### Run starts but no step events appear in the UI
+
+Check that `?include_steps=1` is in the runs URL the UI fetches. The list endpoint defaults to run-level only to keep payload bounded; the detail panel passes the flag explicitly. After a refresh, the waterfall populates from journal entries plus live WebSocket events.
+
+### Schedule shows enabled=true but never fires
+
+The scheduler ticks every 30s; with single-binary deployment, restarting the server resets the in-memory tick cursor. Pending schedules whose `next_run_at` has passed will fire on the next tick after restart. If you've edited the cron expression, `next_run_at` recomputes from `now()` — so a `0 9 * * *` schedule edited at 10:30 won't fire until 9 AM tomorrow.
+
+### Webhook returns 401 / 403 on a known-good token
+
+HMAC mismatch: check the `X-Crewship-Signature: sha256=<hex>` header, computed as `HMAC-SHA256(signing_secret, request_body)` over the **raw bytes** the sender sent (not a re-serialized form). The server uses `hmac.Equal` for comparison so timing-safe.
+
+### Run cost is higher than `estimated_cost_usd`
+
+Two-tier escalation walks the fallback chain. With `on_validation_fail: escalate_tier`, a failed Haiku run retries on Sonnet (5-10× more expensive), then Opus (20-50× more expensive) before giving up. Tighten validation gates (loosen `must_contain`, raise `min_length`), or set `max_cost_usd` on the routine to abort the run between steps when a cost ceiling is hit.
+
+### "Pipeline X step Y stuck in pending state"
+
+Probably a waitpoint without a matching listener (process restarted between the `wait` step starting and a decision arriving). Check `crewship routine waitpoints list`; if listed, decide via approve/reject. The recovery scan at server boot reports stranded waitpoints in the log line `pipeline waitpoint store wired (...) stranded_pending=N`.
+
+## CLI reference
+
+| Command | Purpose |
+|---------|---------|
+| `routine list` | Workspace routine catalog |
+| `routine get <slug>` | Detail with full DSL |
+| `routine save` | Save from JSON file |
+| `routine run <slug>` | Invoke against execution tier |
+| `routine dry-run <slug>` | Preview without invoking |
+| `routine delete <slug>` | Soft-delete |
+| `routine runs <slug>` | Run history from journal |
+| `routine versions <slug>` | Version history |
+| `routine rollback <slug> --to N` | Roll back to v N |
+| `routine export <slug>` | JSON bundle to stdout |
+| `routine import [bundle.json]` | Load from file or stdin |
+| `routine cancel <run_id>` | Signal in-flight run |
+| `routine validate [file.json]` | Offline DSL check |
+| `routine watch <slug>` | Live event stream |
+| `routine schedules ...` | Cron CRUD |
+| `routine webhooks ...` | Webhook CRUD |
+| `routine waitpoints ...` | HITL inbox + decisions |
+
+The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pipeline list`, `pipeline run`, `pipeline get`, etc.). The post-rename additions — `schedules`, `webhooks`, `waitpoints`, `validate`, `watch`, `logs`, `records` — are only registered under `routine`, so scripts that need them must switch.
+
+## Backend reference
+
+- Migrations v78 (pipelines + execution_tiers_json), v79 (versions + waitpoints), v80 (schedules), v81 (run idempotency), v82 (webhooks)
+- Source: `internal/pipeline/` (~10 700 LOC, 36 files)
+- API: `internal/api/pipelines.go`, `pipeline_runs.go`, `pipeline_schedules.go`, `pipeline_webhooks.go`
+- Sidecar: `internal/sidecar/pipelines.go` (port 9119)
+- Frontend: `app/(dashboard)/routines/`, `components/features/routines/`, hooks `use-pipelines*`
+
+## Limitations (current MVP)
+
+- **Run state is in-memory** — restart loses active runs. Pending waitpoints survive (DB-backed); active step execution does not. A `pipeline_runs` table with status enum + checkpoint is the next-step PR.
+- **Single-instance scheduler** — running multiple replicas would double-fire schedules.
+- **DSL editor is read-only in UI** — Monaco write-mode is a follow-up. Authoring through CLI / agent / API works fully.
+- **No cross-adapter tier swap yet** — same-provider model swap (Haiku→Opus) works; Claude→Gemini swap requires a shorthand→constant mapping not yet wired.
+- **No NL→cron converter** — ops still hand-type `0 9 * * *`. Foundation PRD has the design; not in MVP.
+- **No errors fingerprinting / bulk replay** — one-by-one rerun via `routine run` only.
+
+See [PIPELINES.md §17.7](./../../.claude/context/prd/PIPELINES.md) for the full deferred-features list and rationale.

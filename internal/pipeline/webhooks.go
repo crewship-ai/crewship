@@ -245,29 +245,34 @@ type rateLimiter struct {
 
 type rateWindow struct {
 	startedAt time.Time
-	count     atomic.Int64
+	count     int64
 }
 
 var globalRateLimiter = &rateLimiter{windows: map[string]*rateWindow{}}
 
 // allow reports whether a hit on `key` is within the limit. limit=0
 // is treated as unlimited.
+//
+// The increment must run UNDER the mutex (not via atomic.Add after
+// unlock) — otherwise two goroutines that both lock, both see an
+// expired window, both install a new window, and then both increment
+// outside the lock can race in subtle ways when multiple keys
+// interleave. Holding the mutex through increment + decision keeps
+// the limit semantics simple and observable.
 func (r *rateLimiter) allow(key string, limit int) bool {
 	if limit <= 0 {
 		return true
 	}
 	now := time.Now()
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	w, ok := r.windows[key]
 	if !ok || now.Sub(w.startedAt) >= time.Minute {
-		r.windows[key] = &rateWindow{startedAt: now}
-		w = r.windows[key]
+		w = &rateWindow{startedAt: now}
+		r.windows[key] = w
 	}
-	r.mu.Unlock()
-	if w.count.Add(1) > int64(limit) {
-		return false
-	}
-	return true
+	w.count++
+	return w.count <= int64(limit)
 }
 
 // AllowFire is the public throttle entrypoint used by the webhook

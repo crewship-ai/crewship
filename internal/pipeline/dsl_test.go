@@ -266,3 +266,255 @@ func TestRender_EnvAllowed(t *testing.T) {
 		t.Errorf("got %q", out)
 	}
 }
+
+// Validation breadth tests — verify that validateTemplatesInStep
+// walks ALL template-bearing fields, not just Prompt + NestedInputs.
+// The bug fixed in the routines stabilization commit was that
+// templates in step.HTTP.URL/Body/Headers, step.Wait.Until,
+// step.Code.Code, step.Transform.*, and step.If silently passed save
+// and crashed at runtime. These tests pin the behaviour so future
+// step-type additions remember to add their template fields to the
+// validator.
+
+func TestValidate_RejectsBadTemplateInHTTPUrl(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{
+				ID:   "fetch",
+				Type: StepHTTP,
+				HTTP: &HTTPStep{Method: "GET", URL: "{{ inputs.does_not_exist }}/path"},
+			},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "does_not_exist") {
+		t.Errorf("expected unknown-input error in HTTP URL template, got %v", err)
+	}
+}
+
+func TestValidate_RejectsBadTemplateInHTTPBody(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{ID: "a", Type: StepAgentRun, AgentSlug: "x", Prompt: "ok"},
+			{
+				ID:   "post",
+				Type: StepHTTP,
+				HTTP: &HTTPStep{
+					Method: "POST",
+					URL:    "https://api.example.com",
+					Body:   `{"echo":"{{ steps.never.output }}"}`,
+				},
+			},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "never") {
+		t.Errorf("expected unknown-step error in HTTP body template, got %v", err)
+	}
+}
+
+func TestValidate_RejectsBadTemplateInHTTPHeaders(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{
+				ID:   "auth",
+				Type: StepHTTP,
+				HTTP: &HTTPStep{
+					Method:  "GET",
+					URL:     "https://api.example.com",
+					Headers: map[string]string{"X-Token": "{{ inputs.missing }}"},
+				},
+			},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "missing") {
+		t.Errorf("expected unknown-input error in HTTP header template, got %v", err)
+	}
+}
+
+func TestValidate_RejectsBadTemplateInIf(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{
+				ID:        "guarded",
+				Type:      StepAgentRun,
+				If:        "{{ inputs.gate_unknown }}",
+				AgentSlug: "x",
+				Prompt:    "ok",
+			},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "gate_unknown") {
+		t.Errorf("expected unknown-input error in If template, got %v", err)
+	}
+}
+
+func TestValidate_RejectsBadTemplateInWaitUntil(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{
+				ID:   "wait",
+				Type: StepWait,
+				Wait: &WaitStep{Kind: "datetime", Until: "{{ inputs.no_such_time }}"},
+			},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "no_such_time") {
+		t.Errorf("expected unknown-input error in Wait.Until template, got %v", err)
+	}
+}
+
+func TestValidate_RejectsBadTemplateInCodeBody(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{
+				ID:   "run_script",
+				Type: StepCode,
+				Code: &CodeStep{
+					Runtime: "python",
+					Code:    "print('{{ inputs.absent_var }}')",
+				},
+			},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "absent_var") {
+		t.Errorf("expected unknown-input error in Code body template, got %v", err)
+	}
+}
+
+func TestValidate_RejectsBadTemplateInTransformExpression(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{ID: "fetch", Type: StepAgentRun, AgentSlug: "x", Prompt: "ok"},
+			{
+				ID:   "shape",
+				Type: StepTransform,
+				Transform: &TransformStep{
+					Input:      "{{ steps.fetch.output }}",
+					Expression: ".{{ steps.unknown.output }}",
+				},
+			},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil ||
+		!strings.Contains(err.Error(), "unknown") {
+		t.Errorf("expected unknown-step error in Transform template, got %v", err)
+	}
+}
+
+// TestValidate_DAGStepsCanReferenceAncestorRegardlessOfSourceOrder
+// pins the DAG-aware template validation: when ANY step declares
+// needs[], the validator switches from source-order to transitive-
+// reach. A step can reference ancestor outputs even when the source
+// position would say "forward reference". Without this, the parallel-
+// execution promise of DAG mode was undermined by the validator
+// rejecting topologically-valid configs.
+func TestValidate_DAGStepsCanReferenceAncestorRegardlessOfSourceOrder(t *testing.T) {
+	// B appears BEFORE A in source, but B explicitly depends on A
+	// via needs:[A]. Topologically A runs first; B's prompt
+	// referencing {{ steps.A.output }} should validate.
+	dsl := &DSL{
+		Name: "dag",
+		Steps: []Step{
+			{ID: "B", Type: StepAgentRun, AgentSlug: "x",
+				Needs:  []string{"A"},
+				Prompt: "use {{ steps.A.output }}"},
+			{ID: "A", Type: StepAgentRun, AgentSlug: "x", Prompt: "first"},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err != nil {
+		t.Errorf("DAG step B referencing ancestor A rejected: %v", err)
+	}
+}
+
+// TestValidate_DAGRejectsReferenceToNonAncestor counter-test: a step
+// MUST NOT reference a sibling or descendant. Only declared transitive
+// ancestors are valid template targets in DAG mode — referencing a
+// peer that runs in parallel would be a real ordering bug.
+func TestValidate_DAGRejectsReferenceToNonAncestor(t *testing.T) {
+	dsl := &DSL{
+		Name: "dag",
+		Steps: []Step{
+			{ID: "root", Type: StepAgentRun, AgentSlug: "x", Prompt: "start"},
+			// peer1 + peer2 both depend on root but NOT on each other.
+			// peer1 illegally references peer2's output — they're
+			// running in parallel, no ordering guarantee.
+			{ID: "peer1", Type: StepAgentRun, AgentSlug: "x",
+				Needs:  []string{"root"},
+				Prompt: "{{ steps.peer2.output }}"},
+			{ID: "peer2", Type: StepAgentRun, AgentSlug: "x",
+				Needs:  []string{"root"},
+				Prompt: "second"},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err == nil {
+		t.Error("expected rejection: peer1 cannot reference peer2 (parallel siblings, no ordering)")
+	}
+}
+
+// TestValidate_NestedTemplatesInCallPipelineInputs targets the bug
+// fixed by walkNestedTemplates: NestedInputs is `map[string]any` whose
+// values can themselves be objects/arrays/strings. Templates inside
+// the deeper layers were skipped by the old flat string-only walk and
+// crashed at runtime.
+func TestValidate_NestedTemplatesInCallPipelineInputs(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Steps: []Step{
+			{ID: "a", Type: StepAgentRun, AgentSlug: "x", Prompt: "ok"},
+			{
+				ID:           "wrap",
+				Type:         StepCallPipeline,
+				PipelineSlug: "child",
+				NestedInputs: map[string]any{
+					"meta": map[string]any{
+						"forwarded": "{{ inputs.does_not_exist }}",
+					},
+				},
+			},
+		},
+	}
+	pipelineSlugs := map[string]struct{}{"child": {}}
+	if err := Validate(dsl, nil, pipelineSlugs); err == nil ||
+		!strings.Contains(err.Error(), "does_not_exist") {
+		t.Errorf("expected unknown-input error in nested NestedInputs, got %v", err)
+	}
+}
+
+// Positive control: known good templates across all fields pass.
+func TestValidate_AcceptsValidTemplatesAcrossAllFields(t *testing.T) {
+	dsl := &DSL{
+		Name: "demo",
+		Inputs: []InputSpec{
+			{Name: "url", Type: "string"},
+			{Name: "gate", Type: "boolean"},
+			{Name: "until_ts", Type: "string"},
+			{Name: "echo", Type: "string"},
+		},
+		Steps: []Step{
+			{ID: "fetch", Type: StepHTTP, HTTP: &HTTPStep{
+				Method: "GET", URL: "{{ inputs.url }}",
+				Headers: map[string]string{"X-Echo": "{{ inputs.echo }}"},
+			}},
+			{ID: "guarded", Type: StepAgentRun, If: "{{ inputs.gate }}",
+				AgentSlug: "x", Prompt: "see {{ steps.fetch.output }}"},
+			{ID: "wait_until", Type: StepWait, Wait: &WaitStep{
+				Kind: "datetime", Until: "{{ inputs.until_ts }}",
+			}},
+		},
+	}
+	if err := Validate(dsl, nil, nil); err != nil {
+		t.Errorf("happy-path multi-field templates rejected: %v", err)
+	}
+}

@@ -87,21 +87,47 @@ VALUES (?, ?, ?, ?, ?)`,
 		return runID, true, nil
 	}
 
-	// Conflict — read the existing row.
+	// Conflict — read the existing row, but only if it is NOT
+	// expired. Without the expires_at filter, a sweep failure above
+	// would leave an expired row in the table, and INSERT OR IGNORE
+	// would silently match it; we'd then return the dead run_id as
+	// if it were live, and the caller (a webhook redelivery, say)
+	// would resolve to a zombie run.
+	nowStr := now.Format(time.RFC3339Nano)
 	var existing string
 	err = s.db.QueryRowContext(ctx, `
 SELECT run_id FROM pipeline_run_idempotency
-WHERE workspace_id = ? AND idempotency_key = ?`,
-		workspaceID, idempotencyKey,
+WHERE workspace_id = ? AND idempotency_key = ? AND expires_at > ?`,
+		workspaceID, idempotencyKey, nowStr,
 	).Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The matching row exists but has expired. The sweep failed
+		// to delete it. Treat as if no reservation existed: caller
+		// retries with the same key, INSERT OR IGNORE will conflict
+		// again, and the next call needs the row gone. Force-delete
+		// this exact key so the retry succeeds; if even that fails,
+		// surface a clean error so the caller backs off.
+		if _, delErr := s.db.ExecContext(ctx, `
+DELETE FROM pipeline_run_idempotency
+WHERE workspace_id = ? AND idempotency_key = ? AND expires_at <= ?`,
+			workspaceID, idempotencyKey, nowStr,
+		); delErr != nil {
+			return "", false, fmt.Errorf("idempotency: stale row force-delete: %w", delErr)
+		}
+		return "", false, errStaleRowDeleted
+	}
 	if err != nil {
-		// Row went away between INSERT OR IGNORE and SELECT (sweep
-		// raced us). Best caller experience is to retry once; we
-		// surface the error so the caller can decide.
 		return "", false, fmt.Errorf("idempotency: read after conflict: %w", err)
 	}
 	return existing, false, nil
 }
+
+// errStaleRowDeleted signals to the caller (via Reserve) that an
+// expired row was present and has been force-deleted. The caller can
+// retry Reserve once and expect to succeed. Sentinel error so the
+// HTTP handler can map it to 409 with a "retry once" hint instead of
+// crashing with a confused state.
+var errStaleRowDeleted = errors.New("idempotency: stale row force-deleted; retry")
 
 // Forget removes an idempotency reservation. Called when a run
 // failed early enough that a retry with the same key should be

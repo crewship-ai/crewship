@@ -22,24 +22,35 @@ import (
 // resources: list / get / run / dry-run / delete + a save subcommand
 // that round-trips the test_run gate before the row hits the DB.
 var pipelineCmd = &cobra.Command{
-	Use:   "pipeline",
-	Short: "Manage workspace pipelines (declarative DSL workflows)",
-	Long: `Pipelines are AI-authored, workspace-scoped recipes that any crew can
-invoke. Each pipeline has a slug, a JSON DSL definition, and a record
+	Use:     "routine",
+	Aliases: []string{"pipeline"},
+	Short:   "Manage workspace routines (declarative DSL workflows; alias: pipeline)",
+	Long: `Routines are AI-authored, workspace-scoped recipes that any crew can
+invoke. Each routine has a slug, a JSON DSL definition, and a record
 of who authored it (which crew, which agent). When you invoke a
-pipeline, the executor runs it in the AUTHOR crew's context — you
+routine, the executor runs it in the AUTHOR crew's context — you
 reuse the author's persona + credentials without seeing them.
 
-Examples:
-  crewship pipeline list
-  crewship pipeline get email-fetch-summarize
-  crewship pipeline save --name "email-fetch" --description "..." --definition pipeline.json --author-crew crew_a
-  crewship pipeline run email-fetch-summarize --inputs '{"since":"yesterday"}'
-  crewship pipeline dry-run email-fetch-summarize --inputs '{"since":"yesterday"}'
-  crewship pipeline delete email-fetch-summarize
-  crewship pipeline runs email-fetch-summarize --limit 20
+The "pipeline" alias is preserved for back-compat: every "crewship
+routine X" invocation also works as "crewship pipeline X". Internal
+identifiers (table, package, route paths) remain "pipeline"; only
+the user-facing label is Routine.
 
-Subcommand status (all live as of MVP ship):
+Examples:
+  crewship routine list
+  crewship routine get email-fetch-summarize
+  crewship routine save --name "email-fetch" --description "..." --definition routine.json --author-crew crew_a
+  crewship routine run email-fetch-summarize --inputs '{"since":"yesterday"}'
+  crewship routine dry-run email-fetch-summarize --inputs '{"since":"yesterday"}'
+  crewship routine delete email-fetch-summarize
+  crewship routine runs email-fetch-summarize --limit 20
+  crewship routine versions email-fetch-summarize
+  crewship routine rollback email-fetch-summarize --to 3
+  crewship routine export email-fetch-summarize > bundle.json
+  crewship routine import < bundle.json
+  crewship routine cancel <run_id>
+
+Subcommand status:
   list       GET    /api/v1/workspaces/{ws}/pipelines
   get        GET    /api/v1/workspaces/{ws}/pipelines/{slug}
   run        POST   /api/v1/workspaces/{ws}/pipelines/{slug}/run
@@ -47,6 +58,11 @@ Subcommand status (all live as of MVP ship):
   save       POST   /api/v1/workspaces/{ws}/pipelines/test_run + .../internal/pipelines/save
   delete     DELETE /api/v1/workspaces/{ws}/pipelines/{slug}
   runs       GET    /api/v1/workspaces/{ws}/pipelines/{slug}/runs (journal-backed)
+  versions   GET    /api/v1/workspaces/{ws}/pipelines/{slug}/versions
+  rollback   POST   /api/v1/workspaces/{ws}/pipelines/{slug}/rollback
+  export     GET    /api/v1/workspaces/{ws}/pipelines/{slug}/export
+  import     POST   /api/v1/workspaces/{ws}/pipelines/import
+  cancel     POST   /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/cancel
 `,
 }
 

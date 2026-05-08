@@ -133,8 +133,13 @@ export function usePipelineRuns(workspaceId: string | null | undefined, slug: st
     setLoading(true)
     setError(null)
     try {
+      // include_steps=1 widens the response to include pipeline.step.*
+      // events alongside pipeline.run.* — the Runs sub-tab uses the
+      // step entries to render the waterfall timeline when a run is
+      // expanded. Server caps the LIMIT regardless so payload stays
+      // bounded (50 entries ≈ 5 runs × 11-event lifecycle).
       const res = await fetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/runs?limit=50`,
+        `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/runs?limit=50&include_steps=1`,
         { signal: controller.signal },
       )
       if (controller.signal.aborted) return

@@ -519,7 +519,18 @@ func scanPipeline(rs rowScanner) (*Pipeline, error) {
 // produce stable output but break integrity for documents that
 // preserve significant whitespace or key ordering (some schemas do).
 func definitionHash(definitionJSON string) string {
-	sum := sha256.Sum256([]byte(definitionJSON))
+	return DefinitionHash([]byte(definitionJSON))
+}
+
+// DefinitionHash is the exported single-source-of-truth implementation
+// of the routine definition hash. The HMAC save_token wiring in
+// internal/api uses this to bind a token to a specific DSL version;
+// historically internal/api had its own copy and the two were free
+// to drift (different pre-processing, different encoding) which would
+// silently break save_token verification. Keep one impl, share both
+// callers.
+func DefinitionHash(definitionJSON []byte) string {
+	sum := sha256.Sum256(definitionJSON)
 	return hex.EncodeToString(sum[:])
 }
 

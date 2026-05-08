@@ -119,7 +119,7 @@ function PipelineRunNodeImpl({ data }: NodeProps) {
       )}
       role="button"
       tabIndex={0}
-      aria-label={`Pipeline run ${title} (${cfg.label})`}
+      aria-label={`Routine run ${title} (${cfg.label})`}
     >
       {/* Header: pipeline icon + status icon + slug */}
       <div className="flex items-center gap-2">
