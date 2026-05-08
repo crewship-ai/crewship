@@ -1,26 +1,36 @@
 ---
 title: "Eval Commands"
-description: "Mission replay and regression evaluation via Quartermaster."
+description: "Two evaluation surfaces: mission replay/regression (Quartermaster) and routine-eval scenarios (cross-tier consistency suite, baseline regression diff)."
 icon: "clipboard-check"
 ---
 
 # crewship eval
 
-Evaluate agent behaviour by replaying a mission with a fixed seed or diffing a candidate mission against a baseline. See the [Quartermaster guide](/guides/quartermaster) for the underlying model.
+Two distinct evaluation surfaces share the `crewship eval` namespace:
+
+1. **Mission-level** — replay a single mission deterministically or regression-diff two missions. Uses the Quartermaster engine. See [Quartermaster guide](/guides/quartermaster).
+2. **Routine-level** — sweep the workspace's `eval-*` routines × tier matrix, head-to-head tier compare, save/diff regression baselines. Built on top of the Routines runtime. See [Routines guide](/guides/routines) and [Routines cookbook](/guides/routines-cookbook).
 
 ```bash
 crewship eval <subcommand> [flags]
 ```
 
-All mutating subcommands return a `run_id` immediately (the backend enqueues the work and processes it asynchronously with a 10-minute worker deadline). Poll completion via `crewship eval runs`.
+Mission-level subcommands enqueue work asynchronously and return a `run_id` (poll completion via `crewship eval runs`). Routine-level subcommands run synchronously and emit results inline.
 
 ## Subcommands
 
-| Command | Description |
-|---|---|
-| `replay <mission-id>` | Replay a mission deterministically. |
-| `regression <baseline-id> <candidate-id>` | Regression-diff two missions. |
-| `runs` | List recent eval runs. |
+| Group | Command | Description |
+|---|---|---|
+| Mission | `replay <mission-id>` | Replay a mission deterministically. |
+| Mission | `regression <baseline-id> <candidate-id>` | Regression-diff two missions. |
+| Mission | `runs` | List recent eval runs. |
+| Routine | `scenarios` | Batch-run `eval-*` routines × tier list × N runs, output pass-rate matrix. |
+| Routine | `compare <slug>` | Head-to-head: run one scenario back-to-back on two tiers. |
+| Routine | `baseline save <name>` | Snapshot the current matrix as a regression baseline. |
+| Routine | `baseline list` | List stored baselines. |
+| Routine | `baseline show <name>` | Inspect a stored baseline's matrix. |
+| Routine | `baseline diff <name>` | Re-run + diff against a stored baseline. CI-friendly (non-zero exit on regression). |
+| Routine | `baseline delete <name>` | Remove a stored baseline. |
 
 ---
 
@@ -93,7 +103,160 @@ curl -H "Authorization: Bearer $CREWSHIP_TOKEN" \
 
 Or watch the [Crew Journal](/guides/crew-journal) for `eval.run_started`, `eval.metric`, `eval.regression_detected` entries correlated by the `run_id` in the payload.
 
+---
+
+# Routine-level eval
+
+The routine-level commands target the **eval suite** seeded under the `eval-` slug prefix (see [Routines guide §18](/guides/routines#eval-framework) for the framework concept and [cookbook recipe 6](/guides/routines-cookbook) for the eval-driven promotion workflow).
+
+Unlike the mission commands, these run synchronously and emit pass/fail and stats inline.
+
+## `crewship eval scenarios`
+
+Batch-run the workspace's `eval-*` routines across one or more tiers and report a pass-rate matrix. The canonical "weak vs strong agent same outcome?" harness — same DSL, same inputs, only the resolved tier differs across cells.
+
+```bash
+# Default: every eval-* routine, once, at the workspace's authored tier
+crewship eval scenarios
+
+# Targeted sweep with N runs per (scenario, tier) cell
+crewship eval scenarios --scenarios eval-extract-emails,eval-classify-sentiment \
+                        --tiers fast,smart --runs 5
+
+# Machine-readable output for CI / regression dashboards
+crewship eval scenarios --runs 3 --tiers fast,smart -f json
+crewship eval scenarios --runs 3 --tiers fast,smart -f markdown
+```
+
+| Flag | Description |
+|---|---|
+| `--scenarios` | Comma-separated routine slugs (default: every routine whose slug starts with `eval-`). |
+| `--tiers` | Comma-separated tier overrides (`trivial`/`fast`/`moderate`/`smart`). Empty = use authored complexity. |
+| `--runs` | Runs per (scenario, tier) cell (default 1). |
+| `--inputs` | JSON inputs forwarded to every run (default: each routine's authored defaults). |
+| `--fail-fast` | Abort on the first non-pass instead of running every cell. |
+
+Output (table format): rows = scenarios, columns = tiers, cells = `pass/total  $avg-cost`. A cell with `5/5 $0.0012` means every run passed the routine's gate at that tier. Use the JSON or Markdown formats for downstream tooling.
+
+---
+
+## `crewship eval compare <slug>`
+
+Run ONE eval scenario back-to-back on two tiers and report a head-to-head verdict. Use this when investigating a specific scenario rather than sweeping the whole suite.
+
+```bash
+crewship eval compare eval-extract-emails
+crewship eval compare eval-syllogism-reasoning --tier-a moderate --tier-b smart
+crewship eval compare eval-classify-sentiment -f markdown
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--tier-a` | `fast` | Tier override for side A. |
+| `--tier-b` | `smart` | Tier override for side B. |
+| `--inputs` | | JSON inputs forwarded to both sides (default: routine's authored defaults). |
+
+Verdict (top of output):
+
+| Verdict | Meaning |
+|---|---|
+| `AGREE-PASS` | Both tiers passed the routine's gate. |
+| `AGREE-FAIL` | Both tiers failed (regression on the routine itself, not a tier-strength signal). |
+| `DIVERGE-A-PASS` | Only side A passed — weak-tier-only or strong-tier-only path discovered. |
+| `DIVERGE-B-PASS` | Only side B passed. |
+| `AMBIGUOUS` | At least one side errored at transport level — verdict can't be cleanly assigned. |
+
+**`--tier-a` and `--tier-b` MUST differ** — passing the same value on both errors out.
+
+Output text identity is NOT asserted — two LLM runs are rarely identical at the byte level. The verdict is about gate-pass agreement, not text agreement.
+
+---
+
+## `crewship eval baseline`
+
+File-local snapshots of the eval matrix (`~/.crewship/eval-baselines/<name>.json`) plus regression diff. Per-developer / per-CI-run state — no server-side migration, no RBAC surface. Designed to be the CI gate that fails the build when a model swap or DSL refactor changes gate-pass behaviour.
+
+### `baseline save <name>`
+
+Run the eval matrix once and persist it as a regression baseline.
+
+```bash
+# Snapshot current main behaviour as the baseline
+crewship eval baseline save main --tiers fast,smart --runs 5
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--scenarios` | (every `eval-*`) | Comma-separated routine slugs. |
+| `--tiers` | (no override) | Comma-separated tier overrides. |
+| `--runs` | `5` | Runs per (scenario, tier) cell. |
+| `--inputs` | | JSON inputs forwarded to every run. |
+
+Baselines record the source workspace ID at save time. `diff` refuses to compare across workspaces — reusing a baseline name in another workspace would silently report bogus regressions.
+
+Names are restricted to `[A-Za-z0-9_-]{1,64}` to prevent path-traversal in the on-disk file location.
+
+### `baseline list`
+
+```bash
+crewship eval baseline list
+crewship eval baseline list -f json
+```
+
+Columns: `NAME`, `GENERATED`, `SCENARIOS`, `TIERS`, `RUNS/CELL`.
+
+### `baseline show <name>`
+
+```bash
+crewship eval baseline show main
+```
+
+Prints the full matrix from the stored baseline (cells = `pass/total $avg-cost`). Use `-f json` for the raw record.
+
+### `baseline diff <name>`
+
+Re-run the matrix against the same scenario / tier / runs combo and diff each cell against the stored baseline. Exits non-zero on any regression beyond `--tolerance`.
+
+```bash
+# In CI: fail on regression beyond ±10pp pass-rate change
+crewship eval baseline diff main --tiers fast,smart --runs 5
+
+# Looser tolerance for known-flaky routines, JSON output for CI capture
+crewship eval baseline diff main --tolerance 0.20 --runs 10 -f json
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--scenarios` | (every `eval-*`) | Comma-separated routine slugs. |
+| `--tiers` | (no override) | Comma-separated tier overrides. |
+| `--runs` | `5` | Runs per cell. |
+| `--inputs` | | JSON inputs forwarded to every run. |
+| `--tolerance` | `0.10` | Pass-rate delta tolerance for the `STABLE` verdict (e.g. `0.10` = ±10pp). |
+
+Per-cell verdict:
+
+| Verdict | When |
+|---|---|
+| `STABLE` | Pass-rate delta within ±tolerance. |
+| `IMPROVED` | Pass-rate rose by more than tolerance. |
+| `REGRESSION` | Pass-rate dropped by more than tolerance. **Triggers non-zero exit.** |
+| `NEW` | Cell exists in current run but not in baseline. |
+| `REMOVED` | Cell exists in baseline but not in current run (warning only). |
+
+Cells that exist in NEITHER baseline nor current are skipped (they get no row).
+
+### `baseline delete <name>`
+
+```bash
+crewship eval baseline delete main
+```
+
+Permanently removes the on-disk baseline file. No confirmation prompt — file is per-developer state.
+
 ## Related
 
-- [Quartermaster guide](/guides/quartermaster).
+- [Quartermaster guide](/guides/quartermaster) — mission-level replay/regression engine.
+- [Routines guide](/guides/routines) — concept of routines + DSL spec.
+- [Routines cookbook](/guides/routines-cookbook) — recipe 6 walks the eval-driven promotion workflow end-to-end.
+- [Routine CLI](/cli/routine) — `routine bench`, `routine doctor` (per-routine variance + preflight).
 - [Eval API](/api-reference/eval).

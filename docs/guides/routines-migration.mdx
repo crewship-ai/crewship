@@ -73,6 +73,11 @@ Beyond the rename itself, the same release shipped the following net-new capabil
 - **`crewship routine validate file.json`** — offline DSL parse + validate, exit 0/1 for CI gates.
 - **`crewship routine watch <slug>`** — live event stream, ANSI-coloured by default, `--json` for jq pipelines.
 - **`crewship routine logs <run_id> --slug X`** — one-shot post-mortem dump for a specific run.
+- **`crewship routine doctor <slug>`** — preflight ✓/⚠/✗ checklist that catches blind alleys (missing crew provisioning, agent slug typo, missing credential, contradictory validation gate, cost cap too tight) before `run`. CI-friendly via `-f json` + non-zero exit on any FAIL.
+- **`crewship routine bench <slug>`** — N-runs variance characterisation: pass-rate + cost mean/p95/max + duration p50/p95/max + fail-reason breakdown. Headline verdict (`PRODUCTION_READY`/`FLAKY`/`UNRELIABLE`/`BROKEN`).
+- **`crewship routine records <slug>`** — list runs from the indexed `pipeline_runs` projection (v83). Filterable by status, much faster than `runs` for large run history.
+- **`crewship eval scenarios` / `eval compare` / `eval baseline`** — cross-tier consistency suite for routines whose slug starts with `eval-`. Save baselines locally, diff in CI on every PR. See [eval CLI](/cli/eval).
+- **`--tier-override`** flag on `routine run` (and on `bench`, `eval scenarios`, `eval compare`, `eval baseline`) — force every `agent_run` step onto a specific tier without DSL changes. Step-level `model_override` still wins.
 - **JSON Schema** at `schemas/routine.v1.json` — IDE autocomplete + inline validation when authoring DSL files.
 
 ### Security
@@ -85,7 +90,7 @@ Beyond the rename itself, the same release shipped the following net-new capabil
 
 ### "I'm using the CLI"
 
-Nothing to change. `crewship pipeline list` keeps working as an alias for `crewship routine list`. New subcommands (schedules / webhooks / waitpoints / validate / watch / logs) are only available under the `routine` name; pipeline alias doesn't expose them. Recommended: switch your scripts to `routine` so both old and new commands are available.
+Nothing to change. `crewship pipeline list` keeps working as an alias for `crewship routine list`. New subcommands (`schedules` / `webhooks` / `waitpoints` / `validate` / `watch` / `logs` / `records` / `doctor` / `bench`) are only available under the `routine` name; the `pipeline` alias doesn't expose them. Recommended: switch your scripts to `routine` so both old and new commands are available.
 
 ### "I'm using the API"
 
