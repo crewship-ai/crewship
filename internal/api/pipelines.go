@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -524,6 +525,35 @@ func definitionHashHex(def []byte) string {
 	return pipeline.DefinitionHash(def)
 }
 
+// truncateErrorForList sanitizes an error_message before exposing it
+// through the run-records list endpoint. Caller-supplied + executor-
+// supplied error strings can carry: file paths, stack frames, half-
+// rendered prompts that included secrets, full credential values
+// that the must_not_contain gate didn't catch. The list view doesn't
+// need that detail — operators drill into journal_entries via the
+// /runs?include_steps=1 endpoint when they want the full picture.
+func truncateErrorForList(s string) string {
+	if s == "" {
+		return ""
+	}
+	// First newline = stop. Keeps single-line summaries intact, drops
+	// multi-line stack traces.
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	// Hard length cap. UTF-8 safe slice — walk back to a rune
+	// boundary so we don't emit invalid bytes.
+	const cap = 200
+	if len(s) <= cap {
+		return s
+	}
+	cut := cap
+	for cut > 0 && cut > cap-4 && (s[cut]&0xc0) == 0x80 {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
 // Delete soft-deletes a pipeline by slug.
 // DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}
 func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -616,17 +646,24 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	out := make([]runRecordDTO, 0, len(records))
 	for _, rec := range records {
 		dto := runRecordDTO{
-			ID:               rec.ID,
-			PipelineID:       rec.PipelineID,
-			PipelineSlug:     rec.PipelineSlug,
-			Status:           string(rec.Status),
-			Mode:             string(rec.Mode),
-			StartedAt:        rec.StartedAt.Format(time.RFC3339Nano),
-			CurrentStepID:    rec.CurrentStepID,
-			Output:           rec.Output,
-			CostUSD:          rec.CostUSD,
-			DurationMs:       rec.DurationMs,
-			ErrorMessage:     rec.ErrorMessage,
+			ID:            rec.ID,
+			PipelineID:    rec.PipelineID,
+			PipelineSlug:  rec.PipelineSlug,
+			Status:        string(rec.Status),
+			Mode:          string(rec.Mode),
+			StartedAt:     rec.StartedAt.Format(time.RFC3339Nano),
+			CurrentStepID: rec.CurrentStepID,
+			Output:        rec.Output,
+			CostUSD:       rec.CostUSD,
+			DurationMs:    rec.DurationMs,
+			// Sanitize: error_message comes verbatim from executor /
+			// runner / DB driver — could carry stack traces, file
+			// paths, half-rendered prompts, secrets the validation
+			// gate didn't catch. Truncate hard at 200 chars and
+			// strip anything past the first newline so multi-line
+			// stack traces don't leak through the dashboard. Full
+			// error stays in journal_entries (audit-of-record).
+			ErrorMessage:     truncateErrorForList(rec.ErrorMessage),
 			FailedAtStep:     rec.FailedAtStep,
 			ErrorFingerprint: rec.ErrorFingerprint,
 			TriggeredVia:     string(rec.TriggeredVia),

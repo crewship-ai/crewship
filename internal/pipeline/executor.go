@@ -521,7 +521,7 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 		// exhaust / cancel) lands the same finalized row. The
 		// persist helper short-circuits when result is unset
 		// (recursive helper returns early).
-		defer e.persistRunTerminal(ctx, runID, in, result, startedAt)
+		defer e.persistRunTerminal(ctx, runID, in, pipelineID, result, startedAt)
 	}
 
 	// DAG dispatch — if any step declares `needs:` AND we're not in
@@ -1197,8 +1197,21 @@ var runIDCounter atomic.Uint64
 // pipeline_runs is the query-optimized projection. Used only at
 // depth==0 (top-level run) and skipped for ModeDryRun (no run row
 // for previews).
+//
+// Skips entirely when pipelineID is empty — that's the unsaved-draft
+// path used by RunDefinition (TestRun on a draft DSL). Inserting
+// with empty pipelineID would violate the FK on pipeline_runs and
+// fail the test_run gate; saved-pipeline runs always have a real
+// pipelineID via the in.pipeline.ID field.
 func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipelineID, pipelineSlug string, inputs map[string]any, startedAt time.Time) {
 	if e.runStore == nil {
+		return
+	}
+	if pipelineID == "" {
+		// Unsaved-draft run (TestRun on RunDefinition path) — no
+		// matching pipelines row exists yet, so the FK insert would
+		// fail. Skip the projection write; the journal entries that
+		// already fired are sufficient for audit on draft runs.
 		return
 	}
 	inputsRaw, _ := json.Marshal(inputs)
@@ -1230,10 +1243,31 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 // before returning. If result is nil (early-return path before
 // result was constructed), we mark the run failed with a generic
 // message so the row doesn't sit in 'running' forever.
-func (e *Executor) persistRunTerminal(ctx context.Context, runID string, in RunInput, result *RunResult, startedAt time.Time) {
+//
+// Skips entirely when pipelineID is empty (unsaved-draft path —
+// matches the persistRunStart skip so we never try to update a row
+// we never inserted).
+//
+// Uses a fresh context with a 5s timeout (NOT the run's ctx) because
+// the run's ctx may have been cancelled (user clicked Cancel, parent
+// deadline tripped). Persisting terminal state is the audit-of-
+// record action that MUST land regardless — without the fresh ctx,
+// MarkTerminal would fail with "context cancelled" and the row
+// would stay in 'running' forever. 5s is generous for a single
+// SQLite UPDATE.
+func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in RunInput, pipelineID string, result *RunResult, startedAt time.Time) {
 	if e.runStore == nil {
 		return
 	}
+	if pipelineID == "" {
+		// No row to update — see persistRunStart skip rationale.
+		return
+	}
+	// Fresh context decoupled from the run's ctx so cancellation
+	// doesn't drop the terminal write. We still cap at 5s so a hung
+	// DB doesn't leak goroutines forever via the defer.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	dur := time.Since(startedAt).Milliseconds()
 	terminal := MarkTerminalInput{
 		RunID:      runID,
@@ -1242,6 +1276,13 @@ func (e *Executor) persistRunTerminal(ctx context.Context, runID string, in RunI
 	if result == nil {
 		terminal.Status = RunStatusFailed
 		terminal.ErrorMessage = "run aborted before result was constructed"
+		// If the run ctx was cancelled, surface the cancel cause for
+		// post-mortem clarity — distinguishes user-initiated cancel
+		// from a panic-style early return.
+		if runCtx.Err() != nil {
+			terminal.Status = RunStatusCancelled
+			terminal.ErrorMessage = "run cancelled: " + runCtx.Err().Error()
+		}
 	} else {
 		switch result.Status {
 		case "COMPLETED":
