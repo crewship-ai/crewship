@@ -547,6 +547,100 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ListRunRecords returns runs from the pipeline_runs table directly
+// (column-typed, B-tree scan). Faster than ListRuns because it skips
+// the LIKE-pattern + json_extract path on journal_entries; ideal for
+// the active-runs dashboard and run-history list views that don't
+// need per-step event detail.
+//
+// GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records
+//
+// Returns 503 when the runStore is not wired (legacy deployment with
+// only journal-backed runs); UI clients should fall back to ListRuns
+// in that case.
+func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	slug := r.PathValue("slug")
+	if h.runStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":  "pipeline_runs store not wired; fall back to /runs (journal-backed)",
+			"hint":   "this deployment predates migration v83 or runStore is unset in cmd_start.go",
+			"legacy": "/runs",
+		})
+		return
+	}
+	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("pipeline list run-records: load", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		return
+	}
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := parseSmallInt(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	statusFilter := pipeline.RunStatus(r.URL.Query().Get("status"))
+	records, err := h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+	if err != nil {
+		h.logger.Error("pipeline list run-records: query", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list run records"})
+		return
+	}
+	// Stable wire shape — explicit DTO so internal renames don't
+	// silently break the API contract.
+	type runRecordDTO struct {
+		ID               string  `json:"id"`
+		PipelineID       string  `json:"pipeline_id"`
+		PipelineSlug     string  `json:"pipeline_slug"`
+		Status           string  `json:"status"`
+		Mode             string  `json:"mode"`
+		StartedAt        string  `json:"started_at"`
+		EndedAt          string  `json:"ended_at,omitempty"`
+		CurrentStepID    string  `json:"current_step_id,omitempty"`
+		Output           string  `json:"output,omitempty"`
+		CostUSD          float64 `json:"cost_usd"`
+		DurationMs       int64   `json:"duration_ms"`
+		ErrorMessage     string  `json:"error_message,omitempty"`
+		FailedAtStep     string  `json:"failed_at_step,omitempty"`
+		ErrorFingerprint string  `json:"error_fingerprint,omitempty"`
+		TriggeredVia     string  `json:"triggered_via"`
+		TriggeredByID    string  `json:"triggered_by_id,omitempty"`
+		IdempotencyKey   string  `json:"idempotency_key,omitempty"`
+	}
+	out := make([]runRecordDTO, 0, len(records))
+	for _, rec := range records {
+		dto := runRecordDTO{
+			ID:               rec.ID,
+			PipelineID:       rec.PipelineID,
+			PipelineSlug:     rec.PipelineSlug,
+			Status:           string(rec.Status),
+			Mode:             string(rec.Mode),
+			StartedAt:        rec.StartedAt.Format(time.RFC3339Nano),
+			CurrentStepID:    rec.CurrentStepID,
+			Output:           rec.Output,
+			CostUSD:          rec.CostUSD,
+			DurationMs:       rec.DurationMs,
+			ErrorMessage:     rec.ErrorMessage,
+			FailedAtStep:     rec.FailedAtStep,
+			ErrorFingerprint: rec.ErrorFingerprint,
+			TriggeredVia:     string(rec.TriggeredVia),
+			TriggeredByID:    rec.TriggeredByID,
+			IdempotencyKey:   rec.IdempotencyKey,
+		}
+		if rec.EndedAt != nil && !rec.EndedAt.IsZero() {
+			dto.EndedAt = rec.EndedAt.Format(time.RFC3339Nano)
+		}
+		out = append(out, dto)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ListRuns returns the journal entries for the named pipeline,
 // filtered server-side to pipeline.* entry types so the response
 // is purpose-built for a runs table UI without leaking unrelated
