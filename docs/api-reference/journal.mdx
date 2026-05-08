@@ -4,7 +4,7 @@ description: "Read and stream the Crew Journal -- the canonical append-only even
 icon: "book-open"
 ---
 
-Every endpoint requires authentication and is workspace-scoped via the session context. There is no write endpoint -- entries come from backend code emitting via `journal.Writer`. See the [Crew Journal guide](/guides/crew-journal) for the data model and entry-type catalog.
+Every endpoint requires authentication and is workspace-scoped via the session context. The journal is **append-only at the entry level** — there is no endpoint that creates, mutates, or deletes a journal row's payload; entries come from backend code emitting via `journal.Writer`. The one writable surface is the operator-facing **priority marker** ([`POST /api/v1/journal/{id}/priority`](#set-entry-priority)), which updates only the `priority` column on an existing row and emits its own `memory.priority_changed` audit entry. See the [Crew Journal guide](/guides/crew-journal) for the data model and entry-type catalog.
 
 ---
 
@@ -25,7 +25,7 @@ All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predica
 | `mission_id` | string | Filter by mission ID. |
 | `trace_id` | string | Narrow to one run's spans (`trace_id` == run id). |
 | `crew_ids` | string | CSV multi-crew filter — takes precedence over `crew_id` when non-empty. |
-| `agent_ids` | string | CSV multi-agent filter — takes precedence over `agent_id`. |
+| `agent_ids` | string | CSV multi-agent filter — takes precedence over `agent_id` when non-empty. |
 | `entry_type` | string | CSV of entry types (e.g. `peer.escalation,keeper.decision`). |
 | `exclude_entry_type` | string | CSV of entry types to exclude (`NOT IN`). Useful for hiding `container.metrics` noise. AND-combines with `entry_type`. |
 | `severity` | string | CSV of `info`, `notice`, `warn`, `error`. |
