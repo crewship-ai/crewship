@@ -99,6 +99,22 @@ const (
 	EntryHookFired   EntryType = "hook.fired"
 	EntryHookBlocked EntryType = "hook.blocked"
 
+	// Pipelines — declarative AI-authored workflows persisted per-
+	// workspace and reusable across crews. See PIPELINES.md for the
+	// full design. Run-level entries (started/completed/failed) frame
+	// the run; step-level entries trace each individual step. Output
+	// previews are truncated server-side to keep payload size bounded.
+	// invoking_crew_id and author_crew_id are duplicated into the
+	// payload so cross-crew reuse is queryable without a join.
+	EntryPipelineRunStarted     EntryType = "pipeline.run.started"
+	EntryPipelineRunCompleted   EntryType = "pipeline.run.completed"
+	EntryPipelineRunFailed      EntryType = "pipeline.run.failed"
+	EntryPipelineStepStarted    EntryType = "pipeline.step.started"
+	EntryPipelineStepCompleted  EntryType = "pipeline.step.completed"
+	EntryPipelineStepFailed     EntryType = "pipeline.step.failed"
+	EntryPipelineStepValidation EntryType = "pipeline.step.validation_failed"
+	EntryPipelineDryRun         EntryType = "pipeline.dry_run"
+
 	// System
 	EntrySystemCompaction             EntryType = "system.compaction"
 	EntrySystemMigration              EntryType = "system.migration"

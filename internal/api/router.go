@@ -81,6 +81,11 @@ type Router struct {
 	consolidator           *consolidate.Consolidator
 	consolidateMemoryRoot  string
 	provisioning           *ProvisioningHandler // exposed via Provisioning() so chatbridge can auto-trigger builds
+	// PipelinesHandler is exposed (capitalised) so the orchestrator
+	// boot path can hand it the AgentRunner adapter post-construction.
+	// The router builds handlers before the orchestrator is fully
+	// initialised, so two-phase wiring is the cheapest fix.
+	PipelinesHandler *PipelineHandler
 }
 
 // Provisioning returns the registered ProvisioningHandler so wiring code (e.g.

@@ -1,0 +1,156 @@
+package pipeline
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// runHTTPStep handles a StepHTTP. Single outbound request,
+// template-substituted URL/body/headers, optional credential
+// injection from a workspace-typed reference. The runtime resolves
+// CredentialRef via the supplied Executor.credentialResolver.
+//
+// Why a separate file: HTTP step has its own security perimeter
+// (egress allowlist, credential injection, body size cap) that
+// shouldn't muddy executor.go's step-dispatch loop.
+//
+// Returns (output, costUSD=0, durationMs, err). HTTP steps don't
+// burn LLM tokens, so cost is always 0 — pipeline cost reporting
+// stays accurate.
+func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender RenderContext) (string, float64, int64, error) {
+	stepStart := time.Now()
+	if step.HTTP == nil {
+		return "", 0, 0, fmt.Errorf("http step missing body")
+	}
+
+	// Render templates on URL, body, and header values. We
+	// deliberately DO NOT render header keys — that's a misuse
+	// vector (a template-injected key could overwrite Authorization).
+	rawURL := Render(step.HTTP.URL, parentRender)
+	if rawURL == "" {
+		return "", 0, 0, fmt.Errorf("http step %q rendered empty URL", step.ID)
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("http step %q parse url: %w", step.ID, err)
+	}
+	// Egress allowlist: enforce host check at the runtime even
+	// though sidecar already gates network for agent_run. For
+	// HTTP step we go direct, so the gate has to live here.
+	if e.egressAllowed != nil && !e.egressAllowed(parsed.Host) {
+		return "", 0, 0, fmt.Errorf("http step %q host %q not in egress allowlist", step.ID, parsed.Host)
+	}
+
+	body := Render(step.HTTP.Body, parentRender)
+	method := strings.ToUpper(step.HTTP.Method)
+
+	timeoutSec := step.TimeoutSec
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+	rctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(rctx, method, parsed.String(), strings.NewReader(body))
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("http step %q new request: %w", step.ID, err)
+	}
+	for k, v := range step.HTTP.Headers {
+		req.Header.Set(k, Render(v, parentRender))
+	}
+	// Default content type for bodied verbs if caller didn't set one.
+	if body != "" && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Credential injection. Resolution is best-effort — if no
+	// resolver wired, we skip; if resolver returns empty, we skip
+	// + log. Failing here would block legitimate requests against
+	// public endpoints that don't need auth.
+	if step.HTTP.CredentialRef != nil && e.credentialByType != nil {
+		credValue, credErr := e.credentialByType(rctx, step.HTTP.CredentialRef.Type)
+		if credErr == nil && credValue != "" {
+			injectCredential(req, step.HTTP.CredentialRef, credValue)
+		}
+	}
+
+	client := http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("http step %q request: %w", step.ID, err)
+	}
+	defer resp.Body.Close()
+
+	maxBytes := int64(step.HTTP.MaxResponseBytes)
+	if maxBytes <= 0 {
+		maxBytes = 1_000_000 // 1 MB default
+	}
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil {
+		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("http step %q read body: %w", step.ID, err)
+	}
+	if int64(len(respBody)) >= maxBytes {
+		// Truncated — append marker so downstream consumers see it
+		respBody = append(respBody, []byte("\n...(response truncated)")...)
+	}
+
+	successCodes := step.HTTP.SuccessCodes
+	if len(successCodes) == 0 {
+		successCodes = []int{200, 201, 202, 204}
+	}
+	if !containsInt(successCodes, resp.StatusCode) {
+		return string(respBody), 0, time.Since(stepStart).Milliseconds(),
+			fmt.Errorf("http step %q got HTTP %d (success codes: %v)", step.ID, resp.StatusCode, successCodes)
+	}
+	return string(respBody), 0, time.Since(stepStart).Milliseconds(), nil
+}
+
+// injectCredential mutates the request to carry the credential per
+// the configured InjectAs scheme. Default is bearer.
+func injectCredential(req *http.Request, ref *CredentialRef, value string) {
+	switch ref.InjectAs {
+	case "", "bearer":
+		req.Header.Set("Authorization", "Bearer "+value)
+	case "header":
+		req.Header.Set(ref.HeaderName, value)
+	case "query":
+		q := req.URL.Query()
+		q.Set(ref.QueryName, value)
+		req.URL.RawQuery = q.Encode()
+	}
+}
+
+// containsInt is a tiny helper kept here (rather than pulling in
+// slices.Contains) to keep the package go-mod minimal.
+func containsInt(xs []int, x int) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
+// FingerprintHTTPRequest returns a stable fingerprint for journal
+// entries so pipeline run HTTP steps can be grouped independently
+// of the rendered URL — useful for retry analytics. Currently
+// sha256 of method+host+path; query string and body excluded so
+// per-input variance doesn't fragment the fingerprint. Exported
+// for the API handler that surfaces run summaries.
+func FingerprintHTTPRequest(method, rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	host, path := "", ""
+	if err == nil {
+		host = parsed.Host
+		path = parsed.Path
+	}
+	sum := sha256.Sum256([]byte(strings.ToUpper(method) + " " + host + path))
+	return hex.EncodeToString(sum[:8])
+}

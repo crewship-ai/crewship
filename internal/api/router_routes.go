@@ -339,6 +339,60 @@ func (r *Router) registerRoutes() {
 	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/bulk-import", authed(wsCtx(http.HandlerFunc(skillBulk.Import))))
 
+	// Pipelines — declarative DSL workflows persisted per-workspace and
+	// reusable across crews. Runner is wired post-construction by the
+	// orchestrator boot path; an unwired runner returns 503 from /run
+	// and /test_run so the rest of the surface (List/Get/Delete/DryRun)
+	// stays usable for read-only inspection during boot.
+	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	r.PipelinesHandler = pipes // expose for orchestrator wiring
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", authed(wsCtx(http.HandlerFunc(pipes.Run))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run", authed(wsCtx(http.HandlerFunc(pipes.DryRun))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/test_run", authed(wsCtx(http.HandlerFunc(pipes.TestRun))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Delete))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs", authed(wsCtx(http.HandlerFunc(pipes.ListRuns))))
+	// Versioning — every save creates an immutable history row;
+	// rollback flips head to a prior version (history preserved).
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions", authed(wsCtx(http.HandlerFunc(pipes.ListVersions))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", authed(wsCtx(http.HandlerFunc(pipes.Rollback))))
+	// Marketplace prep: portable JSON bundles for cross-workspace
+	// transfer. Export is read-only; import requires author_crew_id
+	// in the body since bundles are deliberately
+	// installation-independent.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/export", authed(wsCtx(http.HandlerFunc(pipes.ExportPipeline))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/import", authed(wsCtx(http.HandlerFunc(pipes.ImportPipeline))))
+	// Waitpoints — StepWait approval persistence + UI inbox surface.
+	// Pending waitpoints flow into the same Inbox as Keeper approvals.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints", authed(wsCtx(http.HandlerFunc(pipes.ListPendingWaitpoints))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve", authed(wsCtx(http.HandlerFunc(pipes.ApproveWaitpoint))))
+	// Pipeline schedules — cron triggers for saved pipelines (the
+	// Routines integration). CRUD-only; the scheduler runs in-process
+	// in cmd_start and reads the table directly.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.ListSchedules))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.CreateSchedule))))
+	r.mux.Handle("PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.UpdateSchedule))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteSchedule))))
+	// Run control — cancel + active list. The cancel API is the
+	// other half of concurrency control: a stuck run holds a slot
+	// until either it finishes or the operator pre-empts it.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active", authed(wsCtx(http.HandlerFunc(pipes.ListActiveRuns))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
+	// Pipeline webhooks — event-driven trigger surface alongside
+	// cron schedules. CRUD requires auth; the public dispatch
+	// endpoint authenticates via the token + optional HMAC instead.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks", authed(wsCtx(http.HandlerFunc(pipes.ListWebhooks))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks", authed(wsCtx(http.HandlerFunc(pipes.CreateWebhook))))
+	r.mux.Handle("DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", authed(wsCtx(http.HandlerFunc(pipes.DeleteWebhook))))
+	// Public dispatch — no `authed` wrapper. The token in the path
+	// is the auth surface; signing_secret + HMAC layered on top.
+	r.mux.HandleFunc("POST /api/v1/webhooks/{token}", pipes.FireWebhook)
+	// Internal /api/v1/internal/pipelines/save route is registered
+	// further down where `internalAuth` is in scope (alongside the
+	// other /internal endpoints). See line ~640 below.
+
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
 
@@ -609,6 +663,10 @@ func (r *Router) registerRoutes() {
 	}
 	internal.SetJournal(r.Journal())
 	internalAuth := internal.requireInternal
+	// Pipeline save — sidecar→main forward. Trust comes from
+	// X-Internal-Token (sidecar attaches it via proxyIPCJSON);
+	// regular JWT-authed users hit the public surface instead.
+	r.mux.Handle("POST /api/v1/internal/pipelines/save", internalAuth(http.HandlerFunc(pipes.InternalSave)))
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))
