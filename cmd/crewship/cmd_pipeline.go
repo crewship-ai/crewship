@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -373,6 +374,15 @@ var pipelineRunCmd = &cobra.Command{
 			return err
 		}
 		defer resp.Body.Close()
+		// Convert "pipeline not found" 404s into actionable
+		// suggestions. Listing the workspace's pipelines costs
+		// one extra round-trip but only on the slow / failing
+		// path, which is exactly when the user wants help.
+		if resp.StatusCode == http.StatusNotFound {
+			if hint := suggestSimilarRoutineSlugs(client, ws, args[0]); hint != "" {
+				return fmt.Errorf("routine %q not found — %s", args[0], hint)
+			}
+		}
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}

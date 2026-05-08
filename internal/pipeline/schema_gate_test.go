@@ -144,6 +144,63 @@ func TestValidateOutput_SchemaGate_RunsAfterCheaperGates(t *testing.T) {
 	}
 }
 
+func TestCompiledSchemaForBytes_CachesByContentHash(t *testing.T) {
+	// Two calls with byte-identical schemas must return the
+	// SAME compiled instance — that's the whole point of the
+	// cache. Pointer equality is the right test (not deep
+	// equality, which would tolerate two separate compiles).
+	schemaA := json.RawMessage(`{"type":"object","required":["x"]}`)
+	schemaB := json.RawMessage(`{"type":"object","required":["x"]}`)
+
+	first, err := compiledSchemaForBytes(schemaA)
+	if err != nil {
+		t.Fatalf("first compile: %v", err)
+	}
+	second, err := compiledSchemaForBytes(schemaB)
+	if err != nil {
+		t.Fatalf("second compile: %v", err)
+	}
+	if first != second {
+		t.Error("expected pointer-identical compiled schema on cache hit, got distinct instances (cache not working)")
+	}
+}
+
+func TestCompiledSchemaForBytes_DistinctSchemasProduceDistinctEntries(t *testing.T) {
+	// Two schemas that differ by even one byte must compile to
+	// two separate cache entries. Otherwise a workspace with
+	// 50 routines would silently use one schema for everyone.
+	a := json.RawMessage(`{"type":"object","required":["x"]}`)
+	b := json.RawMessage(`{"type":"object","required":["y"]}`)
+
+	first, err := compiledSchemaForBytes(a)
+	if err != nil {
+		t.Fatalf("compile a: %v", err)
+	}
+	second, err := compiledSchemaForBytes(b)
+	if err != nil {
+		t.Fatalf("compile b: %v", err)
+	}
+	if first == second {
+		t.Error("distinct schemas should compile to distinct instances")
+	}
+}
+
+func TestCompiledSchemaForBytes_DoesNotPoisonOnFailure(t *testing.T) {
+	// A schema that fails to compile must NOT land in the cache.
+	// Otherwise a transient compile error (e.g. malformed bytes
+	// during a partial write) would freeze a bad entry forever
+	// and every subsequent valid call would hit the bad entry.
+	bad := json.RawMessage(`{not valid json`)
+	if _, err := compiledSchemaForBytes(bad); err == nil {
+		t.Fatal("expected compile failure on malformed schema")
+	}
+	// A second call with the SAME bad bytes should re-attempt
+	// compile (and re-fail), not return a cached error.
+	if _, err := compiledSchemaForBytes(bad); err == nil {
+		t.Error("expected compile failure on second call too — cache must not store failures")
+	}
+}
+
 func TestValidateOutput_NilValidation_Passes(t *testing.T) {
 	// Defensive — many step types have no validation declared.
 	// The gate must accept anything (including the empty string)

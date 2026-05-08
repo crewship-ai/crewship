@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	mathrand "math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1165,18 +1167,20 @@ func validateOutput(output string, v *Validation) (ok bool, reason string) {
 //     Reason includes the first violation (limit at ~200 chars to
 //     keep journal lines bounded).
 //
-// The library is goroutine-safe and the compiled schema can be
-// cached per-pipeline. We deliberately don't cache here in MVP —
-// most pipelines have at most a handful of schema-gated steps and
-// schema compile dominated by syntactic pre-checks is sub-millisecond.
-// A cache (keyed on schema-bytes hash) is a Phase 2 optimisation
-// once we have throughput data justifying the complexity.
+// Compiled schemas are cached by sha256 of their bytes. The library
+// is goroutine-safe so concurrent steps share the same compiled
+// validator. Cache hit shaves the schema-compile cost (typically
+// 100µs-1ms) per validation call; for a 10-step routine benched
+// 10× that's a measurable win at near-zero memory cost (one
+// Schema pointer per unique schema in the workspace).
+//
+// Cache eviction: never. The schema set in a workspace is bounded
+// by the number of distinct routines + their schema-using steps,
+// which is hundreds at the high end. A pointer per schema is bytes;
+// the compiled trie itself is KBs. Even an aggressive workspace
+// would top out under 10 MB cache footprint.
 func validateAgainstSchema(output string, schemaBytes json.RawMessage) (ok bool, reason string) {
-	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("inline://schema.json", strings.NewReader(string(schemaBytes))); err != nil {
-		return false, "schema invalid: " + truncate(err.Error(), 200)
-	}
-	schema, err := compiler.Compile("inline://schema.json")
+	schema, err := compiledSchemaForBytes(schemaBytes)
 	if err != nil {
 		return false, "schema invalid: " + truncate(err.Error(), 200)
 	}
@@ -1188,6 +1192,36 @@ func validateAgainstSchema(output string, schemaBytes json.RawMessage) (ok bool,
 		return false, "schema validation: " + truncate(err.Error(), 200)
 	}
 	return true, ""
+}
+
+// schemaCache holds compiled jsonschema.Schema pointers keyed by
+// sha256(schemaBytes). sync.Map fits the access pattern (write-once,
+// read-many; one entry per unique schema in the workspace) better
+// than a mutex-guarded map — schemas are stable for the binary's
+// lifetime.
+var schemaCache sync.Map // map[string]*jsonschema.Schema, key = hex(sha256)
+
+// compiledSchemaForBytes returns the compiled validator for the
+// supplied schema bytes, compiling on first call and serving from
+// cache thereafter. Errors propagate from the compiler; cache is
+// only populated on successful compile so a transient error doesn't
+// poison the cache.
+func compiledSchemaForBytes(schemaBytes json.RawMessage) (*jsonschema.Schema, error) {
+	sum := sha256.Sum256(schemaBytes)
+	key := hex.EncodeToString(sum[:])
+	if v, ok := schemaCache.Load(key); ok {
+		return v.(*jsonschema.Schema), nil
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("inline://schema.json", strings.NewReader(string(schemaBytes))); err != nil {
+		return nil, err
+	}
+	schema, err := compiler.Compile("inline://schema.json")
+	if err != nil {
+		return nil, err
+	}
+	schemaCache.Store(key, schema)
+	return schema, nil
 }
 
 // truncate returns s clipped to maxLen runes with an ellipsis if it

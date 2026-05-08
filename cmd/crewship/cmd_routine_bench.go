@@ -195,13 +195,24 @@ func executeBenchAttempt(client interface {
 // category so the summary can show "5 cost-cap, 2 rubric, 3 schema"
 // instead of 10 unique error strings. Heuristic — extends as we
 // see new fail modes.
+//
+// Order of cases matters: "outcomes failed" must come before the
+// generic "output ..." gate-fail bucket because outcomes errors
+// can include the underlying output diagnostic in their text.
 func classifyFailReason(msg string) string {
 	switch {
 	case containsAny(msg, "cost cap exceeded"):
 		return "cost-cap"
 	case containsAny(msg, "outcomes failed"):
 		return "rubric-fail"
-	case containsAny(msg, "output length", "must_contain", "must_not_contain", "schema validation:", "output not valid JSON"):
+	case containsAny(msg,
+		"output length",
+		"output contains banned",
+		"output missing required",
+		"schema validation:",
+		"schema invalid:",
+		"output not valid JSON",
+	):
 		return "gate-fail"
 	case containsAny(msg, "invalid Anthropic API key", "no active Anthropic credential"):
 		return "auth-fail"
