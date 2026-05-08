@@ -541,6 +541,19 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			// reaches apiRouter. Both.
 			mux.Handle("/exposed/", apiRouter)
 			logger.Info("Go API routes mounted")
+
+			// Pipeline AgentRunner is wired in cmd_start.go after
+			// the chatbridge.ChatResolver is built — the runner
+			// needs the resolver + IPC base URL to look up agent
+			// configs the same way the chat handler does. Until
+			// the runner is wired, /pipelines/.../run returns 503.
+			//
+			// We attach the journal emitter here because that
+			// dependency is local to the server, not the start
+			// command. Runner attach happens in cmd_start.go.
+			if apiRouter.PipelinesHandler != nil && s.journalWriter != nil {
+				apiRouter.PipelinesHandler.SetJournal(s.journalWriter)
+			}
 		}
 		// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues
 		if deps.WebFS != nil {
@@ -700,6 +713,14 @@ func (s *Server) LogWriter() *logcollector.Writer {
 // APIRouter returns the API router for registering additional routes.
 func (s *Server) APIRouter() *goapi.Router {
 	return s.apiRouter
+}
+
+// WSHub exposes the WebSocket hub for subsystems (e.g. pipeline
+// runtime) that need to push live events to subscribed clients.
+// Returns nil before the server fully boots; callers must
+// nil-check before subscribing.
+func (s *Server) WSHub() *ws.Hub {
+	return s.wsHub
 }
 
 // Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,

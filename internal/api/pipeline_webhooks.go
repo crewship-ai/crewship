@@ -1,0 +1,355 @@
+package api
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
+)
+
+// webhookResponse is the wire shape returned by webhook list/get/save.
+// The token surfaces in CRUD responses so the UI can show the user
+// the public URL once on creation; thereafter the row sits in the
+// database and the UI doesn't need to surface it again. Signing
+// secret is NEVER returned post-create — the only path that reveals
+// it is the create response, mirroring how Stripe / GitHub do it.
+type webhookResponse struct {
+	ID                    string         `json:"id"`
+	WorkspaceID           string         `json:"workspace_id"`
+	Name                  string         `json:"name"`
+	TargetPipelineID      string         `json:"target_pipeline_id"`
+	TargetPipelineSlug    string         `json:"target_pipeline_slug,omitempty"`
+	TargetPipelineVersion *int           `json:"target_pipeline_version,omitempty"`
+	Token                 string         `json:"token"`
+	SigningSecretSet      bool           `json:"signing_secret_set"`
+	SigningSecret         string         `json:"signing_secret,omitempty"` // only on create
+	InputsTemplate        map[string]any `json:"inputs_template"`
+	Enabled               bool           `json:"enabled"`
+	RateLimitPerMin       int            `json:"rate_limit_per_min"`
+	LastFiredAt           *time.Time     `json:"last_fired_at,omitempty"`
+	LastStatus            string         `json:"last_status,omitempty"`
+	LastRunID             string         `json:"last_run_id,omitempty"`
+	FireCount             int64          `json:"fire_count"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+}
+
+func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, includeSecret bool) webhookResponse {
+	var tmpl map[string]any
+	if w.InputsTemplateJSON != "" {
+		_ = json.Unmarshal([]byte(w.InputsTemplateJSON), &tmpl)
+	}
+	if tmpl == nil {
+		tmpl = map[string]any{}
+	}
+	resp := webhookResponse{
+		ID:                    w.ID,
+		WorkspaceID:           w.WorkspaceID,
+		Name:                  w.Name,
+		TargetPipelineID:      w.TargetPipelineID,
+		TargetPipelineSlug:    slug,
+		TargetPipelineVersion: w.TargetPipelineVersion,
+		Token:                 w.Token,
+		SigningSecretSet:      w.SigningSecret != "",
+		InputsTemplate:        tmpl,
+		Enabled:               w.Enabled,
+		RateLimitPerMin:       w.RateLimitPerMin,
+		LastFiredAt:           w.LastFiredAt,
+		LastStatus:            w.LastStatus,
+		LastRunID:             w.LastRunID,
+		FireCount:             w.FireCount,
+		CreatedAt:             w.CreatedAt,
+		UpdatedAt:             w.UpdatedAt,
+	}
+	if includeSecret {
+		resp.SigningSecret = w.SigningSecret
+	}
+	return resp
+}
+
+type webhookRequestBody struct {
+	Name                  string         `json:"name"`
+	TargetPipelineSlug    string         `json:"target_pipeline_slug"`
+	TargetPipelineID      string         `json:"target_pipeline_id"`
+	TargetPipelineVersion *int           `json:"target_pipeline_version,omitempty"`
+	SigningSecret         string         `json:"signing_secret"`
+	InputsTemplate        map[string]any `json:"inputs_template"`
+	Enabled               *bool          `json:"enabled,omitempty"`
+	RateLimitPerMin       int            `json:"rate_limit_per_min"`
+}
+
+// CreateWebhook POST /workspaces/{wsId}/pipeline-webhooks
+func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.webhooks == nil {
+		writeError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var body webhookRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	pipelineID, slug, err := h.resolveWebhookPipelineID(r, workspaceID, &body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	enabled := true
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	in := pipeline.SaveWebhookInput{
+		WorkspaceID:           workspaceID,
+		Name:                  defaultIfBlank(body.Name, slug),
+		TargetPipelineID:      pipelineID,
+		TargetPipelineVersion: body.TargetPipelineVersion,
+		SigningSecret:         body.SigningSecret,
+		InputsTemplate:        body.InputsTemplate,
+		Enabled:               enabled,
+		RateLimitPerMin:       body.RateLimitPerMin,
+	}
+	saved, err := h.webhooks.Save(r.Context(), in)
+	if err != nil {
+		h.logger.Warn("create pipeline webhook", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create webhook")
+		return
+	}
+	// Reveal the signing secret only on create — the UI shows it
+	// once, the user copies it into the sender, and we never expose
+	// it again. Stripe / GitHub use the same one-shot pattern.
+	writeJSON(w, http.StatusCreated, h.toWebhookResponse(saved, slug, true))
+}
+
+// ListWebhooks GET /workspaces/{wsId}/pipeline-webhooks
+func (h *PipelineHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
+	if h.webhooks == nil {
+		writeError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	rows, err := h.webhooks.List(r.Context(), workspaceID)
+	if err != nil {
+		h.logger.Warn("list pipeline webhooks", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list webhooks")
+		return
+	}
+	out := make([]webhookResponse, 0, len(rows))
+	slugCache := map[string]string{}
+	for _, wh := range rows {
+		slug, ok := slugCache[wh.TargetPipelineID]
+		if !ok {
+			if p, perr := h.store.GetByID(r.Context(), wh.TargetPipelineID); perr == nil {
+				slug = p.Slug
+			}
+			slugCache[wh.TargetPipelineID] = slug
+		}
+		out = append(out, h.toWebhookResponse(wh, slug, false))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// DeleteWebhook DELETE /workspaces/{wsId}/pipeline-webhooks/{webhookId}
+func (h *PipelineHandler) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.webhooks == nil {
+		writeError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	webhookID := r.PathValue("webhookId")
+	if webhookID == "" {
+		writeError(w, http.StatusBadRequest, "webhookId required")
+		return
+	}
+	existing, err := h.webhooks.GetByID(r.Context(), webhookID)
+	if err != nil {
+		if errors.Is(err, pipeline.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load webhook")
+		return
+	}
+	if existing.WorkspaceID != workspaceID {
+		writeError(w, http.StatusNotFound, "webhook not found")
+		return
+	}
+	if err := h.webhooks.SoftDelete(r.Context(), webhookID); err != nil {
+		h.logger.Warn("delete pipeline webhook", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete webhook")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// FireWebhook POST /api/v1/webhooks/{token}
+//
+// Public dispatch entrypoint — NO auth middleware. Auth is the
+// secret embedded in the token itself plus optional HMAC verification
+// via X-Crewship-Signature.
+//
+// Returns:
+//   - 202 with { run_id } on accepted (run starts async)
+//   - 401 on HMAC mismatch
+//   - 404 on unknown / disabled / deleted token (deliberate to
+//     avoid leaking which tokens exist)
+//   - 429 on per-token rate limit hit
+//   - 503 if the runner / webhook store isn't wired
+func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.webhooks == nil || h.runner == nil {
+		writeError(w, http.StatusServiceUnavailable, "webhook dispatch not wired")
+		return
+	}
+	token := r.PathValue("token")
+	wh, err := h.webhooks.GetByToken(r.Context(), token)
+	if err != nil {
+		// 404 on every failure — never reveal which tokens exist.
+		writeError(w, http.StatusNotFound, "unknown webhook")
+		return
+	}
+	if !wh.Enabled {
+		writeError(w, http.StatusNotFound, "unknown webhook")
+		return
+	}
+
+	// Read body up to 1 MiB. Webhook bodies that big are nearly
+	// always misuse; if a real sender needs more, the limit can be
+	// raised per-webhook (deferred until we see a use case).
+	const maxBody = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read body")
+		return
+	}
+
+	// HMAC verification before rate limiting — invalid signatures
+	// shouldn't even consume rate-limit slots.
+	if wh.SigningSecret != "" {
+		sig := r.Header.Get("X-Crewship-Signature")
+		if !wh.ValidateSignature(body, sig) {
+			writeError(w, http.StatusUnauthorized, "signature mismatch")
+			return
+		}
+	}
+
+	if !pipeline.AllowWebhookFire(wh.Token, wh.RateLimitPerMin) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		return
+	}
+
+	// Build pipeline inputs. Default: pass body under "event" so the
+	// pipeline can reference {{ inputs.event }}. The
+	// inputs_template (if non-empty) is merged on top so a webhook
+	// can hand-shape the event into the pipeline's input schema.
+	inputs := map[string]any{
+		"event":   tryParseJSON(body),
+		"raw":     string(body),
+		"headers": flattenHeaders(r.Header),
+	}
+	if strings.TrimSpace(wh.InputsTemplateJSON) != "" && wh.InputsTemplateJSON != "{}" {
+		var tmpl map[string]any
+		if err := json.Unmarshal([]byte(wh.InputsTemplateJSON), &tmpl); err == nil {
+			for k, v := range tmpl {
+				inputs[k] = v
+			}
+		}
+	}
+
+	exec := h.newExecutor()
+	res, err := exec.Run(r.Context(), pipeline.RunInput{
+		PipelineID:  wh.TargetPipelineID,
+		WorkspaceID: wh.WorkspaceID,
+		Inputs:      inputs,
+		Mode:        pipeline.ModeRun,
+		// Idempotency: use the X-Idempotency-Key header if present,
+		// else use webhook event id headers if the sender provided
+		// one (Stripe sends Stripe-Signature; we don't auto-extract
+		// from there yet, but X-Crewship-Event-ID is the canonical
+		// dedupe key for our own senders).
+		IdempotencyKey: firstNonEmpty(r.Header.Get("Idempotency-Key"), r.Header.Get("X-Crewship-Event-ID")),
+	})
+	status := "FAILED"
+	runID := ""
+	if res != nil {
+		runID = res.RunID
+		if err == nil && (res.Status == "COMPLETED" || res.Status == "DEDUPED") {
+			status = res.Status
+		}
+	}
+	_ = h.webhooks.RecordFire(r.Context(), wh.ID, runID, status)
+
+	if err != nil {
+		// Concurrency-rejected webhooks: signal 429 so the sender
+		// can retry instead of recording a generic 5xx.
+		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
+			w.Header().Set("Retry-After", "5")
+			writeError(w, http.StatusTooManyRequests, "concurrency limit reached")
+			return
+		}
+		h.logger.Warn("webhook fire", "error", err, "webhook_id", wh.ID)
+		writeError(w, http.StatusInternalServerError, "pipeline run failed")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"run_id":  res.RunID,
+		"status":  res.Status,
+		"deduped": res.Deduped,
+	})
+}
+
+func (h *PipelineHandler) resolveWebhookPipelineID(r *http.Request, workspaceID string, body *webhookRequestBody) (string, string, error) {
+	if body.TargetPipelineID != "" {
+		p, err := h.store.GetByID(r.Context(), body.TargetPipelineID)
+		if err != nil {
+			return "", "", errors.New("target_pipeline_id not found")
+		}
+		if p.WorkspaceID != workspaceID {
+			return "", "", errors.New("target_pipeline_id not in this workspace")
+		}
+		return p.ID, p.Slug, nil
+	}
+	if body.TargetPipelineSlug != "" {
+		p, err := h.store.GetBySlug(r.Context(), workspaceID, body.TargetPipelineSlug)
+		if err != nil {
+			return "", "", errors.New("target_pipeline_slug not found")
+		}
+		return p.ID, p.Slug, nil
+	}
+	return "", "", errors.New("target_pipeline_slug or target_pipeline_id required")
+}
+
+// tryParseJSON returns the parsed JSON object/array if the body is
+// valid JSON, else returns the raw string. Most webhook bodies are
+// JSON, but we don't 400 on non-JSON — the pipeline can still read
+// inputs.raw if it wants the unparsed form.
+func tryParseJSON(body []byte) any {
+	if len(body) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(body, &v); err == nil {
+		return v
+	}
+	return string(body)
+}
+
+// flattenHeaders converts http.Header (map[string][]string) into a
+// flat string→string map for template-friendly access:
+//
+//	{{ inputs.headers.x_event_type }}
+//
+// Multi-value headers are joined with commas (the standard).
+func flattenHeaders(h http.Header) map[string]string {
+	out := make(map[string]string, len(h))
+	for k, vs := range h {
+		out[strings.ToLower(strings.ReplaceAll(k, "-", "_"))] = strings.Join(vs, ",")
+	}
+	return out
+}

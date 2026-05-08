@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
@@ -213,6 +214,110 @@ var startCmd = &cobra.Command{
 				if apiRouter := srv.APIRouter(); apiRouter != nil {
 					apiRouter.SetScheduler(sched)
 				}
+			}
+		}
+
+		// Wire the pipeline AgentRunner. Pipelines route every step
+		// through the same orchestrator path the scheduler uses —
+		// the agent runs in its real container, with its real CLI
+		// adapter (Claude Code / Codex / Gemini / etc.), no raw
+		// LLM API key required. This is the "reuse the firm's own
+		// employees" model: the agent the author crew already
+		// configured for chat use also handles pipeline steps.
+		//
+		// Wired here (not in server.go) because the runner needs
+		// chatbridge.ChatResolver, which is constructed in this
+		// file. The router exposes PipelinesHandler so the runner
+		// can be plugged in post-router-construction.
+		if deps.DB != nil && deps.Container != nil && srv.APIRouter() != nil && srv.APIRouter().PipelinesHandler != nil {
+			pipeRunner, err := pipeline.NewOrchestratorRunner(pipeline.OrchestratorRunnerDeps{
+				DB:        deps.DB,
+				Orch:      srv.Orchestrator(),
+				Container: deps.Container,
+				Resolver:  resolver,
+				LogWriter: srv.LogWriter(),
+				ConvStore: srv.ConversationStore(),
+				Logger:    logger,
+			})
+			if err != nil {
+				logger.Error("pipeline orchestrator runner construct failed", "error", err)
+			} else {
+				srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
+				logger.Info("pipeline runner wired (orchestrator mode — agent runs in its container via CLI adapter)")
+			}
+
+			// Wire production WaitpointStore so StepWait approvals
+			// persist across restarts and the inbox UI can fire
+			// /pipelines/waitpoints/{token}/approve. Without this,
+			// approval steps timeout after 60s in-memory only.
+			if deps.DB != nil {
+				wpStore := pipeline.NewSQLWaitpointStore(deps.DB)
+				defer wpStore.Close()
+				srv.APIRouter().PipelinesHandler.SetWaitpointStore(wpStore)
+				logger.Info("pipeline waitpoint store wired (DB-backed; survives restart)")
+			}
+
+			// Wire WS broadcaster so pipeline run + step events
+			// reach subscribed frontend clients live (PipelineRunNode
+			// status updates without polling). Without it, the UI
+			// only catches up via journal poll. wsHub is exposed
+			// via Server.WSHub() in production; tests skip this
+			// branch when wsHub is nil.
+			if hub := srv.WSHub(); hub != nil {
+				srv.APIRouter().PipelinesHandler.SetWSBroadcaster(hub)
+				logger.Info("pipeline WS broadcaster wired (live event push)")
+			}
+
+			// Run registry — process-singleton tracker for cancel +
+			// concurrency. Lives for the binary's lifetime; no Stop
+			// needed because runs are tracked, not goroutines.
+			runRegistry := pipeline.NewRunRegistry()
+			srv.APIRouter().PipelinesHandler.SetRunRegistry(runRegistry)
+			logger.Info("pipeline run registry wired (cancel + concurrency_key gating)")
+
+			// Webhook store — event-driven triggers. Dispatch is
+			// public (no auth middleware); auth comes from the token
+			// in the URL plus optional HMAC.
+			if deps.DB != nil {
+				webhookStore := pipeline.NewWebhookStore(deps.DB)
+				srv.APIRouter().PipelinesHandler.SetWebhookStore(webhookStore)
+				logger.Info("pipeline webhooks wired (event-driven triggers; HMAC + per-token rate limit)")
+			}
+
+			// Pipeline schedules — cron triggers for saved pipelines.
+			// The store backs the CRUD endpoints; the scheduler runs
+			// in-process and fires due schedules every 30s.
+			//
+			// Single-instance: running multiple replicas would
+			// double-fire (no leader election yet); deferring leader
+			// election until we have a multi-replica deployment story.
+			if deps.DB != nil && srv.APIRouter().PipelinesHandler != nil {
+				schedStore := pipeline.NewScheduleStore(deps.DB)
+				srv.APIRouter().PipelinesHandler.SetScheduleStore(schedStore)
+				// Build a fresh executor for the scheduler. Reusing
+				// the handler's lazy newExecutor would couple scheduler
+				// lifetime to a specific HTTP request scope; wiring an
+				// independent executor is cleaner.
+				ph := srv.APIRouter().PipelinesHandler
+				schedPipelineStore := pipeline.NewStore(deps.DB)
+				schedExec := pipeline.NewExecutor(
+					schedPipelineStore,
+					pipeline.NewResolver(deps.DB),
+					ph.Runner(),
+					ph.Emitter(),
+				)
+				if hub := srv.WSHub(); hub != nil {
+					schedExec = schedExec.WithWSBroadcaster(hub)
+				}
+				// Scheduler-driven runs MUST share the same registry
+				// as HTTP-driven runs — otherwise a cron + manual run
+				// of the same concurrency_key would slip past the gate.
+				schedExec = schedExec.WithRunRegistry(runRegistry).
+					WithIdempotencyStore(pipeline.NewIdempotencyStore(deps.DB))
+				scheduler := pipeline.NewPipelineScheduler(schedStore, schedPipelineStore, schedExec, logger)
+				scheduler.Start(ctx)
+				defer scheduler.Stop()
+				logger.Info("pipeline scheduler wired (cron triggers; 30s tick)")
 			}
 		}
 

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // agentConfigData holds the intermediate state during agent config resolution.
@@ -352,7 +354,55 @@ func (h *InternalHandler) loadAgentSystemPrompt(r *http.Request, data *agentConf
 		promptParts = append(promptParts, skillBlock)
 	}
 
+	// [AVAILABLE PIPELINES] section — appended after skills so the
+	// LLM treats pipelines as the larger-grained primitive it should
+	// reach for FIRST, with skills as the recipe library it falls
+	// back to when no pipeline fits. Failure here is non-fatal:
+	// pipelines are an optional layer, an error rendering the block
+	// must not block agent startup.
+	if data.wsID != "" {
+		store := pipeline.NewStore(h.db)
+		crewNames := h.lookupCrewNamesForWorkspace(r, data.wsID)
+		pipeBlock, err := pipeline.BuildSystemPromptBlock(r.Context(), store, data.wsID, crewNames)
+		if err != nil {
+			h.logger.Warn("pipeline system prompt build failed", "error", err, "workspace_id", data.wsID)
+		} else if pipeBlock != "" {
+			promptParts = append(promptParts, pipeBlock)
+		}
+	}
+
 	return strings.Join(promptParts, "\n\n"), nil
+}
+
+// lookupCrewNamesForWorkspace returns a map of crew_id → crew_name for
+// every non-deleted crew in the workspace. Used to render readable
+// "authored by Crew X" labels in the [AVAILABLE PIPELINES] block.
+// Failure returns an empty map — the block falls back to raw IDs.
+//
+// Cheap workspace-wide lookup (one query per system-prompt build) is
+// fine for MVP; if it ever shows up in profile we'll cache.
+func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspaceID string) map[string]string {
+	out := make(map[string]string)
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, name FROM crews WHERE workspace_id = ? AND deleted_at IS NULL`,
+		workspaceID)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err == nil {
+			out[id] = name
+		}
+	}
+	if err := rows.Err(); err != nil {
+		// Partial map — log so a context-cancellation or driver
+		// error doesn't silently downgrade [AVAILABLE PIPELINES]
+		// "authored by Marketing" rows to "authored by crew_xyz".
+		h.logger.Warn("lookupCrewNamesForWorkspace: rows iteration", "workspace_id", workspaceID, "error", err)
+	}
+	return out
 }
 
 // NOTE: resolveSkillsBlock, resolveCoordinatorCrews, resolveCrewMembers,

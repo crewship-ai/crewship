@@ -13,6 +13,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
+import { PipelineDetailSheet } from "@/components/features/orchestration/pipeline-detail-sheet"
+import { usePipelines } from "@/hooks/use-pipelines"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
 // TemplateGallery removed — workflow templates not needed in orchestration UI yet
@@ -119,6 +121,19 @@ export function OrchestrationLayout({
   const [savedViewsOpen, setSavedViewsOpen] = useState(false)
 
   // graphRef removed — was unused
+
+  // Pipelines surface in the Graph tab as a registry row of
+  // pipelineRun nodes along the bottom. Fetched once on mount + on
+  // refresh; the WS hub will eventually push pipeline.run.* events
+  // to update node status live, but for MVP polling on-demand is
+  // enough — pipelines change rarely (agent saves, user invokes).
+  const { pipelines } = usePipelines(workspaceId)
+
+  // Pipeline detail side-sheet state. Opened by clicking a
+  // PipelineRunNode in the graph; carries the slug so the sheet
+  // can fetch detail + versions + runs against the public API.
+  const [selectedPipelineSlug, setSelectedPipelineSlug] = useState<string | null>(null)
+  const [pipelineSheetOpen, setPipelineSheetOpen] = useState(false)
 
   // Auto-collapse left panel on mobile
   useEffect(() => {
@@ -639,8 +654,26 @@ export function OrchestrationLayout({
                 crews={crews}
                 agents={agents}
                 connections={connections}
+                pipelines={pipelines}
+                onPipelineClick={(id) => {
+                  // The graph node carries the pipeline ID, but the
+                  // detail sheet fetches by slug (public API path
+                  // shape). Cross-reference via the pipelines list
+                  // we already loaded above.
+                  const p = pipelines.find((x) => x.id === id)
+                  if (p) {
+                    setSelectedPipelineSlug(p.slug)
+                    setPipelineSheetOpen(true)
+                  }
+                }}
                 onTaskClick={handleNodeClick}
                 highlightAgentSlug={selectedAgentSlug}
+              />
+              <PipelineDetailSheet
+                workspaceId={workspaceId}
+                slug={selectedPipelineSlug}
+                open={pipelineSheetOpen}
+                onClose={() => setPipelineSheetOpen(false)}
               />
 
             </>

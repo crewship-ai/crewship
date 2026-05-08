@@ -1,0 +1,158 @@
+package pipeline
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// runTransformStep applies a small jq-flavored expression to the
+// rendered Input string. Pure-Go, deterministic, no LLM, no network.
+//
+// MVP grammar (subset of jq):
+//
+//	.field         — top-level object field
+//	.field.nested  — nested fields (no array index yet)
+//	.[index]       — array index by integer
+//	.field[index]  — combined
+//	.              — identity (returns Input as-is)
+//	tostring       — coerce to string (default behaviour for
+//	                 primitive results; documented for clarity)
+//	length         — array/string/object length
+//	keys           — object keys as array (sorted)
+//
+// Anything outside this set is a parse error. We deliberately keep
+// the grammar small: transform steps are for plumbing, not
+// computation. If you need real logic, use a code step.
+func (e *Executor) runTransformStep(step Step, parentRender RenderContext) (string, float64, int64, error) {
+	stepStart := time.Now()
+	if step.Transform == nil {
+		return "", 0, 0, fmt.Errorf("transform step missing body")
+	}
+
+	rawInput := Render(step.Transform.Input, parentRender)
+	expr := strings.TrimSpace(step.Transform.Expression)
+
+	// Identity short-circuit.
+	if expr == "." || expr == "" {
+		return rawInput, 0, time.Since(stepStart).Milliseconds(), nil
+	}
+
+	// Parse JSON. If the input doesn't parse, identity-return for
+	// "tostring" / "length" on raw strings; bail otherwise.
+	var v any
+	if err := json.Unmarshal([]byte(rawInput), &v); err != nil {
+		switch expr {
+		case "length":
+			return fmt.Sprintf("%d", len(rawInput)), 0, time.Since(stepStart).Milliseconds(), nil
+		case "tostring":
+			return rawInput, 0, time.Since(stepStart).Milliseconds(), nil
+		default:
+			return "", 0, time.Since(stepStart).Milliseconds(),
+				fmt.Errorf("transform step %q input is not JSON and expression %q requires JSON", step.ID, expr)
+		}
+	}
+
+	out, err := evalTransform(v, expr)
+	if err != nil {
+		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("transform step %q: %w", step.ID, err)
+	}
+	return out, 0, time.Since(stepStart).Milliseconds(), nil
+}
+
+// evalTransform applies the expression to the parsed JSON value.
+// Returns the stringified result.
+func evalTransform(v any, expr string) (string, error) {
+	switch expr {
+	case "length":
+		switch x := v.(type) {
+		case []any:
+			return fmt.Sprintf("%d", len(x)), nil
+		case map[string]any:
+			return fmt.Sprintf("%d", len(x)), nil
+		case string:
+			return fmt.Sprintf("%d", len(x)), nil
+		default:
+			return "", fmt.Errorf("length: not an array/object/string")
+		}
+	case "keys":
+		m, ok := v.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("keys: not an object")
+		}
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		// Sort for determinism — jq keys sorts alphabetically too.
+		for i := 0; i < len(out); i++ {
+			for j := i + 1; j < len(out); j++ {
+				if out[j] < out[i] {
+					out[i], out[j] = out[j], out[i]
+				}
+			}
+		}
+		b, _ := json.Marshal(out)
+		return string(b), nil
+	case "tostring":
+		return stringify(v), nil
+	}
+
+	// Path expressions: ".a.b[0].c"
+	if !strings.HasPrefix(expr, ".") {
+		return "", fmt.Errorf("expression %q must start with '.' or be one of: length, keys, tostring", expr)
+	}
+	cursor := v
+	rest := expr[1:]
+	for rest != "" {
+		// Array index: [N]
+		if strings.HasPrefix(rest, "[") {
+			closeIdx := strings.Index(rest, "]")
+			if closeIdx < 0 {
+				return "", fmt.Errorf("unclosed [ in expression")
+			}
+			idxStr := rest[1:closeIdx]
+			var idx int
+			if _, err := fmt.Sscanf(idxStr, "%d", &idx); err != nil {
+				return "", fmt.Errorf("array index %q not integer", idxStr)
+			}
+			arr, ok := cursor.([]any)
+			if !ok {
+				return "", fmt.Errorf("cannot index non-array")
+			}
+			if idx < 0 || idx >= len(arr) {
+				return "", fmt.Errorf("index %d out of range (len=%d)", idx, len(arr))
+			}
+			cursor = arr[idx]
+			rest = rest[closeIdx+1:]
+			if strings.HasPrefix(rest, ".") {
+				rest = rest[1:]
+			}
+			continue
+		}
+		// Field access: name (until next . or [)
+		end := len(rest)
+		for i, r := range rest {
+			if r == '.' || r == '[' {
+				end = i
+				break
+			}
+		}
+		field := rest[:end]
+		obj, ok := cursor.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("cannot access field %q on non-object", field)
+		}
+		next, ok := obj[field]
+		if !ok {
+			return "", fmt.Errorf("field %q not found", field)
+		}
+		cursor = next
+		rest = rest[end:]
+		if strings.HasPrefix(rest, ".") {
+			rest = rest[1:]
+		}
+	}
+	return stringify(cursor), nil
+}

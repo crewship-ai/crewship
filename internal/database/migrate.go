@@ -1064,6 +1064,32 @@ CREATE INDEX IF NOT EXISTS idx_journal_trace_id ON journal_entries(trace_id) WHE
 CREATE INDEX IF NOT EXISTS idx_journal_actor_ts ON journal_entries(actor_type, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHERE priority != 'normal';
 `},
+	// v78 introduces pipelines — declarative DSL documents persisted
+	// per-workspace, authored by AI agents (or users) and reusable
+	// across crews via the [AVAILABLE PIPELINES] system-prompt block.
+	// See .claude/context/prd/PIPELINES.md and
+	// migrate_consts_v78_pipelines.go for full design rationale.
+	{version: 78, name: "add_pipelines", sql: migrationAddPipelines},
+	// v79 adds pipeline versioning + waitpoints. Versioning makes
+	// the in-place edits from v78 immutable history (each save = new
+	// row, head_version pointer on pipelines), so rollback + audit
+	// + marketplace integrity are real. Waitpoints persist
+	// approval-step tokens so a wait survives process restarts.
+	{version: 79, name: "add_pipeline_versions_and_waitpoints", sql: migrationAddPipelineVersionsAndWaitpoints},
+	// v80 adds pipeline_schedules — cron-like triggers that fire
+	// a saved pipeline on a recurring schedule. Closes Pavel's
+	// "every day at 8 fetch email and summarize" use case without
+	// requiring an agent in the loop. See migrate_consts_v80*.go.
+	{version: 80, name: "add_pipeline_schedules", sql: migrationAddPipelineSchedules},
+	// v81 adds pipeline_run_idempotency — webhook redelivery dedupe.
+	// Cancel + concurrency state stays in-process (in-memory run
+	// registry) because both couple to Go contexts; only the
+	// idempotency reservation is durable. See migrate_consts_v81*.go.
+	{version: 81, name: "add_pipeline_run_support", sql: migrationAddPipelineRunSupport},
+	// v82 adds pipeline_webhooks — event-driven trigger surface
+	// alongside cron schedules. Closes the "Stripe webhook fires
+	// pipeline" use case. See migrate_consts_v82*.go.
+	{version: 82, name: "add_pipeline_webhooks", sql: migrationAddPipelineWebhooks},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

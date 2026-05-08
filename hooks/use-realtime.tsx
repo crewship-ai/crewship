@@ -37,6 +37,13 @@ export type RealtimeEventType =
   | "provision.progress"
   | "provision.completed"
   | "provision.failed"
+  | "pipeline.run.started"
+  | "pipeline.run.completed"
+  | "pipeline.run.failed"
+  | "pipeline.step.started"
+  | "pipeline.step.completed"
+  | "pipeline.step.failed"
+  | "pipeline.step.validation_failed"
 
 /** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {

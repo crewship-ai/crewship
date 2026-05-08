@@ -322,6 +322,28 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPatch && r.URL.Path == "/manifest":
 				s.handleUpdateManifest(w, r)
 				return
+			// Pipeline routes — agent-authored DSL workflows. Save
+			// runs the test_run gate inline; list/get are pure
+			// forwards; run/dry_run inject invoker headers from IPC.
+			case r.Method == http.MethodPost && r.URL.Path == "/pipelines/save":
+				s.handlePipelinesSave(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/pipelines":
+				s.handlePipelinesList(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/pipelines/") && !strings.Contains(r.URL.Path[len("/pipelines/"):], "/"):
+				slug := strings.TrimPrefix(r.URL.Path, "/pipelines/")
+				s.handlePipelinesGet(w, r, slug)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/pipelines/") && strings.HasSuffix(r.URL.Path, "/run"):
+				slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/pipelines/"), "/run")
+				s.handlePipelinesRun(w, r, slug)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/pipelines/") && strings.HasSuffix(r.URL.Path, "/dry_run"):
+				slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/pipelines/"), "/dry_run")
+				s.handlePipelinesDryRun(w, r, slug)
+				return
+
 			// MCP Gateway routes
 			case r.Method == http.MethodGet && r.URL.Path == "/mcp/tools":
 				s.handleMCPListTools(w, r)
