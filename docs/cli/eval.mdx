@@ -15,7 +15,7 @@ Two distinct evaluation surfaces share the `crewship eval` namespace:
 crewship eval <subcommand> [flags]
 ```
 
-Mission-level subcommands enqueue work asynchronously and return a `run_id` (poll completion via `crewship eval runs`). Routine-level subcommands run synchronously and emit results inline.
+Mission-level `replay` and `regression` enqueue work asynchronously and return a `run_id` (poll completion via `crewship eval runs`). The `runs` subcommand itself is a synchronous list query against existing eval runs. Routine-level subcommands all run synchronously and emit results inline.
 
 ## Subcommands
 

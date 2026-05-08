@@ -358,7 +358,7 @@ crewship routine schedules create \
 | `--slug` | ✓ | Target routine slug |
 | `--cron` | ✓ | 5-field cron expression |
 | `--name` | | Schedule name (default: `"<slug> schedule"`) |
-| `--timezone` | | IANA timezone (default: `UTC`; pass `--timezone $(date +%Z)` for host-local) |
+| `--timezone` | | IANA timezone (default: `UTC`; for host-local, pass an IANA zone such as `America/Los_Angeles` or read it from `cat /etc/timezone` / `timedatectl show -p Timezone --value`) |
 | `--inputs` | | JSON object passed as inputs on each tick |
 | `--enabled` | | Create enabled (default true) |
 
