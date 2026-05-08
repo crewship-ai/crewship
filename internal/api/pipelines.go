@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -29,6 +30,7 @@ type PipelineHandler struct {
 	schedules  *pipeline.ScheduleStore // optional; nil → schedule endpoints return 503
 	runs       *pipeline.RunRegistry   // optional; nil → cancel endpoint returns 503
 	webhooks   *pipeline.WebhookStore  // optional; nil → webhook endpoints return 503
+	runStore   *pipeline.RunStore      // optional; nil → list-runs falls back to journal LIKE scan, no persistence
 	// saveTokenSecret signs the optional save_token returned by
 	// /test_run and verified by /save. Lets save flows skip the body-
 	// trust on last_test_run_at (callers can otherwise mint timestamps;
@@ -73,6 +75,16 @@ func (h *PipelineHandler) SetRunner(r pipeline.AgentRunner) {
 // Without it, the timestamp-trust path remains the only gate-pass.
 func (h *PipelineHandler) SetSaveTokenSecret(secret []byte) {
 	h.saveTokenSecret = secret
+}
+
+// SetRunStore wires the pipeline_runs persistence layer (migration
+// v83). The executor created via newExecutor in this handler picks
+// up the store via WithRunStore, and the ListRuns API hits this
+// store directly when present (column-typed reads beat LIKE-scanning
+// journal_entries). Without it, runs persist only in journal_entries
+// and list-runs falls back to the legacy scan path.
+func (h *PipelineHandler) SetRunStore(s *pipeline.RunStore) {
+	h.runStore = s
 }
 
 // SetJournal wires a journal Emitter post-construction so journal
@@ -161,6 +173,9 @@ func (h *PipelineHandler) newExecutor() *pipeline.Executor {
 		// thin DB wrapper with no goroutines. Keeping construction
 		// here means tests don't need to set it explicitly.
 		exec = exec.WithIdempotencyStore(pipeline.NewIdempotencyStore(h.db))
+	}
+	if h.runStore != nil {
+		exec = exec.WithRunStore(h.runStore)
 	}
 	return exec
 }
@@ -510,6 +525,35 @@ func definitionHashHex(def []byte) string {
 	return pipeline.DefinitionHash(def)
 }
 
+// truncateErrorForList sanitizes an error_message before exposing it
+// through the run-records list endpoint. Caller-supplied + executor-
+// supplied error strings can carry: file paths, stack frames, half-
+// rendered prompts that included secrets, full credential values
+// that the must_not_contain gate didn't catch. The list view doesn't
+// need that detail — operators drill into journal_entries via the
+// /runs?include_steps=1 endpoint when they want the full picture.
+func truncateErrorForList(s string) string {
+	if s == "" {
+		return ""
+	}
+	// First newline = stop. Keeps single-line summaries intact, drops
+	// multi-line stack traces.
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	// Hard length cap. UTF-8 safe slice — walk back to a rune
+	// boundary so we don't emit invalid bytes.
+	const cap = 200
+	if len(s) <= cap {
+		return s
+	}
+	cut := cap
+	for cut > 0 && cut > cap-4 && (s[cut]&0xc0) == 0x80 {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
 // Delete soft-deletes a pipeline by slug.
 // DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}
 func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -531,6 +575,107 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListRunRecords returns runs from the pipeline_runs table directly
+// (column-typed, B-tree scan). Faster than ListRuns because it skips
+// the LIKE-pattern + json_extract path on journal_entries; ideal for
+// the active-runs dashboard and run-history list views that don't
+// need per-step event detail.
+//
+// GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records
+//
+// Returns 503 when the runStore is not wired (legacy deployment with
+// only journal-backed runs); UI clients should fall back to ListRuns
+// in that case.
+func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	slug := r.PathValue("slug")
+	if h.runStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":  "pipeline_runs store not wired; fall back to /runs (journal-backed)",
+			"hint":   "this deployment predates migration v83 or runStore is unset in cmd_start.go",
+			"legacy": "/runs",
+		})
+		return
+	}
+	p, err := h.store.GetBySlug(r.Context(), workspaceID, slug)
+	if errors.Is(err, pipeline.ErrNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("pipeline list run-records: load", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load pipeline"})
+		return
+	}
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := parseSmallInt(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	statusFilter := pipeline.RunStatus(r.URL.Query().Get("status"))
+	records, err := h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+	if err != nil {
+		h.logger.Error("pipeline list run-records: query", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list run records"})
+		return
+	}
+	// Stable wire shape — explicit DTO so internal renames don't
+	// silently break the API contract.
+	type runRecordDTO struct {
+		ID               string  `json:"id"`
+		PipelineID       string  `json:"pipeline_id"`
+		PipelineSlug     string  `json:"pipeline_slug"`
+		Status           string  `json:"status"`
+		Mode             string  `json:"mode"`
+		StartedAt        string  `json:"started_at"`
+		EndedAt          string  `json:"ended_at,omitempty"`
+		CurrentStepID    string  `json:"current_step_id,omitempty"`
+		Output           string  `json:"output,omitempty"`
+		CostUSD          float64 `json:"cost_usd"`
+		DurationMs       int64   `json:"duration_ms"`
+		ErrorMessage     string  `json:"error_message,omitempty"`
+		FailedAtStep     string  `json:"failed_at_step,omitempty"`
+		ErrorFingerprint string  `json:"error_fingerprint,omitempty"`
+		TriggeredVia     string  `json:"triggered_via"`
+		TriggeredByID    string  `json:"triggered_by_id,omitempty"`
+		IdempotencyKey   string  `json:"idempotency_key,omitempty"`
+	}
+	out := make([]runRecordDTO, 0, len(records))
+	for _, rec := range records {
+		dto := runRecordDTO{
+			ID:            rec.ID,
+			PipelineID:    rec.PipelineID,
+			PipelineSlug:  rec.PipelineSlug,
+			Status:        string(rec.Status),
+			Mode:          string(rec.Mode),
+			StartedAt:     rec.StartedAt.Format(time.RFC3339Nano),
+			CurrentStepID: rec.CurrentStepID,
+			Output:        rec.Output,
+			CostUSD:       rec.CostUSD,
+			DurationMs:    rec.DurationMs,
+			// Sanitize: error_message comes verbatim from executor /
+			// runner / DB driver — could carry stack traces, file
+			// paths, half-rendered prompts, secrets the validation
+			// gate didn't catch. Truncate hard at 200 chars and
+			// strip anything past the first newline so multi-line
+			// stack traces don't leak through the dashboard. Full
+			// error stays in journal_entries (audit-of-record).
+			ErrorMessage:     truncateErrorForList(rec.ErrorMessage),
+			FailedAtStep:     rec.FailedAtStep,
+			ErrorFingerprint: rec.ErrorFingerprint,
+			TriggeredVia:     string(rec.TriggeredVia),
+			TriggeredByID:    rec.TriggeredByID,
+			IdempotencyKey:   rec.IdempotencyKey,
+		}
+		if rec.EndedAt != nil && !rec.EndedAt.IsZero() {
+			dto.EndedAt = rec.EndedAt.Format(time.RFC3339Nano)
+		}
+		out = append(out, dto)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // ListRuns returns the journal entries for the named pipeline,

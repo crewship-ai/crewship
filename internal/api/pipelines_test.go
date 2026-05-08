@@ -65,6 +65,36 @@ CREATE TABLE pipelines (
     UNIQUE (workspace_id, slug)
 );
 
+CREATE TABLE pipeline_runs (
+    id                  TEXT PRIMARY KEY,
+    workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    pipeline_id         TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+    pipeline_slug       TEXT NOT NULL,
+    pipeline_version    INTEGER,
+    status              TEXT NOT NULL,
+    mode                TEXT NOT NULL DEFAULT 'run',
+    started_at          TEXT NOT NULL,
+    ended_at            TEXT,
+    current_step_id     TEXT,
+    step_outputs_json   TEXT NOT NULL DEFAULT '{}',
+    output              TEXT,
+    cost_usd            REAL NOT NULL DEFAULT 0,
+    duration_ms         INTEGER NOT NULL DEFAULT 0,
+    error_message       TEXT,
+    failed_at_step      TEXT,
+    error_fingerprint   TEXT,
+    invoking_crew_id    TEXT,
+    invoking_agent_id   TEXT,
+    invoking_user_id    TEXT,
+    triggered_via       TEXT NOT NULL DEFAULT 'manual',
+    triggered_by_id     TEXT,
+    idempotency_key     TEXT,
+    inputs_json         TEXT NOT NULL DEFAULT '{}',
+    concurrency_key     TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
+);
+
 CREATE TABLE journal_entries (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
@@ -470,5 +500,139 @@ func TestPipelinesAPI_Save_RejectsBadDSL(t *testing.T) {
 
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("expected 422 for unsupported step type, got %d", w.Code)
+	}
+}
+
+// ListRunRecords tests — the v83 column-typed projection endpoint.
+
+func TestPipelinesAPI_ListRunRecords_503WithoutStore(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	seedSmokePipeline(t, db, "demo")
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	// Note: SetRunStore NOT called — the handler should 503.
+	req := withWorkspaceCtx(httptest.NewRequest("GET", "/x", nil), "ws_smoke")
+	req.SetPathValue("slug", "demo")
+	w := httptest.NewRecorder()
+	h.ListRunRecords(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 (runStore not wired), got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "runs (journal-backed)") {
+		t.Errorf("expected fallback hint pointing at /runs, got body: %s", w.Body.String())
+	}
+}
+
+func TestPipelinesAPI_ListRunRecords_HappyPath(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	seedSmokePipeline(t, db, "demo")
+	store := pipeline.NewRunStore(db)
+	now := time.Now().UTC()
+	// Seed three runs: one running, one completed, one failed.
+	for _, r := range []*pipeline.RunRecord{
+		{ID: "run_a", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+			Status: pipeline.RunStatusRunning, StartedAt: now.Add(-1 * time.Minute)},
+		{ID: "run_b", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+			Status: pipeline.RunStatusCompleted, StartedAt: now.Add(-2 * time.Minute), Output: "ok"},
+		{ID: "run_c", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+			Status: pipeline.RunStatusFailed, StartedAt: now.Add(-3 * time.Minute), ErrorMessage: "boom"},
+	} {
+		if err := store.Insert(context.Background(), r); err != nil {
+			t.Fatalf("seed run %s: %v", r.ID, err)
+		}
+	}
+
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	h.SetRunStore(store)
+	req := withWorkspaceCtx(httptest.NewRequest("GET", "/x", nil), "ws_smoke")
+	req.SetPathValue("slug", "demo")
+	rec := httptest.NewRecorder()
+	h.ListRunRecords(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out []map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(out))
+	}
+	// Newest first.
+	wantOrder := []string{"run_a", "run_b", "run_c"}
+	for i, w := range wantOrder {
+		if out[i]["id"] != w {
+			t.Errorf("[%d] expected %s, got %v", i, w, out[i]["id"])
+		}
+	}
+	// Status enum is column-typed so values are exact.
+	statuses := []string{}
+	for _, r := range out {
+		statuses = append(statuses, r["status"].(string))
+	}
+	wantStatuses := []string{"running", "completed", "failed"}
+	for i, ws := range wantStatuses {
+		if statuses[i] != ws {
+			t.Errorf("status[%d]: got %q want %q", i, statuses[i], ws)
+		}
+	}
+}
+
+func TestPipelinesAPI_ListRunRecords_FilterByStatus(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	seedSmokePipeline(t, db, "demo")
+	store := pipeline.NewRunStore(db)
+	now := time.Now().UTC()
+	for _, r := range []*pipeline.RunRecord{
+		{ID: "r1", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+			Status: pipeline.RunStatusRunning, StartedAt: now},
+		{ID: "r2", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+			Status: pipeline.RunStatusCompleted, StartedAt: now},
+		{ID: "r3", WorkspaceID: "ws_smoke", PipelineID: "pln_test_demo", PipelineSlug: "demo",
+			Status: pipeline.RunStatusCompleted, StartedAt: now},
+	} {
+		if err := store.Insert(context.Background(), r); err != nil {
+			t.Fatalf("seed run %s: %v", r.ID, err)
+		}
+	}
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	h.SetRunStore(store)
+	req := withWorkspaceCtx(httptest.NewRequest("GET", "/x?status=completed", nil), "ws_smoke")
+	req.SetPathValue("slug", "demo")
+	// httptest.NewRequest doesn't parse the URL query string by default
+	// for our path; explicitly set RawQuery so r.URL.Query() works in
+	// the handler.
+	req.URL.RawQuery = "status=completed"
+	rec := httptest.NewRecorder()
+	h.ListRunRecords(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: %d", rec.Code)
+	}
+	var out []map[string]any
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if len(out) != 2 {
+		t.Errorf("expected 2 completed runs, got %d", len(out))
+	}
+	for _, r := range out {
+		if r["status"] != "completed" {
+			t.Errorf("filter leak: got status=%v", r["status"])
+		}
+	}
+}
+
+func TestPipelinesAPI_ListRunRecords_NotFoundOnUnknownSlug(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	store := pipeline.NewRunStore(db)
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	h.SetRunStore(store)
+	req := withWorkspaceCtx(httptest.NewRequest("GET", "/x", nil), "ws_smoke")
+	req.SetPathValue("slug", "ghost")
+	w := httptest.NewRecorder()
+	h.ListRunRecords(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
 	}
 }

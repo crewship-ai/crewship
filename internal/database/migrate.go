@@ -1090,6 +1090,12 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// alongside cron schedules. Closes the "Stripe webhook fires
 	// pipeline" use case. See migrate_consts_v82*.go.
 	{version: 82, name: "add_pipeline_webhooks", sql: migrationAddPipelineWebhooks},
+	// v83 promotes routine runs from journal-only to a dedicated
+	// pipeline_runs table so list-active-runs becomes B-tree scan
+	// and boot recovery has somewhere to mark interrupted in-flight
+	// runs. Closes the "restart loses runs" production gap from
+	// PIPELINES.md §17.6. See migrate_consts_v83*.go.
+	{version: 83, name: "add_pipeline_runs", sql: migrationAddPipelineRuns},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
