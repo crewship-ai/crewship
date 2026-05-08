@@ -78,6 +78,13 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 //
 // Returns (timedOutCount, pendingCount, err). The server's main.go
 // calls this once before declaring readiness.
+//
+// Timestamp format: timeout_at is stored as RFC3339Nano (set by
+// CreateApproval); we compare against the same format here. SQLite's
+// default `datetime('now','subsec')` would NOT lex-sort against
+// RFC3339Nano (no T separator, no Z suffix) — so passing the same
+// Go-formatted now to BOTH the SET and WHERE clauses keeps the
+// compare consistent with the stored values.
 func (s *SQLWaitpointStore) RecoverPending(ctx context.Context) (timedOut int, pending int, err error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	res, err := s.db.ExecContext(ctx, `

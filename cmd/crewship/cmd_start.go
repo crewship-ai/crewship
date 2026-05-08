@@ -253,12 +253,16 @@ var startCmd = &cobra.Command{
 			// adding new config surface. Token validity is bound to
 			// 5 minutes regardless, so internal-token rotation
 			// invalidates outstanding tokens by design.
-			if cfg.Auth.InternalToken != "" {
-				srv.APIRouter().PipelinesHandler.SetSaveTokenSecret([]byte(cfg.Auth.InternalToken))
-				logger.Info("pipeline save_token signing enabled (HMAC-SHA256 over internal token)")
-			} else {
-				logger.Warn("pipeline save_token signing DISABLED — internal token unset, save flow will fall back to body-trust on last_test_run_at")
+			if cfg.Auth.InternalToken == "" {
+				// Fail-fast: silent degrade to body-trust would defeat
+				// the threat-model closure that PIPELINES.md §17 calls
+				// out as a hard requirement. Better to refuse to start
+				// than to ship a server that quietly keeps the
+				// loophole open.
+				return fmt.Errorf("crewship start: cfg.Auth.InternalToken is required for save_token HMAC signing — set CREWSHIP_INTERNAL_TOKEN or auth.internal_token in config")
 			}
+			srv.APIRouter().PipelinesHandler.SetSaveTokenSecret([]byte(cfg.Auth.InternalToken))
+			logger.Info("pipeline save_token signing enabled (HMAC-SHA256 over internal token)")
 
 			// Wire production WaitpointStore so StepWait approvals
 			// persist across restarts and the inbox UI can fire

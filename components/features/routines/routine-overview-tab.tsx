@@ -8,14 +8,37 @@ import { Badge } from "@/components/ui/badge"
 // with declared egress / credentials / inputs blocks pulled from the
 // routine's DSL (when available).
 
+// asArrayOfObjects defensively extracts an array-of-records from a
+// DSL field. Older routines or hand-edited JSON can ship arrays
+// containing scalars, or a non-array value where an array is
+// expected; without this guard the .map() calls below would crash
+// the whole tab. Returning [] keeps the section silent for malformed
+// fields (the Editor sub-tab still surfaces the raw JSON for
+// diagnosis).
+function asArrayOfObjects(v: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(v)) return []
+  const out: Array<Record<string, unknown>> = []
+  for (const item of v) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      out.push(item as Record<string, unknown>)
+    }
+  }
+  return out
+}
+
+function asArrayOfStrings(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === "string")
+}
+
 export function RoutineOverviewTab({ routine }: { routine: RoutineDetail }) {
   const def = routine.definition as Record<string, unknown> | undefined
-  const inputs = (def?.["inputs"] as Array<Record<string, unknown>>) ?? []
-  const outputs = (def?.["outputs"] as Array<Record<string, unknown>>) ?? []
-  const egress = (def?.["egress_targets"] as string[]) ?? []
-  const creds = (def?.["credentials_required"] as Array<Record<string, unknown>>) ?? []
+  const inputs = asArrayOfObjects(def?.["inputs"])
+  const outputs = asArrayOfObjects(def?.["outputs"])
+  const egress = asArrayOfStrings(def?.["egress_targets"])
+  const creds = asArrayOfObjects(def?.["credentials_required"])
   const tier = def?.["execution_tier"] as Record<string, unknown> | undefined
-  const steps = (def?.["steps"] as Array<Record<string, unknown>>) ?? []
+  const steps = asArrayOfObjects(def?.["steps"])
 
   return (
     <div className="space-y-4 text-xs">

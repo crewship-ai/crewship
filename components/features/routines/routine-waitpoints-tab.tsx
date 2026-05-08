@@ -107,7 +107,8 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
       )}
 
       <p className="text-[10px] text-muted-foreground">
-        Pending approvals are workspace-wide. Filter by routine: {slug}
+        Showing all pending approvals in this workspace (the API is workspace-scoped, not routine-scoped).
+        Routine context: <span className="font-mono">{slug}</span>
       </p>
 
       {pending.length === 0 ? (

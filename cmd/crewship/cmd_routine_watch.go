@@ -91,6 +91,13 @@ Examples:
 		// matches the journal page LIMIT and is more than enough for
 		// reasonably-sized runs.
 		seen := make(map[string]bool, 1024)
+		// firstPollSeen pre-loads `seen` from the first poll so
+		// --once doesn't fire on a historical run that already
+		// terminated before this command started. Without this, the
+		// CI flow `crewship routine run X && crewship routine watch
+		// X --once` exits immediately on the first poll because the
+		// previous run's run.completed is in the response window.
+		firstPollSeen := false
 
 		ticker := time.NewTicker(intervalFlag)
 		defer ticker.Stop()
@@ -146,6 +153,17 @@ Examples:
 					continue
 				}
 				seen[key] = true
+				// On the first poll, pre-seed `seen` without
+				// printing — events that were already in the API
+				// window when the watch started are historical;
+				// printing them would surprise users running
+				// `routine watch X --once` after a previous run
+				// already completed (the prior terminal would
+				// trigger immediate exit). Skip emit + skip the
+				// terminal trigger on this initial fill.
+				if !firstPollSeen {
+					continue
+				}
 				if jsonMode {
 					b, _ := json.Marshal(r)
 					fmt.Println(string(b))
@@ -156,6 +174,7 @@ Examples:
 					lastTerminal = r.RunID
 				}
 			}
+			firstPollSeen = true
 
 			if once && lastTerminal != "" && (runIDFilter == "" || lastTerminal == runIDFilter) {
 				fmt.Fprintln(os.Stderr, "Run terminated; exiting (--once).")

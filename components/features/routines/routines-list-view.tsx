@@ -159,8 +159,23 @@ function RoutineRow({
   return (
     <tr
       onClick={onClick}
+      tabIndex={0}
+      role="button"
+      aria-label={`Open routine ${routine.name || routine.slug}`}
+      onKeyDown={(e) => {
+        // Activate on Enter or Space (matches button semantics).
+        // The hand-rolled <tr role="button"> approach is necessary
+        // because <button> can't be a table-row child without
+        // breaking layout. Tab index keeps the row in the focus
+        // order; visual focus ring lives on the row itself.
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onClick()
+        }
+      }}
       className={cn(
         "cursor-pointer border-b border-white/[0.04] transition-colors hover:bg-muted/40",
+        "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-background",
         selected && "bg-blue-500/10",
       )}
     >
