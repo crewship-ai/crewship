@@ -527,29 +527,41 @@ func checkEgressTargets(def map[string]interface{}) []doctorCheck {
 		}
 		return []doctorCheck{{Name: "egress_allowlist", Level: doctorOK, Message: "no http steps; allowlist not required"}}
 	}
+	// Collect every issue rather than returning on the first.
+	// An operator iterating on a routine with both `*` and
+	// `localhost` in the allowlist gets BOTH problems in a
+	// single doctor pass — fewer round-trips while fixing.
+	issues := make([]doctorCheck, 0, 2)
 	for _, raw := range targets {
 		host, _ := raw.(string)
 		if host == "*" || host == "*.*" || host == "" {
-			return []doctorCheck{{
+			issues = append(issues, doctorCheck{
 				Name:    "egress_allowlist",
 				Level:   doctorWarn,
 				Message: fmt.Sprintf("egress_targets contains wildcard %q", host),
 				Hint:    "wildcards open the routine to SSRF; pin to specific hostnames",
-			}}
+			})
+			continue
 		}
-		if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") {
-			return []doctorCheck{{
+		// strings.HasPrefix(host, "127.") catches the full IPv4
+		// loopback /8 range — original "127.0.0.1" check missed
+		// 127.0.0.2 and other valid loopback aliases.
+		if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.") {
+			issues = append(issues, doctorCheck{
 				Name:    "egress_allowlist",
 				Level:   doctorWarn,
-				Message: fmt.Sprintf("egress_targets includes localhost host %q", host),
-				Hint:    "remove localhost from production routines; it points at the agent container, not the operator's machine",
-			}}
+				Message: fmt.Sprintf("egress_targets includes loopback host %q", host),
+				Hint:    "remove loopback from production routines; it points at the agent container, not the operator's machine",
+			})
 		}
+	}
+	if len(issues) > 0 {
+		return issues
 	}
 	return []doctorCheck{{
 		Name:    "egress_allowlist",
 		Level:   doctorOK,
-		Message: fmt.Sprintf("%d target(s) declared, no wildcards or localhost", len(targets)),
+		Message: fmt.Sprintf("%d target(s) declared, no wildcards or loopback", len(targets)),
 	}}
 }
 
@@ -681,14 +693,19 @@ func optionalInt(m map[string]interface{}, key string) *int {
 	}
 }
 
-// truncCrewID shortens a long ID to its first 12 chars for display.
-// Keeps doctor output readable on terminals that wrap; the full ID
-// is in the JSON output for tooling that needs it.
+// truncCrewID shortens a long ID to its first 12 RUNES (not bytes)
+// for display. Keeps doctor output readable on terminals that wrap;
+// the full ID is in the JSON output for tooling that needs it.
+//
+// Slicing by runes avoids splitting multi-byte UTF-8 mid-sequence
+// if a future ID scheme stops being ASCII-only. Mirrors the
+// rune-safe truncate() in internal/pipeline/executor.go.
 func truncCrewID(id string) string {
-	if len(id) <= 12 {
+	runes := []rune(id)
+	if len(runes) <= 12 {
 		return id
 	}
-	return id[:12] + "…"
+	return string(runes[:12]) + "…"
 }
 
 func init() {

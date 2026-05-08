@@ -120,9 +120,15 @@ func TestEvalScenarios_ParseAndValidate(t *testing.T) {
 func TestEvalScenarios_AgentReferencesResolve(t *testing.T) {
 	agentsByCrew := buildAgentSlugSetPerCrew()
 	for _, scenario := range seeddata.EvalScenarios {
-		stepsAny, ok := scenario.Definition["steps"].([]map[string]interface{})
+		// Steps come in as []map[string]interface{} when authored
+		// directly in Go and as []interface{} when round-tripped
+		// through JSON. Accept either shape so the test is robust
+		// to either authoring style — a future move to load
+		// scenarios from JSON files would otherwise silently skip
+		// the assertion.
+		stepsList, ok := stepsAsInterfaceSlice(scenario.Definition["steps"])
 		if !ok {
-			t.Errorf("%s: steps is not []map[string]interface{} (got %T)", scenario.Slug, scenario.Definition["steps"])
+			t.Errorf("%s: steps is not a slice (got %T)", scenario.Slug, scenario.Definition["steps"])
 			continue
 		}
 		crewAgents, hasCrewMap := agentsByCrew[scenario.CrewSlug]
@@ -130,7 +136,12 @@ func TestEvalScenarios_AgentReferencesResolve(t *testing.T) {
 			t.Errorf("%s: author crew %q has no seeded agents", scenario.Slug, scenario.CrewSlug)
 			continue
 		}
-		for i, step := range stepsAny {
+		for i, raw := range stepsList {
+			step, ok := raw.(map[string]interface{})
+			if !ok {
+				t.Errorf("%s: step[%d] is not a map (got %T)", scenario.Slug, i, raw)
+				continue
+			}
 			if slug, _ := step["agent_slug"].(string); slug != "" {
 				if _, found := crewAgents[slug]; !found {
 					t.Errorf("%s: step[%d] references agent_slug %q which is NOT in author crew %q",
@@ -146,6 +157,26 @@ func TestEvalScenarios_AgentReferencesResolve(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// stepsAsInterfaceSlice normalises the two shapes Go produces for
+// `steps`: directly authored slices come through as
+// []map[string]interface{}; JSON-decoded slices come through as
+// []interface{}. Returning a single []interface{} lets callers
+// branch on element shape without re-asserting the outer slice.
+func stepsAsInterfaceSlice(v interface{}) ([]interface{}, bool) {
+	switch s := v.(type) {
+	case []interface{}:
+		return s, true
+	case []map[string]interface{}:
+		out := make([]interface{}, len(s))
+		for i := range s {
+			out[i] = s[i]
+		}
+		return out, true
+	default:
+		return nil, false
 	}
 }
 

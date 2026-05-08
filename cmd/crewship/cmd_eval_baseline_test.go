@@ -144,6 +144,50 @@ func TestComputeRegressionRows_ImprovedVerdict(t *testing.T) {
 	}
 }
 
+func TestComputeRegressionRows_SkipsCellsMissingInBoth(t *testing.T) {
+	// Cross-product allScenarios × allTiers can produce phantom
+	// (slug, tier) pairs that exist in NEITHER baseline nor
+	// current. Those must NOT emit STABLE rows — that would
+	// falsely imply the matrices agree on cells nobody measured.
+	// Regression test for the CodeRabbit round-2 finding on
+	// cmd_eval_baseline.go:531.
+	baseline := baselineRecord{
+		Scenarios: []string{"a"},
+		Tiers:     []string{"fast"},
+		Cells: map[string]baselineCell{
+			matrixKey("a", "fast"): {Pass: 5, Total: 5},
+		},
+	}
+	current := map[string]scenarioCell{
+		matrixKey("b", "smart"): {Pass: 5, Total: 5},
+	}
+	// Union of axes: scenarios={a,b}, tiers={fast,smart}.
+	// Cross-product → 4 cells. Only 2 were measured (a/fast in
+	// baseline, b/smart in current). The other 2 (a/smart, b/fast)
+	// must be skipped, not labeled STABLE.
+	rows := computeRegressionRows(baseline, current,
+		[]string{"a", "b"}, []string{"fast", "smart"}, 0.10)
+
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows (only the measured cells), got %d: %+v", len(rows), rows)
+	}
+	wantPresent := map[string]string{
+		"a/fast":  "REMOVED", // present in baseline only
+		"b/smart": "NEW",     // present in current only
+	}
+	for _, r := range rows {
+		key := r.Scenario + "/" + r.Tier
+		want, ok := wantPresent[key]
+		if !ok {
+			t.Errorf("unexpected row %s with verdict %q (phantom cell?)", key, r.Verdict)
+			continue
+		}
+		if r.Verdict != want {
+			t.Errorf("row %s: got verdict %q, want %q", key, r.Verdict, want)
+		}
+	}
+}
+
 func TestComputeRegressionRows_ToleranceBoundary(t *testing.T) {
 	// Delta exactly at tolerance threshold should be STABLE,
 	// not REGRESSION — strict-less-than comparison matters for

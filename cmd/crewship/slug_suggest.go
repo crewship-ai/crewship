@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -31,7 +32,11 @@ func suggestSimilarRoutineSlugs(client interface {
 	if target == "" || ws == "" {
 		return ""
 	}
-	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines", ws))
+	// Escape ws as a path segment so a workspace id containing
+	// reserved characters (slash, hash, question mark — possible
+	// in some bootstrap configs) doesn't construct a malformed URL
+	// or accidentally hit a different endpoint.
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines", url.PathEscape(ws)))
 	if err != nil {
 		return ""
 	}
@@ -78,7 +83,10 @@ func suggestSimilarRoutineSlugs(client interface {
 		}
 	}
 	if len(substr) > 0 {
-		return "no exact match — routines containing %q: " + strings.Join(substr, ", ")
+		// Format the target into the hint — original code had a
+		// literal %q sequence that never got interpolated, so the
+		// substring-fallback hint was unhelpful for users.
+		return fmt.Sprintf("no exact match — routines containing %q: %s", target, strings.Join(substr, ", "))
 	}
 	return ""
 }

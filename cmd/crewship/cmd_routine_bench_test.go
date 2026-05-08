@@ -96,10 +96,13 @@ func TestClassifyFailReason_BucketsAllCommonModes(t *testing.T) {
 		"":                                                                    "other",
 	}
 	for msg, want := range cases {
-		got := classifyFailReason(msg)
-		if got != want {
-			t.Errorf("classifyFailReason(%q) = %q, want %q", msg, got, want)
-		}
+		msg, want := msg, want // capture for subtest closure
+		t.Run(msg, func(t *testing.T) {
+			got := classifyFailReason(msg)
+			if got != want {
+				t.Errorf("classifyFailReason(%q) = %q, want %q", msg, got, want)
+			}
+		})
 	}
 }
 

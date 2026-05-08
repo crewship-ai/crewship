@@ -459,13 +459,19 @@ func runEvalBaselineDiff(cmd *cobra.Command, args []string) error {
 
 	f := newFormatter()
 	if f.Format == "json" {
-		_ = f.JSON(map[string]any{
-			"baseline_name":     baseline.Name,
-			"baseline_at":       baseline.GeneratedAt,
-			"tolerance":         tolerance,
-			"regression_count":  regressionCount,
-			"rows":              rows,
-		})
+		// Propagate serialisation failures (broken pipe, full
+		// disk on stdout redirect, etc) so CI doesn't see exit 0
+		// when the JSON output never actually reached the
+		// downstream consumer.
+		if err := f.JSON(map[string]any{
+			"baseline_name":    baseline.Name,
+			"baseline_at":      baseline.GeneratedAt,
+			"tolerance":        tolerance,
+			"regression_count": regressionCount,
+			"rows":             rows,
+		}); err != nil {
+			return fmt.Errorf("emit json diff: %w", err)
+		}
 	} else {
 		printRegressionTable(cmd, baseline, rows, tolerance)
 	}
@@ -493,6 +499,19 @@ func computeRegressionRows(baseline baselineRecord, currentMatrix map[string]sce
 			key := matrixKey(slug, tier)
 			b, hasB := baseline.Cells[key]
 			c, hasC := currentMatrix[key]
+
+			// Cross-product of allScenarios × allTiers can yield
+			// (slug, tier) pairs that exist in NEITHER baseline
+			// nor current — e.g. if baseline ran scenarios A,B
+			// at tier=fast and current ran scenarios C,D at
+			// tier=smart, the union axes cross to A/smart, B/smart,
+			// C/fast, D/fast — none of which were ever measured.
+			// Without this skip, those phantom cells fall into the
+			// `default` branch below and emit STABLE rows, falsely
+			// implying agreement on cells nobody touched.
+			if !hasB && !hasC {
+				continue
+			}
 
 			r := regressionRow{Scenario: slug, Tier: tier}
 
