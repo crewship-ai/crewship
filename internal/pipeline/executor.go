@@ -1224,15 +1224,23 @@ func compiledSchemaForBytes(schemaBytes json.RawMessage) (*jsonschema.Schema, er
 	return schema, nil
 }
 
-// truncate returns s clipped to maxLen runes with an ellipsis if it
-// got cut. Used by validateAgainstSchema to keep journal-line widths
-// bounded; long jsonschema error chains can run several KB and would
-// blow up the journal_entries.error_message column otherwise.
+// truncate returns s clipped to maxLen RUNES (not bytes) with an
+// ellipsis if it got cut. Used by validateAgainstSchema to keep
+// journal-line widths bounded; long jsonschema error chains can run
+// several KB and would blow up the journal_entries.error_message
+// column otherwise.
+//
+// Rune-based slicing matters when jsonschema returns non-ASCII
+// content in errors (e.g. echoed input that contains multi-byte
+// characters). Byte-slicing could split a UTF-8 sequence and
+// produce invalid bytes in the journal entry, breaking downstream
+// JSON serialisation. Caught by CodeRabbit review of #285.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }
 
 // containsCaseSensitive is a thin wrapper over strings.Contains; kept

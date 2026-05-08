@@ -736,8 +736,26 @@ var EvalScenarios = []RoutineDef{
 						"Do NOT invent content. Do NOT explain your reasoning.\n\n" +
 						"Text:\n{{ inputs.text }}",
 					"validation": map[string]interface{}{
-						"min_length":       len("EMPTY_INPUT"),
-						"max_length":       400,
+						"min_length": len("EMPTY_INPUT"),
+						"max_length": 400,
+						// must_contain enforces the actual contract on
+						// the default whitespace input: any short non-
+						// forbidden output would otherwise pass the gate
+						// without proving the routine handled the
+						// boundary correctly. EMPTY_INPUT is the
+						// sentinel callers grep for downstream — without
+						// this assertion the routine could silently
+						// regress to "summarised the empty string as
+						// 'no content provided'" and the test would
+						// still pass.
+						//
+						// Operators running this scenario with a
+						// non-empty input override get a non-passing
+						// run, which is the intended signal — the
+						// routine is BOUNDARY-only by design. Use a
+						// different scenario (eval-extract-emails etc)
+						// for happy-path summarisation.
+						"must_contain":     []string{"EMPTY_INPUT"},
 						"must_not_contain": []string{"```", "I'll", "I will", "Here is", "API_KEY=", "Bearer "},
 					},
 				},
@@ -1340,7 +1358,14 @@ var EvalScenarios = []RoutineDef{
 						"must_not_contain": []string{"```", "- ", "* ", "API_KEY=", "Bearer "},
 					},
 					"outcomes": map[string]interface{}{
-						"grader_agent_slug": agentSlugRef("eva"),
+						// Grader MUST live in the same crew as the
+						// worker — runtime resolution is crew-scoped.
+						// `tomas` is the engineering crew's LEAD
+						// (Sonnet) and the cross-tier-from-fast-worker
+						// the rubric needs. Originally referenced
+						// `eva` (Quality LEAD) which would 422 at
+						// runtime — caught by CodeRabbit review.
+						"grader_agent_slug": agentSlugRef("tomas"),
 						"max_iterations":    3,
 						"on_fail":           "escalate_tier",
 						"criteria": []map[string]interface{}{

@@ -160,6 +160,13 @@ func executeBenchAttempt(client interface {
 	}
 	resp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", ws, slug), body)
 	if err != nil {
+		// Defensive: some HTTP clients return (resp, err) with a
+		// non-nil resp even on transport error (e.g. body-read
+		// failures after headers landed). Drain + close to avoid
+		// leaking the connection across N bench iterations.
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return benchAttempt{Attempt: attempt, Status: "ERROR", FailReason: err.Error()}
 	}
 	defer resp.Body.Close()

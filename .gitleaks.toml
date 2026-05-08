@@ -114,6 +114,12 @@ paths = [
   '''internal/orchestrator/testdata/cli-fixtures/droid\.ndjson$''',
   '''internal/orchestrator/testdata/cli-fixtures/gemini\.ndjson$''',
   '''internal/orchestrator/testdata/cli-fixtures/opencode\.ndjson$''',
+
+  # Routines cookbook — documents the standard `Idempotency-Key`
+  # HTTP header pattern with placeholder values like
+  # `order-12345-attempt-1`. Gitleaks' generic-api-key rule fires
+  # on the placeholder; verified false positive (CodeRabbit #285).
+  '''docs/guides/routines-cookbook\.mdx$''',
 ]
 
 # Strings that look like secrets but are documented placeholders.

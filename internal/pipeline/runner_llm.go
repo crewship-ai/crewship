@@ -96,12 +96,12 @@ var errNoAnthropicCred = errors.New("no active Anthropic credential in workspace
 // assistant's response text; cost + token counts come from the
 // llm.Response that the middleware records in the paymaster ledger.
 func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentStepResult, error) {
-	systemPrompt, err := r.resolveAgentSystemPrompt(ctx, req.AuthorCrewID, req.AgentSlug)
+	systemPrompt, authorAgentID, err := r.resolveAgentSystemPrompt(ctx, req.AuthorCrewID, req.AgentSlug)
 	if err != nil {
 		// "Agent not found" is a save-time bug we couldn't catch
 		// (slug existed at save, agent deleted between save+run).
 		// Surface a clean error so the executor can report it.
-		return AgentStepResult{}, fmt.Errorf("LLMRunner: resolve agent: %w", err)
+		return AgentStepResult{}, err
 	}
 
 	provider, err := r.providerForWorkspace(ctx, req.WorkspaceID)
@@ -119,14 +119,17 @@ func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentSte
 	// mirrors how the orchestrator's goroutines wrap their inner
 	// LLM calls.
 	//
-	// AgentID is the resolved author agent's ID (the agent the
-	// step runs AS), not the invoker — this matches the cross-crew
-	// reuse contract: cost is billed to the author's workspace
-	// regardless of who invoked the routine.
+	// AgentID is the resolved AUTHOR agent's id — the agent the
+	// step actually runs AS. Cross-crew invocation: Crew B
+	// triggering Crew A's routine bills Crew A's agent, not
+	// Crew B's invoker. This matches the cross-crew reuse contract
+	// the orchestrator runner already enforces and keeps cost
+	// analytics meaningful when one crew owns a heavily-shared
+	// routine fleet.
 	scope := lookout.Scope{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.AuthorCrewID,
-		AgentID:     req.InvokingAgentID, // best-effort; may be empty for direct API runs
+		AgentID:     authorAgentID,
 	}
 	ctx = lookout.WithScope(ctx, scope)
 
@@ -164,31 +167,40 @@ func (r *LLMRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentSte
 }
 
 // resolveAgentSystemPrompt looks up the agent's persona/system
-// prompt by (author_crew_id, agent_slug). Returns ErrNotFound when
-// the slug doesn't resolve in the author crew. Empty system prompt
-// is allowed — many lightweight agents are persona-free.
-func (r *LLMRunner) resolveAgentSystemPrompt(ctx context.Context, crewID, slug string) (string, error) {
+// prompt by (author_crew_id, agent_slug) AND returns the resolved
+// agent's row id. The id is returned alongside the prompt so the
+// caller can attribute paymaster cost to the AUTHOR agent (the
+// agent the routine actually runs as) rather than the invoker —
+// otherwise cross-crew or delegated runs bill the wrong agent.
+//
+// Returns ErrNotFound when the slug doesn't resolve in the author
+// crew. Empty system prompt is allowed — many lightweight agents
+// are persona-free.
+func (r *LLMRunner) resolveAgentSystemPrompt(ctx context.Context, crewID, slug string) (systemPrompt, agentID string, err error) {
 	if crewID == "" || slug == "" {
-		return "", fmt.Errorf("crew_id + agent_slug required")
+		return "", "", fmt.Errorf("crew_id + agent_slug required")
 	}
-	var systemPrompt sql.NullString
-	err := r.db.QueryRowContext(ctx, `
-SELECT a.system_prompt
+	var (
+		prompt sql.NullString
+		id     string
+	)
+	err = r.db.QueryRowContext(ctx, `
+SELECT a.id, a.system_prompt
 FROM agents a
 WHERE a.crew_id = ?
   AND a.slug = ?
   AND a.deleted_at IS NULL
-LIMIT 1`, crewID, slug).Scan(&systemPrompt)
+LIMIT 1`, crewID, slug).Scan(&id, &prompt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("agent slug %q not found in crew %q", slug, crewID)
+		return "", "", fmt.Errorf("agent slug %q not found in crew %q", slug, crewID)
 	}
 	if err != nil {
-		return "", err
+		return "", "", fmt.Errorf("LLMRunner: resolve agent: %w", err)
 	}
-	if !systemPrompt.Valid {
-		return "", nil
+	if !prompt.Valid {
+		return "", id, nil
 	}
-	return systemPrompt.String, nil
+	return prompt.String, id, nil
 }
 
 // providerForWorkspace returns a middleware-wrapped Anthropic
@@ -216,10 +228,12 @@ func (r *LLMRunner) providerForWorkspace(ctx context.Context, workspaceID string
 	// than a "no credential" message would be when one is actually
 	// present.
 	//
-	// Order matters: ASC by created_at so a later-rotated key wins
-	// over an older one when both are present and ACTIVE. The seed
-	// only ever creates one row per workspace so this only matters
-	// in operator-rotated workspaces.
+	// Order matters: DESC by created_at so the LATEST rotated key
+	// wins when an operator has rotated credentials and both rows
+	// are still ACTIVE. The seed only ever creates one row per
+	// workspace so this only matters in rotated workspaces — but
+	// in those cases ASC silently picks a stale key, which we
+	// caught in CodeRabbit review of #285.
 	var encryptedValue string
 	err := r.db.QueryRowContext(ctx, `
 SELECT encrypted_value FROM credentials
@@ -228,7 +242,7 @@ WHERE workspace_id = ?
   AND type IN ('API_KEY', 'AI_CLI_TOKEN')
   AND status = 'ACTIVE'
   AND deleted_at IS NULL
-ORDER BY created_at ASC
+ORDER BY created_at DESC
 LIMIT 1`, workspaceID).Scan(&encryptedValue)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errNoAnthropicCred

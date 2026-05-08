@@ -284,8 +284,9 @@ var evalBaselineListCmd = &cobra.Command{
 			return f.JSON(rows)
 		}
 		if len(rows) == 0 {
-			fmt.Println("(no baselines stored yet)")
-			fmt.Println("Save one with: crewship eval baseline save <name> --tiers fast,smart --runs 5")
+			out := cmd.OutOrStdout()
+			fmt.Fprintln(out, "(no baselines stored yet)")
+			fmt.Fprintln(out, "Save one with: crewship eval baseline save <name> --tiers fast,smart --runs 5")
 			return nil
 		}
 		header := []string{"NAME", "GENERATED", "SCENARIOS", "TIERS", "RUNS/CELL"}
@@ -348,7 +349,7 @@ var evalBaselineDeleteCmd = &cobra.Command{
 	Use:   "delete <name>",
 	Short: "Delete a stored baseline",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		path, err := baselinePath(args[0])
 		if err != nil {
 			return err
@@ -359,7 +360,7 @@ var evalBaselineDeleteCmd = &cobra.Command{
 			}
 			return fmt.Errorf("delete baseline: %w", err)
 		}
-		fmt.Printf("Deleted baseline %q\n", args[0])
+		fmt.Fprintf(cmd.OutOrStdout(), "Deleted baseline %q\n", args[0])
 		return nil
 	},
 }
@@ -429,6 +430,17 @@ func runEvalBaselineDiff(cmd *cobra.Command, args []string) error {
 	var baseline baselineRecord
 	if err := json.Unmarshal(data, &baseline); err != nil {
 		return fmt.Errorf("parse baseline: %w", err)
+	}
+
+	// Refuse cross-workspace diff. Baselines record their source
+	// workspace at save time; reusing the same name across
+	// workspaces is a footgun (CI would silently report "regression"
+	// when really comparing two unrelated matrices). Surface the
+	// mismatch loudly and tell the operator how to recover.
+	currentWS := newAPIClient().GetWorkspaceID()
+	if baseline.WorkspaceID != "" && currentWS != "" && baseline.WorkspaceID != currentWS {
+		return fmt.Errorf("baseline %q was saved for workspace %s but you are in workspace %s — diff aborted (re-save the baseline in the current workspace, or switch workspaces with `crewship config workspace`)",
+			baseline.Name, baseline.WorkspaceID, currentWS)
 	}
 
 	currentMatrix, currentScenarios, currentTiers, _, err := executeBaselineSweep(cmd)

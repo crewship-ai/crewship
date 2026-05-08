@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 )
@@ -235,14 +234,4 @@ func TestTierOverride_RunnerSeesDifferentModels(t *testing.T) {
 	if step.Complexity != ComplexityModerate {
 		t.Error("original step.Complexity mutated — copy-on-override invariant broken")
 	}
-
-	// Pull in the unused fakeResolver / fakeAgentRunner / errors
-	// / newTierTestExecutor symbols so the imports stay tight.
-	// They're not part of the assertion — kept for future
-	// expansion of the executor-level integration tests this
-	// file is positioned to host.
-	_ = fakeResolver{}
-	_ = errors.New
-	_ = newTierTestExecutor
-	_ = (*fakeAgentRunner)(nil)
 }
