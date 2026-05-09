@@ -44,6 +44,8 @@ export type RealtimeEventType =
   | "pipeline.step.completed"
   | "pipeline.step.failed"
   | "pipeline.step.validation_failed"
+  | "pipeline.waitpoint.created"
+  | "inbox.updated"
 
 /** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {
@@ -68,6 +70,16 @@ const VALID_REALTIME_TYPES: Set<string> = new Set([
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   "agent.log", "file.event", "container.stats",
   "provision.started", "provision.progress", "provision.completed", "provision.failed",
+  // Pipeline run events — RunsView + WaitpointRunDetail subscribe.
+  "pipeline.run.started", "pipeline.run.completed", "pipeline.run.failed",
+  "pipeline.step.started", "pipeline.step.completed", "pipeline.step.failed",
+  "pipeline.step.validation_failed",
+  // Inbox + waitpoint events. Without these in the allowlist
+  // handleMessage drops them and the bell + /inbox stop refreshing
+  // in real time — silent regression that would only surface as
+  // "the badge count looks stuck."
+  "pipeline.waitpoint.created",
+  "inbox.updated",
 ])
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)

@@ -197,10 +197,23 @@ type pipelineResponse struct {
 	LastInvocationStatus string  `json:"last_invocation_status,omitempty"`
 	AuthorCrewID         string  `json:"author_crew_id,omitempty"`
 	AuthorAgentID        string  `json:"author_agent_id,omitempty"`
-	AuthorUserID         string  `json:"author_user_id,omitempty"`
-	AuthoredVia          string  `json:"authored_via"`
-	CreatedAt            string  `json:"created_at"`
-	UpdatedAt            string  `json:"updated_at"`
+	// AuthorAgentName denormalizes the author agent's display name so
+	// the routines list can render "Authored by Eva" without a second
+	// fetch + client-side join. Populated by the List handler via a
+	// batch lookup; empty when AuthorAgentID is empty or the agent
+	// was deleted.
+	AuthorAgentName string `json:"author_agent_name,omitempty"`
+	AuthorUserID    string `json:"author_user_id,omitempty"`
+	AuthoredVia     string `json:"authored_via"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+	// LinkedIssueCount is the number of issues bound to this routine
+	// via missions.routine_id. LinkedIssues holds up to the first 3
+	// issue identifiers so the UI can render a "ENG-5, ENG-9 +1"
+	// chip without paginating. Both populated by the List handler
+	// from a single GROUP BY query.
+	LinkedIssueCount int      `json:"linked_issue_count"`
+	LinkedIssues     []string `json:"linked_issues,omitempty"`
 	// Definition is included on the detail endpoint only — list
 	// responses omit it to keep payloads small.
 	Definition json.RawMessage `json:"definition,omitempty"`
@@ -276,7 +289,171 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, p := range rows {
 		out = append(out, toPipelineResponse(p, false))
 	}
+	// Enrich the list with two cross-cutting bits:
+	//   - author_agent_name: lets the UI render "Authored by Eva"
+	//     instead of a UUID. Single batch query keyed on author_agent_id.
+	//   - linked_issue_count + linked_issues: how many issues bind
+	//     this routine via missions.routine_id. Single GROUP BY scan;
+	//     identifiers truncated to 3 per routine to bound payload.
+	// Both are best-effort — if the lookup fails we log and keep the
+	// list minus the enrichment rather than failing the whole call.
+	enrichPipelineListAuthorNames(r.Context(), h.db, h.logger, out)
+	enrichPipelineListLinkedIssues(r.Context(), h.db, h.logger, workspaceID, out)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// enrichPipelineListAuthorNames looks up the display name for each
+// distinct author_agent_id in the response and stitches it back onto
+// the matching rows. Best-effort: a SQL error or a missing agent
+// just leaves AuthorAgentName empty.
+func enrichPipelineListAuthorNames(ctx context.Context, db *sql.DB, logger *slog.Logger, rows []pipelineResponse) {
+	if len(rows) == 0 {
+		return
+	}
+	idSet := make(map[string]struct{})
+	for _, r := range rows {
+		if r.AuthorAgentID != "" {
+			idSet[r.AuthorAgentID] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	ids := make([]any, 0, len(idSet))
+	placeholders := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+		placeholders = append(placeholders, "?")
+	}
+	// Exclude soft-deleted agents — same defensive scope as
+	// lookupAgentSlugs. A name resolved through this enrichment is
+	// shown to the user; surfacing the name of an agent the operator
+	// removed would be confusing.
+	q := `SELECT id, name FROM agents WHERE deleted_at IS NULL AND id IN (` + strings.Join(placeholders, ",") + `)`
+	res, err := db.QueryContext(ctx, q, ids...)
+	if err != nil {
+		logger.Warn("pipeline list: author name lookup", "error", err)
+		return
+	}
+	defer res.Close()
+	names := make(map[string]string, len(idSet))
+	scanErrors := 0
+	for res.Next() {
+		var id, name string
+		if scanErr := res.Scan(&id, &name); scanErr != nil {
+			scanErrors++
+			continue
+		}
+		names[id] = name
+	}
+	// Iterator-level error after the loop catches driver-side
+	// problems (broken connection, decode error mid-stream) that
+	// res.Next() swallowed silently.
+	if rowsErr := res.Err(); rowsErr != nil {
+		logger.Warn("pipeline list: author name iterator", "error", rowsErr)
+	}
+	if scanErrors > 0 {
+		logger.Warn("pipeline list: author name scans skipped", "count", scanErrors)
+	}
+	for i := range rows {
+		if n, ok := names[rows[i].AuthorAgentID]; ok {
+			rows[i].AuthorAgentName = n
+		}
+	}
+}
+
+// enrichPipelineListLinkedIssues counts issues bound to each pipeline
+// via missions.routine_id and inlines up to 3 identifiers per routine
+// so the UI can render a chip without a second fetch. Best-effort:
+// SQL errors leave the counts at 0 rather than failing the request.
+func enrichPipelineListLinkedIssues(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID string, rows []pipelineResponse) {
+	if len(rows) == 0 {
+		return
+	}
+	idSet := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		idSet[r.ID] = struct{}{}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	ids := make([]any, 0, len(idSet)+1)
+	ids = append(ids, workspaceID)
+	placeholders := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+		placeholders = append(placeholders, "?")
+	}
+	// Identifiers ordered by created_at DESC so the truncated set is
+	// the *recent* bindings — those are the ones a user is likeliest
+	// to want to revisit. The ROW_NUMBER trick keeps the list small
+	// per routine_id.
+	q := `
+SELECT routine_id, identifier
+FROM (
+  SELECT routine_id, identifier,
+    ROW_NUMBER() OVER (PARTITION BY routine_id ORDER BY created_at DESC) AS rn
+  FROM missions
+  WHERE workspace_id = ?
+    AND routine_id IN (` + strings.Join(placeholders, ",") + `)
+    AND identifier IS NOT NULL
+)
+WHERE rn <= 3
+ORDER BY routine_id, rn`
+	res, err := db.QueryContext(ctx, q, ids...)
+	if err != nil {
+		logger.Warn("pipeline list: linked issues lookup", "error", err)
+		return
+	}
+	defer res.Close()
+	type bucket struct {
+		count       int
+		identifiers []string
+	}
+	linked := make(map[string]*bucket)
+	for res.Next() {
+		var routineID, identifier string
+		if scanErr := res.Scan(&routineID, &identifier); scanErr != nil {
+			logger.Warn("pipeline list: scan linked issue", "error", scanErr)
+			continue
+		}
+		b, ok := linked[routineID]
+		if !ok {
+			b = &bucket{}
+			linked[routineID] = b
+		}
+		b.identifiers = append(b.identifiers, identifier)
+	}
+	// Second query to capture totals — the windowed query above caps
+	// at 3 per routine, so we need a bare COUNT for the badge number.
+	q2 := `SELECT routine_id, COUNT(*) FROM missions
+		WHERE workspace_id = ? AND routine_id IN (` + strings.Join(placeholders, ",") + `)
+		GROUP BY routine_id`
+	res2, err := db.QueryContext(ctx, q2, ids...)
+	if err != nil {
+		logger.Warn("pipeline list: linked count lookup", "error", err)
+		return
+	}
+	defer res2.Close()
+	for res2.Next() {
+		var routineID string
+		var count int
+		if scanErr := res2.Scan(&routineID, &count); scanErr != nil {
+			continue
+		}
+		b, ok := linked[routineID]
+		if !ok {
+			b = &bucket{}
+			linked[routineID] = b
+		}
+		b.count = count
+	}
+	for i := range rows {
+		if b, ok := linked[rows[i].ID]; ok {
+			rows[i].LinkedIssueCount = b.count
+			rows[i].LinkedIssues = b.identifiers
+		}
+	}
 }
 
 // Get returns a single pipeline by slug, including its definition.
@@ -307,6 +484,13 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 type runRequestBody struct {
 	Inputs       map[string]any `json:"inputs"`
 	TierOverride string         `json:"tier_override,omitempty"`
+	// TriggeredVia + TriggeredByID let the caller (UI button, issue
+	// detail panel, etc.) attribute the run for the dashboards. Server
+	// validates against the closed enum so a malicious / typo'd value
+	// can't show up in the runs list as a forged source. Defaults to
+	// "manual" when empty.
+	TriggeredVia  string `json:"triggered_via,omitempty"`
+	TriggeredByID string `json:"triggered_by_id,omitempty"`
 }
 
 // Run invokes a saved pipeline by slug.
@@ -376,6 +560,22 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		tierOverride = ""
 	}
 
+	// Validate triggered_via against the closed enum so the runs list
+	// dashboard can trust the value without sanitizing again. Anything
+	// outside the enum falls back to "manual" — same forgive-and-carry-on
+	// semantics as TierOverride above.
+	triggeredVia := pipeline.TriggeredVia(body.TriggeredVia)
+	switch triggeredVia {
+	case pipeline.TriggeredViaManual,
+		pipeline.TriggeredViaSchedule,
+		pipeline.TriggeredViaWebhook,
+		pipeline.TriggeredViaCallPipeline,
+		pipeline.TriggeredViaIssue:
+		// accepted
+	default:
+		triggeredVia = pipeline.TriggeredViaManual
+	}
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:      p.ID,
@@ -386,6 +586,8 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		Mode:            pipeline.ModeRun,
 		IdempotencyKey:  idempotencyKey,
 		TierOverride:    tierOverride,
+		TriggeredVia:    triggeredVia,
+		TriggeredByID:   body.TriggeredByID,
 	})
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal

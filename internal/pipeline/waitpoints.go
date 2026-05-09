@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/inbox"
 )
 
 // SQLWaitpointStore is the production WaitpointStore backed by the
@@ -87,6 +90,13 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 // compare consistent with the stored values.
 func (s *SQLWaitpointStore) RecoverPending(ctx context.Context) (timedOut int, pending int, err error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// UPDATE first, then SELECT the rows we actually transitioned by
+	// matching on (status='timed_out' AND decided_at = now). This
+	// closes the SELECT-then-UPDATE race: if CompleteApproval wins
+	// between the original pre-SELECT and the UPDATE, the row's
+	// status flips to approved/denied and the timed_out filter
+	// won't pick it up — so we won't cascade a wrong timeout signal
+	// into the inbox.
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = 'timed_out', decided_at = ?
@@ -96,6 +106,28 @@ WHERE status = 'pending' AND timeout_at <= ?`, now, now)
 	}
 	n, _ := res.RowsAffected()
 	timedOut = int(n)
+
+	if timedOut > 0 {
+		rows, qerr := s.db.QueryContext(ctx, `
+SELECT token FROM pipeline_waitpoints
+WHERE status = 'timed_out' AND decided_at = ?`, now)
+		if qerr != nil {
+			return timedOut, 0, fmt.Errorf("waitpoints: recover transitioned scan: %w", qerr)
+		}
+		var expired []string
+		for rows.Next() {
+			var tok string
+			if scanErr := rows.Scan(&tok); scanErr == nil {
+				expired = append(expired, tok)
+			}
+		}
+		rows.Close()
+		// Mirror each timeout into the inbox so the "blocking" row
+		// clears at the same moment the source becomes terminal.
+		for _, tok := range expired {
+			inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "timed_out", "")
+		}
+	}
 
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM pipeline_waitpoints WHERE status = 'pending'`,
@@ -140,6 +172,35 @@ INSERT INTO pipeline_waitpoints (
 	if err != nil {
 		return "", fmt.Errorf("waitpoints: insert: %w", err)
 	}
+	// Mirror into the unified inbox so the bell + /inbox light up
+	// the moment the wait step fires. Best-effort: a SQL error here
+	// is logged but doesn't fail the waitpoint creation — the
+	// pipeline_waitpoints row remains the source of truth and a
+	// follow-up rebuild job can backfill missed projections.
+	title := "Waitpoint pending approval"
+	if req.Prompt != "" {
+		title = req.Prompt
+		if len(title) > 80 {
+			title = title[:77] + "…"
+		}
+	}
+	inbox.Insert(ctx, s.db, slog.Default(), inbox.Item{
+		WorkspaceID: req.WorkspaceID,
+		Kind:        "waitpoint",
+		SourceID:    token,
+		TargetRole:  "MANAGER",
+		Title:       title,
+		BodyMD:      req.Prompt,
+		SenderType:  "pipeline",
+		Priority:    "high",
+		Blocking:    true,
+		Payload: map[string]interface{}{
+			"pipeline_run_id":  req.PipelineRunID,
+			"step_id":          req.StepID,
+			"invoking_crew_id": req.InvokingCrewID,
+			"timeout_at":       timeoutAt,
+		},
+	})
 	// Pre-create the listener channel so a fast CompleteApproval
 	// (somehow racing the WaitFor) doesn't get lost. Buffered 1
 	// so a complete-then-wait still delivers.
@@ -227,6 +288,12 @@ WHERE token = ? AND status = 'pending'`,
 	if n == 0 {
 		return ErrAlreadyDecided
 	}
+	// Mirror the decision into the unified inbox so the row drops
+	// from "needs action" into the resolved feed in real time. The
+	// pipeline_waitpoints UPDATE has already committed by the time
+	// we get here, so a failure in the projection write is safe to
+	// log + swallow — a follow-up rebuild can patch up missed rows.
+	inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", token, status, deciderUserID)
 	s.mu.Lock()
 	if ch, ok := s.listeners[token]; ok {
 		select {
@@ -311,10 +378,27 @@ LIMIT 200`, now)
 	}
 	_ = rows.Err()
 	for _, tok := range expired {
-		_, _ = s.db.ExecContext(ctx, `
+		// Gate the cascade on whether THIS UPDATE actually flipped
+		// the row. RowsAffected==0 means CompleteApproval (or
+		// another sweep) already moved the waitpoint terminal —
+		// re-firing the timeout signal here would deliver the
+		// wrong outcome to a WaitFor goroutine and resolve the
+		// inbox row with a stale "timed_out" action.
+		res, execErr := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = 'timed_out', decided_at = ?
 WHERE token = ? AND status = 'pending'`, now, tok)
+		if execErr != nil {
+			continue
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			continue
+		}
+		// Cascade into the inbox projection so the user's "needs
+		// approval" row clears at the same moment the source
+		// becomes terminal. Idempotent at the SQL layer.
+		inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "timed_out", "")
 		s.mu.Lock()
 		if ch, ok := s.listeners[tok]; ok {
 			select {

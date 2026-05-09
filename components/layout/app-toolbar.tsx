@@ -33,6 +33,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import { CommandPalette } from "@/components/command-palette"
 import { NotificationBell } from "@/components/features/notifications/notification-bell"
+import { InboxBell } from "@/components/features/inbox/inbox-bell"
 import { useAppStore } from "@/lib/store"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
@@ -433,8 +434,13 @@ export function AppToolbar() {
           <Search className="h-4 w-4" />
         </Button>
 
-        {/* Desktop: notifications */}
-        <div className="hidden md:flex">
+        {/* Desktop: actionable inbox + informational notifications.
+          * Two distinct surfaces: Inbox = "you need to do something"
+          * (waitpoints, escalations, failed runs); Notification bell
+          * = "FYI" (mention, comment, status change). Inbox first so
+          * the action surface gets the more prominent slot. */}
+        <div className="hidden md:flex items-center gap-0.5">
+          <InboxBell />
           <NotificationBell />
         </div>
 

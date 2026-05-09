@@ -190,6 +190,10 @@ function RoutineRow({
               {routine.ephemeral && (
                 <Badge variant="outline" className="px-1 py-0 text-[9px]">ephemeral</Badge>
               )}
+              <LinkedIssuesChip
+                count={routine.linked_issue_count ?? 0}
+                identifiers={routine.linked_issues ?? []}
+              />
             </div>
             <div className="font-mono text-[10px] text-muted-foreground">{routine.slug}</div>
           </div>
@@ -201,8 +205,8 @@ function RoutineRow({
         {routine.last_invoked_at ? formatRelative(routine.last_invoked_at) : "—"}
       </td>
       <td className="px-3 py-2.5">
-        <span className="font-mono text-[10px] text-muted-foreground">
-          {routine.author_crew_id ? truncate(routine.author_crew_id, 16) : "—"}
+        <span className="text-[11px] text-foreground/80">
+          {routine.author_agent_name || (routine.author_crew_id ? truncate(routine.author_crew_id, 16) : "—")}
         </span>
         <div className="text-[9px] capitalize text-muted-foreground/70">
           {routine.authored_via.replace(/_/g, " ")}
@@ -210,6 +214,26 @@ function RoutineRow({
       </td>
       <td className="px-3 py-2.5 text-muted-foreground">{formatRelative(routine.updated_at)}</td>
     </tr>
+  )
+}
+
+// LinkedIssuesChip renders the "this routine is bound to N issues"
+// badge inline next to the routine title. Up to 2 identifiers are
+// shown verbatim so the user can scan which issues use it; anything
+// past that becomes "+N more" so the chip stays a single line.
+function LinkedIssuesChip({ count, identifiers }: { count: number; identifiers: string[] }) {
+  if (count === 0) return null
+  const head = identifiers.slice(0, 2)
+  const extra = count - head.length
+  const label = extra > 0 ? `${head.join(", ")} +${extra}` : head.join(", ")
+  return (
+    <Badge
+      variant="outline"
+      className="border-blue-500/30 bg-blue-500/5 px-1.5 py-0 text-[9px] font-medium text-blue-300"
+      title={`Linked to ${count} issue${count === 1 ? "" : "s"}: ${identifiers.join(", ")}${extra > 0 ? "…" : ""}`}
+    >
+      {label || `${count} issue${count === 1 ? "" : "s"}`}
+    </Badge>
   )
 }
 

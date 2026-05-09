@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -35,6 +36,12 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		MilestoneID   *string   `json:"milestone_id"`
 		SortOrder     *float64  `json:"sort_order"`
 		Labels        *[]string `json:"labels"`
+		// Routine binding — pointer + map so the caller can clear it
+		// (RoutineID = ""), set it, or leave it untouched (nil).
+		// RoutineInputs is treated as a full replacement, not a merge,
+		// to keep the inputs schema deterministic.
+		RoutineID     *string                 `json:"routine_id"`
+		RoutineInputs *map[string]interface{} `json:"routine_inputs"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -102,6 +109,42 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ub.Set("milestone_id", *req.MilestoneID)
 		}
+	}
+
+	// Routine binding: empty string = clear, non-empty = set (and
+	// validate). We resolve the pipeline_id against the workspace so
+	// a stale or cross-workspace ID can't sneak in. DB errors stay
+	// 500; "no such routine in this workspace" is the only 400 path.
+	// Clearing the binding also resets routine_inputs_json so stale
+	// inputs don't leak into a future re-bind.
+	if req.RoutineID != nil {
+		if *req.RoutineID == "" {
+			ub.SetNull("routine_id")
+			ub.Set("routine_inputs_json", "{}")
+		} else {
+			var exists int
+			err = h.db.QueryRowContext(r.Context(),
+				`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
+				*req.RoutineID, wsID).Scan(&exists)
+			if err != nil {
+				h.logger.Error("validate routine_id", "error", err)
+				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+			if exists == 0 {
+				writeProblem(w, r, http.StatusBadRequest, "routine_id does not exist in this workspace")
+				return
+			}
+			ub.Set("routine_id", *req.RoutineID)
+		}
+	}
+	if req.RoutineInputs != nil {
+		b, mErr := json.Marshal(*req.RoutineInputs)
+		if mErr != nil {
+			writeProblem(w, r, http.StatusBadRequest, "routine_inputs is not valid JSON")
+			return
+		}
+		ub.Set("routine_inputs_json", string(b))
 	}
 
 	// Validate status transition

@@ -123,6 +123,14 @@ type issueResponse struct {
 	MilestoneID    *string         `json:"milestone_id"`
 	SubIssuesCount int             `json:"sub_issues_count"`
 	CommentCount   int             `json:"comment_count"`
+	// Routine binding — when set, /run-routine on this issue invokes
+	// the bound pipeline. RoutineSlug is denormalized in the response
+	// so the UI doesn't have to round-trip the pipelines list to
+	// label the chip ("Run with: triage-classifier"). Both omitempty
+	// so unbound issues don't carry empty fields.
+	RoutineID   *string `json:"routine_id,omitempty"`
+	RoutineSlug *string `json:"routine_slug,omitempty"`
+	RoutineName *string `json:"routine_name,omitempty"`
 }
 
 type labelResponse struct {
@@ -233,6 +241,17 @@ func (h *IssueHandler) addIssueComment(ctx context.Context, missionID, authorTyp
 }
 
 // issueSelectQuery returns the base SELECT query for fetching issues.
+// LEFT JOINs into pipelines on routine_id so the response can include
+// routine slug + name without a second round-trip — the Issue UI
+// renders a "Run with: <slug>" chip and would otherwise have to map
+// every routine_id against a prefetched pipeline list.
+//
+// The pipelines join is workspace-scoped: a stale or cross-tenant
+// routine_id would otherwise leak the foreign workspace's slug+name
+// into the response. The handler-level validation already prevents
+// cross-workspace IDs from being persisted, but defense-in-depth here
+// keeps the surface safe even if a row sneaks through (manual SQL,
+// imported backup, etc.).
 func issueSelectQuery() string {
 	return `SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
 		m.number, m.identifier, m.title, m.description, m.status,
@@ -244,9 +263,11 @@ func issueSelectQuery() string {
 		m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 		m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
 		m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		(SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
+		(SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count,
+		m.routine_id, p.slug, p.name
 	FROM missions m
-	LEFT JOIN crews c ON m.crew_id = c.id`
+	LEFT JOIN crews c ON m.crew_id = c.id
+	LEFT JOIN pipelines p ON m.routine_id = p.id AND p.workspace_id = m.workspace_id`
 }
 
 // scanIssueRow scans a row into an issueResponse.
@@ -260,6 +281,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
 		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
 		&issue.SubIssuesCount,
+		&issue.RoutineID, &issue.RoutineSlug, &issue.RoutineName,
 	)
 	if err == nil {
 		issue.Labels = []labelResponse{}

@@ -3,12 +3,14 @@
 import { IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
 import { ContextDetailPanel, type DetailContext } from "@/components/features/orchestration/context-detail-panel"
 import type { Mission, IssueLabel, IssueComment, Project } from "@/lib/types/mission"
+import type { Pipeline } from "@/hooks/use-pipelines"
 
 export interface RightPanelContentProps {
   selectedIssue: Mission | null
   issueComments: IssueComment[]
   issueLabels: IssueLabel[]
   projects: Project[]
+  routines?: Pipeline[]
   selectedProject: Project | null
   workspaceId: string
   detailContext: DetailContext
@@ -26,6 +28,7 @@ export function RightPanelContent({
   issueComments,
   issueLabels,
   projects,
+  routines,
   selectedProject,
   workspaceId,
   detailContext,
@@ -44,6 +47,7 @@ export function RightPanelContent({
         comments={issueComments}
         labels={issueLabels}
         projects={projects}
+        routines={routines}
         workspaceId={workspaceId}
         onClose={onIssueClose}
         onUpdated={onIssueUpdated}

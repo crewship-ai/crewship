@@ -454,8 +454,16 @@ type RunInput struct {
 	// wins (explicit author intent overrides batch-level override).
 	// Empty (default) preserves existing per-step tier resolution.
 	TierOverride Complexity
-	pipeline     *Pipeline
-	dsl          *DSL
+	// TriggeredVia / TriggeredByID feed the run-record's audit
+	// trail so dashboards can answer "which runs came from a
+	// schedule vs a webhook vs a manual click." Default empty =
+	// "manual" via RunRecord's normaliseInsert step. Schedules,
+	// webhooks, and call_pipeline expansions populate these so
+	// the projection accurately reflects the trigger.
+	TriggeredVia  TriggeredVia
+	TriggeredByID string
+	pipeline      *Pipeline
+	dsl           *DSL
 }
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
@@ -1358,6 +1366,8 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		InvokingAgentID: in.InvokingAgentID,
 		IdempotencyKey:  in.IdempotencyKey,
 		InputsJSON:      string(inputsRaw),
+		TriggeredVia:    in.TriggeredVia,
+		TriggeredByID:   in.TriggeredByID,
 	}
 	if err := e.runStore.Insert(ctx, rec); err != nil {
 		e.persistWarn("run start", runID, err)
