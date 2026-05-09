@@ -78,7 +78,7 @@ export function WaitpointRunDetail({
       setError(null)
       try {
         const runRes = await fetch(
-          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/${encodeURIComponent(pipelineRunId)}`,
+          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(pipelineRunId)}`,
         )
         if (!runRes.ok) {
           if (cancelled) return

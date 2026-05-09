@@ -70,7 +70,10 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetRun GET /workspaces/{wsId}/pipelines/runs/{runId}
+// GetRun GET /workspaces/{wsId}/pipeline-runs/{runId}
+//
+// Top-level /pipeline-runs/ instead of /pipelines/runs/ to avoid a
+// net/http ServeMux pattern conflict with /pipelines/{slug}/runs.
 //
 // Returns the persisted state of a single pipeline run — status,
 // current step, accumulated step outputs, error info. Used by the
