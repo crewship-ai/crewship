@@ -1,6 +1,8 @@
 package api
 
 import (
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -66,6 +68,97 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 		"cancel_requested":    true,
 		"cancel_requested_at": time.Now().UTC().Format(time.RFC3339Nano),
 	})
+}
+
+// GetRun GET /workspaces/{wsId}/pipelines/runs/{runId}
+//
+// Returns the persisted state of a single pipeline run — status,
+// current step, accumulated step outputs, error info. Used by the
+// inbox waitpoint detail panel to render "where did it pause" with
+// real data from pipeline_runs (the projection table v83 introduced).
+//
+// step_outputs_json is parsed server-side into an object so the UI
+// doesn't have to JSON.parse twice; the frontend renders one panel
+// per (step_id, output) pair.
+func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	runID := r.PathValue("runId")
+	if runID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId required"})
+		return
+	}
+
+	var (
+		id, wsID, pipelineID, pipelineSlug, status, mode string
+		currentStepID, stepOutputsJSON, output           sql.NullString
+		startedAt                                        string
+		endedAt, errorMessage, failedAtStep              sql.NullString
+		costUSD                                          float64
+		durationMs                                       int64
+		triggeredVia, triggeredByID, idempotencyKey      sql.NullString
+		inputsJSON                                       string
+	)
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT id, workspace_id, pipeline_id, pipeline_slug, status, mode,
+		       current_step_id, step_outputs_json, output, started_at,
+		       ended_at, error_message, failed_at_step,
+		       cost_usd, duration_ms,
+		       triggered_via, triggered_by_id, idempotency_key, inputs_json
+		FROM pipeline_runs
+		WHERE id = ? AND workspace_id = ?`,
+		runID, workspaceID,
+	).Scan(
+		&id, &wsID, &pipelineID, &pipelineSlug, &status, &mode,
+		&currentStepID, &stepOutputsJSON, &output, &startedAt,
+		&endedAt, &errorMessage, &failedAtStep,
+		&costUSD, &durationMs,
+		&triggeredVia, &triggeredByID, &idempotencyKey, &inputsJSON,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("get pipeline run", "error", err, "run_id", runID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load run"})
+		return
+	}
+
+	// Parse step_outputs_json into a map so the UI can iterate steps
+	// without a second JSON.parse. Default to empty object on parse
+	// failure rather than failing the whole call — the rest of the
+	// metadata is still useful.
+	var stepOutputs map[string]interface{}
+	if stepOutputsJSON.Valid && stepOutputsJSON.String != "" {
+		_ = json.Unmarshal([]byte(stepOutputsJSON.String), &stepOutputs)
+	}
+	var inputs map[string]interface{}
+	if inputsJSON != "" {
+		_ = json.Unmarshal([]byte(inputsJSON), &inputs)
+	}
+
+	resp := map[string]interface{}{
+		"id":              id,
+		"workspace_id":    wsID,
+		"pipeline_id":     pipelineID,
+		"pipeline_slug":   pipelineSlug,
+		"status":          status,
+		"mode":            mode,
+		"current_step_id": currentStepID.String,
+		"step_outputs":    stepOutputs,
+		"output":          output.String,
+		"started_at":      startedAt,
+		"ended_at":        endedAt.String,
+		"error_message":   errorMessage.String,
+		"failed_at_step":  failedAtStep.String,
+		"cost_usd":        costUSD,
+		"duration_ms":     durationMs,
+		"triggered_via":   triggeredVia.String,
+		"triggered_by_id": triggeredByID.String,
+		"idempotency_key": idempotencyKey.String,
+		"inputs":          inputs,
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListActiveRuns GET /workspaces/{wsId}/pipelines/runs/active

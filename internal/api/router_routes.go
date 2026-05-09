@@ -389,6 +389,7 @@ func (r *Router) registerRoutes() {
 	// other half of concurrency control: a stuck run holds a slot
 	// until either it finishes or the operator pre-empts it.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active", authed(wsCtx(http.HandlerFunc(pipes.ListActiveRuns))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
 	// Pipeline webhooks — event-driven trigger surface alongside
 	// cron schedules. CRUD requires auth; the public dispatch

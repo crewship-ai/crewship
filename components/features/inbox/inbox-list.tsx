@@ -19,6 +19,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
+import { WaitpointRunDetail } from "./waitpoint-run-detail"
 
 // InboxList — the /inbox page surface. Linear-Triage UX: three states
 // (unread → read → resolved) with no archive / flag / snooze. List on
@@ -300,6 +301,26 @@ function InboxDetail({
       <div className="px-6 py-4">
         <KindActions item={item} onResolve={onResolve} disabled={isResolved} />
       </div>
+
+      {/* Rich run progress for waitpoints — fetches the underlying
+        * pipeline_run + DSL definition so the user can see exactly
+        * which step is paused and what each preceding step produced.
+        * Only meaningful when the payload has a pipeline_run_id. */}
+      {item.kind === "waitpoint" && (() => {
+        const runID = item.payload?.pipeline_run_id
+        if (typeof runID !== "string" || runID === "") return null
+        return (
+          <div className="border-t border-white/[0.06] px-6 py-4">
+            <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Run progress
+            </div>
+            <WaitpointRunDetail
+              workspaceId={item.workspace_id}
+              pipelineRunId={runID}
+            />
+          </div>
+        )
+      })()}
 
       {/* Payload (debug / advanced) */}
       {item.payload && Object.keys(item.payload).length > 0 && (
