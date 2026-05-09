@@ -128,9 +128,9 @@ type issueResponse struct {
 	// so the UI doesn't have to round-trip the pipelines list to
 	// label the chip ("Run with: triage-classifier"). Both omitempty
 	// so unbound issues don't carry empty fields.
-	RoutineID    *string `json:"routine_id,omitempty"`
-	RoutineSlug  *string `json:"routine_slug,omitempty"`
-	RoutineName  *string `json:"routine_name,omitempty"`
+	RoutineID   *string `json:"routine_id,omitempty"`
+	RoutineSlug *string `json:"routine_slug,omitempty"`
+	RoutineName *string `json:"routine_name,omitempty"`
 }
 
 type labelResponse struct {

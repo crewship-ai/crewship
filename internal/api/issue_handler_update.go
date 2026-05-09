@@ -23,19 +23,19 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		Title         *string                 `json:"title"`
-		Description   *string                 `json:"description"`
-		Status        *string                 `json:"status"`
-		Priority      *string                 `json:"priority"`
-		AssigneeType  *string                 `json:"assignee_type"`
-		AssigneeID    *string                 `json:"assignee_id"`
-		DueDate       *string                 `json:"due_date"`
-		ProjectID     *string                 `json:"project_id"`
-		Estimate      *int                    `json:"estimate"`
-		ParentIssueID *string                 `json:"parent_issue_id"`
-		MilestoneID   *string                 `json:"milestone_id"`
-		SortOrder     *float64                `json:"sort_order"`
-		Labels        *[]string               `json:"labels"`
+		Title         *string   `json:"title"`
+		Description   *string   `json:"description"`
+		Status        *string   `json:"status"`
+		Priority      *string   `json:"priority"`
+		AssigneeType  *string   `json:"assignee_type"`
+		AssigneeID    *string   `json:"assignee_id"`
+		DueDate       *string   `json:"due_date"`
+		ProjectID     *string   `json:"project_id"`
+		Estimate      *int      `json:"estimate"`
+		ParentIssueID *string   `json:"parent_issue_id"`
+		MilestoneID   *string   `json:"milestone_id"`
+		SortOrder     *float64  `json:"sort_order"`
+		Labels        *[]string `json:"labels"`
 		// Routine binding — pointer + map so the caller can clear it
 		// (RoutineID = ""), set it, or leave it untouched (nil).
 		// RoutineInputs is treated as a full replacement, not a merge,
