@@ -279,6 +279,17 @@ export function ActivityTracePage() {
               Trace unavailable: {traceError}
             </div>
           )}
+          {/* Heatmap-on, no metrics: surface the gap honestly. The
+            * journal-fetch window is capped at 200 entries per
+            * pipeline, so a run from far back in history won't have
+            * its step.completed events anymore. Without this hint
+            * the user thinks the toggle is broken. */}
+          {heatmapMode !== "off" && run !== null && stepMetrics.size === 0 && (
+            <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-200">
+              Heatmap data not available for this run — older runs may have
+              rolled out of the metrics window
+            </div>
+          )}
           <TraceCanvas
             run={run}
             dsl={dsl}

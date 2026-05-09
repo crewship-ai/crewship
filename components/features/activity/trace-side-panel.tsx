@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { Braces, FileText, Inbox, ScrollText, Send, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -178,7 +178,12 @@ function LogsView({ errorMessage }: { errorMessage?: string }) {
 }
 
 function FilesView({ step, output }: { step: TraceStep; output: unknown }) {
-  const artifacts = extractArtifacts(step.type, output)
+  // Memoize so a 1MB http response doesn't get regex-scanned + JSON-
+  // parsed on every parent re-render (panel resize, polling tick, …).
+  const artifacts = useMemo(
+    () => extractArtifacts(step.type, output),
+    [step.type, output],
+  )
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null)
 
   if (artifacts.length === 0) {

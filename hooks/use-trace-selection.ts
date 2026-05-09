@@ -17,6 +17,10 @@ export function useTraceSelection() {
   const runId = params.get("run") || null
   const stepId = params.get("step") || null
 
+  // Push for run/step selection so browser Back walks the trail of
+  // recent picks instead of bouncing the user out of /activity. We
+  // don't push when CLEARING a selection — that's idempotent state
+  // hygiene rather than a user-meaningful navigation.
   const setRunId = useCallback(
     (next: string | null) => {
       const sp = new URLSearchParams(params.toString())
@@ -25,7 +29,9 @@ export function useTraceSelection() {
       // Selecting a different run drops the previously-focused step;
       // a step id from one run isn't meaningful in another.
       sp.delete("step")
-      router.replace(`${pathname}?${sp.toString()}`, { scroll: false })
+      const url = `${pathname}?${sp.toString()}`
+      if (next) router.push(url, { scroll: false })
+      else router.replace(url, { scroll: false })
     },
     [params, pathname, router],
   )
@@ -35,7 +41,9 @@ export function useTraceSelection() {
       const sp = new URLSearchParams(params.toString())
       if (next) sp.set("step", next)
       else sp.delete("step")
-      router.replace(`${pathname}?${sp.toString()}`, { scroll: false })
+      const url = `${pathname}?${sp.toString()}`
+      if (next) router.push(url, { scroll: false })
+      else router.replace(url, { scroll: false })
     },
     [params, pathname, router],
   )

@@ -51,15 +51,34 @@ export interface TraceGraphData {
 //   - id === current_step_id       → running (or waiting if the step
 //                                     is a wait kind)
 //   - id === failed_at_step        → failed
+//   - run.status === "failed" with no failed_at_step → paint the
+//     current step as failed if known, else the LAST step as failed.
+//     Without this, runs that errored before any step (auth failures,
+//     boot recovery sweeps, etc.) render all-pending — invisible.
 //   - else                         → pending
 //
 // Skipped is reserved — Phase 2 doesn't infer it; if/when we wire
 // `if:` conditions on steps, this is where it lights up.
-function statusOf(run: PipelineRun, step: TraceStep): StepStatus {
+function statusOf(
+  run: PipelineRun,
+  step: TraceStep,
+  steps: TraceStep[],
+): StepStatus {
   if (run.failed_at_step && run.failed_at_step === step.id) return "failed"
   if (run.step_outputs && step.id in run.step_outputs) return "success"
   if (run.current_step_id === step.id) {
     return step.type === "wait" ? "waiting" : "running"
+  }
+  // Catastrophic-failure fallback: status=failed but failed_at_step
+  // is empty. Pin the failure to current_step_id when set, otherwise
+  // to the last step in the chain so the user sees SOMETHING red.
+  const isTerminalFailed =
+    run.status === "failed" && !run.failed_at_step && step.id !== ""
+  if (isTerminalFailed) {
+    if (run.current_step_id && run.current_step_id === step.id) return "failed"
+    if (!run.current_step_id && steps.length > 0 && steps[steps.length - 1].id === step.id) {
+      return "failed"
+    }
   }
   return "pending"
 }
@@ -123,7 +142,7 @@ export function buildTraceGraph(
         : null
     const data: TraceStepNodeData = {
       step,
-      status: statusOf(run, step),
+      status: statusOf(run, step, effectiveSteps),
       selected: opts.selectedStepId === step.id,
       waitpoint,
       heatmapBorder: heatmapColors.get(step.id) ?? null,
@@ -182,7 +201,7 @@ export function buildTraceGraph(
   // (resolved client-side from the upstream step's output).
   for (const dfe of dataFlowEdges) {
     const sourceStep = effectiveSteps.find((s) => s.id === dfe.from)
-    const sourceStatus = sourceStep ? statusOf(run, sourceStep) : null
+    const sourceStatus = sourceStep ? statusOf(run, sourceStep, effectiveSteps) : null
     const active = sourceStatus === "running" || sourceStatus === "waiting"
     const upstreamOutput = run.step_outputs?.[dfe.from]
     const data: TraceDataFlowEdgeData = {
@@ -286,7 +305,7 @@ function makeSequencingEdge(
   steps: TraceStep[],
 ): Edge {
   const sourceStep = steps.find((s) => s.id === source)
-  const sourceStatus = sourceStep ? statusOf(run, sourceStep) : null
+  const sourceStatus = sourceStep ? statusOf(run, sourceStep, steps) : null
   const animated = source === "__trigger__"
     ? run.status === "running" || run.status === "queued"
     : sourceStatus === "running" || sourceStatus === "waiting"

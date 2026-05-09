@@ -108,6 +108,11 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	// returns the human pipeline name + issue identifier without
 	// forcing the FE to do a second fetch. The trace canvas
 	// (/activity) needs both for its trigger node + toolbar label.
+	//
+	// `p.deleted_at IS NULL` matches the soft-delete contract used by
+	// every other pipelines query (v78 migration). Without this, a
+	// run from a deleted pipeline would still surface the deleted
+	// pipeline's name to anyone who can guess the run id.
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT r.id, r.workspace_id, r.pipeline_id, r.pipeline_slug, r.status, r.mode,
 		       r.current_step_id, r.step_outputs_json, r.output, r.started_at,
@@ -116,7 +121,9 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		       r.triggered_via, r.triggered_by_id, r.idempotency_key, r.inputs_json,
 		       p.name, m.identifier
 		FROM pipeline_runs r
-		LEFT JOIN pipelines p ON r.pipeline_id = p.id AND p.workspace_id = r.workspace_id
+		LEFT JOIN pipelines p ON r.pipeline_id = p.id
+		                     AND p.workspace_id = r.workspace_id
+		                     AND p.deleted_at IS NULL
 		LEFT JOIN missions m ON r.triggered_via = 'issue'
 		                    AND m.identifier = r.triggered_by_id
 		                    AND m.workspace_id = r.workspace_id
@@ -230,7 +237,9 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 	// LEFT JOIN pipelines for the human name + LEFT JOIN missions on
 	// triggered_by_id (when triggered_via='issue') for the issue
 	// identifier. Both joins are workspace-scoped so a stale ID can't
-	// leak from another tenant.
+	// leak from another tenant. `p.deleted_at IS NULL` matches every
+	// other pipelines query (v78) so a soft-deleted pipeline doesn't
+	// resurface its name in run lists.
 	query := `
 		SELECT r.id, r.pipeline_id, r.pipeline_slug, p.name,
 		       r.status, r.mode, r.started_at, r.ended_at,
@@ -241,7 +250,9 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 		       r.error_message, r.failed_at_step,
 		       m.identifier
 		FROM pipeline_runs r
-		LEFT JOIN pipelines p ON r.pipeline_id = p.id AND p.workspace_id = r.workspace_id
+		LEFT JOIN pipelines p ON r.pipeline_id = p.id
+		                     AND p.workspace_id = r.workspace_id
+		                     AND p.deleted_at IS NULL
 		LEFT JOIN missions m ON r.triggered_via = 'issue'
 		                    AND m.identifier = r.triggered_by_id
 		                    AND m.workspace_id = r.workspace_id

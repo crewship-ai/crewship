@@ -38,12 +38,31 @@ function scan(value: string | undefined | null, hits: RefHit[]): void {
 
 function scanRecord(rec: Record<string, unknown> | undefined, hits: RefHit[]): void {
   if (!rec) return
-  for (const v of Object.values(rec)) {
-    if (typeof v === "string") scan(v, hits)
-    // Inputs values can also be nested; we don't recurse here
-    // because the DSL only allows scalar string inputs at the
-    // top level. Match server-side coverage.
+  for (const v of Object.values(rec)) scanAny(v, hits)
+}
+
+// scanAny — recurse into nested maps / arrays / strings looking for
+// step refs. Mirrors the Go-side `walkNestedTemplates` helper in
+// `internal/pipeline/dsl.go`. Without this, a call_pipeline step
+// with `inputs: { config: { url: "{{ steps.fetch.output.url }}" } }`
+// drops the inner reference on the floor — the data-flow edge never
+// gets drawn even though the value really does flow through.
+function scanAny(v: unknown, hits: RefHit[]): void {
+  if (v === null || v === undefined) return
+  if (typeof v === "string") {
+    scan(v, hits)
+    return
   }
+  if (Array.isArray(v)) {
+    for (const child of v) scanAny(child, hits)
+    return
+  }
+  if (typeof v === "object") {
+    for (const child of Object.values(v as Record<string, unknown>)) {
+      scanAny(child, hits)
+    }
+  }
+  // Numbers / booleans carry no templates — skip.
 }
 
 // scanStep — find every step ref inside a single step's inputs.
@@ -77,12 +96,11 @@ function scanStep(step: TraceStep, hits: RefHit[]): void {
       scan(step.transform?.expression, hits)
       break
     case "call_pipeline":
-      // inputs is Record<string, unknown> — only string values can
-      // contain template refs. Match server-side coverage.
+      // inputs is Record<string, unknown> with arbitrarily nested
+      // shapes. Recurse to match the Go validator's behavior — see
+      // `walkNestedTemplates` in `internal/pipeline/dsl.go`.
       if (step.inputs) {
-        for (const v of Object.values(step.inputs)) {
-          if (typeof v === "string") scan(v, hits)
-        }
+        for (const v of Object.values(step.inputs)) scanAny(v, hits)
       }
       break
   }
@@ -118,7 +136,6 @@ export function parseDataFlowEdges(steps: TraceStep[]): DataFlowEdge[] {
         grouped.set(key, { fromStepId: hit.fromStepId, path: hit.path })
       }
     }
-    void step.id // (intentional — `step` reference clarity above)
   }
 
   const edges: DataFlowEdge[] = []

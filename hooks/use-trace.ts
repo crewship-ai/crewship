@@ -38,7 +38,6 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
   const [dsl, setDsl] = useState<PipelineDSL | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const inFlightRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const refresh = useCallback(async () => {
@@ -47,8 +46,12 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
       setDsl(null)
       return
     }
-    if (inFlightRef.current) return
-    inFlightRef.current = true
+    // Cancel any in-flight fetch and start a fresh one. We
+    // deliberately don't gate on an "in-flight" flag — realtime
+    // events arriving mid-poll were silently dropped that way, so
+    // step.completed events between polls never showed up. Aborting
+    // is correct: if a step finishes while a previous fetch is
+    // still flying, the abort guarantees the next fetch wins.
     abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -98,18 +101,15 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
       if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      inFlightRef.current = false
       if (!ctrl.signal.aborted) setLoading(false)
     }
   }, [workspaceId, runId])
 
   useEffect(() => {
     abortRef.current?.abort()
-    inFlightRef.current = false
     refresh()
     return () => {
       abortRef.current?.abort()
-      inFlightRef.current = false
     }
   }, [refresh])
 

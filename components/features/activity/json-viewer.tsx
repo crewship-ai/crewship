@@ -38,14 +38,21 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
   const tableEnabled = parsed.kind === "object" || parsed.kind === "array"
 
   const onCopy = async () => {
+    // navigator.clipboard is undefined under SSR, in non-secure
+    // contexts (insecure http://), and in some test runners — so
+    // probe before calling. Without the guard, the inner await throws
+    // a TypeError before the try-catch can swallow it.
+    const cb =
+      typeof navigator !== "undefined" ? navigator.clipboard : undefined
+    if (!cb) return
     try {
       const text =
         typeof value === "string" ? value : JSON.stringify(value, null, 2)
-      await navigator.clipboard.writeText(text)
+      await cb.writeText(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      /* ignore — clipboard may be unavailable in test contexts */
+      /* ignore — clipboard rejection is non-fatal */
     }
   }
 

@@ -29,10 +29,16 @@ export function shadeNodes(
   const out = new Map<string, string>()
   if (mode === "off") return out
 
+  // Include cost=0 / duration=0 — http and code steps legitimately
+  // cost $0 (no LLM tokens), so excluding them made the heatmap shade
+  // ONLY the agent_run nodes and read as "agent_run is expensive"
+  // when really every other step was just metered out of the picture.
+  // Negative values are still skipped (defensive — the journal can
+  // emit -1 sentinels for in-flight steps).
   const values: { stepId: string; v: number }[] = []
   for (const m of metrics) {
     const v = mode === "cost" ? m.cost : m.duration
-    if (v === undefined || v === null || v <= 0) continue
+    if (v === undefined || v === null || v < 0) continue
     values.push({ stepId: m.stepId, v })
   }
   if (values.length === 0) return out

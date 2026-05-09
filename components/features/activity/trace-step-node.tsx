@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useState, type ReactNode } from "react"
+import { memo, useEffect, useRef, useState, type ReactNode } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import {
   ArrowLeftRight,
@@ -198,10 +198,14 @@ function TraceStepNodeBase({ data }: NodeProps) {
   const Icon = visual.Icon
   const ring = STATUS_RING[status]
 
+  // React Flow's wrapper makes the node tab-focusable and forwards
+  // Enter/Space to onNodeClick (handled at the canvas level), so we
+  // don't add our own tabIndex here — that would create a second
+  // focus stop and confuse keyboard users. role + aria-label still
+  // help screen readers describe the step.
   return (
     <div
       role="button"
-      tabIndex={0}
       aria-label={`${visual.label} step ${step.id}, status ${status}`}
       aria-pressed={selected}
       className={cn(
@@ -260,12 +264,24 @@ function WaitpointActions({
   waitpoint: { token: string; workspaceId: string }
 }) {
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null)
+  // mountedRef guards setBusy after a successful decide — the
+  // realtime pipeline.run.* event that fires once the run resumes
+  // unmounts this node, and React warns on stale state updates if we
+  // setBusy(null) on a dead component. Toast is fine to fire either
+  // way (sonner is global) — only the local state needs the guard.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const decide = async (e: React.MouseEvent, approved: boolean) => {
     e.stopPropagation()
     e.preventDefault()
     setBusy(approved ? "approve" : "deny")
     const res = await waitpointDecide(waitpoint.workspaceId, waitpoint.token, approved)
-    setBusy(null)
+    if (mountedRef.current) setBusy(null)
     if (res.ok) {
       toast.success(approved ? "Approved" : "Denied")
     } else {
@@ -328,9 +344,14 @@ export interface TraceTriggerNodeData {
 function TriggerNodeBase({ data }: NodeProps) {
   const d = data as unknown as TraceTriggerNodeData
   const Icon = TRIGGER_VISUAL.Icon
+  // Pin the label to the trigger SOURCE first; only fall through to
+  // "manual" when triggered_via really is empty/manual. Previous
+  // version dropped issue-triggered runs to "manual" when the
+  // identifier was empty (deleted mission), confusing the user about
+  // why the run kicked off.
   const label =
-    d.triggeredVia === "issue" && d.issueIdentifier
-      ? d.issueIdentifier
+    d.triggeredVia === "issue"
+      ? d.issueIdentifier || "issue"
       : d.triggeredVia === "schedule"
         ? "schedule"
         : d.triggeredVia === "webhook"
