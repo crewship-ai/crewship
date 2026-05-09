@@ -298,8 +298,15 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // runRequestBody is the shared shape for /run + /dry_run.
+//
+// TierOverride is the eval-suite knob that replaces every agent_run
+// step's complexity for the duration of one run. Accepted values
+// match pipeline.Complexity (trivial | fast | moderate | smart);
+// any other value is silently ignored (treat as no override) so a
+// future tier name added to the executor doesn't break old clients.
 type runRequestBody struct {
-	Inputs map[string]any `json:"inputs"`
+	Inputs       map[string]any `json:"inputs"`
+	TierOverride string         `json:"tier_override,omitempty"`
 }
 
 // Run invokes a saved pipeline by slug.
@@ -358,6 +365,17 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// wired (tests, dev without DB).
 	idempotencyKey := r.Header.Get("Idempotency-Key")
 
+	tierOverride := pipeline.Complexity(body.TierOverride)
+	switch tierOverride {
+	case "", pipeline.ComplexityTrivial, pipeline.ComplexityFast, pipeline.ComplexityModerate, pipeline.ComplexitySmart:
+		// accepted (empty = no override)
+	default:
+		// Unknown tier: drop the override silently. A future tier
+		// name added server-side will then ignore old clients
+		// gracefully rather than 400-ing them.
+		tierOverride = ""
+	}
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:      p.ID,
@@ -367,6 +385,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		Inputs:          body.Inputs,
 		Mode:            pipeline.ModeRun,
 		IdempotencyKey:  idempotencyKey,
+		TierOverride:    tierOverride,
 	})
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal

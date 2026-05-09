@@ -366,7 +366,15 @@ Every routine run emits a sequence of journal entries:
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 
-For terminal-side observability: `crewship routine watch <slug>` polls the runs endpoint and prints events as ANSI-coloured timeline; `--json` for JSON Lines piping into `jq`; `--once` exits after the first run terminates (CI-friendly).
+Three terminal-side observability surfaces, ordered by when you'd reach for each:
+
+| Phase | Command | Why |
+|---|---|---|
+| **Before run** | `crewship routine doctor <slug>` | Preflight ✓/⚠/✗ checklist — catches missing crew provisioning, agent slug typos, missing credentials, contradictory validation gates, tight cost caps. Cheap to run, returns in milliseconds, fails CI builds on FAIL. |
+| **During run** | `crewship routine watch <slug>` | Polls the runs endpoint and prints events as an ANSI-coloured timeline. `--json` for JSON Lines piping into `jq`; `--once` exits after the first run terminates (CI-friendly). |
+| **After run** | `crewship routine logs <run_id> --slug X` | One-shot post-mortem dump — every step's prompt, output, validation verdict, cost. Use to investigate a specific failure surfaced by `watch` or by the UI. |
+
+For variance characterisation across many runs (is this routine production-ready at this tier?), use [`crewship routine bench`](/cli/routine#crewship-routine-bench-slug). For matrix-level cross-tier consistency (which scenarios diverge between Haiku and Opus?), use [`crewship eval scenarios`](/cli/eval#crewship-eval-scenarios) and [`crewship eval baseline diff`](/cli/eval#baseline-diff-name) for CI regression gates.
 
 ## RBAC
 
@@ -421,6 +429,8 @@ Signals the run goroutine; it stops at the next safe point and emits `pipeline.r
 
 ## Troubleshooting
 
+**Before going through this list:** run `crewship routine doctor <slug>` first. Most "blind alley" failures (missing crew provisioning, agent slug typo, missing credential, contradictory validation gate, cost cap too tight) surface as a ✗ check on doctor before they ever cost an LLM call.
+
 ### Save returns 422 "save requires a fresh, passing test_run"
 
 The save endpoint requires the test gate cleared. Preferred path: call `/test_run`, capture the `save_token` from its response, and pass `"save_token": "<token>"` in the `/save` body. The token is a server-signed HMAC over `(workspace_id | definition_hash | user_id | issued_at)` and expires after 5 minutes — it cannot be forged from the client side.
@@ -456,22 +466,28 @@ Probably a waitpoint without a matching listener (process restarted between the 
 | `routine list` | Workspace routine catalog |
 | `routine get <slug>` | Detail with full DSL |
 | `routine save` | Save from JSON file |
-| `routine run <slug>` | Invoke against execution tier |
+| `routine run <slug>` | Invoke against execution tier (`--tier-override fast/smart/...`) |
 | `routine dry-run <slug>` | Preview without invoking |
 | `routine delete <slug>` | Soft-delete |
+| `routine doctor <slug>` | Preflight checklist (✓/⚠/✗) — catches blind alleys before run |
+| `routine bench <slug>` | N-runs variance characterisation — pass-rate + cost/latency stats |
 | `routine runs <slug>` | Run history from journal |
+| `routine records <slug>` | Run history from `pipeline_runs` projection (filterable by status) |
+| `routine logs <run_id>` | Full journal trace for one run (post-mortem) |
+| `routine watch <slug>` | Live event stream |
+| `routine cancel <run_id>` | Signal in-flight run |
 | `routine versions <slug>` | Version history |
 | `routine rollback <slug> --to N` | Roll back to v N |
 | `routine export <slug>` | JSON bundle to stdout |
 | `routine import [bundle.json]` | Load from file or stdin |
-| `routine cancel <run_id>` | Signal in-flight run |
 | `routine validate [file.json]` | Offline DSL check |
-| `routine watch <slug>` | Live event stream |
 | `routine schedules ...` | Cron CRUD |
 | `routine webhooks ...` | Webhook CRUD |
 | `routine waitpoints ...` | HITL inbox + decisions |
 
-The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pipeline list`, `pipeline run`, `pipeline get`, etc.). The post-rename additions — `schedules`, `webhooks`, `waitpoints`, `validate`, `watch`, `logs`, `records` — are only registered under `routine`, so scripts that need them must switch.
+For batch evaluation across the eval-* fleet (matrix sweep, head-to-head tier compare, baseline regression diff), see the [eval CLI](/cli/eval). Cookbook recipe 6 walks the eval-driven promotion workflow end-to-end.
+
+The `pipeline` alias is preserved for back-compat on the legacy subcommands (`pipeline list`, `pipeline run`, `pipeline get`, etc.). The post-rename additions — `schedules`, `webhooks`, `waitpoints`, `validate`, `watch`, `logs`, `records`, `bench`, `doctor` — are only registered under `routine`, so scripts that need them must switch.
 
 ## Backend reference
 

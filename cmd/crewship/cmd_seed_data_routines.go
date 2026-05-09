@@ -32,22 +32,56 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 	}
 
 	fmt.Fprintln(os.Stderr, "Creating routines...")
-	var (
-		eligible int
-		ok       int
-		conflict int
-		failed   int
-	)
-	for _, r := range seeddata.Routines {
+	starterStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Routine", seeddata.Routines)
+	if err != nil {
+		return err
+	}
+
+	// Eval scenarios are seeded as a separate batch so their failure
+	// surface is reported independently — a regression in the eval
+	// suite shouldn't be misread as a starter-routine regression and
+	// vice versa. Both batches use the same /pipelines/save endpoint
+	// and the same per-routine error handling; only the log prefix
+	// differs.
+	fmt.Fprintln(os.Stderr, "Creating eval scenarios...")
+	evalStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Eval", seeddata.EvalScenarios)
+	if err != nil {
+		return err
+	}
+
+	_ = starterStats
+	_ = evalStats
+	return nil
+}
+
+// seedRoutineSlice POSTs each routine in the slice to /pipelines/save and
+// reports per-batch totals. Returns an error only when every eligible
+// routine in the batch failed — same regression-surface heuristic the
+// original seedRoutines used, scoped per-batch so a starter-routine
+// regression doesn't mask an eval-scenario one (or vice versa).
+//
+// `kind` is a short label used in log lines ("Routine", "Eval"); it
+// has no behavioural impact and exists purely to make `crewship seed`
+// output disambiguate the two batches at a glance.
+type routineBatchStats struct {
+	eligible int
+	ok       int
+	conflict int
+	failed   int
+}
+
+func seedRoutineSlice(ctx context.Context, client *cli.Client, wsID string, crewIDs map[string]string, kind string, defs []seeddata.RoutineDef) (routineBatchStats, error) {
+	var stats routineBatchStats
+	for _, r := range defs {
 		if err := ctx.Err(); err != nil {
-			return err
+			return stats, err
 		}
 		crewID, exists := crewIDs[r.CrewSlug]
 		if !exists {
-			fmt.Fprintf(os.Stderr, "  ! Routine %s: skipped (crew %q not seeded)\n", r.Slug, r.CrewSlug)
+			fmt.Fprintf(os.Stderr, "  ! %s %s: skipped (crew %q not seeded)\n", kind, r.Slug, r.CrewSlug)
 			continue
 		}
-		eligible++
+		stats.eligible++
 		body := map[string]interface{}{
 			"slug":                 r.Slug,
 			"name":                 r.Name,
@@ -60,34 +94,30 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", wsID)
 		resp, err := client.Post(path, body)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  ! Routine %s: %v\n", r.Slug, err)
-			failed++
+			fmt.Fprintf(os.Stderr, "  ! %s %s: %v\n", kind, r.Slug, err)
+			stats.failed++
 			continue
 		}
 		switch {
 		case resp.StatusCode == http.StatusCreated:
-			fmt.Fprintf(os.Stderr, "  + Routine: %s (crew=%s)\n", r.Slug, r.CrewSlug)
-			ok++
+			fmt.Fprintf(os.Stderr, "  + %s: %s (crew=%s)\n", kind, r.Slug, r.CrewSlug)
+			stats.ok++
 		case resp.StatusCode == http.StatusConflict:
-			fmt.Fprintf(os.Stderr, "  = Routine exists: %s\n", r.Slug)
-			conflict++
+			fmt.Fprintf(os.Stderr, "  = %s exists: %s\n", kind, r.Slug)
+			stats.conflict++
 		default:
-			// 5xx / 422 — surface the body so a misshapen DSL is
-			// debuggable. Individual routine failures are tolerated
-			// (mirrors seedIssues), but if EVERY eligible routine
-			// fails with the same status we likely hit a server-side
-			// regression and should surface that to the operator.
-			fmt.Fprintf(os.Stderr, "  ! Routine %s: HTTP %d\n", r.Slug, resp.StatusCode)
-			failed++
+			// 5xx / 422 — surface the status so a misshapen DSL is
+			// debuggable. Individual failures are tolerated (mirrors
+			// seedIssues), but if EVERY eligible routine in the
+			// batch fails we likely hit a server-side regression
+			// and should surface that to the operator.
+			fmt.Fprintf(os.Stderr, "  ! %s %s: HTTP %d\n", kind, r.Slug, resp.StatusCode)
+			stats.failed++
 		}
 		_ = resp.Body.Close()
 	}
-	// If at least one routine was eligible (crew existed) and every
-	// single eligible attempt failed, treat that as an unexpected
-	// regression rather than silently returning nil. Conflicts count
-	// as success here — the routine already exists, which is fine.
-	if eligible > 0 && ok == 0 && conflict == 0 && failed == eligible {
-		return fmt.Errorf("seedRoutines: all %d eligible routines failed (likely server-side regression)", failed)
+	if stats.eligible > 0 && stats.ok == 0 && stats.conflict == 0 && stats.failed == stats.eligible {
+		return stats, fmt.Errorf("seedRoutineSlice[%s]: all %d eligible routines failed (likely server-side regression)", kind, stats.failed)
 	}
-	return nil
+	return stats, nil
 }

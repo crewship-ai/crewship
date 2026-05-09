@@ -26,17 +26,23 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Core | `run <slug>` | Invoke a routine against the live execution tier |
 | Core | `dry-run <slug>` | Preview what a routine would do without invoking agents |
 | Core | `delete <slug>` | Soft-delete a routine |
-| Core | `runs <slug>` | Show recent run history from journal |
+| Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
+| Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
+| Runs | `runs <slug>` | List recent runs from journal |
+| Runs | `records <slug>` | List runs from `pipeline_runs` projection (v83) |
+| Runs | `logs <run_id>` | Full journal trace for a run (post-mortem) |
+| Runs | `cancel <run_id>` | Cancel an in-flight run |
+| Runs | `watch <slug>` | Stream live run + step events |
 | Versions | `versions <slug>` | List version history |
 | Versions | `rollback <slug> --to N` | Roll back to version N |
 | Bundles | `export <slug>` | Export bundle JSON to stdout |
 | Bundles | `import [bundle.json]` | Import bundle from file or stdin |
-| Runs | `cancel <run_id>` | Cancel an in-flight run |
-| Runs | `watch <slug>` | Stream live run + step events |
 | Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
 | Triggers | `schedules ...` | Cron schedule CRUD |
 | Triggers | `webhooks ...` | Webhook CRUD |
 | HITL | `waitpoints ...` | Approval inbox + decisions |
+
+For batch evaluation across the eval-* routine fleet (matrix sweep, head-to-head tier compare, regression baselines), see the [eval CLI](/cli/eval).
 
 ---
 
@@ -101,14 +107,116 @@ Invoke a saved routine against the live execution tier.
 ```bash
 crewship routine run summarize-text --inputs '{"text":"..."}'
 crewship routine run pr-review-structured --inputs '{"diff":"..."}' --invoking-crew crew_eng
+
+# Force every agent_run step onto a specific tier (eval / debug)
+crewship routine run eval-extract-emails --tier-override fast
+crewship routine run eval-extract-emails --tier-override smart
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--inputs` | JSON inputs for the run |
 | `--invoking-crew` | crew_id recorded as the invoker (cross-crew reuse audit) |
+| `--tier-override` | force every `agent_run` step onto `trivial`/`fast`/`moderate`/`smart`. Step-level `model_override` still wins. Empty (default) = use authored complexity. Used by the eval suite to diff weak vs strong worker tiers without DSL changes. |
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`.
+
+---
+
+## `crewship routine doctor <slug>`
+
+Preflight checklist that walks every checkable precondition before `run` and emits a ✓/⚠/✗ report. Catches the blind alleys (missing crew provisioning, agent slug typo, missing credential, contradictory validation gate, cost cap too tight) at one round-trip instead of one failure-per-run.
+
+```bash
+crewship routine doctor eval-extract-emails
+crewship routine doctor my-routine -f json   # CI-friendly
+```
+
+Checks performed:
+
+- `routine_exists` — routine present in the workspace
+- `author_crew` — author crew exists, has a devcontainer config, provisioning status is `completed` (not `in_progress` or `failed`)
+- `agent_slugs` — every step's `agent_slug` and every `outcomes.grader_agent_slug` resolves to an agent in the **author crew** (runtime resolution is crew-scoped)
+- `credential:<TYPE>` — every entry in `credentials_required` has an active workspace credential of that type
+- `egress_allowlist` — `egress_targets` declared when `http` steps are present; no wildcards or loopback hosts (`*`, `localhost`, `127.0.0.0/8`)
+- `cost_cap` — `max_cost_usd` is set and is at least 1.5× `estimated_cost_usd`
+- `validation:<step_id>` — gates are structurally satisfiable (`min_length ≤ max_length`, no string in both `must_contain` and `must_not_contain`)
+
+Exit code is non-zero if any check FAILed. WARN does not propagate to the exit code — it's an operator hint, not a blocker.
+
+---
+
+## `crewship routine bench <slug>`
+
+Run a routine N times with the same inputs and report pass-rate, cost stats, and latency distribution. Trigger.dev-style stability characterisation — use to decide whether a routine is production-ready at its current tier.
+
+```bash
+# 10 runs at the routine's authored tier
+crewship routine bench eval-extract-emails --runs 10
+
+# 5 runs with explicit tier override and JSON output for CI
+crewship routine bench eval-extract-emails --runs 5 --tier-override fast -f json
+
+# Bench with custom inputs + spaced cooldown for rate-limited credentials
+crewship routine bench summarize-text --runs 5 --cooldown-ms 1000 \
+    --inputs '{"text":"specific text to bench"}'
+```
+
+| Flag | Description |
+|------|-------------|
+| `--runs` | Number of runs (default 10) |
+| `--tier-override` | Force every `agent_run` step onto a tier (`trivial`/`fast`/`moderate`/`smart`). Empty = authored complexity. |
+| `--inputs` | JSON inputs forwarded to every run |
+| `--fail-fast` | Abort on the first non-pass instead of completing every run |
+| `--cooldown-ms` | Delay between runs (useful when stress-testing rate-limited credentials) |
+
+Output reports total / mean / p95 / max cost; p50 / p95 / max duration; fail-reason breakdown bucketed into `cost-cap` / `rubric-fail` / `gate-fail` / `auth-fail` / `timeout` / `other`. Headline verdict label so the operator doesn't need to interpret the stats:
+
+| Verdict | When |
+|---|---|
+| `PRODUCTION_READY` | ≥90% pass rate |
+| `FLAKY` | 70–90% pass rate (investigate top fail reason) |
+| `UNRELIABLE` | <70% pass rate (escalate tier or rewrite gates) |
+| `BROKEN` | 0% pass rate (auth issue, unsatisfiable gate, or cost guardrail trips every time) |
+| `INSUFFICIENT_DATA` | 0 runs |
+
+---
+
+## `crewship routine records <slug>`
+
+List runs for a routine using the `pipeline_runs` projection (introduced in migration v83). Backed by indexed columns, so this is O(log n) where `runs` is O(scan-with-LIKE) over `journal_entries`. Prefer `records` for filterable / scriptable run history.
+
+```bash
+crewship routine records eval-extract-emails
+crewship routine records eval-extract-emails --status failed --limit 100
+crewship routine records eval-extract-emails --json | jq '.[] | select(.cost_usd > 0.05)'
+```
+
+| Flag | Description |
+|------|-------------|
+| `--limit` | Max records to return, 1–500 (default 50) |
+| `--status` | Filter: `queued`/`running`/`completed`/`failed`/`cancelled`/`interrupted`/`dry_run` |
+| `--json` | Emit JSON for scripting |
+
+Falls back with a clear message to `crewship routine runs <slug>` when the server predates v83.
+
+---
+
+## `crewship routine logs <run_id>`
+
+Fetch the full journal trace for a single run. Post-mortem and CI-diagnostics surface — every step's prompt, output, validation verdict, and cost in one document.
+
+```bash
+crewship routine logs run_cmox10oci00016b48aacd --slug eval-extract-emails
+crewship routine logs run_cmox... --slug eval-... --json | jq '.events[] | select(.type=="pipeline.step.failed")'
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--slug` | ✓ | Routine slug the run belongs to |
+| `--json` | | JSON output for scripting |
+
+Pair with `routine watch` for live observation and `routine logs` for post-hoc forensics.
 
 ---
 
@@ -250,7 +358,7 @@ crewship routine schedules create \
 | `--slug` | ✓ | Target routine slug |
 | `--cron` | ✓ | 5-field cron expression |
 | `--name` | | Schedule name (default: `"<slug> schedule"`) |
-| `--timezone` | | IANA timezone (default: server local, falling back to UTC) |
+| `--timezone` | | IANA timezone (default: `UTC`; for host-local, pass an IANA zone such as `America/Los_Angeles` or read it from `cat /etc/timezone` / `timedatectl show -p Timezone --value`) |
 | `--inputs` | | JSON object passed as inputs on each tick |
 | `--enabled` | | Create enabled (default true) |
 

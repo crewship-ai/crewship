@@ -217,33 +217,74 @@ var startCmd = &cobra.Command{
 			}
 		}
 
-		// Wire the pipeline AgentRunner. Pipelines route every step
-		// through the same orchestrator path the scheduler uses —
-		// the agent runs in its real container, with its real CLI
-		// adapter (Claude Code / Codex / Gemini / etc.), no raw
-		// LLM API key required. This is the "reuse the firm's own
-		// employees" model: the agent the author crew already
-		// configured for chat use also handles pipeline steps.
+		// Wire the pipeline AgentRunner.
 		//
-		// Wired here (not in server.go) because the runner needs
-		// chatbridge.ChatResolver, which is constructed in this
-		// file. The router exposes PipelinesHandler so the runner
+		// Two implementations exist; selection logic:
+		//
+		//   1. CREWSHIP_PIPELINE_RUNNER=llm_direct (explicit override)  → LLMRunner
+		//   2. deps.Container == nil (no Docker provider available)     → LLMRunner
+		//   3. otherwise (default; production)                          → OrchestratorRunner
+		//
+		// OrchestratorRunner is the production path: pipelines route
+		// every step through the same orchestrator the scheduler uses,
+		// the agent runs in its real container with its real CLI
+		// adapter (Claude Code / Codex / Gemini / etc.), no raw LLM
+		// API key required. This is the "reuse the firm's own
+		// employees" model.
+		//
+		// LLMRunner is the eval / CI / no-Docker fallback. It calls
+		// the workspace's Anthropic credential directly via
+		// internal/llm, skipping the container + adapter layer. Used
+		// for cross-tier eval scenarios (where skills + MCP loops are
+		// out of scope by design) and for `--no-docker` smoke runs.
+		// See internal/pipeline/runner_llm.go for the trade-off
+		// analysis vs. the orchestrator path.
+		//
+		// Wired here (not in server.go) because OrchestratorRunner
+		// needs chatbridge.ChatResolver, which is constructed in this
+		// file. The router exposes PipelinesHandler so either runner
 		// can be plugged in post-router-construction.
-		if deps.DB != nil && deps.Container != nil && srv.APIRouter() != nil && srv.APIRouter().PipelinesHandler != nil {
-			pipeRunner, err := pipeline.NewOrchestratorRunner(pipeline.OrchestratorRunnerDeps{
-				DB:        deps.DB,
-				Orch:      srv.Orchestrator(),
-				Container: deps.Container,
-				Resolver:  resolver,
-				LogWriter: srv.LogWriter(),
-				ConvStore: srv.ConversationStore(),
-				Logger:    logger,
-			})
-			if err != nil {
-				logger.Error("pipeline orchestrator runner construct failed", "error", err)
-			} else {
+		if deps.DB != nil && srv.APIRouter() != nil && srv.APIRouter().PipelinesHandler != nil {
+			runnerMode := os.Getenv("CREWSHIP_PIPELINE_RUNNER")
+			useLLMDirect := runnerMode == "llm_direct" || deps.Container == nil
+			switch {
+			case useLLMDirect:
+				// LLMRunner takes a journal Emitter. The router's
+				// Emitter() accessor returns the wired writer; in
+				// boot order it's already set by the time we get
+				// here (server.go constructs the writer before
+				// returning).
+				// LLMRunner takes journal.Emitter for the middleware
+			// stack (paymaster cost ledger). PipelinesHandler.Emitter()
+			// returns the narrower pipeline.Emitter; we pass the full
+			// Server.JournalWriter() so cost ledger entries land in
+			// the same buffer as the rest of the server. Falls back
+			// to a no-op writer when journalWriter is nil (test path
+			// — should never happen in `crewship start`).
+			pipeRunner := pipeline.NewLLMRunner(deps.DB, srv.JournalWriter(), logger)
 				srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
-				logger.Info("pipeline runner wired (orchestrator mode — agent runs in its container via CLI adapter)")
+				reason := "no Docker provider"
+				if runnerMode == "llm_direct" {
+					reason = "CREWSHIP_PIPELINE_RUNNER=llm_direct"
+				}
+				logger.Info("pipeline runner wired (LLM-direct mode — bypasses container/adapter layer)",
+					"reason", reason)
+			default:
+				pipeRunner, err := pipeline.NewOrchestratorRunner(pipeline.OrchestratorRunnerDeps{
+					DB:        deps.DB,
+					Orch:      srv.Orchestrator(),
+					Container: deps.Container,
+					Resolver:  resolver,
+					LogWriter: srv.LogWriter(),
+					ConvStore: srv.ConversationStore(),
+					Logger:    logger,
+				})
+				if err != nil {
+					logger.Error("pipeline orchestrator runner construct failed", "error", err)
+				} else {
+					srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
+					logger.Info("pipeline runner wired (orchestrator mode — agent runs in its container via CLI adapter)")
+				}
 			}
 
 			// Wire HMAC secret for save_token signing. Reuses the

@@ -1,0 +1,463 @@
+---
+title: 'Routines cookbook'
+description: 'Worked examples and patterns for production-ready routines: gates, tier escalation, outcomes rubrics, eval-driven promotion'
+icon: 'book-open'
+---
+
+This cookbook collects the patterns we've seen pay off when promoting an AI workflow from prototype to production. Each example is a complete, runnable routine — copy, paste, adjust slugs to your crew, save with `crewship routine save`, validate with `crewship eval scenarios`.
+
+If you're new to routines, start with the [routines guide](/guides/routines) for the conceptual model. This page assumes you know what `agent_run`, `complexity`, and `validation` are.
+
+## How to read these recipes
+
+Every recipe has the same anatomy:
+
+1. **Goal** — what the routine does and when it's worth using.
+2. **DSL** — the full JSON definition. No omissions, no `...`.
+3. **Gates explained** — why each `must_contain` / schema / `outcomes.criteria` is there. The gates are the design — copying the prompt without the gates doesn't reproduce the routine.
+4. **Failure modes & fixes** — what goes wrong on weak tiers and the typical resolution.
+
+Every routine here can be benched in one command:
+
+```bash
+crewship routine bench <slug> --runs 10
+```
+
+That gives you the pass-rate + cost variance you need to decide between `complexity: fast` (Haiku, cheap) and `complexity: smart` (Opus, robust).
+
+---
+
+## Recipe 1 — Strict JSON extraction
+
+**Goal**: turn freeform text into a typed JSON object that the next step can `transform` over without parsing prose. The canonical "make this prompt deterministic enough to be a function" pattern.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "extract-order",
+  "display_name": "Extract order details",
+  "estimated_cost_usd": 0.002,
+  "max_cost_usd": 0.50,
+  "credentials_required": [{ "type": "anthropic" }],
+  "inputs": [
+    { "name": "order_text", "type": "string", "required": true }
+  ],
+  "outputs": [
+    { "name": "order", "type": "object" }
+  ],
+  "steps": [
+    {
+      "id": "extract",
+      "type": "agent_run",
+      "agent_slug": "viktor",
+      "complexity": "fast",
+      "on_fail": "escalate_tier",
+      "prompt": "Reshape the order summary into a JSON object with EXACTLY these keys:\n  - \"item\":       string\n  - \"qty\":        integer\n  - \"unit_price\": number\n  - \"currency\":   ISO-4217 string\nOutput ONLY the raw JSON object. No prose, no code fences.\n\nOrder:\n{{ inputs.order_text }}",
+      "validation": {
+        "min_length": 30,
+        "max_length": 400,
+        "must_contain": ["{", "}", "\"item\"", "\"qty\"", "\"unit_price\"", "\"currency\""],
+        "must_not_contain": ["```", "Here is", "API_KEY=", "Bearer "]
+      }
+    }
+  ]
+}
+```
+
+### Gates explained
+
+- **`must_contain` on `{`, `}`, `"item"`, `"qty"`, `"unit_price"`, `"currency"`** — anchors on JSON structure + every required key name. Catches the most common failure: model emits prose like *"Sure, here's the JSON: ..."* before the actual object.
+- **`must_not_contain` on `` ``` ``, `Here is`** — blocks code-fence wrappers and conversational lead-ins.
+- **`max_length: 400`** — caps verbosity drift. A weak tier sometimes ignores "no prose" and adds a paragraph of explanation; the cap trips it.
+- **No JSON Schema gate yet** — full schema validation now enforced (PR #284 follow-up). Use it when you want type-checking; the substring anchors are the cheap-but-effective layer.
+
+### Failure modes & fixes
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `output missing required token: "currency"` | Worker forgot a field | Add the missing key to the prompt's "EXACTLY these keys" list more explicitly |
+| `output contains banned token: ` ``` | Wrapped in code fences | Add `"do NOT use code fences"` to prompt; prompt-engineering, not gate-tightening |
+| Cost cap exceeded on smart tier | `max_cost_usd: 0.05` too low | Bump to 0.50 — Claude Code overhead is ~$0.05–0.10 per step |
+
+---
+
+## Recipe 2 — Cross-family rubric grading
+
+**Goal**: a fast worker drafts the output, a smart grader scores it on a strict rubric, the loop iterates if the worker misses the rubric. Mitigates self-preference bias by using a different grader family.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "graded-summary",
+  "display_name": "Cross-family graded summary",
+  "estimated_cost_usd": 0.005,
+  "max_cost_usd": 1.50,
+  "credentials_required": [{ "type": "anthropic" }],
+  "inputs": [
+    { "name": "topic", "type": "string", "required": true }
+  ],
+  "outputs": [
+    { "name": "summary", "type": "string" }
+  ],
+  "steps": [
+    {
+      "id": "summarize",
+      "type": "agent_run",
+      "agent_slug": "daniel",
+      "complexity": "fast",
+      "on_fail": "retry_step",
+      "prompt": "Write a 3-bullet summary of the topic. Each bullet starts with '- ', between 5 and 25 words. No preamble.\n\nTopic:\n{{ inputs.topic }}",
+      "validation": {
+        "min_length": 30,
+        "max_length": 1200,
+        "must_contain": ["- "],
+        "must_not_contain": ["```", "API_KEY="]
+      },
+      "outcomes": {
+        "grader_agent_slug": "eva",
+        "max_iterations": 3,
+        "on_fail": "abort",
+        "criteria": [
+          { "name": "exactly_three_bullets", "rule": "Exactly three lines starting with '- '." },
+          { "name": "each_bullet_in_range",  "rule": "Each bullet line contains 5-25 words." },
+          { "name": "covers_topic",          "rule": "Across the bullets, at least two distinct facts from the topic appear." },
+          { "name": "no_invented_facts",     "rule": "No bullet introduces a fact not present in the topic input." }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### Why this pattern
+
+A bare gate (`must_contain: ["- "]`) catches the bullet marker but not "did the worker actually summarise the topic, or just emit three placeholder bullets?" The rubric's `covers_topic` + `no_invented_facts` criteria are what prove the output is grounded. The grader is a separate `agent_slug` (`eva`, Sonnet) so its self-preference bias doesn't pile onto the worker's (`daniel`, Haiku).
+
+### Gotchas
+
+- **`max_iterations: 3`** — the loop is bounded so a stubborn worker can't burn unbounded tokens. After 3 attempts, `on_fail: abort` lets the run fail honestly rather than ship a bad summary.
+- **`max_cost_usd: 1.50`** — outcomes loops can iterate up to 3× the worker cost + 1 grader call per iteration. Budget accordingly.
+- **Don't put more than ~10 criteria in one rubric** — the grader's verdict gets noisy. Split into two graded steps if you need finer-grained rubric.
+
+---
+
+## Recipe 3 — Tier escalation on cost guardrail
+
+**Goal**: pin a routine to the cheapest tier that satisfies the gate, but escalate automatically if the cheap tier fails. Production routines should have this — it's how you catch a model regression without a 4am page.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "auto-escalate-classifier",
+  "display_name": "Sentiment classifier (auto-escalating)",
+  "estimated_cost_usd": 0.005,
+  "max_cost_usd": 0.50,
+  "credentials_required": [{ "type": "anthropic" }],
+  "execution_tier": {
+    "preferred": "fast",
+    "fallback": ["moderate", "smart"]
+  },
+  "inputs": [
+    { "name": "text", "type": "string", "required": true }
+  ],
+  "steps": [
+    {
+      "id": "classify",
+      "type": "agent_run",
+      "agent_slug": "daniel",
+      "complexity": "fast",
+      "on_fail": "escalate_tier",
+      "prompt": "Classify sentiment as positive, negative, or neutral. Output exactly: `sentiment: <label>`\n\nText:\n{{ inputs.text }}",
+      "validation": {
+        "min_length": 18,
+        "max_length": 50,
+        "must_contain": ["sentiment:"],
+        "must_not_contain": ["```", "I think", "API_KEY="]
+      }
+    }
+  ]
+}
+```
+
+### Escalation flow
+
+1. Worker runs at `fast` tier (Haiku). Output fails `must_contain` because it added "I think the sentiment is..."
+2. `on_fail: escalate_tier` → executor walks `execution_tier.fallback`, retries on `moderate` (Sonnet).
+3. Sonnet's output passes the gate. Run completes with `cost_usd` ≈ Haiku-cost + Sonnet-cost.
+4. Journal records both attempts so you can see which tier actually satisfied the gate.
+
+### When NOT to use auto-escalation
+
+- **Critical-output routines where wrong-but-confident is worse than failed.** Rubric-graded scenarios with `outcomes.on_fail: abort` are better — failing loud is preferable to silently spending more.
+- **Cost-budget-pinned routines** where you'd rather see `FAILED: cost cap exceeded` than auto-bump to a $0.20 tier you didn't budget for.
+
+---
+
+## Recipe 4 — DAG with deterministic transform plumbing
+
+**Goal**: combine non-LLM steps (`http`, `transform`, `code`) with LLM steps to keep cost down where determinism is achievable.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "fetch-extract-summarize",
+  "display_name": "Fetch JSON, project field, summarize",
+  "estimated_cost_usd": 0.003,
+  "max_cost_usd": 0.50,
+  "egress_targets": ["api.example.com"],
+  "credentials_required": [{ "type": "anthropic" }],
+  "inputs": [
+    { "name": "endpoint", "type": "string", "required": true }
+  ],
+  "steps": [
+    {
+      "id": "fetch",
+      "type": "http",
+      "http": {
+        "method": "GET",
+        "url": "{{ inputs.endpoint }}",
+        "max_response_bytes": 200000,
+        "success_codes": [200]
+      },
+      "timeout_seconds": 30
+    },
+    {
+      "id": "project_title",
+      "type": "transform",
+      "needs": ["fetch"],
+      "transform": {
+        "input": "{{ steps.fetch.output }}",
+        "expression": ".data.title"
+      }
+    },
+    {
+      "id": "summarize",
+      "type": "agent_run",
+      "agent_slug": "filip",
+      "complexity": "fast",
+      "needs": ["project_title"],
+      "on_fail": "escalate_tier",
+      "prompt": "One-sentence summary of the document title (max 20 words):\n\n{{ steps.project_title.output }}",
+      "validation": {
+        "min_length": 5,
+        "max_length": 400,
+        "must_not_contain": ["```", "API_KEY="]
+      }
+    }
+  ]
+}
+```
+
+### Why the transform step matters
+
+Without `project_title`, the LLM step would see the entire JSON response (often KBs of data) and either truncate context or summarise the wrong field. A deterministic `transform` step (jq projection) reduces cost AND eliminates a class of hallucination — the LLM only sees what we explicitly extract.
+
+### Egress allowlist
+
+`egress_targets: ["api.example.com"]` is enforced at runtime. A typo'd URL host fails at the http step rather than going to a different server. **Always set this** — leaving it unset opens the routine to SSRF if any input is template-substituted into a URL.
+
+---
+
+## Recipe 5 — Idempotent routine with concurrency key
+
+**Goal**: a webhook-triggered routine that should never double-execute on retransmission. This is the Trigger.dev / Stripe webhook model — pair an idempotency key with a concurrency limit so retries are safe and a burst of duplicate events doesn't fan out to N parallel executions.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "webhook-process-order",
+  "display_name": "Process order webhook",
+  "concurrency_key": "{{ inputs.order_id }}",
+  "max_concurrent": 1,
+  "estimated_cost_usd": 0.002,
+  "max_cost_usd": 0.50,
+  "credentials_required": [{ "type": "anthropic" }],
+  "inputs": [
+    { "name": "order_id",  "type": "string", "required": true },
+    { "name": "raw_payload","type": "string", "required": true }
+  ],
+  "steps": [
+    {
+      "id": "validate_and_enrich",
+      "type": "agent_run",
+      "agent_slug": "viktor",
+      "complexity": "fast",
+      "prompt": "Parse the order webhook payload and emit a JSON status line.\n\n{{ inputs.raw_payload }}",
+      "validation": {
+        "min_length": 5,
+        "max_length": 600,
+        "must_not_contain": ["API_KEY="]
+      }
+    }
+  ]
+}
+```
+
+### Idempotency vs concurrency — what's the difference?
+
+- **`concurrency_key`** gates *parallel* runs: if two requests with the same key arrive at the same time, the second one waits (or 429s) until the first finishes.
+- **`Idempotency-Key` HTTP header** dedupes *across time*: a second request with the same key (within the TTL) returns the original `run_id` with `status=DEDUPED` instead of executing again.
+
+Use both for a webhook handler. The concurrency key prevents a burst from fanning out; the idempotency header prevents a delayed retry from re-running an already-completed job.
+
+### Triggering safely
+
+```bash
+curl -X POST https://your-crewship/api/v1/workspaces/$WS/pipelines/webhook-process-order/run \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: order-12345-attempt-1" \
+  -d '{"inputs":{"order_id":"12345","raw_payload":"..."}}'
+```
+
+If the webhook upstream re-fires with the same `Idempotency-Key`, the second request returns `status=DEDUPED` and the original run id. No double-charge, no double-fulfilment.
+
+---
+
+## Recipe 6 — Eval-driven promotion to production
+
+**Goal**: take a hand-written routine and decide, with data, whether to ship it on `fast` or `smart` tier. This is the workflow PRD §18 calls "operator promotion path."
+
+```bash
+# 1. Author the routine, save with skip_test_gate=false (real test_run gate)
+crewship routine save --name='my-summarizer' --definition=routine.json \
+  --author-crew=engineering
+
+# 2. Bench at fast tier — 10 runs to characterise
+crewship routine bench my-summarizer --runs 10 --tier-override fast
+
+# Output:
+#   Pass rate:  9/10  (90%)
+#   Cost:       total $0.0521  /  mean $0.0052  /  p95 $0.0080
+#   Duration:   p50 2400ms  /  p95 4100ms  /  max 5200ms
+#   Verdict:    PRODUCTION_READY (≥90% pass rate over 10 runs)
+
+# 3. Bench at smart tier for comparison
+crewship routine bench my-summarizer --runs 10 --tier-override smart
+
+# Output:
+#   Pass rate:  10/10  (100%)
+#   Cost:       total $0.4900 / mean $0.0490
+#   Verdict:    PRODUCTION_READY
+
+# 4. Decide: 90% at $0.005 vs 100% at $0.049 — fast tier is 10x cheaper.
+#    Ship at fast. Save the matrix as a regression baseline.
+crewship eval baseline save my-summarizer-v1 \
+  --scenarios my-summarizer --tiers fast --runs 10
+
+# 5. In CI, on every PR that touches the routine or its prompts:
+crewship eval baseline diff my-summarizer-v1 \
+  --scenarios my-summarizer --tiers fast --runs 10
+# Exits 1 if pass rate dropped beyond --tolerance (default ±10pp)
+```
+
+### What to do at each verdict
+
+| Bench verdict | Action |
+|---|---|
+| `PRODUCTION_READY` (≥90%) at fast | Ship. Save baseline. Add to CI. |
+| `FLAKY` (70-90%) at fast | Look at fail breakdown. Top reason `cost-cap` → bump cap. Top reason `rubric-fail` → tighten prompt or escalate tier. |
+| `UNRELIABLE` (<70%) at fast | Don't ship at fast. Bench at moderate. If still <70%, the gate is unsatisfiable — rewrite. |
+| `BROKEN` (0%) | Auth issue, unsatisfiable gate, or always-failing guardrail. Check `--cooldown-ms 1000` to rule out rate limiting. |
+
+---
+
+## Recipe 7 — Cross-tier compare (head-to-head)
+
+**Goal**: investigate one specific scenario when the matrix from `eval scenarios` shows divergence.
+
+```bash
+crewship eval compare my-summarizer --tier-a fast --tier-b smart -f markdown
+```
+
+Output (markdown, paste into PR description):
+
+```markdown
+## Eval compare — `my-summarizer` (DIVERGE-B-PASS)
+
+| Side | Tier  | Status     | Cost (USD) | Duration (ms) |
+| ---  | ---   | ---        | ---        | ---           |
+| A    | fast  | FAILED     | $0.0080    | 4200          |
+| B    | smart | COMPLETED  | $0.0490    | 5800          |
+
+### Side A output
+```
+[paste of Haiku output that failed the gate]
+```
+
+### Side B output
+```
+[paste of Opus output that passed]
+```
+
+### Errors
+- **A** at `summarize`: outcomes failed: bullet 2 contains 32 words (max 25)
+```
+
+The verdict (`DIVERGE-B-PASS`) tells you Haiku can't satisfy the gate but Opus can. Now you have a real data point for the "ship at fast?" decision: probably no, unless you can rewrite the gate.
+
+---
+
+## Recipe 8 — Routine that calls another routine
+
+**Goal**: compose a complex workflow from smaller, individually-tested routines. Each sub-routine has its own gates, costs, baseline.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "weekly-digest-pipeline",
+  "display_name": "Weekly digest (composes extract + summarize + format)",
+  "estimated_cost_usd": 0.020,
+  "max_cost_usd": 2.00,
+  "credentials_required": [{ "type": "anthropic" }],
+  "inputs": [
+    { "name": "week", "type": "string", "required": true }
+  ],
+  "steps": [
+    {
+      "id": "extract",
+      "type": "call_pipeline",
+      "pipeline_slug": "extract-week-events",
+      "inputs": { "week": "{{ inputs.week }}" }
+    },
+    {
+      "id": "summarize",
+      "type": "call_pipeline",
+      "needs": ["extract"],
+      "pipeline_slug": "summarize-events",
+      "inputs": { "events": "{{ steps.extract.output }}" }
+    },
+    {
+      "id": "format",
+      "type": "agent_run",
+      "agent_slug": "nela",
+      "complexity": "fast",
+      "needs": ["summarize"],
+      "prompt": "Format as Slack-ready markdown:\n\n{{ steps.summarize.output }}",
+      "validation": {
+        "min_length": 100,
+        "max_length": 4000,
+        "must_contain": ["##"],
+        "must_not_contain": ["```", "API_KEY="]
+      }
+    }
+  ]
+}
+```
+
+### Why compose
+
+- Each sub-routine has its own benched baseline. A regression in `summarize-events` shows up as a regression in any composed routine that calls it — you don't have to re-bench the parent.
+- Author-crew context is preserved per call. If `summarize-events` lives in the `quality` crew, calling it from a `engineering` routine still runs with `quality`'s persona.
+- Cycle detection at save time: A → B → A is rejected. Maximum nested depth is 10 (PIPELINES.md §6.4).
+
+---
+
+## What's intentionally NOT in the cookbook
+
+These exist in the routines documentation but aren't recipes here because they don't change the patterns above:
+
+- **Schedules** — see [routine schedules CLI](/cli/routine#crewship-routine-schedules). Add a cron and you have a periodic version of any recipe above.
+- **Webhooks** — see [routine webhooks CLI](/cli/routine#crewship-routine-webhooks). HMAC-signed event triggers for any recipe above.
+- **Wait points** — human approval gates between steps. See [routines guide](/guides/routines#wait-points).
+
+The recipes here are the LLM-step shapes; the trigger surfaces are orthogonal.
