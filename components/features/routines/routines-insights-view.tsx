@@ -54,12 +54,20 @@ export function RoutinesInsightsView({
       .filter((r) => (r.invocation_count ?? 0) > 0)
       .sort((a, b) => (b.invocation_count ?? 0) - (a.invocation_count ?? 0))
       .slice(0, 5)
+    // Sort by last_invoked_at desc so the panel shows the freshest
+    // failures, not the first 5 in workspace iteration order. Routines
+    // missing a timestamp sort to the bottom.
     const recentFailures = routines
       .filter(
         (r) =>
           r.last_invocation_status?.toLowerCase() === "failed" ||
           r.last_invocation_status?.toLowerCase() === "error",
       )
+      .sort((a, b) => {
+        const ta = a.last_invoked_at ? Date.parse(a.last_invoked_at) : 0
+        const tb = b.last_invoked_at ? Date.parse(b.last_invoked_at) : 0
+        return tb - ta
+      })
       .slice(0, 5)
     return { totalRuns, everRun, succeeded, failed, passRate, top, recentFailures }
   }, [routines])
@@ -154,17 +162,14 @@ export function RoutinesInsightsView({
   )
 }
 
-function StatCard({
-  icon,
-  label,
-  value,
-  sub,
-}: {
+interface StatCardProps {
   icon: React.ReactNode
   label: string
   value: string
   sub: string
-}) {
+}
+
+function StatCard({ icon, label, value, sub }: StatCardProps) {
   return (
     <div className={cn("rounded-md border border-white/[0.06] bg-card/30 p-4")}>
       <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -177,13 +182,12 @@ function StatCard({
   )
 }
 
-function Panel({
-  title,
-  children,
-}: {
+interface PanelProps {
   title: string
   children: React.ReactNode
-}) {
+}
+
+function Panel({ title, children }: PanelProps) {
   return (
     <div className="overflow-hidden rounded-md border border-white/[0.06] bg-card/30">
       <div className="border-b border-white/[0.06] px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -194,19 +198,17 @@ function Panel({
   )
 }
 
+interface RoutineRowProps {
+  onActivate: () => void
+  ariaLabel: string
+  children: React.ReactNode
+}
+
 // RoutineRow wraps a list item so the row is keyboard-activatable
 // (Enter / Space) in addition to clickable. Both insights panels reuse
 // it; the children compose the row content while the wrapper handles
 // role / tabIndex / onKeyDown wiring.
-function RoutineRow({
-  onActivate,
-  ariaLabel,
-  children,
-}: {
-  onActivate: () => void
-  ariaLabel: string
-  children: React.ReactNode
-}) {
+function RoutineRow({ onActivate, ariaLabel, children }: RoutineRowProps) {
   return (
     <li
       role="button"

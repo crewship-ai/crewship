@@ -137,6 +137,14 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.RoutineID != nil && *req.RoutineID == "" {
 		req.RoutineID = nil
 	}
+	// Reject orphan inputs — the SQL COALESCE would silently swallow
+	// them when routine_id is NULL, and storing inputs without a
+	// routine to drive them is meaningless. Surface the mistake so
+	// callers don't think their inputs landed.
+	if req.RoutineID == nil && req.RoutineInputs != nil {
+		writeProblem(w, r, http.StatusBadRequest, "routine_inputs provided without routine_id")
+		return
+	}
 	if req.RoutineID != nil {
 		var exists int
 		err = tx.QueryRowContext(r.Context(),

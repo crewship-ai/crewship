@@ -112,6 +112,30 @@ func TestIssue_Create_WithBadRoutineID(t *testing.T) {
 	}
 }
 
+// TestIssue_Create_OrphanInputsRejected guards the "you forgot to set
+// routine_id" case: posting routine_inputs without a routine_id is a
+// 400 because COALESCE in the INSERT would otherwise swallow the
+// inputs silently and the caller wouldn't notice.
+func TestIssue_Create_OrphanInputsRejected(t *testing.T) {
+	h, userID, wsID, crewID, _, _ := newTestIssueHandler(t)
+
+	body := bytes.NewBufferString(`{
+		"title":"Orphan inputs",
+		"routine_inputs":{"k":"v"}
+	}`)
+	req := httptest.NewRequest("POST", "/", body)
+	req.SetPathValue("crewId", crewID)
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (body=%s)", rr.Code, rr.Body.String())
+	}
+}
+
 // TestIssue_Update_RoutineBinding_SetAndClear verifies the PATCH
 // surface: an empty routine_id clears the binding, a valid one sets
 // it. Also exercises the routine_inputs replacement path.

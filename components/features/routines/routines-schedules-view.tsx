@@ -122,21 +122,35 @@ export function RoutinesSchedulesView({
           <tbody className="divide-y divide-white/[0.04]">
             {schedules.map((s) => {
               const slug = s.target_pipeline_slug ?? slugByPipelineId.get(s.target_pipeline_id) ?? ""
+              // Only present the row as actionable when there's a slug
+              // to navigate to. Schedules that lost their target (manual
+              // delete, mid-rename) render as plain rows so screen readers
+              // don't announce a broken control.
+              const interactive = Boolean(slug)
               const activate = () => { if (slug) onSelect(slug) }
               return (
                 <tr
                   key={s.id}
-                  role="button"
-                  tabIndex={slug ? 0 : -1}
-                  aria-label={`Open routine ${slug || s.name}`}
-                  className="cursor-pointer transition-colors hover:bg-card/40 focus:bg-card/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
-                  onClick={activate}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      activate()
-                    }
-                  }}
+                  {...(interactive
+                    ? {
+                        role: "button" as const,
+                        tabIndex: 0,
+                        "aria-label": `Open routine ${slug}`,
+                        onClick: activate,
+                        onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault()
+                            activate()
+                          }
+                        },
+                      }
+                    : {})}
+                  className={cn(
+                    "transition-colors",
+                    interactive
+                      ? "cursor-pointer hover:bg-card/40 focus:bg-card/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+                      : "opacity-70",
+                  )}
                 >
                   <td className="px-3 py-2.5 font-medium">
                     <div className="flex items-center gap-2">
