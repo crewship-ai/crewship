@@ -5,10 +5,9 @@ import { motion, AnimatePresence } from "motion/react"
 import {
   ScrollText, Calendar, BarChart3,
   Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
-  Search, X,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { usePipelines } from "@/hooks/use-pipelines"
@@ -51,7 +50,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const [filters, setFilters] = useState<RoutineFilters>({
     status: "all",
     invocations: "all",
-    authoredVia: "all",
+    authorAgentId: null,
     showEphemeral: false,
   })
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
@@ -70,7 +69,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const filteredRoutines = pipelines.filter((p) => {
     if (search) {
       const q = search.toLowerCase()
-      const haystack = `${p.slug} ${p.name} ${p.description ?? ""}`.toLowerCase()
+      const haystack = `${p.slug} ${p.name} ${p.description ?? ""} ${p.author_agent_name ?? ""}`.toLowerCase()
       if (!haystack.includes(q)) return false
     }
     if (filters.status !== "all") {
@@ -80,7 +79,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     if (filters.invocations === "popular" && p.invocation_count < 10) return false
     if (filters.invocations === "fresh" && p.invocation_count > 0) return false
-    if (filters.authoredVia !== "all" && p.authored_via !== filters.authoredVia) return false
+    if (filters.authorAgentId !== null && p.author_agent_id !== filters.authorAgentId) return false
     if (!filters.showEphemeral && p.ephemeral) return false
     return true
   })
@@ -108,26 +107,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
         <div className="flex-1" />
 
-        {/* Search (only meaningful on the catalog list) */}
-        {activeTab === "list" && (
-          <div className="relative w-56 mr-2">
-            <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search routines…"
-              className="h-7 pl-7 pr-6 text-xs"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        )}
+        {/* Search now lives in the left filter sidebar (mirroring the
+          * /issues UnifiedExplorer); the toolbar stays focused on tabs
+          * + actions. Removed the duplicate toolbar search to avoid
+          * confusing two visible inputs. */}
 
         {/* Action buttons */}
         <Button
@@ -157,11 +140,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
       {/* ---- Body: 3-column layout ---- */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left filter panel */}
+        {/* Left filter panel — same chrome as the /issues sidebar
+          * (bg-card, not bg-card/30) so the two surfaces feel like
+          * pieces of one app rather than two near-misses. The width
+          * also matches the orchestration explorer (300px expanded). */}
         <aside
           className={cn(
-            "shrink-0 border-r border-white/[0.06] bg-card/30 transition-all overflow-hidden",
-            leftCollapsed ? "w-9" : "w-60",
+            "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
+            leftCollapsed ? "w-9" : "w-[300px]",
           )}
         >
           {leftCollapsed ? (
@@ -177,28 +163,28 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
               </Button>
             </div>
           ) : (
-            <div className="flex h-full flex-col">
-              <div className="flex items-center justify-between border-b border-white/[0.06] px-3 h-8 shrink-0">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Filters
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 w-6 p-0"
-                  onClick={() => setLeftCollapsed(true)}
-                  title="Collapse"
-                >
-                  <PanelLeftClose className="h-3 w-3" />
-                </Button>
-              </div>
+            <div className="relative flex h-full flex-col">
               <RoutinesFilterSidebar
                 filters={filters}
                 onChange={setFilters}
                 routines={pipelines}
                 totalRoutines={pipelines.length}
                 filteredCount={filteredRoutines.length}
+                search={search}
+                onSearchChange={setSearch}
               />
+              {/* Collapse handle floats top-right so the sidebar's own
+                * search bar reaches edge-to-edge; matches the explorer
+                * pattern in /issues. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="absolute right-1 top-1.5 h-6 w-6 p-0"
+                onClick={() => setLeftCollapsed(true)}
+                title="Collapse"
+              >
+                <PanelLeftClose className="h-3 w-3" />
+              </Button>
             </div>
           )}
         </aside>
