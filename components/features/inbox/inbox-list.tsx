@@ -351,6 +351,36 @@ function InboxDetail({
   )
 }
 
+// waitpointDecide POSTs to the workspace-scoped approve endpoint
+// with the explicit boolean. The handler treats an absent `approved`
+// field as false, so callers MUST send the field even when the user
+// clicked Deny — otherwise the row gets denied for the wrong reason
+// (silent default), which is exactly the bug we shipped on the
+// first cut of this surface.
+async function waitpointDecide(
+  workspaceID: string,
+  token: string,
+  approved: boolean,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceID)}/pipelines/waitpoints/${encodeURIComponent(token)}/approve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved }),
+      },
+    )
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      return { ok: false, error: body?.error ?? `Decide failed (${res.status})` }
+    }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 function KindActions({
   item,
   onResolve,
@@ -372,6 +402,13 @@ function KindActions({
 
   switch (item.kind) {
     case "waitpoint":
+      // Both Approve and Deny hit the same /approve endpoint —
+      // the body's `approved` boolean is what disambiguates. An empty
+      // body decoded to approved=false because Go's JSON unmarshal
+      // gives bools their zero value when absent, so a "{}" body was
+      // silently equivalent to denying. The earlier "already decided
+      // or expired" complaint was the second click hitting the
+      // already-denied row.
       return (
         <div className="flex items-center gap-2">
           <Button
@@ -379,16 +416,15 @@ function KindActions({
             disabled={disabled || busy !== null}
             onClick={() =>
               wrap("approved", async () => {
-                const token = item.source_id
-                const res = await fetch(
-                  `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/waitpoints/${encodeURIComponent(token)}/approve`,
-                  { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
-                )
+                const res = await waitpointDecide(item.workspace_id, item.source_id, true)
                 if (!res.ok) {
-                  const body = await res.json().catch(() => null)
-                  toast.error(body?.error ?? "Approve failed")
+                  toast.error(res.error)
                   return
                 }
+                // Server-side CompleteApproval already cascades
+                // inbox state via inbox.ResolveBySource — the local
+                // onResolve mostly ensures the optimistic UI
+                // matches before the WS event arrives.
                 await onResolve("approved")
               })
             }
@@ -401,11 +437,20 @@ function KindActions({
             size="sm"
             variant="ghost"
             disabled={disabled || busy !== null}
-            onClick={() => wrap("denied", async () => onResolve("denied"))}
+            onClick={() =>
+              wrap("denied", async () => {
+                const res = await waitpointDecide(item.workspace_id, item.source_id, false)
+                if (!res.ok) {
+                  toast.error(res.error)
+                  return
+                }
+                await onResolve("denied")
+              })
+            }
             className="gap-1.5"
           >
             <XCircle className="h-3 w-3" />
-            Deny
+            {busy === "denied" ? "Denying…" : "Deny"}
           </Button>
         </div>
       )
