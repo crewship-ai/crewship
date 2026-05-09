@@ -44,6 +44,8 @@ export type RealtimeEventType =
   | "pipeline.step.completed"
   | "pipeline.step.failed"
   | "pipeline.step.validation_failed"
+  | "pipeline.waitpoint.created"
+  | "inbox.updated"
 
 /** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {

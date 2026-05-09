@@ -1102,6 +1102,12 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// it with. Closes the gap where issues were free text + assignee
 	// with no path to "automate this." See migrate_consts_v84*.go.
 	{version: 84, name: "add_issue_routine_binding", sql: migrationAddIssueRoutineBinding},
+	// v85 introduces the unified inbox_items table — one row per
+	// "thing that needs the human." Backfills currently-open
+	// waitpoints + escalations so the inbox lights up on first
+	// deploy. Future kinds (failed runs, agent messages) drop in
+	// via the kind discriminator. See migrate_consts_v85*.go.
+	{version: 85, name: "add_inbox_items", sql: migrationAddInboxItems},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

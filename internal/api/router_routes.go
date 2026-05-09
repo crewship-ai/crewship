@@ -458,6 +458,16 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
 	r.mux.Handle("POST /api/v1/approvals/reset-auto-tuning", authed(wsCtx(http.HandlerFunc(ah.ResetAutoTuning))))
 
+	// Unified Inbox — the canonical "stuff that needs the human"
+	// surface. Backed by inbox_items (migration v85). Source-of-
+	// truth handlers (waitpoints, escalations, run failures) write
+	// through to this table so the bell + /inbox page render from
+	// one query instead of fanning out to four.
+	ih := NewInboxHandler(r.db, r.logger, r.hub)
+	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
+	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
+	r.mux.Handle("PATCH /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.PatchState))))
+
 	// Memory health dashboard — 5-metric score with per-crew scope.
 	// Read-only; available to every workspace member because the
 	// output is aggregate counts and ratios, no raw entry content.

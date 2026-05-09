@@ -20,7 +20,10 @@ import {
   ScrollText,
   CircleDot,
   MessagesSquare,
+  Inbox,
 } from "lucide-react"
+import { useInboxUnreadCount } from "@/hooks/use-inbox"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
   DropdownMenu,
@@ -51,6 +54,7 @@ const navSections = [
     label: "Plan",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
+      { title: "Inbox", href: "/inbox", icon: Inbox },
       { title: "Issues", href: "/issues", icon: CircleDot },
       { title: "Routines", href: "/routines", icon: ScrollText },
     ],
@@ -86,6 +90,10 @@ export function AppSidebar() {
   const pathname = usePathname()
   const { role } = useAbilities()
   const { sidebarMode, setSidebarMode } = useSidebar()
+  // Live unread count for the Inbox row badge — shared with the
+  // top-bar bell so they stay in lockstep without two pollers.
+  const { workspaceId } = useWorkspace()
+  const inboxUnread = useInboxUnreadCount(workspaceId)
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
@@ -162,6 +170,8 @@ export function AppSidebar() {
                       )
                     }
 
+                    const showInboxBadge = item.href === "/inbox" && inboxUnread > 0
+
                     return (
                       <SidebarMenuItem key={item.href}>
                         <SidebarMenuButton
@@ -175,6 +185,11 @@ export function AppSidebar() {
                             <span>{item.title}</span>
                           </Link>
                         </SidebarMenuButton>
+                        {showInboxBadge && (
+                          <SidebarMenuBadge className="bg-blue-500/15 text-blue-300 px-1.5 text-[10px] font-semibold tabular-nums">
+                            {inboxUnread > 99 ? "99+" : inboxUnread}
+                          </SidebarMenuBadge>
+                        )}
                       </SidebarMenuItem>
                     )
                   })}

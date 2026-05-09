@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/inbox"
 )
 
 // SQLWaitpointStore is the production WaitpointStore backed by the
@@ -140,6 +143,35 @@ INSERT INTO pipeline_waitpoints (
 	if err != nil {
 		return "", fmt.Errorf("waitpoints: insert: %w", err)
 	}
+	// Mirror into the unified inbox so the bell + /inbox light up
+	// the moment the wait step fires. Best-effort: a SQL error here
+	// is logged but doesn't fail the waitpoint creation — the
+	// pipeline_waitpoints row remains the source of truth and a
+	// follow-up rebuild job can backfill missed projections.
+	title := "Waitpoint pending approval"
+	if req.Prompt != "" {
+		title = req.Prompt
+		if len(title) > 80 {
+			title = title[:77] + "…"
+		}
+	}
+	inbox.Insert(ctx, s.db, slog.Default(), inbox.Item{
+		WorkspaceID: req.WorkspaceID,
+		Kind:        "waitpoint",
+		SourceID:    token,
+		TargetRole:  "MANAGER",
+		Title:       title,
+		BodyMD:      req.Prompt,
+		SenderType:  "pipeline",
+		Priority:    "high",
+		Blocking:    true,
+		Payload: map[string]interface{}{
+			"pipeline_run_id":  req.PipelineRunID,
+			"step_id":          req.StepID,
+			"invoking_crew_id": req.InvokingCrewID,
+			"timeout_at":       timeoutAt,
+		},
+	})
 	// Pre-create the listener channel so a fast CompleteApproval
 	// (somehow racing the WaitFor) doesn't get lost. Buffered 1
 	// so a complete-then-wait still delivers.
@@ -227,6 +259,12 @@ WHERE token = ? AND status = 'pending'`,
 	if n == 0 {
 		return ErrAlreadyDecided
 	}
+	// Mirror the decision into the unified inbox so the row drops
+	// from "needs action" into the resolved feed in real time. The
+	// pipeline_waitpoints UPDATE has already committed by the time
+	// we get here, so a failure in the projection write is safe to
+	// log + swallow — a follow-up rebuild can patch up missed rows.
+	inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", token, status, deciderUserID)
 	s.mu.Lock()
 	if ch, ok := s.listeners[token]; ok {
 		select {
