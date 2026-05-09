@@ -90,26 +90,13 @@ func NewSQLWaitpointStore(db *sql.DB) *SQLWaitpointStore {
 // compare consistent with the stored values.
 func (s *SQLWaitpointStore) RecoverPending(ctx context.Context) (timedOut int, pending int, err error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	// First collect tokens about to time out so we can cascade the
-	// inbox resolve afterwards. Doing the SELECT before the UPDATE
-	// keeps the read predicate consistent with what the UPDATE
-	// touches; doing the cascade AFTER means a partial cascade
-	// failure can't roll back the timeout marking.
-	rows, err := s.db.QueryContext(ctx, `
-SELECT token FROM pipeline_waitpoints
-WHERE status = 'pending' AND timeout_at <= ?`, now)
-	if err != nil {
-		return 0, 0, fmt.Errorf("waitpoints: recover scan: %w", err)
-	}
-	var expired []string
-	for rows.Next() {
-		var tok string
-		if scanErr := rows.Scan(&tok); scanErr == nil {
-			expired = append(expired, tok)
-		}
-	}
-	rows.Close()
-
+	// UPDATE first, then SELECT the rows we actually transitioned by
+	// matching on (status='timed_out' AND decided_at = now). This
+	// closes the SELECT-then-UPDATE race: if CompleteApproval wins
+	// between the original pre-SELECT and the UPDATE, the row's
+	// status flips to approved/denied and the timed_out filter
+	// won't pick it up — so we won't cascade a wrong timeout signal
+	// into the inbox.
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = 'timed_out', decided_at = ?
@@ -120,13 +107,26 @@ WHERE status = 'pending' AND timeout_at <= ?`, now, now)
 	n, _ := res.RowsAffected()
 	timedOut = int(n)
 
-	// Mirror each timeout into the inbox. Without this, a waitpoint
-	// whose deadline passes silently leaves a "blocking" inbox row
-	// at unread forever — the user keeps seeing "Approve before
-	// deploying…" in their inbox even though the routine's already
-	// abandoned the wait.
-	for _, tok := range expired {
-		inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "timed_out", "")
+	if timedOut > 0 {
+		rows, qerr := s.db.QueryContext(ctx, `
+SELECT token FROM pipeline_waitpoints
+WHERE status = 'timed_out' AND decided_at = ?`, now)
+		if qerr != nil {
+			return timedOut, 0, fmt.Errorf("waitpoints: recover transitioned scan: %w", qerr)
+		}
+		var expired []string
+		for rows.Next() {
+			var tok string
+			if scanErr := rows.Scan(&tok); scanErr == nil {
+				expired = append(expired, tok)
+			}
+		}
+		rows.Close()
+		// Mirror each timeout into the inbox so the "blocking" row
+		// clears at the same moment the source becomes terminal.
+		for _, tok := range expired {
+			inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "timed_out", "")
+		}
 	}
 
 	if err := s.db.QueryRowContext(ctx,
@@ -378,14 +378,26 @@ LIMIT 200`, now)
 	}
 	_ = rows.Err()
 	for _, tok := range expired {
-		_, _ = s.db.ExecContext(ctx, `
+		// Gate the cascade on whether THIS UPDATE actually flipped
+		// the row. RowsAffected==0 means CompleteApproval (or
+		// another sweep) already moved the waitpoint terminal —
+		// re-firing the timeout signal here would deliver the
+		// wrong outcome to a WaitFor goroutine and resolve the
+		// inbox row with a stale "timed_out" action.
+		res, execErr := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = 'timed_out', decided_at = ?
 WHERE token = ? AND status = 'pending'`, now, tok)
+		if execErr != nil {
+			continue
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			continue
+		}
 		// Cascade into the inbox projection so the user's "needs
 		// approval" row clears at the same moment the source
-		// becomes terminal. Best-effort; same idempotency guard as
-		// CompleteApproval so re-firing is safe.
+		// becomes terminal. Idempotent at the SQL layer.
 		inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", tok, "timed_out", "")
 		s.mu.Lock()
 		if ch, ok := s.listeners[tok]; ok {

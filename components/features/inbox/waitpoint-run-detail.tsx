@@ -263,7 +263,23 @@ export function WaitpointRunDetail({
       {steps.length > 0 ? (
         <div className="rounded-md border border-white/[0.06] bg-card/30">
           <div className="border-b border-white/[0.06] px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-            Progress · paused at step {Math.max(currentIdx, completedSteps.length) + 1} of {steps.length}
+            {/* Status label + step index reflect the actual run, not
+              * a hardcoded "paused at step N+1". A completed run
+              * shouldn't read as still paused, and the index is
+              * clamped to [1, steps.length] so an off-by-one in
+              * current_step_id can't render "step 5 of 4". */}
+            {(() => {
+              const statusLabel = isCompleted
+                ? "completed"
+                : isFailed
+                  ? "failed"
+                  : run.status === "running" && completedSteps.length > 0
+                    ? "running"
+                    : "paused"
+              const rawIdx = Math.max(currentIdx, completedSteps.length) + 1
+              const clampedIdx = Math.min(Math.max(rawIdx, 1), steps.length)
+              return `Progress · ${statusLabel} at step ${clampedIdx} of ${steps.length}`
+            })()}
           </div>
           <ol className="divide-y divide-white/[0.04]">
             {steps.map((step, idx) => {
@@ -309,15 +325,19 @@ function StepRow({
   output: unknown
 }) {
   const [expanded, setExpanded] = useState(status === "paused")
+  const hasOutput = output != null
+  const panelId = `wp-step-output-${step.id}`
 
   return (
     <li>
       <button
-        onClick={() => output != null && setExpanded((v) => !v)}
-        disabled={output == null}
+        onClick={() => hasOutput && setExpanded((v) => !v)}
+        disabled={!hasOutput}
+        aria-expanded={hasOutput ? expanded : undefined}
+        aria-controls={hasOutput ? panelId : undefined}
         className={cn(
           "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
-          output != null && "hover:bg-white/[0.02]",
+          hasOutput && "hover:bg-white/[0.02]",
           status === "paused" && "bg-amber-500/5",
         )}
       >
@@ -347,8 +367,8 @@ function StepRow({
           </span>
         )}
       </button>
-      {expanded && output != null && (
-        <div className="border-t border-white/[0.04] bg-card/20">
+      {expanded && hasOutput && (
+        <div id={panelId} role="region" className="border-t border-white/[0.04] bg-card/20">
           <pre className="overflow-auto px-3 py-2 font-mono text-[11px] text-foreground/80">
             {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
           </pre>
@@ -378,16 +398,21 @@ function StatusBadge({ status }: { status: "done" | "paused" | "pending" }) {
 
 function CollapsiblePanel({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
+  // Slug the title to derive a deterministic id for aria-controls so
+  // the toggle button + panel stay linked across re-renders.
+  const panelId = `wp-panel-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   return (
     <div className="overflow-hidden rounded-md border border-white/[0.06] bg-card/30">
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
         className="flex w-full items-center gap-2 px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:bg-white/[0.02]"
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         {title}
       </button>
-      {open && <div className="border-t border-white/[0.06]">{children}</div>}
+      {open && <div id={panelId} role="region" className="border-t border-white/[0.06]">{children}</div>}
     </div>
   )
 }
