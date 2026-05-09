@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  Workflow, Clock, Activity,
+  Workflow, Clock, Activity, GitBranch,
   FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, X,
@@ -39,6 +39,7 @@ import { LiveMessagesPanel, ExecLogPanel } from "@/components/features/orchestra
 import { RightPanelContent } from "@/components/features/orchestration/right-panel-content"
 import { IssuesToolbarStrip } from "@/components/features/orchestration/issues-toolbar-strip"
 import { RoutinesTab } from "@/components/features/routines/routines-tab"
+import { RunsView } from "@/components/features/activity/runs-view"
 
 type DrawerTab = "messages" | "exec" | "yaml" | "docker"
 
@@ -72,6 +73,7 @@ const ORCH_DRAWER_TABS = [
 
 const ORCH_TABS = [
   { id: "issues", label: "Issues", icon: CircleDot },
+  { id: "runs", label: "Runs", icon: GitBranch },
   { id: "graph", label: "Graph", icon: Workflow },
   { id: "timeline", label: "Timeline", icon: Clock },
   { id: "activity", label: "Feed", icon: Activity },
@@ -79,17 +81,19 @@ const ORCH_TABS = [
 ] as const
 
 // Tabs visible in each mode. /issues hides everything except its own
-// content (no tab bar at all). /activity exposes the three observability
-// views as compact sub-tabs (Graph default).
+// content (no tab bar at all). /activity exposes "Runs" as the
+// primary surface (the issue→routine→steps→agent tree) with the
+// older Graph/Timeline/Feed kept as secondary observability views
+// until they're either folded into Runs or retired.
 const TAB_IDS_BY_MODE: Record<OrchestrationMode, ReadonlyArray<typeof ORCH_TABS[number]["id"]>> = {
   issues: [],
-  activity: ["graph", "timeline", "activity"],
+  activity: ["runs", "graph", "timeline", "activity"],
   default: ORCH_TABS.map((t) => t.id),
 }
 
 const DEFAULT_TAB_BY_MODE: Record<OrchestrationMode, typeof ORCH_TABS[number]["id"]> = {
   issues: "issues",
-  activity: "graph",
+  activity: "runs",
   default: "issues",
 }
 
@@ -713,6 +717,10 @@ export function OrchestrationLayout({
                 </AnimatePresence>
               </div>
             </div>
+          )}
+
+          {activeTab === "runs" && (
+            <RunsView workspaceId={workspaceId} />
           )}
 
           {activeTab === "graph" && (

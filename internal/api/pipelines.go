@@ -470,6 +470,13 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 type runRequestBody struct {
 	Inputs       map[string]any `json:"inputs"`
 	TierOverride string         `json:"tier_override,omitempty"`
+	// TriggeredVia + TriggeredByID let the caller (UI button, issue
+	// detail panel, etc.) attribute the run for the dashboards. Server
+	// validates against the closed enum so a malicious / typo'd value
+	// can't show up in the runs list as a forged source. Defaults to
+	// "manual" when empty.
+	TriggeredVia  string `json:"triggered_via,omitempty"`
+	TriggeredByID string `json:"triggered_by_id,omitempty"`
 }
 
 // Run invokes a saved pipeline by slug.
@@ -539,6 +546,22 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		tierOverride = ""
 	}
 
+	// Validate triggered_via against the closed enum so the runs list
+	// dashboard can trust the value without sanitizing again. Anything
+	// outside the enum falls back to "manual" — same forgive-and-carry-on
+	// semantics as TierOverride above.
+	triggeredVia := pipeline.TriggeredVia(body.TriggeredVia)
+	switch triggeredVia {
+	case pipeline.TriggeredViaManual,
+		pipeline.TriggeredViaSchedule,
+		pipeline.TriggeredViaWebhook,
+		pipeline.TriggeredViaCallPipeline,
+		pipeline.TriggeredViaIssue:
+		// accepted
+	default:
+		triggeredVia = pipeline.TriggeredViaManual
+	}
+
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
 		PipelineID:      p.ID,
@@ -549,6 +572,8 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		Mode:            pipeline.ModeRun,
 		IdempotencyKey:  idempotencyKey,
 		TierOverride:    tierOverride,
+		TriggeredVia:    triggeredVia,
+		TriggeredByID:   body.TriggeredByID,
 	})
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal

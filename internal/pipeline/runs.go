@@ -48,6 +48,10 @@ const (
 	TriggeredViaSchedule     TriggeredVia = "schedule"
 	TriggeredViaWebhook      TriggeredVia = "webhook"
 	TriggeredViaCallPipeline TriggeredVia = "call_pipeline"
+	// TriggeredViaIssue marks runs fired from an issue's "Run routine"
+	// button. TriggeredByID carries the issue identifier (e.g. ENG-15)
+	// so the runs list can JOIN back to missions for the source pill.
+	TriggeredViaIssue TriggeredVia = "issue"
 )
 
 // RunRecord is the persisted shape. Pointer-typed timestamps are NULL

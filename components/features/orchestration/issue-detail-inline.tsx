@@ -199,6 +199,11 @@ export function IssueDetailInline({
     if (!issue.routine_slug) return
     setRunningRoutine(true)
     try {
+      // triggered_by_id carries the issue identifier (ENG-15) so the
+      // /activity Runs view's LEFT JOIN missions ON triggered_by_id =
+      // identifier resolves the source pill back to the issue. We
+      // fall back to issue.id only when identifier is absent (shouldn't
+      // happen for issues but defends the type).
       const res = await fetch(
         `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(issue.routine_slug)}/run`,
         {

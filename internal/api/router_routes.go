@@ -389,10 +389,13 @@ func (r *Router) registerRoutes() {
 	// other half of concurrency control: a stuck run holds a slot
 	// until either it finishes or the operator pre-empts it.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active", authed(wsCtx(http.HandlerFunc(pipes.ListActiveRuns))))
-	// Single-run lookup uses /pipeline-runs/{runId} (top-level resource)
-	// instead of /pipelines/runs/{runId} because the latter collides
-	// with /pipelines/{slug}/runs in net/http's pattern-matcher: both
-	// resolve "/pipelines/runs/runs" without a tie-breaker.
+	// Single-run + workspace-list lookups under /pipeline-runs/ (top-
+	// level resource) instead of /pipelines/runs/ because the latter
+	// collides with /pipelines/{slug}/runs in net/http's pattern-
+	// matcher: both resolve "/pipelines/runs/runs" without a tie-
+	// breaker. Workspace list also stays out of /pipelines/{slug}/
+	// because it spans every pipeline.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
 	// Pipeline webhooks — event-driven trigger surface alongside
