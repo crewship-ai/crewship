@@ -60,7 +60,8 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      {/* Toggle row */}
+      {/* Toggle row. Button(size=xs) already supplies h-6 + gap-1; we
+        * only override padding + font-size for the dense panel feel. */}
       <div className="flex items-center gap-1">
         <Button
           type="button"
@@ -69,7 +70,7 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
           onClick={() => setMode("json")}
           aria-pressed={mode === "json"}
           className={cn(
-            "h-6 gap-1 px-1.5 text-[10px]",
+            "px-1.5 text-[10px]",
             mode === "json" && "bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200",
           )}
         >
@@ -83,7 +84,7 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
           aria-pressed={mode === "table"}
           disabled={!tableEnabled}
           className={cn(
-            "h-6 gap-1 px-1.5 text-[10px]",
+            "px-1.5 text-[10px]",
             mode === "table" && "bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200",
           )}
         >
@@ -96,7 +97,7 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
           size="xs"
           onClick={onCopy}
           aria-label="Copy as JSON"
-          className="h-6 gap-1 px-1.5 text-[10px] text-muted-foreground/60"
+          className="px-1.5 text-[10px] text-muted-foreground/60"
         >
           <Copy className="h-3 w-3" />
           {copied ? "Copied" : "Copy"}
@@ -257,8 +258,12 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
       )
     }
     // Array of objects — column per union of keys (capped at 8).
+    // Only scan the rows we'll actually render: walking all 5000
+    // entries to find unique keys we then truncate to 8 is just
+    // wasted work, and it can lock the panel for a fraction of a
+    // second on big payloads even before reconciliation starts.
     const allKeys = new Set<string>()
-    for (const item of parsed.arr) {
+    for (const item of visibleArr) {
       if (item && typeof item === "object" && !Array.isArray(item)) {
         for (const k of Object.keys(item as Record<string, unknown>)) allKeys.add(k)
         if (allKeys.size > 8) break

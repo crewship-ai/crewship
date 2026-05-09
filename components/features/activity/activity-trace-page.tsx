@@ -24,7 +24,7 @@ import { RunTimelineRail } from "./run-timeline-rail"
 import { TraceCanvas } from "./trace-canvas"
 import { TraceSidePanel } from "./trace-side-panel"
 import type { TraceStep } from "@/lib/trace/types"
-import { shadeNodes, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
+import { shadeNodes, type HeatmapBucket, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
 
 // ActivityTracePage — top-level page for /activity. Replaces the old
 // OrchestrationPageShell layout (which exposed Runs / Graph / Timeline
@@ -79,14 +79,14 @@ export function ActivityTracePage() {
     "off",
   )
 
-  // Pre-compute the heatmap-color map up here. shadeNodes is fast,
+  // Pre-compute the heatmap bucket map up here. shadeNodes is fast,
   // but baking it into the canvas's memo would re-run dagreLayout
   // every time stepMetrics or heatmapMode flips. Memoizing the map
   // separately means a metric arriving over WS only re-shades node
   // borders — the node positions stay put.
-  const heatmapColors = useMemo(() => {
+  const heatmapBuckets = useMemo(() => {
     if (heatmapMode === "off" || stepMetrics.size === 0) {
-      return new Map<string, string>()
+      return new Map<string, HeatmapBucket>()
     }
     return shadeNodes(
       Array.from(stepMetrics, ([stepId, m]) => ({
@@ -319,7 +319,7 @@ export function ActivityTracePage() {
             onStepSelect={setStepId}
             workspaceId={workspaceId}
             waitpointTokensByStepId={waitpointTokensByStepId}
-            heatmapColors={heatmapColors}
+            heatmapBuckets={heatmapBuckets}
           />
         </div>
 

@@ -10,6 +10,7 @@ import type {
   TraceTriggerNodeData,
 } from "./types"
 import { formatEdgeLabel, parseDataFlowEdges } from "./parse-data-flow"
+import type { HeatmapBucket } from "./percentile-heatmap"
 import { summarizeValue } from "@/lib/format/summarize-value"
 
 // buildTraceGraph — turns one (run, dsl) pair into ReactFlow nodes
@@ -37,11 +38,11 @@ interface BuildTraceGraphOptions {
   // Step ID → waitpoint token for steps with a pending waitpoint.
   // The step node renders inline Approve/Deny when its id matches.
   waitpointTokensByStepId?: ReadonlyMap<string, string>
-  // Pre-computed heatmap colors keyed by step id. The caller
+  // Pre-computed heatmap buckets keyed by step id. The caller
   // computes this once via shadeNodes() and passes it in — keeping
   // the (cheap) percentile bucketing OUT of the hot rebuild path
   // means a stepMetrics change doesn't force a full dagre relayout.
-  heatmapColors?: ReadonlyMap<string, string>
+  heatmapBuckets?: ReadonlyMap<string, HeatmapBucket>
 }
 
 export interface TraceGraphData {
@@ -129,7 +130,7 @@ export function buildTraceGraph(
   })
 
   // One step node per DSL step.
-  const heatmapColors = opts.heatmapColors
+  const heatmapBuckets = opts.heatmapBuckets
   for (const step of effectiveSteps) {
     const token = opts.waitpointTokensByStepId?.get(step.id)
     const waitpoint =
@@ -141,7 +142,7 @@ export function buildTraceGraph(
       status: statusOf(run, step, effectiveSteps),
       selected: opts.selectedStepId === step.id,
       waitpoint,
-      heatmapBorder: heatmapColors?.get(step.id) ?? null,
+      heatmapBucket: heatmapBuckets?.get(step.id) ?? null,
     }
     nodes.push({
       id: step.id,

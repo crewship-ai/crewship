@@ -9,24 +9,27 @@
 
 export type HeatmapMode = "off" | "cost" | "duration"
 
+// Discrete percentile bucket. Five tiers + "none" for steps with no
+// metric. The node renderer maps each bucket to a Tailwind border
+// class — keeping color decisions in CSS instead of inline styles
+// means dark/light theme switches and design-system updates stay
+// consistent.
+export type HeatmapBucket = "p20" | "p60" | "p80" | "p95" | "outlier"
+
 interface StepMetrics {
   stepId: string
   cost?: number
   duration?: number
 }
 
-// shadeNodes — given a list of step metrics + a mode, return a map of
-// step id → hex color for the node border. Steps without a metric
-// (e.g. pending, no cost recorded) get no entry; the canvas falls
-// back to the default border.
-//
-// Color ramp (5 buckets): green (p20) → yellow (p60) → orange (p80)
-// → red (p95+). Greenish for cheap/fast, reddish for expensive/slow.
+// shadeNodes — given a list of step metrics + a mode, return a map
+// of step id → bucket. Steps without a metric (pending, no cost
+// recorded) get no entry; the canvas falls back to the default border.
 export function shadeNodes(
   metrics: StepMetrics[],
   mode: HeatmapMode,
-): Map<string, string> {
-  const out = new Map<string, string>()
+): Map<string, HeatmapBucket> {
+  const out = new Map<string, HeatmapBucket>()
   if (mode === "off") return out
 
   // Include cost=0 / duration=0 — http and code steps legitimately
@@ -55,21 +58,31 @@ export function shadeNodes(
   const p95 = at(0.95)
 
   for (const { stepId, v } of values) {
-    out.set(stepId, colorForPercentile(v, p20, p60, p80, p95))
+    out.set(stepId, bucketForPercentile(v, p20, p60, p80, p95))
   }
   return out
 }
 
-function colorForPercentile(
+function bucketForPercentile(
   v: number,
   p20: number,
   p60: number,
   p80: number,
   p95: number,
-): string {
-  if (v <= p20) return "rgb(74, 222, 128)" // emerald-400  — cheap/fast
-  if (v <= p60) return "rgb(250, 204, 21)" // yellow-400
-  if (v <= p80) return "rgb(251, 146, 60)" // orange-400
-  if (v <= p95) return "rgb(248, 113, 113)" // red-400
-  return "rgb(225, 29, 72)" // rose-600     — outlier
+): HeatmapBucket {
+  if (v <= p20) return "p20"
+  if (v <= p60) return "p60"
+  if (v <= p80) return "p80"
+  if (v <= p95) return "p95"
+  return "outlier"
+}
+
+// Tailwind class for a bucket's node border. Centralised so node
+// renderers stay free of color literals; theming changes happen here.
+export const HEATMAP_BORDER_CLASS: Record<HeatmapBucket, string> = {
+  p20: "!border-emerald-400/70 !border-2",
+  p60: "!border-yellow-400/70 !border-2",
+  p80: "!border-orange-400/70 !border-2",
+  p95: "!border-red-400/70 !border-2",
+  outlier: "!border-rose-600/80 !border-2",
 }

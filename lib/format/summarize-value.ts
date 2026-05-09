@@ -18,7 +18,11 @@ interface SummarizeOptions {
 }
 
 export function summarizeValue(v: unknown, opts: SummarizeOptions = {}): string {
-  const max = opts.maxChars ?? 80
+  // Clamp to a sane minimum: with maxChars <= 0 the truncation math
+  // (`slice(0, max - 1) + "…"`) collapses or returns the whole value
+  // unchanged, which silently breaks the cap contract. Caller can
+  // still pass huge values to disable truncation effectively.
+  const max = Math.max(8, opts.maxChars ?? 80)
   if (v === undefined) return ""
   if (v === null) return "null"
   if (typeof v === "string") {

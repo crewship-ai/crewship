@@ -8,6 +8,7 @@
 // arrow and makes lib/trace unusable from anywhere else.
 
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
+import type { HeatmapBucket } from "./percentile-heatmap"
 
 export type StepKind =
   | "agent_run"
@@ -28,6 +29,13 @@ export type StepStatus =
 // Trimmed DSL step shape — only the fields the trace view renders.
 // The full Go struct has dozens more (retry, validation, outcomes…)
 // that don't surface in the graph.
+//
+// Security note: http.headers/body and code.env values can carry
+// templated credential refs (`{{ inputs.token }}`, `{{ secrets.X }}`)
+// at the DSL level. The pipeline runtime resolves these against the
+// keeper credential store server-side; the FE only ever sees the
+// templated form. Anyone editing this file should keep that
+// invariant — never persist or log resolved values on the client.
 export interface TraceStep {
   id: string
   type: StepKind
@@ -101,9 +109,11 @@ export interface TraceStepNodeData {
     token: string
     workspaceId: string
   } | null
-  // Heatmap shading — hex border color set by buildTraceGraph based
-  // on the percentile bucket of cost or duration.
-  heatmapBorder?: string | null
+  // Heatmap shading — discrete percentile bucket, mapped to a
+  // Tailwind border class by the node renderer. Keeping the bucket
+  // (not a hex color) here keeps theme/color decisions in CSS where
+  // they belong.
+  heatmapBucket?: HeatmapBucket | null
   [key: string]: unknown
 }
 

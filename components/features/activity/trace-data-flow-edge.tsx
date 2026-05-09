@@ -68,6 +68,20 @@ function TraceDataFlowEdgeBase(props: EdgeProps) {
         }}
         className={cn(active && "animate-pulse")}
       />
+      {/* Invisible thick path overlay so hover lands anywhere on the
+        * edge, not just on the floating label chip. The visible path
+        * is 2.5px; this hit area is 16px to match cursor expectations
+        * on a busy canvas. pointer-events:stroke means only the
+        * stroke (not the bounding box) catches the mouse. */}
+      <path
+        d={edgePath}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={16}
+        style={{ pointerEvents: "stroke", cursor: "default" }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      />
       <EdgeLabelRenderer>
         <div
           className="pointer-events-auto absolute"

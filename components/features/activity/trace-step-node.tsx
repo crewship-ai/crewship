@@ -28,6 +28,7 @@ import type {
   TraceTriggerNodeData,
 } from "@/lib/trace/types"
 import { waitpointDecide } from "@/lib/api/waitpoints"
+import { HEATMAP_BORDER_CLASS } from "@/lib/trace/percentile-heatmap"
 
 export type { TraceStepNodeData, TraceTriggerNodeData }
 
@@ -183,10 +184,11 @@ function hostnameFromTemplate(raw: string): string {
 
 function TraceStepNodeBase({ data }: NodeProps) {
   const d = data as unknown as TraceStepNodeData
-  const { step, status, selected, waitpoint, heatmapBorder } = d
+  const { step, status, selected, waitpoint, heatmapBucket } = d
   const visual = KIND_VISUAL[step.type] ?? KIND_VISUAL.agent_run
   const Icon = visual.Icon
   const ring = STATUS_RING[status]
+  const heatmapClass = heatmapBucket ? HEATMAP_BORDER_CLASS[heatmapBucket] : ""
 
   // tabIndex + onKeyDown make the node keyboard-activatable. Enter
   // and Space dispatch a click on the same element, which bubbles up
@@ -199,6 +201,11 @@ function TraceStepNodeBase({ data }: NodeProps) {
       aria-label={`${visual.label} step ${step.id}, status ${status}`}
       aria-pressed={selected}
       onKeyDown={(e) => {
+        // Only fire when the wrapper itself is focused — keydown
+        // bubbles from descendants (e.g. the inline Approve/Deny
+        // buttons), and pressing Enter on Approve would otherwise
+        // also dispatch a wrapper click that re-selects the step.
+        if (e.target !== e.currentTarget) return
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
           ;(e.currentTarget as HTMLElement).click()
@@ -210,8 +217,8 @@ function TraceStepNodeBase({ data }: NodeProps) {
         ring.ring,
         selected && "ring-2 ring-blue-400",
         "hover:bg-card/80",
+        heatmapClass,
       )}
-      style={heatmapBorder ? { borderColor: heatmapBorder, borderWidth: 2 } : undefined}
     >
       <Handle
         type="target"

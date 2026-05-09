@@ -185,12 +185,14 @@ function FilesView({ step, output }: { step: TraceStep; output: unknown }) {
     [step.type, output],
   )
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null)
-  // Drop the open artifact whenever the step or output changes —
-  // otherwise the JSON viewer keeps showing the previous step's
-  // payload while the user clicks through nodes on the canvas.
+  // Drop the open artifact when the user switches to a different
+  // step. Keying only on step.id (not output) means a 3s polling
+  // tick that re-creates the run object — and therefore the output
+  // reference — won't yank the artifact viewer out from under the
+  // user mid-inspection.
   useEffect(() => {
     setActiveArtifact(null)
-  }, [step.id, output])
+  }, [step.id])
 
   if (artifacts.length === 0) {
     return (
@@ -206,50 +208,14 @@ function FilesView({ step, output }: { step: TraceStep; output: unknown }) {
     <div className="space-y-3">
       <ul className="space-y-1.5">
         {artifacts.map((a) => (
-          <li key={`${a.kind}:${a.name}`}>
-            <button
-              type="button"
-              onClick={async () => {
-                if (a.kind === "file_ref") {
-                  // No way to open a file in the user's editor from
-                  // a web context; copying the path is the most
-                  // useful thing we can do until the executor
-                  // persists artifacts as addressable resources.
-                  // Toast only on a confirmed write — under SSR /
-                  // insecure contexts navigator.clipboard is missing
-                  // and cheering "Copied!" would be a lie.
-                  const cb =
-                    typeof navigator !== "undefined" ? navigator.clipboard : undefined
-                  if (!cb) {
-                    toast.error("Clipboard unavailable")
-                    return
-                  }
-                  try {
-                    await cb.writeText(String(a.content))
-                    toast.success(`Copied ${a.name}`)
-                  } catch (err) {
-                    toast.error(err instanceof Error ? err.message : "Copy failed")
-                  }
-                  return
-                }
-                setActiveArtifact((prev) => (prev?.name === a.name ? null : a))
-              }}
-              className={cn(
-                "flex w-full items-center gap-2 rounded border border-white/[0.06] bg-background px-2 py-1.5 text-left text-xs transition-colors hover:bg-white/[0.04]",
-                activeArtifact?.name === a.name && "border-blue-500/40 bg-blue-500/5",
-              )}
-            >
-              {a.kind === "json" ? (
-                <Braces className="h-3 w-3 shrink-0 text-blue-300" />
-              ) : (
-                <FileText className="h-3 w-3 shrink-0 text-muted-foreground/60" />
-              )}
-              <span className="truncate font-mono">{a.name}</span>
-              <span className="ml-auto truncate text-[10px] text-muted-foreground/50">
-                {a.preview}
-              </span>
-            </button>
-          </li>
+          <ArtifactRow
+            key={`${a.kind}:${a.name}`}
+            artifact={a}
+            active={activeArtifact?.name === a.name}
+            onToggleActive={() =>
+              setActiveArtifact((prev) => (prev?.name === a.name ? null : a))
+            }
+          />
         ))}
       </ul>
 
@@ -259,6 +225,69 @@ function FilesView({ step, output }: { step: TraceStep; output: unknown }) {
         </div>
       )}
     </div>
+  )
+}
+
+function ArtifactRow({
+  artifact,
+  active,
+  onToggleActive,
+}: {
+  artifact: Artifact
+  active: boolean
+  onToggleActive: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+
+  const onClick = async () => {
+    if (artifact.kind !== "file_ref") {
+      onToggleActive()
+      return
+    }
+    // No way to open a file in the user's editor from a web context;
+    // copying the path is the most useful thing we can do until the
+    // executor persists artifacts as addressable resources. Disable
+    // the row while writing so a rapid double-click doesn't fire two
+    // racing clipboard writes + two toasts.
+    if (busy) return
+    const cb = typeof navigator !== "undefined" ? navigator.clipboard : undefined
+    if (!cb) {
+      toast.error("Clipboard unavailable")
+      return
+    }
+    setBusy(true)
+    try {
+      await cb.writeText(String(artifact.content))
+      toast.success(`Copied ${artifact.name}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Copy failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        className={cn(
+          "flex w-full items-center gap-2 rounded border border-white/[0.06] bg-background px-2 py-1.5 text-left text-xs transition-colors hover:bg-white/[0.04] disabled:opacity-60",
+          active && "border-blue-500/40 bg-blue-500/5",
+        )}
+      >
+        {artifact.kind === "json" ? (
+          <Braces className="h-3 w-3 shrink-0 text-blue-300" />
+        ) : (
+          <FileText className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+        )}
+        <span className="truncate font-mono">{artifact.name}</span>
+        <span className="ml-auto truncate text-[10px] text-muted-foreground/50">
+          {artifact.preview}
+        </span>
+      </button>
+    </li>
   )
 }
 
