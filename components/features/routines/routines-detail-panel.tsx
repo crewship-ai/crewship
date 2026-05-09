@@ -237,7 +237,14 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
               <RoutineOverviewTab routine={routine} />
             </TabsContent>
             <TabsContent value="editor" className="m-0 p-0 h-full">
-              <RoutineEditorTab routine={routine} />
+              <RoutineEditorTab
+                routine={routine}
+                workspaceId={workspaceId}
+                onSaved={() => {
+                  fetchRoutine()
+                  onChanged()
+                }}
+              />
             </TabsContent>
             <TabsContent value="runs" className="m-0 p-3">
               <RoutineRunsTab workspaceId={workspaceId} slug={routine.slug} />
