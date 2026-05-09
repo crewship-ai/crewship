@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -360,6 +361,7 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 			MissionID: ms.ID,
 		})
 		e.logger.Info("mission completed", "mission_id", ms.ID, "status", "REVIEW")
+		e.fireIssueReviewInboxNotification(ctx, ms)
 		return nil
 	}
 
@@ -402,7 +404,60 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 	})
 
 	e.logger.Info("mission completed", "mission_id", ms.ID, "status", newStatus)
+	if newStatus == "REVIEW" {
+		// allTerminal+REVIEW path also lands in the user's "I need
+		// to look at this" set. Original implementation only fired
+		// the inbox notification on the lead-planning fast path
+		// above; missions reaching REVIEW through this branch were
+		// silently skipped. Same helper now covers both.
+		e.fireIssueReviewInboxNotification(ctx, ms)
+	}
 	return nil
+}
+
+// fireIssueReviewInboxNotification creates the kind=message inbox row
+// when an issue mission transitions to REVIEW, so the user gets a
+// single jump-off point next to waitpoints and escalations. Best-
+// effort: a SQL failure is logged + swallowed (the missions row is
+// already updated; the inbox is a projection). Skips for non-issue
+// mission types and missions without an identifier — neither has a
+// meaningful "open the issue page" path.
+func (e *MissionEngine) fireIssueReviewInboxNotification(ctx context.Context, ms *missionState) {
+	var (
+		missionTitle, missionIdentifier sql.NullString
+		missionType                     sql.NullString
+	)
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT title, identifier, mission_type FROM missions WHERE id = ?`,
+		ms.ID).Scan(&missionTitle, &missionIdentifier, &missionType); err != nil {
+		e.logger.Warn("review inbox: lookup mission", "mission_id", ms.ID, "error", err)
+		return
+	}
+	if !missionType.Valid || missionType.String != "issue" || !missionIdentifier.Valid {
+		return
+	}
+	title := fmt.Sprintf("%s ready for review", missionIdentifier.String)
+	body := ""
+	if missionTitle.Valid {
+		body = missionTitle.String
+	}
+	inbox.Insert(ctx, e.db, e.logger, inbox.Item{
+		WorkspaceID: ms.WorkspaceID,
+		Kind:        "message",
+		SourceID:    "issue_review_" + ms.ID,
+		TargetRole:  "MANAGER",
+		Title:       title,
+		BodyMD:      body,
+		SenderType:  "system",
+		SenderName:  "Mission engine",
+		Priority:    "medium",
+		Blocking:    false,
+		Payload: map[string]interface{}{
+			"mission_id":       ms.ID,
+			"issue_identifier": missionIdentifier.String,
+			"new_status":       "REVIEW",
+		},
+	})
 }
 
 // unblockDependentTasks transitions BLOCKED tasks to PENDING when all deps are done.

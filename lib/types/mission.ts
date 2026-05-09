@@ -138,6 +138,12 @@ export interface Mission {
   crew_name?: string
   crew_slug?: string
   comment_count?: number
+  // Routine binding (migration 84). Set when this issue should be
+  // handled by a saved routine — UI surfaces it as a "Run with: <slug>"
+  // chip and the issue detail panel shows a Run button.
+  routine_id?: string | null
+  routine_slug?: string | null
+  routine_name?: string | null
 }
 
 /** A color-coded label that can be attached to issues for categorization. */

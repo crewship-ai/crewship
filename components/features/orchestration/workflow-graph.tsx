@@ -29,7 +29,7 @@ import { PipelineRunNode } from "./pipeline-run-node"
 import { STATUS_COLORS, CREW_COLORS, CREW_COLOR_DEFAULT, GRAPH_CHROME } from "@/lib/colors"
 import { PermissionEdge } from "./permission-edge"
 
-import { buildFlatGraphData, buildGraphData, buildPipelineNodes } from "./workflow-graph-builders"
+import { buildFlatGraphData, buildGraphData, buildPipelineNodes, buildIssueRoutineEdges } from "./workflow-graph-builders"
 import type { PipelineForGraph } from "./workflow-graph-builders"
 
 export interface WorkflowGraphRef {
@@ -126,7 +126,18 @@ function WorkflowGraphInner(
       for (const n of pipelineNodes) {
         if (n.data) (n.data as Record<string, unknown>).onClick = onPipelineClick
       }
-      data = { nodes: [...data.nodes, ...pipelineNodes], edges: data.edges }
+      // Edges from each issue with a bound routine to the pipeline
+      // node, so the disconnected registry strip becomes a wired
+      // mesh ("this issue runs that routine"). The dashed blue
+      // styling distinguishes binding edges from execution-flow
+      // edges (solid arrows). Visible-node check skips edges to
+      // pipelines the user filtered out via the registry strip.
+      const visibleIDs = new Set([...data.nodes, ...pipelineNodes].map((n) => n.id))
+      const routineEdges = buildIssueRoutineEdges(missions, pipelines, visibleIDs)
+      data = {
+        nodes: [...data.nodes, ...pipelineNodes],
+        edges: [...data.edges, ...routineEdges],
+      }
     }
     return data
   }, [missions, crews, agents, connections, pipelines, onPipelineClick, collapsedCrews, toggleCollapse, hasCrewData])

@@ -23,10 +23,21 @@ export interface Pipeline {
   last_invocation_status?: string
   author_crew_id?: string
   author_agent_id?: string
+  // author_agent_name is denormalized server-side from the agents
+  // table so the routines list can render a human label without a
+  // second fetch. Empty when author_agent_id is empty or the agent
+  // was deleted.
+  author_agent_name?: string
   author_user_id?: string
   authored_via: "agent_tool_call" | "user_api" | "imported" | "seed"
   created_at: string
   updated_at: string
+  // linked_issue_count: how many issues bind this routine via
+  // missions.routine_id. linked_issues holds up to 3 recent issue
+  // identifiers (e.g. ["ENG-12","ENG-9","ENG-7"]) so the catalog
+  // row can render a chip like "ENG-12 +2".
+  linked_issue_count?: number
+  linked_issues?: string[]
 }
 
 // PipelineRunSummary is the shape ListRuns returns — a journal entry

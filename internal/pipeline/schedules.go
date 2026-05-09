@@ -336,10 +336,12 @@ func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
 	}
 
 	in := RunInput{
-		PipelineID:  pipeline.ID,
-		WorkspaceID: sched.WorkspaceID,
-		Inputs:      inputs,
-		Mode:        ModeRun,
+		PipelineID:    pipeline.ID,
+		WorkspaceID:   sched.WorkspaceID,
+		Inputs:        inputs,
+		Mode:          ModeRun,
+		TriggeredVia:  TriggeredViaSchedule,
+		TriggeredByID: sched.ID,
 	}
 
 	res, runErr := s.executor.Run(ctx, in)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -110,6 +111,30 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+
+	// Write-through to inbox_items so the escalation surfaces in the
+	// unified Inbox without a fan-out query at read time. Best-effort:
+	// failure here is logged + swallowed; the escalations table stays
+	// the source of truth and a future inbox-rebuild job can backfill.
+	inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
+		WorkspaceID: body.WorkspaceID,
+		Kind:        "escalation",
+		SourceID:    escalationID,
+		TargetRole:  "MANAGER",
+		Title:       fmt.Sprintf("Agent escalation: %s", truncate(body.Reason, 80)),
+		BodyMD:      body.Context,
+		SenderType:  "agent",
+		SenderID:    fromAgentID,
+		SenderName:  body.FromSlug,
+		Priority:    "high",
+		Blocking:    true,
+		Payload: map[string]interface{}{
+			"crew_id":         body.CrewID,
+			"chat_id":         body.ChatID,
+			"reason":          body.Reason,
+			"escalation_type": escalationType,
+		},
+	})
 
 	// Dual-write the escalation into the journal. Severity=warn because
 	// an unresolved escalation should surface in the default "things
@@ -278,6 +303,18 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	if n == 0 {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
 		return
+	}
+
+	// Mirror the resolution into the unified inbox so the row drops
+	// from "needs action" into the resolved feed in real time. Done
+	// after the source UPDATE so we don't flip the inbox row before
+	// the source actually transitions.
+	if user := UserFromContext(r.Context()); user != nil {
+		inbox.ResolveBySource(r.Context(), h.db, h.logger,
+			"escalation", escalationID, body.Action, user.ID)
+	} else {
+		inbox.ResolveBySource(r.Context(), h.db, h.logger,
+			"escalation", escalationID, body.Action, "")
 	}
 
 	// Resolution closes the escalation thread in the journal. Severity

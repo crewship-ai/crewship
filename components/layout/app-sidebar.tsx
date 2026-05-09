@@ -8,17 +8,22 @@ import {
   Plug,
   Zap,
   Settings,
-  Workflow,
+  Activity,
   Store,
   ShieldCheck,
   PanelLeftClose,
   Pin,
   MousePointer2,
   ChevronDown,
-  Ship,
+  Users,
   BookOpen,
   ScrollText,
+  CircleDot,
+  MessagesSquare,
+  Inbox,
 } from "lucide-react"
+import { useInboxUnreadCount } from "@/hooks/use-inbox"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
   DropdownMenu,
@@ -46,32 +51,35 @@ import {
 
 const navSections = [
   {
-    label: "Work",
+    label: "Plan",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Orchestration", href: "/orchestration", icon: Workflow },
+      { title: "Inbox", href: "/inbox", icon: Inbox },
+      { title: "Issues", href: "/issues", icon: CircleDot },
       { title: "Routines", href: "/routines", icon: ScrollText },
-      { title: "Crews", href: "/crews", icon: Ship },
     ],
   },
   {
-    label: "Configure",
+    label: "Run",
     items: [
+      { title: "Activity", href: "/activity", icon: Activity },
+      { title: "Missions", href: "/missions", icon: MessagesSquare },
+      { title: "Journal", href: "/journal", icon: BookOpen },
+    ],
+  },
+  {
+    label: "Build",
+    items: [
+      { title: "Crews", href: "/crews", icon: Users },
       { title: "Skills", href: "/skills", icon: Zap },
-      { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
       { title: "Credentials", href: "/credentials", icon: Key },
       { title: "Integrations", href: "/integrations", icon: Plug },
     ],
   },
   {
-    label: "Monitor",
-    items: [
-      { title: "Journal", href: "/journal", icon: BookOpen },
-    ],
-  },
-  {
     label: "System",
     items: [
+      { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
       { title: "Settings", href: "/settings", icon: Settings },
       { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "OWNER" as const },
     ],
@@ -82,6 +90,10 @@ export function AppSidebar() {
   const pathname = usePathname()
   const { role } = useAbilities()
   const { sidebarMode, setSidebarMode } = useSidebar()
+  // Live unread count for the Inbox row badge — shared with the
+  // top-bar bell so they stay in lockstep without two pollers.
+  const { workspaceId } = useWorkspace()
+  const inboxUnread = useInboxUnreadCount(workspaceId)
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
@@ -158,6 +170,8 @@ export function AppSidebar() {
                       )
                     }
 
+                    const showInboxBadge = item.href === "/inbox" && inboxUnread > 0
+
                     return (
                       <SidebarMenuItem key={item.href}>
                         <SidebarMenuButton
@@ -171,6 +185,14 @@ export function AppSidebar() {
                             <span>{item.title}</span>
                           </Link>
                         </SidebarMenuButton>
+                        {showInboxBadge && (
+                          <SidebarMenuBadge
+                            className="bg-blue-500/15 text-blue-300 px-1.5 text-[10px] font-semibold tabular-nums"
+                            aria-label={`${inboxUnread > 99 ? "99+" : inboxUnread} unread inbox items`}
+                          >
+                            {inboxUnread > 99 ? "99+" : inboxUnread}
+                          </SidebarMenuBadge>
+                        )}
                       </SidebarMenuItem>
                     )
                   })}

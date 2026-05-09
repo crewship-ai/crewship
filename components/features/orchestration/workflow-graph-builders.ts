@@ -584,6 +584,7 @@ export {
   buildGraphData,
   buildFlatGraphData,
   buildPipelineNodes,
+  buildIssueRoutineEdges,
 }
 export type { BuildInput, PipelineForGraph }
 
@@ -598,6 +599,65 @@ interface PipelineForGraph {
   invocation_count: number
   last_invocation_status?: string
   author_crew_id?: string
+}
+
+// buildIssueRoutineEdges connects each mission with a routine_id to
+// the pipeline node that backs it, so the user sees the wiring
+// "this issue runs through this routine" instead of a registry strip
+// floating disconnected at the bottom of the canvas.
+//
+// We try two source-node id shapes because the main builder switches
+// between flat (mission node = `mission-<id>`) and crew (mission
+// renders as its tasks, mission itself has no own node — we hop to
+// the first task and use its id). The visibleNodeIds set, threaded
+// in by the caller, lets us pick whichever is actually on the canvas.
+function buildIssueRoutineEdges(
+  missions: Mission[],
+  pipelines: PipelineForGraph[],
+  visibleNodeIds: Set<string>,
+): Edge[] {
+  if (!missions?.length || !pipelines?.length) return []
+  const pipelineIDs = new Set(pipelines.map((p) => p.id))
+  const out: Edge[] = []
+  for (const m of missions) {
+    const routineID = (m as Mission & { routine_id?: string | null }).routine_id
+    if (!routineID || !pipelineIDs.has(routineID)) continue
+    const target = `pipeline:${routineID}`
+    if (!visibleNodeIds.has(target)) continue
+
+    // Try mission-level node first (flat builder); fall back to the
+    // first task of the mission (crew builder renders tasks, not
+    // missions, as the visible cards). Either way we get a single
+    // logical edge per (issue, routine) pair.
+    let source: string | null = null
+    const flatID = `mission-${m.id}`
+    if (visibleNodeIds.has(flatID)) {
+      source = flatID
+    } else if (m.tasks && m.tasks.length > 0) {
+      for (const t of m.tasks) {
+        if (visibleNodeIds.has(t.id)) {
+          source = t.id
+          break
+        }
+      }
+    }
+    if (!source) continue
+
+    out.push({
+      id: `e-routine-${m.id}-${routineID}`,
+      source,
+      target,
+      type: "animated",
+      // Distinct visual treatment: dashed + steel-blue so the user
+      // reads this as a binding ("uses routine") rather than a
+      // dependency arrow (solid → execution sequence).
+      animated: false,
+      style: { strokeWidth: 1.5, strokeDasharray: "4 3" },
+      data: { color: "#5b8def", active: false },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "#5b8def", width: 12, height: 12 },
+    })
+  }
+  return out
 }
 
 // buildPipelineNodes returns React Flow nodes for the workspace's

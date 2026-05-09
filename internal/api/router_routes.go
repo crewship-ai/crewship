@@ -389,6 +389,14 @@ func (r *Router) registerRoutes() {
 	// other half of concurrency control: a stuck run holds a slot
 	// until either it finishes or the operator pre-empts it.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active", authed(wsCtx(http.HandlerFunc(pipes.ListActiveRuns))))
+	// Single-run + workspace-list lookups under /pipeline-runs/ (top-
+	// level resource) instead of /pipelines/runs/ because the latter
+	// collides with /pipelines/{slug}/runs in net/http's pattern-
+	// matcher: both resolve "/pipelines/runs/runs" without a tie-
+	// breaker. Workspace list also stays out of /pipelines/{slug}/
+	// because it spans every pipeline.
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
 	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel", authed(wsCtx(http.HandlerFunc(pipes.CancelRun))))
 	// Pipeline webhooks — event-driven trigger surface alongside
 	// cron schedules. CRUD requires auth; the public dispatch
@@ -457,6 +465,16 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/approvals/{id}", authed(wsCtx(http.HandlerFunc(ah.Get))))
 	r.mux.Handle("POST /api/v1/approvals/{id}/decide", authed(wsCtx(http.HandlerFunc(ah.Decide))))
 	r.mux.Handle("POST /api/v1/approvals/reset-auto-tuning", authed(wsCtx(http.HandlerFunc(ah.ResetAutoTuning))))
+
+	// Unified Inbox — the canonical "stuff that needs the human"
+	// surface. Backed by inbox_items (migration v85). Source-of-
+	// truth handlers (waitpoints, escalations, run failures) write
+	// through to this table so the bell + /inbox page render from
+	// one query instead of fanning out to four.
+	ih := NewInboxHandler(r.db, r.logger, r.hub)
+	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
+	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
+	r.mux.Handle("PATCH /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.PatchState))))
 
 	// Memory health dashboard — 5-metric score with per-crew scope.
 	// Read-only; available to every workspace member because the

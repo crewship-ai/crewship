@@ -3,38 +3,37 @@
 import { useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  ScrollText, Workflow, Clock, Activity,
+  ScrollText, Calendar, BarChart3,
   Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
-  Search, X,
+  X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { RoutinesListView } from "./routines-list-view"
-import { RoutinesGraphView } from "./routines-graph-view"
-import { RoutinesTimelineView } from "./routines-timeline-view"
-import { RoutinesActivityView } from "./routines-activity-view"
+import { RoutinesSchedulesView } from "./routines-schedules-view"
+import { RoutinesInsightsView } from "./routines-insights-view"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutinesFilterSidebar, type RoutineFilters } from "./routines-filter-sidebar"
 import { RoutineCreateDialog } from "./routine-create-dialog"
 
-// RoutinesLayout — full /routines page. Shape mirrors orchestration:
-// top toolbar with tabs + actions, optional left filter panel, main
-// area swapped by tab, right detail panel when a routine is selected.
+// RoutinesLayout — full /routines page. The IA refactor cut the
+// previous 4 tabs (Routines / Graph / Timeline / Activity) down to 3:
+//   - List      — the catalog, primary entry point.
+//   - Schedules — workspace-wide cron triggers across all routines.
+//   - Insights  — health snapshot (top usage, recent failures).
 //
-// Why a separate page instead of just orchestration's Routines tab:
-// schedules, webhooks, waitpoints fire autonomously regardless of
-// open mission/issue. Routines deserve a workspace-scoped surface
-// like /skills or /credentials. The orchestration tab covers
-// in-context invocation; this page is the asset-management home.
+// Graph + Timeline + Activity moved to /activity, which is now the
+// single live observability surface for the whole workspace. This
+// page stays focused on the asset-management story (catalog +
+// triggers + health), matching how Trigger.dev/Inngest/Dagster
+// separate definitions from runs.
 
 const ROUTINES_TABS = [
-  { id: "routines" as const, label: "Routines", icon: ScrollText },
-  { id: "graph" as const, label: "Graph", icon: Workflow },
-  { id: "timeline" as const, label: "Timeline", icon: Clock },
-  { id: "activity" as const, label: "Activity", icon: Activity },
+  { id: "list" as const, label: "List", icon: ScrollText },
+  { id: "schedules" as const, label: "Schedules", icon: Calendar },
+  { id: "insights" as const, label: "Insights", icon: BarChart3 },
 ] as const
 
 type RoutinesTab = (typeof ROUTINES_TABS)[number]["id"]
@@ -45,13 +44,13 @@ interface RoutinesLayoutProps {
 
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines, loading, error, refresh } = usePipelines(workspaceId)
-  const [activeTab, setActiveTab] = useState<RoutinesTab>("routines")
+  const [activeTab, setActiveTab] = useState<RoutinesTab>("list")
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [search, setSearch] = useState("")
   const [filters, setFilters] = useState<RoutineFilters>({
     status: "all",
     invocations: "all",
-    authoredVia: "all",
+    authorAgentId: null,
     showEphemeral: false,
   })
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
@@ -70,7 +69,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const filteredRoutines = pipelines.filter((p) => {
     if (search) {
       const q = search.toLowerCase()
-      const haystack = `${p.slug} ${p.name} ${p.description ?? ""}`.toLowerCase()
+      const haystack = `${p.slug} ${p.name} ${p.description ?? ""} ${p.author_agent_name ?? ""}`.toLowerCase()
       if (!haystack.includes(q)) return false
     }
     if (filters.status !== "all") {
@@ -80,7 +79,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     if (filters.invocations === "popular" && p.invocation_count < 10) return false
     if (filters.invocations === "fresh" && p.invocation_count > 0) return false
-    if (filters.authoredVia !== "all" && p.authored_via !== filters.authoredVia) return false
+    if (filters.authorAgentId !== null && p.author_agent_id !== filters.authorAgentId) return false
     if (!filters.showEphemeral && p.ephemeral) return false
     return true
   })
@@ -108,26 +107,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
         <div className="flex-1" />
 
-        {/* Search (when on Routines tab) */}
-        {activeTab === "routines" && (
-          <div className="relative w-56 mr-2">
-            <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search routines…"
-              className="h-7 pl-7 pr-6 text-xs"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        )}
+        {/* Search now lives in the left filter sidebar (mirroring the
+          * /issues UnifiedExplorer); the toolbar stays focused on tabs
+          * + actions. Removed the duplicate toolbar search to avoid
+          * confusing two visible inputs. */}
 
         {/* Action buttons */}
         <Button
@@ -157,11 +140,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
       {/* ---- Body: 3-column layout ---- */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left filter panel */}
+        {/* Left filter panel — same chrome as the /issues sidebar
+          * (bg-card, not bg-card/30) so the two surfaces feel like
+          * pieces of one app rather than two near-misses. The width
+          * also matches the orchestration explorer (300px expanded). */}
         <aside
           className={cn(
-            "shrink-0 border-r border-white/[0.06] bg-card/30 transition-all overflow-hidden",
-            leftCollapsed ? "w-9" : "w-60",
+            "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
+            leftCollapsed ? "w-9" : "w-[300px]",
           )}
         >
           {leftCollapsed ? (
@@ -177,28 +163,35 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
               </Button>
             </div>
           ) : (
-            <div className="flex h-full flex-col">
-              <div className="flex items-center justify-between border-b border-white/[0.06] px-3 h-8 shrink-0">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                  Filters
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 w-6 p-0"
-                  onClick={() => setLeftCollapsed(true)}
-                  title="Collapse"
-                >
-                  <PanelLeftClose className="h-3 w-3" />
-                </Button>
-              </div>
+            <div className="relative flex h-full flex-col">
+              {/* The filter sidebar's "Showing X of Y" only matches
+                * reality on the List tab — Schedules + Insights walk
+                * the unfiltered pipelines list internally. To avoid
+                * misleading counts (and to disable filter UX that has
+                * no effect on those views), surface filteredCount
+                * verbatim on List, and totalRoutines on the others
+                * so the strip reads as "showing all". */}
               <RoutinesFilterSidebar
                 filters={filters}
                 onChange={setFilters}
                 routines={pipelines}
                 totalRoutines={pipelines.length}
-                filteredCount={filteredRoutines.length}
+                filteredCount={activeTab === "list" ? filteredRoutines.length : pipelines.length}
+                search={search}
+                onSearchChange={setSearch}
               />
+              {/* Collapse handle floats top-right so the sidebar's own
+                * search bar reaches edge-to-edge; matches the explorer
+                * pattern in /issues. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="absolute right-1 top-1.5 h-6 w-6 p-0"
+                onClick={() => setLeftCollapsed(true)}
+                title="Collapse"
+              >
+                <PanelLeftClose className="h-3 w-3" />
+              </Button>
             </div>
           )}
         </aside>
@@ -206,9 +199,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         {/* Main content area */}
         <div className="flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
-            {activeTab === "routines" && (
+            {activeTab === "list" && (
               <motion.div
-                key="routines"
+                key="list"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -225,40 +218,32 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 />
               </motion.div>
             )}
-            {activeTab === "graph" && (
+            {activeTab === "schedules" && (
               <motion.div
-                key="graph"
+                key="schedules"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
                 className="absolute inset-0"
               >
-                <RoutinesGraphView workspaceId={workspaceId} routines={pipelines} onSelect={handleSelect} />
+                <RoutinesSchedulesView
+                  workspaceId={workspaceId}
+                  routines={pipelines}
+                  onSelect={handleSelect}
+                />
               </motion.div>
             )}
-            {activeTab === "timeline" && (
+            {activeTab === "insights" && (
               <motion.div
-                key="timeline"
+                key="insights"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.15 }}
-                className="absolute inset-0 overflow-auto"
+                className="absolute inset-0"
               >
-                <RoutinesTimelineView workspaceId={workspaceId} routines={pipelines} onSelect={handleSelect} />
-              </motion.div>
-            )}
-            {activeTab === "activity" && (
-              <motion.div
-                key="activity"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.15 }}
-                className="absolute inset-0 overflow-auto"
-              >
-                <RoutinesActivityView workspaceId={workspaceId} />
+                <RoutinesInsightsView routines={pipelines} onSelect={handleSelect} />
               </motion.div>
             )}
           </AnimatePresence>
