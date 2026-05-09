@@ -106,7 +106,14 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
   }, [workspaceId, runId])
 
   useEffect(() => {
+    // Clear stale graph state when the run identity flips. Without
+    // this, switching from a healthy run to one whose DSL fetch fails
+    // would render the previous run's DSL against the new run row —
+    // step nodes from one pipeline shown on top of another's outputs.
     abortRef.current?.abort()
+    setRun(null)
+    setDsl(null)
+    setError(null)
     refresh()
     return () => {
       abortRef.current?.abort()

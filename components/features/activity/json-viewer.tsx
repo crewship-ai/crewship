@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Braces, Copy, Table as TableIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { summarizeValue } from "@/lib/format/summarize-value"
 
 // JSONViewer — small JSON inspector with two modes:
 //   - JSON: pretty-printed, monospace (the default everywhere)
@@ -60,44 +62,45 @@ export function JSONViewer({ value, maxChars = 65_536 }: JSONViewerProps) {
     <div className="flex flex-col gap-1.5">
       {/* Toggle row */}
       <div className="flex items-center gap-1">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => setMode("json")}
           aria-pressed={mode === "json"}
           className={cn(
-            "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px]",
-            mode === "json"
-              ? "bg-blue-500/15 text-blue-300"
-              : "text-muted-foreground/60 hover:text-foreground/80",
+            "h-6 gap-1 px-1.5 text-[10px]",
+            mode === "json" && "bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200",
           )}
         >
           <Braces className="h-3 w-3" /> JSON
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={() => tableEnabled && setMode("table")}
           aria-pressed={mode === "table"}
           disabled={!tableEnabled}
           className={cn(
-            "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px]",
-            !tableEnabled && "cursor-default opacity-40",
-            mode === "table"
-              ? "bg-blue-500/15 text-blue-300"
-              : "text-muted-foreground/60 hover:text-foreground/80",
+            "h-6 gap-1 px-1.5 text-[10px]",
+            mode === "table" && "bg-blue-500/15 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200",
           )}
         >
           <TableIcon className="h-3 w-3" /> Table
-        </button>
+        </Button>
         <div className="flex-1" />
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={onCopy}
           aria-label="Copy as JSON"
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/60 hover:text-foreground/80"
+          className="h-6 gap-1 px-1.5 text-[10px] text-muted-foreground/60"
         >
           <Copy className="h-3 w-3" />
           {copied ? "Copied" : "Copy"}
-        </button>
+        </Button>
       </div>
 
       {mode === "json" || !tableEnabled ? (
@@ -165,6 +168,21 @@ function PrettyJSON({
   )
 }
 
+// Hard cap on rendered rows. Big API responses (1k+ records) used
+// to lock the panel for a couple seconds while React reconciled
+// every <tr>; the JSON tab is still available for users who need
+// the full data.
+const MAX_TABLE_ROWS = 200
+
+function TruncatedRowsHint({ shown, total }: { shown: number; total: number }) {
+  if (shown >= total) return null
+  return (
+    <div className="border-t border-white/[0.04] bg-white/[0.02] px-2 py-1 text-[10px] text-muted-foreground/70">
+      Showing first {shown} of {total} rows — switch to JSON for the full payload
+    </div>
+  )
+}
+
 function TableJSON({ parsed }: { parsed: ParsedValue }) {
   if (parsed.kind === "object") {
     const entries = Object.entries(parsed.obj)
@@ -175,6 +193,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
         </div>
       )
     }
+    const visibleEntries = entries.slice(0, MAX_TABLE_ROWS)
     return (
       <div className="overflow-auto rounded border border-white/[0.06]">
         <table className="w-full text-[10px]">
@@ -189,7 +208,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
             </tr>
           </thead>
           <tbody>
-            {entries.map(([k, v]) => (
+            {visibleEntries.map(([k, v]) => (
               <tr key={k} className="border-t border-white/[0.04]">
                 <td className="px-2 py-1 align-top font-mono text-blue-300">{k}</td>
                 <td className="px-2 py-1 align-top font-mono text-foreground/80">
@@ -199,6 +218,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
             ))}
           </tbody>
         </table>
+        <TruncatedRowsHint shown={visibleEntries.length} total={entries.length} />
       </div>
     )
   }
@@ -206,6 +226,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
     const sample = parsed.arr[0]
     const isArrayOfObjects =
       sample && typeof sample === "object" && !Array.isArray(sample)
+    const visibleArr = parsed.arr.slice(0, MAX_TABLE_ROWS)
     if (!isArrayOfObjects) {
       return (
         <div className="overflow-auto rounded border border-white/[0.06]">
@@ -221,7 +242,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
               </tr>
             </thead>
             <tbody>
-              {parsed.arr.map((v, i) => (
+              {visibleArr.map((v, i) => (
                 <tr key={i} className="border-t border-white/[0.04]">
                   <td className="px-2 py-1 font-mono text-muted-foreground/70">{i}</td>
                   <td className="px-2 py-1 font-mono text-foreground/80">
@@ -231,6 +252,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
               ))}
             </tbody>
           </table>
+          <TruncatedRowsHint shown={visibleArr.length} total={parsed.arr.length} />
         </div>
       )
     }
@@ -259,7 +281,7 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
             </tr>
           </thead>
           <tbody>
-            {parsed.arr.map((item, i) => {
+            {visibleArr.map((item, i) => {
               const obj = (item ?? {}) as Record<string, unknown>
               return (
                 <tr key={i} className="border-t border-white/[0.04]">
@@ -274,24 +296,10 @@ function TableJSON({ parsed }: { parsed: ParsedValue }) {
             })}
           </tbody>
         </table>
+        <TruncatedRowsHint shown={visibleArr.length} total={parsed.arr.length} />
       </div>
     )
   }
   return null
 }
 
-function summarizeValue(v: unknown): string {
-  if (v === undefined) return ""
-  if (v === null) return "null"
-  if (typeof v === "string") {
-    return v.length > 80 ? v.slice(0, 79) + "…" : v
-  }
-  if (typeof v === "number" || typeof v === "boolean") return String(v)
-  // For nested objects/arrays, show a compact preview.
-  try {
-    const s = JSON.stringify(v)
-    return s.length > 80 ? s.slice(0, 79) + "…" : s
-  } catch {
-    return String(v)
-  }
-}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { Braces, FileText, Inbox, ScrollText, Send, X } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -185,6 +185,12 @@ function FilesView({ step, output }: { step: TraceStep; output: unknown }) {
     [step.type, output],
   )
   const [activeArtifact, setActiveArtifact] = useState<Artifact | null>(null)
+  // Drop the open artifact whenever the step or output changes —
+  // otherwise the JSON viewer keeps showing the previous step's
+  // payload while the user clicks through nodes on the canvas.
+  useEffect(() => {
+    setActiveArtifact(null)
+  }, [step.id, output])
 
   if (artifacts.length === 0) {
     return (
@@ -203,14 +209,27 @@ function FilesView({ step, output }: { step: TraceStep; output: unknown }) {
           <li key={`${a.kind}:${a.name}`}>
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 if (a.kind === "file_ref") {
                   // No way to open a file in the user's editor from
                   // a web context; copying the path is the most
                   // useful thing we can do until the executor
                   // persists artifacts as addressable resources.
-                  navigator.clipboard?.writeText(String(a.content)).catch(() => {})
-                  toast.success(`Copied ${a.name}`)
+                  // Toast only on a confirmed write — under SSR /
+                  // insecure contexts navigator.clipboard is missing
+                  // and cheering "Copied!" would be a lie.
+                  const cb =
+                    typeof navigator !== "undefined" ? navigator.clipboard : undefined
+                  if (!cb) {
+                    toast.error("Clipboard unavailable")
+                    return
+                  }
+                  try {
+                    await cb.writeText(String(a.content))
+                    toast.success(`Copied ${a.name}`)
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Copy failed")
+                  }
                   return
                 }
                 setActiveArtifact((prev) => (prev?.name === a.name ? null : a))

@@ -2,6 +2,10 @@
 // side panel. Mirrors the Go pipeline DSL just enough to render a
 // readable execution chain; we never need the full server-side step
 // type (validation, retry config, etc.) on the FE.
+//
+// React Flow node/edge data interfaces also live here so the lib
+// layer doesn't import from components/ — that flips the dependency
+// arrow and makes lib/trace unusable from anywhere else.
 
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 
@@ -77,3 +81,45 @@ export interface DataFlowEdge {
 // has every field we need; this is a re-export alias so callers can
 // import a single type.
 export type RunRow = PipelineRun
+
+// ── React Flow node + edge data shapes ─────────────────────────────
+//
+// Lifted out of components/ so lib/trace/build-trace-graph.ts (and
+// any other lib helpers that build canvas data) never has to import
+// back into components/. The graph builder is the source of truth for
+// what fields a node carries; the components just render them.
+
+export interface TraceStepNodeData {
+  step: TraceStep
+  status: StepStatus
+  selected: boolean
+  // When set, the node renders inline Approve/Deny buttons that call
+  // the workspace-scoped /pipelines/waitpoints/{token}/approve
+  // endpoint. Same handler the inbox uses; lifted to a shared lib so
+  // both surfaces stay in sync.
+  waitpoint?: {
+    token: string
+    workspaceId: string
+  } | null
+  // Heatmap shading — hex border color set by buildTraceGraph based
+  // on the percentile bucket of cost or duration.
+  heatmapBorder?: string | null
+  [key: string]: unknown
+}
+
+export interface TraceTriggerNodeData {
+  triggeredVia: string
+  triggeredById?: string
+  issueIdentifier?: string
+  pipelineName?: string
+  [key: string]: unknown
+}
+
+export interface TraceDataFlowEdgeData {
+  label?: string
+  // Truncated string preview of the value that flowed.
+  // null = no value yet (source step hasn't run).
+  preview?: string | null
+  active?: boolean
+  [key: string]: unknown
+}

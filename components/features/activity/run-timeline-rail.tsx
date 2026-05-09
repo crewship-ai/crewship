@@ -3,19 +3,17 @@
 import { useMemo, useState } from "react"
 import {
   Calendar,
-  Check,
   CircleDot,
-  Clock,
   Loader2,
-  PauseCircle,
   Search,
   ScrollText,
   Webhook,
   X,
-  XCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
+import { statusIcon, statusTint } from "@/lib/activity/run-status"
+import { relTime } from "@/lib/activity/format-time"
 
 // RunTimelineRail — left-side list of recent runs. Each row is one
 // pipeline_run with its source pill (issue / schedule / webhook /
@@ -157,6 +155,7 @@ function FilterBtn({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={cn(
         "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
         active
@@ -284,53 +283,3 @@ function EmptyRail({ filter, hasSearch }: { filter: StatusFilter; hasSearch: boo
   )
 }
 
-// ── helpers (mirror runs-view.tsx, kept local to avoid circular imports) ─
-
-function statusIcon(status: string) {
-  switch (status) {
-    case "running":
-    case "queued":
-      return Loader2
-    case "paused":
-      return PauseCircle
-    case "completed":
-      return Check
-    case "failed":
-    case "cancelled":
-    case "interrupted":
-      return XCircle
-    default:
-      return Clock
-  }
-}
-
-function statusTint(status: string) {
-  switch (status) {
-    case "running":
-    case "queued":
-      return { bg: "bg-blue-500/15", icon: "animate-spin text-blue-400" }
-    case "paused":
-      return { bg: "bg-amber-500/15", icon: "text-amber-400 animate-pulse" }
-    case "completed":
-      return { bg: "bg-emerald-500/15", icon: "text-emerald-400" }
-    case "failed":
-    case "cancelled":
-    case "interrupted":
-      return { bg: "bg-rose-500/15", icon: "text-rose-400" }
-    default:
-      return { bg: "bg-white/[0.06]", icon: "text-muted-foreground" }
-  }
-}
-
-function relTime(iso?: string) {
-  if (!iso) return "—"
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return "—"
-  const diff = Date.now() - d.getTime()
-  if (Math.abs(diff) < 60_000) return "just now"
-  const mins = Math.round(Math.abs(diff) / 60_000)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.round(hrs / 24)}d ago`
-}

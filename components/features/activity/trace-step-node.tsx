@@ -20,8 +20,16 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { StepKind, StepStatus, TraceStep } from "@/lib/trace/types"
+import type {
+  StepKind,
+  StepStatus,
+  TraceStep,
+  TraceStepNodeData,
+  TraceTriggerNodeData,
+} from "@/lib/trace/types"
 import { waitpointDecide } from "@/lib/api/waitpoints"
+
+export type { TraceStepNodeData, TraceTriggerNodeData }
 
 // TraceStepNode — single React Flow node component used for every
 // step kind in the trace canvas. The kind drives icon + subtitle; the
@@ -32,24 +40,6 @@ import { waitpointDecide } from "@/lib/api/waitpoints"
 // (icon, label, type chip, subtitle, status pip). Splitting into 6
 // components meant 6× the boilerplate without any per-kind layout
 // difference. The variation is data, not structure.
-
-export interface TraceStepNodeData {
-  step: TraceStep
-  status: StepStatus
-  selected: boolean
-  // When set, the node renders inline Approve/Deny buttons that call
-  // the workspace-scoped /pipelines/waitpoints/{token}/approve
-  // endpoint. Same handler the inbox uses; lifted to a shared lib so
-  // both surfaces stay in sync.
-  waitpoint?: {
-    token: string
-    workspaceId: string
-  } | null
-  // Heatmap shading — hex border color set by buildTraceGraph based
-  // on the percentile bucket of cost or duration.
-  heatmapBorder?: string | null
-  [key: string]: unknown
-}
 
 // Icon + label for each step kind. The "label" surfaces as a small
 // type chip on the node so a colorblind user can still distinguish
@@ -64,9 +54,9 @@ const KIND_VISUAL: Record<StepKind, { Icon: LucideIcon; label: string; tint: str
 }
 
 // Trigger isn't a real step kind — it's a synthetic node for the
-// run's entry point (issue / schedule / webhook / manual). We export
-// the visual config so the canvas builder can render it identically.
-export const TRIGGER_VISUAL = { Icon: Zap, label: "trigger", tint: "text-orange-300" }
+// run's entry point (issue / schedule / webhook / manual). Local;
+// nobody outside this file renders the trigger visual.
+const TRIGGER_VISUAL = { Icon: Zap, label: "trigger", tint: "text-orange-300" }
 
 const STATUS_RING: Record<StepStatus, { ring: string; bg: string }> = {
   pending: { ring: "ring-1 ring-white/[0.08]", bg: "bg-card" },
@@ -198,16 +188,22 @@ function TraceStepNodeBase({ data }: NodeProps) {
   const Icon = visual.Icon
   const ring = STATUS_RING[status]
 
-  // React Flow's wrapper makes the node tab-focusable and forwards
-  // Enter/Space to onNodeClick (handled at the canvas level), so we
-  // don't add our own tabIndex here — that would create a second
-  // focus stop and confuse keyboard users. role + aria-label still
-  // help screen readers describe the step.
+  // tabIndex + onKeyDown make the node keyboard-activatable. Enter
+  // and Space dispatch a click on the same element, which bubbles up
+  // through React Flow's node wrapper and fires the canvas-level
+  // onNodeClick handler — same code path as a mouse click.
   return (
     <div
       role="button"
+      tabIndex={0}
       aria-label={`${visual.label} step ${step.id}, status ${status}`}
       aria-pressed={selected}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          ;(e.currentTarget as HTMLElement).click()
+        }
+      }}
       className={cn(
         "relative w-[200px] rounded-lg border border-white/[0.06] px-2.5 py-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80",
         ring.bg,
@@ -280,12 +276,21 @@ function WaitpointActions({
     e.stopPropagation()
     e.preventDefault()
     setBusy(approved ? "approve" : "deny")
-    const res = await waitpointDecide(waitpoint.workspaceId, waitpoint.token, approved)
-    if (mountedRef.current) setBusy(null)
-    if (res.ok) {
-      toast.success(approved ? "Approved" : "Denied")
-    } else {
-      toast.error(res.error)
+    // try/finally so a transport-level throw (network drop, CORS,
+    // …) still clears the busy state. Without it, a thrown fetch
+    // would leave both buttons disabled until the node remounts —
+    // looks like a hung approval but is really an unhandled error.
+    try {
+      const res = await waitpointDecide(waitpoint.workspaceId, waitpoint.token, approved)
+      if (res.ok) {
+        toast.success(approved ? "Approved" : "Denied")
+      } else {
+        toast.error(res.error)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Decide failed")
+    } finally {
+      if (mountedRef.current) setBusy(null)
     }
   }
   return (
@@ -332,14 +337,6 @@ export const TraceStepNode = memo(TraceStepNodeBase)
 // step node but with a Zap icon, no input handle, and a smaller
 // footprint. Renders the source of the run (issue id / schedule cron
 // / webhook name / "manual").
-
-export interface TraceTriggerNodeData {
-  triggeredVia: string
-  triggeredById?: string
-  issueIdentifier?: string
-  pipelineName?: string
-  [key: string]: unknown
-}
 
 function TriggerNodeBase({ data }: NodeProps) {
   const d = data as unknown as TraceTriggerNodeData

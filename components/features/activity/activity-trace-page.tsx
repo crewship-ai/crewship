@@ -24,7 +24,7 @@ import { RunTimelineRail } from "./run-timeline-rail"
 import { TraceCanvas } from "./trace-canvas"
 import { TraceSidePanel } from "./trace-side-panel"
 import type { TraceStep } from "@/lib/trace/types"
-import type { HeatmapMode } from "@/lib/trace/percentile-heatmap"
+import { shadeNodes, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
 
 // ActivityTracePage — top-level page for /activity. Replaces the old
 // OrchestrationPageShell layout (which exposed Runs / Graph / Timeline
@@ -79,12 +79,36 @@ export function ActivityTracePage() {
     "off",
   )
 
-  // Panel collapse state. Persisted per-user so a user who wants the
-  // canvas wide always gets it wide on next visit.
-  const [railCollapsed, setRailCollapsed] = useUserPreference<boolean>(
+  // Pre-compute the heatmap-color map up here. shadeNodes is fast,
+  // but baking it into the canvas's memo would re-run dagreLayout
+  // every time stepMetrics or heatmapMode flips. Memoizing the map
+  // separately means a metric arriving over WS only re-shades node
+  // borders — the node positions stay put.
+  const heatmapColors = useMemo(() => {
+    if (heatmapMode === "off" || stepMetrics.size === 0) {
+      return new Map<string, string>()
+    }
+    return shadeNodes(
+      Array.from(stepMetrics, ([stepId, m]) => ({
+        stepId,
+        cost: m.costUsd,
+        duration: m.durationMs,
+      })),
+      heatmapMode,
+    )
+  }, [stepMetrics, heatmapMode])
+
+  // Persisted desktop preference + a derived mobile override. Without
+  // the override / preference split, opening the page on a phone
+  // would write `true` into the preference and then keep the rail
+  // collapsed on the user's next desktop visit too — a phone-only
+  // accommodation leaking into desktop.
+  const [railPref, setRailPref] = useUserPreference<boolean>(
     "activity.rail.collapsed",
     false,
   )
+  const railCollapsed = isMobile ? true : railPref
+  const setRailCollapsed = setRailPref
 
   // Side panel is "auto-open when a step is selected, auto-close
   // when stepId clears". The user can also manually close it (clears
@@ -93,10 +117,8 @@ export function ActivityTracePage() {
   const sidePanelOpen = stepId !== null
   const closeSidePanel = () => setStepId(null)
 
-  // Auto-collapse rail on mobile so the canvas has room.
-  useEffect(() => {
-    if (isMobile) setRailCollapsed(true)
-  }, [isMobile, setRailCollapsed])
+  // (Mobile rail collapse is derived, not persisted — see railCollapsed
+  // above. No effect needed.)
 
   // Keyboard shortcuts:
   //   Esc   — close the side panel (clears stepId)
@@ -297,8 +319,7 @@ export function ActivityTracePage() {
             onStepSelect={setStepId}
             workspaceId={workspaceId}
             waitpointTokensByStepId={waitpointTokensByStepId}
-            stepMetrics={stepMetrics}
-            heatmapMode={heatmapMode}
+            heatmapColors={heatmapColors}
           />
         </div>
 

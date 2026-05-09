@@ -47,6 +47,10 @@ export function useStepMetrics(
   useEffect(() => {
     if (!workspaceId || !pipelineSlug || !runId) {
       setMetrics(new Map())
+      // Clear loading too — without this a hook that started
+      // loading, then had its inputs cleared (run switch to null,
+      // workspace switch), would stay stuck on loading=true.
+      setLoading(false)
       return
     }
     let cancelled = false

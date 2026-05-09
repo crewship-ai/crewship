@@ -22,8 +22,6 @@ import type { PipelineDSL } from "@/lib/trace/types"
 import { buildTraceGraph } from "@/lib/trace/build-trace-graph"
 import { TraceStepNode, TraceTriggerNode } from "./trace-step-node"
 import { TraceDataFlowEdge } from "./trace-data-flow-edge"
-import type { HeatmapMode } from "@/lib/trace/percentile-heatmap"
-import type { StepMetric } from "@/hooks/use-step-metrics"
 
 // TraceCanvas — ReactFlow surface for the /activity trace view.
 //
@@ -53,8 +51,9 @@ interface TraceCanvasProps {
   // scoped decide endpoint when the user clicks Approve/Deny inline.
   workspaceId: string
   waitpointTokensByStepId: ReadonlyMap<string, string>
-  stepMetrics: ReadonlyMap<string, StepMetric>
-  heatmapMode: HeatmapMode
+  // Pre-computed heatmap shading; the page memoizes this so a step
+  // metric flowing in over realtime doesn't force a dagre relayout.
+  heatmapColors: ReadonlyMap<string, string>
 }
 
 export function TraceCanvas(props: TraceCanvasProps) {
@@ -84,8 +83,7 @@ function CanvasInner({
   onStepSelect,
   workspaceId,
   waitpointTokensByStepId,
-  stepMetrics,
-  heatmapMode,
+  heatmapColors,
 }: TraceCanvasProps & { run: PipelineRun }) {
   const graphData = useMemo(
     () =>
@@ -93,10 +91,9 @@ function CanvasInner({
         selectedStepId,
         workspaceId,
         waitpointTokensByStepId,
-        stepMetrics,
-        heatmapMode,
+        heatmapColors,
       }),
-    [run, dsl, selectedStepId, workspaceId, waitpointTokensByStepId, stepMetrics, heatmapMode],
+    [run, dsl, selectedStepId, workspaceId, waitpointTokensByStepId, heatmapColors],
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)

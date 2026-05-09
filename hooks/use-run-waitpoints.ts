@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { listPendingWaitpoints, type PendingWaitpoint } from "@/lib/api/waitpoints"
 
@@ -23,13 +23,21 @@ export function useRunWaitpoints(
   runId: string | null | undefined,
 ) {
   const [waitpoints, setWaitpoints] = useState<PendingWaitpoint[]>([])
+  // Stamp every fetch with the (workspaceId, runId) it was for so a
+  // slow response from a previous run can't overwrite waitpoints
+  // for the new run after the user switched. Without this guard,
+  // rapidly clicking through runs in the rail produces wrong
+  // inline Approve/Deny tokens.
+  const reqIdRef = useRef(0)
 
   const refresh = useCallback(async () => {
     if (!workspaceId || !runId) {
       setWaitpoints([])
       return
     }
+    const myReq = ++reqIdRef.current
     const all = await listPendingWaitpoints(workspaceId)
+    if (myReq !== reqIdRef.current) return
     setWaitpoints(all.filter((w) => w.pipeline_run_id === runId))
   }, [workspaceId, runId])
 

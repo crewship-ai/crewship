@@ -8,6 +8,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react"
 import { cn } from "@/lib/utils"
+import type { TraceDataFlowEdgeData } from "@/lib/trace/types"
 
 // TraceDataFlowEdge — labeled bezier edge for "data flowed from
 // step A to step B" relationships. Visually distinct from the gray
@@ -16,19 +17,13 @@ import { cn } from "@/lib/utils"
 //   - thicker (2.5px vs 1.5px)
 //   - animated when the source step is in a non-terminal state
 //   - label chip showing the JSON path the consumer reads
-//   - hover popover (Phase 4) preview the resolved value
+//   - hover popover preview the resolved value
 //
-// Source: n8n's "items flow on edges" pattern. Until we ship per-edge
-// preview tooltips, the chip alone makes data flow legible.
+// Source: n8n's "items flow on edges" pattern. Edge data shape lives
+// in lib/trace/types so the lib-level builder doesn't import back
+// into components/.
 
-export interface TraceDataFlowEdgeData {
-  label?: string
-  // Truncated string preview of the value that flowed (Phase 4).
-  // null = no value yet (source step hasn't run).
-  preview?: string | null
-  active?: boolean
-  [key: string]: unknown
-}
+export type { TraceDataFlowEdgeData }
 
 function TraceDataFlowEdgeBase(props: EdgeProps) {
   const {

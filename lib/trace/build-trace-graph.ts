@@ -1,12 +1,16 @@
 import type { Node, Edge } from "@xyflow/react"
 import { Graph as DagreGraph, layout as dagreLayout } from "@dagrejs/dagre"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
-import type { PipelineDSL, StepStatus, TraceStep } from "./types"
-import type { TraceStepNodeData, TraceTriggerNodeData } from "@/components/features/activity/trace-step-node"
-import type { TraceDataFlowEdgeData } from "@/components/features/activity/trace-data-flow-edge"
+import type {
+  PipelineDSL,
+  StepStatus,
+  TraceDataFlowEdgeData,
+  TraceStep,
+  TraceStepNodeData,
+  TraceTriggerNodeData,
+} from "./types"
 import { formatEdgeLabel, parseDataFlowEdges } from "./parse-data-flow"
-import { shadeNodes, type HeatmapMode } from "./percentile-heatmap"
-import type { StepMetric } from "@/hooks/use-step-metrics"
+import { summarizeValue } from "@/lib/format/summarize-value"
 
 // buildTraceGraph — turns one (run, dsl) pair into ReactFlow nodes
 // and edges for the trace canvas.
@@ -33,11 +37,11 @@ interface BuildTraceGraphOptions {
   // Step ID → waitpoint token for steps with a pending waitpoint.
   // The step node renders inline Approve/Deny when its id matches.
   waitpointTokensByStepId?: ReadonlyMap<string, string>
-  // Per-step metrics from journal entries — drives the heatmap.
-  stepMetrics?: ReadonlyMap<string, StepMetric>
-  // Heatmap mode toggle. "off" disables shading regardless of
-  // stepMetrics; "cost" / "duration" pick which metric to color by.
-  heatmapMode?: HeatmapMode
+  // Pre-computed heatmap colors keyed by step id. The caller
+  // computes this once via shadeNodes() and passes it in — keeping
+  // the (cheap) percentile bucketing OUT of the hot rebuild path
+  // means a stepMetrics change doesn't force a full dagre relayout.
+  heatmapColors?: ReadonlyMap<string, string>
 }
 
 export interface TraceGraphData {
@@ -91,17 +95,21 @@ export function buildTraceGraph(
   const steps = dsl?.steps ?? []
   // Fall back to outputs-only when DSL is missing — the run still has
   // step_outputs keys, which is enough to render success-state nodes.
-  const stepIds = steps.length > 0
-    ? steps.map((s) => s.id)
-    : Object.keys(run.step_outputs ?? {})
-
-  // Build a synthetic step list when the DSL is gone but outputs
-  // exist. We don't know the kind, so default to agent_run; the
-  // canvas still renders the chain.
-  const effectiveSteps: TraceStep[] =
-    steps.length > 0
-      ? steps
-      : stepIds.map((id) => ({ id, type: "agent_run" as const }))
+  // Also include current_step_id and failed_at_step in the synthetic
+  // chain: those steps may have produced no output (still running, or
+  // failed before persisting), so a strictly-output-derived list
+  // would hide the only non-success state on the canvas.
+  let effectiveSteps: TraceStep[]
+  if (steps.length > 0) {
+    effectiveSteps = steps
+  } else {
+    const ids = new Set<string>(Object.keys(run.step_outputs ?? {}))
+    if (run.current_step_id) ids.add(run.current_step_id)
+    if (run.failed_at_step) ids.add(run.failed_at_step)
+    // We don't know the kind without the DSL; default to agent_run
+    // so the renderer still picks a reasonable icon + chrome.
+    effectiveSteps = Array.from(ids).map((id) => ({ id, type: "agent_run" as const }))
+  }
 
   // ---- Nodes ----
   const nodes: Node[] = []
@@ -120,20 +128,8 @@ export function buildTraceGraph(
     position: { x: 0, y: 0 },
   })
 
-  // Heatmap colors — computed once over the metric map; the node
-  // builder below picks per-step colors out of the shaded map.
-  const heatmapColors = (() => {
-    const mode = opts.heatmapMode ?? "off"
-    if (mode === "off" || !opts.stepMetrics) return new Map<string, string>()
-    const metricsList = Array.from(opts.stepMetrics, ([stepId, m]) => ({
-      stepId,
-      cost: m.costUsd,
-      duration: m.durationMs,
-    }))
-    return shadeNodes(metricsList, mode)
-  })()
-
   // One step node per DSL step.
+  const heatmapColors = opts.heatmapColors
   for (const step of effectiveSteps) {
     const token = opts.waitpointTokensByStepId?.get(step.id)
     const waitpoint =
@@ -145,7 +141,7 @@ export function buildTraceGraph(
       status: statusOf(run, step, effectiveSteps),
       selected: opts.selectedStepId === step.id,
       waitpoint,
-      heatmapBorder: heatmapColors.get(step.id) ?? null,
+      heatmapBorder: heatmapColors?.get(step.id) ?? null,
     }
     nodes.push({
       id: step.id,
@@ -267,32 +263,26 @@ function previewValueAtPath(upstreamOutput: unknown, path: string): string | nul
     }
   }
 
-  // Walk the dotted path. Empty path → just summarize the root.
+  // Walk the dotted path. When the path doesn't resolve (output
+  // shape drifted from what the DSL expected, e.g. an HTTP response
+  // changed schema), fall back to a summary of the root output —
+  // returning null here would make the edge hover preview disappear
+  // entirely, which reads as "nothing flowed" when actually the data
+  // just doesn't match the requested path.
   const parts = path.replace(/^\./, "").split(".").filter(Boolean)
   let cur: unknown = value
+  let resolved = true
   for (const seg of parts) {
     if (cur && typeof cur === "object") {
       cur = (cur as Record<string, unknown>)[seg]
     } else {
-      return null
+      resolved = false
+      break
     }
   }
-  return summarizePreview(cur)
+  return summarizeValue(resolved ? cur : value, { maxChars: 100, quoteStrings: true })
 }
 
-function summarizePreview(v: unknown): string {
-  if (v === undefined || v === null) return "null"
-  if (typeof v === "string") {
-    return v.length > 80 ? `"${v.slice(0, 79)}…"` : `"${v}"`
-  }
-  if (typeof v === "number" || typeof v === "boolean") return String(v)
-  try {
-    const s = JSON.stringify(v)
-    return s.length > 100 ? s.slice(0, 99) + "…" : s
-  } catch {
-    return String(v)
-  }
-}
 
 // makeSequencingEdge — gray control-flow edge between two steps.
 // Animated when the source step is in a non-terminal state (i.e. data
