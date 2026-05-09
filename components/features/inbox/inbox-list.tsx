@@ -422,16 +422,48 @@ function KindActions({
         </Button>
       )
     case "failed_run":
+      // Retry actually re-fires the routine: POST /pipelines/{slug}/run
+      // with the same inputs that produced the failure (replayed from
+      // the run's inputs_json so dynamic context is preserved). The
+      // payload carries the slug + inputs the writer captured at
+      // failure time. If the slug is missing we fall back to just
+      // marking the inbox item resolved so the user isn't stuck.
       return (
         <div className="flex items-center gap-2">
           <Button
             size="sm"
             disabled={disabled || busy !== null}
-            onClick={() => wrap("retried", async () => onResolve("retried"))}
+            onClick={() =>
+              wrap("retried", async () => {
+                const slug = (item.payload?.pipeline_slug ??
+                  item.sender_name) as string | undefined
+                const inputs = (item.payload?.inputs ?? {}) as Record<string, unknown>
+                if (!slug) {
+                  toast.error("Cannot retry — pipeline slug missing in payload")
+                  await onResolve("cancelled")
+                  return
+                }
+                const res = await fetch(
+                  `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/${encodeURIComponent(slug)}/run`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ inputs, triggered_via: "manual" }),
+                  },
+                )
+                if (!res.ok) {
+                  const body = await res.json().catch(() => null)
+                  toast.error(body?.error ?? "Retry failed")
+                  return
+                }
+                toast.success(`Routine ${slug} re-queued — see /activity`)
+                await onResolve("retried")
+              })
+            }
             className="gap-1.5"
           >
             <ScrollText className="h-3 w-3" />
-            Retry
+            {busy === "retried" ? "Retrying…" : "Retry"}
           </Button>
           <Button
             size="sm"
