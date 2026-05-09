@@ -61,10 +61,15 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: "
     setLoading(true)
     setError(null)
     try {
-      const url = stateFilter && stateFilter !== "all"
-        ? `/api/v1/inbox?state=${stateFilter}`
-        : "/api/v1/inbox"
-      const res = await fetch(url, { signal: ctrl.signal })
+      // workspace_id is required by RequireWorkspace middleware. Use
+      // the same query-param pattern as /issues + /missions; the
+      // backend route is /api/v1/inbox (no path param) so the value
+      // has to land on the URL.
+      const params = new URLSearchParams({ workspace_id: workspaceId })
+      if (stateFilter && stateFilter !== "all") {
+        params.set("state", stateFilter)
+      }
+      const res = await fetch(`/api/v1/inbox?${params.toString()}`, { signal: ctrl.signal })
       if (ctrl.signal.aborted) return
       if (!res.ok) {
         setError(`inbox: ${res.status}`)
@@ -101,11 +106,15 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: "
   const patch = useCallback(
     async (id: string, state: InboxItem["state"], resolvedAction?: string) => {
       try {
-        const res = await fetch(`/api/v1/inbox/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ state, resolved_action: resolvedAction }),
-        })
+        if (!workspaceId) return
+        const res = await fetch(
+          `/api/v1/inbox/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ state, resolved_action: resolvedAction }),
+          },
+        )
         if (!res.ok) {
           const body = await res.json().catch(() => null)
           throw new Error(body?.error ?? `patch failed (${res.status})`)
@@ -139,7 +148,7 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: "
         setError(e instanceof Error ? e.message : String(e))
       }
     },
-    [items],
+    [items, workspaceId],
   )
 
   return { items, unreadCount, loading, error, refresh, patch }
@@ -158,7 +167,9 @@ export function useInboxUnreadCount(workspaceId: string | null | undefined) {
       return
     }
     try {
-      const res = await fetch("/api/v1/inbox/count")
+      const res = await fetch(
+        `/api/v1/inbox/count?workspace_id=${encodeURIComponent(workspaceId)}`,
+      )
       if (!res.ok) return
       const data: { unread_count: number } = await res.json()
       setCount(data.unread_count ?? 0)
