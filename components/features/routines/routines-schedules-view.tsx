@@ -40,6 +40,10 @@ function statusColor(status: string | undefined): string {
 function relativeTime(iso?: string): string {
   if (!iso) return "—"
   const d = new Date(iso)
+  // Guard against malformed timestamps from the wire — without this
+  // the formatter cascades through NaN math and renders "NaNd ago",
+  // which is worse than "—" because it looks intentional.
+  if (Number.isNaN(d.getTime())) return "—"
   const diff = Date.now() - d.getTime()
   if (Math.abs(diff) < 60_000) return "just now"
   const fwd = diff < 0

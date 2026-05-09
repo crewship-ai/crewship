@@ -89,50 +89,44 @@ func TestIssue_Create_WithRoutineBinding(t *testing.T) {
 	}
 }
 
-// TestIssue_Create_WithBadRoutineID rejects a routine_id that doesn't
-// exist in the workspace — guards against stale or cross-workspace IDs
-// the UI might supply by accident.
-func TestIssue_Create_WithBadRoutineID(t *testing.T) {
-	h, userID, wsID, crewID, _, _ := newTestIssueHandler(t)
-
-	body := bytes.NewBufferString(`{
-		"title":"Bad routine",
-		"routine_id":"pln_does_not_exist"
-	}`)
-	req := httptest.NewRequest("POST", "/", body)
-	req.SetPathValue("crewId", crewID)
-	ctx := withUser(req.Context(), &AuthUser{ID: userID})
-	ctx = withWorkspace(ctx, wsID, "OWNER")
-	req = req.WithContext(ctx)
-	rr := httptest.NewRecorder()
-	h.Create(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 (body=%s)", rr.Code, rr.Body.String())
+// TestIssue_Create_RoutineBinding_BadRequests covers the two
+// 400-returning validation negatives on Create's routine binding:
+// (a) routine_id pointing at a pipeline that doesn't exist in the
+// workspace, and (b) routine_inputs supplied without a routine_id
+// (would otherwise be silently swallowed by the COALESCE in the
+// INSERT). Bundled as t.Run subtests so future negative cases —
+// invalid JSON inputs, cross-workspace ID, malformed payload —
+// drop in as one more table row.
+func TestIssue_Create_RoutineBinding_BadRequests(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "WithBadRoutineID",
+			body: `{"title":"Bad routine","routine_id":"pln_does_not_exist"}`,
+		},
+		{
+			name: "OrphanInputsRejected",
+			body: `{"title":"Orphan inputs","routine_inputs":{"k":"v"}}`,
+		},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, userID, wsID, crewID, _, _ := newTestIssueHandler(t)
 
-// TestIssue_Create_OrphanInputsRejected guards the "you forgot to set
-// routine_id" case: posting routine_inputs without a routine_id is a
-// 400 because COALESCE in the INSERT would otherwise swallow the
-// inputs silently and the caller wouldn't notice.
-func TestIssue_Create_OrphanInputsRejected(t *testing.T) {
-	h, userID, wsID, crewID, _, _ := newTestIssueHandler(t)
+			req := httptest.NewRequest("POST", "/", bytes.NewBufferString(tc.body))
+			req.SetPathValue("crewId", crewID)
+			ctx := withUser(req.Context(), &AuthUser{ID: userID})
+			ctx = withWorkspace(ctx, wsID, "OWNER")
+			req = req.WithContext(ctx)
+			rr := httptest.NewRecorder()
+			h.Create(rr, req)
 
-	body := bytes.NewBufferString(`{
-		"title":"Orphan inputs",
-		"routine_inputs":{"k":"v"}
-	}`)
-	req := httptest.NewRequest("POST", "/", body)
-	req.SetPathValue("crewId", crewID)
-	ctx := withUser(req.Context(), &AuthUser{ID: userID})
-	ctx = withWorkspace(ctx, wsID, "OWNER")
-	req = req.WithContext(ctx)
-	rr := httptest.NewRecorder()
-	h.Create(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400 (body=%s)", rr.Code, rr.Body.String())
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400 (body=%s)", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -195,5 +189,8 @@ func TestIssue_Update_RoutineBinding_SetAndClear(t *testing.T) {
 	}
 	if cleared.RoutineSlug != nil {
 		t.Errorf("after clear: routine_slug = %v, want nil", *cleared.RoutineSlug)
+	}
+	if cleared.RoutineName != nil {
+		t.Errorf("after clear: routine_name = %v, want nil", *cleared.RoutineName)
 	}
 }
