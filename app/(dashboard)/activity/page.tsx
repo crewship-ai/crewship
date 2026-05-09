@@ -1,12 +1,16 @@
 "use client"
 
-import { OrchestrationPageShell } from "@/components/features/orchestration/orchestration-page-shell"
+import { ActivityTracePage } from "@/components/features/activity/activity-trace-page"
 
-// /activity — live observability surface. Renders Graph (default),
-// Timeline and Feed as sub-views of a single page; no top-level tabs
-// for Issues or Routines because those are their own destinations now.
-// Replaces /orchestration as the "what's running across the workspace
-// right now" page.
+// /activity — single-canvas trace view. Picks a run from the left
+// rail and renders the full execution chain (issue → routine → step
+// nodes with data-flow edges) on a ReactFlow canvas, with a step
+// detail panel on the right.
+//
+// The legacy 4-tab layout (Runs / Graph / Timeline / Feed via
+// OrchestrationPageShell) was retired here on the IA refactor — too
+// much fragmentation. The /orchestration route still uses the old
+// layout for backwards compat.
 export default function ActivityPage() {
-  return <OrchestrationPageShell mode="activity" />
+  return <ActivityTracePage />
 }

@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
+import { waitpointDecide } from "@/lib/api/waitpoints"
 
 // InboxList — the /inbox page surface. Linear-Triage UX: three states
 // (unread → read → resolved) with no archive / flag / snooze. List on
@@ -352,36 +353,6 @@ function InboxDetail({
       </div>
     </div>
   )
-}
-
-// waitpointDecide POSTs to the workspace-scoped approve endpoint
-// with the explicit boolean. The handler treats an absent `approved`
-// field as false, so callers MUST send the field even when the user
-// clicked Deny — otherwise the row gets denied for the wrong reason
-// (silent default), which is exactly the bug we shipped on the
-// first cut of this surface.
-async function waitpointDecide(
-  workspaceID: string,
-  token: string,
-  approved: boolean,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const res = await fetch(
-      `/api/v1/workspaces/${encodeURIComponent(workspaceID)}/pipelines/waitpoints/${encodeURIComponent(token)}/approve`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
-      },
-    )
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      return { ok: false, error: body?.error ?? `Decide failed (${res.status})` }
-    }
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
 }
 
 function KindActions({

@@ -102,15 +102,25 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		durationMs                                       int64
 		triggeredVia, triggeredByID, idempotencyKey      sql.NullString
 		inputsJSON                                       string
+		pipelineName, issueIdentifier                    sql.NullString
 	)
+	// Same LEFT JOIN as ListWorkspaceRuns so /pipeline-runs/{id}
+	// returns the human pipeline name + issue identifier without
+	// forcing the FE to do a second fetch. The trace canvas
+	// (/activity) needs both for its trigger node + toolbar label.
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT id, workspace_id, pipeline_id, pipeline_slug, status, mode,
-		       current_step_id, step_outputs_json, output, started_at,
-		       ended_at, error_message, failed_at_step,
-		       cost_usd, duration_ms,
-		       triggered_via, triggered_by_id, idempotency_key, inputs_json
-		FROM pipeline_runs
-		WHERE id = ? AND workspace_id = ?`,
+		SELECT r.id, r.workspace_id, r.pipeline_id, r.pipeline_slug, r.status, r.mode,
+		       r.current_step_id, r.step_outputs_json, r.output, r.started_at,
+		       r.ended_at, r.error_message, r.failed_at_step,
+		       r.cost_usd, r.duration_ms,
+		       r.triggered_via, r.triggered_by_id, r.idempotency_key, r.inputs_json,
+		       p.name, m.identifier
+		FROM pipeline_runs r
+		LEFT JOIN pipelines p ON r.pipeline_id = p.id AND p.workspace_id = r.workspace_id
+		LEFT JOIN missions m ON r.triggered_via = 'issue'
+		                    AND m.identifier = r.triggered_by_id
+		                    AND m.workspace_id = r.workspace_id
+		WHERE r.id = ? AND r.workspace_id = ?`,
 		runID, workspaceID,
 	).Scan(
 		&id, &wsID, &pipelineID, &pipelineSlug, &status, &mode,
@@ -118,6 +128,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		&endedAt, &errorMessage, &failedAtStep,
 		&costUSD, &durationMs,
 		&triggeredVia, &triggeredByID, &idempotencyKey, &inputsJSON,
+		&pipelineName, &issueIdentifier,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
@@ -143,25 +154,27 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"id":              id,
-		"workspace_id":    wsID,
-		"pipeline_id":     pipelineID,
-		"pipeline_slug":   pipelineSlug,
-		"status":          status,
-		"mode":            mode,
-		"current_step_id": currentStepID.String,
-		"step_outputs":    stepOutputs,
-		"output":          output.String,
-		"started_at":      startedAt,
-		"ended_at":        endedAt.String,
-		"error_message":   errorMessage.String,
-		"failed_at_step":  failedAtStep.String,
-		"cost_usd":        costUSD,
-		"duration_ms":     durationMs,
-		"triggered_via":   triggeredVia.String,
-		"triggered_by_id": triggeredByID.String,
-		"idempotency_key": idempotencyKey.String,
-		"inputs":          inputs,
+		"id":               id,
+		"workspace_id":     wsID,
+		"pipeline_id":      pipelineID,
+		"pipeline_slug":    pipelineSlug,
+		"pipeline_name":    pipelineName.String,
+		"status":           status,
+		"mode":             mode,
+		"current_step_id":  currentStepID.String,
+		"step_outputs":     stepOutputs,
+		"output":           output.String,
+		"started_at":       startedAt,
+		"ended_at":         endedAt.String,
+		"error_message":    errorMessage.String,
+		"failed_at_step":   failedAtStep.String,
+		"cost_usd":         costUSD,
+		"duration_ms":      durationMs,
+		"triggered_via":    triggeredVia.String,
+		"triggered_by_id":  triggeredByID.String,
+		"idempotency_key":  idempotencyKey.String,
+		"inputs":           inputs,
+		"issue_identifier": issueIdentifier.String,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
