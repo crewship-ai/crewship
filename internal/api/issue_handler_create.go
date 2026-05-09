@@ -128,13 +128,26 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// a 400 instead of a foreign-key-style failure later when /run-routine
 	// is hit. routine_inputs piggybacks on the same null-check: an empty
 	// inputs map serializes to '{}', matching the column default.
+	//
+	// We split the err vs. not-found cases — a bad SQL state shouldn't
+	// be reported to the user as "routine doesn't exist."
 	var routineInputsJSON sql.NullString
-	if req.RoutineID != nil && *req.RoutineID != "" {
+	// Normalize empty string to nil so a UI that posts "" doesn't
+	// trip the existence check.
+	if req.RoutineID != nil && *req.RoutineID == "" {
+		req.RoutineID = nil
+	}
+	if req.RoutineID != nil {
 		var exists int
 		err = tx.QueryRowContext(r.Context(),
 			`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
 			*req.RoutineID, wsID).Scan(&exists)
-		if err != nil || exists == 0 {
+		if err != nil {
+			h.logger.Error("validate routine_id", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if exists == 0 {
 			writeProblem(w, r, http.StatusBadRequest, "routine_id does not exist in this workspace")
 			return
 		}
@@ -207,9 +220,15 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Estimate:      req.Estimate,
 		ParentIssueID: req.ParentIssueID,
 		MilestoneID:   req.MilestoneID,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-		Labels:        []labelResponse{},
+		// Surface the binding back so the client doesn't have to
+		// re-fetch immediately. Slug+name come from the next Get
+		// (handlers that JOIN pipelines); for the create path the
+		// client typically already has the routine in its picker
+		// list and can resolve them locally.
+		RoutineID: req.RoutineID,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Labels:    []labelResponse{},
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id})

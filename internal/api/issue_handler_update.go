@@ -113,16 +113,25 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Routine binding: empty string = clear, non-empty = set (and
 	// validate). We resolve the pipeline_id against the workspace so
-	// a stale or cross-workspace ID can't sneak in.
+	// a stale or cross-workspace ID can't sneak in. DB errors stay
+	// 500; "no such routine in this workspace" is the only 400 path.
+	// Clearing the binding also resets routine_inputs_json so stale
+	// inputs don't leak into a future re-bind.
 	if req.RoutineID != nil {
 		if *req.RoutineID == "" {
 			ub.SetNull("routine_id")
+			ub.Set("routine_inputs_json", "{}")
 		} else {
 			var exists int
 			err = h.db.QueryRowContext(r.Context(),
 				`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
 				*req.RoutineID, wsID).Scan(&exists)
-			if err != nil || exists == 0 {
+			if err != nil {
+				h.logger.Error("validate routine_id", "error", err)
+				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+			if exists == 0 {
 				writeProblem(w, r, http.StatusBadRequest, "routine_id does not exist in this workspace")
 				return
 			}

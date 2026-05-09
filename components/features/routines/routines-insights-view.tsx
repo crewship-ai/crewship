@@ -109,17 +109,17 @@ export function RoutinesInsightsView({
           ) : (
             <ul className="divide-y divide-white/[0.04]">
               {stats.top.map((r) => (
-                <li
+                <RoutineRow
                   key={r.id}
-                  className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-card/40"
-                  onClick={() => onSelect(r.slug)}
+                  onActivate={() => onSelect(r.slug)}
+                  ariaLabel={`Open routine ${r.name}`}
                 >
                   {statusBadge(r.last_invocation_status)}
                   <span className="flex-1 truncate text-xs">{r.name}</span>
                   <span className="text-[11px] tabular-nums text-muted-foreground">
                     {r.invocation_count} runs
                   </span>
-                </li>
+                </RoutineRow>
               ))}
             </ul>
           )}
@@ -134,17 +134,17 @@ export function RoutinesInsightsView({
           ) : (
             <ul className="divide-y divide-white/[0.04]">
               {stats.recentFailures.map((r) => (
-                <li
+                <RoutineRow
                   key={r.id}
-                  className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-card/40"
-                  onClick={() => onSelect(r.slug)}
+                  onActivate={() => onSelect(r.slug)}
+                  ariaLabel={`Open routine ${r.name}`}
                 >
                   <AlertCircle className="h-3 w-3 text-rose-400" />
                   <span className="flex-1 truncate text-xs">{r.name}</span>
                   <span className="text-[11px] tabular-nums text-muted-foreground">
                     {r.last_invoked_at ? new Date(r.last_invoked_at).toLocaleDateString() : "—"}
                   </span>
-                </li>
+                </RoutineRow>
               ))}
             </ul>
           )}
@@ -191,5 +191,37 @@ function Panel({
       </div>
       {children}
     </div>
+  )
+}
+
+// RoutineRow wraps a list item so the row is keyboard-activatable
+// (Enter / Space) in addition to clickable. Both insights panels reuse
+// it; the children compose the row content while the wrapper handles
+// role / tabIndex / onKeyDown wiring.
+function RoutineRow({
+  onActivate,
+  ariaLabel,
+  children,
+}: {
+  onActivate: () => void
+  ariaLabel: string
+  children: React.ReactNode
+}) {
+  return (
+    <li
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      onClick={onActivate}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onActivate()
+        }
+      }}
+      className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-card/40 focus:bg-card/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+    >
+      {children}
+    </li>
   )
 }

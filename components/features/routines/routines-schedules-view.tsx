@@ -1,7 +1,6 @@
 "use client"
 
-import { Calendar, Pause, Play, Plus, Webhook } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Calendar, Pause, Play, Webhook } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
@@ -80,6 +79,10 @@ export function RoutinesSchedulesView({
     )
   }
 
+  // The "New schedule" entry point lives on each routine's detail
+  // panel today (Schedules tab). Surfacing a workspace-level create
+  // button here would need cross-routine plumbing we haven't built;
+  // copy below points users at the per-routine flow until that lands.
   if (schedules.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
@@ -88,29 +91,20 @@ export function RoutinesSchedulesView({
         <p className="max-w-md text-xs text-muted-foreground">
           Schedules fire a saved routine on a cron expression — perfect for
           recurring jobs like &quot;every weekday at 8am, summarize new
-          tickets.&quot; Open a routine and use the Schedules tab to add one.
+          tickets.&quot; Open a routine in the List tab and use its
+          Schedules sub-tab to add one.
         </p>
-        <Button size="sm" variant="outline" className="mt-2 gap-1.5 text-xs">
-          <Plus className="h-3 w-3" />
-          New schedule
-        </Button>
       </div>
     )
   }
 
   return (
     <div className="h-full overflow-auto p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <div className="text-base font-semibold">Schedules</div>
-          <div className="text-xs text-muted-foreground">
-            {schedules.length} schedule{schedules.length === 1 ? "" : "s"} across the workspace
-          </div>
+      <div className="mb-4">
+        <div className="text-base font-semibold">Schedules</div>
+        <div className="text-xs text-muted-foreground">
+          {schedules.length} schedule{schedules.length === 1 ? "" : "s"} across the workspace · open a routine to add or edit
         </div>
-        <Button size="sm" variant="default" className="gap-1.5 text-xs">
-          <Plus className="h-3 w-3" />
-          New schedule
-        </Button>
       </div>
 
       <div className="overflow-hidden rounded-md border border-white/[0.06]">
@@ -128,11 +122,21 @@ export function RoutinesSchedulesView({
           <tbody className="divide-y divide-white/[0.04]">
             {schedules.map((s) => {
               const slug = s.target_pipeline_slug ?? slugByPipelineId.get(s.target_pipeline_id) ?? ""
+              const activate = () => { if (slug) onSelect(slug) }
               return (
                 <tr
                   key={s.id}
-                  className="cursor-pointer transition-colors hover:bg-card/40"
-                  onClick={() => slug && onSelect(slug)}
+                  role="button"
+                  tabIndex={slug ? 0 : -1}
+                  aria-label={`Open routine ${slug || s.name}`}
+                  className="cursor-pointer transition-colors hover:bg-card/40 focus:bg-card/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
+                  onClick={activate}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      activate()
+                    }
+                  }}
                 >
                   <td className="px-3 py-2.5 font-medium">
                     <div className="flex items-center gap-2">

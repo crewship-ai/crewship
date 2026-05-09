@@ -245,6 +245,13 @@ func (h *IssueHandler) addIssueComment(ctx context.Context, missionID, authorTyp
 // routine slug + name without a second round-trip — the Issue UI
 // renders a "Run with: <slug>" chip and would otherwise have to map
 // every routine_id against a prefetched pipeline list.
+//
+// The pipelines join is workspace-scoped: a stale or cross-tenant
+// routine_id would otherwise leak the foreign workspace's slug+name
+// into the response. The handler-level validation already prevents
+// cross-workspace IDs from being persisted, but defense-in-depth here
+// keeps the surface safe even if a row sneaks through (manual SQL,
+// imported backup, etc.).
 func issueSelectQuery() string {
 	return `SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
 		m.number, m.identifier, m.title, m.description, m.status,
@@ -260,7 +267,7 @@ func issueSelectQuery() string {
 		m.routine_id, p.slug, p.name
 	FROM missions m
 	LEFT JOIN crews c ON m.crew_id = c.id
-	LEFT JOIN pipelines p ON m.routine_id = p.id`
+	LEFT JOIN pipelines p ON m.routine_id = p.id AND p.workspace_id = m.workspace_id`
 }
 
 // scanIssueRow scans a row into an issueResponse.

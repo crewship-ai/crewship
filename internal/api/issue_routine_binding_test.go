@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 )
@@ -64,8 +62,6 @@ func TestIssue_Create_WithRoutineBinding(t *testing.T) {
 	// Fetch via the workspace-scoped Get to confirm the binding is
 	// persisted AND that the LEFT JOIN on pipelines populates
 	// routine_slug + routine_name.
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	_ = logger // h already has a logger; this just ensures import is used
 	getReq := httptest.NewRequest("GET", "/", nil)
 	getReq.SetPathValue("crewId", crewID)
 	getReq.SetPathValue("identifier", "ENG-1")
