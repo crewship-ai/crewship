@@ -71,43 +71,82 @@ export function WaitpointRunDetail({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Pipeline definition is fetched once per slug — it doesn't change
+  // mid-flight. Run state, by contrast, is polled every 3s while the
+  // run is in a non-terminal state so the user sees step transitions
+  // happen in real time after they Approve. Without the poll the
+  // panel froze at "paused at step 3" even though the runtime had
+  // already moved on, which is exactly the stale-state complaint
+  // we're fixing.
   useEffect(() => {
     let cancelled = false
-    async function load() {
-      setLoading(true)
-      setError(null)
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const fetchRun = async (): Promise<RunResponse | null> => {
+      const res = await fetch(
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(pipelineRunId)}`,
+      )
+      if (!res.ok) return null
+      return (await res.json()) as RunResponse
+    }
+
+    const fetchPipeline = async (slug: string) => {
+      const res = await fetch(
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`,
+      )
+      if (res.ok) return (await res.json()) as PipelineDetail
+      return null
+    }
+
+    async function tick(initial: boolean) {
+      if (cancelled) return
       try {
-        const runRes = await fetch(
-          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(pipelineRunId)}`,
-        )
-        if (!runRes.ok) {
-          if (cancelled) return
-          setError(`run lookup: ${runRes.status}`)
-          setLoading(false)
+        const runData = await fetchRun()
+        if (cancelled) return
+        if (!runData) {
+          if (initial) {
+            setError(`run lookup failed`)
+            setLoading(false)
+          }
           return
         }
-        const runData: RunResponse = await runRes.json()
-        if (cancelled) return
         setRun(runData)
 
-        if (runData.pipeline_slug) {
-          const pipeRes = await fetch(
-            `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(runData.pipeline_slug)}`,
-          )
-          if (pipeRes.ok && !cancelled) {
-            const pipeData: PipelineDetail = await pipeRes.json()
-            setPipeline(pipeData)
+        if (initial) {
+          if (runData.pipeline_slug) {
+            const pipeData = await fetchPipeline(runData.pipeline_slug)
+            if (!cancelled && pipeData) setPipeline(pipeData)
           }
+          setLoading(false)
+        }
+
+        // Re-arm only while the run is still doing something. Terminal
+        // states ("completed" / "failed" / "cancelled") freeze the
+        // panel — the audit story is intact + we don't burn requests.
+        if (
+          runData.status === "running" ||
+          runData.status === "queued" ||
+          runData.status === "paused"
+        ) {
+          timer = setTimeout(() => tick(false), 3000)
         }
       } catch (e) {
         if (cancelled) return
-        setError(e instanceof Error ? e.message : String(e))
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (initial) {
+          setError(e instanceof Error ? e.message : String(e))
+          setLoading(false)
+        }
       }
     }
-    load()
-    return () => { cancelled = true }
+
+    setLoading(true)
+    setError(null)
+    tick(true)
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
   }, [workspaceId, pipelineRunId])
 
   if (loading) {
@@ -151,22 +190,48 @@ export function WaitpointRunDetail({
     return "pending"
   }
 
+  // Status icon + colour reflect what the polling has caught: amber
+  // pause when still at the wait step, blue pulse while a downstream
+  // step runs, green check on completion, red cross on failure.
+  const isLive = run.status === "running" || run.status === "queued" || run.status === "paused"
+  const isCompleted = run.status === "completed"
+  const isFailed = run.status === "failed" || run.status === "cancelled"
+
   return (
     <div className="space-y-3">
-      {/* Run summary header */}
-      <div className="flex items-center justify-between rounded-md border border-white/[0.06] bg-card/30 px-3 py-2">
+      {/* Run summary header — colour shifts as the run progresses so
+        * the user sees the post-approve transition without re-reading
+        * the step list. Active = amber/blue pulse, completed = green,
+        * failed = rose. */}
+      <div
+        className={cn(
+          "flex items-center justify-between rounded-md border px-3 py-2",
+          isCompleted && "border-emerald-500/30 bg-emerald-500/5",
+          isFailed && "border-rose-500/30 bg-rose-500/5",
+          isLive && !isCompleted && !isFailed && "border-white/[0.06] bg-card/30",
+        )}
+      >
         <div className="flex items-center gap-2">
-          <PauseCircle className="h-4 w-4 text-amber-400" />
+          {isCompleted ? (
+            <Check className="h-4 w-4 text-emerald-400" />
+          ) : isFailed ? (
+            <AlertCircle className="h-4 w-4 text-rose-400" />
+          ) : run.current_step_id && completedSteps.includes(run.current_step_id) ? (
+            <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+          ) : (
+            <PauseCircle className="h-4 w-4 text-amber-400" />
+          )}
           <div>
             <div className="text-xs font-medium">{pipeline?.name || run.pipeline_slug}</div>
             <div className="font-mono text-[10px] text-muted-foreground">
               {run.id} · {run.status}
+              {isLive && <span className="ml-1 text-blue-400/70">· live</span>}
             </div>
           </div>
         </div>
         <a
           href={`/activity?run=${encodeURIComponent(run.id)}`}
-          className="text-[10px] text-blue-400 hover:underline"
+          className="rounded bg-blue-500/10 px-2 py-1 text-[11px] font-medium text-blue-300 hover:bg-blue-500/20"
         >
           Open in Activity →
         </a>
