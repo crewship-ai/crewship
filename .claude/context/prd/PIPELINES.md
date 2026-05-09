@@ -883,3 +883,97 @@ The following items were originally listed as deferred but landed during the ite
 ### 17.8 Cost cap deprioritization
 
 Per user direction 2026-05-07 evening: cost cap implementation in this branch is **NOT a blocker**. Functional correctness, visibility, auditability, and CLI parity take priority. Cost-related UX (estimate vs actual, daily caps, alerting) is deferred to a dedicated PR after stabilization.
+
+## 18. Eval suite — cross-tier consistency framework (2026-05-08)
+
+This section documents the eval framework added to make routines a credible **agentic-program primitive**: a routine is only worth handing to a fleet of cross-crew callers when its output is *gate-passing on the cheapest tier that can satisfy it* — and that property has to be testable, regressionable, and bisectable when an upstream model swap regresses behaviour.
+
+The framework adds three pieces and re-introduces one removed runner:
+
+### 18.1 Eval scenarios (the test corpus)
+
+13 routines seeded under the `eval-` prefix that exercise distinct LLM-step assertion classes. Each scenario is a normal routine — same DSL, same Save endpoint, same CLI surface — so no special-case "test mode" code path exists. The scenarios are simply *rigorously gated* routines with conservative defaults and cross-family rubric graders where appropriate.
+
+Categories covered (`cmd/crewship/seeddata/eval_scenarios.go`):
+
+| # | Slug | Class | Worker → Grader |
+|---|---|---|---|
+| 1 | `eval-extract-emails` | Pure transformation | daniel (fast) |
+| 2 | `eval-extract-numbers-sorted` | Pure transformation + determinism | filip (fast) |
+| 3 | `eval-classify-sentiment` | 3-way classification | daniel → eva (rubric) |
+| 4 | `eval-json-extract-order` | Format compliance | viktor (fast) |
+| 5 | `eval-syllogism-reasoning` | Reasoning chain | filip (fast) |
+| 6 | `eval-refuse-prompt-injection` | Adversarial / refusal | jakub (fast) |
+| 7 | `eval-faithfulness-rag` | RAG faithfulness | filip → lucie (rubric) |
+| 8 | `eval-judge-cross-family` | LLM-as-judge | daniel → eva (rubric) |
+| 9 | `eval-cost-budget-haiku` | Cost guardrail | daniel (trivial) |
+| 10 | `eval-boundary-empty-input` | Boundary handling | daniel (fast) |
+| 11 | `eval-trajectory-fetch-summarize` | DAG trajectory | filip (fast) |
+| 12 | `eval-idempotent-by-key` | Idempotency / concurrency | daniel (trivial) |
+| 13 | `eval-escalate-on-rubric-fail` | Tier escalation loop | daniel → eva (rubric) |
+
+Design principles applied to every scenario:
+
+- **Anchor-based gates over phrase-match gates.** `must_contain` checks pin format markers (`{`, `qty`, `sentiment:`) not specific wording, so both Haiku-tier and Opus-tier outputs pass when correct.
+- **Credential-leak tripwires across the suite** — `must_not_contain: [API_KEY=, Bearer ]` is a one-line guard that catches the worst regression class for free on every scenario.
+- **Cross-family graders mitigate self-preference bias** (arxiv 2410.21819 / FairJudge Feb 2026). Sonnet-tier `eva`/`lucie` grade Haiku-tier `daniel`/`filip` outputs on rubric criteria.
+- **Length bounds catch verbosity drift** — a known weak-model failure mode where the worker over-explains and breaks downstream JSON parsing.
+- **`on_fail: escalate_tier`** at step level (not the deprecated `on_validation_fail` inside the validation block — that field exists in the IDE schema for back-compat but the executor ignores it).
+
+### 18.2 LLMRunner (Anthropic-direct) restored as opt-in
+
+PR #282 removed `internal/pipeline/runner_llm.go` in favour of `runner_orchestrator.go`. The orchestrator path is correct for production — agents run inside their real container with their real CLI adapter, no API keys in Crewship — but it makes the eval suite *untestable* on a workstation without a fully provisioned crew container stack.
+
+`runner_llm.go` is restored as the **opt-in runner** for eval / CI / `--no-docker` smoke runs. Selection logic (`cmd/crewship/cmd_start.go`):
+
+1. `CREWSHIP_PIPELINE_RUNNER=llm_direct`           — explicit override (always wins)
+2. `deps.Container == nil` (e.g. `--no-docker` flag) — auto-fallback
+3. otherwise (default; production)                 — `OrchestratorRunner`
+
+LLMRunner's trade-offs vs OrchestratorRunner are documented inline in the file. Summary: works without provisioning, no skills/MCP/memory inside steps. Eval scenarios deliberately don't need those — they're about the LLM-step contract, not the full agent loop.
+
+Cost ledger + lookout middleware still wraps the LLMRunner provider, so a Haiku run still emits paymaster ledger entries — the eval suite's cost guardrail (`max_cost_usd: 0.005`) is exercised end-to-end the same way a production routine would be.
+
+### 18.3 JSON Schema gate enforcement
+
+`internal/pipeline/executor.go validateOutput` previously accepted `validation.schema` as documentary only. This was the largest gap between the DSL surface and the gate semantics — a routine could declare any schema and the executor would silently let any output through.
+
+Schema validation now runs after byte-level checks (`min_length` / `max_length` / `must_contain` / `must_not_contain`) using `github.com/santhosh-tekuri/jsonschema/v5` (draft 2020-12). Failure modes are distinguished by reason prefix so the journal entry's error_message preview tells the operator which class of problem the run hit:
+
+- `schema invalid: ...`        — author-side bug; the schema can't compile
+- `output not valid JSON: ...` — worker didn't follow the JSON contract
+- `schema validation: ...`     — output parsed but failed the schema constraints
+
+8 unit tests under `internal/pipeline/schema_gate_test.go` cover accept, missing-required-key, wrong-type, non-JSON, malformed-schema, enum, ordering against cheaper gates, and the nil-Validation safety path.
+
+### 18.4 Cross-tier eval CLI
+
+Two new subcommands under `crewship eval`:
+
+- **`crewship eval scenarios`** — sweep across the workspace's `eval-*` routines × tier list × N runs, output a pass-rate matrix in table / json / yaml / markdown.
+- **`crewship eval compare <slug>`** — run ONE scenario back-to-back on two tiers, report a head-to-head verdict (`AGREE-PASS` / `AGREE-FAIL` / `DIVERGE-A-PASS` / `DIVERGE-B-PASS` / `AMBIGUOUS`) plus side-by-side outputs.
+
+Both leverage a new `tier_override` field on `RunInput` + `runRequestBody`. The override applies per-run to every `agent_run` step's `complexity` (step-level `model_override` still wins — explicit author intent always overrides batch-level overrides).
+
+Verdict semantics for `compare` are designed for *fail-loud-on-disagreement*. Two LLM runs are essentially never identical at the text level — insisting on text identity would yield a useless test. Instead, the verdict captures **gate-pass agreement**: did both tiers pass the routine's declared gates with these inputs? The output text + cost/latency delta are surfaced for context, not for assertion.
+
+### 18.5 Operator workflow
+
+Bringing a fleet of agentic routines online safely:
+
+1. **Author** the routine with strict gates (`must_contain` anchors, schema, optional outcomes rubric). Use `complexity: fast` everywhere it's plausible.
+2. **Save** with a fresh `test_run` against authored inputs — gate trips instantly if the worker can't satisfy the contract.
+3. **`crewship eval scenarios --scenarios <slug> --tiers fast,smart --runs 10`** — establish baseline pass-rate at both tiers.
+4. **Promote / pin tier** based on the matrix:
+   - 10/10 fast = ship at fast tier; cost-optimal.
+   - 4/10 fast vs 10/10 smart = either tighten the rubric, or pin `complexity: smart` on the failing step (and document why).
+   - 0/10 both = the gate is unsatisfiable; rewrite the routine.
+5. **Schedule the eval sweep in CI** (`crewship eval scenarios -f json` → store, alert on regression) so a model swap or DSL refactor that breaks gate-pass agreement is caught automatically.
+
+This is the closest analogue we have to Trigger.dev's run replay + idempotent-task contracts — but lifted into the LLM-step contract space, where the assertion is about output gate-pass not byte-identity.
+
+### 18.6 What this section does NOT replace
+
+- **Functional tests on agent skills / MCP tool loops** — those still need OrchestratorRunner with a real provisioned container. The eval suite asserts the LLM-step contract, not the full agent loop. A routine that depends on a Slack MCP tool can't be evaluated by `eval scenarios` end-to-end; it's an OrchestratorRunner-only target.
+- **Cost analytics across tiers** — paymaster has the data, but the eval CLI surfaces only per-cell averages. Cross-tier total-cost-of-ownership analysis is a separate dashboard.
+- **Determinism for non-LLM steps** — `transform` / `code` / `http` steps are already deterministic by construction; the eval suite uses them as plumbing in scenario 11 but doesn't separately test them.

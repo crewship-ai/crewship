@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,8 +11,12 @@ import (
 	"log/slog"
 	mathrand "math/rand/v2"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 // ErrPipelineNotFound is returned by Run when a call_pipeline step
@@ -441,8 +446,16 @@ type RunInput struct {
 	// run actually emits to the journal. Leave empty for the default
 	// (executor generates a fresh id).
 	RunIDOverride string
-	pipeline      *Pipeline
-	dsl           *DSL
+	// TierOverride, when non-empty, replaces every agent_run step's
+	// `complexity` for the duration of this run. Used by the eval
+	// suite to run the same routine on multiple tiers without
+	// editing + re-saving the DSL: e.g. one run with "fast" → Haiku,
+	// another with "smart" → Opus. Step-level ModelOverride still
+	// wins (explicit author intent overrides batch-level override).
+	// Empty (default) preserves existing per-step tier resolution.
+	TierOverride Complexity
+	pipeline     *Pipeline
+	dsl          *DSL
 }
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
@@ -577,7 +590,17 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 			}
 		}
 
-		tier, fallback, err := e.resolver.Resolve(ctx, in.WorkspaceID, step)
+		// Apply per-run tier override if the caller passed one.
+		// ModelOverride still wins inside Resolver — author's
+		// explicit pin beats a batch-level "run everything on fast".
+		// We mutate a local copy, never the DSL's Step in-place,
+		// so concurrent runs of the same DSL with different overrides
+		// don't race.
+		stepForResolve := step
+		if in.TierOverride != "" && step.Type == StepAgentRun && step.ModelOverride == "" {
+			stepForResolve.Complexity = in.TierOverride
+		}
+		tier, fallback, err := e.resolver.Resolve(ctx, in.WorkspaceID, stepForResolve)
 		if err != nil {
 			result.Status = "FAILED"
 			result.FailedAtStep = step.ID
@@ -1081,10 +1104,18 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 
 // validateOutput applies a step's Validation to the candidate output.
 // Returns ok=true on success; otherwise reason describes which check
-// failed. MVP supports must_not_contain / must_contain / min_length /
-// max_length; full JSON Schema enforcement is deferred to Phase 2 to
-// avoid pulling in the schema library before we know the semantics
-// we want.
+// failed.
+//
+// Order matters. Cheap byte-level checks first (length, must/not_contain)
+// so a junk output fails fast without paying the JSON parse + schema
+// compile cost. Schema validation runs only when the byte-level checks
+// pass AND the schema field is non-empty.
+//
+// Schema gate semantics: when v.Schema is set, output MUST be parseable
+// as JSON and MUST validate against the schema. A non-JSON output with
+// a schema present fails the gate with a clear reason — this is the
+// correct behaviour because routines that declare a schema do so
+// because downstream steps consume the output as structured data.
 func validateOutput(output string, v *Validation) (ok bool, reason string) {
 	if v == nil {
 		return true, ""
@@ -1111,9 +1142,105 @@ func validateOutput(output string, v *Validation) (ok bool, reason string) {
 			return false, "output missing required token: " + required
 		}
 	}
-	// JSON Schema validation: Phase 2. Until then we accept the
-	// schema field as documentation only.
+	if len(v.Schema) > 0 {
+		if ok, reason := validateAgainstSchema(output, v.Schema); !ok {
+			return false, reason
+		}
+	}
 	return true, ""
+}
+
+// validateAgainstSchema parses `output` as JSON and validates it
+// against the supplied schema bytes (JSON Schema draft 2020-12 by
+// default; library auto-detects $schema if specified).
+//
+// Failure modes return distinct reasons so a CodeRabbit-style review
+// can tell at a glance which class of problem the run hit:
+//
+//   - "schema invalid"         — the schema itself can't compile.
+//     Author bug; the routine should have been rejected at save time
+//     once the parser-side schema validator lands. Returning false
+//     here is correct: a misshapen schema can't accept anything.
+//   - "output not valid JSON"  — output has no JSON structure but
+//     a schema was declared. Worker model didn't follow the contract.
+//   - "schema validation: ..." — output parsed but failed the schema.
+//     Reason includes the first violation (limit at ~200 chars to
+//     keep journal lines bounded).
+//
+// Compiled schemas are cached by sha256 of their bytes. The library
+// is goroutine-safe so concurrent steps share the same compiled
+// validator. Cache hit shaves the schema-compile cost (typically
+// 100µs-1ms) per validation call; for a 10-step routine benched
+// 10× that's a measurable win at near-zero memory cost (one
+// Schema pointer per unique schema in the workspace).
+//
+// Cache eviction: never. The schema set in a workspace is bounded
+// by the number of distinct routines + their schema-using steps,
+// which is hundreds at the high end. A pointer per schema is bytes;
+// the compiled trie itself is KBs. Even an aggressive workspace
+// would top out under 10 MB cache footprint.
+func validateAgainstSchema(output string, schemaBytes json.RawMessage) (ok bool, reason string) {
+	schema, err := compiledSchemaForBytes(schemaBytes)
+	if err != nil {
+		return false, "schema invalid: " + truncate(err.Error(), 200)
+	}
+	var doc any
+	if err := json.Unmarshal([]byte(output), &doc); err != nil {
+		return false, "output not valid JSON: " + truncate(err.Error(), 200)
+	}
+	if err := schema.Validate(doc); err != nil {
+		return false, "schema validation: " + truncate(err.Error(), 200)
+	}
+	return true, ""
+}
+
+// schemaCache holds compiled jsonschema.Schema pointers keyed by
+// sha256(schemaBytes). sync.Map fits the access pattern (write-once,
+// read-many; one entry per unique schema in the workspace) better
+// than a mutex-guarded map — schemas are stable for the binary's
+// lifetime.
+var schemaCache sync.Map // map[string]*jsonschema.Schema, key = hex(sha256)
+
+// compiledSchemaForBytes returns the compiled validator for the
+// supplied schema bytes, compiling on first call and serving from
+// cache thereafter. Errors propagate from the compiler; cache is
+// only populated on successful compile so a transient error doesn't
+// poison the cache.
+func compiledSchemaForBytes(schemaBytes json.RawMessage) (*jsonschema.Schema, error) {
+	sum := sha256.Sum256(schemaBytes)
+	key := hex.EncodeToString(sum[:])
+	if v, ok := schemaCache.Load(key); ok {
+		return v.(*jsonschema.Schema), nil
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("inline://schema.json", strings.NewReader(string(schemaBytes))); err != nil {
+		return nil, err
+	}
+	schema, err := compiler.Compile("inline://schema.json")
+	if err != nil {
+		return nil, err
+	}
+	schemaCache.Store(key, schema)
+	return schema, nil
+}
+
+// truncate returns s clipped to maxLen RUNES (not bytes) with an
+// ellipsis if it got cut. Used by validateAgainstSchema to keep
+// journal-line widths bounded; long jsonschema error chains can run
+// several KB and would blow up the journal_entries.error_message
+// column otherwise.
+//
+// Rune-based slicing matters when jsonschema returns non-ASCII
+// content in errors (e.g. echoed input that contains multi-byte
+// characters). Byte-slicing could split a UTF-8 sequence and
+// produce invalid bytes in the journal entry, breaking downstream
+// JSON serialisation. Caught by CodeRabbit review of #285.
+func truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 // containsCaseSensitive is a thin wrapper over strings.Contains; kept
