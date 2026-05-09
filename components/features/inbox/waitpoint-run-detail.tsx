@@ -62,9 +62,15 @@ interface PipelineDetail {
 export function WaitpointRunDetail({
   workspaceId,
   pipelineRunId,
+  inboxResolved = false,
 }: {
   workspaceId: string
   pipelineRunId: string
+  // Set when the parent inbox item is already resolved so we can
+  // tone down the "live" chip — the user already actioned this and
+  // the executor either advanced or it's a fake demo seed; either
+  // way "live" pulsing is misleading once the decision is recorded.
+  inboxResolved?: boolean
 }) {
   const [run, setRun] = useState<RunResponse | null>(null)
   const [pipeline, setPipeline] = useState<PipelineDetail | null>(null)
@@ -193,7 +199,12 @@ export function WaitpointRunDetail({
   // Status icon + colour reflect what the polling has caught: amber
   // pause when still at the wait step, blue pulse while a downstream
   // step runs, green check on completion, red cross on failure.
-  const isLive = run.status === "running" || run.status === "queued" || run.status === "paused"
+  // Once the inbox item is resolved the "live" chip is misleading —
+  // the user already actioned the decision; whatever progress the
+  // executor makes belongs to /activity, not this audit panel.
+  const isLive =
+    !inboxResolved &&
+    (run.status === "running" || run.status === "queued" || run.status === "paused")
   const isCompleted = run.status === "completed"
   const isFailed = run.status === "failed" || run.status === "cancelled"
 

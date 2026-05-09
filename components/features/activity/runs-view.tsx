@@ -42,6 +42,11 @@ interface RunsViewProps {
   workspaceId: string
 }
 
+// useEffect imported here so RunStepTree's lazy DSL fetch compiles
+// without dragging the import into every helper. (Already imported
+// above for focusRunId scroll-into-view, just confirming the symbol
+// stays resolvable for the tree.)
+
 export function RunsView({ workspaceId }: RunsViewProps) {
   const searchParams = useSearchParams()
   const focusRunId = searchParams.get("run")
@@ -114,6 +119,7 @@ export function RunsView({ workspaceId }: RunsViewProps) {
               <RunCard
                 key={run.id}
                 run={run}
+                workspaceId={workspaceId}
                 expanded={expanded.has(run.id)}
                 focused={focusRunId === run.id}
                 onToggle={() => toggleExpand(run.id)}
@@ -158,11 +164,13 @@ function FilterBtn({
 
 function RunCard({
   run,
+  workspaceId,
   expanded,
   focused,
   onToggle,
 }: {
   run: PipelineRun
+  workspaceId: string
   expanded: boolean
   focused: boolean
   onToggle: () => void
@@ -231,7 +239,7 @@ function RunCard({
             transition={{ duration: 0.15 }}
             className="overflow-hidden"
           >
-            <RunStepTree run={run} />
+            <RunStepTree workspaceId={workspaceId} run={run} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -247,7 +255,7 @@ function SourcePill({ run }: { run: PipelineRun }) {
   if (run.triggered_via === "issue" && run.issue_identifier) {
     return (
       <Link
-        href={`/issues#${encodeURIComponent(run.issue_identifier)}`}
+        href={`/issues/${encodeURIComponent(run.issue_identifier)}`}
         onClick={(e) => e.stopPropagation()}
         className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-300 hover:bg-blue-500/25"
       >
@@ -296,15 +304,69 @@ function StatusPill({ status }: { status: string }) {
   )
 }
 
-// RunStepTree walks step_outputs and renders one row per step. Steps
-// not yet in step_outputs are pending; the step matching current_step_id
-// is the paused/active one. Without the pipeline definition we can't
-// list "future" steps, but the existing data already tells the user
-// "here's everything that's run so far" — which is what they're trying
-// to audit.
-function RunStepTree({ run }: { run: PipelineRun }) {
-  const stepIDs = run.step_outputs ? Object.keys(run.step_outputs) : []
-  const hasOutputs = stepIDs.length > 0
+// PipelineDSL is the trimmed shape we pull from the pipeline detail
+// endpoint. Only `steps` is needed for the tree — id + type drive the
+// rendering, agent_slug + wait copy are surfaced when present.
+interface PipelineDSLStep {
+  id: string
+  type: string
+  agent_slug?: string
+  wait?: { kind?: string; approval_prompt?: string }
+}
+
+interface PipelineDSL {
+  steps?: PipelineDSLStep[]
+}
+
+interface PipelineDetail {
+  id: string
+  slug: string
+  name: string
+  definition?: PipelineDSL
+}
+
+// RunStepTree fetches the pipeline DEFINITION lazily so we can render
+// every step (done / current / future) instead of just the ones with
+// outputs. The previous version iterated over step_outputs only and
+// the user couldn't see step 4 of 4 ("publish") sitting there waiting.
+// Cache via component state — one fetch per expansion of this run.
+function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineRun }) {
+  const [definition, setDefinition] = useState<PipelineDSL | null>(null)
+  useEffect(() => {
+    if (!run.pipeline_slug) return
+    let cancelled = false
+    fetch(
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}`,
+    )
+      .then(async (res) => (res.ok ? ((await res.json()) as PipelineDetail) : null))
+      .then((data) => {
+        if (cancelled || !data?.definition) return
+        setDefinition(data.definition)
+      })
+      .catch(() => { /* swallow — fall back to outputs-only view */ })
+    return () => { cancelled = true }
+  }, [workspaceId, run.pipeline_slug])
+
+  const stepOutputs = run.step_outputs ?? {}
+  const completedSet = new Set(Object.keys(stepOutputs))
+
+  // Step status:
+  //   - in step_outputs            → done
+  //   - id === current_step_id     → paused/running (the wait or in-flight one)
+  //   - else                       → pending (only when DSL is loaded)
+  function statusOf(stepID: string): "done" | "current" | "pending" {
+    if (completedSet.has(stepID)) return "done"
+    if (run.current_step_id && stepID === run.current_step_id) return "current"
+    return "pending"
+  }
+
+  // Two render paths:
+  //   1) DSL loaded → full step list (done + current + pending) gives
+  //      the user the whole "here's where we are out of N total" view.
+  //   2) DSL not loaded yet (or pipeline gone) → outputs-only fallback
+  //      so the user still sees what the run produced.
+  const dslSteps = definition?.steps ?? []
+  const hasDSL = dslSteps.length > 0
 
   return (
     <div className="border-t border-white/[0.06] bg-card/20 px-4 py-3 text-xs">
@@ -321,17 +383,40 @@ function RunStepTree({ run }: { run: PipelineRun }) {
         )}
       </div>
 
-      {/* Steps */}
-      {hasOutputs ? (
+      {hasDSL ? (
         <ol className="space-y-1">
-          {stepIDs.map((stepID, idx) => (
-            <StepRow key={stepID} index={idx + 1} stepID={stepID} output={run.step_outputs![stepID]} />
+          {dslSteps.map((step, idx) => {
+            const s = statusOf(step.id)
+            return (
+              <StepRow
+                key={step.id}
+                index={idx + 1}
+                stepID={step.id}
+                output={s === "done" ? stepOutputs[step.id] : undefined}
+                stepStatus={s}
+                stepType={step.type}
+                agentSlug={step.agent_slug}
+                waitPrompt={step.wait?.approval_prompt}
+              />
+            )
+          })}
+        </ol>
+      ) : completedSet.size > 0 ? (
+        <ol className="space-y-1">
+          {Object.keys(stepOutputs).map((stepID, idx) => (
+            <StepRow
+              key={stepID}
+              index={idx + 1}
+              stepID={stepID}
+              output={stepOutputs[stepID]}
+              stepStatus="done"
+            />
           ))}
-          {run.current_step_id && !stepIDs.includes(run.current_step_id) && (
+          {run.current_step_id && !completedSet.has(run.current_step_id) && (
             <li className="flex items-center gap-2 px-2 py-1 text-amber-300">
               <PauseCircle className="h-3 w-3 animate-pulse" />
               <span className="font-mono text-[10px]">{run.current_step_id}</span>
-              <span className="text-[10px] text-amber-200/70">— paused / running</span>
+              <span className="text-[10px] text-amber-200/70">— in flight</span>
             </li>
           )}
         </ol>
@@ -364,23 +449,54 @@ function RunStepTree({ run }: { run: PipelineRun }) {
       <div className="mt-3 flex items-center justify-between border-t border-white/[0.04] pt-2">
         <span className="font-mono text-[10px] text-muted-foreground/40">{run.pipeline_slug}</span>
         <div className="flex items-center gap-2">
-          {run.status === "paused" && (
-            <Link href="/inbox">
-              <Button size="sm" variant="ghost" className="h-6 gap-1.5 text-[10px]">
-                <Sparkles className="h-3 w-3" />
-                Resolve in Inbox
-              </Button>
-            </Link>
-          )}
+          {/* Show "Resolve in Inbox" whenever the current step is a
+            * wait — this catches both the official paused status AND
+            * the more common case where the run sits at status=running
+            * with current_step_id pointing at a wait step. The original
+            * status==="paused" gate never matched in practice. */}
+          {(() => {
+            const currentStep = dslSteps.find((s) => s.id === run.current_step_id)
+            const isWaitingForApproval =
+              run.status === "paused" ||
+              (run.current_step_id !== "" && currentStep?.type === "wait")
+            if (!isWaitingForApproval) return null
+            return (
+              <Link href="/inbox">
+                <Button size="sm" variant="ghost" className="h-6 gap-1.5 text-[10px]">
+                  <Sparkles className="h-3 w-3" />
+                  Resolve in Inbox
+                </Button>
+              </Link>
+            )
+          })()}
         </div>
       </div>
     </div>
   )
 }
 
-function StepRow({ index, stepID, output }: { index: number; stepID: string; output: unknown }) {
+function StepRow({
+  index,
+  stepID,
+  output,
+  stepStatus = "done",
+  stepType,
+  agentSlug,
+  waitPrompt,
+}: {
+  index: number
+  stepID: string
+  output?: unknown
+  stepStatus?: "done" | "current" | "pending"
+  stepType?: string
+  agentSlug?: string
+  waitPrompt?: string
+}) {
   const [open, setOpen] = useState(false)
-  const hasOutput = output != null && output !== ""
+  const hasOutput = stepStatus === "done" && output != null && output !== ""
+  const isCurrent = stepStatus === "current"
+  const isPending = stepStatus === "pending"
+
   return (
     <li>
       <button
@@ -389,13 +505,36 @@ function StepRow({ index, stepID, output }: { index: number; stepID: string; out
         className={cn(
           "flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors",
           hasOutput && "hover:bg-white/[0.04]",
+          isCurrent && "bg-amber-500/5",
+          isPending && "opacity-50",
         )}
       >
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
-          <Check className="h-2.5 w-2.5" />
-        </span>
+        {stepStatus === "done" && (
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+            <Check className="h-2.5 w-2.5" />
+          </span>
+        )}
+        {isCurrent && (
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-500/30 text-amber-400">
+            <PauseCircle className="h-2.5 w-2.5 animate-pulse" />
+          </span>
+        )}
+        {isPending && (
+          <span className="h-4 w-4 shrink-0 rounded-full border border-muted-foreground/30" />
+        )}
         <span className="font-mono text-[10px] text-muted-foreground/60">{index}.</span>
         <span className="font-mono text-xs">{stepID}</span>
+        {stepType && (
+          <span className="rounded bg-white/[0.06] px-1 py-0 font-mono text-[9px] text-muted-foreground">
+            {stepType}
+          </span>
+        )}
+        {agentSlug && (
+          <span className="text-[10px] text-muted-foreground">— {agentSlug}</span>
+        )}
+        {waitPrompt && (
+          <span className="truncate text-[10px] text-amber-200/80">— {waitPrompt}</span>
+        )}
         {hasOutput && (
           <span className="ml-auto text-muted-foreground/40">
             {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}

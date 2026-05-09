@@ -7,12 +7,14 @@ import {
   Bell,
   CheckCircle2,
   ChevronRight,
+  CircleDot,
   Clock,
   Inbox as InboxIcon,
   ScrollText,
   Sparkles,
   XCircle,
 } from "lucide-react"
+import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useInbox, type InboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -317,6 +319,7 @@ function InboxDetail({
             <WaitpointRunDetail
               workspaceId={item.workspace_id}
               pipelineRunId={runID}
+              inboxResolved={item.state === "resolved"}
             />
           </div>
         )
@@ -518,6 +521,34 @@ function KindActions({
             className="gap-1.5"
           >
             Cancel
+          </Button>
+        </div>
+      )
+    case "message":
+      // Messages from the orchestrator (e.g. "ENG-1 ready for review")
+      // carry the issue identifier in payload so the inbox can offer
+      // a one-click jump to the issue. Without this the user reads
+      // the title and has nowhere to go.
+      return (
+        <div className="flex items-center gap-2">
+          {typeof item.payload?.issue_identifier === "string" && (
+            <Link
+              href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}
+            >
+              <Button size="sm" className="gap-1.5">
+                <CircleDot className="h-3 w-3" />
+                Open {item.payload.issue_identifier}
+              </Button>
+            </Link>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={disabled || busy !== null}
+            onClick={() => wrap("dismissed", async () => onResolve("dismissed"))}
+            className="gap-1.5"
+          >
+            Dismiss
           </Button>
         </div>
       )
