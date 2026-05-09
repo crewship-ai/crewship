@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -360,6 +361,45 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 			MissionID: ms.ID,
 		})
 		e.logger.Info("mission completed", "mission_id", ms.ID, "status", "REVIEW")
+
+		// Issue moved to REVIEW — that's exactly the user's "I need to
+		// look at this" moment. Surface it in the unified inbox so the
+		// review request shows up next to waitpoints and escalations
+		// instead of the user having to poll /issues to notice. We use
+		// kind=message because there's no decision the inbox itself
+		// arbitrates — the actual approve/reject buttons live in the
+		// issue detail. Inbox is the notification + entry point.
+		var (
+			missionTitle, missionIdentifier sql.NullString
+			missionType                     sql.NullString
+		)
+		_ = e.db.QueryRowContext(ctx,
+			`SELECT title, identifier, mission_type FROM missions WHERE id = ?`,
+			ms.ID).Scan(&missionTitle, &missionIdentifier, &missionType)
+		if missionType.Valid && missionType.String == "issue" && missionIdentifier.Valid {
+			title := fmt.Sprintf("%s ready for review", missionIdentifier.String)
+			body := ""
+			if missionTitle.Valid {
+				body = missionTitle.String
+			}
+			inbox.Insert(ctx, e.db, e.logger, inbox.Item{
+				WorkspaceID: ms.WorkspaceID,
+				Kind:        "message",
+				SourceID:    "issue_review_" + ms.ID,
+				TargetRole:  "MANAGER",
+				Title:       title,
+				BodyMD:      body,
+				SenderType:  "system",
+				SenderName:  "Mission engine",
+				Priority:    "medium",
+				Blocking:    false,
+				Payload: map[string]interface{}{
+					"mission_id":       ms.ID,
+					"issue_identifier": missionIdentifier.String,
+					"new_status":       "REVIEW",
+				},
+			})
+		}
 		return nil
 	}
 

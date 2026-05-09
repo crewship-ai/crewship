@@ -730,7 +730,16 @@ export function OrchestrationLayout({
                 crews={crews}
                 agents={agents}
                 connections={connections}
-                pipelines={pipelines}
+                // When the user has narrowed to one issue, the pipeline
+                // strip narrows with it: show only the bound routine
+                // (if any), not every routine in the workspace. The
+                // un-narrowed strip was the noise the user kept
+                // calling out.
+                pipelines={
+                  selectedIssue
+                    ? pipelines.filter((p) => p.id === selectedIssue.routine_id)
+                    : pipelines
+                }
                 onPipelineClick={(id) => {
                   // The graph node carries the pipeline ID, but the
                   // detail sheet fetches by slug (public API path
