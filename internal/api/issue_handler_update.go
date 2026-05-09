@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,19 +23,25 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		Title         *string   `json:"title"`
-		Description   *string   `json:"description"`
-		Status        *string   `json:"status"`
-		Priority      *string   `json:"priority"`
-		AssigneeType  *string   `json:"assignee_type"`
-		AssigneeID    *string   `json:"assignee_id"`
-		DueDate       *string   `json:"due_date"`
-		ProjectID     *string   `json:"project_id"`
-		Estimate      *int      `json:"estimate"`
-		ParentIssueID *string   `json:"parent_issue_id"`
-		MilestoneID   *string   `json:"milestone_id"`
-		SortOrder     *float64  `json:"sort_order"`
-		Labels        *[]string `json:"labels"`
+		Title         *string                 `json:"title"`
+		Description   *string                 `json:"description"`
+		Status        *string                 `json:"status"`
+		Priority      *string                 `json:"priority"`
+		AssigneeType  *string                 `json:"assignee_type"`
+		AssigneeID    *string                 `json:"assignee_id"`
+		DueDate       *string                 `json:"due_date"`
+		ProjectID     *string                 `json:"project_id"`
+		Estimate      *int                    `json:"estimate"`
+		ParentIssueID *string                 `json:"parent_issue_id"`
+		MilestoneID   *string                 `json:"milestone_id"`
+		SortOrder     *float64                `json:"sort_order"`
+		Labels        *[]string               `json:"labels"`
+		// Routine binding — pointer + map so the caller can clear it
+		// (RoutineID = ""), set it, or leave it untouched (nil).
+		// RoutineInputs is treated as a full replacement, not a merge,
+		// to keep the inputs schema deterministic.
+		RoutineID     *string                 `json:"routine_id"`
+		RoutineInputs *map[string]interface{} `json:"routine_inputs"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -102,6 +109,33 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ub.Set("milestone_id", *req.MilestoneID)
 		}
+	}
+
+	// Routine binding: empty string = clear, non-empty = set (and
+	// validate). We resolve the pipeline_id against the workspace so
+	// a stale or cross-workspace ID can't sneak in.
+	if req.RoutineID != nil {
+		if *req.RoutineID == "" {
+			ub.SetNull("routine_id")
+		} else {
+			var exists int
+			err = h.db.QueryRowContext(r.Context(),
+				`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
+				*req.RoutineID, wsID).Scan(&exists)
+			if err != nil || exists == 0 {
+				writeProblem(w, r, http.StatusBadRequest, "routine_id does not exist in this workspace")
+				return
+			}
+			ub.Set("routine_id", *req.RoutineID)
+		}
+	}
+	if req.RoutineInputs != nil {
+		b, mErr := json.Marshal(*req.RoutineInputs)
+		if mErr != nil {
+			writeProblem(w, r, http.StatusBadRequest, "routine_inputs is not valid JSON")
+			return
+		}
+		ub.Set("routine_inputs_json", string(b))
 	}
 
 	// Validate status transition

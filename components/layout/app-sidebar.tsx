@@ -8,16 +8,18 @@ import {
   Plug,
   Zap,
   Settings,
-  Workflow,
+  Activity,
   Store,
   ShieldCheck,
   PanelLeftClose,
   Pin,
   MousePointer2,
   ChevronDown,
-  Ship,
+  Users,
   BookOpen,
   ScrollText,
+  CircleDot,
+  MessagesSquare,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -46,32 +48,34 @@ import {
 
 const navSections = [
   {
-    label: "Work",
+    label: "Plan",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Orchestration", href: "/orchestration", icon: Workflow },
+      { title: "Issues", href: "/issues", icon: CircleDot },
       { title: "Routines", href: "/routines", icon: ScrollText },
-      { title: "Crews", href: "/crews", icon: Ship },
     ],
   },
   {
-    label: "Configure",
+    label: "Run",
     items: [
+      { title: "Activity", href: "/activity", icon: Activity },
+      { title: "Missions", href: "/missions", icon: MessagesSquare },
+      { title: "Journal", href: "/journal", icon: BookOpen },
+    ],
+  },
+  {
+    label: "Build",
+    items: [
+      { title: "Crews", href: "/crews", icon: Users },
       { title: "Skills", href: "/skills", icon: Zap },
-      { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
       { title: "Credentials", href: "/credentials", icon: Key },
       { title: "Integrations", href: "/integrations", icon: Plug },
     ],
   },
   {
-    label: "Monitor",
-    items: [
-      { title: "Journal", href: "/journal", icon: BookOpen },
-    ],
-  },
-  {
     label: "System",
     items: [
+      { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
       { title: "Settings", href: "/settings", icon: Settings },
       { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "OWNER" as const },
     ],

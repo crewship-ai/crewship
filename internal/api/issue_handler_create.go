@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -33,6 +34,13 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID *string  `json:"parent_issue_id"`
 		MilestoneID   *string  `json:"milestone_id"`
 		Labels        []string `json:"labels"`
+		// RoutineID binds the issue to a saved routine (pipeline). When
+		// set, /run-routine on this issue invokes the bound pipeline
+		// with RoutineInputs as the inputs payload. Stored as the
+		// pipeline_id (UUID, not slug) so renames don't break the
+		// link. Optional — most issues won't have one.
+		RoutineID     *string                `json:"routine_id"`
+		RoutineInputs map[string]interface{} `json:"routine_inputs"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -115,17 +123,46 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	traceID := "issue-" + generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// If a routine binding was supplied, validate the pipeline_id exists
+	// in this workspace before INSERT. Catching it here gives the user
+	// a 400 instead of a foreign-key-style failure later when /run-routine
+	// is hit. routine_inputs piggybacks on the same null-check: an empty
+	// inputs map serializes to '{}', matching the column default.
+	var routineInputsJSON sql.NullString
+	if req.RoutineID != nil && *req.RoutineID != "" {
+		var exists int
+		err = tx.QueryRowContext(r.Context(),
+			`SELECT COUNT(*) FROM pipelines WHERE id = ? AND workspace_id = ?`,
+			*req.RoutineID, wsID).Scan(&exists)
+		if err != nil || exists == 0 {
+			writeProblem(w, r, http.StatusBadRequest, "routine_id does not exist in this workspace")
+			return
+		}
+		if req.RoutineInputs == nil {
+			routineInputsJSON = sql.NullString{String: "{}", Valid: true}
+		} else {
+			b, mErr := json.Marshal(req.RoutineInputs)
+			if mErr != nil {
+				writeProblem(w, r, http.StatusBadRequest, "routine_inputs is not valid JSON")
+				return
+			}
+			routineInputsJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		    title, description, status, number, identifier, priority,
 		    assignee_type, assignee_id, due_date, project_id, estimate,
 		    parent_issue_id, milestone_id, sort_order, mission_type,
+		    routine_id, routine_inputs_json,
 		    created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, COALESCE(?, '{}'), ?, ?)`,
 		id, wsID, crewID, leadAgentID, traceID,
 		req.Title, req.Description, issueNumber, identifier, req.Priority,
 		req.AssigneeType, req.AssigneeID, req.DueDate, req.ProjectID,
 		req.Estimate, req.ParentIssueID, req.MilestoneID,
+		req.RoutineID, routineInputsJSON,
 		now, now)
 	if err != nil {
 		h.logger.Error("insert issue", "error", err)

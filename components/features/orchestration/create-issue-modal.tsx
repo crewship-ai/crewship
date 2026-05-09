@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   X, Loader2, Paperclip, ChevronRight, User, Bot, UserX, Check,
-  Tag, FolderKanban,
+  Tag, FolderKanban, ScrollText,
 } from "lucide-react"
+import type { Pipeline } from "@/hooks/use-pipelines"
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,10 @@ interface CreateIssueModalProps {
   crews: CrewSummary[]
   labels: IssueLabel[]
   projects: Project[]
+  // Routines available to bind to the new issue. Optional — if the
+  // host page hasn't loaded pipelines yet, the picker simply renders
+  // an empty Command list.
+  routines?: Pipeline[]
   workspaceId: string
   onCreated: () => void
 }
@@ -52,6 +57,7 @@ export function CreateIssueModal({
   crews,
   labels,
   projects,
+  routines = [],
   workspaceId,
   onCreated,
 }: CreateIssueModalProps) {
@@ -63,6 +69,7 @@ export function CreateIssueModal({
   const [assigneeId, setAssigneeId] = useState<string | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [selectedLabels, setSelectedLabels] = useState<string[]>([])
+  const [routineId, setRoutineId] = useState<string | null>(null)
   const [agents, setAgents] = useState<AssigneeOption[]>([])
   const [createMore, setCreateMore] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -73,6 +80,7 @@ export function CreateIssueModal({
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [projectOpen, setProjectOpen] = useState(false)
   const [labelsOpen, setLabelsOpen] = useState(false)
+  const [routineOpen, setRoutineOpen] = useState(false)
 
   const titleRef = useRef<HTMLInputElement>(null)
 
@@ -125,11 +133,13 @@ export function CreateIssueModal({
     setAssigneeId(null)
     setProjectId(null)
     setSelectedLabels([])
+    setRoutineId(null)
   }
 
   const selectedCrew = crews.find((c) => c.id === crewId)
   const crewPrefix = selectedCrew?.slug?.toUpperCase().slice(0, 3) ?? "CRE"
   const selectedProject = projects.find((p) => p.id === projectId)
+  const selectedRoutine = routines.find((r) => r.id === routineId)
   const assigneeName = (() => {
     if (!assigneeId) return null
     const found = agents.find((a) => a.id === assigneeId)
@@ -155,6 +165,7 @@ export function CreateIssueModal({
             assignee_type: assigneeType ?? undefined,
             assignee_id: assigneeId ?? undefined,
             project_id: projectId ?? undefined,
+            routine_id: routineId ?? undefined,
           }),
         },
       )
@@ -180,7 +191,7 @@ export function CreateIssueModal({
     } finally {
       setSaving(false)
     }
-  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, workspaceId, onCreated, createMore, onOpenChange])
+  }, [crewId, title, description, priority, selectedLabels, assigneeType, assigneeId, projectId, routineId, workspaceId, onCreated, createMore, onOpenChange])
 
   // Cmd+Enter to submit
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -383,6 +394,46 @@ export function CreateIssueModal({
                         <FolderKanban className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
                         <span className="text-xs">{p.name}</span>
                         {projectId === p.id && <Check className="ml-auto h-3.5 w-3.5" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+
+          {/* Routine — bind a saved routine to handle this issue */}
+          <Popover open={routineOpen} onOpenChange={setRoutineOpen}>
+            <PopoverTrigger asChild>
+              <button className={cn(
+                "h-7 px-2.5 rounded-md text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] flex items-center gap-1.5 transition-colors",
+                routineId ? "text-foreground/80" : "text-muted-foreground",
+              )}>
+                <ScrollText className="h-3 w-3" />
+                <span>{selectedRoutine?.name ?? "Routine"}</span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[280px] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search routines..." className="h-8 text-xs" />
+                <CommandList>
+                  <CommandEmpty>No routines yet — create one in /routines.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem onSelect={() => { setRoutineId(null); setRoutineOpen(false) }}>
+                      <span className="text-xs text-muted-foreground">No routine</span>
+                      {!routineId && <Check className="ml-auto h-3.5 w-3.5" />}
+                    </CommandItem>
+                    {routines.map((r) => (
+                      <CommandItem
+                        key={r.id}
+                        onSelect={() => { setRoutineId(r.id); setRoutineOpen(false) }}
+                      >
+                        <ScrollText className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-medium truncate">{r.name}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">{r.slug}</div>
+                        </div>
+                        {routineId === r.id && <Check className="ml-2 h-3.5 w-3.5 shrink-0" />}
                       </CommandItem>
                     ))}
                   </CommandGroup>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { X, Send, Plus, Link2, Flag, CalendarIcon } from "lucide-react"
+import { X, Send, Plus, Link2, Flag, CalendarIcon, Play, ScrollText } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
@@ -20,12 +20,17 @@ import { ActivityFeed } from "@/components/features/issues/activity-feed"
 import { timeAgo } from "@/lib/time"
 import { ISSUE_STATUSES, ALL_PRIORITIES, RELATION_TYPE_LABELS, RELATION_TYPE_OPTIONS } from "@/components/features/issues/issue-constants"
 import type { Mission, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, IssueActivity, Milestone } from "@/lib/types/mission"
+import type { Pipeline } from "@/hooks/use-pipelines"
 
 interface IssueDetailInlineProps {
   issue: Mission
   comments: IssueComment[]
   labels: IssueLabel[]
   projects: Project[]
+  // Routines available to bind to this issue. Optional: if not
+  // supplied, the routine section renders nothing (the host page
+  // hasn't loaded pipelines yet, or doesn't expose routine binding).
+  routines?: Pipeline[]
   workspaceId: string
   onClose: () => void
   onUpdated: () => void
@@ -36,6 +41,7 @@ export function IssueDetailInline({
   comments,
   labels: workspaceLabels,
   projects,
+  routines = [],
   workspaceId,
   onClose,
   onUpdated,
@@ -57,10 +63,14 @@ export function IssueDetailInline({
 
   // Section collapse state
   const [propertiesOpen, setPropertiesOpen] = useState(true)
+  const [routineSectionOpen, setRoutineSectionOpen] = useState(true)
   const [labelsOpen, setLabelsOpen] = useState(true)
   const [projectOpen, setProjectOpen] = useState(true)
   const [relationsOpen, setRelationsOpen] = useState(true)
   const [subIssuesOpen, setSubIssuesOpen] = useState(true)
+  // Routine picker popover + run-in-flight guard
+  const [routinePickerOpen, setRoutinePickerOpen] = useState(false)
+  const [runningRoutine, setRunningRoutine] = useState(false)
 
   // Popover open state
   const [statusOpen, setStatusOpen] = useState(false)
@@ -179,6 +189,41 @@ export function IssueDetailInline({
     },
     [issue.crew_id, issue.identifier, workspaceId, onUpdated],
   )
+
+  // Run the bound routine. Resolves the issue's routine_slug, fires
+  // the existing /pipelines/{slug}/run endpoint with empty inputs
+  // (routine_inputs would be merged in here once the inputs editor
+  // ships), and surfaces a toast pointing at /activity for live
+  // progress. Disabled when routineId or slug is missing.
+  const runBoundRoutine = useCallback(async () => {
+    if (!issue.routine_slug) return
+    setRunningRoutine(true)
+    try {
+      const res = await fetch(
+        `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(issue.routine_slug)}/run`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inputs: {},
+            triggered_via: "issue",
+            triggered_by_id: issue.identifier ?? issue.id,
+          }),
+        },
+      )
+      if (!res.ok) {
+        const b = await res.json().catch(() => null)
+        toast.error(b?.detail ?? "Failed to start routine")
+        return
+      }
+      toast.success(`Routine ${issue.routine_slug} started — see /activity`)
+      onUpdated()
+    } catch {
+      toast.error("Failed to start routine")
+    } finally {
+      setRunningRoutine(false)
+    }
+  }, [issue.routine_slug, issue.identifier, issue.id, workspaceId, onUpdated])
 
   const handleTitleSave = useCallback(async () => {
     setEditingTitle(false)
@@ -739,6 +784,109 @@ export function IssueDetailInline({
             )}
             </AnimatePresence>
           </div>
+
+          {/* ── Routine section ──────────────────────────────────────────
+            * Lets the user bind a saved routine to this issue and fire
+            * it on demand. The picker writes routine_id via PATCH; the
+            * Run button hits /pipelines/{slug}/run directly because
+            * the routine is already resolved server-side (slug arrives
+            * in the issue payload via the LEFT JOIN). Hidden entirely
+            * when no routines are loaded (e.g. host page didn't pass
+            * the prop) — keeps the panel tidy on /missions or other
+            * surfaces that don't need it.
+            */}
+          {routines.length > 0 && (
+            <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+              <SectionHeader
+                title="Routine"
+                open={routineSectionOpen}
+                onToggle={() => setRoutineSectionOpen((v) => !v)}
+                action={
+                  issue.routine_slug ? (
+                    <button
+                      onClick={runBoundRoutine}
+                      disabled={runningRoutine}
+                      className={cn(
+                        "flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium transition-colors",
+                        runningRoutine
+                          ? "bg-blue-500/10 text-blue-400/60"
+                          : "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25",
+                      )}
+                    >
+                      <Play className="h-3 w-3" />
+                      {runningRoutine ? "Starting…" : "Run"}
+                    </button>
+                  ) : undefined
+                }
+              />
+              <AnimatePresence initial={false}>
+                {routineSectionOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <Popover open={routinePickerOpen} onOpenChange={setRoutinePickerOpen}>
+                      <PopoverTrigger asChild>
+                        <div>
+                          <PropertyRow label="Routine">
+                            <ScrollText className="h-3.5 w-3.5 text-muted-foreground" />
+                            {issue.routine_name ? (
+                              <span className="truncate">{issue.routine_name}</span>
+                            ) : (
+                              <span className="text-foreground/40">No routine bound</span>
+                            )}
+                          </PropertyRow>
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[280px] p-0" align="start" sideOffset={4}>
+                        <Command>
+                          <CommandInput placeholder="Search routines..." className="h-8 text-xs" />
+                          <CommandList>
+                            <CommandEmpty>No routines yet.</CommandEmpty>
+                            <CommandGroup>
+                              <CommandItem
+                                value="__none__"
+                                onSelect={() => {
+                                  patchIssue({ routine_id: "" })
+                                  setRoutinePickerOpen(false)
+                                }}
+                                className="flex items-center gap-2 text-xs"
+                              >
+                                <span className="text-muted-foreground">No routine</span>
+                                {!issue.routine_id && <span className="ml-auto text-blue-400 text-[10px]">current</span>}
+                              </CommandItem>
+                              {routines.map((r) => (
+                                <CommandItem
+                                  key={r.id}
+                                  value={`${r.name} ${r.slug}`}
+                                  onSelect={() => {
+                                    patchIssue({ routine_id: r.id })
+                                    setRoutinePickerOpen(false)
+                                  }}
+                                  className="flex items-center gap-2 text-xs"
+                                >
+                                  <ScrollText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-medium truncate">{r.name}</div>
+                                    <div className="text-[10px] text-muted-foreground truncate">{r.slug}</div>
+                                  </div>
+                                  {issue.routine_id === r.id && (
+                                    <span className="ml-2 shrink-0 text-blue-400 text-[10px]">current</span>
+                                  )}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
 
           {/* ── Labels section ───────────────────────────────────────────── */}
           <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">

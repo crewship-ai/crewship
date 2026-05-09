@@ -42,6 +42,14 @@ import { RoutinesTab } from "@/components/features/routines/routines-tab"
 
 type DrawerTab = "messages" | "exec" | "yaml" | "docker"
 
+// Page mode controls which top-level tabs are visible. Issues and
+// Routines now live as their own top-level pages (/issues, /routines);
+// /activity is the live observability surface (Graph + Timeline + Feed).
+// "default" keeps the legacy 5-tab container — nothing in-tree links to
+// it after the IA refactor, but it stays so /orchestration → /activity
+// can be a soft redirect rather than a hard breaking change.
+export type OrchestrationMode = "issues" | "activity" | "default"
+
 export interface OrchestrationLayoutProps {
   missions: Mission[]
   crews: CrewSummary[]
@@ -52,6 +60,7 @@ export interface OrchestrationLayoutProps {
   onMissionChange: (missionId: string) => void
   onRefresh: () => void
   onMissionCreated: () => void
+  mode?: OrchestrationMode
 }
 
 const ORCH_DRAWER_TABS = [
@@ -65,9 +74,24 @@ const ORCH_TABS = [
   { id: "issues", label: "Issues", icon: CircleDot },
   { id: "graph", label: "Graph", icon: Workflow },
   { id: "timeline", label: "Timeline", icon: Clock },
-  { id: "activity", label: "Activity", icon: Activity },
+  { id: "activity", label: "Feed", icon: Activity },
   { id: "routines", label: "Routines", icon: ScrollText },
 ] as const
+
+// Tabs visible in each mode. /issues hides everything except its own
+// content (no tab bar at all). /activity exposes the three observability
+// views as compact sub-tabs (Graph default).
+const TAB_IDS_BY_MODE: Record<OrchestrationMode, ReadonlyArray<typeof ORCH_TABS[number]["id"]>> = {
+  issues: [],
+  activity: ["graph", "timeline", "activity"],
+  default: ORCH_TABS.map((t) => t.id),
+}
+
+const DEFAULT_TAB_BY_MODE: Record<OrchestrationMode, typeof ORCH_TABS[number]["id"]> = {
+  issues: "issues",
+  activity: "graph",
+  default: "issues",
+}
 
 export function OrchestrationLayout({
   missions,
@@ -79,6 +103,7 @@ export function OrchestrationLayout({
   onMissionChange: _onMissionChange,
   onRefresh,
   onMissionCreated: _onMissionCreated,
+  mode = "default",
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -87,8 +112,30 @@ export function OrchestrationLayout({
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("messages")
 
-  // Content state
-  const [activeTab, setActiveTab] = useState("issues")
+  // Content state — initial active tab depends on the page mode.
+  // /issues opens on Issues; /activity opens on Graph; /orchestration
+  // (legacy) opens on Issues for backwards compatibility.
+  const [activeTab, setActiveTab] = useState<typeof ORCH_TABS[number]["id"]>(DEFAULT_TAB_BY_MODE[mode])
+
+  // Visible tabs filtered by mode. Issues mode hides the tab bar
+  // entirely (length 0); activity mode shows only the three observability
+  // sub-tabs; default mode shows everything.
+  const visibleTabs = useMemo(
+    () => ORCH_TABS.filter((t) => TAB_IDS_BY_MODE[mode].includes(t.id)),
+    [mode],
+  )
+
+  // If the URL switches between modes mid-session (router back/forward),
+  // make sure activeTab settles on a tab that's actually visible.
+  useEffect(() => {
+    if (visibleTabs.length === 0) {
+      setActiveTab(DEFAULT_TAB_BY_MODE[mode])
+      return
+    }
+    if (!visibleTabs.some((t) => t.id === activeTab)) {
+      setActiveTab(DEFAULT_TAB_BY_MODE[mode])
+    }
+  }, [mode, visibleTabs, activeTab])
   const [_selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
   const [selectedCrewId] = useState<string | null>(null)
   const [selectedAgentSlug] = useState<string | null>(null)
@@ -400,47 +447,60 @@ export function OrchestrationLayout({
     return () => setBreadcrumbs([])
   }, [selectedProject, selectedIssue, setBreadcrumbs])
 
+  // Toolbar surfaces are mode-dependent:
+  //   - issues: hide tab bar, show New Issue + New Project buttons
+  //   - activity: show Graph/Timeline/Feed sub-tabs, no create buttons
+  //   - default: legacy — everything visible
+  const showCreateButtons = mode === "issues" || mode === "default"
+  const showToolbar = visibleTabs.length > 0 || showCreateButtons
+
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
-      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {/* Tabs */}
-        {ORCH_TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
-              activeTab === id
-                ? "border-blue-400 text-blue-400"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            <Icon className="h-3 w-3 opacity-75" />
-            {label}
-          </button>
-        ))}
+      {showToolbar && (
+        <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          {/* Tabs */}
+          {visibleTabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
+                activeTab === id
+                  ? "border-blue-400 text-blue-400"
+                  : "border-transparent text-muted-foreground hover:text-foreground/80",
+              )}
+            >
+              <Icon className="h-3 w-3 opacity-75" />
+              {label}
+            </button>
+          ))}
 
-        {/* spacer between tabs and actions */}
+          {/* spacer between tabs and actions */}
 
-        <div className="flex-1" />
+          <div className="flex-1" />
 
-        {/* Create buttons */}
-        <button
-          onClick={() => setShowCreateIssue(true)}
-          className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
-        >
-          <CircleDot className="h-3 w-3" />
-          New Issue
-        </button>
-        <button
-          onClick={() => setShowCreateProject(true)}
-          className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-accent text-accent-foreground hover:bg-accent/80 border border-white/[0.08]"
-        >
-          <FolderKanban className="h-3 w-3" />
-          New Project
-        </button>
-      </div>
+          {/* Create buttons — only relevant when issues UI is on this page */}
+          {showCreateButtons && (
+            <>
+              <button
+                onClick={() => setShowCreateIssue(true)}
+                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+              >
+                <CircleDot className="h-3 w-3" />
+                New Issue
+              </button>
+              <button
+                onClick={() => setShowCreateProject(true)}
+                className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-accent text-accent-foreground hover:bg-accent/80 border border-white/[0.08]"
+              >
+                <FolderKanban className="h-3 w-3" />
+                New Project
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ---- Main 3-column layout ---- */}
       <div
@@ -735,6 +795,7 @@ export function OrchestrationLayout({
                     issueComments={issueComments}
                     issueLabels={issueLabels}
                     projects={projects}
+                    routines={pipelines}
                     selectedProject={selectedProject}
                     workspaceId={workspaceId}
                     detailContext={detailContext}
@@ -769,6 +830,7 @@ export function OrchestrationLayout({
                     issueComments={issueComments}
                     issueLabels={issueLabels}
                     projects={projects}
+                    routines={pipelines}
                     selectedProject={selectedProject}
                     workspaceId={workspaceId}
                     detailContext={detailContext}
@@ -874,6 +936,7 @@ export function OrchestrationLayout({
         crews={crews}
         labels={issueLabels}
         projects={projects}
+        routines={pipelines}
         workspaceId={workspaceId}
         onCreated={() => { fetchIssues(); fetchProjects() }}
       />
