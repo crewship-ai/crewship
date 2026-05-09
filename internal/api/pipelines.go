@@ -325,7 +325,11 @@ func enrichPipelineListAuthorNames(ctx context.Context, db *sql.DB, logger *slog
 		ids = append(ids, id)
 		placeholders = append(placeholders, "?")
 	}
-	q := `SELECT id, name FROM agents WHERE id IN (` + strings.Join(placeholders, ",") + `)`
+	// Exclude soft-deleted agents — same defensive scope as
+	// lookupAgentSlugs. A name resolved through this enrichment is
+	// shown to the user; surfacing the name of an agent the operator
+	// removed would be confusing.
+	q := `SELECT id, name FROM agents WHERE deleted_at IS NULL AND id IN (` + strings.Join(placeholders, ",") + `)`
 	res, err := db.QueryContext(ctx, q, ids...)
 	if err != nil {
 		logger.Warn("pipeline list: author name lookup", "error", err)
@@ -333,13 +337,23 @@ func enrichPipelineListAuthorNames(ctx context.Context, db *sql.DB, logger *slog
 	}
 	defer res.Close()
 	names := make(map[string]string, len(idSet))
+	scanErrors := 0
 	for res.Next() {
 		var id, name string
 		if scanErr := res.Scan(&id, &name); scanErr != nil {
-			logger.Warn("pipeline list: scan author name", "error", scanErr)
+			scanErrors++
 			continue
 		}
 		names[id] = name
+	}
+	// Iterator-level error after the loop catches driver-side
+	// problems (broken connection, decode error mid-stream) that
+	// res.Next() swallowed silently.
+	if rowsErr := res.Err(); rowsErr != nil {
+		logger.Warn("pipeline list: author name iterator", "error", rowsErr)
+	}
+	if scanErrors > 0 {
+		logger.Warn("pipeline list: author name scans skipped", "count", scanErrors)
 	}
 	for i := range rows {
 		if n, ok := names[rows[i].AuthorAgentID]; ok {

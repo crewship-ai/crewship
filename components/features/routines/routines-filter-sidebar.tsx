@@ -98,24 +98,28 @@ export function RoutinesFilterSidebar({
       {/* ── Search ── */}
       <div className="shrink-0 px-2 py-2">
         <div className="flex h-8 items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2.5">
-          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+          <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" aria-hidden="true" />
           <input
             type="text"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search routines, agents..."
+            aria-label="Search routines and agents"
             className="min-w-0 flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/40 outline-none"
           />
           <AnimatePresence>
             {search && (
               <motion.button
+                type="button"
+                aria-label="Clear search"
+                title="Clear search"
                 initial={{ opacity: 0, scale: 0.5 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.5 }}
                 onClick={() => onSearchChange("")}
                 className="text-muted-foreground/50 hover:text-foreground"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
               </motion.button>
             )}
           </AnimatePresence>

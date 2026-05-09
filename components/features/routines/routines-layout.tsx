@@ -164,12 +164,19 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             </div>
           ) : (
             <div className="relative flex h-full flex-col">
+              {/* The filter sidebar's "Showing X of Y" only matches
+                * reality on the List tab — Schedules + Insights walk
+                * the unfiltered pipelines list internally. To avoid
+                * misleading counts (and to disable filter UX that has
+                * no effect on those views), surface filteredCount
+                * verbatim on List, and totalRoutines on the others
+                * so the strip reads as "showing all". */}
               <RoutinesFilterSidebar
                 filters={filters}
                 onChange={setFilters}
                 routines={pipelines}
                 totalRoutines={pipelines.length}
-                filteredCount={filteredRoutines.length}
+                filteredCount={activeTab === "list" ? filteredRoutines.length : pipelines.length}
                 search={search}
                 onSearchChange={setSearch}
               />
