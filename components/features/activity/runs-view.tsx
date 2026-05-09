@@ -503,12 +503,21 @@ function StepRow({
   return (
     <li>
       <button
-        onClick={() => hasOutput && setOpen((v) => !v)}
-        disabled={!hasOutput}
+        type="button"
+        onClick={() => {
+          // aria-disabled vs disabled — same reason as the inbox
+          // step row: keyboard tab order should still include
+          // pending / no-output steps so a screen-reader user can
+          // discover them. The early-return guards the click
+          // semantically without removing focusability.
+          if (!hasOutput) return
+          setOpen((v) => !v)
+        }}
+        aria-disabled={!hasOutput}
         aria-expanded={hasOutput ? open : undefined}
         className={cn(
           "flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors",
-          hasOutput && "hover:bg-white/[0.04]",
+          hasOutput ? "hover:bg-white/[0.04]" : "cursor-default",
           isCurrent && "bg-amber-500/5",
           isPending && "opacity-50",
         )}

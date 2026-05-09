@@ -331,13 +331,21 @@ function StepRow({
   return (
     <li>
       <button
-        onClick={() => hasOutput && setExpanded((v) => !v)}
-        disabled={!hasOutput}
+        type="button"
+        onClick={() => {
+          // aria-disabled (vs the native disabled attribute) keeps the
+          // button in the tab order so keyboard-only users can still
+          // focus a step row that has no expandable output. Without
+          // this, tab skips entirely past pending / no-output steps.
+          if (!hasOutput) return
+          setExpanded((v) => !v)
+        }}
+        aria-disabled={!hasOutput}
         aria-expanded={hasOutput ? expanded : undefined}
-        aria-controls={hasOutput ? panelId : undefined}
+        aria-controls={hasOutput && expanded ? panelId : undefined}
         className={cn(
           "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
-          hasOutput && "hover:bg-white/[0.02]",
+          hasOutput ? "hover:bg-white/[0.02]" : "cursor-default opacity-70",
           status === "paused" && "bg-amber-500/5",
         )}
       >
@@ -404,9 +412,13 @@ function CollapsiblePanel({ title, children }: { title: string; children: React.
   return (
     <div className="overflow-hidden rounded-md border border-white/[0.06] bg-card/30">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-controls={panelId}
+        // aria-controls is only valid when the controlled element is
+        // in the DOM — we render the region conditionally below, so
+        // omit the attribute when collapsed to satisfy ARIA spec.
+        aria-controls={open ? panelId : undefined}
         className="flex w-full items-center gap-2 px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:bg-white/[0.02]"
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
