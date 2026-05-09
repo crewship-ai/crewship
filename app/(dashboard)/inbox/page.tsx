@@ -1,5 +1,3 @@
-"use client"
-
 import { InboxList } from "@/components/features/inbox/inbox-list"
 
 // /inbox — unified human-in-the-loop surface backed by inbox_items

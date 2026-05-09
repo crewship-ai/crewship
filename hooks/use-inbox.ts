@@ -105,50 +105,57 @@ export function useInbox(workspaceId: string | null | undefined, stateFilter?: "
 
   const patch = useCallback(
     async (id: string, state: InboxItem["state"], resolvedAction?: string) => {
-      try {
-        if (!workspaceId) return
-        const res = await fetch(
-          `/api/v1/inbox/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ state, resolved_action: resolvedAction }),
-          },
-        )
-        if (!res.ok) {
-          const body = await res.json().catch(() => null)
-          throw new Error(body?.error ?? `patch failed (${res.status})`)
-        }
-        // Optimistic local update — the WS event will follow and
-        // re-fetch, but updating in place avoids the row jumping
-        // around during the round-trip.
-        setItems((prev) =>
-          prev.map((it) =>
-            it.id === id
-              ? {
-                  ...it,
-                  state,
-                  resolved_action: state === "resolved" ? resolvedAction ?? it.resolved_action : it.resolved_action,
-                }
-              : it,
-          ),
-        )
-        // Adjust unread count locally so the bell badge updates without
-        // waiting for the next refresh.
-        setUnreadCount((prev) => {
-          const before = items.find((it) => it.id === id)
-          if (!before) return prev
-          const wasUnread = before.state === "unread"
-          const isUnread = state === "unread"
-          if (wasUnread && !isUnread) return Math.max(0, prev - 1)
-          if (!wasUnread && isUnread) return prev + 1
-          return prev
-        })
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+      if (!workspaceId) return
+      const res = await fetch(
+        `/api/v1/inbox/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ state, resolved_action: resolvedAction }),
+        },
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        const err = new Error(body?.error ?? `patch failed (${res.status})`)
+        setError(err.message)
+        // Propagate to the caller so a UI button can show its own
+        // toast + roll back optimistic UI. Earlier silently-swallowed
+        // errors meant a 409 (e.g. the source-managed kind guard)
+        // never surfaced to the user.
+        throw err
       }
+      // Optimistic local update plus reconciliation against the
+      // current filter so a stateFilter='unread' view drops the row
+      // when it transitions to read/resolved (instead of leaving a
+      // stale row in the list until the next refresh).
+      const before = items.find((it) => it.id === id)
+      const matchesFilter =
+        !stateFilter || stateFilter === "all" || stateFilter === state
+      setItems((prev) => {
+        if (!matchesFilter) {
+          return prev.filter((it) => it.id !== id)
+        }
+        return prev.map((it) =>
+          it.id === id
+            ? {
+                ...it,
+                state,
+                resolved_action:
+                  state === "resolved" ? resolvedAction ?? it.resolved_action : it.resolved_action,
+              }
+            : it,
+        )
+      })
+      setUnreadCount((prev) => {
+        if (!before) return prev
+        const wasUnread = before.state === "unread"
+        const isUnread = state === "unread"
+        if (wasUnread && !isUnread) return Math.max(0, prev - 1)
+        if (!wasUnread && isUnread) return prev + 1
+        return prev
+      })
     },
-    [items, workspaceId],
+    [items, workspaceId, stateFilter],
   )
 
   return { items, unreadCount, loading, error, refresh, patch }

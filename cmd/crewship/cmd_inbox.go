@@ -113,6 +113,12 @@ var inboxListCmd = &cobra.Command{
 		if f.Format == "yaml" {
 			return f.YAML(body.Rows)
 		}
+		// "quiet" suppresses table output entirely so a script can
+		// pipe the exit status without parsing rows. Match approvals'
+		// + journal's behavior so cross-command UX stays consistent.
+		if f.Format == "quiet" {
+			return nil
+		}
 
 		// Table output — color the STATE column so an unread waitpoint
 		// is impossible to miss when the user is scanning a 50-row feed.

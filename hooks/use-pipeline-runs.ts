@@ -54,12 +54,22 @@ export function usePipelineRuns(
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  // inFlightRef gates a poll-driven refresh from cancelling a still-
+  // pending fetch from the previous tick. Aborting on every tick
+  // could drop slow responses on a flaky network, leaving the runs
+  // view stale. We only abort on workspace/filter change or unmount
+  // (handled by the cleanup below + the explicit refresh on filter
+  // change). Manual refresh (caller invokes refresh()) is rare and
+  // can wait for the in-flight fetch to settle.
+  const inFlightRef = useRef(false)
+
   const refresh = useCallback(async () => {
     if (!workspaceId) {
       setRuns([])
       return
     }
-    abortRef.current?.abort()
+    if (inFlightRef.current) return
+    inFlightRef.current = true
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setLoading(true)
@@ -83,13 +93,20 @@ export function usePipelineRuns(
       if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
+      inFlightRef.current = false
       if (!ctrl.signal.aborted) setLoading(false)
     }
   }, [workspaceId, filter])
 
   useEffect(() => {
+    // workspace / filter change → abort any in-flight + start fresh
+    abortRef.current?.abort()
+    inFlightRef.current = false
     refresh()
-    return () => { abortRef.current?.abort() }
+    return () => {
+      abortRef.current?.abort()
+      inFlightRef.current = false
+    }
   }, [refresh])
 
   // Poll cadence is gated on whether anything is active. When the

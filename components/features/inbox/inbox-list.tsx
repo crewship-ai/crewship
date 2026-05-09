@@ -532,14 +532,14 @@ function KindActions({
       return (
         <div className="flex items-center gap-2">
           {typeof item.payload?.issue_identifier === "string" && (
-            <Link
-              href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}
-            >
-              <Button size="sm" className="gap-1.5">
+            <Button asChild size="sm" className="gap-1.5">
+              <Link
+                href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}
+              >
                 <CircleDot className="h-3 w-3" />
                 Open {item.payload.issue_identifier}
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           )}
           <Button
             size="sm"

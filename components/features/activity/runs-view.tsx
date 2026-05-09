@@ -190,6 +190,8 @@ function RunCard({
       {/* Header row — always visible, click toggles expansion */}
       <button
         onClick={onToggle}
+        aria-expanded={expanded}
+        aria-controls={`run-card-content-${run.id}`}
         className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02]"
       >
         <span
@@ -233,6 +235,7 @@ function RunCard({
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
+            id={`run-card-content-${run.id}`}
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -502,6 +505,7 @@ function StepRow({
       <button
         onClick={() => hasOutput && setOpen((v) => !v)}
         disabled={!hasOutput}
+        aria-expanded={hasOutput ? open : undefined}
         className={cn(
           "flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors",
           hasOutput && "hover:bg-white/[0.04]",

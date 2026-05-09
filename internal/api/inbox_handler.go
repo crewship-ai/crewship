@@ -25,6 +25,23 @@ type InboxHandler struct {
 	hub    *ws.Hub
 }
 
+// inboxVisibilityClause restricts inbox results to items targeted at
+// either the workspace as a whole, the caller's user id, or the
+// caller's role. Without this every workspace member could see
+// items addressed to a specific OWNER (e.g. a routing-key escalation
+// or a personal review request) — a real privacy / least-privilege
+// gap. Returns the SQL fragment + the args to bind, in order.
+//
+// All three handlers (List, UnreadCount, PatchState) call this so
+// the predicate stays consistent across the surface.
+func inboxVisibilityClause(userID, role string) (string, []interface{}) {
+	return ` AND (
+        (COALESCE(target_user_id, '') = '' AND COALESCE(target_role, '') = '')
+        OR target_user_id = ?
+        OR target_role = ?
+    )`, []interface{}{userID, role}
+}
+
 func NewInboxHandler(db *sql.DB, logger *slog.Logger, hub *ws.Hub) *InboxHandler {
 	return &InboxHandler{db: db, logger: logger, hub: hub}
 }
@@ -74,7 +91,9 @@ type inboxListResponse struct {
 // top — same convention as Linear / GitHub Notifications.
 func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if workspaceID == "" {
+	user := UserFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if workspaceID == "" || user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
 		return
 	}
@@ -99,6 +118,10 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		created_at, updated_at
 	FROM inbox_items WHERE workspace_id = ?`)
 	args := []interface{}{workspaceID}
+
+	visClause, visArgs := inboxVisibilityClause(user.ID, role)
+	q.WriteString(visClause)
+	args = append(args, visArgs...)
 
 	if state != "" && state != "all" {
 		if state != "unread" && state != "read" && state != "resolved" {
@@ -150,11 +173,13 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Bell badge fetched in the same response so the UI doesn't need
 	// a second round-trip on every poll. Cheap because it's a partial-
-	// indexed COUNT(*) on the workspace partition.
+	// indexed COUNT(*) on the workspace partition. Visibility predicate
+	// kept in lockstep with the list query so a user's badge count
+	// matches the rows they can actually see.
 	var unreadCount int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ? AND state = 'unread'`,
-		workspaceID).Scan(&unreadCount); err != nil {
+	countQuery := `SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ?` + visClause + ` AND state = 'unread'`
+	countArgs := append([]interface{}{workspaceID}, visArgs...)
+	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&unreadCount); err != nil {
 		h.logger.Warn("inbox unread count", "error", err)
 		unreadCount = 0
 	}
@@ -171,14 +196,18 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 // bell uses.
 func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if workspaceID == "" {
+	user := UserFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if workspaceID == "" || user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
 		return
 	}
+	visClause, visArgs := inboxVisibilityClause(user.ID, role)
+	args := append([]interface{}{workspaceID}, visArgs...)
 	var n int
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ? AND state = 'unread'`,
-		workspaceID).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ?`+visClause+` AND state = 'unread'`,
+		args...).Scan(&n); err != nil {
 		h.logger.Warn("inbox unread count", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "count failed"})
 		return
@@ -194,6 +223,7 @@ func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())
+	role := RoleFromContext(r.Context())
 	if workspaceID == "" || user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "auth required"})
 		return
@@ -225,11 +255,17 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Verify the row exists in this workspace before flipping. A
-	// cross-workspace id should 404 rather than silently no-op.
-	var existing string
+	// Verify the row exists, in this workspace, AND visible to this
+	// caller before flipping. A cross-workspace id should 404 rather
+	// than silently no-op; an item targeted at another user / role
+	// must also 404 so a workspace member can't flip a row addressed
+	// to a specific OWNER.
+	visClause, visArgs := inboxVisibilityClause(user.ID, role)
+	lookupArgs := append([]interface{}{id, workspaceID}, visArgs...)
+	var existing, kind string
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT id FROM inbox_items WHERE id = ? AND workspace_id = ?`, id, workspaceID).Scan(&existing)
+		`SELECT id, kind FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
+		lookupArgs...).Scan(&existing, &kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
@@ -238,6 +274,25 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("inbox patch lookup", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
 		return
+	}
+
+	// Source-managed kinds (waitpoint / escalation / failed_run) must
+	// keep their inbox state in sync with the authoritative source
+	// row. The inbox PATCH is fine for "read" (the inbox row tracks
+	// its own visibility marker) but "resolved" and "unread" would
+	// desync — the user expects the inbox flip to also approve the
+	// waitpoint / close the escalation / retry the run, and it
+	// doesn't. Force callers through the proper source endpoints
+	// (/pipelines/waitpoints/{token}/approve, etc.) for those
+	// transitions. Generic kinds (message) can flip freely.
+	if kind == "waitpoint" || kind == "escalation" || kind == "failed_run" {
+		if body.State != "read" {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "use the source endpoint for this kind (e.g. /pipelines/waitpoints/{token}/approve) — inbox PATCH only supports 'read' for source-managed items",
+				"kind":  kind,
+			})
+			return
+		}
 	}
 
 	switch body.State {

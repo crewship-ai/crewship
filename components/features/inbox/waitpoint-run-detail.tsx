@@ -113,7 +113,13 @@ export function WaitpointRunDetail({
           if (initial) {
             setError(`run lookup failed`)
             setLoading(false)
+            return
           }
+          // Transient lookup failure on a follow-up poll (network
+          // blip, server restart). Don't tear down the panel; just
+          // re-arm so the next tick can recover. Without this a
+          // single bad fetch would freeze the live view forever.
+          timer = setTimeout(() => tick(false), 3000)
           return
         }
         setRun(runData)
@@ -141,7 +147,12 @@ export function WaitpointRunDetail({
         if (initial) {
           setError(e instanceof Error ? e.message : String(e))
           setLoading(false)
+          return
         }
+        // Same transient-recovery story as the !runData path: a
+        // network throw on a follow-up tick should retry, not stop
+        // polling.
+        timer = setTimeout(() => tick(false), 3000)
       }
     }
 
