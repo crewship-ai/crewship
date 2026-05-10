@@ -91,7 +91,8 @@ export function resolveEntity<T>(
   fallback: T,
 ): T {
   if (!id) return fallback
-  return registry[id] ?? fallback
+  // Object.hasOwn guards against prototype-pollution lookups (e.g. "__proto__").
+  return Object.hasOwn(registry, id) ? registry[id] : fallback
 }
 
 // ---------------------------------------------------------------------------

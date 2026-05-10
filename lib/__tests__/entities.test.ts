@@ -7,7 +7,24 @@ import {
   getCrewDotColor,
   CREW_ICON_CATEGORIES,
   searchCrewIcons,
+  resolveEntity,
 } from "@/lib/entities"
+
+describe("resolveEntity (prototype-pollution guard)", () => {
+  it("returns fallback for inherited keys like __proto__", () => {
+    const reg: Record<string, { id: string }> = { blue: { id: "blue" } }
+    const fb = { id: "fallback" }
+    expect(resolveEntity("__proto__", reg, fb)).toBe(fb)
+    expect(resolveEntity("constructor", reg, fb)).toBe(fb)
+    expect(resolveEntity("toString", reg, fb)).toBe(fb)
+  })
+
+  it("returns own properties normally", () => {
+    const reg: Record<string, { id: string }> = { blue: { id: "blue" } }
+    const fb = { id: "fallback" }
+    expect(resolveEntity("blue", reg, fb)).toEqual({ id: "blue" })
+  })
+})
 
 describe("CREW_ICONS registry", () => {
   it("contains canonical icons documented in CLAUDE.md (code, rocket, clipboard...)", () => {
