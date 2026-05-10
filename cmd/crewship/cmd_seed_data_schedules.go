@@ -25,11 +25,11 @@ import (
 // agents on the path call out to a real model.
 
 type demoSchedule struct {
-	Name             string
-	TargetSlug       string
-	CronExpr         string
-	Inputs           map[string]interface{}
-	Enabled          bool
+	Name       string
+	TargetSlug string
+	CronExpr   string
+	Inputs     map[string]interface{}
+	Enabled    bool
 }
 
 var demoSchedules = []demoSchedule{

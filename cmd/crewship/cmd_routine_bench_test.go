@@ -81,19 +81,19 @@ func TestPercentileInt64_TruncationBehaviour(t *testing.T) {
 
 func TestClassifyFailReason_BucketsAllCommonModes(t *testing.T) {
 	cases := map[string]string{
-		"cost cap exceeded: $0.1399 > $0.0500 after step \"extract\"":         "cost-cap",
-		"outcomes failed: word_count_in_range":                                "rubric-fail",
-		"output length 5 below min 30":                                        "gate-fail",
-		"output contains banned token: API_KEY=":                              "gate-fail",
-		"output missing required token: \"qty\"":                              "gate-fail",
-		"schema validation: missing required key qty":                         "gate-fail",
-		"output not valid JSON: unexpected token":                             "gate-fail",
-		"LLMRunner: complete: invalid Anthropic API key":                      "auth-fail",
-		"no active Anthropic credential in workspace":                         "auth-fail",
-		"context deadline exceeded":                                           "timeout",
-		"step timeout after 30s":                                              "timeout",
-		"weird unknown error from somewhere":                                  "other",
-		"":                                                                    "other",
+		"cost cap exceeded: $0.1399 > $0.0500 after step \"extract\"": "cost-cap",
+		"outcomes failed: word_count_in_range":                        "rubric-fail",
+		"output length 5 below min 30":                                "gate-fail",
+		"output contains banned token: API_KEY=":                      "gate-fail",
+		"output missing required token: \"qty\"":                      "gate-fail",
+		"schema validation: missing required key qty":                 "gate-fail",
+		"output not valid JSON: unexpected token":                     "gate-fail",
+		"LLMRunner: complete: invalid Anthropic API key":              "auth-fail",
+		"no active Anthropic credential in workspace":                 "auth-fail",
+		"context deadline exceeded":                                   "timeout",
+		"step timeout after 30s":                                      "timeout",
+		"weird unknown error from somewhere":                          "other",
+		"":                                                            "other",
 	}
 	for msg, want := range cases {
 		msg, want := msg, want // capture for subtest closure
@@ -176,8 +176,8 @@ func TestSummariseBench_NoFailureKeyOmittedWhenEmpty(t *testing.T) {
 
 func TestReadinessVerdict_ThresholdMapping(t *testing.T) {
 	cases := []struct {
-		name     string
-		summary  benchSummary
+		name       string
+		summary    benchSummary
 		wantPrefix string
 	}{
 		{"insufficient", benchSummary{Runs: 0}, "INSUFFICIENT_DATA"},

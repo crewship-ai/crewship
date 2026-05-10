@@ -1204,8 +1204,11 @@ func sleepWithJitter(ctx context.Context, delay time.Duration) bool {
 // same task description plus the new constraint.
 //
 // Length is capped: a long-winded grader feedback would otherwise
-// dilute the prompt and waste tokens. 600 chars is enough for the
-// rubric reason + a sentence of context.
+// dilute the prompt and waste tokens. 600 bytes is enough for the
+// rubric reason + a sentence of context. Truncation walks back to
+// the nearest UTF-8 rune boundary so a grader reply ending mid-emoji
+// (or any multi-byte char) doesn't ship a malformed string into the
+// next worker call. Mirrors the pattern in truncateForGraderLog.
 func injectValidationFeedback(prompt, reason string) string {
 	const maxReason = 600
 	r := strings.TrimSpace(reason)
@@ -1213,7 +1216,11 @@ func injectValidationFeedback(prompt, reason string) string {
 		return prompt
 	}
 	if len(r) > maxReason {
-		r = r[:maxReason-1] + "…"
+		cut := maxReason - 1
+		for cut > 0 && cut > maxReason-5 && (r[cut]&0xc0) == 0x80 {
+			cut--
+		}
+		r = r[:cut] + "…"
 	}
 	return "[PREVIOUS ATTEMPT FAILED VALIDATION: " + r + "\n" +
 		"Address the failure exactly in this response. Do not repeat the same mistake.]\n\n" +

@@ -221,16 +221,16 @@ func TestValidateOutput_SchemaGate_AcceptsLLMQuirks(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","required":["k"]}`)
 	v := &Validation{Schema: schema}
 	cases := map[string]string{
-		"fenced with json tag":       "```json\n{\"k\":1}\n```",
-		"fenced upper-case tag":      "```JSON\n{\"k\":1}\n```",
-		"fenced no tag":              "```\n{\"k\":1}\n```",
-		"fenced with leading space":  "  ```json\n{\"k\":1}\n```\n",
+		"fenced with json tag":        "```json\n{\"k\":1}\n```",
+		"fenced upper-case tag":       "```JSON\n{\"k\":1}\n```",
+		"fenced no tag":               "```\n{\"k\":1}\n```",
+		"fenced with leading space":   "  ```json\n{\"k\":1}\n```\n",
 		"fenced unclosed (truncated)": "```json\n{\"k\":1}",
-		"prose preamble":             "Here is the JSON you asked for:\n{\"k\":1}",
-		"markdown bullet preamble":   "* Quick note: see below.\n{\"k\":1}",
-		"prose suffix":               "{\"k\":1}\nLet me know if you need anything else.",
-		"both preamble and fence":    "Sure!\n```json\n{\"k\":1}\n```",
-		"bare json":                  `{"k":1}`,
+		"prose preamble":              "Here is the JSON you asked for:\n{\"k\":1}",
+		"markdown bullet preamble":    "* Quick note: see below.\n{\"k\":1}",
+		"prose suffix":                "{\"k\":1}\nLet me know if you need anything else.",
+		"both preamble and fence":     "Sure!\n```json\n{\"k\":1}\n```",
+		"bare json":                   `{"k":1}`,
 	}
 	for name, raw := range cases {
 		ok, reason := validateOutput(raw, v)

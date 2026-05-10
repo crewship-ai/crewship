@@ -104,19 +104,19 @@ func TestRunAgentStep_DoesNotRetryNonTransientError(t *testing.T) {
 
 func TestIsTransientRunnerError_Matrix(t *testing.T) {
 	cases := map[string]bool{
-		"":                                            false,
-		"permission denied":                           false,
-		"context canceled":                            false,
-		"context deadline exceeded":                   false,
-		"anthropic 429: rate limit exceeded":          true,
-		"upstream 503 service unavailable":            true,
-		"i/o timeout":                                 true,
-		"connection refused":                          true,
-		"broken pipe":                                 true,
-		"500 internal server error":                   true,
-		"too many requests":                           true,
-		"429 Too Many Requests (slow down)":           true,
-		"random unrelated error like ENOMEM mapped":   false,
+		"":                                          false,
+		"permission denied":                         false,
+		"context canceled":                          false,
+		"context deadline exceeded":                 false,
+		"anthropic 429: rate limit exceeded":        true,
+		"upstream 503 service unavailable":          true,
+		"i/o timeout":                               true,
+		"connection refused":                        true,
+		"broken pipe":                               true,
+		"500 internal server error":                 true,
+		"too many requests":                         true,
+		"429 Too Many Requests (slow down)":         true,
+		"random unrelated error like ENOMEM mapped": false,
 	}
 	for msg, want := range cases {
 		var err error

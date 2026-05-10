@@ -29,6 +29,20 @@ import type {
 // the components dumb and avoids passing callbacks via the data
 // payload.
 
+// activateOnEnterOrSpace dispatches a click on the wrapper when
+// Enter or Space is pressed, gated to events that originated from
+// the wrapper itself (so a key press inside an inner button doesn't
+// also re-activate the parent). Mirrors the same pattern in
+// trace-step-node.tsx so canvas-wide keyboard semantics stay
+// consistent.
+function activateOnEnterOrSpace(e: React.KeyboardEvent<HTMLElement>) {
+  if (e.target !== e.currentTarget) return
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault()
+    ;(e.currentTarget as HTMLElement).click()
+  }
+}
+
 function IssueNodeBase({ data }: NodeProps) {
   const d = data as unknown as OverviewIssueNodeData
   return (
@@ -36,11 +50,12 @@ function IssueNodeBase({ data }: NodeProps) {
       role="button"
       tabIndex={0}
       aria-label={`Issue ${d.identifier}: ${d.title}`}
+      onKeyDown={activateOnEnterOrSpace}
       className="relative w-[200px] rounded-lg border border-blue-500/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80"
     >
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-blue-400/40" isConnectable={false} />
       <div className="flex items-center gap-1.5">
-        <CircleDot className="h-3.5 w-3.5 shrink-0 text-blue-300" />
+        <CircleDot aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-blue-300" />
         <span className="truncate font-mono text-[10px] text-blue-300">{d.identifier}</span>
         <StatusChip status={d.status} />
       </div>
@@ -54,10 +69,11 @@ export const OverviewIssueNode = memo(IssueNodeBase)
 
 function RoutineNodeBase({ data }: NodeProps) {
   const d = data as unknown as OverviewRoutineNodeData
+  // Native <Link> = native anchor semantics. Enter activates it for
+  // free; adding role="button" would have stomped that.
   return (
     <Link
       href={`/routines?slug=${encodeURIComponent(d.slug)}`}
-      role="button"
       aria-label={`Routine ${d.name}`}
       className="relative block w-[200px] rounded-lg border border-violet-500/25 bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80"
       onClick={(e) => e.stopPropagation()}
@@ -65,11 +81,11 @@ function RoutineNodeBase({ data }: NodeProps) {
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-violet-400/40" isConnectable={false} />
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-violet-400/40" isConnectable={false} />
       <div className="flex items-center gap-1.5">
-        <Workflow className="h-3.5 w-3.5 shrink-0 text-violet-300" />
+        <Workflow aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-violet-300" />
         <span className="truncate text-xs font-medium">{d.name}</span>
       </div>
       <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground/70">
-        <ScrollText className="h-2.5 w-2.5" />
+        <ScrollText aria-hidden="true" className="h-2.5 w-2.5" />
         <span className="truncate font-mono">{d.slug}</span>
         {d.invocationCount !== undefined && d.invocationCount > 0 && (
           <span className="ml-auto rounded bg-white/[0.06] px-1 py-0 text-[9px]">
@@ -92,6 +108,7 @@ function RunNodeBase({ data }: NodeProps) {
       role="button"
       tabIndex={0}
       aria-label={`Run ${d.runId} status ${d.status}`}
+      onKeyDown={activateOnEnterOrSpace}
       className={cn(
         "relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80",
         isWait && "ring-1 ring-amber-400/40",
@@ -140,12 +157,17 @@ function StatusChip({ status }: { status: string }) {
   )
 }
 
+// SourceIcon — purely decorative glyph next to the relative time.
+// Each branch carries aria-hidden so screen readers don't try to
+// pronounce the typographic command/lightning/return characters;
+// the parent node's aria-label already names the trigger source via
+// the run status text.
 function SourceIcon({ source }: { source?: string }) {
-  if (source === "schedule") return <span className="text-violet-300">⌘</span>
-  if (source === "issue") return <CircleDot className="h-2.5 w-2.5 text-blue-300" />
-  if (source === "webhook") return <span className="text-amber-300">⚡</span>
-  if (source === "call_pipeline") return <span className="text-purple-300">↳</span>
-  return <Zap className="h-2.5 w-2.5 text-muted-foreground/60" />
+  if (source === "schedule") return <span aria-hidden="true" className="text-violet-300">⌘</span>
+  if (source === "issue") return <CircleDot aria-hidden="true" className="h-2.5 w-2.5 text-blue-300" />
+  if (source === "webhook") return <span aria-hidden="true" className="text-amber-300">⚡</span>
+  if (source === "call_pipeline") return <span aria-hidden="true" className="text-purple-300">↳</span>
+  return <Zap aria-hidden="true" className="h-2.5 w-2.5 text-muted-foreground/60" />
 }
 
 function shortId(id: string): string {

@@ -200,7 +200,6 @@ function GroupNode({
               onShowMore={() => setShownPage((p) => p + 1)}
               selectedRunId={selectedRunId}
               onSelect={onSelectRun}
-              onSelectIssue={onSelectIssue}
               accentBorder={accentBorder}
             />
           )}
@@ -223,7 +222,6 @@ function RunRows({
   onShowMore: () => void
   selectedRunId: string | null
   onSelect: (id: string) => void
-  onSelectIssue?: (id: string) => void
   accentBorder: string
 }) {
   const visibleCount = Math.min(runs.length, shownPage * PAGE_SIZE)

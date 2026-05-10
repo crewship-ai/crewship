@@ -116,13 +116,13 @@ func TestAggregateMatrix_NoOutcomesForCell(t *testing.T) {
 
 func TestSplitCSV(t *testing.T) {
 	cases := map[string][]string{
-		"":                       nil,
-		"   ":                    nil,
-		"a":                      {"a"},
-		"a,b,c":                  {"a", "b", "c"},
-		" a , b , c ":            {"a", "b", "c"},
-		"fast,smart":             {"fast", "smart"},
-		"a,,b":                   {"a", "b"},
+		"":                        nil,
+		"   ":                     nil,
+		"a":                       {"a"},
+		"a,b,c":                   {"a", "b", "c"},
+		" a , b , c ":             {"a", "b", "c"},
+		"fast,smart":              {"fast", "smart"},
+		"a,,b":                    {"a", "b"},
 		"eval-extract,eval-judge": {"eval-extract", "eval-judge"},
 	}
 	for in, want := range cases {

@@ -209,6 +209,11 @@ function LastRunSection({ workspaceId, slug }: { workspaceId: string; slug: stri
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
+    // AbortController so a fast routine switch (or unmount) actually
+    // cancels in-flight fetches instead of just discarding their
+    // results. The `cancelled` flag still guards setState calls in
+    // case the fetch resolves between abort() and the next tick.
+    const ctrl = new AbortController()
     let cancelled = false
     setLoading(true)
     setErr(null)
@@ -221,6 +226,7 @@ function LastRunSection({ workspaceId, slug }: { workspaceId: string; slug: stri
       try {
         const recRes = await fetch(
           `/api/v1/workspaces/${wsEnc}/pipelines/${slugEnc}/run-records?limit=1`,
+          { signal: ctrl.signal },
         )
         if (!recRes.ok) {
           if (recRes.status === 503) {
@@ -245,6 +251,7 @@ function LastRunSection({ workspaceId, slug }: { workspaceId: string; slug: stri
         try {
           const detRes = await fetch(
             `/api/v1/workspaces/${wsEnc}/pipeline-runs/${encodeURIComponent(rec.id)}`,
+            { signal: ctrl.signal },
           )
           if (detRes.ok && !cancelled) {
             setDetail((await detRes.json()) as LatestRunDetail)
@@ -253,6 +260,9 @@ function LastRunSection({ workspaceId, slug }: { workspaceId: string; slug: stri
           /* ignore — the record-level summary is enough */
         }
       } catch (e) {
+        // AbortError lands here as a DOMException — ignore it; the
+        // unmount cleanup is the cause and the component is gone.
+        if (ctrl.signal.aborted) return
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e))
       } finally {
         if (!cancelled) setLoading(false)
@@ -260,6 +270,7 @@ function LastRunSection({ workspaceId, slug }: { workspaceId: string; slug: stri
     })()
 
     return () => {
+      ctrl.abort()
       cancelled = true
     }
   }, [workspaceId, slug])

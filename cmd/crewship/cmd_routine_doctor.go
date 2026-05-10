@@ -19,12 +19,12 @@ import (
 //
 // Designed for two audiences:
 //
-//   1. Operator about to /run a new routine for the first time —
-//      catches "I forgot to provision the crew" / "agent slug typo"
-//      before the LLM call is wasted.
-//   2. CI step before running the eval suite — fail-fast if the
-//      target workspace isn't healthy, with a structured report
-//      that's grep-able for what to fix.
+//  1. Operator about to /run a new routine for the first time —
+//     catches "I forgot to provision the crew" / "agent slug typo"
+//     before the LLM call is wasted.
+//  2. CI step before running the eval suite — fail-fast if the
+//     target workspace isn't healthy, with a structured report
+//     that's grep-able for what to fix.
 var routineDoctorCmd = &cobra.Command{
 	Use:   "doctor <slug>",
 	Short: "Preflight diagnostics for a routine — catches blind alleys before /run",

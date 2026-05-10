@@ -19,11 +19,11 @@ func TestIsValidBaselineName(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"",                         // empty
-		"with spaces",              // space
-		"slash/in/name",            // slash
-		"dot.name",                 // dot
-		"a" + repeat("b", 64),      // 65 chars > 64 max
+		"",                    // empty
+		"with spaces",         // space
+		"slash/in/name",       // slash
+		"dot.name",            // dot
+		"a" + repeat("b", 64), // 65 chars > 64 max
 	}
 	for _, s := range bad {
 		if isValidBaselineName(s) {
