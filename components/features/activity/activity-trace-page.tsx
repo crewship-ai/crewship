@@ -362,6 +362,7 @@ export function ActivityTracePage() {
             workspaceId={workspaceId}
             waitpointTokensByStepId={waitpointTokensByStepId}
             heatmapBuckets={heatmapBuckets}
+            stepMetrics={stepMetrics}
             overview={overview}
             onSelectRun={setRunId}
           />

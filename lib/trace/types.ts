@@ -114,6 +114,14 @@ export interface TraceStepNodeData {
   // (not a hex color) here keeps theme/color decisions in CSS where
   // they belong.
   heatmapBucket?: HeatmapBucket | null
+  // Hover-card payload — duration/cost from journal events + a
+  // truncated output snippet. None of these are required to render
+  // the node itself; they're peek-only data we pre-resolve in the
+  // graph builder so the hover renderer stays dumb.
+  durationMs?: number | null
+  costUsd?: number | null
+  outputSnippet?: string | null
+  errorMessage?: string | null
   [key: string]: unknown
 }
 

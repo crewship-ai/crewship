@@ -64,6 +64,9 @@ interface TraceCanvasProps {
   // Pre-computed heatmap buckets; the page memoizes this so a step
   // metric flowing in over realtime doesn't force a dagre relayout.
   heatmapBuckets: ReadonlyMap<string, HeatmapBucket>
+  // Per-step duration + cost — surfaced in the step hover card.
+  // Same Map identity as the page's useStepMetrics output.
+  stepMetrics: ReadonlyMap<string, { durationMs: number; costUsd: number }>
   // Overview graph (issues → routines → last-run chains) shown when
   // no run is selected. Caller computes it from missions + pipelines
   // + runs and memoizes; passing in keeps the canvas dumb.
@@ -175,6 +178,7 @@ function CanvasInner({
   workspaceId,
   waitpointTokensByStepId,
   heatmapBuckets,
+  stepMetrics,
 }: TraceCanvasProps & { run: PipelineRun }) {
   const graphData = useMemo(
     () =>
@@ -183,8 +187,9 @@ function CanvasInner({
         workspaceId,
         waitpointTokensByStepId,
         heatmapBuckets,
+        stepMetrics,
       }),
-    [run, dsl, selectedStepId, workspaceId, waitpointTokensByStepId, heatmapBuckets],
+    [run, dsl, selectedStepId, workspaceId, waitpointTokensByStepId, heatmapBuckets, stepMetrics],
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)

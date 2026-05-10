@@ -122,9 +122,11 @@ export function RunTimelineRail({
   // for the hover card.
   const ctx = useMemo(() => {
     const cronBySlug = new Map<string, string>()
+    const scheduleByPipelineSlug = new Map<string, typeof schedules[number]>()
     for (const s of schedules) {
-      if (s.target_pipeline_slug && s.cron_expr) {
-        cronBySlug.set(s.target_pipeline_slug, s.cron_expr)
+      if (s.target_pipeline_slug) {
+        if (s.cron_expr) cronBySlug.set(s.target_pipeline_slug, s.cron_expr)
+        scheduleByPipelineSlug.set(s.target_pipeline_slug, s)
       }
     }
     const crewNameById = new Map(crews.map((c) => [c.id, c.name]))
@@ -149,6 +151,7 @@ export function RunTimelineRail({
       routineNameBySlug,
       runsByPipelineSlug,
       crewNameByPipelineSlug,
+      scheduleByPipelineSlug,
     }
   }, [schedules, crews, pipelines, runs])
 
@@ -205,6 +208,7 @@ export function RunTimelineRail({
               crewNameByPipelineSlug: ctx.crewNameByPipelineSlug,
               cronExprByPipelineSlug: ctx.cronBySlug,
               runsByPipelineSlug: ctx.runsByPipelineSlug,
+              scheduleByPipelineSlug: ctx.scheduleByPipelineSlug,
             }}
           />
         )}

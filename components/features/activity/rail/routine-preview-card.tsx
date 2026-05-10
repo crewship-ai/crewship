@@ -1,11 +1,15 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, Pause, Play } from "lucide-react"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Button } from "@/components/ui/button"
+import { toast } from "sonner"
 import { formatDuration, relTime } from "@/lib/activity/format-time"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
+import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 // RoutinePreviewCard — hover-triggered card with rollup stats for one
 // routine. Shown when the user hovers a routine row in the rail tree;
@@ -21,6 +25,11 @@ interface RoutinePreviewCardProps {
   crewName?: string
   cronExpr?: string
   runs: PipelineRun[]
+  // Optional: the schedule this routine is bound to. When present
+  // the card surfaces next-run + enable/disable controls — turning
+  // a hover preview into a quick remediation surface for noisy
+  // crons ("pause this thing, it's failing every minute").
+  schedule?: PipelineSchedule | null
   children: React.ReactNode
 }
 
@@ -30,9 +39,11 @@ export function RoutinePreviewCard({
   crewName,
   cronExpr,
   runs,
+  schedule,
   children,
 }: RoutinePreviewCardProps) {
   const stats = useMemo(() => computeStats(runs), [runs])
+  const lastFail = useMemo(() => findLastFailReason(runs), [runs])
 
   return (
     <HoverCard openDelay={300} closeDelay={50}>
@@ -87,7 +98,25 @@ export function RoutinePreviewCard({
               <span>{relTime(stats.lastAt)}</span>
             </Row>
           )}
+          {schedule?.next_run_at && (
+            <Row label="Next run">
+              <span>{relTime(schedule.next_run_at)}</span>
+            </Row>
+          )}
+          {schedule && (
+            <Row label="Schedule">
+              <span className={schedule.enabled ? "text-emerald-300" : "text-muted-foreground/50"}>
+                {schedule.enabled ? "enabled" : "paused"}
+              </span>
+            </Row>
+          )}
         </dl>
+
+        {lastFail && stats.failed > 0 && (
+          <div className="border-t border-rose-500/30 bg-rose-500/10 px-3 py-1.5 font-mono text-[10px] text-rose-200">
+            <span className="opacity-70">Last failure:</span> {lastFail}
+          </div>
+        )}
 
         <div className="flex gap-1 border-t border-border p-2">
           <Link
@@ -97,10 +126,81 @@ export function RoutinePreviewCard({
             <ExternalLink className="h-3 w-3" />
             Open routine
           </Link>
+          {schedule && <ScheduleToggle schedule={schedule} />}
         </div>
       </HoverCardContent>
     </HoverCard>
   )
+}
+
+function ScheduleToggle({ schedule }: { schedule: PipelineSchedule }) {
+  const { workspaceId } = useWorkspace()
+  const [busy, setBusy] = useState(false)
+  const [enabled, setEnabled] = useState(schedule.enabled)
+  const Icon = enabled ? Pause : Play
+  const label = enabled ? "Pause" : "Resume"
+  const onToggle = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!workspaceId || busy) return
+    setBusy(true)
+    const next = !enabled
+    try {
+      const res = await fetch(
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-schedules/${encodeURIComponent(schedule.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: next }),
+        },
+      )
+      if (!res.ok) {
+        toast.error(`Schedule update failed (${res.status})`)
+        return
+      }
+      setEnabled(next)
+      toast.success(next ? "Schedule resumed" : "Schedule paused")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Schedule update failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Button
+      type="button"
+      onClick={onToggle}
+      disabled={busy}
+      size="xs"
+      variant="ghost"
+      className="flex-1 gap-1 text-[10px]"
+    >
+      <Icon className="h-3 w-3" />
+      {label}
+    </Button>
+  )
+}
+
+function findLastFailReason(runs: PipelineRun[]): string | null {
+  const sorted = [...runs].sort(
+    (a, b) => (parseTs(b.started_at) ?? 0) - (parseTs(a.started_at) ?? 0),
+  )
+  for (const r of sorted) {
+    if (
+      (r.status === "failed" || r.status === "cancelled" || r.status === "interrupted") &&
+      r.error_message
+    ) {
+      const msg = r.error_message
+      return msg.length > 120 ? msg.slice(0, 119) + "…" : msg
+    }
+  }
+  return null
+}
+
+function parseTs(iso?: string): number | null {
+  if (!iso) return null
+  const t = new Date(iso).getTime()
+  return Number.isNaN(t) ? null : t
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {

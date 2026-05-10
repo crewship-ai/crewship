@@ -29,6 +29,7 @@ import type {
 } from "@/lib/trace/types"
 import { waitpointDecide } from "@/lib/api/waitpoints"
 import { HEATMAP_BORDER_CLASS } from "@/lib/trace/percentile-heatmap"
+import { StepHoverCard } from "./step-hover-card"
 
 export type { TraceStepNodeData, TraceTriggerNodeData }
 
@@ -184,7 +185,7 @@ function hostnameFromTemplate(raw: string): string {
 
 function TraceStepNodeBase({ data }: NodeProps) {
   const d = data as unknown as TraceStepNodeData
-  const { step, status, selected, waitpoint, heatmapBucket } = d
+  const { step, status, selected, waitpoint, heatmapBucket, durationMs, costUsd, outputSnippet, errorMessage } = d
   const visual = KIND_VISUAL[step.type] ?? KIND_VISUAL.agent_run
   const Icon = visual.Icon
   const ring = STATUS_RING[status]
@@ -194,7 +195,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
   // and Space dispatch a click on the same element, which bubbles up
   // through React Flow's node wrapper and fires the canvas-level
   // onNodeClick handler — same code path as a mouse click.
-  return (
+  const nodeBody = (
     <div
       role="button"
       tabIndex={0}
@@ -251,6 +252,20 @@ function TraceStepNodeBase({ data }: NodeProps) {
 
       {waitpoint && <WaitpointActions waitpoint={waitpoint} />}
     </div>
+  )
+  return (
+    <StepHoverCard
+      payload={{
+        step,
+        status,
+        durationMs,
+        costUsd,
+        outputSnippet,
+        errorMessage,
+      }}
+    >
+      {nodeBody}
+    </StepHoverCard>
   )
 }
 

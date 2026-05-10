@@ -36,6 +36,7 @@ interface RunGroupTreeProps {
     crewNameByPipelineSlug: Map<string, string>
     cronExprByPipelineSlug: Map<string, string>
     runsByPipelineSlug: Map<string, PipelineRun[]>
+    scheduleByPipelineSlug: Map<string, import("@/hooks/use-pipeline-schedules").PipelineSchedule>
   }
 }
 
@@ -155,6 +156,7 @@ function GroupNode({
         crewName={routineCardCtx.crewNameByPipelineSlug.get(group.metadata.routineSlug)}
         cronExpr={routineCardCtx.cronExprByPipelineSlug.get(group.metadata.routineSlug) ?? group.metadata.cronExpr}
         runs={routineCardCtx.runsByPipelineSlug.get(group.metadata.routineSlug) ?? []}
+        schedule={routineCardCtx.scheduleByPipelineSlug.get(group.metadata.routineSlug)}
       >
         {headerInner}
       </RoutinePreviewCard>

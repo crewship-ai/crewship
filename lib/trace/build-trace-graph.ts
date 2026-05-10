@@ -11,7 +11,10 @@ import type {
 } from "./types"
 import { formatEdgeLabel, parseDataFlowEdges } from "./parse-data-flow"
 import type { HeatmapBucket } from "./percentile-heatmap"
+import type { StepMetric } from "@/hooks/use-step-metrics"
 import { summarizeValue } from "@/lib/format/summarize-value"
+
+const OUTPUT_SNIPPET_MAX = 240
 
 // buildTraceGraph — turns one (run, dsl) pair into ReactFlow nodes
 // and edges for the trace canvas.
@@ -43,6 +46,9 @@ interface BuildTraceGraphOptions {
   // the (cheap) percentile bucketing OUT of the hot rebuild path
   // means a stepMetrics change doesn't force a full dagre relayout.
   heatmapBuckets?: ReadonlyMap<string, HeatmapBucket>
+  // Per-step duration + cost from the journal — surfaced in the
+  // hover preview without forcing the rebuild path through shadeNodes.
+  stepMetrics?: ReadonlyMap<string, StepMetric>
 }
 
 export interface TraceGraphData {
@@ -131,18 +137,29 @@ export function buildTraceGraph(
 
   // One step node per DSL step.
   const heatmapBuckets = opts.heatmapBuckets
+  const metrics = opts.stepMetrics
+  const stepOutputs = run.step_outputs ?? {}
   for (const step of effectiveSteps) {
     const token = opts.waitpointTokensByStepId?.get(step.id)
     const waitpoint =
       token && opts.workspaceId
         ? { token, workspaceId: opts.workspaceId }
         : null
+    const m = metrics?.get(step.id)
+    const rawOutput = stepOutputs[step.id]
+    const isFailed =
+      run.failed_at_step === step.id ||
+      (run.status === "failed" && step.id === run.current_step_id)
     const data: TraceStepNodeData = {
       step,
       status: statusOf(run, step, effectiveSteps),
       selected: opts.selectedStepId === step.id,
       waitpoint,
       heatmapBucket: heatmapBuckets?.get(step.id) ?? null,
+      durationMs: m?.durationMs ?? null,
+      costUsd: m?.costUsd ?? null,
+      outputSnippet: snippetFromOutput(rawOutput),
+      errorMessage: isFailed && run.error_message ? run.error_message : null,
     }
     nodes.push({
       id: step.id,
@@ -238,6 +255,29 @@ export function buildTraceGraph(
   }
 
   return { nodes, edges }
+}
+
+// snippetFromOutput — short preview of a step's persisted output
+// for the hover card. JSON values render as compact JSON; raw text
+// is hard-truncated. Mirrors what summarizeValue does but biased
+// toward readability over disambiguation (no quotes around plain
+// strings).
+function snippetFromOutput(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return summarizeValue(JSON.parse(trimmed), { maxChars: OUTPUT_SNIPPET_MAX })
+      } catch {
+        /* fall through */
+      }
+    }
+    return trimmed.length > OUTPUT_SNIPPET_MAX
+      ? trimmed.slice(0, OUTPUT_SNIPPET_MAX - 1) + "…"
+      : trimmed
+  }
+  return summarizeValue(value, { maxChars: OUTPUT_SNIPPET_MAX })
 }
 
 // previewValueAtPath — given an upstream step's output and a JSON
