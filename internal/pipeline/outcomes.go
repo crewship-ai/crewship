@@ -45,7 +45,7 @@ func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutpu
 		return graderResult{passed: true}, 0, nil
 	}
 
-	prompt := buildGraderPrompt(step, workerOutput)
+	prompt := buildGraderPrompt(step, workerOutput, in.Inputs)
 
 	// Build a synthetic AgentStepRequest pointing at the grader
 	// agent slug. We DON'T inherit step.Complexity / ModelOverride
@@ -107,7 +107,14 @@ func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutpu
 // Outcomes feature uses a constrained JSON-out approach for the
 // same reason (parse reliability). The grader reads named criteria,
 // emits per-criterion booleans + a single feedback paragraph.
-func buildGraderPrompt(step Step, workerOutput string) string {
+//
+// `runInputs` is the run's input map. Criteria like "preserves the
+// meaning of the original input" need access to that input to make
+// any judgement at all; without it the grader correctly refuses to
+// rate. Marshalled into the prompt under <run_inputs> so the rubric
+// can reference fields by name (e.g. inputs.text) the same way the
+// step prompt did.
+func buildGraderPrompt(step Step, workerOutput string, runInputs map[string]any) string {
 	var b strings.Builder
 	b.WriteString("You are an output grader. Evaluate the artifact below against the listed criteria.\n\n")
 	b.WriteString("Return STRICT JSON in this exact shape (no markdown, no prose outside the JSON):\n")
@@ -124,6 +131,18 @@ func buildGraderPrompt(step Step, workerOutput string) string {
 			fmt.Fprintf(&b, "    description: %s\n", c.Description)
 		}
 	}
+
+	if len(runInputs) > 0 {
+		// Marshal errors here would be exotic (the same map already
+		// round-tripped through inputs_json). Defensive fallback to
+		// an empty block keeps the rest of the prompt usable.
+		if blob, err := json.MarshalIndent(runInputs, "", "  "); err == nil {
+			b.WriteString("\nRun inputs (the original payload that produced the artifact):\n<run_inputs>\n")
+			b.Write(blob)
+			b.WriteString("\n</run_inputs>\n")
+		}
+	}
+
 	b.WriteString("\nArtifact to grade:\n<artifact>\n")
 	b.WriteString(workerOutput)
 	b.WriteString("\n</artifact>\n\nNow return the JSON verdict.\n")
