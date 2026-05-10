@@ -161,22 +161,18 @@ func buildGraderPrompt(step Step, workerOutput string, runInputs map[string]any)
 }
 
 // parseGraderVerdict extracts the structured verdict from the
-// grader's output. We accept loose framing (some models like to
-// wrap JSON in ```json ... ```) and surface a hard error only when
-// no parseable JSON object is found at all. Missing per-criterion
-// entries are treated as failures — a grader that quietly skips a
-// rule should be treated as if that rule didn't pass.
+// grader's output. DecodeAgentJSON handles the loose framing every
+// LLM grader produces (markdown fence, prose preamble, trailing
+// chatter); missing per-criterion entries are still treated as
+// failures — a grader that quietly skips a rule should be treated
+// as if that rule didn't pass.
 func parseGraderVerdict(raw string, criteria []OutcomeCriterion) (graderResult, error) {
-	jsonBlob := extractJSONBlob(raw)
-	if jsonBlob == "" {
-		return graderResult{}, fmt.Errorf("no JSON object found in grader output")
-	}
 	var parsed struct {
 		Passed       bool            `json:"passed"`
 		PerCriterion map[string]bool `json:"per_criterion"`
 		Feedback     string          `json:"feedback"`
 	}
-	if err := json.Unmarshal([]byte(jsonBlob), &parsed); err != nil {
+	if err := DecodeAgentJSON(raw, &parsed); err != nil {
 		return graderResult{}, fmt.Errorf("unmarshal: %w", err)
 	}
 
@@ -212,53 +208,6 @@ func parseGraderVerdict(raw string, criteria []OutcomeCriterion) (graderResult, 
 		out.feedback = fmt.Sprintf("grader did not return verdicts for criteria: %s", strings.Join(missing, ", "))
 	}
 	return out, nil
-}
-
-// extractJSONBlob pulls the first balanced { ... } from raw text.
-// Handles graders that wrap JSON in ```json fences or include a
-// preamble. We don't try to repair malformed JSON — if the brace
-// balance is off, parseGraderVerdict's Unmarshal will surface the
-// error to the caller.
-func extractJSONBlob(raw string) string {
-	// Common case: pure JSON.
-	trimmed := strings.TrimSpace(raw)
-	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
-		return trimmed
-	}
-	// Markdown fences: ```json\n{...}\n```.
-	if i := strings.Index(raw, "```"); i >= 0 {
-		fenced := raw[i+3:]
-		// strip optional language tag (json) on first line
-		if nl := strings.IndexByte(fenced, '\n'); nl >= 0 {
-			fenced = fenced[nl+1:]
-		}
-		if end := strings.LastIndex(fenced, "```"); end >= 0 {
-			candidate := strings.TrimSpace(fenced[:end])
-			if strings.HasPrefix(candidate, "{") && strings.HasSuffix(candidate, "}") {
-				return candidate
-			}
-		}
-	}
-	// Last resort: walk for the first '{', track brace depth, return
-	// when we close it. Doesn't handle braces inside strings
-	// perfectly, but verdict JSON shouldn't contain them.
-	start := strings.IndexByte(raw, '{')
-	if start < 0 {
-		return ""
-	}
-	depth := 0
-	for i := start; i < len(raw); i++ {
-		switch raw[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return raw[start : i+1]
-			}
-		}
-	}
-	return ""
 }
 
 // truncateForGraderLog is a small wrapper around the journal's
