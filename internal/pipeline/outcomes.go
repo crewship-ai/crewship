@@ -45,7 +45,7 @@ func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutpu
 		return graderResult{passed: true}, 0, nil
 	}
 
-	prompt := buildGraderPrompt(step, workerOutput)
+	prompt := buildGraderPrompt(step, workerOutput, in.Inputs)
 
 	// Build a synthetic AgentStepRequest pointing at the grader
 	// agent slug. We DON'T inherit step.Complexity / ModelOverride
@@ -107,7 +107,14 @@ func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutpu
 // Outcomes feature uses a constrained JSON-out approach for the
 // same reason (parse reliability). The grader reads named criteria,
 // emits per-criterion booleans + a single feedback paragraph.
-func buildGraderPrompt(step Step, workerOutput string) string {
+//
+// `runInputs` is the run's input map. Criteria like "preserves the
+// meaning of the original input" need access to that input to make
+// any judgement at all; without it the grader correctly refuses to
+// rate. Marshalled into the prompt under <run_inputs> so the rubric
+// can reference fields by name (e.g. inputs.text) the same way the
+// step prompt did.
+func buildGraderPrompt(step Step, workerOutput string, runInputs map[string]any) string {
 	var b strings.Builder
 	b.WriteString("You are an output grader. Evaluate the artifact below against the listed criteria.\n\n")
 	b.WriteString("Return STRICT JSON in this exact shape (no markdown, no prose outside the JSON):\n")
@@ -124,6 +131,29 @@ func buildGraderPrompt(step Step, workerOutput string) string {
 			fmt.Fprintf(&b, "    description: %s\n", c.Description)
 		}
 	}
+
+	if len(runInputs) > 0 {
+		// Marshal errors here would be exotic (the same map already
+		// round-tripped through inputs_json). Defensive fallback to
+		// an empty block keeps the rest of the prompt usable.
+		if blob, err := json.MarshalIndent(runInputs, "", "  "); err == nil {
+			// Spell out the relationship explicitly. Earlier wording
+			// ("the original payload") had graders refusing to evaluate
+			// criteria like "preserves the original meaning" or "every
+			// claim appears verbatim in the context" because they
+			// didn't realize <run_inputs> WAS the source of those
+			// reference values. Naming the common patterns up front
+			// (input / original / context / source) covers the rubrics
+			// that actually appear in routines today.
+			b.WriteString("\nRun inputs — REFERENCE these when evaluating criteria. Anything the rubric calls\n")
+			b.WriteString("\"the input\", \"the original\", \"the context\", \"the source\", \"the source document\",\n")
+			b.WriteString("or names a specific input field (e.g. inputs.text, inputs.context) lives here:\n")
+			b.WriteString("<run_inputs>\n")
+			b.Write(blob)
+			b.WriteString("\n</run_inputs>\n")
+		}
+	}
+
 	b.WriteString("\nArtifact to grade:\n<artifact>\n")
 	b.WriteString(workerOutput)
 	b.WriteString("\n</artifact>\n\nNow return the JSON verdict.\n")
@@ -131,22 +161,18 @@ func buildGraderPrompt(step Step, workerOutput string) string {
 }
 
 // parseGraderVerdict extracts the structured verdict from the
-// grader's output. We accept loose framing (some models like to
-// wrap JSON in ```json ... ```) and surface a hard error only when
-// no parseable JSON object is found at all. Missing per-criterion
-// entries are treated as failures — a grader that quietly skips a
-// rule should be treated as if that rule didn't pass.
+// grader's output. DecodeAgentJSON handles the loose framing every
+// LLM grader produces (markdown fence, prose preamble, trailing
+// chatter); missing per-criterion entries are still treated as
+// failures — a grader that quietly skips a rule should be treated
+// as if that rule didn't pass.
 func parseGraderVerdict(raw string, criteria []OutcomeCriterion) (graderResult, error) {
-	jsonBlob := extractJSONBlob(raw)
-	if jsonBlob == "" {
-		return graderResult{}, fmt.Errorf("no JSON object found in grader output")
-	}
 	var parsed struct {
 		Passed       bool            `json:"passed"`
 		PerCriterion map[string]bool `json:"per_criterion"`
 		Feedback     string          `json:"feedback"`
 	}
-	if err := json.Unmarshal([]byte(jsonBlob), &parsed); err != nil {
+	if err := DecodeAgentJSON(raw, &parsed); err != nil {
 		return graderResult{}, fmt.Errorf("unmarshal: %w", err)
 	}
 
@@ -182,53 +208,6 @@ func parseGraderVerdict(raw string, criteria []OutcomeCriterion) (graderResult, 
 		out.feedback = fmt.Sprintf("grader did not return verdicts for criteria: %s", strings.Join(missing, ", "))
 	}
 	return out, nil
-}
-
-// extractJSONBlob pulls the first balanced { ... } from raw text.
-// Handles graders that wrap JSON in ```json fences or include a
-// preamble. We don't try to repair malformed JSON — if the brace
-// balance is off, parseGraderVerdict's Unmarshal will surface the
-// error to the caller.
-func extractJSONBlob(raw string) string {
-	// Common case: pure JSON.
-	trimmed := strings.TrimSpace(raw)
-	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
-		return trimmed
-	}
-	// Markdown fences: ```json\n{...}\n```.
-	if i := strings.Index(raw, "```"); i >= 0 {
-		fenced := raw[i+3:]
-		// strip optional language tag (json) on first line
-		if nl := strings.IndexByte(fenced, '\n'); nl >= 0 {
-			fenced = fenced[nl+1:]
-		}
-		if end := strings.LastIndex(fenced, "```"); end >= 0 {
-			candidate := strings.TrimSpace(fenced[:end])
-			if strings.HasPrefix(candidate, "{") && strings.HasSuffix(candidate, "}") {
-				return candidate
-			}
-		}
-	}
-	// Last resort: walk for the first '{', track brace depth, return
-	// when we close it. Doesn't handle braces inside strings
-	// perfectly, but verdict JSON shouldn't contain them.
-	start := strings.IndexByte(raw, '{')
-	if start < 0 {
-		return ""
-	}
-	depth := 0
-	for i := start; i < len(raw); i++ {
-		switch raw[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return raw[start : i+1]
-			}
-		}
-	}
-	return ""
 }
 
 // truncateForGraderLog is a small wrapper around the journal's

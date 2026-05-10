@@ -212,3 +212,45 @@ func TestValidateOutput_NilValidation_Passes(t *testing.T) {
 		t.Fatalf("nil validation should accept arbitrary output, got reason=%q", reason)
 	}
 }
+
+// LLMs ignore "no prose outside the JSON" prompts in three reliable
+// ways; the candidate extractor + json.Decoder combo accepts all of
+// them so the validator stops being a per-pipeline whack-a-mole.
+
+func TestValidateOutput_SchemaGate_AcceptsLLMQuirks(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","required":["k"]}`)
+	v := &Validation{Schema: schema}
+	cases := map[string]string{
+		"fenced with json tag":        "```json\n{\"k\":1}\n```",
+		"fenced upper-case tag":       "```JSON\n{\"k\":1}\n```",
+		"fenced no tag":               "```\n{\"k\":1}\n```",
+		"fenced with leading space":   "  ```json\n{\"k\":1}\n```\n",
+		"fenced unclosed (truncated)": "```json\n{\"k\":1}",
+		"prose preamble":              "Here is the JSON you asked for:\n{\"k\":1}",
+		"markdown bullet preamble":    "* Quick note: see below.\n{\"k\":1}",
+		"prose suffix":                "{\"k\":1}\nLet me know if you need anything else.",
+		"both preamble and fence":     "Sure!\n```json\n{\"k\":1}\n```",
+		"bare json":                   `{"k":1}`,
+	}
+	for name, raw := range cases {
+		ok, reason := validateOutput(raw, v)
+		if !ok {
+			t.Errorf("case %s: expected pass for %q, got reason=%q", name, raw, reason)
+		}
+	}
+}
+
+func TestValidateOutput_SchemaGate_StillRejectsRealNonJSON(t *testing.T) {
+	// Regression guard: the extractor must not turn pure prose into
+	// a passing case. Without a `{` or `[` anywhere, validation must
+	// still fail with the "output not valid JSON" prefix.
+	schema := json.RawMessage(`{"type":"object"}`)
+	v := &Validation{Schema: schema}
+	ok, reason := validateOutput("nothing here looks like JSON at all", v)
+	if ok {
+		t.Fatal("prose-only input must not pass validation")
+	}
+	if !strings.HasPrefix(reason, "output not valid JSON:") {
+		t.Errorf("reason prefix wrong: %q", reason)
+	}
+}

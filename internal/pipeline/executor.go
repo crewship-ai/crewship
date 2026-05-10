@@ -520,6 +520,13 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 	}
 
 	inputsForCtx := mergeInputs(in.Inputs, dsl)
+	// Update in.Inputs to the defaults-merged map so any downstream
+	// consumer that takes `in` (the outcomes grader, persistence,
+	// nested call_pipeline runs) sees the same effective input set
+	// templates render against. Without this, a curl POST with `{}`
+	// reaches the grader as `in.Inputs = {}` and rubrics that
+	// reference "the original input" can't resolve anything.
+	in.Inputs = inputsForCtx
 	result := &RunResult{
 		RunID:        runID,
 		PipelineID:   pipelineID,
@@ -904,6 +911,24 @@ func (e *Executor) runStep(
 // escalation chain unfold ("trivial failed → fast attempted →
 // moderate succeeded"). The final returned output comes from the
 // attempt that satisfied the validation gate.
+//
+// Two quality wins layered on top of the bare tier-escalation chain:
+//
+//  1. Same-tier transient retry. Network blips, rate limits, and
+//     truncated empty completions used to immediately jump to a
+//     more expensive tier — wasteful, and the bigger model is no
+//     more resilient to a 429 than the small one. Now each tier
+//     gets retryAttemptsPerTier shots with backoff before we move
+//     on. Empty output (string-trim length 0) is treated as the
+//     same class of transient since a Haiku rate-limit truncation
+//     reaches the runner as success+empty rather than as an error.
+//
+//  2. Feedback-loop on tier escalation. When validation fails on
+//     tier N, the next tier was previously handed the SAME prompt —
+//     so it had no idea what to do differently. Now we prepend a
+//     short feedback block ("PREVIOUS ATTEMPT FAILED VALIDATION:
+//     <reason>. Address this exactly.") so the next tier knows
+//     what the schema gate or rubric grader rejected last time.
 func (e *Executor) runAgentStep(
 	ctx context.Context,
 	step Step,
@@ -924,16 +949,23 @@ func (e *Executor) runAgentStep(
 	totalCost := 0.0
 	startTotal := time.Now()
 	var lastValidationReason string
+	basePrompt := prompt
 
 	for i, am := range attempts {
 		stepStart := time.Now()
+		// Inject feedback from the previous tier's failure into the
+		// retry prompt so the new tier knows what to fix.
+		attemptPrompt := basePrompt
+		if i > 0 && lastValidationReason != "" {
+			attemptPrompt = injectValidationFeedback(basePrompt, lastValidationReason)
+		}
 		req := AgentStepRequest{
 			WorkspaceID:     in.WorkspaceID,
 			AuthorCrewID:    in.AuthorCrewID,
 			AgentSlug:       step.AgentSlug,
 			Adapter:         am.Adapter,
 			Model:           am.Model,
-			Prompt:          prompt,
+			Prompt:          attemptPrompt,
 			TimeoutSec:      step.TimeoutSec,
 			PipelineID:      pipelineID,
 			PipelineRunID:   runID,
@@ -941,14 +973,12 @@ func (e *Executor) runAgentStep(
 			InvokingCrewID:  in.InvokingCrewID,
 			InvokingAgentID: in.InvokingAgentID,
 		}
-		res, err := e.runner.RunStep(ctx, req)
+		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
 		if err != nil {
 			emit.emitStepFailed(ctx, step, "agent_run_error", err.Error())
-			// Treat outright runner failure (network / timeout / 5xx)
-			// the same as a non-retryable validation failure: we
-			// escalate to the next tier if escalate_tier is set, else
-			// abort. This is conservative — Phase 2 will distinguish
-			// retry-able errors from permanent ones.
+			// Treat outright runner failure as a candidate for tier
+			// escalation: the next-bigger tier might be hosted on a
+			// different region / API key combo and dodge the failure.
 			if onFail == OnFailEscalateTier && i < len(attempts)-1 {
 				continue
 			}
@@ -1030,6 +1060,171 @@ func (e *Executor) runAgentStep(
 	// (validation OR outcomes — they share lastValidationReason).
 	return "", totalCost, time.Since(startTotal).Milliseconds(),
 		fmt.Errorf("step failed after exhausting tiers: %s", lastValidationReason)
+}
+
+// retryAttemptsPerTier caps the same-tier transient retry loop in
+// runRunnerWithTransientRetry. Two attempts is enough to absorb the
+// occasional 429 / 5xx / empty-completion without dramatically
+// extending the wall clock; bigger numbers tip the cost balance back
+// toward "just escalate to the next tier and pay for the smarter
+// model". A pipeline that wants more aggressive retries can still
+// opt in via step.Retry, which runs ON TOP of this floor.
+const retryAttemptsPerTier = 2
+
+// transientRetryBackoff is the floor delay before the second attempt
+// in the same tier. We add full jitter on top so concurrent runs
+// hitting the same upstream don't stampede the recovery moment.
+const transientRetryBackoff = 800 * time.Millisecond
+
+// runRunnerWithTransientRetry calls the agent runner and silently
+// reissues on transient-class failures (rate limit, timeout, 5xx,
+// truncated empty completion). The caller sees a single result —
+// either the first success or the last error — but the journal
+// gets one emitStepRetry entry per retry so the rail / inspector
+// shows the recovery in the run timeline.
+//
+// Why we treat empty output as a transient: under load, Anthropic's
+// API has been observed to return success + empty body when the
+// upstream cancelled the response stream. Validating "" as a real
+// answer immediately escalates to a more expensive tier that will
+// usually produce the same empty under the same pressure. Retrying
+// once on the same tier is cheaper and typically succeeds.
+func (e *Executor) runRunnerWithTransientRetry(
+	ctx context.Context,
+	req AgentStepRequest,
+	step Step,
+	emit *pipelineEmitContext,
+) (AgentStepResult, error) {
+	var (
+		res     AgentStepResult
+		err     error
+		lastErr error
+	)
+	for attempt := 1; attempt <= retryAttemptsPerTier; attempt++ {
+		if cerr := ctx.Err(); cerr != nil {
+			return AgentStepResult{}, cerr
+		}
+		res, err = e.runner.RunStep(ctx, req)
+		if err != nil {
+			lastErr = err
+			if attempt < retryAttemptsPerTier && isTransientRunnerError(err) {
+				emit.emitStepRetry(ctx, step, attempt, err.Error(), transientRetryBackoff)
+				if !sleepWithJitter(ctx, transientRetryBackoff) {
+					return AgentStepResult{}, ctx.Err()
+				}
+				continue
+			}
+			return res, err
+		}
+		// Empty success body — treat as transient on first attempt.
+		if attempt < retryAttemptsPerTier && strings.TrimSpace(res.Output) == "" {
+			lastErr = fmt.Errorf("agent runner returned empty output")
+			emit.emitStepRetry(ctx, step, attempt, "empty output", transientRetryBackoff)
+			if !sleepWithJitter(ctx, transientRetryBackoff) {
+				return AgentStepResult{}, ctx.Err()
+			}
+			continue
+		}
+		return res, nil
+	}
+	if err != nil {
+		return res, err
+	}
+	return res, lastErr
+}
+
+// transientErrorMarkers names the substrings that classify a runner
+// error as worth retrying on the same tier. Lowercased and matched
+// case-insensitively. Curated from real failures on the dev VM (rate
+// limits and load-shedding 5xx from upstream LLM providers, plus
+// container-network blips from Docker).
+var transientErrorMarkers = []string{
+	"429",
+	"rate limit",
+	"rate_limit",
+	"too many requests",
+	"timeout",
+	"timed out",
+	"deadline exceeded",
+	"500", "502", "503", "504",
+	"internal server error",
+	"bad gateway",
+	"service unavailable",
+	"gateway timeout",
+	"connection refused",
+	"connection reset",
+	"broken pipe",
+	"eof",
+}
+
+// isTransientRunnerError reports whether `err` matches one of the
+// markers we treat as worth retrying. context.Cancelled / DeadlineExceeded
+// are NOT transient for this purpose — those mean the caller wanted
+// the work to stop, and retrying would race against the cleanup.
+func isTransientRunnerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "context deadline") {
+		return false
+	}
+	for _, marker := range transientErrorMarkers {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// sleepWithJitter sleeps for a random duration in [delay/2, delay)
+// or returns false if the context is cancelled during the wait.
+// Half-base + random keeps collisions between concurrent retries
+// rare without making any one retry pathologically slow.
+func sleepWithJitter(ctx context.Context, delay time.Duration) bool {
+	half := delay / 2
+	jittered := half + time.Duration(mathrand.Int64N(int64(delay-half+1)))
+	t := time.NewTimer(jittered)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// injectValidationFeedback prepends a short "previous attempt failed"
+// block to the original prompt. The block is fenced with [...] so it
+// reads as out-of-band guidance, not as part of the user task. We
+// keep the original prompt verbatim below so the new tier sees the
+// same task description plus the new constraint.
+//
+// Length is capped: a long-winded grader feedback would otherwise
+// dilute the prompt and waste tokens. 600 bytes is enough for the
+// rubric reason + a sentence of context. Truncation walks back to
+// the nearest UTF-8 rune boundary so a grader reply ending mid-emoji
+// (or any multi-byte char) doesn't ship a malformed string into the
+// next worker call. Mirrors the pattern in truncateForGraderLog.
+func injectValidationFeedback(prompt, reason string) string {
+	const maxReason = 600
+	r := strings.TrimSpace(reason)
+	if r == "" {
+		return prompt
+	}
+	if len(r) > maxReason {
+		cut := maxReason - 1
+		for cut > 0 && cut > maxReason-5 && (r[cut]&0xc0) == 0x80 {
+			cut--
+		}
+		r = r[:cut] + "…"
+	}
+	return "[PREVIOUS ATTEMPT FAILED VALIDATION: " + r + "\n" +
+		"Address the failure exactly in this response. Do not repeat the same mistake.]\n\n" +
+		prompt
 }
 
 // outcomesOnFail returns the OnFail action for outcomes failures,
@@ -1193,7 +1388,7 @@ func validateAgainstSchema(output string, schemaBytes json.RawMessage) (ok bool,
 		return false, "schema invalid: " + truncate(err.Error(), 200)
 	}
 	var doc any
-	if err := json.Unmarshal([]byte(output), &doc); err != nil {
+	if err := DecodeAgentJSON(output, &doc); err != nil {
 		return false, "output not valid JSON: " + truncate(err.Error(), 200)
 	}
 	if err := schema.Validate(doc); err != nil {

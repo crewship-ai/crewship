@@ -9,14 +9,12 @@ import {
   ChevronDown,
   ChevronRight,
   CircleDot,
-  Clock,
   Globe,
   Loader2,
   PauseCircle,
   ScrollText,
   Sparkles,
   Webhook,
-  XCircle,
 } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import Link from "next/link"
@@ -24,6 +22,8 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePipelineRuns, type PipelineRun } from "@/hooks/use-pipeline-runs"
+import { statusIcon, statusTint } from "@/lib/activity/run-status"
+import { relTime, formatDuration } from "@/lib/activity/format-time"
 
 // RunsView — the /activity "what's happening right now" surface.
 // Each row is one pipeline_run. Collapsed shows source pill + routine
@@ -579,61 +579,3 @@ function EmptyState({ filter }: { filter: StatusFilter }) {
   )
 }
 
-// ── helpers ────────────────────────────────────────────────────────
-
-function statusIcon(status: string) {
-  switch (status) {
-    case "running":
-    case "queued":
-      return Loader2
-    case "paused":
-      return PauseCircle
-    case "completed":
-      return Check
-    case "failed":
-    case "cancelled":
-    case "interrupted":
-      return XCircle
-    default:
-      return Clock
-  }
-}
-
-function statusTint(status: string) {
-  switch (status) {
-    case "running":
-    case "queued":
-      return { bg: "bg-blue-500/15", icon: "animate-spin text-blue-400", text: "text-blue-300" }
-    case "paused":
-      return { bg: "bg-amber-500/15", icon: "text-amber-400 animate-pulse", text: "text-amber-300" }
-    case "completed":
-      return { bg: "bg-emerald-500/15", icon: "text-emerald-400", text: "text-emerald-300" }
-    case "failed":
-    case "cancelled":
-    case "interrupted":
-      return { bg: "bg-rose-500/15", icon: "text-rose-400", text: "text-rose-300" }
-    default:
-      return { bg: "bg-white/[0.06]", icon: "text-muted-foreground", text: "text-muted-foreground" }
-  }
-}
-
-function relTime(iso?: string) {
-  if (!iso) return "—"
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return "—"
-  const diff = Date.now() - d.getTime()
-  if (Math.abs(diff) < 60_000) return "just now"
-  const mins = Math.round(Math.abs(diff) / 60_000)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.round(hrs / 24)}d ago`
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
-  const mins = Math.floor(ms / 60_000)
-  const secs = Math.floor((ms % 60_000) / 1000)
-  return `${mins}m ${secs}s`
-}

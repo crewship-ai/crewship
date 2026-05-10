@@ -23,23 +23,23 @@ package seeddata
 //
 // Categories covered (per the eval taxonomy in PIPELINES.md §17.eval):
 //
-//	 1. Pure transformation        — eval-extract-emails, eval-extract-numbers-sorted
-//	 2. Classification             — eval-classify-sentiment
-//	 3. Format compliance          — eval-json-extract-order
-//	 4. Reasoning chain            — eval-syllogism-reasoning
-//	 5. Refusal / adversarial      — eval-refuse-prompt-injection
-//	 6. Faithfulness (no halluc.)  — eval-faithfulness-rag (outcomes-graded)
-//	 7. Cross-family LLM judge     — eval-judge-cross-family (outcomes-graded)
-//	 8. Cost guardrail             — eval-cost-budget-haiku
-//	 9. Boundary / empty input     — eval-boundary-empty-input
-//	10. Trajectory (DAG)           — eval-trajectory-fetch-summarize
-//	11. Idempotency / concurrency  — eval-idempotent-by-key
-//	12. Tier escalation loop       — eval-escalate-on-rubric-fail (outcomes-graded)
-//	13. Translation roundtrip      — eval-translation-roundtrip (outcomes-graded)
-//	14. Date arithmetic            — eval-date-arithmetic
-//	15. Noisy-context extraction   — eval-noisy-context-extraction
-//	16. Citation faithfulness      — eval-citation-faithfulness (outcomes-graded)
-//	17. Long-form coherence        — eval-long-form-coherence (outcomes-graded)
+//  1. Pure transformation        — eval-extract-emails, eval-extract-numbers-sorted
+//  2. Classification             — eval-classify-sentiment
+//  3. Format compliance          — eval-json-extract-order
+//  4. Reasoning chain            — eval-syllogism-reasoning
+//  5. Refusal / adversarial      — eval-refuse-prompt-injection
+//  6. Faithfulness (no halluc.)  — eval-faithfulness-rag (outcomes-graded)
+//  7. Cross-family LLM judge     — eval-judge-cross-family (outcomes-graded)
+//  8. Cost guardrail             — eval-cost-budget-haiku
+//  9. Boundary / empty input     — eval-boundary-empty-input
+//  10. Trajectory (DAG)           — eval-trajectory-fetch-summarize
+//  11. Idempotency / concurrency  — eval-idempotent-by-key
+//  12. Tier escalation loop       — eval-escalate-on-rubric-fail (outcomes-graded)
+//  13. Translation roundtrip      — eval-translation-roundtrip (outcomes-graded)
+//  14. Date arithmetic            — eval-date-arithmetic
+//  15. Noisy-context extraction   — eval-noisy-context-extraction
+//  16. Citation faithfulness      — eval-citation-faithfulness (outcomes-graded)
+//  17. Long-form coherence        — eval-long-form-coherence (outcomes-graded)
 //
 // Why these gates work for cross-tier consistency:
 //
@@ -66,9 +66,13 @@ package seeddata
 // is ~$0.05-0.10 (system prompt + tool defs + base context) before
 // the worker even reads the routine prompt. A $0.05 cap leaves zero
 // budget for the actual work and trips the guardrail on every Opus
-// run regardless of routine complexity. The $0.005 cap on
+// run regardless of routine complexity. The $0.01 cap on
 // `eval-cost-budget-haiku` is intentionally preserved — that scenario's
-// whole purpose is to trip the cap on tier escalation.
+// whole purpose is to trip the cap on tier escalation. The cap was
+// $0.005 originally; bumped to $0.01 on 2026-05-10 after Anthropic's
+// rate-card refresh nudged a single Haiku 4.5 echo to ~$0.007, which
+// would have made the happy path fail-by-design instead of the cap-
+// triggering escalation it was designed to test.
 var EvalScenarios = []RoutineDef{
 	// ────────────────────────────────────────────────────────────────────
 	// 1. Pure transformation — extract-emails
@@ -642,15 +646,19 @@ var EvalScenarios = []RoutineDef{
 	{
 		Slug:        "eval-cost-budget-haiku",
 		Name:        "Eval: cost budget (Haiku-only)",
-		Description: "Trivial step capped at $0.005 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Opus.",
+		Description: "Trivial step capped at $0.01 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
 		CrewSlug:    "quality",
 		Definition: map[string]interface{}{
-			"dsl_version":        "1.0",
-			"name":               "eval-cost-budget-haiku",
-			"display_name":       "Eval: cost budget (Haiku-only)",
-			"description":        "Trivial step capped at $0.005 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Opus.",
-			"estimated_cost_usd": 0.001,
-			"max_cost_usd":       0.005,
+			"dsl_version":  "1.0",
+			"name":         "eval-cost-budget-haiku",
+			"display_name": "Eval: cost budget (Haiku-only)",
+			"description":  "Trivial step capped at $0.01 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
+			// $0.01 fits a Haiku 4.5 echo (~$0.007) while still flagging
+			// a regression to Sonnet (~$0.04+) or Opus (~$0.15+). The
+			// original $0.005 was tight to Haiku 4 pricing and started
+			// biting after Anthropic's rate-card refresh.
+			"estimated_cost_usd": 0.002,
+			"max_cost_usd":       0.01,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
