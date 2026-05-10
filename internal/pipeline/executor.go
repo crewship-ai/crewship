@@ -520,6 +520,13 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (*RunResu
 	}
 
 	inputsForCtx := mergeInputs(in.Inputs, dsl)
+	// Update in.Inputs to the defaults-merged map so any downstream
+	// consumer that takes `in` (the outcomes grader, persistence,
+	// nested call_pipeline runs) sees the same effective input set
+	// templates render against. Without this, a curl POST with `{}`
+	// reaches the grader as `in.Inputs = {}` and rubrics that
+	// reference "the original input" can't resolve anything.
+	in.Inputs = inputsForCtx
 	result := &RunResult{
 		RunID:        runID,
 		PipelineID:   pipelineID,
