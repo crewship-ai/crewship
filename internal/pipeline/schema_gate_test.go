@@ -213,36 +213,44 @@ func TestValidateOutput_NilValidation_Passes(t *testing.T) {
 	}
 }
 
-// Markdown code fences are the most common reason an agent_run output
-// fails JSON validation despite a "no prose outside the JSON" prompt:
-// LLMs default to triple-backtick wrappers because that is what their
-// training data looks like. The unwrapper handles that case before the
-// schema gate runs.
+// LLMs ignore "no prose outside the JSON" prompts in three reliable
+// ways; the candidate extractor + json.Decoder combo accepts all of
+// them so the validator stops being a per-pipeline whack-a-mole.
 
-func TestValidateOutput_SchemaGate_UnwrapsJSONMarkdownFence(t *testing.T) {
+func TestValidateOutput_SchemaGate_AcceptsLLMQuirks(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","required":["k"]}`)
 	v := &Validation{Schema: schema}
-	cases := []string{
-		"```json\n{\"k\":1}\n```",
-		"```JSON\n{\"k\":1}\n```",
-		"```\n{\"k\":1}\n```",
-		"  ```json\n{\"k\":1}\n```\n",
-		"```json\n{\"k\":1}", // truncated, no closing fence
+	cases := map[string]string{
+		"fenced with json tag":       "```json\n{\"k\":1}\n```",
+		"fenced upper-case tag":      "```JSON\n{\"k\":1}\n```",
+		"fenced no tag":              "```\n{\"k\":1}\n```",
+		"fenced with leading space":  "  ```json\n{\"k\":1}\n```\n",
+		"fenced unclosed (truncated)": "```json\n{\"k\":1}",
+		"prose preamble":             "Here is the JSON you asked for:\n{\"k\":1}",
+		"markdown bullet preamble":   "* Quick note: see below.\n{\"k\":1}",
+		"prose suffix":               "{\"k\":1}\nLet me know if you need anything else.",
+		"both preamble and fence":    "Sure!\n```json\n{\"k\":1}\n```",
+		"bare json":                  `{"k":1}`,
 	}
-	for _, raw := range cases {
+	for name, raw := range cases {
 		ok, reason := validateOutput(raw, v)
 		if !ok {
-			t.Errorf("expected pass for %q, got reason=%q", raw, reason)
+			t.Errorf("case %s: expected pass for %q, got reason=%q", name, raw, reason)
 		}
 	}
 }
 
-func TestValidateOutput_SchemaGate_BareJSONStillWorks(t *testing.T) {
-	// Regression guard: the unwrapper must not mangle un-fenced JSON.
-	schema := json.RawMessage(`{"type":"object","required":["k"]}`)
+func TestValidateOutput_SchemaGate_StillRejectsRealNonJSON(t *testing.T) {
+	// Regression guard: the extractor must not turn pure prose into
+	// a passing case. Without a `{` or `[` anywhere, validation must
+	// still fail with the "output not valid JSON" prefix.
+	schema := json.RawMessage(`{"type":"object"}`)
 	v := &Validation{Schema: schema}
-	ok, reason := validateOutput(`{"k":1}`, v)
-	if !ok {
-		t.Fatalf("bare JSON should still pass, got %q", reason)
+	ok, reason := validateOutput("nothing here looks like JSON at all", v)
+	if ok {
+		t.Fatal("prose-only input must not pass validation")
+	}
+	if !strings.HasPrefix(reason, "output not valid JSON:") {
+		t.Errorf("reason prefix wrong: %q", reason)
 	}
 }

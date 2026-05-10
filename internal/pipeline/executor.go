@@ -1192,8 +1192,16 @@ func validateAgainstSchema(output string, schemaBytes json.RawMessage) (ok bool,
 	if err != nil {
 		return false, "schema invalid: " + truncate(err.Error(), 200)
 	}
+	// json.Decoder tolerates trailing prose after a complete JSON value.
+	// Combined with extractJSONCandidate (strips fences + scans to the
+	// first JSON delimiter), this accepts the three failure modes LLMs
+	// produce despite "no prose outside the JSON" prompts:
+	//   - markdown-fenced JSON (```json\n{...}\n```)
+	//   - JSON preceded by a preamble ("Here is the answer: {...}")
+	//   - JSON followed by trailing prose
+	dec := json.NewDecoder(strings.NewReader(extractJSONCandidate(output)))
 	var doc any
-	if err := json.Unmarshal([]byte(unwrapJSONFence(output)), &doc); err != nil {
+	if err := dec.Decode(&doc); err != nil {
 		return false, "output not valid JSON: " + truncate(err.Error(), 200)
 	}
 	if err := schema.Validate(doc); err != nil {
@@ -1202,43 +1210,57 @@ func validateAgainstSchema(output string, schemaBytes json.RawMessage) (ok bool,
 	return true, ""
 }
 
-// unwrapJSONFence strips a leading/trailing markdown code-fence wrapper
-// from agent output so json.Unmarshal sees the raw JSON underneath.
-// LLMs love wrapping JSON in ```json ... ``` even when the prompt
-// explicitly says "no prose outside the JSON" — fixing the prompt is
-// a per-pipeline whack-a-mole, fixing the validator handles every
-// existing and future routine in one place.
+// extractJSONCandidate prepares an LLM-emitted string for json.Decoder.
+// LLMs ignore "no prose outside the JSON" prompts in three reliable
+// ways; fixing the per-pipeline prompt is whack-a-mole, fixing the
+// validator handles every existing and future routine in one place.
 //
-// Behavior:
-//   - "```json\n{...}\n```" → "{...}"
-//   - "```\n{...}\n```"     → "{...}"
-//   - "{...}"               → unchanged
-//   - "```json\n{... not closed" → still strips opener so Unmarshal
-//     gets a chance to surface the truncation error rather than the
-//     fence error
+// Steps, in order:
+//  1. Strip a leading/trailing markdown code fence (```json … ``` or
+//     ``` … ```). Truncated streams without a closing fence still get
+//     the opener stripped so the next step can find a delimiter.
+//  2. If the result still doesn't start with a JSON delimiter ('{' or
+//     '['), scan forward to the first one and slice from there. That
+//     swallows preamble prose like "Here is the JSON:". Trailing
+//     prose is handled by json.Decoder, which reads one value and
+//     stops at the first complete delimiter pair.
 //
-// Surrounding whitespace is left to json.Unmarshal which handles it.
-func unwrapJSONFence(s string) string {
+// If neither step finds a candidate, the original string is returned
+// so the Decoder can produce its own error message rather than us
+// silently mangling unrelated input.
+func extractJSONCandidate(s string) string {
 	t := strings.TrimSpace(s)
-	if !strings.HasPrefix(t, "```") {
+	if strings.HasPrefix(t, "```") {
+		// Drop the opening fence line. Anything until the first
+		// newline is the language tag we discard. Single-line fences
+		// (rare) get the bare prefix stripped.
+		if nl := strings.IndexByte(t, '\n'); nl >= 0 {
+			t = t[nl+1:]
+		} else {
+			t = strings.TrimPrefix(t, "```")
+		}
+		t = strings.TrimRight(t, " \t\n")
+		t = strings.TrimSuffix(t, "```")
+		t = strings.TrimSpace(t)
+	}
+	if strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") {
+		return t
+	}
+	// Scan for the earliest JSON delimiter. Whichever comes first wins.
+	obj := strings.IndexByte(t, '{')
+	arr := strings.IndexByte(t, '[')
+	switch {
+	case obj < 0 && arr < 0:
 		return s
+	case obj < 0:
+		return t[arr:]
+	case arr < 0:
+		return t[obj:]
+	case obj < arr:
+		return t[obj:]
+	default:
+		return t[arr:]
 	}
-	// Drop the opening fence line. Common shapes are "```json", "```",
-	// or "```JSON" — anything until the first newline is the language
-	// tag we discard.
-	if nl := strings.IndexByte(t, '\n'); nl >= 0 {
-		t = t[nl+1:]
-	} else {
-		// Single-line fence (rare); strip the leading backticks and
-		// hope for the best.
-		t = strings.TrimPrefix(t, "```")
-	}
-	// Drop a trailing closing fence if present. We don't require it —
-	// truncated streaming output sometimes loses the closer, and
-	// returning the JSON body without a trailing fence still parses.
-	t = strings.TrimRight(t, " \t\n")
-	t = strings.TrimSuffix(t, "```")
-	return t
 }
 
 // schemaCache holds compiled jsonschema.Schema pointers keyed by
