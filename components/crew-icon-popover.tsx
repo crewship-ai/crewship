@@ -8,7 +8,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import {
   searchCrewIcons, getCrewIconDef,
   CREW_ICON_CATEGORIES, GRADIENT_PALETTES,
-} from "@/lib/crew-icon"
+} from "@/lib/entities"
 import { cn } from "@/lib/utils"
 
 interface CrewIconPopoverProps {

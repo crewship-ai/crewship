@@ -7,7 +7,7 @@ import {
   getCrewDotColor,
   CREW_ICON_CATEGORIES,
   searchCrewIcons,
-} from "@/lib/crew-icon"
+} from "@/lib/entities"
 
 describe("CREW_ICONS registry", () => {
   it("contains canonical icons documented in CLAUDE.md (code, rocket, clipboard...)", () => {

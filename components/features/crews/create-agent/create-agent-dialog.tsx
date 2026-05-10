@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/agent-personas"
+import { BUILTIN_PERSONAS, type AgentPersona } from "@/lib/entities"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
 import { TemplateBrowser } from "./template-browser"
 import { PersonaChip, BlankChip } from "./persona-chip"
@@ -37,7 +37,7 @@ import {
   type AgentDraft,
   type CrewLite,
 } from "./types"
-import type { LLMProvider } from "@/lib/agent-personas"
+import type { LLMProvider } from "@/lib/entities"
 
 export interface CreateAgentDialogProps {
   workspaceId: string

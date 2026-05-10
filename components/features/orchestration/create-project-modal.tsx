@@ -37,7 +37,7 @@ const TiptapEditor = dynamic(
 import {
   searchCrewIcons, getCrewIconDef,
   CREW_ICON_CATEGORIES, GRADIENT_PALETTES,
-} from "@/lib/crew-icon"
+} from "@/lib/entities"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
 import { ISSUE_ICON_COLORS } from "@/lib/colors"

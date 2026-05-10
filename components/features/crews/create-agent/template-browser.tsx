@@ -6,8 +6,8 @@ import {
   BUILTIN_PERSONAS,
   filterPersonas,
   categoryCounts,
-} from "@/lib/agent-personas"
-import type { AgentPersona, PersonaCategory } from "@/lib/agent-personas"
+} from "@/lib/entities"
+import type { AgentPersona, PersonaCategory } from "@/lib/entities"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
 import { getModelLabel } from "@/lib/cli-adapters"

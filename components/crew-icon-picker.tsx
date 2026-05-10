@@ -5,7 +5,7 @@ import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { searchCrewIcons, getCrewIconDef, CREW_ICON_CATEGORIES } from "@/lib/crew-icon"
+import { searchCrewIcons, getCrewIconDef, CREW_ICON_CATEGORIES } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 
 interface CrewIconPickerProps {

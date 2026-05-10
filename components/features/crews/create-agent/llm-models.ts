@@ -1,4 +1,4 @@
-import type { LLMProvider } from "@/lib/agent-personas"
+import type { LLMProvider } from "@/lib/entities"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
 
 /** Curated model lists per LLM provider — what the dropdown offers when the
