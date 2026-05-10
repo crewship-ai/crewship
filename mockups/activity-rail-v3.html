@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Activity rail v3 — mockup</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #0a0d11; color: #e6e8ec; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 13px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .card { background: #111319; border: 1px solid #1f232b; }
+  .mute { color: #7a8593; }
+  .pip { width: 8px; height: 8px; border-radius: 9999px; display: inline-block; flex-shrink: 0; }
+  .pip-running { background: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); animation: pulse 1.5s infinite; }
+  .pip-paused  { background: #f59e0b; }
+  .pip-success { background: #10b981; }
+  .pip-failed  { background: #ef4444; }
+  .pip-queued  { background: #6366f1; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
+
+  .chip { display:inline-flex; align-items:center; gap:4px; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:500; line-height: 1.2; }
+  .chip-issue   { background: rgba(59,130,246,0.15); color: #93c5fd; }
+  .chip-cron    { background: rgba(139,92,246,0.15); color: #c4b5fd; }
+  .chip-webhook { background: rgba(245,158,11,0.15); color: #fcd34d; }
+  .chip-manual  { background: rgba(120,128,140,0.18); color: #cbd5e1; }
+  .chip-call    { background: rgba(168,85,247,0.12); color: #c4b5fd; }
+
+  .filter-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 6px; font-size:11px; border-radius:6px;
+                 background: rgba(59,130,246,0.10); color: #c7d6ee; border: 1px solid rgba(59,130,246,0.25); }
+  .filter-chip .op { color: #6b7d99; }
+  .filter-chip .val { font-weight: 500; color: #e6e8ec; }
+  .filter-chip button { color: #6b7d99; padding: 0 2px; }
+  .filter-chip button:hover { color: #e6e8ec; }
+
+  .pop { position: absolute; z-index: 50; background: #14171f; border: 1px solid #2a2f3a;
+         border-radius: 6px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+
+  .row:hover { background: rgba(255,255,255,0.03); }
+  .row-selected { background: rgba(59,130,246,0.10); }
+  .row-selected::before { content: ''; display: inline-block; width: 2px; align-self: stretch; background: #3b82f6; margin-right: 6px; }
+
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary { list-style: none; cursor: pointer; user-select: none; }
+  details > summary:hover { background: rgba(255,255,255,0.025); }
+
+  .badge-count { padding: 1px 6px; border-radius: 6px; font-size:10px; background: rgba(255,255,255,0.06); color:#94a3b8; line-height: 1.2; }
+  kbd { font-family: ui-monospace; font-size: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body class="p-6">
+
+<div class="max-w-7xl mx-auto">
+
+  <header class="mb-4">
+    <h1 class="text-lg font-semibold">/activity — left rail v3</h1>
+    <p class="text-sm mute mt-1">
+      Linear-style filter panel · group-by selector · cron grouping under parent routine · card preview on hover · virtualization-ready (<span class="mono">100s</span> of runs in scope).
+    </p>
+  </header>
+
+  <div class="flex gap-3">
+
+    <!-- ===== LEFT RAIL v3 ============================================= -->
+    <aside class="w-[380px] flex flex-col card rounded-md overflow-hidden h-[820px]">
+
+      <!-- ── Toolbar row 1: search ── -->
+      <div class="shrink-0 border-b border-[#1f232b] p-2 space-y-1.5">
+
+        <!-- Search box -->
+        <div class="relative">
+          <svg class="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" stroke-width="2"/><path d="M21 21l-3.5-3.5" stroke-width="2"/></svg>
+          <input
+            type="text"
+            placeholder="Search ID, routine, issue, agent…"
+            class="h-7 w-full rounded border border-[#1f232b] bg-[#0a0d11] pl-7 pr-12 text-xs"
+          />
+          <span class="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] mute"><kbd>⌘K</kbd></span>
+        </div>
+
+        <!-- Toolbar row 2: filter / sort / group dropdowns (Linear-style) -->
+        <div class="flex items-center gap-1 text-[11px]">
+          <button class="flex items-center gap-1 rounded border border-[#1f232b] px-2 py-0.5 hover:bg-white/[0.04]">
+            <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 6h18M7 12h10M11 18h2" stroke-width="2" stroke-linecap="round"/></svg>
+            Filter
+            <span class="badge-count ml-0.5">2</span>
+          </button>
+          <button class="flex items-center gap-1 rounded border border-[#1f232b] px-2 py-0.5 hover:bg-white/[0.04] mute">
+            <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3" stroke-width="1.5"/></svg>
+            Sort: <span class="text-foreground/90 ml-0.5">Newest</span>
+          </button>
+          <button class="flex items-center gap-1 rounded border border-[#1f232b] px-2 py-0.5 hover:bg-white/[0.04] mute">
+            <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" stroke-width="1.5"/><rect x="14" y="3" width="7" height="7" stroke-width="1.5"/><rect x="3" y="14" width="7" height="7" stroke-width="1.5"/><rect x="14" y="14" width="7" height="7" stroke-width="1.5"/></svg>
+            Group: <span class="text-foreground/90 ml-0.5">Source</span>
+          </button>
+          <button class="ml-auto rounded p-1 hover:bg-white/[0.04] mute" title="Saved views">
+            <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 2v8m0 0l3-3m-3 3l-3-3M5 14v6a2 2 0 002 2h10a2 2 0 002-2v-6" stroke-width="1.5"/></svg>
+          </button>
+        </div>
+
+        <!-- Active filter chips -->
+        <div class="flex flex-wrap gap-1">
+          <span class="filter-chip">
+            <span class="op">crew</span> = <span class="val">Marketing</span>
+            <button>×</button>
+          </span>
+          <span class="filter-chip">
+            <span class="op">source</span> ∈ <span class="val">schedule, webhook</span>
+            <button>×</button>
+          </span>
+          <button class="filter-chip" style="background: transparent; color: #7a8593; border-style: dashed;">
+            + Add filter
+          </button>
+        </div>
+
+        <!-- Status segments (always-on quick filter) -->
+        <div class="flex items-center gap-0.5 rounded border border-[#1f232b] bg-[#0a0d11] p-0.5">
+          <button class="flex-1 rounded px-2 py-0.5 text-[10px] bg-blue-500/15 text-blue-300">Active <span class="ml-1 mono">3</span></button>
+          <button class="flex-1 rounded px-2 py-0.5 text-[10px] mute hover:text-white">All <span class="ml-1 mono">487</span></button>
+          <button class="flex-1 rounded px-2 py-0.5 text-[10px] mute hover:text-white">Done <span class="ml-1 mono">478</span></button>
+          <button class="flex-1 rounded px-2 py-0.5 text-[10px] mute hover:text-white">Failed <span class="ml-1 mono">6</span></button>
+        </div>
+      </div>
+
+      <!-- ── Body: tree (group by Source) ── -->
+      <div class="flex-1 min-h-0 overflow-y-auto text-xs">
+
+        <!-- ============== CRON ============== -->
+        <details open class="border-b border-[#1f232b]/60">
+          <summary class="flex items-center gap-2 px-2.5 py-1.5">
+            <svg class="h-3 w-3 mute group-marker" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+            <span class="chip chip-cron">⌘ Cron</span>
+            <span class="mute">3 routines · 234 runs/24h</span>
+          </summary>
+
+          <details open class="pl-1 border-l-2 border-violet-500/30 ml-3.5">
+            <summary class="flex items-center gap-2 px-2.5 py-1.5">
+              <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+              <span class="pip pip-success"></span>
+              <span class="font-medium truncate">daily-etl</span>
+              <span class="mono text-[10px] mute">every 1h</span>
+              <span class="badge-count ml-auto">24</span>
+            </summary>
+            <ul class="ml-6 text-[11px]">
+              <li class="row row-selected flex items-center gap-2 px-2 py-1 border-l border-violet-500/20">
+                <span class="pip pip-running"></span>
+                <span class="mono">prn_2a8b</span>
+                <span class="text-blue-300">running</span>
+                <span class="ml-auto mute text-[10px]">2m</span>
+              </li>
+              <li class="row flex items-center gap-2 px-2 py-1 border-l border-violet-500/20">
+                <span class="pip pip-success"></span>
+                <span class="mono">prn_2a7c</span>
+                <span class="ml-auto mute text-[10px]">1h</span>
+              </li>
+              <li class="row flex items-center gap-2 px-2 py-1 border-l border-violet-500/20">
+                <span class="pip pip-success"></span>
+                <span class="mono">prn_2a6f</span>
+                <span class="ml-auto mute text-[10px]">2h</span>
+              </li>
+              <li class="row flex items-center gap-2 px-2 py-1 border-l border-violet-500/20 mute">
+                <span style="width:8px"></span>
+                <button class="hover:text-white">Show 21 more runs</button>
+              </li>
+            </ul>
+          </details>
+
+          <details class="pl-1 border-l-2 border-violet-500/30 ml-3.5">
+            <summary class="flex items-center gap-2 px-2.5 py-1.5">
+              <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+              <span class="pip pip-success"></span>
+              <span class="font-medium truncate">hourly-cleanup</span>
+              <span class="mono text-[10px] mute">every 1h</span>
+              <span class="badge-count ml-auto">168/wk</span>
+            </summary>
+          </details>
+
+          <details class="pl-1 border-l-2 border-violet-500/30 ml-3.5 mb-1">
+            <summary class="flex items-center gap-2 px-2.5 py-1.5">
+              <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+              <span class="pip pip-failed"></span>
+              <span class="font-medium truncate text-rose-300">price-sync</span>
+              <span class="mono text-[10px] mute">every 5m</span>
+              <span class="badge-count ml-auto">1 fail</span>
+            </summary>
+          </details>
+        </details>
+
+        <!-- ============== ISSUE ============== -->
+        <details open class="border-b border-[#1f232b]/60">
+          <summary class="flex items-center gap-2 px-2.5 py-1.5">
+            <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+            <span class="chip chip-issue">◷ Issue</span>
+            <span class="mute">8 runs · 1 awaiting</span>
+          </summary>
+
+          <details open class="pl-1 border-l-2 border-blue-500/30 ml-3.5">
+            <summary class="flex items-center gap-2 px-2.5 py-1.5">
+              <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+              <span class="pip pip-paused"></span>
+              <span class="chip chip-issue">ENG-12</span>
+              <span class="font-medium truncate">deploy approval</span>
+              <span class="badge-count ml-auto">1</span>
+            </summary>
+            <ul class="ml-6 text-[11px]">
+              <li class="row flex items-center gap-2 px-2 py-1 border-l border-blue-500/20">
+                <span class="pip pip-paused"></span>
+                <span class="mono">prn_8e23</span>
+                <span class="text-amber-300">awaiting approval</span>
+                <span class="ml-auto mute text-[10px]">12m</span>
+              </li>
+            </ul>
+          </details>
+
+          <details class="pl-1 border-l-2 border-blue-500/30 ml-3.5">
+            <summary class="flex items-center gap-2 px-2.5 py-1.5">
+              <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+              <span class="pip pip-success"></span>
+              <span class="chip chip-issue">ENG-9</span>
+              <span class="font-medium truncate">fix migration runner</span>
+              <span class="badge-count ml-auto">1</span>
+            </summary>
+          </details>
+
+          <details class="pl-1 border-l-2 border-blue-500/30 ml-3.5 mb-1">
+            <summary class="flex items-center gap-2 px-2.5 py-1.5">
+              <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+              <span class="pip pip-success"></span>
+              <span class="chip chip-issue">SUP-44</span>
+              <span class="font-medium truncate">refund webhook</span>
+              <span class="badge-count ml-auto">3</span>
+            </summary>
+          </details>
+        </details>
+
+        <!-- ============== WEBHOOK ============== -->
+        <details class="border-b border-[#1f232b]/60">
+          <summary class="flex items-center gap-2 px-2.5 py-1.5">
+            <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+            <span class="chip chip-webhook">⚡ Webhook</span>
+            <span class="mute">2 routines</span>
+          </summary>
+        </details>
+
+        <!-- ============== MANUAL ============== -->
+        <details>
+          <summary class="flex items-center gap-2 px-2.5 py-1.5">
+            <svg class="h-3 w-3 mute" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-width="2"/></svg>
+            <span class="chip chip-manual">▷ Manual</span>
+            <span class="mute">2 runs</span>
+          </summary>
+        </details>
+
+        <!-- Bottom load-more (virtualization fallback) -->
+        <div class="px-2.5 py-2 border-t border-[#1f232b]/40 mt-2 text-center">
+          <button class="text-[10px] mute hover:text-white">Load 200 older runs</button>
+        </div>
+      </div>
+
+      <!-- Footer summary -->
+      <div class="shrink-0 border-t border-[#1f232b] p-2 text-[10px] mute flex items-center justify-between">
+        <span>24h: 234 runs · <span class="text-emerald-400">232 ✓</span> · <span class="text-rose-400">2 ✗</span></span>
+        <button class="hover:text-white">Clear filters</button>
+      </div>
+
+    </aside>
+
+
+    <!-- ===== POPOVER COLUMN: filter menu + card preview ============== -->
+    <div class="w-[300px] flex flex-col gap-3">
+
+      <!-- Filter add-popover (Linear pattern) -->
+      <div class="rounded-md card overflow-hidden">
+        <div class="px-2.5 py-1.5 text-[11px] font-semibold border-b border-[#1f232b] flex items-center justify-between">
+          <span>Add filter</span>
+          <kbd>F</kbd>
+        </div>
+        <div class="p-1">
+          <input type="text" placeholder="Filter dimension…" class="h-6 w-full rounded bg-[#0a0d11] border border-[#1f232b] px-2 text-[11px]" />
+        </div>
+        <ul class="text-[11px]">
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>◷</span> Status</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>⌥</span> Crew</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>👤</span> Agent</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>📦</span> Routine</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>⚙</span> Source</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>◷</span> Issue identifier</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>📅</span> Date range</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>💰</span> Cost</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>⏱</span> Duration</li>
+          <li class="row flex items-center gap-2 px-2.5 py-1 hover:bg-white/[0.04]"><span>⏸</span> Has waitpoint</li>
+        </ul>
+      </div>
+
+      <!-- Hover card preview for a routine -->
+      <div class="rounded-md card overflow-hidden text-[11px]">
+        <div class="px-3 py-2 border-b border-[#1f232b] flex items-center gap-2">
+          <span class="pip pip-success"></span>
+          <span class="font-medium truncate">daily-etl</span>
+          <span class="ml-auto mute mono text-[10px]">→</span>
+        </div>
+        <div class="p-3 space-y-2 mute">
+          <div class="flex items-center justify-between">
+            <span>Cron pattern</span><span class="mono text-foreground/90">0 */1 * * *</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Author crew</span><span class="text-foreground/90">Marketing</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Last 24h</span><span class="text-foreground/90">24 runs · all ✓</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Avg cost</span><span class="mono text-foreground/90">$0.0023</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Avg duration</span><span class="mono text-foreground/90">2.3s</span>
+          </div>
+        </div>
+        <div class="border-t border-[#1f232b] p-2 flex gap-1.5">
+          <button class="flex-1 rounded bg-blue-500/15 text-blue-300 px-2 py-1 text-[10px] hover:bg-blue-500/25">Open routine</button>
+          <button class="flex-1 rounded border border-[#1f232b] mute px-2 py-1 text-[10px] hover:text-white">Pause schedule</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CANVAS PLACEHOLDER ============================================= -->
+    <main class="flex-1 card rounded-md p-6 h-[820px]">
+      <div class="text-xs uppercase tracking-wider mute mb-2">Canvas</div>
+      <p class="text-foreground/80 mb-4">No-run state shows <strong>issues → bound routines → last-run chains</strong> as overview. Click any node to drill in.</p>
+      <pre class="mono mute text-[11px] leading-relaxed">
+ENG-12 ──[bound]──▶ deploy-approval ──▶ prn_8e23 ⏸
+ENG-9  ──[bound]──▶ migrate         ──▶ prn_8d11 ✓
+SUP-44 ──[bound]──▶ refund-webhook  ──▶ prn_8c0a, prn_8b9f, prn_8a3c ✓
+                                    ▲
+                            click to enter trace
+      </pre>
+    </main>
+
+  </div>
+
+  <!-- ===== EXPLAINERS ============================================= -->
+  <section class="mt-6 grid grid-cols-4 gap-4 text-sm">
+    <div class="rounded card p-3">
+      <div class="text-[10px] uppercase tracking-wider mute mb-1">Search</div>
+      <p class="text-foreground/80">One box: matches <span class="mono">prn_…</span> id, routine slug, issue identifier, agent slug. Cmd-K opens the global picker.</p>
+    </div>
+    <div class="rounded card p-3">
+      <div class="text-[10px] uppercase tracking-wider mute mb-1">Filter</div>
+      <p class="text-foreground/80">Linear pattern: + Add filter → pick dimension → pick value → chip. Combine N filters; Saved views icon top-right persists combos per user.</p>
+    </div>
+    <div class="rounded card p-3">
+      <div class="text-[10px] uppercase tracking-wider mute mb-1">Group</div>
+      <p class="text-foreground/80">Group axis: <span class="mono">Source / Routine / Crew / Issue / None</span>. Default <strong>Source</strong> collapses cron noise. Persisted per user.</p>
+    </div>
+    <div class="rounded card p-3">
+      <div class="text-[10px] uppercase tracking-wider mute mb-1">Scale</div>
+      <p class="text-foreground/80">React-window virtualization on the flat row list. Group children paginate "Show N more" so a 1000-run cron stream stays scrollable.</p>
+    </div>
+  </section>
+
+  <p class="mt-4 text-[10px] mute">
+    File: <span class="mono">mockups/activity-rail-v3.html</span> · Branch: <span class="mono">feat/activity-trace-graph</span>
+  </p>
+
+</div>
+
+</body>
+</html>

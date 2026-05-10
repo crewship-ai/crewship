@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
+import { usePipelines } from "@/hooks/use-pipelines"
 import { useTrace } from "@/hooks/use-trace"
 import { useTraceSelection } from "@/hooks/use-trace-selection"
 import { useRunWaitpoints } from "@/hooks/use-run-waitpoints"
@@ -25,6 +26,8 @@ import { TraceCanvas } from "./trace-canvas"
 import { TraceSidePanel } from "./trace-side-panel"
 import type { TraceStep } from "@/lib/trace/types"
 import { shadeNodes, type HeatmapBucket, type HeatmapMode } from "@/lib/trace/percentile-heatmap"
+import { buildOverviewGraph } from "@/lib/trace/build-overview-graph"
+import type { Mission } from "@/lib/types/mission"
 
 // ActivityTracePage — top-level page for /activity. Replaces the old
 // OrchestrationPageShell layout (which exposed Runs / Graph / Timeline
@@ -63,6 +66,44 @@ export function ActivityTracePage() {
     for (const w of waitpoints) m.set(w.step_id, w.token)
     return m
   }, [waitpoints])
+
+  // Overview-mode data: missions (issues with routine_id) + pipelines.
+  // Fetched here when no run is selected so the overview canvas has
+  // something to render. We deliberately fetch a small page (50)
+  // because the overview is a "what's bound to what" snapshot, not
+  // a full dashboard.
+  const { pipelines } = usePipelines(workspaceId)
+  const [missions, setMissions] = useState<Mission[]>([])
+  useEffect(() => {
+    if (!workspaceId || runId) return
+    let cancelled = false
+    fetch(`/api/v1/missions?workspace_id=${encodeURIComponent(workspaceId)}&limit=50`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        if (cancelled) return
+        setMissions(Array.isArray(d) ? d : [])
+      })
+      .catch(() => { /* non-fatal — overview just renders fewer chains */ })
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceId, runId])
+
+  const runsWithWaitpointSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of runs) if (r.status === "paused") s.add(r.id)
+    return s
+  }, [runs])
+
+  const overview = useMemo(() => {
+    if (runId) return null
+    return buildOverviewGraph({
+      missions,
+      pipelines,
+      runs,
+      runsWithWaitpoint: runsWithWaitpointSet,
+    })
+  }, [runId, missions, pipelines, runs, runsWithWaitpointSet])
 
   // Per-step duration / cost from journal entries — drives the
   // heatmap shading.
@@ -285,6 +326,7 @@ export function ActivityTracePage() {
               onSelect={setRunId}
               loading={runsLoading}
               error={runsError}
+              runsWithWaitpoint={runsWithWaitpointSet}
             />
           )}
         </div>
@@ -320,6 +362,8 @@ export function ActivityTracePage() {
             workspaceId={workspaceId}
             waitpointTokensByStepId={waitpointTokensByStepId}
             heatmapBuckets={heatmapBuckets}
+            overview={overview}
+            onSelectRun={setRunId}
           />
         </div>
 

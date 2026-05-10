@@ -10,6 +10,7 @@ import {
   useNodesState,
   useEdgesState,
   useReactFlow,
+  type Edge,
   type Node,
   type NodeTypes,
   type EdgeTypes,
@@ -21,6 +22,11 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineDSL } from "@/lib/trace/types"
 import { buildTraceGraph } from "@/lib/trace/build-trace-graph"
 import { TraceStepNode, TraceTriggerNode } from "./trace-step-node"
+import {
+  OverviewIssueNode,
+  OverviewRoutineNode,
+  OverviewRunNode,
+} from "./overview-nodes"
 import { TraceDataFlowEdge } from "./trace-data-flow-edge"
 import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
 
@@ -37,6 +43,9 @@ import type { HeatmapBucket } from "@/lib/trace/percentile-heatmap"
 const nodeTypes: NodeTypes = {
   traceStep: TraceStepNode,
   traceTrigger: TraceTriggerNode,
+  overviewIssue: OverviewIssueNode,
+  overviewRoutine: OverviewRoutineNode,
+  overviewRun: OverviewRunNode,
 }
 
 const edgeTypes: EdgeTypes = {
@@ -55,10 +64,67 @@ interface TraceCanvasProps {
   // Pre-computed heatmap buckets; the page memoizes this so a step
   // metric flowing in over realtime doesn't force a dagre relayout.
   heatmapBuckets: ReadonlyMap<string, HeatmapBucket>
+  // Overview graph (issues → routines → last-run chains) shown when
+  // no run is selected. Caller computes it from missions + pipelines
+  // + runs and memoizes; passing in keeps the canvas dumb.
+  overview?: { nodes: Node[]; edges: Edge[] } | null
+  onSelectRun?: (runId: string) => void
 }
 
 export function TraceCanvas(props: TraceCanvasProps) {
   if (!props.run) {
+    // Overview mode: render workspace-level chains (issues → bound
+    // routines → last run) when the caller supplied one. Falling
+    // back to the empty state keeps the page useful when missions /
+    // pipelines / runs are still loading on first paint.
+    return (
+      <ReactFlowProvider>
+        <OverviewInner
+          overview={props.overview}
+          onSelectRun={props.onSelectRun}
+        />
+      </ReactFlowProvider>
+    )
+  }
+  return (
+    <ReactFlowProvider>
+      <CanvasInner {...props} run={props.run} />
+    </ReactFlowProvider>
+  )
+}
+
+function OverviewInner({
+  overview,
+  onSelectRun,
+}: {
+  overview?: { nodes: Node[]; edges: Edge[] } | null
+  onSelectRun?: (runId: string) => void
+}) {
+  const [nodes, setNodes, onNodesChange] = useNodesState(overview?.nodes ?? [])
+  const [edges, setEdges, onEdgesChange] = useEdgesState(overview?.edges ?? [])
+  const { fitView } = useReactFlow()
+
+  useEffect(() => {
+    setNodes(overview?.nodes ?? [])
+    setEdges(overview?.edges ?? [])
+    const t = setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 50)
+    return () => clearTimeout(t)
+  }, [overview, setNodes, setEdges, fitView])
+
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (node.id.startsWith("run:") && onSelectRun) {
+        const runId = node.id.slice("run:".length)
+        onSelectRun(runId)
+      }
+      // Issue + Routine clicks navigate via the node-level <Link>
+      // wrapper or are handled at the rail level; canvas does
+      // nothing extra.
+    },
+    [onSelectRun],
+  )
+
+  if (!overview || overview.nodes.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
         <EmptyState
@@ -71,9 +137,33 @@ export function TraceCanvas(props: TraceCanvasProps) {
   }
 
   return (
-    <ReactFlowProvider>
-      <CanvasInner {...props} run={props.run} />
-    </ReactFlowProvider>
+    <div className="h-full w-full overflow-hidden bg-background">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={onNodeClick}
+        fitView
+        fitViewOptions={{ padding: 0.3 }}
+        minZoom={0.1}
+        maxZoom={2.5}
+        proOptions={{ hideAttribution: true }}
+        className="!bg-transparent"
+      >
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={24}
+          size={1.5}
+          color="rgba(100, 116, 139, 0.12)"
+        />
+        <Controls
+          showInteractive={false}
+          className="!bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
+        />
+      </ReactFlow>
+    </div>
   )
 }
 

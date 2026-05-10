@@ -1,37 +1,44 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import {
-  Calendar,
-  CircleDot,
-  Loader2,
-  Search,
-  ScrollText,
-  Webhook,
-  X,
-} from "lucide-react"
-import { cn } from "@/lib/utils"
+import { useEffect, useMemo, useState } from "react"
+import { Loader2, ScrollText } from "lucide-react"
+import { useUserPreference } from "@/hooks/use-user-preference"
+import { useWorkspace } from "@/hooks/use-workspace"
+import { usePipelines } from "@/hooks/use-pipelines"
+import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
-import { statusIcon, statusTint } from "@/lib/activity/run-status"
-import { relTime } from "@/lib/activity/format-time"
+import {
+  applyFilters,
+  groupRuns,
+  type GroupAxis,
+  type RunFilter,
+  type TriggerSource,
+} from "@/lib/activity/run-filters"
+import { RailToolbar, type SortAxis } from "./rail/rail-toolbar"
+import { RunGroupTree } from "./rail/run-group-tree"
+import { SavedViewsButton } from "./rail/saved-views"
 
-// RunTimelineRail — left-side list of recent runs. Each row is one
-// pipeline_run with its source pill (issue / schedule / webhook /
-// manual), pipeline name, status pip, and started-at relative time.
-// Selecting a row drives the canvas into trace mode for that run.
+// RunTimelineRail v3 — composed of toolbar + grouped tree. Replaces
+// the v2 flat list with a Linear-style filter / sort / group UX.
 //
-// Replaces the default `RunsView` table in /activity. The expandable
-// step-tree per row is gone here on purpose — the canvas IS the step
-// view now, no need to render it twice.
+// Data layout:
+//   - runs: flat list from usePipelineRuns (parent passes in)
+//   - schedules + pipelines + crews: fetched here for filter dropdowns
+//     and the routine preview card
+//   - filter / sort / group: persisted per-user
+
 interface RunTimelineRailProps {
   runs: PipelineRun[]
   selectedRunId: string | null
   onSelect: (runId: string) => void
   loading?: boolean
   error?: string | null
+  // Optional: workspace crews list. If omitted we fetch our own.
+  crews?: { id: string; name: string }[]
+  // Run ids that currently have a pending waitpoint — feeds the
+  // "Has waitpoint" filter. Optional; absent = filter is a no-op.
+  runsWithWaitpoint?: ReadonlySet<string>
 }
-
-type StatusFilter = "all" | "active" | "completed" | "failed"
 
 export function RunTimelineRail({
   runs,
@@ -39,81 +46,144 @@ export function RunTimelineRail({
   onSelect,
   loading,
   error,
+  crews: crewsProp,
+  runsWithWaitpoint,
 }: RunTimelineRailProps) {
-  const [filter, setFilter] = useState<StatusFilter>("all")
+  const { workspaceId } = useWorkspace()
+  const { pipelines } = usePipelines(workspaceId)
+  const { schedules } = usePipelineSchedules(workspaceId)
+  const [crews, setCrews] = useState<{ id: string; name: string }[]>(crewsProp ?? [])
+
+  // Fetch crews if the parent didn't supply them. Cheap one-shot —
+  // crew list rarely changes mid-session.
+  useEffect(() => {
+    if (crewsProp || !workspaceId) return
+    fetch(`/api/v1/crews?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setCrews(Array.isArray(d) ? d.map((c) => ({ id: c.id, name: c.name })) : []))
+      .catch(() => { /* non-fatal — filter dropdown just shows no options */ })
+  }, [crewsProp, workspaceId])
+
+  // Persisted user state
+  const [filter, setFilter] = useUserPreference<RunFilter>("activity.rail.filter", {
+    status: "all",
+  })
+  const [sort, setSort] = useUserPreference<SortAxis>("activity.rail.sort", "newest")
+  const [group, setGroup] = useUserPreference<GroupAxis>("activity.rail.group", "source")
   const [search, setSearch] = useState("")
 
+  // Build filter dropdown options from the actual run set so we
+  // never offer a filter dimension with zero matches.
+  const options = useMemo(() => {
+    const sourceSet = new Set<TriggerSource>()
+    const slugSet = new Set<string>()
+    for (const r of runs) {
+      if (r.triggered_via) sourceSet.add(r.triggered_via as TriggerSource)
+      if (r.pipeline_slug) slugSet.add(r.pipeline_slug)
+    }
+    const routineList: { slug: string; name: string }[] = []
+    const slugToName = new Map<string, string>()
+    for (const r of runs) slugToName.set(r.pipeline_slug, r.pipeline_name || r.pipeline_slug)
+    for (const slug of slugSet) {
+      routineList.push({ slug, name: slugToName.get(slug) ?? slug })
+    }
+    routineList.sort((a, b) => a.name.localeCompare(b.name))
+    return {
+      crews,
+      routines: routineList,
+      sources: Array.from(sourceSet),
+    }
+  }, [runs, crews])
+
+  // Apply search via the same filter pipeline so the toolbar's
+  // filter chip count and the body stay consistent.
+  const effectiveFilter = useMemo<RunFilter>(
+    () => ({ ...filter, search: search.trim() || undefined }),
+    [filter, search],
+  )
+  const filteredRuns = useMemo(
+    () => applyFilters(runs, effectiveFilter, runsWithWaitpoint),
+    [runs, effectiveFilter, runsWithWaitpoint],
+  )
+  const sortedRuns = useMemo(() => sortRuns(filteredRuns, sort), [filteredRuns, sort])
+
   const counts = useMemo(() => {
-    const active = runs.filter(
-      (r) => r.status === "running" || r.status === "queued" || r.status === "paused",
-    ).length
-    const completed = runs.filter((r) => r.status === "completed").length
-    const failed = runs.filter(
-      (r) => r.status === "failed" || r.status === "cancelled" || r.status === "interrupted",
-    ).length
-    return { active, completed, failed, total: runs.length }
+    const ofStatus = (statuses: string[]) =>
+      runs.filter((r) => statuses.includes(r.status)).length
+    return {
+      active: ofStatus(["running", "queued", "paused"]),
+      all: runs.length,
+      completed: ofStatus(["completed"]),
+      failed: ofStatus(["failed", "cancelled", "interrupted"]),
+    }
   }, [runs])
 
-  const filtered = useMemo(() => {
-    let list = runs
-    if (filter === "active") {
-      list = list.filter(
-        (r) => r.status === "running" || r.status === "queued" || r.status === "paused",
-      )
-    } else if (filter === "completed") {
-      list = list.filter((r) => r.status === "completed")
-    } else if (filter === "failed") {
-      list = list.filter(
-        (r) => r.status === "failed" || r.status === "cancelled" || r.status === "interrupted",
-      )
+  // Build group context — schedules + crews + per-routine run buckets
+  // for the hover card.
+  const ctx = useMemo(() => {
+    const cronBySlug = new Map<string, string>()
+    for (const s of schedules) {
+      if (s.target_pipeline_slug && s.cron_expr) {
+        cronBySlug.set(s.target_pipeline_slug, s.cron_expr)
+      }
     }
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(
-        (r) =>
-          (r.pipeline_name || "").toLowerCase().includes(q) ||
-          r.pipeline_slug.toLowerCase().includes(q) ||
-          (r.issue_identifier || "").toLowerCase().includes(q) ||
-          r.id.toLowerCase().includes(q),
-      )
+    const crewNameById = new Map(crews.map((c) => [c.id, c.name]))
+    const routineNameBySlug = new Map<string, string>()
+    for (const p of pipelines) routineNameBySlug.set(p.slug, p.name)
+
+    const runsByPipelineSlug = new Map<string, PipelineRun[]>()
+    for (const r of runs) {
+      const arr = runsByPipelineSlug.get(r.pipeline_slug) ?? []
+      arr.push(r)
+      runsByPipelineSlug.set(r.pipeline_slug, arr)
     }
-    return list
-  }, [runs, filter, search])
+    const crewNameByPipelineSlug = new Map<string, string>()
+    for (const p of pipelines) {
+      const cName = p.author_crew_id ? crewNameById.get(p.author_crew_id) : undefined
+      if (cName) crewNameByPipelineSlug.set(p.slug, cName)
+    }
+
+    return {
+      cronBySlug,
+      crewNameById,
+      routineNameBySlug,
+      runsByPipelineSlug,
+      crewNameByPipelineSlug,
+    }
+  }, [schedules, crews, pipelines, runs])
+
+  const groups = useMemo(
+    () => groupRuns(sortedRuns, group, ctx),
+    [sortedRuns, group, ctx],
+  )
 
   return (
     <div className="flex h-full flex-col bg-card">
-      {/* Search + filter row */}
-      <div className="shrink-0 border-b border-white/[0.06] p-2">
-        <div className="relative mb-2">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/50" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search runs"
-            aria-label="Search runs by pipeline name, slug, or issue"
-            className="h-7 w-full rounded border border-white/[0.06] bg-background pl-7 pr-7 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-blue-500/50 focus:outline-none"
+      <div className="relative">
+        <RailToolbar
+          filter={filter}
+          onFilterChange={setFilter}
+          search={search}
+          onSearchChange={setSearch}
+          sort={sort}
+          onSortChange={setSort}
+          group={group}
+          onGroupChange={setGroup}
+          counts={counts}
+          options={options}
+        />
+        <div className="absolute right-2 top-2">
+          <SavedViewsButton
+            current={{ filter, sort, group }}
+            onApply={(v) => {
+              setFilter(v.filter)
+              setSort(v.sort)
+              setGroup(v.group)
+            }}
           />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              aria-label="Clear search"
-              className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground/50 hover:text-foreground"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <FilterBtn label="All" count={counts.total} active={filter === "all"} onClick={() => setFilter("all")} />
-          <FilterBtn label="Active" count={counts.active} active={filter === "active"} onClick={() => setFilter("active")} />
-          <FilterBtn label="Done" count={counts.completed} active={filter === "completed"} onClick={() => setFilter("completed")} />
-          <FilterBtn label="Failed" count={counts.failed} active={filter === "failed"} onClick={() => setFilter("failed")} />
         </div>
       </div>
 
-      {/* Run list */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && runs.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -121,165 +191,54 @@ export function RunTimelineRail({
           </div>
         ) : error ? (
           <div className="p-3 text-xs text-rose-300">Runs unavailable: {error}</div>
-        ) : filtered.length === 0 ? (
-          <EmptyRail filter={filter} hasSearch={search.length > 0} />
+        ) : runs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 p-6 text-center">
+            <ScrollText className="h-6 w-6 text-muted-foreground/30" />
+            <div className="text-xs text-muted-foreground">No runs in the workspace yet.</div>
+          </div>
         ) : (
-          <ul className="divide-y divide-white/[0.04]">
-            {filtered.map((run) => (
-              <RunRailItem
-                key={run.id}
-                run={run}
-                selected={selectedRunId === run.id}
-                onSelect={() => onSelect(run.id)}
-              />
-            ))}
-          </ul>
+          <RunGroupTree
+            groups={groups}
+            selectedRunId={selectedRunId}
+            onSelectRun={onSelect}
+            routineCardCtx={{
+              crewNameByPipelineSlug: ctx.crewNameByPipelineSlug,
+              cronExprByPipelineSlug: ctx.cronBySlug,
+              runsByPipelineSlug: ctx.runsByPipelineSlug,
+            }}
+          />
         )}
       </div>
-    </div>
-  )
-}
 
-function FilterBtn({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string
-  count: number
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
-        active
-          ? "bg-blue-500/15 text-blue-300"
-          : "text-muted-foreground/70 hover:text-foreground/80",
-      )}
-    >
-      <span>{label}</span>
-      <span
-        className={cn(
-          "rounded px-1 py-0 text-[9px] tabular-nums",
-          active ? "bg-blue-500/20 text-blue-200" : "bg-white/[0.06] text-foreground/40",
-        )}
-      >
-        {count}
-      </span>
-    </button>
-  )
-}
-
-function RunRailItem({
-  run,
-  selected,
-  onSelect,
-}: {
-  run: PipelineRun
-  selected: boolean
-  onSelect: () => void
-}) {
-  const StatusIcon = statusIcon(run.status)
-  const tint = statusTint(run.status)
-
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={onSelect}
-        aria-current={selected ? "true" : undefined}
-        className={cn(
-          "flex w-full items-start gap-2 px-3 py-2 text-left transition-colors",
-          selected ? "bg-blue-500/10" : "hover:bg-white/[0.03]",
-        )}
-      >
-        <span
-          className={cn(
-            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-            tint.bg,
-          )}
-        >
-          <StatusIcon className={cn("h-3 w-3", tint.icon)} />
+      <div className="shrink-0 border-t border-white/[0.06] px-2 py-1.5 text-[10px] text-muted-foreground/60">
+        <span className="tabular-nums">
+          {filteredRuns.length}
+          {filteredRuns.length !== runs.length && (
+            <span className="text-muted-foreground/40"> / {runs.length}</span>
+          )}{" "}
+          runs · {counts.active} active · {counts.failed} failed
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-xs font-medium">
-              {run.pipeline_name || run.pipeline_slug}
-            </span>
-            <SourcePill run={run} />
-          </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground/60">
-            <span className="truncate font-mono">{run.id}</span>
-            <span>·</span>
-            <span className="shrink-0">{relTime(run.started_at)}</span>
-          </div>
-        </div>
-      </button>
-    </li>
-  )
-}
-
-function SourcePill({ run }: { run: PipelineRun }) {
-  if (run.triggered_via === "issue" && run.issue_identifier) {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-blue-500/15 px-1 py-0 text-[9px] font-medium text-blue-300">
-        <CircleDot className="h-2 w-2" />
-        {run.issue_identifier}
-      </span>
-    )
-  }
-  if (run.triggered_via === "schedule") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-violet-500/15 px-1 py-0 text-[9px] font-medium text-violet-300">
-        <Calendar className="h-2 w-2" />
-        cron
-      </span>
-    )
-  }
-  if (run.triggered_via === "webhook") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-amber-500/15 px-1 py-0 text-[9px] font-medium text-amber-300">
-        <Webhook className="h-2 w-2" />
-        hook
-      </span>
-    )
-  }
-  if (run.triggered_via === "call_pipeline") {
-    return (
-      <span className="shrink-0 rounded bg-white/[0.08] px-1 py-0 text-[9px] font-medium text-muted-foreground">
-        sub
-      </span>
-    )
-  }
-  return null
-}
-
-function EmptyRail({ filter, hasSearch }: { filter: StatusFilter; hasSearch: boolean }) {
-  if (hasSearch) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 p-6 text-center">
-        <Search className="h-6 w-6 text-muted-foreground/30" />
-        <div className="text-xs text-muted-foreground">No matches</div>
       </div>
-    )
-  }
-  const messages: Record<StatusFilter, string> = {
-    active: "No routines running.",
-    all: "No runs in the workspace yet.",
-    completed: "No completed runs yet.",
-    failed: "No failed runs.",
-  }
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 p-6 text-center">
-      <ScrollText className="h-6 w-6 text-muted-foreground/30" />
-      <div className="text-xs text-muted-foreground">{messages[filter]}</div>
     </div>
   )
 }
 
+function sortRuns(runs: PipelineRun[], sort: SortAxis): PipelineRun[] {
+  const sorted = [...runs]
+  if (sort === "newest") {
+    sorted.sort((a, b) => parseTime(b.started_at) - parseTime(a.started_at))
+  } else if (sort === "oldest") {
+    sorted.sort((a, b) => parseTime(a.started_at) - parseTime(b.started_at))
+  } else if (sort === "cost-desc") {
+    sorted.sort((a, b) => b.cost_usd - a.cost_usd)
+  } else if (sort === "duration-desc") {
+    sorted.sort((a, b) => b.duration_ms - a.duration_ms)
+  }
+  return sorted
+}
+
+function parseTime(iso?: string): number {
+  if (!iso) return 0
+  const t = new Date(iso).getTime()
+  return Number.isNaN(t) ? 0 : t
+}
