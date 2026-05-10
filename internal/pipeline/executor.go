@@ -1193,13 +1193,52 @@ func validateAgainstSchema(output string, schemaBytes json.RawMessage) (ok bool,
 		return false, "schema invalid: " + truncate(err.Error(), 200)
 	}
 	var doc any
-	if err := json.Unmarshal([]byte(output), &doc); err != nil {
+	if err := json.Unmarshal([]byte(unwrapJSONFence(output)), &doc); err != nil {
 		return false, "output not valid JSON: " + truncate(err.Error(), 200)
 	}
 	if err := schema.Validate(doc); err != nil {
 		return false, "schema validation: " + truncate(err.Error(), 200)
 	}
 	return true, ""
+}
+
+// unwrapJSONFence strips a leading/trailing markdown code-fence wrapper
+// from agent output so json.Unmarshal sees the raw JSON underneath.
+// LLMs love wrapping JSON in ```json ... ``` even when the prompt
+// explicitly says "no prose outside the JSON" — fixing the prompt is
+// a per-pipeline whack-a-mole, fixing the validator handles every
+// existing and future routine in one place.
+//
+// Behavior:
+//   - "```json\n{...}\n```" → "{...}"
+//   - "```\n{...}\n```"     → "{...}"
+//   - "{...}"               → unchanged
+//   - "```json\n{... not closed" → still strips opener so Unmarshal
+//     gets a chance to surface the truncation error rather than the
+//     fence error
+//
+// Surrounding whitespace is left to json.Unmarshal which handles it.
+func unwrapJSONFence(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "```") {
+		return s
+	}
+	// Drop the opening fence line. Common shapes are "```json", "```",
+	// or "```JSON" — anything until the first newline is the language
+	// tag we discard.
+	if nl := strings.IndexByte(t, '\n'); nl >= 0 {
+		t = t[nl+1:]
+	} else {
+		// Single-line fence (rare); strip the leading backticks and
+		// hope for the best.
+		t = strings.TrimPrefix(t, "```")
+	}
+	// Drop a trailing closing fence if present. We don't require it —
+	// truncated streaming output sometimes loses the closer, and
+	// returning the JSON body without a trailing fence still parses.
+	t = strings.TrimRight(t, " \t\n")
+	t = strings.TrimSuffix(t, "```")
+	return t
 }
 
 // schemaCache holds compiled jsonschema.Schema pointers keyed by

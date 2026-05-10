@@ -212,3 +212,37 @@ func TestValidateOutput_NilValidation_Passes(t *testing.T) {
 		t.Fatalf("nil validation should accept arbitrary output, got reason=%q", reason)
 	}
 }
+
+// Markdown code fences are the most common reason an agent_run output
+// fails JSON validation despite a "no prose outside the JSON" prompt:
+// LLMs default to triple-backtick wrappers because that is what their
+// training data looks like. The unwrapper handles that case before the
+// schema gate runs.
+
+func TestValidateOutput_SchemaGate_UnwrapsJSONMarkdownFence(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","required":["k"]}`)
+	v := &Validation{Schema: schema}
+	cases := []string{
+		"```json\n{\"k\":1}\n```",
+		"```JSON\n{\"k\":1}\n```",
+		"```\n{\"k\":1}\n```",
+		"  ```json\n{\"k\":1}\n```\n",
+		"```json\n{\"k\":1}", // truncated, no closing fence
+	}
+	for _, raw := range cases {
+		ok, reason := validateOutput(raw, v)
+		if !ok {
+			t.Errorf("expected pass for %q, got reason=%q", raw, reason)
+		}
+	}
+}
+
+func TestValidateOutput_SchemaGate_BareJSONStillWorks(t *testing.T) {
+	// Regression guard: the unwrapper must not mangle un-fenced JSON.
+	schema := json.RawMessage(`{"type":"object","required":["k"]}`)
+	v := &Validation{Schema: schema}
+	ok, reason := validateOutput(`{"k":1}`, v)
+	if !ok {
+		t.Fatalf("bare JSON should still pass, got %q", reason)
+	}
+}
