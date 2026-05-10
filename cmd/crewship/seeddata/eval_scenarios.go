@@ -642,15 +642,19 @@ var EvalScenarios = []RoutineDef{
 	{
 		Slug:        "eval-cost-budget-haiku",
 		Name:        "Eval: cost budget (Haiku-only)",
-		Description: "Trivial step capped at $0.005 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Opus.",
+		Description: "Trivial step capped at $0.01 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
 		CrewSlug:    "quality",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "eval-cost-budget-haiku",
 			"display_name":       "Eval: cost budget (Haiku-only)",
-			"description":        "Trivial step capped at $0.005 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Opus.",
-			"estimated_cost_usd": 0.001,
-			"max_cost_usd":       0.005,
+			"description":        "Trivial step capped at $0.01 — runs fine on Haiku, gets killed by the cost cap if a regression escalates it to Sonnet or Opus.",
+			// $0.01 fits a Haiku 4.5 echo (~$0.007) while still flagging
+			// a regression to Sonnet (~$0.04+) or Opus (~$0.15+). The
+			// original $0.005 was tight to Haiku 4 pricing and started
+			// biting after Anthropic's rate-card refresh.
+			"estimated_cost_usd": 0.002,
+			"max_cost_usd":       0.01,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				{"type": "anthropic", "scope": "any"},
