@@ -675,9 +675,14 @@ func stringify(v any) string {
 // string output. Real path libraries are overkill for MVP — most
 // pipelines reference {{ steps.X.output }} as a whole. When users
 // need deeper paths we'll layer in tidwall/gjson behind this helper.
+//
+// DecodeAgentJSON tolerates the same LLM quirks the schema gate does
+// (markdown fence, prose preamble, trailing chatter) so a path lookup
+// against an upstream agent output stays consistent with what the
+// validator accepted.
 func jsonPath(raw, path string) string {
 	var v any
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+	if err := DecodeAgentJSON(raw, &v); err != nil {
 		return ""
 	}
 	for _, key := range strings.Split(path, ".") {

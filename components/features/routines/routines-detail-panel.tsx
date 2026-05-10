@@ -234,7 +234,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
 
           <div className="flex-1 overflow-auto">
             <TabsContent value="overview" className="m-0 p-3">
-              <RoutineOverviewTab routine={routine} />
+              <RoutineOverviewTab routine={routine} workspaceId={workspaceId} />
             </TabsContent>
             <TabsContent value="editor" className="m-0 p-0 h-full">
               <RoutineEditorTab

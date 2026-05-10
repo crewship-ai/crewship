@@ -36,13 +36,18 @@ func TestExecutor_Retry_RetriesOnError(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	runner := newMockRunner()
-	// Two errors, then success
+	// Two errors, then success. The mock advances errBySlug on every
+	// call but outputsBySlug only when no error fires, so "finally ok"
+	// is what the third (successful) call returns. Earlier this test
+	// had two padding empties before the success — those used to be
+	// no-ops, but the new transient-retry layer treats empty success
+	// output as retryable, which the test isn't trying to exercise.
 	runner.errBySlug["agent_lead"] = []error{
 		errors.New("transient blip"),
 		errors.New("transient blip"),
 		nil,
 	}
-	runner.outputsBySlug["agent_lead"] = []string{"", "", "finally ok"}
+	runner.outputsBySlug["agent_lead"] = []string{"finally ok"}
 	exec := NewExecutor(store, resolver, runner, nil)
 
 	dsl := &DSL{Name: "x", Steps: []Step{

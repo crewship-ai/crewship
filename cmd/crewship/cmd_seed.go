@@ -164,6 +164,17 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Routine seeding hit an error (continuing): %v\n", err)
 	}
 
+	// ── Phase 9b: Demo schedules ──
+	// Routines exist now; wire one demo cron so a fresh /activity has
+	// something flowing into it without the user having to compose
+	// a schedule from the UI. Failure is non-fatal.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedSchedules(ctx, client); err != nil {
+		fmt.Fprintf(os.Stderr, "Schedule seeding hit an error (continuing): %v\n", err)
+	}
+
 	// ── Phase 10: Issues ──
 	if !skipIssues {
 		if err := ctx.Err(); err != nil {

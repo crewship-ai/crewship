@@ -1,76 +1,17 @@
 package pipeline
 
 import (
-	"context"
-	"sync"
 	"testing"
 )
 
-// fakeAgentRunner records every step request it receives so the test
-// can assert what model the executor resolved to. It returns the
-// pre-set Output for every call (good enough for assertions about
-// tier selection — we're not testing the LLM, we're testing the
-// resolver wiring).
-type fakeAgentRunner struct {
-	mu       sync.Mutex
-	requests []AgentStepRequest
-	output   string
-}
-
-func (f *fakeAgentRunner) RunStep(_ context.Context, req AgentStepRequest) (AgentStepResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.requests = append(f.requests, req)
-	return AgentStepResult{Output: f.output}, nil
-}
-
-func (f *fakeAgentRunner) lastModel() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if len(f.requests) == 0 {
-		return ""
-	}
-	return f.requests[len(f.requests)-1].Model
-}
-
-// fakeResolver returns deterministic AdapterModel pairs based on the
-// step's Complexity, ignoring DB state. Exists so tier_override
-// tests can run without spinning up a workspace tier-mapping
-// fixture — the only thing under test is whether RunInput.TierOverride
-// is correctly applied to step.Complexity before resolution.
-type fakeResolver struct{}
-
-func (f *fakeResolver) Resolve(_ context.Context, _ string, step Step) (AdapterModel, []AdapterModel, error) {
-	if step.ModelOverride != "" {
-		return AdapterModel{Adapter: "claude", Model: step.ModelOverride}, nil, nil
-	}
-	switch step.Complexity {
-	case ComplexityTrivial, ComplexityFast:
-		return AdapterModel{Adapter: "claude", Model: "claude-haiku-4-5"}, nil, nil
-	case ComplexitySmart:
-		return AdapterModel{Adapter: "claude", Model: "claude-opus-4-7"}, nil, nil
-	default:
-		return AdapterModel{Adapter: "claude", Model: "claude-sonnet-4-6"}, nil, nil
-	}
-}
-
-// resolverAdapter wraps fakeResolver to satisfy the executor's
-// expected resolver shape (struct with Resolve method, not an
-// interface). The real *Resolver is also a struct; we substitute
-// at construction.
-type resolverAdapter struct {
-	*Resolver
-	fake *fakeResolver
-}
-
-// helper: spin up a minimal Executor backed by fakes for tier tests
-func newTierTestExecutor(runner *fakeAgentRunner) *Executor {
-	exec := &Executor{
-		runner:   runner,
-		resolver: &Resolver{}, // shape match; we override the resolve inline below via a custom DSL
-	}
-	return exec
-}
+// Tier-override tests exercise the small pre-resolver branch in
+// runStep that copies RunInput.TierOverride onto the step's
+// Complexity before tier resolution. The behaviour under test is
+// purely struct manipulation — no agent runner / resolver fakes
+// needed. Earlier scaffolding (fakeAgentRunner, fakeResolver,
+// resolverAdapter, newTierTestExecutor) was kept for an
+// end-to-end variant that never landed; removed once Go Lint
+// flagged it as dead code.
 
 // runDSLDirectly is a tiny harness — we can't easily plug a fake
 // Resolver into the executor without exposing constructors, so the
@@ -170,12 +111,6 @@ func TestTierOverride_EmptyOverrideIsNoOp(t *testing.T) {
 		t.Errorf("empty override should preserve Complexity %q, got %q", ComplexityFast, stepForResolve.Complexity)
 	}
 }
-
-// Compile-time assertion: AgentRunner is satisfied by fakeAgentRunner.
-// Without this, a refactor that changes AgentRunner's signature would
-// silently break this test file with a confusing "method missing" at
-// the helper instead of at the type-assertion.
-var _ AgentRunner = (*fakeAgentRunner)(nil)
 
 // TestTierOverride_ResolverWiringEndToEnd is a guard for a regression
 // where the executor walked steps but forgot to thread the override

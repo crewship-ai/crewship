@@ -255,13 +255,13 @@ var startCmd = &cobra.Command{
 				// here (server.go constructs the writer before
 				// returning).
 				// LLMRunner takes journal.Emitter for the middleware
-			// stack (paymaster cost ledger). PipelinesHandler.Emitter()
-			// returns the narrower pipeline.Emitter; we pass the full
-			// Server.JournalWriter() so cost ledger entries land in
-			// the same buffer as the rest of the server. Falls back
-			// to a no-op writer when journalWriter is nil (test path
-			// — should never happen in `crewship start`).
-			pipeRunner := pipeline.NewLLMRunner(deps.DB, srv.JournalWriter(), logger)
+				// stack (paymaster cost ledger). PipelinesHandler.Emitter()
+				// returns the narrower pipeline.Emitter; we pass the full
+				// Server.JournalWriter() so cost ledger entries land in
+				// the same buffer as the rest of the server. Falls back
+				// to a no-op writer when journalWriter is nil (test path
+				// — should never happen in `crewship start`).
+				pipeRunner := pipeline.NewLLMRunner(deps.DB, srv.JournalWriter(), logger)
 				srv.APIRouter().PipelinesHandler.SetRunner(pipeRunner)
 				reason := "no Docker provider"
 				if runnerMode == "llm_direct" {

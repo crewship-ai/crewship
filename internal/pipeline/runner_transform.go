@@ -39,10 +39,14 @@ func (e *Executor) runTransformStep(step Step, parentRender RenderContext) (stri
 		return rawInput, 0, time.Since(stepStart).Milliseconds(), nil
 	}
 
-	// Parse JSON. If the input doesn't parse, identity-return for
-	// "tostring" / "length" on raw strings; bail otherwise.
+	// Parse JSON. DecodeAgentJSON strips the fence/preamble noise
+	// that LLM outputs commonly carry, so a transform step can read
+	// upstream agent output without each pipeline having to add a
+	// "strip the fence first" prelude. Non-JSON input still falls
+	// through to the identity short-circuit for "tostring"/"length"
+	// on raw strings.
 	var v any
-	if err := json.Unmarshal([]byte(rawInput), &v); err != nil {
+	if err := DecodeAgentJSON(rawInput, &v); err != nil {
 		switch expr {
 		case "length":
 			return fmt.Sprintf("%d", len(rawInput)), 0, time.Since(stepStart).Milliseconds(), nil

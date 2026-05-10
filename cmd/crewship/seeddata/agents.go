@@ -22,7 +22,7 @@ var Agents = []AgentDef{
 	{
 		Name: "Tomáš", Slug: "tomas", CrewSlug: "engineering",
 		RoleTitle: "Technical Architect", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-sonnet-4-5",
+		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
 		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "tomas",
 	},
 	{
@@ -48,7 +48,7 @@ var Agents = []AgentDef{
 	{
 		Name: "Eva", Slug: "eva", CrewSlug: "quality",
 		RoleTitle: "Quality Director", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-sonnet-4-5",
+		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
 		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "eva",
 	},
 	{
@@ -74,7 +74,7 @@ var Agents = []AgentDef{
 	{
 		Name: "Ondřej", Slug: "ondrej", CrewSlug: "devops",
 		RoleTitle: "SRE Lead", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-sonnet-4-5",
+		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
 		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "ondrej",
 	},
 	{
@@ -88,7 +88,7 @@ var Agents = []AgentDef{
 	{
 		Name: "Lucie", Slug: "lucie", CrewSlug: "research",
 		RoleTitle: "Research Director", AgentRole: "LEAD",
-		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-sonnet-4-5",
+		CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC", LLMModel: "claude-haiku-4-5",
 		ToolProfile: "FULL", TimeoutSeconds: 3600, MemoryEnabled: true, PromptSlug: "lucie",
 	},
 	{

@@ -1,0 +1,98 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+
+	"github.com/crewship-ai/crewship/internal/cli"
+)
+
+// seedSchedules — Phase 9b. Wires demo cron schedules onto existing
+// pipelines so a fresh workspace immediately has cron-driven runs
+// flowing into /activity.
+//
+// Why a separate phase instead of embedding the schedule in the
+// routine seed: schedules belong to the pipeline_schedules table,
+// not the pipeline DSL. Keeping them on a separate seed step also
+// lets us extend the demo set later (e.g. one cron per crew) without
+// touching routines.go.
+//
+// Why every 10 minutes: lower-frequency cron mirrors what real
+// workspaces look like — minute-cadence schedules drown the rail
+// with noise during demos and burn LLM/tool budgets if any of the
+// agents on the path call out to a real model.
+
+type demoSchedule struct {
+	Name       string
+	TargetSlug string
+	CronExpr   string
+	Inputs     map[string]interface{}
+	Enabled    bool
+}
+
+var demoSchedules = []demoSchedule{
+	{
+		Name:       "Demo: extract emails (every 10m)",
+		TargetSlug: "eval-extract-emails",
+		CronExpr:   "*/10 * * * *",
+		Enabled:    true,
+	},
+}
+
+func seedSchedules(ctx context.Context, client *cli.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	wsID := client.GetWorkspaceID()
+	if wsID == "" {
+		return fmt.Errorf("seedSchedules: workspace_id not set on client")
+	}
+	fmt.Fprintln(os.Stderr, "Creating demo schedules...")
+
+	endpoint := fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules", wsID)
+	created := 0
+	for _, s := range demoSchedules {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		body := map[string]interface{}{
+			"name":                 s.Name,
+			"target_pipeline_slug": s.TargetSlug,
+			"cron_expr":            s.CronExpr,
+			"enabled":              s.Enabled,
+		}
+		if len(s.Inputs) > 0 {
+			body["inputs"] = s.Inputs
+		}
+		r, err := client.Post(endpoint, body)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! Schedule %s: %v\n", s.TargetSlug, err)
+			continue
+		}
+		// 404 = target pipeline missing (e.g. routine seed skipped or
+		// failed); 409 = duplicate (idempotent re-seed). Surface both
+		// without aborting the whole seed phase.
+		if r.StatusCode == http.StatusNotFound {
+			fmt.Fprintf(os.Stderr, "  ! Schedule %s: target pipeline not found — skipping\n", s.TargetSlug)
+			r.Body.Close()
+			continue
+		}
+		if r.StatusCode == http.StatusConflict {
+			fmt.Fprintf(os.Stderr, "  = Schedule %s: already exists\n", s.TargetSlug)
+			r.Body.Close()
+			continue
+		}
+		if r.StatusCode >= 400 {
+			fmt.Fprintf(os.Stderr, "  ! Schedule %s: HTTP %d\n", s.TargetSlug, r.StatusCode)
+			r.Body.Close()
+			continue
+		}
+		r.Body.Close()
+		fmt.Fprintf(os.Stderr, "  + Schedule: %s (%s)\n", s.Name, s.CronExpr)
+		created++
+	}
+	fmt.Fprintf(os.Stderr, "  Created %d/%d demo schedule(s)\n", created, len(demoSchedules))
+	return nil
+}
