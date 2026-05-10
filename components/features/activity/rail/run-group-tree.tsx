@@ -72,6 +72,15 @@ export function RunGroupTree({
   )
 }
 
+interface GroupNodeProps {
+  group: RunGroup
+  depth: number
+  selectedRunId: string | null
+  onSelectRun: (id: string) => void
+  onSelectIssue?: (identifier: string) => void
+  routineCardCtx?: RunGroupTreeProps["routineCardCtx"]
+}
+
 function GroupNode({
   group,
   depth,
@@ -79,14 +88,7 @@ function GroupNode({
   onSelectRun,
   onSelectIssue,
   routineCardCtx,
-}: {
-  group: RunGroup
-  depth: number
-  selectedRunId: string | null
-  onSelectRun: (id: string) => void
-  onSelectIssue?: (identifier: string) => void
-  routineCardCtx?: RunGroupTreeProps["routineCardCtx"]
-}) {
+}: GroupNodeProps) {
   const [expanded, setExpanded] = useState(depth === 0)
   const [shownPage, setShownPage] = useState(1)
 
@@ -209,6 +211,15 @@ function GroupNode({
   )
 }
 
+interface RunRowsProps {
+  runs: PipelineRun[]
+  shownPage: number
+  onShowMore: () => void
+  selectedRunId: string | null
+  onSelect: (id: string) => void
+  accentBorder: string
+}
+
 function RunRows({
   runs,
   shownPage,
@@ -216,14 +227,7 @@ function RunRows({
   selectedRunId,
   onSelect,
   accentBorder,
-}: {
-  runs: PipelineRun[]
-  shownPage: number
-  onShowMore: () => void
-  selectedRunId: string | null
-  onSelect: (id: string) => void
-  accentBorder: string
-}) {
+}: RunRowsProps) {
   const visibleCount = Math.min(runs.length, shownPage * PAGE_SIZE)
   const visible = runs.slice(0, visibleCount)
   const hidden = runs.length - visibleCount
@@ -254,17 +258,19 @@ function RunRows({
   )
 }
 
+interface RunRowProps {
+  run: PipelineRun
+  selected: boolean
+  onSelect: () => void
+  accentBorder: string
+}
+
 function RunRow({
   run,
   selected,
   onSelect,
   accentBorder,
-}: {
-  run: PipelineRun
-  selected: boolean
-  onSelect: () => void
-  accentBorder: string
-}) {
+}: RunRowProps) {
   const tint = statusTint(run.status)
   const StatusIcon = statusIcon(run.status)
   const isWait = run.status === "paused"
@@ -341,18 +347,27 @@ const ACCENT_BY_KIND: Record<RunGroup["kind"], string> = {
   all: "border-white/[0.06]",
 }
 
-function KindBadge({ kind }: { kind: RunGroup["kind"] }) {
-  const map: Record<RunGroup["kind"], { Icon: typeof Calendar; cls: string; text: string }> = {
-    cron: { Icon: Calendar, cls: "bg-violet-500/15 text-violet-300", text: "Cron" },
-    issue: { Icon: CircleDot, cls: "bg-blue-500/15 text-blue-300", text: "Issue" },
-    webhook: { Icon: Webhook, cls: "bg-amber-500/15 text-amber-300", text: "Webhook" },
-    manual: { Icon: Zap, cls: "bg-white/[0.06] text-muted-foreground", text: "Manual" },
-    call_pipeline: { Icon: CircleDot, cls: "bg-purple-500/15 text-purple-300", text: "Sub-routine" },
-    crew: { Icon: CircleDot, cls: "bg-cyan-500/15 text-cyan-300", text: "Crew" },
-    routine: { Icon: CircleDot, cls: "bg-violet-500/15 text-violet-300", text: "Routine" },
-    all: { Icon: CircleDot, cls: "bg-white/[0.06] text-muted-foreground", text: "All" },
-  }
-  const m = map[kind]
+// Module-scope so the object literal isn't reallocated on every
+// KindBadge render. Rail re-renders on each pipeline_run event,
+// each filter chip click, each routine in a 100-row workspace —
+// keeping this static keeps GC churn minimal under load.
+const KIND_BADGE_MAP: Record<RunGroup["kind"], { Icon: typeof Calendar; cls: string; text: string }> = {
+  cron: { Icon: Calendar, cls: "bg-violet-500/15 text-violet-300", text: "Cron" },
+  issue: { Icon: CircleDot, cls: "bg-blue-500/15 text-blue-300", text: "Issue" },
+  webhook: { Icon: Webhook, cls: "bg-amber-500/15 text-amber-300", text: "Webhook" },
+  manual: { Icon: Zap, cls: "bg-white/[0.06] text-muted-foreground", text: "Manual" },
+  call_pipeline: { Icon: CircleDot, cls: "bg-purple-500/15 text-purple-300", text: "Sub-routine" },
+  crew: { Icon: CircleDot, cls: "bg-cyan-500/15 text-cyan-300", text: "Crew" },
+  routine: { Icon: CircleDot, cls: "bg-violet-500/15 text-violet-300", text: "Routine" },
+  all: { Icon: CircleDot, cls: "bg-white/[0.06] text-muted-foreground", text: "All" },
+}
+
+interface KindBadgeProps {
+  kind: RunGroup["kind"]
+}
+
+function KindBadge({ kind }: KindBadgeProps) {
+  const m = KIND_BADGE_MAP[kind]
   return (
     <span className={cn("inline-flex items-center gap-0.5 rounded px-1 py-0 text-[9px] font-medium", m.cls)}>
       <m.Icon className="h-2 w-2" /> {m.text}

@@ -2,7 +2,7 @@
 
 import { memo } from "react"
 import Link from "next/link"
-import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react"
 import {
   CircleDot,
   PauseCircle,
@@ -43,8 +43,7 @@ function activateOnEnterOrSpace(e: React.KeyboardEvent<HTMLElement>) {
   }
 }
 
-function IssueNodeBase({ data }: NodeProps) {
-  const d = data as unknown as OverviewIssueNodeData
+function IssueNodeBase({ data: d }: NodeProps<Node<OverviewIssueNodeData>>) {
   return (
     <div
       role="button"
@@ -67,8 +66,7 @@ function IssueNodeBase({ data }: NodeProps) {
 }
 export const OverviewIssueNode = memo(IssueNodeBase)
 
-function RoutineNodeBase({ data }: NodeProps) {
-  const d = data as unknown as OverviewRoutineNodeData
+function RoutineNodeBase({ data: d }: NodeProps<Node<OverviewRoutineNodeData>>) {
   // Native <Link> = native anchor semantics. Enter activates it for
   // free; adding role="button" would have stomped that.
   return (
@@ -98,16 +96,22 @@ function RoutineNodeBase({ data }: NodeProps) {
 }
 export const OverviewRoutineNode = memo(RoutineNodeBase)
 
-function RunNodeBase({ data }: NodeProps) {
-  const d = data as unknown as OverviewRunNodeData
+function RunNodeBase({ data: d }: NodeProps<Node<OverviewRunNodeData>>) {
   const tint = statusTint(d.status)
   const SI = statusIcon(d.status)
   const isWait = d.isWaitpoint || d.status === "paused"
+  // Trigger source is decorative-only in SourceIcon, so the
+  // accessible name has to spell it out — otherwise screen-reader
+  // users hear "Run prn_abc status completed" with no clue WHY the
+  // run fired (cron vs issue vs webhook are clearly distinct in
+  // the visual). `via unknown` covers a missing/legacy field.
+  const accessibleLabel =
+    `Run ${d.runId} triggered via ${d.triggeredVia ?? "unknown"} status ${d.status}`
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`Run ${d.runId} status ${d.status}`}
+      aria-label={accessibleLabel}
       onKeyDown={activateOnEnterOrSpace}
       className={cn(
         "relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/80",
