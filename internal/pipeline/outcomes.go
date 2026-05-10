@@ -137,7 +137,18 @@ func buildGraderPrompt(step Step, workerOutput string, runInputs map[string]any)
 		// round-tripped through inputs_json). Defensive fallback to
 		// an empty block keeps the rest of the prompt usable.
 		if blob, err := json.MarshalIndent(runInputs, "", "  "); err == nil {
-			b.WriteString("\nRun inputs (the original payload that produced the artifact):\n<run_inputs>\n")
+			// Spell out the relationship explicitly. Earlier wording
+			// ("the original payload") had graders refusing to evaluate
+			// criteria like "preserves the original meaning" or "every
+			// claim appears verbatim in the context" because they
+			// didn't realize <run_inputs> WAS the source of those
+			// reference values. Naming the common patterns up front
+			// (input / original / context / source) covers the rubrics
+			// that actually appear in routines today.
+			b.WriteString("\nRun inputs — REFERENCE these when evaluating criteria. Anything the rubric calls\n")
+			b.WriteString("\"the input\", \"the original\", \"the context\", \"the source\", \"the source document\",\n")
+			b.WriteString("or names a specific input field (e.g. inputs.text, inputs.context) lives here:\n")
+			b.WriteString("<run_inputs>\n")
 			b.Write(blob)
 			b.WriteString("\n</run_inputs>\n")
 		}
