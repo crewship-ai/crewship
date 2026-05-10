@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { motion } from "motion/react"
 import { toast } from "sonner"
@@ -8,7 +8,6 @@ import {
   ChevronDown, MessageSquare, MoreHorizontal, Square,
   Trash2, RotateCcw,
 } from "lucide-react"
-import { Skeleton } from "@/components/ui/skeleton"
 import { EditableField } from "@/components/shared/editable-field"
 import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
 import { InboxBanner } from "@/components/features/crews/inbox-banner"
@@ -25,7 +24,6 @@ import {
 import { CLI_ADAPTERS, getProviderLabel } from "@/lib/cli-adapters"
 import { ModelLibraryPicker, getCompatibleAdapters } from "./model-library-picker"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 
@@ -39,6 +37,14 @@ import {
   CredentialsManager,
   SkillsManager,
 } from "./agent-canvas-managers"
+import {
+  CanvasRow as Row,
+  CanvasShell,
+  CanvasTabs,
+  useEntityFetch,
+  usePatchEntity,
+  useResetTabOnSlugChange,
+} from "./canvas-base"
 
 const ROLE_OPTIONS = [
   { value: "AGENT", label: "Agent" },
@@ -177,9 +183,23 @@ export function AgentCanvas({
   onSelectCrew,
   onOpenFiles,
 }: AgentCanvasProps) {
-  const [agent, setAgent] = useState<AgentRecord | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    entity: agent,
+    setEntity: setAgent,
+    loading,
+    error,
+    refetch: fetchAgent,
+  } = useEntityFetch<AgentRecord>({
+    workspaceId,
+    slug: agentSlug,
+    listUrl: "/api/v1/agents",
+    detailUrl: (id) => `/api/v1/agents/${id}`,
+    matchSlug: (a) => a.slug,
+    notFoundMessage: `agent "${agentSlug}" not found in workspace`,
+    listErrorMessage: "agent list failed",
+    detailErrorMessage: "agent detail failed",
+  })
+
   const [tab, setTab] = useState<AgentTab>("overview")
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [customModelOpen, setCustomModelOpen] = useState(false)
@@ -187,43 +207,8 @@ export function AgentCanvas({
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
 
   // Reset to Overview when switching agents.
-  const lastAgentSlug = useRef(agentSlug)
-  useEffect(() => {
-    if (lastAgentSlug.current !== agentSlug) {
-      setTab("overview")
-      lastAgentSlug.current = agentSlug
-    }
-  }, [agentSlug])
-
-  const fetchAgent = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const listRes = await fetchWithRetry(`/api/v1/agents?workspace_id=${workspaceId}`, { signal })
-      if (!listRes.ok) throw new Error(`agent list failed (${listRes.status})`)
-      const list: AgentRecord[] = await listRes.json()
-      const match = list.find((a) => a.slug === agentSlug)
-      if (!match) throw new Error(`agent "${agentSlug}" not found in workspace`)
-      const detailRes = await fetchWithRetry(`/api/v1/agents/${match.id}?workspace_id=${workspaceId}`, { signal })
-      if (!detailRes.ok) throw new Error(`agent detail failed (${detailRes.status})`)
-      const detail: AgentRecord = await detailRes.json()
-      if (!signal?.aborted) {
-        setAgent(detail)
-        setError(null)
-      }
-    } catch (err) {
-      if ((err as { name?: string })?.name === "AbortError") return
-      setError(err instanceof Error ? err.message : "Failed to load agent")
-    } finally {
-      if (!signal?.aborted) setLoading(false)
-    }
-  }, [agentSlug, workspaceId])
-
-  useEffect(() => {
-    setLoading(true)
-    setShowAdvanced(false)
-    const controller = new AbortController()
-    void fetchAgent(controller.signal)
-    return () => controller.abort()
-  }, [agentSlug, fetchAgent])
+  const resetAdvanced = useCallback(() => setShowAdvanced(false), [])
+  useResetTabOnSlugChange<AgentTab>(agentSlug, setTab, "overview", resetAdvanced)
 
   useRealtimeEvent("agent.status", useCallback((event) => {
     if (agent && event.payload?.agent_id === agent.id) {
@@ -291,21 +276,13 @@ export function AgentCanvas({
   }, [agentId, workspaceId])
   const runsCount = runs?.length ?? null
 
-  const patch = useCallback(async (body: Record<string, unknown>) => {
-    if (!agent) return
-    const res = await fetch(`/api/v1/agents/${agent.id}?workspace_id=${workspaceId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(text || `HTTP ${res.status}`)
-    }
-    const updated: AgentRecord = await res.json()
-    setAgent(updated)
-    onAgentChanged()
-  }, [agent, workspaceId, onAgentChanged])
+  const patch = usePatchEntity<AgentRecord>({
+    workspaceId,
+    entity: agent,
+    patchUrl: (a) => `/api/v1/agents/${a.id}`,
+    setEntity: setAgent,
+    onChanged: onAgentChanged,
+  })
 
   // Fire-and-forget wrapper for click/key handlers that can't await.
   // Without this the rejected promise becomes an unhandled rejection
@@ -351,15 +328,15 @@ export function AgentCanvas({
     }
   }, [agent, onAgentChanged, workspaceId])
 
-  if (loading) {
-    return <div className="px-6 md:px-8 lg:px-12 py-6 max-w-[1180px] mx-auto w-full"><Skeleton className="h-[600px] w-full rounded-xl" /></div>
-  }
-  if (error || !agent) {
+  if (loading || error || !agent) {
     return (
-      <div className="px-6 md:px-8 lg:px-12 py-12 max-w-[1180px] mx-auto w-full text-center">
-        <p className="text-sm text-red-300 mb-2">Could not load agent</p>
-        <p className="text-xs text-muted-foreground">{error}</p>
-      </div>
+      <CanvasShell
+        loading={loading}
+        error={loading ? null : (error ?? "agent not found")}
+        notLoadedLabel="Could not load agent"
+      >
+        {null}
+      </CanvasShell>
     )
   }
 
@@ -372,7 +349,7 @@ export function AgentCanvas({
   ]
 
   return (
-    <div className="px-6 md:px-8 lg:px-12 py-6 space-y-6 max-w-[1180px] mx-auto w-full">
+    <CanvasShell loading={false} error={null} notLoadedLabel="">
       {/* Header */}
       <motion.header
         layout
@@ -506,24 +483,7 @@ export function AgentCanvas({
       />
 
       {/* Tabs */}
-      <div className="flex items-center gap-5 border-b border-white/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            aria-selected={tab === t.id}
-            className={cn(
-              "text-sm py-2 px-1 border-b-2 transition-colors shrink-0",
-              tab === t.id
-                ? "border-blue-400 text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <CanvasTabs<AgentTab> tabs={TABS} active={tab} onChange={setTab} />
 
       {/* Tab content */}
       {tab === "overview" && (
@@ -859,7 +819,7 @@ export function AgentCanvas({
           </p>
         </div>
       )}
-    </div>
+    </CanvasShell>
   )
 }
 
@@ -867,26 +827,6 @@ export function AgentCanvas({
 // Layout helpers
 // =============================================================================
 
-
-function Row({
-  label,
-  align = "center",
-  children,
-}: {
-  label: string
-  align?: "center" | "start"
-  children: React.ReactNode
-}) {
-  return (
-    <div className={cn(
-      "grid grid-cols-[180px_1fr] gap-4 px-4 py-2.5",
-      align === "center" ? "items-center" : "items-start",
-    )}>
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-2 min-w-0">{children}</div>
-    </div>
-  )
-}
 
 function StatTile({ label, value }: { label: string; value: number | string }) {
   return (

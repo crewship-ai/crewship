@@ -1,10 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Files, Plus, RotateCcw, Trash2 } from "lucide-react"
-import { Skeleton } from "@/components/ui/skeleton"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
 import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
@@ -15,11 +14,18 @@ import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-poli
 import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { fetchWithRetry } from "@/lib/fetch-with-retry"
 import { cn } from "@/lib/utils"
 
 import { HealthCard, QuickAction } from "./crew-canvas-cards"
 import { Collapsible, ProvisioningBanner } from "./crew-canvas-banner"
+import {
+  CanvasRow as Row,
+  CanvasShell,
+  CanvasTabs,
+  useEntityFetch,
+  usePatchEntity,
+  useResetTabOnSlugChange,
+} from "./canvas-base"
 
 
 interface AgentSummary {
@@ -154,9 +160,22 @@ export function CrewCanvas({
   onSelectAgent,
   onOpenFiles,
 }: CrewCanvasProps) {
-  const [crew, setCrew] = useState<CrewRecord | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    entity: crew,
+    setEntity: setCrew,
+    loading,
+    error,
+  } = useEntityFetch<CrewRecord>({
+    workspaceId,
+    slug: crewSlug,
+    listUrl: "/api/v1/crews",
+    detailUrl: (id) => `/api/v1/crews/${id}`,
+    matchSlug: (c) => c.slug,
+    notFoundMessage: "crew not found",
+    listErrorMessage: "crew fetch failed",
+    detailErrorMessage: "crew detail fetch failed",
+  })
+
   const [tab, setTab] = useState<CrewTab>("overview")
   const [issues, setIssues] = useState<IssuesSnapshot | null>(null)
   const [recentIssues, setRecentIssues] = useState<IssueRow[]>([])
@@ -166,43 +185,8 @@ export function CrewCanvas({
   const [activityFilter, setActivityFilter] = useState<"all" | string>("all") // "all" | agentId
 
   // Reset to Overview when switching crews.
-  const lastCrewSlug = useRef(crewSlug)
-  useEffect(() => {
-    if (lastCrewSlug.current !== crewSlug) {
-      setTab("overview")
-      setActivityFilter("all")
-      lastCrewSlug.current = crewSlug
-    }
-  }, [crewSlug])
-
-  const fetchCrew = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const listRes = await fetchWithRetry(`/api/v1/crews?workspace_id=${workspaceId}`, { signal })
-      if (!listRes.ok) throw new Error(`crew fetch failed (${listRes.status})`)
-      const list: CrewRecord[] = await listRes.json()
-      const match = list.find((c) => c.slug === crewSlug)
-      if (!match) throw new Error("crew not found")
-      const detailRes = await fetchWithRetry(`/api/v1/crews/${match.id}?workspace_id=${workspaceId}`, { signal })
-      if (!detailRes.ok) throw new Error(`crew detail fetch failed (${detailRes.status})`)
-      const detail: CrewRecord = await detailRes.json()
-      if (!signal?.aborted) {
-        setCrew(detail)
-        setError(null)
-      }
-    } catch (err) {
-      if ((err as { name?: string })?.name === "AbortError") return
-      setError(err instanceof Error ? err.message : "Failed to load crew")
-    } finally {
-      if (!signal?.aborted) setLoading(false)
-    }
-  }, [crewSlug, workspaceId])
-
-  useEffect(() => {
-    setLoading(true)
-    const controller = new AbortController()
-    void fetchCrew(controller.signal)
-    return () => controller.abort()
-  }, [crewSlug, fetchCrew])
+  const resetActivityFilter = useCallback(() => setActivityFilter("all"), [])
+  useResetTabOnSlugChange<CrewTab>(crewSlug, setTab, "overview", resetActivityFilter)
 
   useEffect(() => {
     if (!crew) return
@@ -258,21 +242,13 @@ export function CrewCanvas({
     return () => { cancelled = true }
   }, [crew, tab, workspaceId, members])
 
-  const patch = useCallback(async (body: Record<string, unknown>) => {
-    if (!crew) return
-    const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const text = await res.text()
-      throw new Error(text || `HTTP ${res.status}`)
-    }
-    const updated: CrewRecord = await res.json()
-    setCrew(updated)
-    onCrewChanged()
-  }, [crew, workspaceId, onCrewChanged])
+  const patch = usePatchEntity<CrewRecord>({
+    workspaceId,
+    entity: crew,
+    patchUrl: (c) => `/api/v1/crews/${c.id}`,
+    setEntity: setCrew,
+    onChanged: onCrewChanged,
+  })
 
   const applyAvatarStyle = useCallback(async (resetOverrides: boolean) => {
     if (!crew) return
@@ -321,22 +297,22 @@ export function CrewCanvas({
     return { running, errored, openIssues, activeMissions }
   }, [agentsForCrew, issues, missions, crew])
 
-  if (loading) {
-    return <div className="px-6 md:px-8 lg:px-12 py-6 max-w-[1180px] mx-auto w-full"><Skeleton className="h-[600px] w-full rounded-xl" /></div>
-  }
-  if (error || !crew) {
+  if (loading || error || !crew) {
     return (
-      <div className="px-6 md:px-8 lg:px-12 py-12 max-w-[1180px] mx-auto w-full text-center">
-        <p className="text-sm text-red-300 mb-2">Could not load crew</p>
-        <p className="text-xs text-muted-foreground">{error}</p>
-      </div>
+      <CanvasShell
+        loading={loading}
+        error={loading ? null : (error ?? "crew not found")}
+        notLoadedLabel="Could not load crew"
+      >
+        {null}
+      </CanvasShell>
     )
   }
 
   const containerSummary = `${crew.runtime_image ?? "debian:trixie-slim"} · ${formatMemory(crew.container_memory_mb)} · ${crew.container_cpus} CPU · TTL ${crew.container_ttl_hours ?? "—"}h · network: ${crew.network_mode}`
 
   return (
-    <div className="px-6 md:px-8 lg:px-12 py-6 space-y-6 max-w-[1180px] mx-auto w-full">
+    <CanvasShell loading={false} error={null} notLoadedLabel="">
       {/* Header */}
       <header className="flex items-start gap-5 pb-5 border-b border-white/8">
         <button
@@ -407,24 +383,7 @@ export function CrewCanvas({
       <ProvisioningBanner crewId={crew.id} crewSlug={crew.slug} workspaceId={workspaceId} />
 
       {/* Tabs */}
-      <div className="flex items-center gap-5 border-b border-white/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            aria-selected={tab === t.id}
-            className={cn(
-              "text-sm py-2 px-1 border-b-2 transition-colors shrink-0",
-              tab === t.id
-                ? "border-blue-400 text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <CanvasTabs<CrewTab> tabs={TABS} active={tab} onChange={setTab} />
 
       {tab === "overview" && (
         <div className="space-y-7">
@@ -935,7 +894,7 @@ export function CrewCanvas({
           </section>
         </div>
       )}
-    </div>
+    </CanvasShell>
   )
 }
 
@@ -960,25 +919,4 @@ function issueStatusColor(status: string | undefined): string {
   if (s.includes("blocked") || s.includes("error") || s.includes("cancel")) return "bg-red-500"
   if (s.includes("todo")) return "bg-zinc-400"
   return "bg-zinc-600"
-}
-
-
-function Row({
-  label,
-  align = "center",
-  children,
-}: {
-  label: string
-  align?: "center" | "start"
-  children: React.ReactNode
-}) {
-  return (
-    <div className={cn(
-      "grid grid-cols-[180px_1fr] gap-4 px-4 py-2.5",
-      align === "center" ? "items-center" : "items-start",
-    )}>
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="flex items-center gap-2 min-w-0">{children}</div>
-    </div>
-  )
 }
