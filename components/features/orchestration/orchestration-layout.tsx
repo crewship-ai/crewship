@@ -27,7 +27,7 @@ import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
-import { IssuesBoardInline, IssuesListInline, IssueDetailInline } from "@/components/features/orchestration/issues-inline"
+import { IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
 import { IssuesStatusChips } from "@/components/features/issues/issues-status-chips"
 import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
 import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
@@ -361,12 +361,13 @@ export function OrchestrationLayout({
     }
   }, [workspaceId, selectedIssue?.id])
 
-  // selectedIssue takes over the middle pane (same pattern as
-  // /routines). When set, the board/list is hidden and the detail
-  // renders full-width with a breadcrumb back-arrow at top. Right
-  // panel is suppressed entirely for issue selections — only task /
-  // project detail still uses it.
+  // selectedIssue / selectedProject take over the middle pane (same
+  // pattern as /routines). When set, the board/list is hidden and the
+  // detail renders full-width with a breadcrumb back-arrow at top.
+  // Right panel is suppressed entirely for these selections.
   const issueDetailFullWidth = selectedIssue !== null && activeTab === "issues"
+  const projectDetailFullWidth =
+    selectedProjectId !== null && !selectedIssue && activeTab === "issues"
 
   const filteredIssues = useMemo(() => {
     let filtered = issues
@@ -477,14 +478,15 @@ export function OrchestrationLayout({
   // inside RoutinesTab). Suppress the orchestration-level detail pane
   // there so an issue/task selected from a previous tab doesn't bleed
   // into the routines layout and shrink the routines list view.
-  // Right panel still shows for tasks / project drilldowns, but issue
-  // detail moved into the middle pane (full-width) — same pattern as
-  // /routines. The right rail was cramped (520px); the editor / activity
-  // / properties all benefit from real horizontal space.
+  // Right panel still shows for task drilldowns, but issue + project
+  // detail both moved into the middle pane (full-width) — same pattern
+  // as /routines. The right rail was cramped (520px); the editor /
+  // activity / properties all benefit from real horizontal space.
   const showRightPanel =
     activeTab !== "routines" &&
     !issueDetailFullWidth &&
-    (detailContext.type !== "none" || (selectedProjectId !== null && !selectedIssue))
+    !projectDetailFullWidth &&
+    detailContext.type !== "none"
 
   const handleIssueClose = useCallback(() => {
     setSelectedIssue(null)
@@ -784,7 +786,49 @@ export function OrchestrationLayout({
               </div>
             </div>
           )}
-          {activeTab === "issues" && !issueDetailFullWidth && (
+          {activeTab === "issues" && projectDetailFullWidth && selectedProject && (
+            <div className="flex h-full flex-col overflow-hidden">
+              {/* Breadcrumb back-bar — matches the issue detail pattern. */}
+              <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
+                <button
+                  type="button"
+                  onClick={handleProjectClose}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Back to issues
+                </button>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                <span className="truncate text-xs font-medium text-muted-foreground">
+                  Project
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                <span className="truncate text-xs font-medium text-foreground/85">
+                  {selectedProject.name}
+                </span>
+              </div>
+              <div className="relative flex-1 overflow-hidden">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={`project-${selectedProject.id}`}
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -12 }}
+                    transition={{ duration: 0.18, ease: "easeOut" }}
+                    className="absolute inset-0 overflow-hidden"
+                  >
+                    <ProjectDetailInline
+                      project={selectedProject}
+                      workspaceId={workspaceId}
+                      onClose={handleProjectClose}
+                      onUpdated={fetchProjects}
+                    />
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+            </div>
+          )}
+          {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
             <div className="h-full overflow-auto">
               <IssuesToolbarStrip
                 issueViewMode={issueViewMode}
