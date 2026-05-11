@@ -1,4 +1,4 @@
-import { getCrewIconDef, getGradientPalette } from "@/lib/crew-icon"
+import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 
 interface CrewIconProps {

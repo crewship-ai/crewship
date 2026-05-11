@@ -6,7 +6,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { CREW_ICONS, GRADIENT_PALETTES } from "@/lib/crew-icon"
+import { CREW_ICONS, GRADIENT_PALETTES } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 
 export interface CrewIconPickerDialogProps {

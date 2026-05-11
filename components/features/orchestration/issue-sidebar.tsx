@@ -35,7 +35,7 @@ import {
 } from "@/components/ui/command"
 import { formatDate } from "@/lib/time"
 import { cn } from "@/lib/utils"
-import { getCrewDotColor } from "@/lib/crew-icon"
+import { getCrewDotColor } from "@/lib/entities"
 import type { IssueLabel, IssueRelation, Mission, Project } from "@/lib/types/mission"
 
 // ---------------------------------------------------------------------------

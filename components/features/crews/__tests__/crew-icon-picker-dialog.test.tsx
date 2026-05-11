@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
-import { CREW_ICONS, GRADIENT_PALETTES } from "@/lib/crew-icon"
+import { CREW_ICONS, GRADIENT_PALETTES } from "@/lib/entities"
 
 describe("<CrewIconPickerDialog>", () => {
   const baseProps = {

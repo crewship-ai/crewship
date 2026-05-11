@@ -4,7 +4,7 @@ import type {
   CLIAdapter,
   LLMProvider,
   ToolProfile,
-} from "@/lib/agent-personas"
+} from "@/lib/entities"
 
 /** Source of a persona — drives the source-tab filter in the template browser
  *  popover. Only "builtin" is wired today; the others land with the
