@@ -132,26 +132,24 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   }
 
   const status = routine?.last_invocation_status?.toLowerCase()
+  // Status tones share the same `bg-{c}-500/20 text-{c}-400` pattern
+  // as lib/colors.ts STATUS_BADGE_CLASSES so the pill matches the
+  // status pills rendered in Inbox / Issues / Activity.
   const statusTone =
     status === "completed" || status === "succeeded" || status === "success"
-      ? { bg: "bg-emerald-500/12", text: "text-emerald-300", ring: "ring-emerald-500/30", label: "Last run · completed" }
+      ? { bg: "bg-emerald-500/20", text: "text-emerald-400", label: "Last run · completed" }
       : status === "failed" || status === "error"
-        ? { bg: "bg-rose-500/12", text: "text-rose-300", ring: "ring-rose-500/30", label: "Last run · failed" }
+        ? { bg: "bg-rose-500/20", text: "text-rose-400", label: "Last run · failed" }
         : status === "running"
-          ? { bg: "bg-blue-500/12", text: "text-blue-300", ring: "ring-blue-500/30", label: "Running…" }
-          : { bg: "bg-white/[0.04]", text: "text-muted-foreground", ring: "ring-white/[0.08]", label: "Never invoked" }
+          ? { bg: "bg-blue-500/20", text: "text-blue-400", label: "Running…" }
+          : { bg: "bg-muted", text: "text-muted-foreground", label: "Never invoked" }
 
   const [activeTab, setActiveTab] = useState("overview")
 
   return (
     <div className="flex h-full flex-col">
       {/* Hero — gradient title + slug + status pills + description + action group */}
-      <div
-        className={cn(
-          "shrink-0 border-b border-white/[0.06] px-6 pb-5 pt-6",
-          "bg-gradient-to-br from-blue-500/[0.05] via-transparent to-violet-500/[0.03]",
-        )}
-      >
+      <div className="shrink-0 border-b border-border bg-card/40 px-6 pb-5 pt-6">
         <div className="flex items-start gap-4">
           <div className="min-w-0 flex-1">
             {loading ? (
@@ -166,10 +164,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
                 <div className="flex flex-wrap items-center gap-2">
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1",
+                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium",
                       statusTone.bg,
                       statusTone.text,
-                      statusTone.ring,
                     )}
                   >
                     <span className={cn("h-1.5 w-1.5 rounded-full", statusTone.text === "text-muted-foreground" ? "bg-muted-foreground/60" : "bg-current")} />
@@ -220,11 +217,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
           <Button
             onClick={() => triggerAction("run")}
             disabled={!!busyAction || !routine}
-            className={cn(
-              "h-9 gap-2 rounded-md px-4 text-sm font-semibold shadow-lg shadow-blue-500/20",
-              "bg-gradient-to-r from-blue-500 to-violet-500 text-white hover:brightness-110",
-              "disabled:opacity-50 disabled:shadow-none",
-            )}
+            className="h-9 gap-2 rounded-md px-4 text-sm font-semibold"
             title="Invoke routine with empty inputs"
           >
             {busyAction === "run" ? (

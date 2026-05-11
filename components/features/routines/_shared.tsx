@@ -72,20 +72,24 @@ interface PillProps {
   className?: string
 }
 
+// Color tokens aligned with lib/colors.ts STATUS_BADGE_CLASSES (used
+// in Inbox/Issues/Activity status badges) — same `bg-{c}-500/20
+// text-{c}-400` pattern, no ring, so pills across the app are
+// visually identical regardless of which page rendered them.
 const PILL_TONE: Record<NonNullable<PillProps["tone"]>, string> = {
-  default: "bg-white/[0.06] text-muted-foreground ring-white/[0.08]",
-  emerald: "bg-emerald-500/12 text-emerald-300 ring-emerald-500/30",
-  rose: "bg-rose-500/12 text-rose-300 ring-rose-500/30",
-  amber: "bg-amber-500/12 text-amber-300 ring-amber-500/30",
-  blue: "bg-blue-500/12 text-blue-300 ring-blue-500/30",
-  violet: "bg-violet-500/12 text-violet-300 ring-violet-500/30",
+  default: "bg-muted text-muted-foreground",
+  emerald: "bg-emerald-500/20 text-emerald-400",
+  rose: "bg-rose-500/20 text-rose-400",
+  amber: "bg-amber-500/20 text-amber-400",
+  blue: "bg-blue-500/20 text-blue-400",
+  violet: "bg-violet-500/20 text-violet-400",
 }
 
 export function Pill({ tone = "default", children, className }: PillProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium",
         PILL_TONE[tone],
         className,
       )}

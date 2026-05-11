@@ -300,10 +300,14 @@ export function RoutineOverviewTab({
           {/* Authored */}
           <Card title="Authored">
             <div className="flex items-center gap-3 px-3 py-3">
-              <div className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-blue-500/60 to-violet-500/60" aria-hidden />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary" aria-hidden>
+                <span className="text-sm font-semibold">
+                  {routine.authored_via.charAt(0).toUpperCase()}
+                </span>
+              </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{routine.authored_via.replace(/_/g, " ")}</div>
-                <div className="text-[10px] text-muted-foreground">
+                <div className="text-[11px] text-muted-foreground">
                   {new Date(routine.created_at).toLocaleString()}
                 </div>
               </div>
@@ -316,7 +320,7 @@ export function RoutineOverviewTab({
               <div className="divide-y divide-white/[0.04]">
                 {creds.map((c, i) => (
                   <div key={i} className="flex items-center gap-2.5 px-3 py-2">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-500/12 font-mono text-[10px] font-bold text-violet-300">
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-500/20 font-mono text-[10px] font-bold text-violet-400">
                       {String(c["type"]).slice(0, 2).toUpperCase()}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -399,7 +403,7 @@ function KpiTile({
       <div
         aria-hidden
         className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full"
-        style={{ background: `radial-gradient(circle, ${color}22, transparent 70%)` }}
+        style={{ background: `radial-gradient(circle, ${color}1a, transparent 70%)` }}
       />
       <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-2 text-3xl font-bold tabular-nums leading-none tracking-tight">{value}</div>
@@ -567,10 +571,10 @@ function LastRunCard({
   const isFailed = run.status === "failed"
   const StatusIcon = isCompleted ? CheckCircle2 : isFailed ? XCircle : Activity
   const statusTone = isCompleted
-    ? { bg: "bg-emerald-500/12", text: "text-emerald-400", ring: "ring-emerald-500/30" }
+    ? { bg: "bg-emerald-500/20", text: "text-emerald-400" }
     : isFailed
-      ? { bg: "bg-rose-500/12", text: "text-rose-400", ring: "ring-rose-500/30" }
-      : { bg: "bg-blue-500/12", text: "text-blue-400", ring: "ring-blue-500/30" }
+      ? { bg: "bg-rose-500/20", text: "text-rose-400" }
+      : { bg: "bg-blue-500/20", text: "text-blue-400" }
 
   return (
     <div className="overflow-hidden rounded-lg border border-white/[0.06] bg-card">
@@ -583,9 +587,8 @@ function LastRunCard({
       >
         <div
           className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1",
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
             statusTone.bg,
-            statusTone.ring,
           )}
         >
           <StatusIcon className={cn("h-4 w-4", statusTone.text)} />
@@ -646,7 +649,7 @@ function LastRunCard({
         {workspaceId && (
           <Link
             href={`/activity?run=${encodeURIComponent(run.id)}`}
-            className="inline-flex items-center gap-1.5 rounded-md bg-blue-500/12 px-2.5 py-1.5 text-[11px] font-medium text-blue-300 transition-colors hover:bg-blue-500/20"
+            className="inline-flex items-center gap-1.5 rounded-md bg-blue-500/20 px-2.5 py-1.5 text-[11px] font-medium text-blue-400 transition-colors hover:bg-blue-500/30"
           >
             <ExternalLink className="h-3 w-3" />
             Open full trace in Activity

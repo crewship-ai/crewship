@@ -145,10 +145,10 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
               <li key={s.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
                 <div
                   className={cn(
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1",
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
                     s.enabled
-                      ? "bg-violet-500/12 text-violet-300 ring-violet-500/30"
-                      : "bg-white/[0.04] text-muted-foreground ring-white/[0.06]",
+                      ? "bg-violet-500/20 text-violet-400"
+                      : "bg-muted text-muted-foreground",
                   )}
                 >
                   <Calendar className="h-4 w-4" />

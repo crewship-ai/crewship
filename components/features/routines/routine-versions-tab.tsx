@@ -123,8 +123,8 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
           return (
             <li key={v.version} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
               <div className="flex shrink-0 items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.04] ring-1 ring-white/[0.06]">
-                  <GitCommit className="h-4 w-4 text-muted-foreground" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                  <GitCommit className="h-4 w-4" />
                 </div>
                 <div>
                   <div className="font-mono text-sm font-semibold">v{v.version}</div>

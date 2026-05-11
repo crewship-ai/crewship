@@ -180,7 +180,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
           <span className="opacity-60">·</span>
           <span className="font-mono">v{routine.dsl_version}</span>
           {dirty && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-amber-500/30">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
               unsaved
             </span>

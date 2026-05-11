@@ -132,10 +132,10 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
               <li key={w.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
                 <div
                   className={cn(
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1",
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
                     w.enabled
-                      ? "bg-blue-500/12 text-blue-300 ring-blue-500/30"
-                      : "bg-white/[0.04] text-muted-foreground ring-white/[0.06]",
+                      ? "bg-blue-500/20 text-blue-400"
+                      : "bg-muted text-muted-foreground",
                   )}
                 >
                   <Webhook className="h-4 w-4" />
