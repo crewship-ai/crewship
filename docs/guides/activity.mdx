@@ -1,0 +1,137 @@
+---
+title: "Activity"
+description: "Workspace-wide live trace of agent runs as a single canvas — nodes are steps, edges are data flow, inline Approve/Deny on paused gates."
+icon: "activity"
+---
+
+# Activity
+
+**Activity** is the live operator surface for "what is happening right now". It lives at [`/activity`](/activity) under the **Run** group of the sidebar and replaces the legacy four-tab Orchestration shell (Runs / Graph / Timeline / Feed) with a single ReactFlow canvas that paints every step of every run as you watch.
+
+The intent is "one canvas, no switching" — open `/activity`, pick a run from the left rail, watch the steps light up in real time, click any node for the detail panel, and approve a paused waitpoint inline without ever leaving the page.
+
+## The trace graph
+
+When you select a run, the canvas builds a directed graph from the routine's DSL and the run's recorded state:
+
+| Layer | What it is | Source |
+|-------|------------|--------|
+| **Trigger** | One synthetic entry-point node — issue identifier, schedule cron, webhook name, sub-run, or "manual" | The run's `triggered_via` |
+| **Steps** | One node per DSL step (`agent_run`, `http`, `transform`, `code`, `wait`, `call_pipeline`) | DSL `steps[]` |
+| **Sequencing edges** | Solid edges from a step to every step that lists it in `needs[]` | DSL `needs` arrays |
+| **Data-flow edges** | Dashed edges parsed from `{{ steps.X.output[.path] }}` references in any input field, labelled with the JSON path | `lib/trace/parse-data-flow.ts` |
+
+The layout is left-to-right via dagre, so the chain reads like a flowchart. Sequencing edges show *what must run first*; data-flow edges show *what value flows where* — distinct line styles so the two graph topologies don't visually collide.
+
+<Note>
+The data-flow graph is regex-parsed from the DSL on the frontend, mirroring the Go runtime regex in `internal/pipeline/dsl.go`. The backend doesn't ship resolved dependency lists — the DSL already has everything the canvas needs, and keeping the parse on the FE means changes to the regex don't require an API version bump.
+</Note>
+
+### Step status painting
+
+Each node paints its current status, derived from the run state:
+
+| Status | Visual |
+|--------|--------|
+| `pending` | Muted ring, no pip |
+| `running` | Pulsing blue ring + spinner pip |
+| `waiting` | Amber ring + pause pip — used while a `wait` step is parked on a waitpoint |
+| `success` | Emerald ring + check pip |
+| `failed` | Rose ring + glow + X pip |
+| `skipped` | Faded, 60% opacity |
+
+The status logic lives in `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) so the canvas component itself is a thin React Flow wrapper. Realtime `pipeline.step.*` and `pipeline.run.*` events refresh the run row, and the next render repaints — no per-event imperative DOM diffing.
+
+## Inline approvals
+
+The killer feature: when a routine hits a `wait` step of `kind: approval` (a Harbormaster gate), the corresponding node renders **Approve** and **Deny** buttons in its body. Click Approve, the run resumes, the node flips from `waiting` to `success`, and the next step starts — all without leaving the canvas.
+
+This is the canvas-as-resolution-surface pattern (Trigger.dev's ReviewNode shape). The same `waitpointDecide` helper (`lib/api/waitpoints.ts`) backs both this inline button and the Inbox's detail-pane Approve button, so the two surfaces stay in lock-step. Approving from one tab clears the badge on the other within the realtime round-trip.
+
+<Warning>
+Clicks on Approve/Deny `stopPropagation()` to prevent React Flow's `onNodeClick` from also selecting the step — without the guard, pressing Approve would also pop the detail panel. The pattern is intentional and worth knowing if you fork the trace node.
+</Warning>
+
+For waitpoints that need more context before you decide — what produced the value being approved, what each preceding step output looked like — pop the side panel (click the node body, not the button) and review the rendered prompt + step output. Or jump to the Inbox: every waitpoint is mirrored as an `inbox_items` row with the same Approve/Deny action.
+
+## Run timeline rail
+
+The left rail lists recent runs for the workspace, persisted-per-user filter, sort, and grouping:
+
+- **Filter dimensions**: status (active / completed / failed), crew, agent, routine, trigger source (manual / schedule / webhook / issue / sub-run), issue identifier, date range (1h / 24h / 7d / all), cost min/max, duration min/max, "has waitpoint".
+- **Sort axes**: newest, oldest, slowest, costliest.
+- **Group axes**: source (default — collapses 234 cron runs of `daily-etl` into one parent node so the rail isn't flooded), routine, crew, issue, none.
+
+The toolbar at the top of the rail shows a `[Filter • N]` badge counting active dimensions; clearing them all puts the rail back into "newest run first across everything". The filter set itself is captured in `lib/activity/run-filters.ts` as pure functions so the predicate is testable without React.
+
+Saved views land here too: a stored snapshot of `(filter, sort, group, search)` you can pin and reopen by name. The use case is "the things I check every morning" — failed runs in the last 24h grouped by crew, say.
+
+### Keyboard nav
+
+- `↑` / `↓` — step between adjacent runs in the rail. Skipped if you're typing in the search field.
+- `Esc` — close the detail panel.
+
+## Selecting a step
+
+Clicking any step node opens a right-hand detail panel with:
+
+- **Rendered prompt / URL / code body / expression** (whichever kind the step is), with template placeholders highlighted.
+- **Output** — the recorded text from `run.step_outputs[stepId]`, truncated with a "show full" expander.
+- **Heatmap context** — duration and cost from the journal's `pipeline.step.completed` event.
+- **Error message** — for failed steps, the captured error and which step the run failed at.
+
+URL state is the single source of truth for selection (`useTraceSelection`):
+
+```
+/activity?run=<runId>&step=<stepId>
+```
+
+So a copy-paste of the URL recreates the exact view you were on. Shared with a peer over Slack: same canvas, same selection, same side panel.
+
+## Overview mode
+
+With **no run selected**, the canvas switches to overview mode: a "what's bound to what" snapshot showing issues that have a routine bound to them, the routines themselves, and the most recent run of each chain. Clicking an issue node jumps to `/issues/<id>`; clicking a routine node opens it in `/routines`; clicking the last-run node sets `?run=<id>` and the canvas flips into trace mode.
+
+This is the answer to "I just opened /activity, what should I look at" — the overview surfaces the chains the workspace is currently running on, without forcing you to pick a run blindly from the rail.
+
+## Heatmap shading
+
+A toolbar segmented control switches the node border palette between **Off**, **Cost**, and **Time**. With Cost or Time on, every step node's border colour is set by the percentile bucket of its cost or duration relative to the rest of the run — so you instantly spot the one `agent_run` that ate 80% of the budget without reading every node.
+
+The metrics come from the journal's `pipeline.step.completed` events via `useStepMetrics`. If you're looking at an old run that's rolled out of the metrics window (the journal-fetch is capped at 200 entries per pipeline), the heatmap surfaces the gap honestly — an amber banner appears explaining "Heatmap data not available for this run" rather than silently showing every node in the same colour.
+
+The choice is persisted per user, so a viewer who always wants Time shading gets it back on next load.
+
+## Filtering and search
+
+The rail's free-text search box matches against `run.id`, `pipeline_slug`, `pipeline_name`, and `issue_identifier` — the same fields visible on each row, so the match feels predictable. Search is layered with the filter dimensions, not in lieu of them: "failed runs of `daily-etl` matching 'auth'" is one search box + two filter chips.
+
+## Realtime
+
+The page subscribes to:
+
+| Event | Source | What changes |
+|-------|--------|--------------|
+| `pipeline.run.started` / `completed` / `failed` | `internal/pipeline/runner.go` terminal hooks | Run row refreshes; status pip on the trigger node repaints |
+| `pipeline.step.started` / `completed` / `failed` / `validation_failed` | Same | Step node's status ring + pip repaint |
+| `pipeline.waitpoint.created` | Wait step parking | Approve / Deny buttons appear on the node |
+
+The trace hook (`hooks/use-trace.ts`) refetches on each — cheap because the run + DSL payload is small. No imperative graph mutation; the next render rebuilds the node array via `buildTraceGraph` and React Flow diffs it.
+
+## What this replaces
+
+Before the IA refactor, the same information was split across four tabs of an `OrchestrationPageShell`: **Runs** (list view), **Graph** (the canvas, but per-mission rather than per-run), **Timeline** (waterfall), **Feed** (event stream). Each tab answered part of "what's happening", none of them the whole question.
+
+The single-canvas trace view is intentionally a step back from that fragmentation. The legacy `/orchestration` route still 302s to `/activity` for ~1 release window so external bookmarks don't break.
+
+## Limitations
+
+- **Metrics window is 200 entries per pipeline.** Heatmap shading for runs from far back in history shows the amber "data not available" banner.
+- **No multi-run overlay.** You can compare two runs by opening them in two tabs side-by-side; an overlay-on-canvas mode is a follow-up.
+- **Group-by-axis is single-level.** "Group by crew then by routine" needs two passes; the rail picks the most-asked-for axis (source).
+
+## What's next
+
+- [Inbox](/guides/inbox) — the per-user feed that mirrors every waitpoint, escalation, failed-run, and message
+- [Routines](/guides/routines) — the workflow recipes whose runs you're watching
+- [Orchestration](/guides/orchestration) — the engine subsystem behind the trace (mission lifecycle, retry loops, deadlock detection)

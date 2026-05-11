@@ -120,7 +120,7 @@ All endpoints require a workspace-authenticated user. `ProvisionTrigger` returns
 ```
 crewship crew config <slug>
   --show                    Print current config as YAML.
-  --export                  Same as --show but emits a redistributable YAML bundle.
+  --export                  Export runtime configuration as JSON to stdout.
   --clear                   Remove runtime_image + devcontainer_config + mise_config.
   --devcontainer <path>     Load JSON from path and PATCH devcontainer_config.
   --mise <path>             Load JSON from path and PATCH mise_config.
