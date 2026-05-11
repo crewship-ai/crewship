@@ -74,6 +74,30 @@ var issueCreateCmd = &cobra.Command{
 		if v, _ := flags.GetString("due-date"); v != "" {
 			body["due_date"] = v
 		}
+		// New: project / milestone / parent / estimate / sort-order /
+		// routine-id wiring so the CLI matches the issue-detail UI
+		// panels introduced in PR #292. All optional — only sent when
+		// the user explicitly passes the flag.
+		if v, _ := flags.GetString("project-id"); v != "" {
+			body["project_id"] = v
+		}
+		if v, _ := flags.GetString("milestone-id"); v != "" {
+			body["milestone_id"] = v
+		}
+		if v, _ := flags.GetString("parent-issue-id"); v != "" {
+			body["parent_issue_id"] = v
+		}
+		if flags.Changed("estimate") {
+			est, _ := flags.GetInt("estimate")
+			body["estimate"] = est
+		}
+		if flags.Changed("sort-order") {
+			so, _ := flags.GetFloat64("sort-order")
+			body["sort_order"] = so
+		}
+		if v, _ := flags.GetString("routine-id"); v != "" {
+			body["routine_id"] = v
+		}
 
 		resp, err := client.Post("/api/v1/crews/"+crewID+"/issues", body)
 		if err != nil {
@@ -168,6 +192,36 @@ var issueUpdateCmd = &cobra.Command{
 		if flags.Changed("due-date") {
 			v, _ := flags.GetString("due-date")
 			body["due_date"] = v
+		}
+		// Project/milestone/parent accept "" to clear the association.
+		// The server PATCH treats string-pointer-with-empty-string as
+		// SetNull for these columns (see issue_handler_update.go).
+		if flags.Changed("project-id") {
+			v, _ := flags.GetString("project-id")
+			body["project_id"] = v
+		}
+		if flags.Changed("milestone-id") {
+			v, _ := flags.GetString("milestone-id")
+			body["milestone_id"] = v
+		}
+		if flags.Changed("parent-issue-id") {
+			v, _ := flags.GetString("parent-issue-id")
+			body["parent_issue_id"] = v
+		}
+		if flags.Changed("estimate") {
+			est, _ := flags.GetInt("estimate")
+			body["estimate"] = est
+		}
+		if flags.Changed("sort-order") {
+			so, _ := flags.GetFloat64("sort-order")
+			body["sort_order"] = so
+		}
+		if flags.Changed("routine-id") {
+			v, _ := flags.GetString("routine-id")
+			// Empty string clears the binding server-side; non-empty
+			// rebinds. We don't validate here — server validates that
+			// the pipeline exists in this workspace.
+			body["routine_id"] = v
 		}
 
 		if len(body) == 0 {

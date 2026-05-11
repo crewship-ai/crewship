@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -136,7 +137,12 @@ func init() {
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("slug", "", "Agent slug (auto-generated from name if empty)")
 	agentCreateCmd.Flags().String("crew", "", "Crew slug or ID")
-	agentCreateCmd.Flags().String("role", "AGENT", "Agent role: AGENT|LEAD|COORDINATOR (deprecated)")
+	agentCreateCmd.Flags().String("role", "AGENT", "Agent role: AGENT or LEAD")
+	// COORDINATOR is accepted silently for backward compat — the help
+	// text no longer advertises it. Warn the user once on the create
+	// path so they know to migrate to LEAD. Same hook on update.
+	agentCreateCmd.PreRun = warnCoordinatorDeprecated
+	agentUpdateCmd.PreRun = warnCoordinatorDeprecated
 	agentCreateCmd.Flags().String("role-title", "", "Human-readable role title")
 	agentCreateCmd.Flags().String("cli-adapter", "CLAUDE_CODE", "CLI adapter: CLAUDE_CODE|GEMINI_CLI|OPENCODE")
 	agentCreateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")
@@ -290,6 +296,18 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("crew not found: %s", slugOrID)
+}
+
+// warnCoordinatorDeprecated emits a deprecation notice when the user
+// passes --role COORDINATOR on agent create/update. The role is still
+// accepted (back-compat with v1 templates that used COORDINATOR), but
+// LEAD is the supported value going forward and the help text only
+// advertises LEAD.
+func warnCoordinatorDeprecated(cmd *cobra.Command, _ []string) {
+	v, _ := cmd.Flags().GetString("role")
+	if strings.EqualFold(v, "COORDINATOR") {
+		fmt.Fprintln(os.Stderr, "warning: COORDINATOR role is deprecated; use LEAD instead. Setting role anyway.")
+	}
 }
 
 func looksLikeCUID(s string) bool {

@@ -3,11 +3,219 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+// mcpCmd is the top-level MCP root. Existing `crewship crew mcp` and
+// `crewship agent mcp` continue to live under their owning nouns
+// (further down in this file); this new root exposes the audit log and
+// the registry surfaces, neither of which fits cleanly under crew/agent.
+//
+// Aliases: also matches `mcp-calls` (kept around as a top-level shortcut
+// for `mcp audit list`). The legacy `mcp-calls` command is registered in
+// cmd_admin_extras.go and we don't touch it here — both reach the same
+// /api/v1/mcp-tool-calls endpoint.
+var mcpCmd = &cobra.Command{
+	Use:   "mcp",
+	Short: "MCP registry, audit log, and tool-call observability",
+}
+
+var mcpAuditCmd = &cobra.Command{
+	Use:   "audit",
+	Short: "Inspect MCP tool-call audit data",
+}
+
+var mcpRegistryCmd = &cobra.Command{
+	Use:   "registry",
+	Short: "Browse and sync the local MCP server registry cache",
+}
+
+// mcpAuditListCmd renders recent MCP tool invocations across the
+// workspace. Same data as `crewship mcp-calls` but namespaced under the
+// new mcp root so it lives next to the registry commands. Default page
+// size matches the legacy alias (50) for parity.
+var mcpAuditListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List recent MCP tool calls (audit log)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		limit, _ := cmd.Flags().GetInt("limit")
+		since, _ := cmd.Flags().GetString("since")
+		q := url.Values{}
+		if limit > 0 {
+			q.Set("limit", fmt.Sprintf("%d", limit))
+		}
+		if since != "" {
+			q.Set("since", since)
+		}
+		path := "/api/v1/mcp-tool-calls"
+		if encoded := q.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body any
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		return newFormatter().JSON(body)
+	},
+}
+
+// mcpRegistryListCmd shows the cached registry — public MCP servers
+// the local cache has synced from the official registry.
+var mcpRegistryListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List MCP registry entries (cached)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		// Registry is workspace-agnostic; clear ws header to skip the
+		// wsCtx middleware lookup on the server.
+		client.WorkspaceID = ""
+
+		q := url.Values{}
+		if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+			q.Set("limit", fmt.Sprintf("%d", limit))
+		}
+		if tier, _ := cmd.Flags().GetString("trust-tier"); tier != "" {
+			q.Set("trust_tier", tier)
+		}
+		if featured, _ := cmd.Flags().GetBool("featured"); featured {
+			q.Set("featured", "true")
+		}
+		path := "/api/v1/mcp-registry"
+		if encoded := q.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var result struct {
+			Servers []struct {
+				Name        string `json:"name"`
+				DisplayName string `json:"display_name"`
+				Category    string `json:"category"`
+				Transport   string `json:"transport"`
+				TrustTier   string `json:"trust_tier"`
+				IsFeatured  bool   `json:"is_featured"`
+				PackageName string `json:"package_name"`
+			} `json:"servers"`
+			Total int `json:"total"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+		f := newFormatter()
+		headers := []string{"NAME", "DISPLAY", "CATEGORY", "TRANSPORT", "TRUST", "FEATURED", "PACKAGE"}
+		var rows [][]string
+		for _, s := range result.Servers {
+			rows = append(rows, []string{
+				s.Name, s.DisplayName, s.Category, s.Transport,
+				s.TrustTier, yesNo(s.IsFeatured), s.PackageName,
+			})
+		}
+		if err := f.Auto(result, headers, rows); err != nil {
+			return err
+		}
+		if len(rows) > 0 && f.Format == "" {
+			fmt.Fprintf(os.Stderr, "Total: %d\n", result.Total)
+		}
+		return nil
+	},
+}
+
+var mcpRegistrySearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search the MCP registry by name / description / category",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		client.WorkspaceID = ""
+
+		q := url.Values{}
+		q.Set("q", args[0])
+		if limit, _ := cmd.Flags().GetInt("limit"); limit > 0 {
+			q.Set("limit", fmt.Sprintf("%d", limit))
+		}
+		if tier, _ := cmd.Flags().GetString("trust-tier"); tier != "" {
+			q.Set("trust_tier", tier)
+		}
+		resp, err := client.Get("/api/v1/mcp-registry/search?" + q.Encode())
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body any
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		return newFormatter().JSON(body)
+	},
+}
+
+// mcpRegistrySyncCmd triggers a manual sync of the registry cache from
+// the upstream feed. Admin-only on the server; cooldown is 1h, so a
+// 429 response is normal if someone synced recently.
+var mcpRegistrySyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Trigger a manual sync of the MCP registry cache (admin)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/mcp-registry/sync", nil)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		if out.Message != "" {
+			cli.PrintSuccess(out.Message)
+		} else {
+			cli.PrintSuccess("MCP registry sync triggered.")
+		}
+		return nil
+	},
+}
 
 // mcpConfig is the validated structure of an MCP JSON config.
 type mcpConfig struct {
@@ -341,4 +549,29 @@ func init() {
 	agentMCPCmd.Flags().String("set-file", "", "Set MCP config from file path")
 	agentMCPCmd.Flags().Bool("resolved", false, "Show effective merged config (crew + agent)")
 	agentCmd.AddCommand(agentMCPCmd)
+
+	// New top-level: crewship mcp audit list, mcp registry list/search/sync.
+	mcpAuditListCmd.Flags().Int("limit", 50, "Max calls to return")
+	mcpAuditListCmd.Flags().String("since", "", "Only calls newer than this ISO-8601 timestamp")
+
+	mcpRegistryListCmd.Flags().Int("limit", 50, "Max registry entries to return (max 200)")
+	mcpRegistryListCmd.Flags().String("trust-tier", "", "Filter by trust tier: anthropic|crewship|community")
+	mcpRegistryListCmd.Flags().Bool("featured", false, "Only show featured entries")
+
+	mcpRegistrySearchCmd.Flags().Int("limit", 50, "Max search results")
+	mcpRegistrySearchCmd.Flags().String("trust-tier", "", "Filter by trust tier: anthropic|crewship|community")
+
+	mcpAuditCmd.AddCommand(mcpAuditListCmd)
+	mcpRegistryCmd.AddCommand(mcpRegistryListCmd)
+	mcpRegistryCmd.AddCommand(mcpRegistrySearchCmd)
+	mcpRegistryCmd.AddCommand(mcpRegistrySyncCmd)
+
+	mcpCmd.AddCommand(mcpAuditCmd)
+	mcpCmd.AddCommand(mcpRegistryCmd)
+
+	// Register the new top-level here rather than touching main.go —
+	// the parent file is intentionally a flat list of AddCommand calls
+	// kept in alphabetical-ish order. The old `integration` "mcp" alias
+	// was removed earlier in this wave; this root takes its place.
+	rootCmd.AddCommand(mcpCmd)
 }

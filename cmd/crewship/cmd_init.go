@@ -21,7 +21,7 @@ It creates an admin user with OWNER role and returns a CLI token
 for immediate access.
 
 Example:
-  crewship init --server http://localhost:8081 \
+  crewship init --server http://localhost:8080 \
     --email admin@crewship.ai --name "Pavel Srba"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serverURL, _ := cmd.Flags().GetString("server")
@@ -30,7 +30,7 @@ Example:
 		password, _ := cmd.Flags().GetString("password")
 
 		if serverURL == "" {
-			serverURL = "http://localhost:8081"
+			serverURL = "http://localhost:8080"
 		}
 		if email == "" {
 			return fmt.Errorf("--email is required")
@@ -89,7 +89,7 @@ Example:
 }
 
 func init() {
-	initCmd.Flags().String("server", "", "Crewship server URL (default http://localhost:8081)")
+	initCmd.Flags().String("server", "", "Crewship server URL (default http://localhost:8080)")
 	initCmd.Flags().String("email", "", "Admin email address (required)")
 	initCmd.Flags().String("name", "", "Admin full name (required)")
 	initCmd.Flags().String("password", "", "Admin password (prompted if omitted)")
