@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import {
   ScrollText, Calendar, BarChart3,
   Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
-  X,
+  X, ArrowLeft, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -141,26 +141,61 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     return true
   })
 
+  // Selected routine — looked up from the loaded pipeline list so the
+  // toolbar breadcrumb can show the human name without a second fetch.
+  // The detail panel does its own fetch for the full DSL body.
+  const selectedRoutine = selectedSlug
+    ? pipelines.find((p) => p.slug === selectedSlug)
+    : null
+
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       {/* ---- Toolbar ---- */}
-      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-        <TabBar
-          value={activeTab}
-          onValueChange={(v) => setActiveTab(v as RoutinesTab)}
-          layoutId="routines-tabs-indicator"
-          ariaLabel="Routines view"
-          className="h-full border-b-0 shrink-0"
-        >
-          {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
-            <TabBar.Item key={id} value={id} className="h-full whitespace-nowrap">
-              <span className="inline-flex items-center gap-1.5">
-                <Icon className="h-3 w-3 opacity-75" />
-                {label}
+      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+        {selectedSlug ? (
+          /* Detail mode — breadcrumb back to the list. The detail panel
+             below renders its own close X too; the breadcrumb is the
+             higher-affordance path back since it sits where the tabs
+             used to be. */
+          <div className="flex items-center gap-1 text-xs">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={() => setSelectedSlug(null)}
+              title="Back to all routines"
+            >
+              <ArrowLeft className="h-3 w-3" />
+              Routines
+            </Button>
+            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
+            <span className="truncate font-medium" title={selectedRoutine?.name || selectedSlug}>
+              {selectedRoutine?.name || selectedSlug}
+            </span>
+            {selectedRoutine?.slug && (
+              <span className="ml-2 truncate font-mono text-[10px] text-muted-foreground/60">
+                {selectedRoutine.slug}
               </span>
-            </TabBar.Item>
-          ))}
-        </TabBar>
+            )}
+          </div>
+        ) : (
+          <TabBar
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as RoutinesTab)}
+            layoutId="routines-tabs-indicator"
+            ariaLabel="Routines view"
+            className="h-full border-b-0 shrink-0"
+          >
+            {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
+              <TabBar.Item key={id} value={id} className="h-full whitespace-nowrap">
+                <span className="inline-flex items-center gap-1.5">
+                  <Icon className="h-3 w-3 opacity-75" />
+                  {label}
+                </span>
+              </TabBar.Item>
+            ))}
+          </TabBar>
+        )}
 
         <div className="flex-1" />
 
@@ -260,10 +295,32 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           )}
         </aside>
 
-        {/* Main content area */}
+        {/* Main content area — full-width.
+            With selection: hosts the routine detail (Overview/Editor/
+            Runs/Versions/Schedules/Webhooks/Wait tabs) edge-to-edge
+            instead of cramming it into a 520px right panel. The Editor
+            tab in particular benefits — DSL YAML wants width.
+            Without selection: the existing List / Schedules / Insights
+            tabs that the toolbar above switches between. */}
         <div className="flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
-            {activeTab === "list" && (
+            {selectedSlug ? (
+              <motion.div
+                key={`detail-${selectedSlug}`}
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 12 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className="absolute inset-0 overflow-hidden"
+              >
+                <RoutinesDetailPanel
+                  workspaceId={workspaceId}
+                  slug={selectedSlug}
+                  onClose={() => setSelectedSlug(null)}
+                  onChanged={refresh}
+                />
+              </motion.div>
+            ) : activeTab === "list" ? (
               <motion.div
                 key="list"
                 initial={{ opacity: 0 }}
@@ -281,8 +338,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   onRefresh={refresh}
                 />
               </motion.div>
-            )}
-            {activeTab === "schedules" && (
+            ) : activeTab === "schedules" ? (
               <motion.div
                 key="schedules"
                 initial={{ opacity: 0 }}
@@ -297,8 +353,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   onSelect={handleSelect}
                 />
               </motion.div>
-            )}
-            {activeTab === "insights" && (
+            ) : (
               <motion.div
                 key="insights"
                 initial={{ opacity: 0 }}
@@ -312,18 +367,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             )}
           </AnimatePresence>
         </div>
-
-        {/* Right detail panel */}
-        {selectedSlug && (
-          <aside className="w-[520px] shrink-0 border-l border-white/[0.06] bg-card/30 overflow-hidden">
-            <RoutinesDetailPanel
-              workspaceId={workspaceId}
-              slug={selectedSlug}
-              onClose={() => setSelectedSlug(null)}
-              onChanged={refresh}
-            />
-          </aside>
-        )}
       </div>
 
       {/* Import dialog */}
