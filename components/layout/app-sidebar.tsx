@@ -19,7 +19,6 @@ import {
   BookOpen,
   ScrollText,
   CircleDot,
-  MessagesSquare,
   Inbox,
 } from "lucide-react"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
@@ -63,7 +62,6 @@ const navSections = [
     label: "Run",
     items: [
       { title: "Activity", href: "/activity", icon: Activity },
-      { title: "Missions", href: "/missions", icon: MessagesSquare },
       { title: "Journal", href: "/journal", icon: BookOpen },
     ],
   },
