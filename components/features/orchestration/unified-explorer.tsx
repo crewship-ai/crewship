@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Search, X, ChevronDown, Filter } from "lucide-react"
+import { Search, X, ChevronDown, Filter, ExternalLink } from "lucide-react"
+import Link from "next/link"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
@@ -128,7 +129,8 @@ export function UnifiedExplorer({
             )}
           </AnimatePresence>
         </div>
-        {/* Filter dropdown */}
+        {/* Filter dropdown — button + clear-X kept inline as a single
+            control so an active filter doesn't push the search row down. */}
         <div className="relative shrink-0">
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -141,23 +143,26 @@ export function UnifiedExplorer({
             )}
           >
             <Filter className="h-3 w-3" />
-            {filterLabel || "Filter"}
-
-          </motion.button>
-          <AnimatePresence>
+            <span>{filterLabel || "Filter"}</span>
             {filterLabel && (
-              <motion.span
+              <span
                 role="button"
                 tabIndex={0}
-                initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0 }}
+                aria-label="Clear filter"
                 onClick={(e) => { e.stopPropagation(); clearFilters() }}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); clearFilters() } }}
-                className="ml-0.5 hover:text-white cursor-pointer"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    clearFilters()
+                  }
+                }}
+                className="ml-0.5 inline-flex items-center hover:text-white cursor-pointer"
               >
                 <X className="h-3 w-3" />
-              </motion.span>
+              </span>
             )}
-          </AnimatePresence>
+          </motion.button>
           <AnimatePresence>
             {filterDropdownOpen && (
               <>
@@ -310,20 +315,35 @@ export function UnifiedExplorer({
 
       {/* ── Inbox ── */}
       <div className="shrink-0">
-        <button onClick={() => setInboxOpen(!inboxOpen)} className="flex items-center gap-1.5 w-full px-3 py-1.5 hover:bg-white/[0.02]">
-          <motion.div animate={{ rotate: inboxOpen ? 0 : -90 }} transition={{ duration: 0.15 }}>
-            <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
-          </motion.div>
-          <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider flex-1 text-left">Inbox</span>
-          {inboxCount > 0 && (
-            <motion.span
-              initial={{ scale: 0.5 }} animate={{ scale: 1 }}
-              className="text-[9px] bg-red-500 text-white rounded-full px-1.5 min-w-[16px] text-center leading-[16px]"
-            >
-              {inboxCount}
-            </motion.span>
-          )}
-        </button>
+        <div className="flex items-center gap-1 pr-2 hover:bg-white/[0.02] group">
+          <button
+            onClick={() => setInboxOpen(!inboxOpen)}
+            className="flex items-center gap-1.5 flex-1 px-3 py-1.5 text-left min-w-0"
+          >
+            <motion.div animate={{ rotate: inboxOpen ? 0 : -90 }} transition={{ duration: 0.15 }}>
+              <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
+            </motion.div>
+            <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider flex-1">Inbox</span>
+            {inboxCount > 0 && (
+              <motion.span
+                initial={{ scale: 0.5 }} animate={{ scale: 1 }}
+                className="text-[9px] bg-red-500 text-white rounded-full px-1.5 min-w-[16px] text-center leading-[16px]"
+              >
+                {inboxCount}
+              </motion.span>
+            )}
+          </button>
+          {/* Proklik na celou /inbox stránku — visible on hover so the
+              section header stays clean when not interacting. */}
+          <Link
+            href="/inbox"
+            aria-label="Open full inbox page"
+            title="Open full inbox"
+            className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted-foreground/50 hover:text-foreground hover:bg-white/[0.04] transition-opacity shrink-0"
+          >
+            <ExternalLink className="h-3 w-3" />
+          </Link>
+        </div>
         <AnimatePresence initial={false}>
           {inboxOpen && (
             <motion.div {...sectionAnim} className="overflow-hidden">
