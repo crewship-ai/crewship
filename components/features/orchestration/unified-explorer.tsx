@@ -251,36 +251,20 @@ export function UnifiedExplorer({
                 {projects.map((p) => {
                   const iconDef = getCrewIconDef(p.icon || "folder")
                   const IconComp = iconDef.icon
-                  // Progress bar — data already on Project type (0-100).
-                  // Renders only when there are issues; otherwise the bar
-                  // is meaningless and adds visual noise.
                   const progress = Math.max(0, Math.min(100, p.progress || 0))
                   const isSelected = selectedProjectId === p.id
                   return (
                     <button
                       key={p.id} onClick={() => onProjectSelect(p.id)}
                       className={cn(
-                        "w-full px-3 py-1.5 text-left",
+                        "w-full flex items-center gap-2 px-3 py-1.5 text-left",
                         isSelected ? "row-interactive row-selected" : "row-interactive row-hover",
                       )}
                       title={p.issue_count > 0 ? `${p.name} — ${progress}% complete` : p.name}
                     >
-                      <div className="flex items-center gap-2">
-                        <IconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(p.color).text)} />
-                        <span className="text-xs text-foreground/80 truncate flex-1">{p.name}</span>
-                        <span className="text-[10px] text-foreground/40 tabular-nums">{p.issue_count}</span>
-                      </div>
-                      {p.issue_count > 0 && (
-                        <div className="mt-1 ml-5 h-0.5 w-[calc(100%-2rem)] overflow-hidden rounded-full bg-white/[0.05]">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${progress}%` }}
-                            transition={{ duration: 0.4, ease: "easeOut" }}
-                            style={{ backgroundColor: getGradientPalette(p.color).dot }}
-                            className="h-full rounded-full"
-                          />
-                        </div>
-                      )}
+                      <IconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(p.color).text)} />
+                      <span className="text-xs text-foreground/80 truncate flex-1">{p.name}</span>
+                      <span className="text-[10px] text-foreground/40 tabular-nums">{p.issue_count}</span>
                     </button>
                   )
                 })}
