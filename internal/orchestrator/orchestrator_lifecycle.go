@@ -96,11 +96,6 @@ func (o *Orchestrator) RecoverFromCrash(ctx context.Context) error {
 	return nil
 }
 
-// wrapScrubHandler returns a handler that scrubs credential patterns from
-// event content before forwarding to the real handler.
-// When a credential pattern is detected and redacted, a system event is emitted
-// so the user can see that the scrubber is active and protecting their secrets.
-
 func (o *Orchestrator) Start(ctx context.Context) error {
 	o.logger.Info("starting orchestrator container TTL manager")
 	ticker := time.NewTicker(5 * time.Minute)

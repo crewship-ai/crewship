@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// wrapScrubHandler returns a handler that scrubs credential patterns from
+// event content before forwarding to the real handler. When a credential
+// pattern is detected and redacted, a system event is emitted so the user
+// can see that the scrubber is active and protecting their secrets.
 func (o *Orchestrator) wrapScrubHandler(handler EventHandler) EventHandler {
 	if handler == nil || o.scrubber == nil {
 		return handler
