@@ -1,8 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -124,9 +131,333 @@ func printChatTranscript(messages []map[string]any, md *cli.MarkdownRenderer) {
 	}
 }
 
+// chatReactCmd groups the three reaction subcommands. Wraps
+// MessageReactionsHandler on the server, scoped by (chat, message, emoji,
+// user) — emoji presence is idempotent server-side, so add/remove can be
+// called blindly without first checking list.
+var chatReactCmd = &cobra.Command{
+	Use:   "react",
+	Short: "Add, remove or list emoji reactions on a chat message",
+}
+
+var chatReactAddCmd = &cobra.Command{
+	Use:   "add <chat-id> <message-id> <emoji>",
+	Short: "Add an emoji reaction to a message",
+	Args:  cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		body := map[string]string{"emoji": args[2]}
+		path := "/api/v1/chats/" + url.PathEscape(args[0]) +
+			"/messages/" + url.PathEscape(args[1]) + "/reactions"
+		if err := postJSON(client, path, body, nil); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Added %s to message %s.", args[2], args[1]))
+		return nil
+	},
+}
+
+var chatReactRemoveCmd = &cobra.Command{
+	Use:     "remove <chat-id> <message-id> <emoji>",
+	Aliases: []string{"rm", "delete"},
+	Short:   "Remove your emoji reaction from a message",
+	Args:    cobra.ExactArgs(3),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		path := "/api/v1/chats/" + url.PathEscape(args[0]) +
+			"/messages/" + url.PathEscape(args[1]) +
+			"/reactions/" + url.PathEscape(args[2])
+		if err := deleteJSON(client, path); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Removed %s from message %s.", args[2], args[1]))
+		return nil
+	},
+}
+
+var chatReactListCmd = &cobra.Command{
+	Use:   "list <chat-id> <message-id>",
+	Short: "List emoji reactions on a message (with counts)",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		path := "/api/v1/chats/" + url.PathEscape(args[0]) +
+			"/messages/" + url.PathEscape(args[1]) + "/reactions"
+		var body struct {
+			Reactions []struct {
+				Emoji string `json:"emoji"`
+				Count int    `json:"count"`
+				Mine  bool   `json:"mine"`
+			} `json:"reactions"`
+		}
+		if err := getJSON(client, path, &body); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(body.Reactions)
+		case "yaml":
+			return f.YAML(body.Reactions)
+		}
+
+		if len(body.Reactions) == 0 {
+			fmt.Printf("%sNo reactions.%s\n", cli.Dim, cli.Reset)
+			return nil
+		}
+		headers := []string{"EMOJI", "COUNT", "MINE"}
+		var rows [][]string
+		for _, r := range body.Reactions {
+			mine := "no"
+			if r.Mine {
+				mine = "yes"
+			}
+			rows = append(rows, []string{r.Emoji, fmt.Sprintf("%d", r.Count), mine})
+		}
+		f.Table(headers, rows)
+		return nil
+	},
+}
+
+// chatAttachCmd uploads a file as an attachment scoped to a (agent, chat)
+// pair. The server route lives under /agents/{agentId}/chats/{chatId}, so
+// the CLI resolves the agent ID from the chat (which the local server can
+// answer via the messages-prefetch trick — see lookupChatAgentID below).
+var chatAttachCmd = &cobra.Command{
+	Use:   "attach <chat-id> <file-path>",
+	Short: "Upload a file as an attachment to a chat session",
+	Long: `Attach a file to a chat session. The file lands under
+/output/<agent-slug>/attachments/<chat-id>/ inside the agent container — the
+agent can read it like any other file in its workspace.
+
+The agent ID is auto-resolved from the chat: pass --agent <slug-or-id> to
+override (useful when the lookup is ambiguous or you've pre-fetched it).
+
+Examples:
+  crewship chat attach c_abc123 ./diagram.png
+  crewship chat attach c_abc123 ./logs.tar.gz --agent viktor`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		chatID := args[0]
+		localPath := args[1]
+
+		agentOverride, _ := cmd.Flags().GetString("agent")
+		var agentID string
+		if agentOverride != "" {
+			agentID, err = resolveAgentID(client, agentOverride)
+			if err != nil {
+				return err
+			}
+		} else {
+			agentID, err = lookupChatAgentID(client, chatID)
+			if err != nil {
+				return fmt.Errorf("resolve agent for chat %s: %w (pass --agent to override)", chatID, err)
+			}
+		}
+
+		fh, err := os.Open(localPath)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", localPath, err)
+		}
+		defer fh.Close()
+
+		// Multipart body assembled in memory: 25 MB server-side cap means
+		// the bound is small. Streaming via io.Pipe + goroutine adds
+		// complexity for no real benefit at this size.
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		fw, err := mw.CreateFormFile("file", filepath.Base(localPath))
+		if err != nil {
+			return fmt.Errorf("multipart form: %w", err)
+		}
+		if _, err := io.Copy(fw, fh); err != nil {
+			return fmt.Errorf("multipart copy: %w", err)
+		}
+		if err := mw.Close(); err != nil {
+			return fmt.Errorf("multipart close: %w", err)
+		}
+
+		path := "/api/v1/agents/" + url.PathEscape(agentID) +
+			"/chats/" + url.PathEscape(chatID) + "/attachments"
+		resp, err := postMultipart(cmd.Context(), client, path, mw.FormDataContentType(), &buf)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var result struct {
+			Filename  string `json:"filename"`
+			Size      int    `json:"size"`
+			AgentPath string `json:"agent_path"`
+		}
+		_ = cli.ReadJSON(resp, &result)
+		if result.AgentPath != "" {
+			cli.PrintSuccess(fmt.Sprintf("Uploaded %s (%d bytes) → %s",
+				result.Filename, result.Size, result.AgentPath))
+		} else {
+			cli.PrintSuccess(fmt.Sprintf("Uploaded %s to chat %s.",
+				filepath.Base(localPath), chatID))
+		}
+		return nil
+	},
+}
+
+// chatListCmd lists recent chats for an agent. Same data as the
+// SessionsSidebar in the web UI — exposed here so CLI users can pipe
+// chat IDs into other commands (e.g. `crewship chat <id>` to print a
+// transcript).
+var chatListCmd = &cobra.Command{
+	Use:   "list <agent-slug-or-id>",
+	Short: "List recent chats for an agent (most recent first)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		var chats []struct {
+			ID           string  `json:"id"`
+			Title        *string `json:"title"`
+			Status       string  `json:"status"`
+			MessageCount int     `json:"message_count"`
+			StartedAt    string  `json:"started_at"`
+			CreatedAt    string  `json:"created_at"`
+			EndedAt      *string `json:"ended_at"`
+			Origin       *string `json:"origin"`
+		}
+		if err := getJSON(client, "/api/v1/agents/"+agentID+"/chats", &chats); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"ID", "TITLE", "STATUS", "MSGS", "STARTED", "ORIGIN"}
+		var rows [][]string
+		for _, c := range chats {
+			title := "-"
+			if c.Title != nil && *c.Title != "" {
+				title = truncateString(*c.Title, 36)
+			}
+			origin := "-"
+			if c.Origin != nil && *c.Origin != "" {
+				origin = *c.Origin
+			}
+			started := c.StartedAt
+			if t, err := time.Parse(time.RFC3339, started); err == nil {
+				started = t.Format("2006-01-02 15:04")
+			}
+			rows = append(rows, []string{
+				c.ID, title, c.Status,
+				fmt.Sprintf("%d", c.MessageCount),
+				started, origin,
+			})
+		}
+		return f.Auto(chats, headers, rows)
+	},
+}
+
+// lookupChatAgentID finds which agent owns a chat by walking the agents
+// list and querying each agent's chat list until the chat ID is found.
+// Worst case scales with #agents — fine for the typical workspace size
+// (single-digit to low-tens). Falls back to a clear error so the user
+// knows to pass --agent.
+func lookupChatAgentID(client *cli.Client, chatID string) (string, error) {
+	resp, err := client.Get("/api/v1/agents")
+	if err != nil {
+		return "", err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", err
+	}
+	var agents []struct {
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
+	}
+	if err := cli.ReadJSON(resp, &agents); err != nil {
+		return "", err
+	}
+	for _, a := range agents {
+		var chats []struct {
+			ID string `json:"id"`
+		}
+		if err := getJSON(client, "/api/v1/agents/"+a.ID+"/chats", &chats); err != nil {
+			// Skip agents we can't read rather than aborting — a single
+			// permission-denied shouldn't blow up the whole lookup.
+			continue
+		}
+		for _, c := range chats {
+			if c.ID == chatID {
+				return a.ID, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("chat %s not found in any agent's recent sessions", chatID)
+}
+
+// postMultipart issues a multipart/form-data POST without going through
+// the JSON-encoding client.Post path. Picks up auth + workspace_id the
+// same way cli.Client.Do does.
+func postMultipart(ctx context.Context, client *cli.Client, path, contentType string, body io.Reader) (*http.Response, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	u, err := url.Parse(client.BaseURL + path)
+	if err != nil {
+		return nil, fmt.Errorf("parse url: %w", err)
+	}
+	wsID := client.GetWorkspaceID()
+	if wsID != "" {
+		q := u.Query()
+		if q.Get("workspace_id") == "" {
+			q.Set("workspace_id", wsID)
+			u.RawQuery = q.Encode()
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), body)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if client.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+client.Token)
+	}
+	req.Header.Set("Content-Type", contentType)
+	return client.HTTPClient.Do(req)
+}
+
 func init() {
 	chatCmd.Flags().String("since", "", "Only show messages newer than this (1h, 24h, RFC3339)")
 	chatCmd.Flags().Bool("markdown", false, "Force markdown ANSI styling")
 	chatCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling")
 	jqExprFlag(chatCmd)
+
+	chatAttachCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
+
+	chatReactCmd.AddCommand(chatReactAddCmd)
+	chatReactCmd.AddCommand(chatReactRemoveCmd)
+	chatReactCmd.AddCommand(chatReactListCmd)
+
+	chatCmd.AddCommand(chatReactCmd)
+	chatCmd.AddCommand(chatAttachCmd)
+	chatCmd.AddCommand(chatListCmd)
 }

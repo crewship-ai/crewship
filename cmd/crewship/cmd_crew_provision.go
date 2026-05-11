@@ -137,6 +137,60 @@ var crewProvisionStatusCmd = &cobra.Command{
 	},
 }
 
+// crewRestartAgentsCmd wires the call the provision-success message has
+// been suggesting for months. Drops the crew's runtime container so the
+// next agent exec recreates it from the latest cached image — agents pick
+// up new system prompts, new MCP config, new env, without a full rebuild.
+//
+// Idempotent: returns {restarted: 0} when no container was running.
+var crewRestartAgentsCmd = &cobra.Command{
+	Use:   "restart-agents <slug-or-id>",
+	Short: "Restart all agents in a crew (drops the runtime container)",
+	Long: `Force-remove the crew's runtime container. The next agent exec
+recreates it from the current cached image, so agents pick up new system
+prompts, MCP config and env vars without a full rebuild.
+
+Idempotent: succeeds with restarted=0 when no container was running.
+
+Examples:
+  crewship crew restart-agents demo-crew
+  crewship crew restart-agents demo-crew --format json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		crewID, err := resolveCrewID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		var result struct {
+			Restarted int    `json:"restarted"`
+			Error     string `json:"error,omitempty"`
+		}
+		if err := postJSON(client, "/api/v1/crews/"+crewID+"/restart-agents", nil, &result); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		switch f.Format {
+		case "json":
+			return f.JSON(result)
+		case "yaml":
+			return f.YAML(result)
+		}
+		if result.Restarted == 0 {
+			cli.PrintSuccess(fmt.Sprintf("Crew %q: no running container, nothing to restart.", args[0]))
+		} else {
+			cli.PrintSuccess(fmt.Sprintf("Crew %q restarted: %d agent%s will pick up the new image on next exec.",
+				args[0], result.Restarted, plural(result.Restarted)))
+		}
+		return nil
+	},
+}
+
 var crewRebuildCmd = &cobra.Command{
 	Use:   "rebuild <slug-or-id>",
 	Short: "Invalidate cache and re-provision a crew container",
@@ -306,4 +360,5 @@ func init() {
 	crewProvisionCmd.AddCommand(crewProvisionStatusCmd)
 	crewCmd.AddCommand(crewProvisionCmd)
 	crewCmd.AddCommand(crewRebuildCmd)
+	crewCmd.AddCommand(crewRestartAgentsCmd)
 }
