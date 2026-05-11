@@ -756,19 +756,31 @@ export function OrchestrationLayout({
                   {selectedIssue.title}
                 </span>
               </div>
-              {/* Full-width issue detail */}
-              <div className="flex-1 overflow-hidden">
-                <IssueDetailInline
-                  key={selectedIssue.id}
-                  issue={selectedIssue}
-                  comments={issueComments}
-                  labels={issueLabels}
-                  projects={projects}
-                  routines={pipelines}
-                  workspaceId={workspaceId}
-                  onClose={handleIssueClose}
-                  onUpdated={handleIssueUpdated}
-                />
+              {/* Full-width issue detail — slides + fades when switching
+                  between issues (key on selectedIssue.id) so the
+                  navigation feels continuous instead of a hard swap. */}
+              <div className="relative flex-1 overflow-hidden">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={`issue-${selectedIssue.id}`}
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -12 }}
+                    transition={{ duration: 0.18, ease: "easeOut" }}
+                    className="absolute inset-0 overflow-hidden"
+                  >
+                    <IssueDetailInline
+                      issue={selectedIssue}
+                      comments={issueComments}
+                      labels={issueLabels}
+                      projects={projects}
+                      routines={pipelines}
+                      workspaceId={workspaceId}
+                      onClose={handleIssueClose}
+                      onUpdated={handleIssueUpdated}
+                    />
+                  </motion.div>
+                </AnimatePresence>
               </div>
             </div>
           )}
