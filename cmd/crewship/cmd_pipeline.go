@@ -14,10 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pipelineCmd groups all pipeline commands. Pipelines are workspace-
+// pipelineCmd groups all routine commands. Routines are workspace-
 // scoped declarative DSL workflows authored once (preferably by a
 // smart model like Opus) and executed many times by the cheaper
-// runtime tier. See PIPELINES.md for the design.
+// runtime tier. See ROUTINES.md for the design.
 //
 // CLI shape mirrors `approvals`, `mission`, and similar workspace
 // resources: list / get / run / dry-run / delete + a save subcommand
@@ -67,7 +67,7 @@ Subcommand status:
 `,
 }
 
-// pipelineRowJSON mirrors the pipelineResponse shape from the API
+// pipelineRowJSON mirrors the routine response shape from the API
 // handler. We don't share the type to keep the CLI build light;
 // adding fields server-side requires updating both sites, which is
 // the price of stable wire shape contracts.
@@ -94,7 +94,7 @@ type pipelineRowJSON struct {
 
 var pipelineListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List workspace pipelines (sorted by usage)",
+	Short: "List workspace routines (sorted by usage)",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -121,8 +121,8 @@ var pipelineListCmd = &cobra.Command{
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(rows) == 0 {
-			fmt.Println("No pipelines registered yet.")
-			fmt.Println("Save one via: crewship pipeline save --name … --definition file.json --author-crew <crew_id>")
+			fmt.Println("No routines registered yet.")
+			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew_id>")
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -148,7 +148,7 @@ var pipelineListCmd = &cobra.Command{
 
 var pipelineGetCmd = &cobra.Command{
 	Use:   "get <slug>",
-	Short: "Show full pipeline detail including DSL definition",
+	Short: "Show full routine detail including DSL definition",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -202,17 +202,17 @@ var pipelineGetCmd = &cobra.Command{
 
 var pipelineSaveCmd = &cobra.Command{
 	Use:   "save",
-	Short: "Save a new pipeline from a JSON DSL file",
-	Long: `Save a pipeline by uploading a DSL JSON file. The save flow runs the
+	Short: "Save a new routine from a JSON DSL file",
+	Long: `Save a routine by uploading a DSL JSON file. The save flow runs the
 test_run gate first — your DSL is parsed, validated, and executed
 once against the workspace's execution tier. Only on success does
 the row land in the registry.
 
 The DSL file should be a JSON document matching the format described
-in PIPELINES.md (top-level: name, description, inputs, steps).
+in ROUTINES.md (top-level: name, description, inputs, steps).
 
 You also need to supply --author-crew so the runtime knows which
-crew owns the pipeline. The agent_slug references inside the DSL
+crew owns the routine. The agent_slug references inside the DSL
 are resolved against THIS crew, not the caller's crew (cross-crew
 reuse contract).`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -236,7 +236,7 @@ reuse contract).`,
 			return fmt.Errorf("--name required")
 		}
 		if authorCrew == "" {
-			return fmt.Errorf("--author-crew required (the crew that owns this pipeline)")
+			return fmt.Errorf("--author-crew required (the crew that owns this routine)")
 		}
 
 		definitionRaw, err := os.ReadFile(definitionPath)
@@ -331,15 +331,15 @@ reuse contract).`,
 		if len(shortHash) > 12 {
 			shortHash = shortHash[:12]
 		}
-		fmt.Printf("Saved pipeline %s (id=%s, hash=%s)\n", saved.Slug, saved.ID, shortHash)
-		fmt.Printf("Invoke with: crewship pipeline run %s\n", saved.Slug)
+		fmt.Printf("Saved routine %s (id=%s, hash=%s)\n", saved.Slug, saved.ID, shortHash)
+		fmt.Printf("Invoke with: crewship routine run %s\n", saved.Slug)
 		return nil
 	},
 }
 
 var pipelineRunCmd = &cobra.Command{
 	Use:   "run <slug>",
-	Short: "Invoke a saved pipeline against the live execution tier",
+	Short: "Invoke a saved routine against the live execution tier",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -374,8 +374,8 @@ var pipelineRunCmd = &cobra.Command{
 			return err
 		}
 		defer resp.Body.Close()
-		// Convert "pipeline not found" 404s into actionable
-		// suggestions. Listing the workspace's pipelines costs
+		// Convert "routine not found" 404s into actionable
+		// suggestions. Listing the workspace's routines costs
 		// one extra round-trip but only on the slow / failing
 		// path, which is exactly when the user wants help.
 		if resp.StatusCode == http.StatusNotFound {
@@ -405,7 +405,7 @@ var pipelineRunCmd = &cobra.Command{
 		fmt.Printf("Run %s: %s (%dms, $%.4f)\n", result.RunID, result.Status, result.DurationMs, result.CostUSD)
 		if result.Status == "FAILED" {
 			fmt.Printf("  failed at step: %s\n  error: %s\n", result.FailedAtStep, result.ErrorMessage)
-			return fmt.Errorf("pipeline run failed")
+			return fmt.Errorf("routine run failed")
 		}
 		if result.Output != "" {
 			fmt.Println("\nFinal output:")
@@ -427,7 +427,7 @@ var pipelineRunCmd = &cobra.Command{
 
 var pipelineDryRunCmd = &cobra.Command{
 	Use:   "dry-run <slug>",
-	Short: "Preview what a pipeline would do without invoking agents",
+	Short: "Preview what a routine would do without invoking agents",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -484,7 +484,7 @@ var pipelineDryRunCmd = &cobra.Command{
 				fmt.Printf("  would call agent: %s\n", s.WouldCallAgent)
 			}
 			if s.WouldCallSlug != "" {
-				fmt.Printf("  would call pipeline: %s\n", s.WouldCallSlug)
+				fmt.Printf("  would call routine: %s\n", s.WouldCallSlug)
 			}
 			if s.TierAdapter != "" {
 				fmt.Printf("  resolved tier: %s/%s\n", s.TierAdapter, s.TierModel)
@@ -507,7 +507,7 @@ var pipelineDryRunCmd = &cobra.Command{
 
 var pipelineDeleteCmd = &cobra.Command{
 	Use:   "delete <slug>",
-	Short: "Soft-delete a pipeline (hidden but row preserved for audit)",
+	Short: "Soft-delete a routine (hidden but row preserved for audit)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(_ *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -526,14 +526,14 @@ var pipelineDeleteCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Deleted pipeline %s\n", args[0])
+		fmt.Printf("Deleted routine %s\n", args[0])
 		return nil
 	},
 }
 
 var pipelineRunsCmd = &cobra.Command{
 	Use:   "runs <slug>",
-	Short: "List recent invocations for a pipeline (from journal)",
+	Short: "List recent invocations for a routine (from journal)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -569,7 +569,7 @@ var pipelineRunsCmd = &cobra.Command{
 			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(rows) == 0 {
-			fmt.Println("No runs yet for this pipeline.")
+			fmt.Println("No runs yet for this routine.")
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -635,10 +635,10 @@ func init() {
 	pipelineRunsCmd.Flags().Int("limit", 20, "max number of run entries to return (1-500)")
 
 	pipelineSaveCmd.Flags().String("name", "", "human-readable name (REQUIRED; slug derived from this)")
-	pipelineSaveCmd.Flags().String("description", "", "one-line description shown in [AVAILABLE PIPELINES] block")
+	pipelineSaveCmd.Flags().String("description", "", "one-line description shown in [AVAILABLE ROUTINES] block")
 	pipelineSaveCmd.Flags().String("definition", "", "path to a JSON DSL file (REQUIRED)")
-	pipelineSaveCmd.Flags().String("author-crew", "", "crew_id that owns this pipeline (REQUIRED)")
-	pipelineSaveCmd.Flags().String("author-agent", "", "agent_id that authored this pipeline (optional but recommended)")
+	pipelineSaveCmd.Flags().String("author-crew", "", "crew_id that owns this routine (REQUIRED)")
+	pipelineSaveCmd.Flags().String("author-agent", "", "agent_id that authored this routine (optional but recommended)")
 	pipelineSaveCmd.Flags().String("sample-inputs", "", "JSON inputs the test_run uses to validate the DSL")
 
 	pipelineRunCmd.Flags().String("inputs", "", "JSON inputs for the run (e.g. '{\"since\":\"yesterday\"}')")

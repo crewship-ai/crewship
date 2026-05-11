@@ -30,6 +30,11 @@ The inbox is the CLI counterpart of the /inbox web page. Same items,
 same lifecycle (unread → read → resolved), and the same kind taxonomy
 (waitpoint, escalation, failed_run, message).
 
+See also: 'crewship notification' for the low-level per-entity event
+log. Notifications back the same flows as inbox items but at a
+different granularity — notifications are entity-scoped, inbox is
+human-attention-scoped.
+
 Examples:
   crewship inbox list                       # show unread items
   crewship inbox list --state all           # include resolved
