@@ -14,6 +14,13 @@ import { SectionHeader, PropertyRow } from "@/components/features/issues/propert
 import { ISSUE_STATUSES, ALL_PRIORITIES } from "@/components/features/issues/issue-constants"
 import type { Mission, IssuePriority, Milestone } from "@/lib/types/mission"
 
+// Parse a YYYY-MM-DD string as a local-midnight Date so toLocaleDateString
+// and Calendar selection don't drift one day in non-UTC timezones.
+function parseISODateAsLocal(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number)
+  return new Date(y, (m ?? 1) - 1, d ?? 1)
+}
+
 interface IssuePropertiesPanelProps {
   issue: Mission
   workspaceId: string
@@ -34,13 +41,15 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const currentMilestone = milestones.find((m) => m.id === issue.milestone_id)
 
-  // Fetch milestones for the project
+  // Fetch milestones for the project — reset state when project changes
+  // so stale milestones from a previous project don't leak in.
   useEffect(() => {
+    setMilestones([])
     if (!issue.project_id || !workspaceId) return
     fetch(`/api/v1/projects/${issue.project_id}/milestones?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data) => setMilestones(Array.isArray(data) ? data : data.milestones ?? []))
-      .catch(() => {})
+      .catch(() => setMilestones([]))
   }, [issue.project_id, workspaceId])
 
   // Fetch agents for assignee picker — crew-scoped when available, all agents otherwise
@@ -199,7 +208,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
                 <PropertyRow label="Due date">
                   <span className="flex items-center gap-1.5">
                     <CalendarIcon className="h-3 w-3 text-muted-foreground/50" />
-                    {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-foreground/40">No due date</span>}
+                    {issue.due_date ? parseISODateAsLocal(issue.due_date).toLocaleDateString() : <span className="text-foreground/40">No due date</span>}
                   </span>
                 </PropertyRow>
               </div>
@@ -207,7 +216,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
             <PopoverContent className="w-auto p-0" align="start" sideOffset={4}>
               <Calendar
                 mode="single"
-                selected={issue.due_date ? new Date(issue.due_date) : undefined}
+                selected={issue.due_date ? parseISODateAsLocal(issue.due_date) : undefined}
                 onSelect={(date) => {
                   if (date) {
                     const yyyy = date.getFullYear()
