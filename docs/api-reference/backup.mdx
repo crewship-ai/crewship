@@ -155,6 +155,42 @@ Duration quantiles are approximated from an in-memory ring buffer (tens-to-hundr
 | `401 Unauthorized` | No authenticated session. |
 | `403 Forbidden` | Authenticated, but email does not match `CREWSHIP_OWNER_EMAIL`. |
 
+## POST /api/v1/admin/backups/self-test
+
+Round-trip self-test: create a synthetic backup, verify its MANIFEST + payload, and clean up. Used by health checks and CI to confirm encryption keys, storage paths, and the restore-side decrypt path are all wired correctly.
+
+**Request body:**
+
+```json
+{
+  "dry_run": false
+}
+```
+
+- `dry_run`: when `true`, validate configuration and storage permissions without writing a bundle. Default `false`.
+
+**Response:** `200 OK`
+
+```json
+{
+  "ok": true,
+  "created_path": "/var/lib/crewship/backups/self-test-2026-05-11T07-30-00Z.crewbackup",
+  "verified": true
+}
+```
+
+If `dry_run: true`, `created_path` is empty and `verified` reflects only configuration checks.
+
+| Status | Condition |
+|--------|-----------|
+| `400 Bad Request` | Malformed body. |
+| `401 Unauthorized` | No authenticated session. |
+| `403 Forbidden` | Authenticated, but email does not match `CREWSHIP_OWNER_EMAIL`. |
+| `409 Conflict` | Another backup operation holds the workspace lock. |
+| `500 Internal Server Error` | Storage path unwritable, encryption key missing, or verify-decrypt failed. |
+
+Audit action: `backup.self_test`.
+
 ## DELETE /api/v1/admin/backups/status
 
 Force-release the per-workspace lock regardless of owner. Intended as an emergency escape hatch when a crashed backup left a stale lock behind. Returns `204 No Content`.
