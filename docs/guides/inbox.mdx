@@ -1,0 +1,146 @@
+---
+title: "Inbox"
+description: "Per-user actionable feed across every crew and workspace — waitpoints, escalations, failed runs, and agent messages in one Linear-Triage list."
+icon: "inbox"
+---
+
+# Inbox
+
+The **Inbox** is your unified human-in-the-loop feed. Anything an agent — anywhere across your crews — needs you to look at lands here, in one ordered list, with the action you'd take inline on the detail panel. No tab switching, no hunting through `/issues` for the one paused routine, no separate "approvals queue" page to remember.
+
+It lives at [`/inbox`](/inbox) and is the first item in the **Plan** group of the sidebar. The bell in the top bar shares its unread count with the sidebar badge — both update over WebSocket so a peer triaging an item in another tab clears your bell instantly.
+
+## What lands in the Inbox
+
+Four kinds of items get written through to `inbox_items` (migration v85) the moment their source signal fires:
+
+| Kind | When it's created | Resolves via |
+|------|-------------------|--------------|
+| `waitpoint` | A routine hits a `wait` step of `kind: approval` (Harbormaster gate) | Approve / Deny — calls `/pipelines/waitpoints/{token}/approve` |
+| `escalation` | An agent or sub-task calls `/escalate` on the sidecar, or `internal/api/escalations.go` records one | Mark resolved (decision is recorded in the escalation row separately) |
+| `failed_run` | A `pipeline_run` reaches the `failed` terminal state | Retry (re-fires the routine with the same inputs) or Cancel |
+| `message` | The orchestrator broadcasts a notification — e.g. "ENG-12 ready for review" — addressed at a user or role | One-click jump to the linked issue, or Dismiss |
+
+Items are **written by source-of-truth handlers**, not synthesised by the inbox. So:
+
+- Approving a waitpoint via `/inbox` cascades back through `pipeline.waitpoints.CompleteApproval` — the run resumes, the journal records the decision, and the inbox row flips to `resolved` via `inbox.ResolveBySource`.
+- Retrying a failed run from `/inbox` POSTs to `/api/v1/workspaces/{ws}/pipelines/{slug}/run` with the original inputs (captured at failure time on the row's `payload.inputs`). The new run shows up in `/activity` immediately.
+- Marking an escalation resolved on the inbox only flips the inbox state — the escalation itself lives in its own table and is closed via `crewship escalation resolve` (or the escalation lifecycle API).
+
+<Note>
+The inbox is a **projection**, not a queue. The authoritative state lives on the source row (waitpoint token, escalation id, pipeline_run). The inbox row exists to give you one place to see "is anything waiting on me right now?" and a one-click handle to resolve it.
+</Note>
+
+## States
+
+The lifecycle is intentionally minimal: **unread → read → resolved**. No archive, no flag, no snooze — anything that needs reminding stays unread until you act on it. This matches Linear's triage UX; the v85 migration comment explicitly calls out that we considered and rejected the extra states.
+
+```
+unread ──(click row)──> read ──(action button)──> resolved
+   │                                                  ▲
+   └──────────────── "Mark unread" ───────────────────┘
+```
+
+- Reading a row is a side-effect of opening it (`patch(id, "read")` fires on click).
+- Resolving requires a kind-specific action: Approve, Deny, Retry, Cancel, Mark resolved, Dismiss. The chosen action is stored on `resolved_action` so the audit trail shows the *shape* of the decision, not just that someone closed it.
+- "Mark unread" flips the row back. The bell count and sidebar badge both react.
+
+## The /inbox page
+
+A two-pane Linear-Triage layout:
+
+| Pane | Purpose |
+|------|---------|
+| Left list (420 px) | Item rows ordered newest-first. Three filter tabs at the top — **Unread**, **All**, **Resolved** — with live counts. Unread rows show a blue dot, a kind icon, the title, sender, and a relative timestamp. |
+| Right detail | Full title and body, sender, payload (collapsed JSON), kind-specific action buttons, and — for waitpoints — a `WaitpointRunDetail` block that fetches the underlying `pipeline_run` + DSL so you can see which step is paused and what each preceding step produced. |
+
+The detail panel's action row is what the source-of-truth call hangs off:
+
+- **Waitpoints** show **Approve** + **Deny**. Both hit `/pipelines/waitpoints/{token}/approve`; the boolean `approved` in the body disambiguates. (An empty body decoded to `approved=false` because Go's `json.Unmarshal` gives bools their zero value when absent — the inbox always sends the explicit value.)
+- **Failed runs** show **Retry** + **Cancel**. Retry replays the routine's `inputs_json`. If the payload is missing a `pipeline_slug` for some reason, the row falls back to "cancelled" rather than getting wedged.
+- **Escalations** show **Mark resolved** only — the actual decision is recorded by the escalation handler, the inbox just acknowledges you saw it.
+- **Messages** with an `issue_identifier` in payload show **Open <identifier>** as a direct link into `/issues/<id>`.
+
+When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line, and the row still appears in the **All** and **Resolved** filter tabs.
+
+## Realtime
+
+The list is refreshed by three WebSocket events on the workspace channel:
+
+| Event | Source | Effect |
+|-------|--------|--------|
+| `inbox.updated` | `inbox_handler.go` after any PATCH | Re-fetches the current filter |
+| `escalation.created` | `escalation_handler.go` on POST | Re-fetches so a new escalation lights the list instantly |
+| `pipeline.waitpoint.created` | The pipeline runtime when a `wait` step parks | Same — the row appears the moment the gate hits |
+
+The `useInbox` hook (`hooks/use-inbox.ts`) listens to all three and re-issues the same workspace-scoped GET on each. No polling; the bell badge uses `useInboxUnreadCount` which adds a 30-second poll alongside the same realtime listeners as a belt-and-braces fallback.
+
+<Note>
+The badge debounces correctly across tabs: an approve from your laptop clears the bell on your phone within a few hundred milliseconds because both subscribe to the same `inbox.updated` workspace event.
+</Note>
+
+## CLI
+
+The Inbox has full CLI parity — everything the web surface exposes is scriptable. Same items, same lifecycle, same kind taxonomy. The contract is "anything an operator can do in the UI must be pipe-glueable", so cron-driven Slack pings or CI gates on unread waitpoints are first-class.
+
+| Command | What it does |
+|---------|--------------|
+| `crewship inbox list` | Show unread items (default). `--state all\|read\|resolved`, `--kind waitpoint\|escalation\|failed_run\|message`, `--limit`, `--format json\|yaml\|quiet`. |
+| `crewship inbox read <id>` | Mark an item as read. |
+| `crewship inbox unread <id>` | Flip back to unread. |
+| `crewship inbox resolve <id>` | Mark resolved. Optional `--action approved\|denied\|retried\|cancelled\|acknowledged\|dismissed` to record the decision shape. |
+
+Examples:
+
+```bash
+# List unread items in the current workspace
+crewship inbox list
+
+# Include resolved items, narrow to waitpoints
+crewship inbox list --state all --kind waitpoint
+
+# Pipe into jq to count by kind
+crewship inbox list --format json | jq '[.[] | .kind] | group_by(.) | map({kind: .[0], count: length})'
+
+# Mark something resolved with the action shape that matches what you did
+crewship inbox resolve abc123 --action approved
+
+# Push the bell count into Slack every 5 minutes
+*/5 * * * * count=$(crewship inbox list --format json | jq length); \
+            [ "$count" -gt 0 ] && curl -X POST "$SLACK_HOOK" -d "{\"text\":\"$count inbox items\"}"
+```
+
+<Warning>
+`crewship inbox resolve` only flips the inbox row. It does **not** call the source endpoint — approving a waitpoint through to the executor requires `crewship approvals approve <id>`, and resolving an escalation in its own lifecycle requires `crewship escalation resolve <id>`. The inbox CLI is the read + acknowledge surface; the source CLIs are the act-on-it surface.
+</Warning>
+
+## Permissions
+
+Inbox items are user-scoped via three target fields on the row:
+
+| Targeting | Who sees it |
+|-----------|-------------|
+| `target_user_id` is set | Only that user |
+| `target_role` is set | Every member with that role in the workspace |
+| Both empty | Every member of the workspace (the default for waitpoints and routine messages) |
+
+`inboxVisibilityClause` in `internal/api/inbox_handler.go` enforces the predicate on every read endpoint (`List`, `UnreadCount`, `PatchState`). Admins do **not** automatically see other users' targeted items — least privilege wins over convenience, the same way Linear's own Inbox works.
+
+If you genuinely need a workspace-wide view of who has what pending — say, to audit whether a payroll-grade routine has been sitting on someone's bell all weekend — that's what the journal is for. The journal records `pipeline.waitpoint.created` + `pipeline.run.failed` + `escalation.created` events with full sender / target context, and is not user-scoped.
+
+## What this replaces
+
+Before the IA refactor, the same signals were scattered across:
+
+- A modal-style **Approvals** queue at `/approvals` (waitpoints only)
+- Per-mission notifications on `/missions/<id>` (escalations, message-style nudges)
+- A failed-run banner that lived inside the run detail panel
+- Top-bar bell that only showed the count, not the list
+
+The Inbox folds all four into one feed. `/approvals` still exists for the workspace-admin "show me every pending waitpoint workspace-wide, including ones not targeted at me" use case, but the daily-driver surface is `/inbox`.
+
+## What's next
+
+- [Routines](/guides/routines) — the workflow recipes whose `wait` steps create waitpoints
+- [Harbormaster](/guides/harbormaster) — the approval-gate framing for high-risk actions
+- [Activity](/guides/activity) — the live trace view where inline Approve/Deny on a paused step does the same thing as the Inbox's Approve button

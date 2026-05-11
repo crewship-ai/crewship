@@ -4,7 +4,7 @@
 **Datum:** 2026-02-16
 **Status:** Architekturni navrh (implementace Phase 2A/2B/3)
 **Zavislosti:** ORCHESTRATION.md (assignments, sidecar, lead modes),
-AGENT-RUNTIME.md (kontejnery, sidecar API, loop modes),
+architecture.md (kontejnery, sidecar API, loop modes -- predchazejici spec doc retired commit `dd86356`),
 DATABASE.md (existujici Prisma schema)
 
 ---

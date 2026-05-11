@@ -33,6 +33,8 @@
               "guides/skills-authoring",
               "guides/skills-format",
               "guides/orchestration",
+              "guides/inbox",
+              "guides/activity",
               "guides/routines",
               "guides/routines-cookbook",
               "guides/routines-migration",

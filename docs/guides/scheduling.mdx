@@ -32,29 +32,29 @@ triggerAgent(agent)
 
 ## Enabling a Schedule
 
-Schedules are configured via the API. There are no CLI flags for scheduling yet.
+Schedules attach to a saved routine (pipeline) and fire it on a cron expression. Manage them via `crewship routine schedules`:
+
+| Subcommand | Purpose |
+|------------|---------|
+| `list [--slug <routine>]` | List schedules in this workspace, optionally filtered by target routine. |
+| `create --slug <routine> --cron '<expr>' [--name ...] [--timezone <IANA>] [--inputs <json>] [--enabled=false]` | Create a schedule. `--slug` and `--cron` are required; defaults to UTC and enabled. |
+| `update <id> [--cron ...] [--timezone ...] [--name ...] [--enabled / --enabled=false] [--inputs <json>]` | Patch one or more fields. |
+| `enable <id>` | Enable a paused schedule (fires on next 30 s tick). |
+| `disable <id>` | Pause a schedule without deleting it. |
+| `now <id>` | Force-fire out of cycle (useful for smoke tests). |
+| `delete <id> [--yes]` | Permanently delete; prompts for confirmation unless `--yes`. |
 
 ```bash
-# Enable a schedule on an agent
-curl -X PATCH http://localhost:8080/api/v1/agents/{id} \
-  -H "Content-Type: application/json" \
-  -d '{
-    "schedule_cron": "0 9 * * 1-5",
-    "schedule_prompt": "Review open PRs and summarize status.",
-    "schedule_enabled": true
-  }'
+crewship routine schedules create --slug summarize-text \
+  --name "daily-summary" --cron "0 9 * * *" --inputs '{"text":"..."}'
+crewship routine schedules list --slug summarize-text
+crewship routine schedules now <schedule_id>
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `schedule_cron` | string | Standard 5-field cron expression |
-| `schedule_prompt` | string | Custom prompt for scheduled runs (optional) |
-| `schedule_enabled` | boolean | Whether the schedule is active |
-
-When `schedule_prompt` is empty, the agent receives: `"This is a scheduled run. Execute your primary tasks."`
+The same operations are also available on the REST API under `/api/v1/workspaces/{ws}/pipeline-schedules` -- the CLI is a thin wrapper around those endpoints, so server-side behavior (cron parsing, 30 s tick resolution, timezone handling) is identical.
 
 <Note>
-  Scheduling is API-only for now. Use `PATCH /api/v1/agents/{id}` to configure. There are no CLI commands for schedule management yet.
+  Per-agent `schedule_cron` fields described elsewhere in this guide are a separate legacy path. New work should go through `crewship routine schedules` against a saved routine.
 </Note>
 
 ## Cron Expression Format

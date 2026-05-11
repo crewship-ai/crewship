@@ -27,7 +27,7 @@ Tento PRD řeší **obojí najednou**: zavádí 6 epiců, které z Crewshipu MVP
 
 **Co po MVP shipu Crewship reálně umí navíc:**
 
-1. **Routines jako first-class entity** s catch-up po výpadku, 6 overlap policies (Temporal-style), manual trigger funkční i v paused stavu, NL → cron přes Captain LLM, kalendářová heatmapa run historie. Trigger.dev/Inngest nemá ani polovinu.
+1. **Routines jako first-class entity** s catch-up po výpadku, 6 overlap policies (Temporal-style), manual trigger funkční i v paused stavu, NL → cron přes LLM (volá se přímo přes `internal/llm/` middleware, viz EPIC 6), kalendářová heatmapa run historie. Trigger.dev/Inngest nemá ani polovinu.
 2. **Idempotency keys + deklarativní retry policy** napříč všemi triggers (assignments, routines, agent runs). Žádné double-execution při retry. `RetryAfterDelay(secs)` z LLM rate-limit hlavičky. `AbortRunError` strukturovaný permanent-fail.
 3. **Errors page s fingerprintingem + bulk replay** — 1,000 failed runs zkolabuje na 5 unique error groups. „Replay all in group" jeden klik. Sparkline 24h jako workspace puls.
 4. **Run detail waterfall side-sheet** — span timeline vlevo, inspector vpravo, prev/next nav, replay v headeru. Pro AI agenty (kde 1 run = 50+ tool calls) **nezbytné**.
@@ -688,7 +688,7 @@ CREATE INDEX idx_notifications_user_unread ON notifications(workspace_id, user_i
 
 ---
 
-## 9. EPIC 6: NL → cron via Captain LLM
+## 9. EPIC 6: NL → cron via LLM
 
 **Goal.** User napíše „every weekday at 9am Prague" → dostane cron expr + lidský preview „spustí se v 9:00 každý všední den, příští fire úterý 8.5. 9:00".
 
@@ -698,7 +698,9 @@ CREATE INDEX idx_notifications_user_unread ON notifications(workspace_id, user_i
 
 ### Proč MVP — VÁVU
 
-Trigger.dev má feature „Use AI to help you create cron patterns" a uživatelé na PH/HN to **opakovaně cituji jako delight moment**. Crewship má Captain LLM infrastrukturu (`internal/api/captain.go`) + multi-CLI adapters → 2 dny implementace, **nadprůměrně velký wow effect** v demu.
+Trigger.dev má feature „Use AI to help you create cron patterns" a uživatelé na PH/HN to **opakovaně cituji jako delight moment**. Crewship má LLM middleware (`internal/llm/`) + multi-CLI adapters + existující routine-authoring tok v `internal/pipeline/` → 2 dny implementace, **nadprůměrně velký wow effect** v demu.
+
+> **Pozn.:** Dřívější verze tohoto PRD odkazovaly na samostatný autorský LLM orchestrátor s package `internal/api/<retired>` — žádný takový package neexistuje (potvrzeno v `PIPELINES.md §15`). NL→cron call jde přímým middleware voláním přes `internal/llm/` a saves se přes `internal/pipeline/schedules.go`.
 
 Druhý důvod: cron syntax je **měřitelná bariéra** pro non-engineery. Pavel v memory zmiňuje, že Crewship cílí na product owners + AI engineers — ne pure DevOps. Bez NL→cron je rutina-creation tax pro polovinu cílovky.
 
@@ -710,7 +712,7 @@ Druhý důvod: cron syntax je **měřitelná bariéra** pro non-engineery. Pavel
 
 **Acceptance:**
 - [ ] `POST /api/v1/workspaces/{ws}/routines:nl` body `{prompt: "every weekday 9am Prague"}`
-- [ ] Internal call do Captain LLM s prompt:
+- [ ] Internal call přes `internal/llm/` middleware (Anthropic/OpenAI/Ollama, dle workspace LLM provider) s prompt:
   ```
   Convert natural-language schedule to UTC cron expression + IANA timezone.
   Output JSON only: {"cron": "...", "timezone": "...", "human_repr": "...", "next_5_fires_iso": [...], "notes": "..."}
@@ -733,7 +735,7 @@ Druhý důvod: cron syntax je **měřitelná bariéra** pro non-engineery. Pavel
   - klik `Generate` → POST `:nl` → vyplní `cron_expr`, `timezone`, ukáže lidský preview blok + příští 5 fires chips
   - user může edit raw cron field (advanced)
 - [ ] CTA „Generate" disabled pokud prompt &lt; 5 chars
-- [ ] Spinner (Captain LLM ~ 2–4s)
+- [ ] Spinner (LLM round-trip ~ 2–4s)
 
 ---
 

@@ -72,18 +72,22 @@ Each bundle records the source hostname in the manifest. On restore
 the runner compares it to `instance_config.hostname` of the TARGET:
 
 - **Same host**: no rotation. Sessions and credentials resume seamlessly.
-- **Different host OR unknown source host**: the flow **mandates an
-  auth-key rotation**. The CLI refuses to proceed without
-  `--rotate-auth-keys`; the admin UI pops a confirmation dialog.
-  After rotation every existing session token is invalidated — users
-  log in fresh on the new host. This is how we prevent a stolen
-  session token from the source host remaining valid on the target.
+- **Different host OR unknown source host**: the manifest's source
+  hostname differs from the target's `instance_config.hostname`. The
+  helper `backup.ShouldRotateAuthKeysOnRestore` (in
+  `internal/backup/authkeys.go`) detects this condition.
 
-The rotation returns a newly-generated 64-byte hex secret. The
-operator MUST persist it into the service environment (`.env`,
-systemd drop-in, Kubernetes Secret) **before** the next
-`crewshipd` start. We cannot mutate the env of the running process
-— forked sidecar workers already hold the old value.
+<Note>
+  Auth key rotation on cross-host restore is planned but **not
+  currently enforced**. `internal/backup/authkeys.go` defines
+  `RotateAuthKeys`, but it is not wired into the `crewship backup
+  restore` CLI flow — the restore command's flag set is
+  `--as-workspace`, `--as-crew`, `--passphrase-file`, `--use-keyring`,
+  and `--dry-run` (see `cmd/crewship/cmd_backup_lifecycle.go`).
+  Operators performing a cross-host DR restore should manually rotate
+  `NEXTAUTH_SECRET` before the next `crewshipd` start to invalidate
+  any session tokens from the source host.
+</Note>
 
 ## Credstore master-key continuity
 
@@ -112,9 +116,10 @@ keys out of band.
 - **`ENCRYPTION_KEY`**: rotate at least yearly, or immediately on any
   suspected host compromise. Use `ENCRYPTION_KEY_vN` versioned keys
   so ciphertext-at-rest remains decryptable during transition.
-- **`NEXTAUTH_SECRET`**: rotated automatically on any cross-host
-  restore. Rotate manually if an operator session token leaks (every
-  session expires next restart).
+- **`NEXTAUTH_SECRET`**: rotate manually on any cross-host restore
+  (automatic rotation in the CLI is planned but not yet wired — see
+  the cross-host restore note above). Also rotate if an operator
+  session token leaks (every session expires next restart).
 
 ## Incident response
 

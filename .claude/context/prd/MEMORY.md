@@ -3,7 +3,7 @@
 **Verze:** 2.0
 **Datum:** 2026-04-14
 **Status:** Phase 1 MVP DONE + Phase 2B CREW MEMORY DONE + Phase 3 WORKSPACE FOUNDATION DONE (CRE-118, PR #155)
-**Zavislosti:** AGENT-RUNTIME.md (sidecar, kontejnery, /output/ storage),
+**Zavislosti:** architecture.md (sidecar, kontejnery, /output/ storage -- predchazejici spec doc retired commit `dd86356`),
 ORCHESTRATION.md (leader/crew/agent hierarchie, sidecar API),
 SECURITY.md (izolace, encryption, RBAC),
 DATABASE.md (SQLite, schema konvence),
@@ -373,7 +373,7 @@ ale inspirace pro Phase 3 cross-agent knowledge sharing.
 
 **Puvodni navrh:** `index.sqlite` v agent procesu — agent spousti SQLite queries.
 
-**Problem dle AGENT-RUNTIME.md a SECURITY.md:**
+**Problem dle architecture.md (runtime) a SECURITY.md:**
 - Agent bezi jako UID 1001, non-root, `--read-only` root filesystem
 - Agent NEMA SQLite binary v kontejneru (runtime image = minimal Ubuntu + CLI tools)
 - FTS5 + sqlite-vec extensions by musely byt v agent runtime image → zvetsuje attack surface
@@ -399,7 +399,7 @@ Prompt-injected agent muze:
   - Max total memory: 10MB per agent (konfigurovatelne)
   - Sanitization: no control chars, no executable patterns
   - Rate limit: max 60 writes/min per agent
-- Sidecar **audit loguje** kazdy memory write (analogie k tool call audit z AGENT-RUNTIME.md 6A.3)
+- Sidecar **audit loguje** kazdy memory write (analogie k tool call audit z architecture.md, sekce MCP Gateway)
 - Lead MUZE cist memory agentu ve sve crew (RBAC check)
 - Agent NEMUZE cist memory jineho agenta
 
@@ -407,7 +407,7 @@ Prompt-injected agent muze:
 
 **Puvodni navrh:** `/output/.shared/` — vsichni agenti ctou pres filesystem.
 
-**Problem dle ADR-010, AGENT-RUNTIME.md 16.2:**
+**Problem dle ADR-010 (Landlock per-agent; viz ADR.md):**
 Landlock per-agent filesystem izolace explicitne **deny** pristup k workspace
 jinych agentu. Sdilena pamet pres FS by musela obejit Landlock → oslabuje izolaci.
 
@@ -585,7 +585,7 @@ VRSTVA 1: SESSION MEMORY (Phase 2)
 ```
 crewship-sidecar (Go binary, uz bezi v kontejneru)
   ├── Assignment proxy (existujici, ORCHESTRATION.md 5.1)
-  ├── MCP Gateway (existujici, AGENT-RUNTIME.md 6A)
+  ├── MCP Gateway (existujici, viz architecture.md sekce MCP Gateway)
   └── Memory Engine (NOVE)
         ├── SQLite FTS5 index (/output/{agent}/.memory/index.sqlite)
         ├── File watcher (fsnotify na .memory/*.md)
@@ -612,7 +612,7 @@ crewship-sidecar (Go binary, uz bezi v kontejneru)
 
 > **Status: NENI IMPLEMENTOVANO** — MCP skill definice a MCP tools (`memory_write`, `memory_read`, `memory_search`) neexistuji. Planovane pro Phase 2A (plny MCP server). Phase 1 pouziva system prompt instrukce + primo FS zapis.
 
-Memory se implementuje jako **bundled MCP skill** (AGENT-RUNTIME.md 6A.7):
+Memory se implementuje jako **bundled MCP skill** (viz architecture.md sekce Skill Hub / MCP Gateway):
 
 ```yaml
 # Skill definice: crewship-memory
@@ -1817,7 +1817,7 @@ Zero cost. Secure by default.
 
 | Dokument | Relevantni sekce |
 |---|---|
-| AGENT-RUNTIME.md | 6.1 (storage model), 6.4 (memory persistence), 6A (MCP skills) |
+| architecture.md | runtime / storage / MCP Gateway sekce (predchazejici spec doc retired commit `dd86356`) |
 | ORCHESTRATION.md | 3 (3-urovnova hierarchie), 5.1 (sidecar API), 5.7 (output compression) |
 | SECURITY.md | 1.4 (trust zones), 3 (credentials), 6 (agent threats) |
 | DATABASE.md | 1 (co v DB a co ne), 4 (Agent model), SQLite compatibility |

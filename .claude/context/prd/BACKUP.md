@@ -3,7 +3,8 @@
 **Verze:** 1.1 (draft po kriticke review)
 **Datum:** 2026-04-15
 **Status:** PRD draft -- MVP sereazny na 80/20 rule, ceka na schvaleni, zadny kod jeste nevznikl
-**Zavislosti:** AGENT-RUNTIME.md, SECURITY.md, DATABASE.md, MEMORY.md, SIDECAR.md,
+**Zavislosti:** architecture.md (runtime architecture; predchazejici spec doc retired commit `dd86356`),
+SECURITY.md, DATABASE.md, MEMORY.md, SIDECAR.md,
 `.claude/context/DISCUSSION-2026-04-10-architecture-options.md` (Tema 2)
 
 ---

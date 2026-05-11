@@ -10,15 +10,17 @@ Crewship maintains an append-only audit log that records every mutation in the s
 
 ## What Is Audited
 
-Every state-changing operation is recorded in the audit log:
+The `audit_logs` table currently captures these mutations. Other
+entities (crews, missions, credentials) emit journal events but do
+not yet have `WriteAuditLog` calls wired into their handlers:
 
-| Category | Actions | Example |
-|----------|---------|---------|
-| **Agents** | `create`, `update`, `delete` | Agent created with name "Viktor" |
-| **Crews** | `create`, `update`, `delete` | Crew settings updated |
-| **Missions** | `create`, `update`, `delete` | Mission started |
-| **Credentials** | `create`, `update`, `delete` | Credential assigned to agent |
-| **Keeper** | `credential`, `execute` | Keeper evaluated a credential access or command execution request |
+| Category | Actions | Source |
+|----------|---------|--------|
+| **Agents** | `create`, `update`, `delete` | `internal/api/agents_create.go`, `agents_update.go`, `agents_query.go` |
+| **Backups** | `backup.create`, `backup.restore`, `backup.unlock`, `backup.rotate`, `backup.delete`, `backup.download` | `internal/api/backup.go`, `backup_admin.go` |
+
+Keeper security decisions are tracked separately in the
+`keeper_requests` table (see below), not in `audit_logs`.
 
 ### Keeper Decision Auditing
 
@@ -27,7 +29,7 @@ Keeper security decisions are stored in the `keeper_requests` table with detaile
 | Field | Description |
 |-------|-------------|
 | `intent` | The agent's stated reason for access |
-| `request_type` | `credential` or `execute` |
+| `request_type` | `access` (credential read via `/keeper/request`) or `execute` (command run via `/keeper/execute`) |
 | `command` | Shell command (for execute requests) |
 | `decision` | `ALLOW`, `DENY`, or `ESCALATE` |
 | `reason` | LLM-generated explanation |
@@ -57,7 +59,7 @@ CREATE TABLE audit_logs (
 | `id` | `TEXT` | Random hex ID (32 chars) |
 | `workspace_id` | `TEXT` | Workspace the action occurred in |
 | `user_id` | `TEXT` | User who performed the action (null for system actions) |
-| `action` | `TEXT` | Action type — CRUD verbs (`create`, `update`, `delete`) for entity mutations, `credential` / `execute` for Keeper decisions |
+| `action` | `TEXT` | Action type — CRUD verbs (`create`, `update`, `delete`) for agent mutations, `backup.*` for backup lifecycle events |
 | `entity_type` | `TEXT` | Entity type (AGENT, CREW, MISSION, etc.) |
 | `entity_id` | `TEXT` | ID of the affected entity |
 | `metadata` | `TEXT` | JSON object with action-specific details |
@@ -150,16 +152,28 @@ The audit log uses offset-based pagination:
 
 ## How Audit Entries Are Written
 
-Audit entries are written synchronously during mutation handlers using the `WriteAuditLog` function:
+Audit entries are written synchronously during mutation handlers using the `WriteAuditLog` function (defined at `internal/api/internal_handler.go:51`):
 
 ```go
-WriteAuditLog(ctx, db, "create", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+func WriteAuditLog(
+    ctx context.Context,
+    db *sql.DB,
+    j journal.Emitter,
+    action, entityType, entityID, userID, workspaceID string,
+    metadata map[string]interface{},
+)
+```
+
+Typical call site:
+
+```go
+WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
     "name": agent.Name,
     "role": agent.Role,
 })
 ```
 
-The function generates a random hex ID and writes the entry in the same request context. If the write fails, a warning is logged but the original operation is not rolled back -- the audit log is best-effort to avoid blocking user operations.
+The function generates a random hex ID, writes the row in the same request context, and — when `j` is non-nil — dual-emits a typed `audit.entity_*` entry into the unified Crew Journal. If the write fails, a warning is logged but the original operation is not rolled back -- the audit log is best-effort to avoid blocking user operations.
 
 ## What's Next
 
