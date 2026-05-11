@@ -73,7 +73,7 @@ crewship agent create --name "Viktor" --crew backend-team --role LEAD
 | `--name` | `string` | _(required)_ | Agent name. |
 | `--slug` | `string` | _(auto from name)_ | Agent slug. |
 | `--crew` | `string` | | Crew slug or ID. |
-| `--role` | `string` | `AGENT` | Agent role: `AGENT` or `LEAD`. |
+| `--role` | `string` | `AGENT` | Agent role: `AGENT`, `LEAD`, or `COORDINATOR` (deprecated -- kept for backward compatibility). |
 | `--role-title` | `string` | | Human-readable role title. |
 | `--cli-adapter` | `string` | `CLAUDE_CODE` | CLI adapter: `CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`. |
 | `--system-prompt` | `string` | | System prompt text or `@file.txt` to read from file. |
