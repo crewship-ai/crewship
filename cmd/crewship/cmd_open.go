@@ -73,9 +73,15 @@ Examples:
 func buildOpenURL(base string, args []string) (string, error) {
 	resource := strings.ToLower(args[0])
 	rest := args[1:]
-	require := func(n int) error {
-		if len(rest) < n {
-			return fmt.Errorf("%s requires %d argument(s)", resource, n)
+	requireExact := func(n int) error {
+		if len(rest) != n {
+			return fmt.Errorf("%s requires exactly %d argument(s), got %d", resource, n, len(rest))
+		}
+		return nil
+	}
+	requireRange := func(min, max int) error {
+		if len(rest) < min || len(rest) > max {
+			return fmt.Errorf("%s accepts %d-%d argument(s), got %d", resource, min, max, len(rest))
 		}
 		return nil
 	}
@@ -92,19 +98,19 @@ func buildOpenURL(base string, args []string) (string, error) {
 	case "agents":
 		path = "/agents"
 	case "agent":
-		if err := require(1); err != nil {
+		if err := requireExact(1); err != nil {
 			return "", err
 		}
 		path = "/agents/" + esc(rest[0])
 	case "crews":
 		path = "/crews"
 	case "crew":
-		if err := require(1); err != nil {
+		if err := requireExact(1); err != nil {
 			return "", err
 		}
 		path = "/crews/" + esc(rest[0])
 	case "chat":
-		if err := require(1); err != nil {
+		if err := requireExact(1); err != nil {
 			return "", err
 		}
 		// Chat is per-agent: /chat/<agent-slug>. The earlier version of
@@ -112,7 +118,7 @@ func buildOpenURL(base string, args []string) (string, error) {
 		// page that doesn't exist in this app.
 		path = "/chat/" + esc(rest[0])
 	case "mission":
-		if err := require(1); err != nil {
+		if err := requireExact(1); err != nil {
 			return "", err
 		}
 		// Mission detail lives under the timeline sub-route in this app.
@@ -126,7 +132,10 @@ func buildOpenURL(base string, args []string) (string, error) {
 	case "routines":
 		path = "/routines"
 	case "issues":
-		if len(rest) > 0 {
+		if err := requireRange(0, 1); err != nil {
+			return "", err
+		}
+		if len(rest) == 1 {
 			path = "/issues/" + esc(rest[0])
 		} else {
 			path = "/issues"
@@ -142,7 +151,7 @@ func buildOpenURL(base string, args []string) (string, error) {
 	case "credentials":
 		path = "/credentials"
 	default:
-		return "", fmt.Errorf("unknown resource %q (try: inbox, activity, agent, crew, chat, mission, journal, approvals, integrations, routines, issues, runs, settings, admin, audit, credentials)", resource)
+		return "", fmt.Errorf("unknown resource %q (try: inbox, activity, agent[s], crew[s], chat, mission, journal, approvals, integrations, routines, issues, runs, settings, admin, audit, credentials)", resource)
 	}
 	return strings.TrimRight(base, "/") + path, nil
 }

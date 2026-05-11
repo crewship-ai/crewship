@@ -286,17 +286,19 @@ Examples:
 		// shell history). The flag is kept as compatibility fallback
 		// but warns to nudge callers off of it.
 		credValue := ""
-		if useStdin, _ := cmd.Flags().GetBool("credential-value-stdin"); useStdin {
+		useStdin, _ := cmd.Flags().GetBool("credential-value-stdin")
+		if useStdin {
 			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				credValue = scanner.Text()
+			if !scanner.Scan() {
+				if err := scanner.Err(); err != nil {
+					return fmt.Errorf("read --credential-value-stdin: %w", err)
+				}
+				return fmt.Errorf("no input provided on stdin for --credential-value-stdin")
 			}
-		}
-		if credValue == "" {
-			if v, _ := cmd.Flags().GetString("credential-value"); v != "" {
-				fmt.Fprintln(os.Stderr, "warning: --credential-value is deprecated; pipe the secret via --credential-value-stdin instead")
-				credValue = v
-			}
+			credValue = scanner.Text()
+		} else if v, _ := cmd.Flags().GetString("credential-value"); v != "" {
+			fmt.Fprintln(os.Stderr, "warning: --credential-value is deprecated; pipe the secret via --credential-value-stdin instead")
+			credValue = v
 		}
 		if credValue != "" {
 			body["credential_value"] = credValue
