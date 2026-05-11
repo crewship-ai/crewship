@@ -356,13 +356,13 @@ function Card({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border bg-card",
+        "overflow-hidden rounded-xl border bg-card",
         tone === "violet" ? "border-violet-500/15" : "border-white/[0.06]",
       )}
     >
-      <div className="flex items-center gap-2 border-b border-white/[0.04] px-3 py-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</span>
-        {subtitle && <span className="text-[10px] text-muted-foreground/50">{subtitle}</span>}
+      <div className="flex items-center gap-2 border-b border-white/[0.04] px-4 py-2.5">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</span>
+        {subtitle && <span className="text-[11px] text-muted-foreground/50">{subtitle}</span>}
         {action && <span className="ml-auto">{action}</span>}
       </div>
       <div>{children}</div>
@@ -395,33 +395,33 @@ function KpiTile({
   const color = SPARK_TONES[tone]
   const max = Math.max(1, ...spark)
   return (
-    <div className="relative overflow-hidden rounded-lg border border-white/[0.06] bg-card p-3.5">
+    <div className="relative overflow-hidden rounded-xl border border-white/[0.06] bg-card p-4">
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-4 -top-4 h-20 w-20 rounded-full"
-        style={{ background: `radial-gradient(circle, ${color}1f, transparent 70%)` }}
+        className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full"
+        style={{ background: `radial-gradient(circle, ${color}22, transparent 70%)` }}
       />
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1.5 text-xl font-bold tabular-nums leading-none">{value}</div>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-2 text-3xl font-bold tabular-nums leading-none tracking-tight">{value}</div>
       {delta && (
         <div
           className={cn(
-            "mt-1 text-[10px]",
+            "mt-2 text-[12px]",
             deltaTone === "up" ? "text-emerald-400" : deltaTone === "down" ? "text-rose-400" : "text-muted-foreground/70",
           )}
         >
           {delta}
         </div>
       )}
-      <div className="mt-2 flex h-6 items-end gap-[2px]">
+      <div className="mt-3 flex h-7 items-end gap-[3px]">
         {spark.map((v, i) => (
           <span
             key={i}
             className="flex-1 rounded-sm"
             style={{
-              height: `${Math.max(4, (v / max) * 100)}%`,
+              height: `${Math.max(6, (v / max) * 100)}%`,
               backgroundColor: color,
-              opacity: 0.55,
+              opacity: 0.6,
             }}
           />
         ))}
@@ -488,28 +488,57 @@ function IORow({
   defaultValue?: unknown
 }) {
   const isIn = direction === "in"
+  // Long defaults (multi-line strings, big JSON) were rendering as a
+  // wall-of-text in the meta line. Render short defaults inline; collapse
+  // long ones into a <details> block so the row stays scannable.
+  const defaultStr = defaultValue !== undefined ? JSON.stringify(defaultValue) : null
+  const isLongDefault = defaultStr !== null && defaultStr.length > 60
   return (
-    <div className="grid grid-cols-[28px_120px_1fr] items-start gap-3 px-3 py-2.5">
+    <div className="flex items-start gap-3 px-4 py-3">
       <span
         className={cn(
-          "text-base font-mono leading-tight",
+          "shrink-0 font-mono text-base leading-tight",
           isIn ? "text-blue-400" : "text-emerald-400",
         )}
         aria-hidden
       >
         {isIn ? "→" : "←"}
       </span>
-      <div className="min-w-0">
-        <div className="truncate font-mono text-xs font-semibold">{name}</div>
-        <div className="text-[10px] text-muted-foreground/70">
-          <span className="font-mono">{type}</span>
-          {required && <span> · required</span>}
-          {defaultValue !== undefined && (
-            <span className="font-mono"> · default {JSON.stringify(defaultValue)}</span>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        {/* Name + type + flags on one line */}
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="font-mono text-sm font-semibold text-foreground">{name}</span>
+          <span className="rounded bg-white/[0.04] px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+            {type}
+          </span>
+          {required && (
+            <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+              required
+            </span>
+          )}
+          {defaultStr !== null && !isLongDefault && (
+            <span className="font-mono text-[11px] text-muted-foreground/70">
+              default {defaultStr}
+            </span>
           )}
         </div>
+        {/* Description */}
+        {description && (
+          <p className="text-[13px] leading-relaxed text-muted-foreground">{description}</p>
+        )}
+        {/* Long default — collapsible, preview clipped */}
+        {isLongDefault && defaultStr !== null && (
+          <details className="group rounded-md border border-white/[0.06] bg-black/20 text-[12px]">
+            <summary className="cursor-pointer list-none px-2.5 py-1.5 font-mono text-muted-foreground hover:text-foreground">
+              <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
+              default value <span className="text-faint">· {defaultStr.length} chars</span>
+            </summary>
+            <pre className="m-0 max-h-48 overflow-auto border-t border-white/[0.04] px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground/85">
+              {defaultStr}
+            </pre>
+          </details>
+        )}
       </div>
-      {description && <div className="text-xs text-muted-foreground">{description}</div>}
     </div>
   )
 }
@@ -633,12 +662,12 @@ function RunFeedRow({ run }: { run: PipelineRunRecord }) {
   const Icon = meta.Icon
   const isFailed = run.status === "failed"
   return (
-    <div className="grid grid-cols-[14px_minmax(0,1fr)_auto_auto_auto] items-center gap-3 px-3 py-2 text-[11px]">
+    <div className="grid grid-cols-[14px_minmax(0,1fr)_auto_auto_auto] items-center gap-3 px-4 py-2.5 text-xs">
       <span
         aria-hidden
         title={run.status}
         className={cn(
-          "h-2 w-2 shrink-0 rounded-full",
+          "h-2.5 w-2.5 shrink-0 rounded-full",
           run.status === "completed" && "bg-emerald-500",
           run.status === "failed" && "bg-rose-500",
           run.status === "running" && "bg-blue-500",
@@ -648,9 +677,9 @@ function RunFeedRow({ run }: { run: PipelineRunRecord }) {
           run.status === "interrupted" && "bg-amber-500",
         )}
       />
-      <span className="truncate font-mono text-muted-foreground">{run.id.slice(0, 14)}…</span>
-      <span className={cn("inline-flex shrink-0 items-center gap-1 text-[10px]", meta.tone)} title={meta.label}>
-        <Icon className="h-2.5 w-2.5" />
+      <span className="truncate font-mono text-muted-foreground">{run.id.slice(0, 16)}…</span>
+      <span className={cn("inline-flex shrink-0 items-center gap-1 text-[11px]", meta.tone)} title={meta.label}>
+        <Icon className="h-3 w-3" />
         {meta.label}
       </span>
       <span className="shrink-0 text-right tabular-nums text-muted-foreground">
@@ -675,9 +704,9 @@ function MetaCell({
   title?: string
 }) {
   return (
-    <div className="border-b border-dashed border-white/[0.04] py-1.5 last:border-b-0">
-      <div className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/70">{k}</div>
-      <div className={cn("text-xs text-foreground/90", mono && "font-mono text-[11px]")} title={title}>
+    <div className="border-b border-dashed border-white/[0.04] py-2 last:border-b-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{k}</div>
+      <div className={cn("mt-0.5 text-sm text-foreground/90", mono && "font-mono text-[12px]")} title={title}>
         {v}
       </div>
     </div>
