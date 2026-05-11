@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import Link from "next/link"
 import { Plus, Link2, X } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { StatusIcon } from "@/components/features/issues/status-icon"
@@ -155,6 +156,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                     {RELATION_TYPE_OPTIONS.map((opt) => (
                       <button
                         key={opt.value}
+                        type="button"
                         onClick={() => setNewRelationType(opt.value)}
                         className={cn(
                           "px-2 py-0.5 rounded text-[10px] border transition-colors",
@@ -168,6 +170,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                     ))}
                   </div>
                   <button
+                    type="button"
                     onClick={handleAddRelation}
                     disabled={!newRelationTarget.trim() || addingRelation}
                     className={cn(
@@ -252,7 +255,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                 <span className="text-[11px] text-foreground/40 pl-0.5">Loading...</span>
               ) : (
                 subIssues.map((sub) => (
-                  <a
+                  <Link
                     key={sub.id}
                     href={`/orchestration/issues/${sub.identifier}`}
                     className="flex items-center gap-2 py-1 text-xs hover:bg-white/[0.04] rounded px-1"
@@ -260,7 +263,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                     <StatusIcon status={sub.status} className="h-3.5 w-3.5" />
                     <span className="font-mono text-muted-foreground/60">{sub.identifier}</span>
                     <span className="truncate text-foreground/70">{sub.title}</span>
-                  </a>
+                  </Link>
                 ))
               )}
             </div>
