@@ -10,7 +10,7 @@ import { PriorityIcon, priorityLabel } from "@/components/features/issues/priori
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { Calendar } from "@/components/ui/calendar"
-import { getCrewIconDef } from "@/lib/crew-icon"
+import { getCrewIconDef } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 import { LABEL_PRESET_COLORS, STATUS_COLORS } from "@/lib/colors"
 import { toast } from "sonner"

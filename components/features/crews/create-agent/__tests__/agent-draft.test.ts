@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { BUILTIN_PERSONAS } from "@/lib/agent-personas"
+import { BUILTIN_PERSONAS } from "@/lib/entities"
 import {
   initialAgentDraft,
   applyPersonaDefaults,

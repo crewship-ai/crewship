@@ -9,7 +9,7 @@ import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { getCrewIconDef, getGradientPalette } from "@/lib/crew-icon"
+import { getCrewIconDef, getGradientPalette } from "@/lib/entities"
 import type { Mission, MissionTask, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 

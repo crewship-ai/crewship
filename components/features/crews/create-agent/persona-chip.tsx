@@ -3,7 +3,7 @@
 import { Sparkles } from "lucide-react"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { cn } from "@/lib/utils"
-import type { AgentPersona } from "@/lib/agent-personas"
+import type { AgentPersona } from "@/lib/entities"
 
 interface PersonaChipProps {
   persona: AgentPersona

@@ -18,7 +18,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { getCrewDotColor, getGradientPalette } from "@/lib/crew-icon"
+import { getCrewDotColor, getGradientPalette } from "@/lib/entities"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
