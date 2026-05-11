@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>UI Style Mockups</title>
+<style>
+  body { background: #0e0c14; color: #e6e4ec; font-family: -apple-system, "Inter", sans-serif; padding: 40px; line-height: 1.5; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 600; }
+  .desc { color: rgba(236,233,243,0.6); margin: 8px 0 32px; }
+  .links { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { background: #19171f; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 18px 22px; text-decoration: none; color: #e6e4ec; transition: border-color 0.2s; }
+  .card:hover { border-color: #6b8df7; }
+  .card .num { color: #6b8df7; font-family: monospace; font-size: 12px; margin-bottom: 6px; }
+  .card .title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .card .sub { color: rgba(236,233,243,0.55); font-size: 13px; }
+  .extra { margin-top: 20px; padding: 14px 18px; background: rgba(107,141,247,0.06); border: 1px solid rgba(107,141,247,0.18); border-radius: 8px; color: rgba(236,233,243,0.8); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Routine detail · style mockups</h1>
+  <p class="desc">Five UI/UX patterns for the routine detail view. Same data (Eval: faithfulness RAG), different presentation. Pick one (or mix elements) — I'll implement.</p>
+
+  <div class="links">
+    <a class="card" href="style-1-linear.html">
+      <div class="num">Style 1</div>
+      <div class="title">Linear / Notion</div>
+      <div class="sub">Clean hero, content-first, right rail with compact properties. Strong typography hierarchy. Best for "understand + edit".</div>
+    </a>
+    <a class="card" href="style-2-stripe.html">
+      <div class="num">Style 2</div>
+      <div class="title">Stripe / Vercel</div>
+      <div class="sub">KPI tiles with sparklines + chart + cards in 2-column grid. Best for "operational overview".</div>
+    </a>
+    <a class="card" href="style-3-github.html">
+      <div class="num">Style 3</div>
+      <div class="title">GitHub repo</div>
+      <div class="sub">Breadcrumb + about box + insights + README-style body + topics sidebar. Best for "discoverable doc".</div>
+    </a>
+    <a class="card" href="style-4-datadog.html">
+      <div class="num">Style 4</div>
+      <div class="title">Datadog / Grafana</div>
+      <div class="sub">Time range bar + 6 KPI strip + multi-panel grid (line chart, p99 chart, pass-rate gauge, recent runs, spend breakdown). Metrics dense.</div>
+    </a>
+    <a class="card" href="style-5-workflow.html">
+      <div class="num">Style 5</div>
+      <div class="title">n8n / Flowise</div>
+      <div class="sub">Visual DAG of routine steps (input → agent → output) on grid canvas + last-run trace bar + compact side panel.</div>
+    </a>
+  </div>
+
+  <div class="extra">
+    Designed for desktop first; mobile responsive (single-column collapse) baked in for styles 1–4. Style 5's canvas needs touch consideration.
+  </div>
+</div>
+</body>
+</html>

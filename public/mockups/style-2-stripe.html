@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Style 2 — Stripe/Vercel KPI dashboard</title>
+<style>
+  :root {
+    --bg: #0c0a12;
+    --bg-card: #16141d;
+    --bg-elev: #1d1b26;
+    --bg-soft: rgba(255,255,255,0.02);
+    --border: rgba(255,255,255,0.06);
+    --border-2: rgba(255,255,255,0.10);
+    --text: #efedf5;
+    --muted: rgba(239,237,245,0.58);
+    --faint: rgba(239,237,245,0.32);
+    --accent: #6b8df7;
+    --green: #34d399;
+    --red: #f43f5e;
+    --amber: #f59e0b;
+    --violet: #a78bfa;
+    --mono: ui-monospace, Menlo, monospace;
+  }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body { margin:0; padding:0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 13px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+
+  .wrap { padding: 18px 24px 60px; max-width: 1400px; margin: 0 auto; }
+
+  /* Top bar with title + action group */
+  .head {
+    display:grid; grid-template-columns: 1fr auto; gap: 20px; padding: 14px 18px; margin-bottom: 14px;
+    background: linear-gradient(135deg, rgba(107,141,247,0.08), rgba(167,139,250,0.04));
+    border: 1px solid var(--border-2); border-radius: 12px;
+  }
+  .head-left h1 { margin:0 0 4px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  .head-left .row { display:flex; align-items:center; gap: 8px; flex-wrap: wrap; }
+  .slug { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .pill { display:inline-flex; align-items:center; gap: 5px; font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 99px; }
+  .pill.green { background: rgba(52,211,153,0.12); color: var(--green); }
+  .pill.outline { background: transparent; border:1px solid var(--border-2); color: var(--muted); }
+  .pill .dot { width:5px; height:5px; border-radius:50%; background: currentColor; }
+  .head-desc { margin-top: 10px; color: rgba(239,237,245,0.78); font-size: 13px; max-width: 760px; }
+
+  .action-group { display:inline-flex; border-radius: 8px; overflow:hidden; border:1px solid var(--border-2); background: var(--bg-elev); height: 36px; }
+  .action-group > button { background: transparent; color: var(--text); padding: 0 14px; font-size: 12px; cursor:pointer; border:0; display:inline-flex; align-items:center; gap: 6px; font-weight: 500; border-right: 1px solid var(--border); }
+  .action-group > button:last-child { border-right: 0; }
+  .action-group > button.primary { background: var(--accent); color: white; }
+  .action-group > button.primary:hover { filter: brightness(1.08); }
+  .action-group > button:not(.primary):hover { background: rgba(255,255,255,0.04); }
+
+  /* KPI strip */
+  .kpis { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+  .kpi { padding: 16px 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; position: relative; overflow: hidden; }
+  .kpi::after { content:""; position: absolute; right: -10px; top: -10px; width: 80px; height: 80px; background: radial-gradient(circle, rgba(107,141,247,0.06), transparent 70%); pointer-events: none; }
+  .kpi .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .kpi .value { font-size: 28px; font-weight: 700; line-height: 1; margin: 8px 0 4px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .kpi .delta { font-size: 11px; color: var(--muted); display:flex; align-items:center; gap:4px; }
+  .kpi .delta.up { color: var(--green); }
+  .kpi .delta.down { color: var(--red); }
+  .kpi .spark { display:flex; gap: 2px; height: 24px; align-items: flex-end; margin-top: 10px; }
+  .kpi .spark span { flex:1; background: rgba(107,141,247,0.5); border-radius: 1px; }
+
+  /* Two-column body */
+  .body { display:grid; grid-template-columns: 2fr 1fr; gap: 12px; }
+  @media (max-width: 980px) { .body { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .col { display:flex; flex-direction:column; gap: 12px; }
+
+  .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; }
+  .card-h { display:flex; align-items:center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .card-h .title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); flex: 1; }
+  .card-h .ctl { font-size: 11px; color: var(--muted); cursor: pointer; padding: 2px 8px; border-radius: 5px; }
+  .card-h .ctl:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+  .card-h .ctl.active { background: rgba(107,141,247,0.12); color: var(--accent); }
+  .card-b { padding: 14px 16px; }
+
+  /* Runs chart */
+  .chart { height: 180px; position: relative; padding: 12px 0; }
+  .chart svg { width: 100%; height: 100%; overflow: visible; }
+  .ticks { display:flex; justify-content: space-between; font-size: 10px; color: var(--faint); margin-top: 4px; }
+
+  /* IO compact */
+  .io-list { display:flex; flex-direction: column; }
+  .io-row { display:grid; grid-template-columns: 22px 110px 1fr; gap: 12px; padding: 11px 0; border-bottom: 1px dashed var(--border); align-items: start; }
+  .io-row:last-child { border-bottom: 0; }
+  .io-row .glyph { font-family: var(--mono); color: var(--accent); font-size: 14px; text-align: center; }
+  .io-row .key { font-family: var(--mono); font-size: 12px; }
+  .io-row .key .name { color: var(--text); font-weight: 500; }
+  .io-row .key .type { display:block; color: var(--faint); font-size: 10px; margin-top: 2px; }
+  .io-row .body { color: var(--muted); font-size: 12px; }
+  .io-row .body .preview { background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 5px; margin-top: 6px; font-family: var(--mono); font-size: 11px; max-height: 60px; overflow: hidden; color: rgba(239,237,245,0.85); border: 1px solid var(--border); }
+
+  /* Last run as full card with status header */
+  .lr-h { display:grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, rgba(52,211,153,0.04), transparent); }
+  .lr-icon { width: 36px; height: 36px; border-radius: 8px; background: rgba(52,211,153,0.12); color: var(--green); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .lr-meta .name { font-weight: 600; font-size: 14px; }
+  .lr-meta .sub { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .lr-stats { display: flex; gap: 16px; font-size: 11px; }
+  .lr-stats .stat { text-align: right; }
+  .lr-stats .stat .v { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .lr-stats .stat .l { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .lr-body { padding: 14px 18px; }
+  .lr-body pre { background: rgba(0,0,0,0.35); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin: 0; max-height: 200px; overflow-y: auto; line-height: 1.55; }
+
+  /* Right column compact info */
+  .meta-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 12px 16px; }
+  .meta-grid > div { padding: 7px 0; border-bottom: 1px dashed var(--border); font-size: 12px; }
+  .meta-grid .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .meta-grid .v { color: var(--text); font-family: var(--mono); font-size: 11px; }
+
+  .runs-list .row { display:grid; grid-template-columns: 22px 1fr auto auto; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px dashed var(--border); font-size: 12px; }
+  .runs-list .row:last-child { border-bottom: 0; }
+  .runs-list .row .when { color: var(--faint); font-size: 11px; text-align: right; }
+  .runs-list .row .dur { color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+  .dot-sm { width: 8px; height: 8px; border-radius: 50%; }
+  .dot-sm.green { background: var(--green); }
+  .dot-sm.red { background: var(--red); }
+
+  .cred-row { display:flex; align-items:center; gap: 10px; padding: 12px 16px; }
+  .cred-row .icon { width: 28px; height: 28px; border-radius: 6px; background: rgba(167,139,250,0.12); color: var(--violet); display:flex; align-items:center; justify-content:center; font-family: var(--mono); font-weight: 700; font-size: 11px; }
+  .cred-row .name { font-weight: 500; }
+  .cred-row .scope { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Hero with gradient -->
+    <div class="head">
+      <div class="head-left">
+        <div class="row">
+          <span class="pill green"><span class="dot"></span>Completed</span>
+          <span class="pill outline">DSL v1.0</span>
+          <span class="pill outline">workspace</span>
+          <span class="slug">eval-faithfulness-rag</span>
+        </div>
+        <h1>Eval: faithfulness (RAG)</h1>
+        <div class="head-desc">Answer a question strictly from supplied context. Hallucinated facts are caught by the cross-family grader.</div>
+      </div>
+      <div class="action-group">
+        <button class="primary">▶ Run</button>
+        <button>⚗ Test run</button>
+        <button>○ Dry run</button>
+      </div>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Total runs</div>
+        <div class="value">7</div>
+        <div class="delta up">▲ +2 this week</div>
+        <div class="spark">
+          <span style="height: 20%"></span><span style="height: 30%"></span>
+          <span style="height: 60%"></span><span style="height: 45%"></span>
+          <span style="height: 80%"></span><span style="height: 50%"></span>
+          <span style="height: 100%"></span>
+        </div>
+      </div>
+      <div class="kpi">
+        <div class="label">Pass rate</div>
+        <div class="value" style="color: var(--green);">100<span style="font-size: 18px; color: var(--muted);">%</span></div>
+        <div class="delta up">7 / 7 succeeded</div>
+        <div class="spark">
+          <span style="height: 100%"></span><span style="height: 100%"></span>
+          <span style="height: 100%"></span><span style="height: 100%"></span>
+          <span style="height: 100%"></span><span style="height: 100%"></span>
+          <span style="height: 100%"></span>
+        </div>
+      </div>
+      <div class="kpi">
+        <div class="label">Avg duration</div>
+        <div class="value">42.1<span style="font-size: 16px; color: var(--muted);">s</span></div>
+        <div class="delta">↓ 3% faster than median</div>
+        <div class="spark">
+          <span style="height: 45%; background: rgba(167,139,250,0.5)"></span>
+          <span style="height: 60%; background: rgba(167,139,250,0.5)"></span>
+          <span style="height: 50%; background: rgba(167,139,250,0.5)"></span>
+          <span style="height: 70%; background: rgba(167,139,250,0.5)"></span>
+          <span style="height: 65%; background: rgba(167,139,250,0.5)"></span>
+          <span style="height: 55%; background: rgba(167,139,250,0.5)"></span>
+          <span style="height: 60%; background: rgba(167,139,250,0.5)"></span>
+        </div>
+      </div>
+      <div class="kpi">
+        <div class="label">Total spend</div>
+        <div class="value">$0.142</div>
+        <div class="delta">avg $0.020 / run</div>
+        <div class="spark">
+          <span style="height: 30%; background: rgba(245,158,11,0.5)"></span>
+          <span style="height: 35%; background: rgba(245,158,11,0.5)"></span>
+          <span style="height: 60%; background: rgba(245,158,11,0.5)"></span>
+          <span style="height: 50%; background: rgba(245,158,11,0.5)"></span>
+          <span style="height: 75%; background: rgba(245,158,11,0.5)"></span>
+          <span style="height: 55%; background: rgba(245,158,11,0.5)"></span>
+          <span style="height: 70%; background: rgba(245,158,11,0.5)"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+      <div class="col">
+        <!-- Chart -->
+        <div class="card">
+          <div class="card-h">
+            <div class="title">📈 Runs over time</div>
+            <span class="ctl">24h</span>
+            <span class="ctl active">7d</span>
+            <span class="ctl">30d</span>
+            <span class="ctl">all</span>
+          </div>
+          <div class="card-b">
+            <div class="chart">
+              <svg viewBox="0 0 400 100" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#6b8df7" stop-opacity="0.6" />
+                    <stop offset="100%" stop-color="#6b8df7" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d="M0,80 L60,70 L120,50 L180,55 L240,30 L300,40 L360,15 L400,25 L400,100 L0,100 Z" fill="url(#g1)" />
+                <path d="M0,80 L60,70 L120,50 L180,55 L240,30 L300,40 L360,15 L400,25" fill="none" stroke="#6b8df7" stroke-width="1.5" />
+                <circle cx="60" cy="70" r="2.5" fill="#6b8df7"/>
+                <circle cx="120" cy="50" r="2.5" fill="#6b8df7"/>
+                <circle cx="180" cy="55" r="2.5" fill="#6b8df7"/>
+                <circle cx="240" cy="30" r="2.5" fill="#6b8df7"/>
+                <circle cx="300" cy="40" r="2.5" fill="#6b8df7"/>
+                <circle cx="360" cy="15" r="2.5" fill="#6b8df7"/>
+              </svg>
+              <div class="ticks">
+                <span>May 5</span><span>May 6</span><span>May 7</span><span>May 8</span><span>May 9</span><span>May 10</span><span>May 11</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- IO -->
+        <div class="card">
+          <div class="card-h"><div class="title">⇄ I/O Schema</div></div>
+          <div class="card-b">
+            <div class="io-list">
+              <div class="io-row">
+                <div class="glyph">→</div>
+                <div class="key"><span class="name">context</span><span class="type">string · required</span></div>
+                <div class="body">
+                  Source-of-truth document the worker may quote from.
+                  <div class="preview">"Crewship Routines are workspace-scoped declarative AI workflow recipes. The DSL version is 1.0 and supports six step types..."</div>
+                </div>
+              </div>
+              <div class="io-row">
+                <div class="glyph">→</div>
+                <div class="key"><span class="name">question</span><span class="type">string · required</span></div>
+                <div class="body">
+                  Question whose answer is fully present in the context.
+                  <div class="preview">"How many step types does the Crewship Routines DSL support, and what is the DSL version?"</div>
+                </div>
+              </div>
+              <div class="io-row" style="border-top: 1px solid var(--border-2); margin-top: 6px;">
+                <div class="glyph" style="color: var(--green)">←</div>
+                <div class="key"><span class="name">answer</span><span class="type">string</span></div>
+                <div class="body" style="color: var(--muted);">Verbatim or grounded synthesis of the answer.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Last run -->
+        <div class="card">
+          <div class="lr-h">
+            <div class="lr-icon">✓</div>
+            <div class="lr-meta">
+              <div class="name">Last run · Completed</div>
+              <div class="sub">run_cmozxcupk000d227a468e · 22h ago</div>
+            </div>
+            <div class="lr-stats">
+              <div class="stat"><div class="v">44.3<span style="font-size:11px; color: var(--muted);">s</span></div><div class="l">Duration</div></div>
+              <div class="stat"><div class="v">$0.0212</div><div class="l">Cost</div></div>
+              <div class="stat"><div class="v">1<span style="font-size:11px; color: var(--muted);">/1</span></div><div class="l">Steps</div></div>
+            </div>
+          </div>
+          <div class="lr-body">
+<pre>{
+  "answer": "The Crewship Routines DSL version is 1.0 and supports six step types: agent_run, call_pipeline, http, code, wait, and transform."
+}</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right column -->
+      <div class="col">
+        <div class="card">
+          <div class="card-h"><div class="title">Metadata</div></div>
+          <div class="meta-grid">
+            <div><div class="k">DSL version</div><div class="v">1.0</div></div>
+            <div><div class="k">Visibility</div><div class="v">workspace</div></div>
+            <div><div class="k">Hash</div><div class="v">0fa3456b…</div></div>
+            <div><div class="k">Step count</div><div class="v">1</div></div>
+            <div><div class="k">Created</div><div class="v">10. 5. 2026</div></div>
+            <div><div class="k">Updated</div><div class="v">10. 5. 2026</div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="title">Authored by</div></div>
+          <div class="cred-row" style="border-bottom: 1px solid var(--border);">
+            <div class="icon" style="background: rgba(107,141,247,0.12); color: var(--accent);">⚙</div>
+            <div style="flex:1;">
+              <div class="name">user api</div>
+              <div class="scope">Engineering crew</div>
+            </div>
+          </div>
+          <div class="cred-row">
+            <div class="icon" style="background: rgba(52,211,153,0.12); color: var(--green); font-size: 13px;">📅</div>
+            <div style="flex:1;">
+              <div class="name" style="font-size: 12px;">Created 10. 5. 2026 16:11</div>
+              <div class="scope">Last updated 17:26 same day</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="title">Credentials</div></div>
+          <div class="cred-row">
+            <div class="icon" style="font-size: 11px;">An</div>
+            <div style="flex:1;">
+              <div class="name">anthropic</div>
+              <div class="scope">scope: any</div>
+            </div>
+            <span class="pill green"><span class="dot"></span>linked</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-h"><div class="title">Recent runs · 7</div><span class="ctl">view all →</span></div>
+          <div class="runs-list">
+            <div class="row"><span class="dot-sm green"></span><span class="key" style="font-family:var(--mono); font-size:10px;">cmozxcupk</span><span class="dur">44.3s</span><span class="when">22h ago</span></div>
+            <div class="row"><span class="dot-sm green"></span><span class="key" style="font-family:var(--mono); font-size:10px;">cmozxk2t4</span><span class="dur">41.7s</span><span class="when">22h ago</span></div>
+            <div class="row"><span class="dot-sm green"></span><span class="key" style="font-family:var(--mono); font-size:10px;">cmozx9hjq</span><span class="dur">39.4s</span><span class="when">22h ago</span></div>
+            <div class="row"><span class="dot-sm green"></span><span class="key" style="font-family:var(--mono); font-size:10px;">cmozxbmwm</span><span class="dur">43.1s</span><span class="when">22h ago</span></div>
+            <div class="row"><span class="dot-sm green"></span><span class="key" style="font-family:var(--mono); font-size:10px;">cmozxfhsv</span><span class="dur">40.9s</span><span class="when">22h ago</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
