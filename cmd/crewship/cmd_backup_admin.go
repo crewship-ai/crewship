@@ -2,8 +2,11 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -90,6 +93,140 @@ non-interactive session --force is mandatory.`,
 	},
 }
 
+// backupMetricsCmd dumps the in-memory backup counters (created /
+// failed totals, duration quantiles, lock-held). Process-lifetime so
+// the numbers reset on a restart. Instance-OWNER gated server-side.
+var backupMetricsCmd = &cobra.Command{
+	Use:   "metrics",
+	Short: "Show process-lifetime backup counters (instance owner only)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/admin/backups/metrics")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := cli.ReadJSON(resp, &raw); err != nil {
+			return err
+		}
+		pretty, _ := json.MarshalIndent(raw, "", "  ")
+		fmt.Println(string(pretty))
+		return nil
+	},
+}
+
+// backupDownloadCmd streams a bundle by ID (or full path) from the
+// server. Useful for pulling a remote bundle to a local workstation
+// before restore. Honours --out for the destination file; without it
+// the file is written into the cwd using the server-side basename.
+var backupDownloadCmd = &cobra.Command{
+	Use:   "download <bundle-path-or-id>",
+	Short: "Stream a backup bundle to disk",
+	Long: `Download the bundle bytes from the server's backup directory.
+The argument is the bundle's full path as returned by 'backup list'.
+Sensitive headers (no-store, no-cache) are applied server-side; the
+client also disables cache. Writes to the basename in cwd unless --out
+points elsewhere.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		path := args[0]
+		resp, err := client.Get("/api/v1/admin/backups/download?path=" + encodeQuery(path))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+
+		dest, _ := cmd.Flags().GetString("out")
+		if dest == "" {
+			dest = filepath.Base(path)
+		}
+		// Refuse to clobber an existing file unless --force — the bundle
+		// is the only authoritative copy of a workspace at a given
+		// point in time, and silently overwriting one is destructive.
+		force, _ := cmd.Flags().GetBool("force")
+		if !force {
+			if _, err := os.Stat(dest); err == nil {
+				return fmt.Errorf("%s already exists; pass --force to overwrite", dest)
+			}
+		}
+		f, err := os.Create(dest)
+		if err != nil {
+			return fmt.Errorf("create output: %w", err)
+		}
+		defer f.Close()
+		n, err := io.Copy(f, resp.Body)
+		if err != nil {
+			return fmt.Errorf("write bundle: %w", err)
+		}
+		cli.PrintSuccess(fmt.Sprintf("Downloaded %s (%s)", dest, formatBytes(n)))
+		return nil
+	},
+}
+
+// backupSelfTestCmd runs the server-side canary round-trip (collect →
+// destroy → restore → verify → cleanup) without touching the on-disk
+// bundle layout. Quick way to validate the docker integration after
+// upgrading the agent runtime image.
+var backupSelfTestCmd = &cobra.Command{
+	Use:   "self-test",
+	Short: "Run the backup canary round-trip on a crew (admin)",
+	Long: `Validates the backup pipeline end-to-end against a crew's
+container, without producing a bundle on disk. Requires --crew. Server
+returns the canary result with an "ok" boolean and per-stage timing.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		crewArg, _ := cmd.Flags().GetString("crew")
+		if crewArg == "" {
+			return fmt.Errorf("--crew is required")
+		}
+		client := newAPIClient()
+		crewID, err := resolveCrewID(client, crewArg)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Post("/api/v1/admin/backups/self-test", map[string]string{
+			"crew_id": crewID,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var raw json.RawMessage
+		if err := cli.ReadJSON(resp, &raw); err != nil {
+			return err
+		}
+		pretty, _ := json.MarshalIndent(raw, "", "  ")
+		fmt.Println(string(pretty))
+		return nil
+	},
+}
+
 var backupRotateCmd = &cobra.Command{
 	Use:   "rotate",
 	Short: "Apply retention policy — drop bundles over --keep-last or older than --keep-days",
@@ -140,4 +277,14 @@ var backupRotateCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func init() {
+	backupDownloadCmd.Flags().String("out", "", "Output file path (default: basename of source path)")
+	backupDownloadCmd.Flags().Bool("force", false, "Overwrite the output file if it already exists")
+	backupSelfTestCmd.Flags().String("crew", "", "Crew slug or ID to run the canary round-trip against (required)")
+
+	backupCmd.AddCommand(backupMetricsCmd)
+	backupCmd.AddCommand(backupDownloadCmd)
+	backupCmd.AddCommand(backupSelfTestCmd)
 }

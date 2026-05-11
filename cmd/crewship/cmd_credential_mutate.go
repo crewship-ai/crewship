@@ -208,6 +208,131 @@ var credUpdateCmd = &cobra.Command{
 	},
 }
 
+// credRotateCmd issues a new value for a credential and starts a grace
+// overlap. Destructive (the old value is moved to a rotation row and
+// scrubbed after the grace window expires) so it gates behind a confirm
+// prompt unless --yes is passed.
+//
+// Flag shape mirrors `credential create`: the new value can come on the
+// command line (--value, visible in `ps`) or from stdin (--value-stdin,
+// preferred for scripts).
+var credRotateCmd = &cobra.Command{
+	Use:   "rotate <name-or-id>",
+	Short: "Rotate a credential value with a grace-overlap window",
+	Long: `Issue a new value for the credential. The old value is preserved
+on the rotation row for --grace-seconds (default 24h, max 7d) so
+in-flight agents that cached the old key can still fall back during
+their run, then the old value is scrubbed.
+
+Examples:
+  crewship credential rotate gh-token --value sk_new_... --yes
+  echo "$NEW" | crewship credential rotate gh-token --value-stdin
+  crewship credential rotate gh-token --value-stdin --grace-seconds 0  # immediate cutover`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		flags := cmd.Flags()
+		value, _ := flags.GetString("value")
+		valueStdin, _ := flags.GetBool("value-stdin")
+		if valueStdin {
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				value = scanner.Text()
+			}
+		}
+		if value == "" {
+			return fmt.Errorf("--value or --value-stdin is required")
+		}
+
+		if err := confirmAction(cmd, fmt.Sprintf("Rotate credential %q? The old value will be scrubbed after the grace window.", args[0])); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		body := map[string]interface{}{"value": value}
+		if flags.Changed("grace-seconds") {
+			gs, _ := flags.GetInt("grace-seconds")
+			body["grace_seconds"] = gs
+		}
+
+		resp, err := client.Post("/api/v1/credentials/"+credID+"/rotate", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var out struct {
+			ID           string `json:"id"`
+			Status       string `json:"status"`
+			GraceSeconds int    `json:"grace_seconds"`
+			ExpiresAt    string `json:"expires_at"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf(
+			"Rotation %s started (grace %ds, expires %s)",
+			out.ID, out.GraceSeconds, out.ExpiresAt,
+		))
+		return nil
+	},
+}
+
+// credRotationCancelCmd ends an ACTIVE grace window immediately and
+// scrubs the old value. EXPIRED / CANCELLED rotations are no-ops on
+// the server side (idempotent 200), so the command still succeeds.
+var credRotationCancelCmd = &cobra.Command{
+	Use:   "rotation-cancel <rotation-id>",
+	Short: "End an ACTIVE rotation's grace window early (scrubs old value)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		if err := confirmAction(cmd, fmt.Sprintf("Cancel rotation %q? The old value will be scrubbed immediately.", args[0])); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		resp, err := client.Delete("/api/v1/credential-rotations/" + args[0])
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		if out.Message != "" {
+			cli.PrintSuccess(fmt.Sprintf("Rotation %s: %s (%s)", args[0], out.Status, out.Message))
+		} else {
+			cli.PrintSuccess(fmt.Sprintf("Rotation %s cancelled.", args[0]))
+		}
+		return nil
+	},
+}
+
 var credDeleteCmd = &cobra.Command{
 	Use:   "delete <name-or-id>",
 	Short: "Delete a credential",
