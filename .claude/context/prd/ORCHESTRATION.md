@@ -358,7 +358,7 @@ ASSIGNMENT PROXY:
   GET  /status      — stav vsech aktivnich assignments
   WS   /events      — real-time stream vysledku (pro API-direct mode)
 
-MCP GATEWAY (Phase 2, viz AGENT-RUNTIME.md 6A):
+MCP GATEWAY (Phase 2, viz architecture.md sekce MCP Gateway):
   MCP stdio proxy   — zachytava MCP tool cally od agenta
                       injektuje credentials, RBAC check, audit log
   GET /tools/search — tool search meta-tool (on-demand discovery, ADR-016)

@@ -860,32 +860,32 @@ v crew kontejneru (Docker-in-Docker nebo bind-mounted socket).
 
 | ID | Rozhodnutí | Status | Dopad |
 |---|---|---|---|
-| ADR-001 v2 | Loopback HTTP sidecar | Accepted | ORCHESTRATION.md 5.1-5.3, AGENT-RUNTIME.md, architecture.md |
+| ADR-001 v2 | Loopback HTTP sidecar | Accepted | ORCHESTRATION.md 5.1-5.3, architecture.md, SIDECAR.md |
 | ADR-002 | NATS odložen na Phase 3 | Accepted | architecture.md (Messaging Architecture) |
-| ADR-003 | gVisor optional runtime | Accepted | AGENT-RUNTIME.md 16, architecture.md |
+| ADR-003 | gVisor optional runtime | Accepted | architecture.md |
 | ADR-004 | Lead modes (active/passive) | Accepted | ORCHESTRATION.md 5.6 |
 | ADR-005 | Agent output compression | Accepted | ORCHESTRATION.md 5.7 |
 | ADR-006 | Circuit breaker | Accepted | ORCHESTRATION.md 5.8 |
-| ADR-007 | Coordinator bez kontejneru | Accepted | ORCHESTRATION.md 5.2, AGENT-RUNTIME.md 15.2 |
+| ADR-007 | Coordinator bez kontejneru | Accepted | ORCHESTRATION.md 5.2, architecture.md |
 | ADR-008 | Cost visibility | Proposed | ORCHESTRATION.md 10 (ORCH-21, ORCH-22) |
-| ADR-009 | Dual runtime (CLI + API) | Accepted | ORCHESTRATION.md 5.9, AGENT-RUNTIME.md 1 |
-| ADR-010 | Landlock per-agent | Accepted | AGENT-RUNTIME.md 16.2 |
+| ADR-009 | Dual runtime (CLI + API) | Accepted | ORCHESTRATION.md 5.9, architecture.md (Dual Runtime sekce) |
+| ADR-010 | Landlock per-agent | Accepted | architecture.md, SECURITY.md |
 | ADR-011 | Meilisearch search | Proposed | architecture.md (Conversation Search) |
 | ADR-012 | Trace ID | Accepted | ORCHESTRATION.md 5.10, AssignmentLog |
 | ADR-013 | Credential decrypt v Go | Accepted | SECURITY.md, architecture.md |
-| ADR-014 | Sidecar = MCP Gateway | Accepted | AGENT-RUNTIME.md 6A, architecture.md, ORCHESTRATION.md 7.2 |
-| ADR-015 | Credential-less agent | Accepted | AGENT-RUNTIME.md 3.3, 6A.6, architecture.md |
-| ADR-016 | Tool search on-demand | Accepted | AGENT-RUNTIME.md 6A.4, architecture.md |
-| ADR-017 | srt sandbox per-MCP-server | Accepted | AGENT-RUNTIME.md 6A, architecture.md |
-| ADR-018 | Claude Agent Teams mode | Proposed | ORCHESTRATION.md, AGENT-RUNTIME.md |
-| ADR-019 | Crewship Skill Hub (Marketplace) | Accepted | DATABASE.md, AGENT-RUNTIME.md 6A.10, architecture.md |
-| ADR-020 | Skill Security Pipeline | Accepted | AGENT-RUNTIME.md 6A.10, architecture.md |
-| ADR-021 | Skill Distribution via OCI | Accepted | AGENT-RUNTIME.md 6A.10, architecture.md |
+| ADR-014 | Sidecar = MCP Gateway | Accepted | architecture.md, ORCHESTRATION.md 7.2, SIDECAR.md |
+| ADR-015 | Credential-less agent | Accepted | architecture.md, SECURITY.md |
+| ADR-016 | Tool search on-demand | Accepted | architecture.md |
+| ADR-017 | srt sandbox per-MCP-server | Accepted | architecture.md, SECURITY.md |
+| ADR-018 | Claude Agent Teams mode | Proposed | ORCHESTRATION.md, architecture.md |
+| ADR-019 | Crewship Skill Hub (Marketplace) | Accepted | DATABASE.md, architecture.md (Skill Hub sekce) |
+| ADR-020 | Skill Security Pipeline | Accepted | architecture.md (Skill Hub sekce) |
+| ADR-021 | Skill Distribution via OCI | Accepted | architecture.md (Skill Hub sekce) |
 | ADR-022 | SQLite jako default databaze | Accepted | DATABASE.md, architecture.md |
 | ADR-023 | Single binary distribuce (Ollama model) | Accepted | architecture.md, DEPLOYMENT.md |
-| ADR-024 | Per-agent network control | Proposed | SECURITY.md, AGENT-RUNTIME.md |
-| ADR-025 | Skill sandbox enforcement | Proposed | SECURITY.md, AGENT-RUNTIME.md |
-| ADR-026 | 3-tier monetizacni model | Proposed | business.md, DATABASE.md |
+| ADR-024 | Per-agent network control | Proposed | SECURITY.md, architecture.md |
+| ADR-025 | Skill sandbox enforcement | Proposed | SECURITY.md, architecture.md |
+| ADR-026 | 3-tier monetizacni model | Proposed | DATABASE.md, STRATEGY-2026.md (business.md neexistuje; tier strategie je v STRATEGY-2026.md) |
 
 ---
 

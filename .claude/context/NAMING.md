@@ -1,7 +1,8 @@
 # Crewship -- Naming Convention (Názvosloví)
 
-**Verze:** 1.0
+**Verze:** 1.1
 **Datum:** 2026-02-17
+**Last updated:** 2026-05-11
 **Status:** Schváleno -- aplikovat na celý codebase, dokumentaci, UI, API, DB schema
 
 ---
@@ -155,7 +156,7 @@ enum AgentRole {
 | Aspect | Staré | Nové |
 |---|---|---|
 | Název (UI) | Conversation Session | **Chat** |
-| DB tabulka | `conversation_sessions` (zachovat) | `chats` |
+| DB tabulka | `conversation_sessions` | `chats` (renamed in v01 init migration -- viz `internal/database/migrate_consts_v01_init.go`) |
 | Prisma model | `ConversationSession` | `Chat` |
 | API endpoint | `/api/v1/sessions` | `/api/v1/chats` |
 | UI label | "Conversation" / "Session" | "Chat" |
@@ -173,6 +174,38 @@ enum AgentRole {
 | **Audit Log** | Standard |
 | **Agent Run** | Technický pojem pro jednotlivý běh agenta |
 | **RBAC role** | OWNER, ADMIN, MANAGER, MEMBER, VIEWER -- beze změny (lidské role) |
+
+---
+
+## 4a. Ship-named subsystems (current code; rename pending but not now)
+
+Crewship má v `internal/` skupinu balíčků pojmenovaných lodním slovníkem (Keeper,
+Harbormaster, Lookout, Paymaster, Cartographer, Quartermaster, Scrubber).
+Pro nováčka v repu jsou tahle jména **bariéra**: ze jména nejde uhodnout účel,
+a žádná zkratka „Lookout = guardrails" v kódu neexistuje. Plánovaná
+simplifikace existuje (viz user memory `project_subsystem_rename_pending.md`),
+ale **NE TEĎ** -- rename napříč 50+ soubory a každým importem by zablokoval
+běžící PR pipeline. Tahle tabulka je most: dokud rename neproběhne, slouží
+jako jediná autoritativní mapa „kód → účel".
+
+| Code name | Path | Purpose | Rename status |
+|---|---|---|---|
+| Keeper | `internal/keeper/` | Authorisation layer pro credential access: agent → sidecar bridge → crewshipd Evaluator (ALLOW / DENY / ESCALATE / PENDING). Drží L1–L4 security levels. | confusing for newcomers; rename pending |
+| Harbormaster | `internal/harbormaster/` | Human-in-the-loop approval workflow engine. Agent zavolá Gate před high-risk akcí; rule match → queue do `approvals_queue` + sync/async hold. | confusing for newcomers; rename pending |
+| Lookout | `internal/lookout/` | **Guardrails** pro agent inputs/outputs (NE observability) -- prompt-injection detection, JSON schema arg validation, structured-output parser, secrets redactor. | confusing for newcomers; rename pending -- jméno svádí k „watchtower / monitoring", reálně je to defensive parsing |
+| Paymaster | `internal/paymaster/` | Cost accounting + budget enforcement pro každý LLM call. Vlastní `cost_ledger` + `budget_limits`. | confusing for newcomers; rename pending |
+| Cartographer | `internal/cartographer/` | Mission checkpointing + time-travel. Captures journal cursor + materializovaný state snapshot; podporuje fork („branch from here"). | confusing for newcomers; rename pending |
+| Quartermaster | `internal/quartermaster/` | Eval framework + trajectory replay. Z journalu derives Trajectory / EvalMetrics / regression reports / LLM-as-judge verdicts. | confusing for newcomers; rename pending |
+| Scrubber | `internal/scrubber/` | Credential pattern redaction v agent outputu (SSH keys, API tokens, ...). Tenký regex sanitizer. | acceptable name; keep |
+| Sidecar | `internal/sidecar/` | Per-crew HTTP proxy uvnitř každého agent kontejneru. Egress allowlist, credential injection, Keeper bridge, memory API, assignment routing pro lead. | acceptable name; keep |
+| Orchestrator | `internal/orchestrator/` | Agent execution lifecycle: CLI adapters (Claude / Codex / Gemini / OpenCode / Cursor / Droid), mission planning, assignment dispatch, peer/lead loops. | acceptable name; keep |
+| Pipeline (internal) / Routines (UI) | `internal/pipeline/` | Workspace-scoped declarative AI workflow recipes. **Code stays `pipeline`** kvůli backwards compat (package, DB tabulka, HTTP routes); **UI / CLI / agent prompt label je "Routine"**. Viz `internal/pipeline/doc.go` + `PIPELINES.md §17`. | code stays "pipeline"; UI is "Routines" |
+
+> **Pravidlo pro novou dokumentaci:** Pokud píšeš nový doc, který odkazuje na
+> jeden z těchto subsystémů, **uveď účel v plain language v první větě**
+> (např. „Lookout (agent input/output guardrails)") -- nepředpokládej, že
+> čtenář ví, co kódové jméno znamená. Až rename proběhne, najdi-a-nahraď
+> bude trivial.
 
 ---
 
@@ -312,10 +345,12 @@ Při aplikování změn proveď v tomto pořadí (závislosti):
    - Agent příkazy (stdout parsing)
 
 5. **Dokumentace** (.claude/context/)
-   - AGENTS.md, architecture.md, business.md
-   - prd/PRD.md, prd/ORCHESTRATION.md, prd/DATABASE.md, prd/AGENT-RUNTIME.md, prd/API.md
-   - prd/CREW-EXECUTION.md, prd/ADR.md
+   - AGENTS.md, architecture.md
+   - prd/PRD.md, prd/ORCHESTRATION.md, prd/DATABASE.md, prd/API.md
+   - prd/CREW-EXECUTION.md, prd/ADR.md, prd/SIDECAR.md, prd/PIPELINES.md
    - TODO.md, MVP.md, STRATEGY-2026.md
+   - (Historical runtime spec doc was retired with commit `dd86356`;
+     the live source of truth for runtime architecture is `architecture.md`.)
 
 6. **Wireframes** (.claude/context/wireframes/)
    - HTML wireframy s UI texty

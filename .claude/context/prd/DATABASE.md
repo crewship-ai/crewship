@@ -662,7 +662,7 @@ model Skill {
   created_at    DateTime      @default(now()) @db.Timestamptz
   updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
 
-  // MCP Server definice (Phase 2, viz AGENT-RUNTIME.md 6A)
+  // MCP Server definice (Phase 2, viz architecture.md -- Skill Hub / MCP Gateway sekce)
   mcp_server_command  String?           // command pro spusteni MCP serveru ("npx @modelcontextprotocol/server-github")
   mcp_server_image    String?           // Docker image MCP serveru (pro marketplace skills)
   mcp_transport       String? @default("stdio")  // "stdio" | "sse" | "streamable-http"
@@ -1064,7 +1064,7 @@ func (o *Orchestrator) selectCredential(agentID, envVarName string) (*Credential
 4. crewshipd detekuje rate limit error
 5. Oznaci klic priority=0 jako "cooldown" (5 minut)
 6. Vybere dalsi klic z poolu (priority=1)
-7. Restartuje agenta s novym klicem (context preservation — viz AGENT-RUNTIME.md)
+7. Restartuje agenta s novym klicem (context preservation — viz architecture.md, sekce Dual Runtime / sidecar lifecycle)
 8. Uzivatel vidi plynuly prechod v chat UI
 ```
 

@@ -3,7 +3,7 @@
 **Verze:** 1.0
 **Datum:** 2026-04-09
 **Status:** Architekturni navrh (neni implementovano)
-**Zavislosti:** ORCHESTRATION.md, SECURITY.md, AGENT-RUNTIME.md
+**Zavislosti:** ORCHESTRATION.md, SECURITY.md, architecture.md (runtime; predchazejici spec doc retired commit `dd86356`)
 
 ---
 

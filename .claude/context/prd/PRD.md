@@ -1250,7 +1250,7 @@ crews:
 
 ## 19. OTEVRENE OTAZKY
 
-1. **CLI adapter detaily** → viz AGENT-RUNTIME.md
+1. **CLI adapter detaily** → viz architecture.md (Dual Runtime sekce) a `internal/orchestrator/adapter_*.go`
 2. **Orchestracni protokol** → viz ORCHESTRATION.md
 3. **Prisma multi-provider** (SQLite + PostgreSQL) -- overit ze Prisma zvlada oba providery se stejnym schematem, pripadne embedded-postgres-go jako fallback
 4. **Next.js static export** -- overit ze App Router + static export pokryje vsechny potrebne features (no SSR v single binary mode)
@@ -1261,4 +1261,4 @@ crews:
 
 ---
 
-*Navazujici dokumenty: DATABASE.md, SECURITY.md, AGENT-RUNTIME.md, ORCHESTRATION.md, API.md, DEPLOYMENT.md*
+*Navazujici dokumenty: DATABASE.md, SECURITY.md, architecture.md, ORCHESTRATION.md, API.md, DEPLOYMENT.md*
