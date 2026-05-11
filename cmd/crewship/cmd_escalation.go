@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -12,6 +15,12 @@ var escalationCmd = &cobra.Command{
 	Short: "Manage crew escalations",
 }
 
+// escalationListCmd lists escalations under a single crew. The server
+// route is /api/v1/crews/{crewId}/escalations and accepts ?status= as
+// the canonical narrowing filter. --limit and --since are applied
+// client-side because the server endpoint doesn't yet support them
+// (audit gap noted in the task) — both are best-effort guards against
+// runaway output, not a substitute for server-side pagination.
 var escalationListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List escalations for a crew",
@@ -25,9 +34,22 @@ var escalationListCmd = &cobra.Command{
 
 		crewSlug, _ := cmd.Flags().GetString("crew")
 		statusFilter, _ := cmd.Flags().GetString("status")
+		limit, _ := cmd.Flags().GetInt("limit")
+		since, _ := cmd.Flags().GetString("since")
 
 		if crewSlug == "" {
 			return fmt.Errorf("--crew is required (crew slug or ID)")
+		}
+
+		var sinceTime time.Time
+		var sinceSet bool
+		if since != "" {
+			t, err := parseSince(since)
+			if err != nil {
+				return fmt.Errorf("bad --since: %w", err)
+			}
+			sinceTime = t
+			sinceSet = true
 		}
 
 		client := newAPIClient()
@@ -39,7 +61,7 @@ var escalationListCmd = &cobra.Command{
 		path := "/api/v1/crews/" + crewID + "/escalations"
 
 		if statusFilter != "" {
-			path += "?status=" + statusFilter
+			path += "?status=" + url.QueryEscape(statusFilter)
 		}
 
 		resp, err := client.Get(path)
@@ -61,6 +83,22 @@ var escalationListCmd = &cobra.Command{
 		}
 		if err := cli.ReadJSON(resp, &escalations); err != nil {
 			return err
+		}
+
+		// Client-side --since / --limit. Cheaper than asking the server
+		// to grow new filter params right now; if the dataset balloons,
+		// promote to server-side filters.
+		if sinceSet {
+			kept := escalations[:0]
+			for _, e := range escalations {
+				if t, err := time.Parse(time.RFC3339Nano, e.CreatedAt); err == nil && !t.Before(sinceTime) {
+					kept = append(kept, e)
+				}
+			}
+			escalations = kept
+		}
+		if limit > 0 && len(escalations) > limit {
+			escalations = escalations[:limit]
 		}
 
 		f := newFormatter()
@@ -114,12 +152,63 @@ var escalationResolveCmd = &cobra.Command{
 	},
 }
 
+// escalationPendingCountCmd hits the workspace-wide aggregator at
+// GET /api/v1/escalations/pending-count. Drives dashboard tiles and
+// alerting that needs "how many escalations are unresolved across all
+// crews" without per-crew fan-out.
+var escalationPendingCountCmd = &cobra.Command{
+	Use:   "pending-count",
+	Short: "Print the count of unresolved escalations across all crews in the workspace",
+	Long: `Return the workspace-wide pending escalation count. Backed by
+GET /api/v1/escalations/pending-count — cheaper than enumerating per-
+crew lists when you only need the dashboard number.
+
+Examples:
+  crewship escalation pending-count             # prints the integer
+  crewship escalation pending-count --format json    # {"count": N}`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/escalations/pending-count")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			Count int `json:"count"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(body)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(body)
+		}
+		fmt.Println(strconv.Itoa(body.Count))
+		return nil
+	},
+}
+
 func init() {
 	escalationListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	escalationListCmd.Flags().String("status", "", "Filter by status: PENDING|RESOLVED")
+	escalationListCmd.Flags().Int("limit", 0, "Cap rows returned client-side (0 = unbounded)")
+	escalationListCmd.Flags().String("since", "", "Only entries newer than this (RFC3339 or 1h/24h/7d duration)")
 
 	escalationResolveCmd.Flags().String("resolution", "", "Resolution notes")
 
 	escalationCmd.AddCommand(escalationListCmd)
 	escalationCmd.AddCommand(escalationResolveCmd)
+	escalationCmd.AddCommand(escalationPendingCountCmd)
 }

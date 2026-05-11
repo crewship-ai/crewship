@@ -15,7 +15,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-var loginTokenFlag string
+var (
+	loginTokenFlag  string
+	loginGoogleFlag bool
+)
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
@@ -26,12 +29,19 @@ Interactive mode (email + password):
   crewship login
 
 Token mode (API token):
-  crewship login --token <api-token>`,
+  crewship login --token <api-token>
+
+Google OAuth (browser-based; finishes the flow in the web UI, then
+paste the CLI token printed at the end):
+  crewship login --google`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		server := cli.ResolveServer(flagServer, cliCfg)
 
 		if loginTokenFlag != "" {
 			return loginWithToken(server, loginTokenFlag)
+		}
+		if loginGoogleFlag {
+			return loginWithGoogle(server)
 		}
 		return loginInteractive(server)
 	},
@@ -120,6 +130,7 @@ var whoamiCmd = &cobra.Command{
 
 func init() {
 	loginCmd.Flags().StringVar(&loginTokenFlag, "token", "", "API token for non-interactive login")
+	loginCmd.Flags().BoolVar(&loginGoogleFlag, "google", false, "Sign in via Google OAuth (browser flow, finishes in the web UI)")
 }
 
 func loginWithToken(serverURL, token string) error {
@@ -129,14 +140,11 @@ func loginWithToken(serverURL, token string) error {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
 
-	if resp.StatusCode == http.StatusNotFound {
-		// Server doesn't have cli-token endpoint yet — fall back to workspace check
-		resp.Body.Close()
-		resp, err = client.Get("/api/v1/workspaces")
-		if err != nil {
-			return fmt.Errorf("failed to connect to server: %w", err)
-		}
-	}
+	// Historical fallback to /workspaces lived here for servers that
+	// predate the cli-token/validate endpoint; per audit, validate now
+	// ships on every supported server, so the fallback is dead code
+	// that only obscured real auth failures (a 404 on validate would
+	// silently switch to a check that succeeded on any logged-in user).
 
 	if err := cli.CheckError(resp); err != nil {
 		return fmt.Errorf("token validation failed: %w", err)
@@ -155,6 +163,68 @@ func loginWithToken(serverURL, token string) error {
 
 	cli.PrintSuccess("Login successful! Token saved to ~/.crewship/cli-config.yaml")
 	return nil
+}
+
+// loginWithGoogle drives the browser-based Google OAuth flow. The
+// server-side flow lands cookies on the browser session (see
+// internal/api/auth_google.go) — there is no CLI-poll endpoint that
+// hands back a token after the OAuth round-trip. So the CLI:
+//
+//  1. Checks /api/v1/auth/google/status to confirm OAuth is configured.
+//  2. Opens the user's browser at /api/v1/auth/google/redirect.
+//  3. After the user completes sign-in in the browser, asks them to
+//     mint a CLI token from Settings → CLI tokens and paste it here.
+//  4. Validates and stores the token via the same code path as
+//     `crewship login --token`.
+//
+// Why not a fully headless flow: a loopback redirect would require a
+// new server endpoint that hands a one-shot CLI token to the redirect
+// URI. That endpoint doesn't exist today; building a polling shim
+// against the existing /google/status (which only reports enabled=bool)
+// would be theatre. This hybrid keeps Google sign-in usable from the
+// terminal without inventing server endpoints that don't ship.
+func loginWithGoogle(serverURL string) error {
+	client := cli.NewClient(serverURL, "", "")
+	statusResp, err := client.Get("/api/v1/auth/google/status")
+	if err != nil {
+		return fmt.Errorf("contact server: %w", err)
+	}
+	if err := cli.CheckError(statusResp); err != nil {
+		return fmt.Errorf("google status: %w", err)
+	}
+	var status struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := cli.ReadJSON(statusResp, &status); err != nil {
+		return fmt.Errorf("parse google status: %w", err)
+	}
+	if !status.Enabled {
+		return fmt.Errorf("Google sign-in is not configured on %s (server returned enabled=false)", serverURL)
+	}
+
+	authURL := strings.TrimRight(serverURL, "/") + "/api/v1/auth/google/redirect"
+	fmt.Printf("Opening browser to complete Google sign-in:\n  %s\n\n", authURL)
+	if err := browserOpen(authURL); err != nil {
+		// Non-fatal: just print the URL and let the user click manually.
+		fmt.Printf("%s(Could not auto-open browser: %v — copy the URL above instead.)%s\n",
+			cli.Dim, err, cli.Reset)
+	}
+	fmt.Printf("After sign-in completes, mint a CLI token at:\n  %s/settings#cli-tokens\n\n",
+		strings.TrimRight(serverURL, "/"))
+
+	// Read the pasted token. Use bufio so we keep working when stdin is
+	// piped — same UX as `login` interactive prompts.
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Paste CLI token (or Ctrl-C to abort): ")
+	tok, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("read token: %w", err)
+	}
+	tok = strings.TrimSpace(tok)
+	if tok == "" {
+		return fmt.Errorf("no token entered")
+	}
+	return loginWithToken(serverURL, tok)
 }
 
 func loginInteractive(serverURL string) error {

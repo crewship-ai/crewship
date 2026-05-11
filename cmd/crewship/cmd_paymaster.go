@@ -213,13 +213,167 @@ func printSpendTable(scopeLabel string, rows any) error {
 	return nil
 }
 
+// paymasterByMissionCmd hits the per-mission rollup. The server-side
+// route (router_orchestration.go:180) enforces workspace isolation —
+// missions from other tenants return 404 with the same shape as
+// "not found" so callers can't enumerate IDs. Output renders both the
+// row JSON (cost, calls, tokens) and the mission ID echo for scripting.
+//
+// Why no --range: SpendByMission has no time-window parameter on the
+// server (it returns the mission's full cost history). Adding a CLI
+// --range would silently do nothing.
+var paymasterByMissionCmd = &cobra.Command{
+	Use:   "by-mission <missionId>",
+	Short: "Spend rolled up for a single mission",
+	Long: `Return the total cost ledger for a single mission (cost, call count,
+input/output tokens). Mission is workspace-scoped; foreign mission IDs
+return 404.
+
+Example:
+  crewship paymaster by-mission mis_abc123
+  crewship paymaster by-mission mis_abc123 --format json | jq .row.cost_usd`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/paymaster/spend/by-mission/" + url.PathEscape(args[0]))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			Row struct {
+				MissionID string  `json:"mission_id"`
+				CostUSD   float64 `json:"cost_usd"`
+				CallCount int64   `json:"call_count"`
+				InTokens  int64   `json:"input_tokens"`
+				OutTokens int64   `json:"output_tokens"`
+			} `json:"row"`
+			MissionID string `json:"mission_id"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(body)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(body)
+		}
+		fmt.Printf("%sMission %s%s\n", cli.Bold, body.MissionID, cli.Reset)
+		fmt.Printf("  Cost:         %s$%.4f%s\n", cli.Yellow, body.Row.CostUSD, cli.Reset)
+		fmt.Printf("  Calls:        %d\n", body.Row.CallCount)
+		fmt.Printf("  In tokens:    %d\n", body.Row.InTokens)
+		fmt.Printf("  Out tokens:   %d\n", body.Row.OutTokens)
+		fmt.Printf("  Total tokens: %d\n", body.Row.InTokens+body.Row.OutTokens)
+		return nil
+	},
+}
+
+// paymasterSubscriptionsCmd hits /paymaster/subscriptions — the
+// flat-rate plan rollup. Cost is always $0 by construction (subscription
+// credentials have no per-call ledger), so the table renders call
+// counts + tokens + last-used instead.
+var paymasterSubscriptionsCmd = &cobra.Command{
+	Use:   "subscriptions",
+	Short: "Subscription-plan usage rollup (flat-rate credentials)",
+	Long: `Show flat-rate subscription usage — the API counterpart to the
+"Subscription plans" panel on the Paymaster dashboard. No $-figures
+because flat-rate cost is always $0 by construction; the row shape is
+plan + provider + call_count + token totals + last_used.
+
+Examples:
+  crewship paymaster subscriptions
+  crewship paymaster subscriptions --range 30d
+  crewship paymaster subscriptions --format json | jq '.rows[].calls'`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		q := url.Values{}
+		if v, _ := cmd.Flags().GetString("range"); v != "" {
+			q.Set("range", v)
+		}
+		if v, _ := cmd.Flags().GetString("since"); v != "" {
+			q.Set("since", v)
+		}
+		if v, _ := cmd.Flags().GetString("until"); v != "" {
+			q.Set("until", v)
+		}
+		path := "/api/v1/paymaster/subscriptions"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var body struct {
+			Rows []struct {
+				Plan       string `json:"plan"`
+				Provider   string `json:"provider"`
+				CallCount  int64  `json:"call_count"`
+				InTokens   int64  `json:"input_tokens"`
+				OutTokens  int64  `json:"output_tokens"`
+				LastUsedAt string `json:"last_used_at"`
+			} `json:"rows"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(body.Rows)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(body.Rows)
+		}
+		fmt.Printf("%s%-20s  %-12s  %6s  %12s  %s%s\n",
+			cli.Bold, "Plan", "Provider", "Calls", "Tokens", "Last used", cli.Reset)
+		fmt.Println(strings.Repeat("─", 80))
+		for _, r := range body.Rows {
+			fmt.Printf("%-20s  %-12s  %6d  %12d  %s\n",
+				truncateString(r.Plan, 20),
+				truncateString(r.Provider, 12),
+				r.CallCount,
+				r.InTokens+r.OutTokens,
+				r.LastUsedAt)
+		}
+		if len(body.Rows) == 0 {
+			fmt.Printf("\n%s(no subscription credentials configured in this workspace)%s\n", cli.Dim, cli.Reset)
+		}
+		return nil
+	},
+}
+
 func init() {
 	paymasterByCrewCmd.Flags().String("range", "7d", "Time window (1h, 24h, 7d, 30d)")
 	paymasterByAgentCmd.Flags().String("range", "7d", "Time window (1h, 24h, 7d, 30d)")
 	paymasterTopCmd.Flags().Int("limit", 10, "Top N spenders")
 	paymasterTopCmd.Flags().String("range", "7d", "Time window")
 
+	paymasterSubscriptionsCmd.Flags().String("range", "7d", "Time window (1h, 24h, 7d, 30d)")
+	paymasterSubscriptionsCmd.Flags().String("since", "", "Lower bound (RFC3339)")
+	paymasterSubscriptionsCmd.Flags().String("until", "", "Upper bound (RFC3339)")
+
 	paymasterCmd.AddCommand(paymasterByCrewCmd)
 	paymasterCmd.AddCommand(paymasterByAgentCmd)
+	paymasterCmd.AddCommand(paymasterByMissionCmd)
 	paymasterCmd.AddCommand(paymasterTopCmd)
+	paymasterCmd.AddCommand(paymasterSubscriptionsCmd)
 }
