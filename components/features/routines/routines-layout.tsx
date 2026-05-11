@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
+import { useRouter } from "next/navigation"
 import {
   ScrollText, Calendar, BarChart3,
   Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
@@ -15,9 +16,11 @@ import { RoutinesListView } from "./routines-list-view"
 import { RoutinesSchedulesView } from "./routines-schedules-view"
 import { RoutinesInsightsView } from "./routines-insights-view"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
-import { RoutinesFilterSidebar, type RoutineFilters } from "./routines-filter-sidebar"
+import { type RoutineFilters } from "./routines-filter-sidebar"
+import { RoutinesExplorer } from "./routines-explorer"
 import { RoutineCreateDialog } from "./routine-create-dialog"
 import { TabBar } from "@/components/ui/tab-bar"
+import type { Mission } from "@/lib/types/mission"
 
 // RoutinesLayout — full /routines page. The IA refactor cut the
 // previous 4 tabs (Routines / Graph / Timeline / Activity) down to 3:
@@ -57,6 +60,59 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  // Missions (with tasks) fed to the sidebar's Inbox section. Same
+  // endpoint + shape as orchestration-page-shell.tsx — fetched here so
+  // the inbox is live on /routines without depending on a separate
+  // shell. One-shot on mount; the inbox is intended as a peek + proklik
+  // to /inbox, not a live triage surface, so polling isn't justified.
+  const [missions, setMissions] = useState<Mission[]>([])
+  const router = useRouter()
+
+  useEffect(() => {
+    let cancelled = false
+    if (!workspaceId) return
+    fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data: Mission[]) => { if (!cancelled) setMissions(Array.isArray(data) ? data : []) })
+      .catch(() => { if (!cancelled) setMissions([]) })
+    return () => { cancelled = true }
+  }, [workspaceId])
+
+  // Keyboard shortcuts (mirrors /issues): `/` focuses the routines
+  // search input, `Esc` clears every filter, `c` opens the create
+  // dialog. Skips when typing in inputs/textarea/contentEditable.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isInputContext = target && (
+        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
+      )
+      if (e.key === "/" && !isInputContext) {
+        const el = document.querySelector<HTMLInputElement>("input[data-routines-search-input]")
+        if (el) {
+          e.preventDefault()
+          el.focus()
+          el.select()
+        }
+        return
+      }
+      if (e.key === "Escape" && !isInputContext) {
+        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral) {
+          e.preventDefault()
+          setSearch("")
+          setFilters({ status: "all", invocations: "all", authorAgentId: null, showEphemeral: false })
+        }
+        return
+      }
+      if (e.key === "c" && !isInputContext && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        setCreateDialogOpen(true)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -165,25 +221,32 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             </div>
           ) : (
             <div className="relative flex h-full flex-col">
-              {/* The filter sidebar's "Showing X of Y" only matches
-                * reality on the List tab — Schedules + Insights walk
-                * the unfiltered pipelines list internally. To avoid
-                * misleading counts (and to disable filter UX that has
-                * no effect on those views), surface filteredCount
-                * verbatim on List, and totalRoutines on the others
-                * so the strip reads as "showing all". */}
-              <RoutinesFilterSidebar
-                filters={filters}
-                onChange={setFilters}
+              {/* New explorer-style sidebar — mirrors /issues UnifiedExplorer
+                  chrome (search + Filter dropdown), with a STATUS bucket
+                  section (like Projects), a ROUTINES list (like Issues),
+                  and an INBOX section at the bottom with hover proklik
+                  to /inbox. */}
+              <RoutinesExplorer
                 routines={pipelines}
-                totalRoutines={pipelines.length}
-                filteredCount={activeTab === "list" ? filteredRoutines.length : pipelines.length}
                 search={search}
                 onSearchChange={setSearch}
+                selectedSlug={selectedSlug}
+                onSelectRoutine={handleSelect}
+                filters={filters}
+                onChange={setFilters}
+                missions={missions}
+                onTaskSelect={(_task, mission) => {
+                  // Inbox click navigates to the related issue page so
+                  // the user can resolve/approve where the full context
+                  // lives. Falls back to /inbox if the mission has no
+                  // identifier yet.
+                  if (mission.identifier) {
+                    router.push(`/issues/${encodeURIComponent(mission.identifier)}`)
+                  } else {
+                    router.push("/inbox")
+                  }
+                }}
               />
-              {/* Collapse handle floats top-right so the sidebar's own
-                * search bar reaches edge-to-edge; matches the explorer
-                * pattern in /issues. */}
               <Button
                 size="sm"
                 variant="ghost"
