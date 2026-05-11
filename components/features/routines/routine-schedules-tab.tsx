@@ -140,7 +140,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
             )
           }
         >
-          <ol className="divide-y divide-white/[0.04]">
+          <ol className="divide-y divide-border/40">
             {ours.map((s) => (
               <li key={s.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
                 <div

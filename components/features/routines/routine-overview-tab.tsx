@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { RoutineDetail } from "./routines-detail-panel"
+import { Card } from "./_shared"
 
 // RoutineOverviewTab — operational dashboard for a single routine,
 // modeled on Stripe/Vercel: KPI tiles with sparklines, runs chart,
@@ -188,7 +189,7 @@ export function RoutineOverviewTab({
 
           {/* I/O schema */}
           <Card title="I/O schema" subtitle={`${inputs.length} in · ${outputs.length} out`}>
-            <div className="divide-y divide-white/[0.04]">
+            <div className="divide-y divide-border/40">
               {inputs.map((inp, i) => (
                 <IORow
                   key={`in-${i}`}
@@ -233,7 +234,7 @@ export function RoutineOverviewTab({
                 </Link>
               }
             >
-              <div className="divide-y divide-white/[0.04]">
+              <div className="divide-y divide-border/40">
                 {runs.slice(0, 5).map((r) => (
                   <RunFeedRow key={r.id} run={r} />
                 ))}
@@ -256,7 +257,7 @@ export function RoutineOverviewTab({
                 <span className="text-muted-foreground/40">Add one in the Schedules tab to run this routine on a cadence.</span>
               </div>
             ) : (
-              <div className="divide-y divide-white/[0.04]">
+              <div className="divide-y divide-border/40">
                 {schedules.slice(0, 4).map((s) => (
                   <div key={s.id} className="px-3 py-2.5">
                     <div className="flex items-center gap-2">
@@ -317,7 +318,7 @@ export function RoutineOverviewTab({
           {/* Credentials */}
           {creds.length > 0 && (
             <Card title="Credentials required">
-              <div className="divide-y divide-white/[0.04]">
+              <div className="divide-y divide-border/40">
                 {creds.map((c, i) => (
                   <div key={i} className="flex items-center gap-2.5 px-3 py-2">
                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-violet-500/20 font-mono text-[10px] font-bold text-violet-400">
@@ -342,37 +343,9 @@ export function RoutineOverviewTab({
 
 /* ----------------------------------------------------------------- *
  *  Sub-components                                                   *
+ *  Card primitive lives in ./_shared.tsx — single source of truth   *
+ *  shared by every routine sub-tab.                                 *
  * ----------------------------------------------------------------- */
-
-function Card({
-  title,
-  subtitle,
-  action,
-  tone,
-  children,
-}: {
-  title: string
-  subtitle?: string
-  action?: React.ReactNode
-  tone?: "default" | "violet"
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-xl border bg-card",
-        tone === "violet" ? "border-violet-500/15" : "border-white/[0.06]",
-      )}
-    >
-      <div className="flex items-center gap-2 border-b border-white/[0.04] px-4 py-2.5">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</span>
-        {subtitle && <span className="text-[11px] text-muted-foreground/50">{subtitle}</span>}
-        {action && <span className="ml-auto">{action}</span>}
-      </div>
-      <div>{children}</div>
-    </div>
-  )
-}
 
 const SPARK_TONES = {
   blue: "rgb(107 141 247)",
@@ -399,25 +372,36 @@ function KpiTile({
   const color = SPARK_TONES[tone]
   const max = Math.max(1, ...spark)
   return (
-    <div className="relative overflow-hidden rounded-xl border border-white/[0.06] bg-card p-4">
+    <div className="relative flex flex-col gap-1 overflow-hidden rounded-xl border border-border/60 bg-card px-4 py-4">
       <div
         aria-hidden
         className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full"
-        style={{ background: `radial-gradient(circle, ${color}1a, transparent 70%)` }}
+        style={{ background: `radial-gradient(circle, ${color}14, transparent 70%)` }}
       />
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-2 text-3xl font-bold tabular-nums leading-none tracking-tight">{value}</div>
+      {/* Label + value sized to match the dashboard's KpiCard so a KPI
+          renders identically whether shown on /dashboard or on a routine
+          detail Overview tab. */}
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 text-[28px] font-semibold leading-none tabular-nums sm:text-[32px]">
+        {value}
+      </div>
       {delta && (
         <div
           className={cn(
-            "mt-2 text-[12px]",
-            deltaTone === "up" ? "text-emerald-400" : deltaTone === "down" ? "text-rose-400" : "text-muted-foreground/70",
+            "mt-1 text-[11px]",
+            deltaTone === "up"
+              ? "text-emerald-400"
+              : deltaTone === "down"
+                ? "text-rose-400"
+                : "text-muted-foreground",
           )}
         >
           {delta}
         </div>
       )}
-      <div className="mt-3 flex h-7 items-end gap-[3px]">
+      <div className="mt-2 flex h-7 items-end gap-[3px]">
         {spark.map((v, i) => (
           <span
             key={i}
@@ -425,7 +409,7 @@ function KpiTile({
             style={{
               height: `${Math.max(6, (v / max) * 100)}%`,
               backgroundColor: color,
-              opacity: 0.6,
+              opacity: 0.55,
             }}
           />
         ))}
@@ -532,12 +516,12 @@ function IORow({
         )}
         {/* Long default — collapsible, preview clipped */}
         {isLongDefault && defaultStr !== null && (
-          <details className="group rounded-md border border-white/[0.06] bg-black/20 text-[12px]">
+          <details className="group rounded-md border border-border/60 bg-black/20 text-[12px]">
             <summary className="cursor-pointer list-none px-2.5 py-1.5 font-mono text-muted-foreground hover:text-foreground">
               <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
               default value <span className="text-faint">· {defaultStr.length} chars</span>
             </summary>
-            <pre className="m-0 max-h-48 overflow-auto border-t border-white/[0.04] px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground/85">
+            <pre className="m-0 max-h-48 overflow-auto border-t border-border/40 px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground/85">
               {defaultStr}
             </pre>
           </details>
@@ -577,10 +561,10 @@ function LastRunCard({
       : { bg: "bg-blue-500/20", text: "text-blue-400" }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-white/[0.06] bg-card">
+    <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
       <div
         className={cn(
-          "flex items-center gap-3 border-b border-white/[0.04] px-4 py-3",
+          "flex items-center gap-3 border-b border-border/40 px-4 py-3",
           isCompleted && "bg-gradient-to-r from-emerald-500/[0.04] to-transparent",
           isFailed && "bg-gradient-to-r from-rose-500/[0.04] to-transparent",
         )}
@@ -641,7 +625,7 @@ function LastRunCard({
         {run.output && (
           <div>
             <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Output</div>
-            <div className="overflow-hidden rounded-md border border-white/[0.06] bg-black/30">
+            <div className="overflow-hidden rounded-md border border-border/60 bg-black/30">
               <JSONViewer value={run.output} />
             </div>
           </div>
@@ -707,7 +691,7 @@ function MetaCell({
   title?: string
 }) {
   return (
-    <div className="border-b border-dashed border-white/[0.04] py-2 last:border-b-0">
+    <div className="border-b border-dashed border-border/40 py-2 last:border-b-0">
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">{k}</div>
       <div className={cn("mt-0.5 text-sm text-foreground/90", mono && "font-mono text-[12px]")} title={title}>
         {v}

@@ -127,7 +127,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
             )
           }
         >
-          <ol className="divide-y divide-white/[0.04]">
+          <ol className="divide-y divide-border/40">
             {ours.map((w) => (
               <li key={w.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
                 <div
@@ -297,7 +297,7 @@ function CreatedReveal({ webhook, onDismiss }: { webhook: PipelineWebhook; onDis
               </Button>
             </div>
             <div className="flex items-center gap-1.5">
-              <code className="flex-1 truncate rounded-md border border-white/[0.06] bg-black/30 px-2.5 py-1.5 font-mono text-[12px] text-foreground/90">
+              <code className="flex-1 truncate rounded-md border border-border/60 bg-black/30 px-2.5 py-1.5 font-mono text-[12px] text-foreground/90">
                 {showSecret ? webhook.signing_secret : "•".repeat(40)}
               </code>
               <Button
@@ -338,7 +338,7 @@ function RevealField({
       <div className="mt-1.5 flex items-center gap-1.5">
         <code
           className={cn(
-            "flex-1 truncate rounded-md border border-white/[0.06] bg-black/30 px-2.5 py-1.5 text-[12px] text-foreground/90",
+            "flex-1 truncate rounded-md border border-border/60 bg-black/30 px-2.5 py-1.5 text-[12px] text-foreground/90",
             mono && "font-mono",
           )}
         >

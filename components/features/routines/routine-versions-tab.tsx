@@ -117,7 +117,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
 
   return (
     <Card title="Version history" subtitle={`${versions.length} total · head v${headVersion}`}>
-      <ol className="divide-y divide-white/[0.04]">
+      <ol className="divide-y divide-border/40">
         {versions.map((v) => {
           const isHead = v.version === headVersion
           return (

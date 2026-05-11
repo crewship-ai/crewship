@@ -146,7 +146,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
 
   return (
     <Card title="Run history" subtitle={`${grouped.length} total · click to expand`}>
-      <ol className="divide-y divide-white/[0.04]">
+      <ol className="divide-y divide-border/40">
         {grouped.map((run) => {
           const expanded = expandedRunId === run.runId
           return (
@@ -185,7 +185,7 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
                 </span>
               </button>
               {expanded && (
-                <div className="border-t border-white/[0.04] bg-black/20 px-5 py-4">
+                <div className="border-t border-border/40 bg-black/20 px-5 py-4">
                   <RunWaterfall
                     runId={run.runId}
                     journalEntries={run.entries}

@@ -123,7 +123,7 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
           title="Pending approvals"
           subtitle={`${pending.length} waiting · workspace-wide · context ${slug}`}
         >
-          <ol className="divide-y divide-white/[0.04]">
+          <ol className="divide-y divide-border/40">
             {pending.map((w) => {
               const expiresMs = new Date(w.timeout_at).getTime() - Date.now()
               const expiresHrs = Math.max(0, Math.round(expiresMs / 3600e3))
@@ -146,7 +146,7 @@ export function RoutineWaitpointsTab({ workspaceId, slug }: Props) {
                   </div>
 
                   {w.prompt && (
-                    <div className="rounded-md border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+                    <div className="rounded-md border border-border/60 bg-white/[0.02] px-3 py-2.5">
                       <div className="flex items-start gap-2">
                         <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">

@@ -172,7 +172,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   return (
     <div className="flex h-full flex-col">
       {/* ── Toolbar ─────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.06] bg-card/30 px-4 py-2.5">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
         <div className="flex items-center gap-2.5 text-[12px] text-muted-foreground">
           <span className="font-medium text-foreground/85">JSON DSL</span>
           <span className="opacity-60">·</span>
@@ -256,7 +256,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
       </div>
 
       {/* ── Footer hint ────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-white/[0.06] bg-card/20 px-4 py-2 text-[11px] text-muted-foreground">
+      <div className="shrink-0 border-t border-border/60 bg-card/20 px-4 py-2 text-[11px] text-muted-foreground">
         <span className="font-mono">⌘/Ctrl+S</span> flushes the buffer · Save lands changes when JSON parses with both{" "}
         <span className="font-mono">name</span> and <span className="font-mono">steps</span>. Requires OWNER/ADMIN role.
       </div>
