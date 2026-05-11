@@ -298,7 +298,7 @@ Examples:
 // shouldn't void a 200-item clean-up).
 var inboxBulkCmd = &cobra.Command{
 	Use:   "bulk",
-	Short: "Bulk operations on inbox items (read / unread / resolve)",
+	Short: "Bulk operations on inbox items (read / resolve)",
 	Long: `Apply the same state transition to multiple inbox items in one go.
 
 The server has no dedicated bulk endpoint; this command iterates the
@@ -357,12 +357,13 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 	// Build the target id list. --all-unread fetches the current unread
 	// page (server-side, capped at 500) so a single CLI invocation can
 	// clear the queue without the user copy-pasting ids by hand.
+	const unreadPageCap = 500
 	var ids []string
 	if allUnread {
 		q := url.Values{}
 		q.Set("workspace_id", cli.ResolveWorkspace(flagWorkspace, cliCfg))
 		q.Set("state", "unread")
-		q.Set("limit", "500")
+		q.Set("limit", fmt.Sprintf("%d", unreadPageCap))
 		resp, err := client.Get("/api/v1/inbox?" + q.Encode())
 		if err != nil {
 			return fmt.Errorf("list unread: %w", err)
@@ -384,6 +385,15 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 		if len(ids) == 0 {
 			cli.PrintSuccess("Inbox is already clean — nothing to do.")
 			return nil
+		}
+		// Server caps the page at 500 and exposes no cursor today. If
+		// we hit the cap, refuse to silently miss the tail — make the
+		// user re-run after this batch, or narrow with explicit --ids.
+		if len(ids) == unreadPageCap {
+			return fmt.Errorf(
+				"more than %d unread items — re-run after this batch, or pass --ids to target a specific subset",
+				unreadPageCap,
+			)
 		}
 	} else {
 		for _, raw := range strings.Split(idsRaw, ",") {

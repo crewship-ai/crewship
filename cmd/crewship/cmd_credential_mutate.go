@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -263,6 +264,9 @@ Examples:
 		body := map[string]interface{}{"value": value}
 		if flags.Changed("grace-seconds") {
 			gs, _ := flags.GetInt("grace-seconds")
+			if gs < 0 || gs > 604800 {
+				return fmt.Errorf("--grace-seconds must be between 0 and 604800 (7 days)")
+			}
 			body["grace_seconds"] = gs
 		}
 
@@ -324,9 +328,12 @@ var credRotationCancelCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		if out.Message != "" {
+		switch {
+		case out.Message != "":
 			cli.PrintSuccess(fmt.Sprintf("Rotation %s: %s (%s)", args[0], out.Status, out.Message))
-		} else {
+		case out.Status != "" && !strings.EqualFold(out.Status, "cancelled"):
+			cli.PrintSuccess(fmt.Sprintf("Rotation %s: %s", args[0], out.Status))
+		default:
 			cli.PrintSuccess(fmt.Sprintf("Rotation %s cancelled.", args[0]))
 		}
 		return nil

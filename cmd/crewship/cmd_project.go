@@ -317,6 +317,7 @@ var projectStatsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}

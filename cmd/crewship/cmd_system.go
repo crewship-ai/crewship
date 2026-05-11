@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -245,12 +247,13 @@ Optional flags:
   --cli-adapter           CLI adapter (default CLAUDE_CODE)
   --llm-provider          One of ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA
   --llm-model             Model identifier (provider-specific)
-  --credential-name       Display name for the stored API key
-  --credential-value      The API key itself (OLLAMA needs neither)
+  --credential-name           Display name for the stored API key
+  --credential-value-stdin    Read the API key from stdin (preferred — keeps it out of 'ps')
+  --credential-value          The API key itself (DEPRECATED — visible in 'ps' and shell history)
 
 Examples:
-  crewship system onboarding setup --crew "backend" --agent "viktor" \
-    --llm-provider ANTHROPIC --credential-value sk-ant-...
+  echo "$ANTHROPIC_KEY" | crewship system onboarding setup --crew "backend" --agent "viktor" \
+    --llm-provider ANTHROPIC --credential-value-stdin
   crewship system onboarding setup --crew "ops" --agent "eva" \
     --llm-provider OLLAMA --llm-model llama3`,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -278,8 +281,25 @@ Examples:
 		if v, _ := cmd.Flags().GetString("credential-name"); v != "" {
 			body["credential_name"] = v
 		}
-		if v, _ := cmd.Flags().GetString("credential-value"); v != "" {
-			body["credential_value"] = v
+		// Sensitive-value precedence: prefer stdin (--credential-value-stdin),
+		// then deprecated --credential-value flag (visible in `ps` and
+		// shell history). The flag is kept as compatibility fallback
+		// but warns to nudge callers off of it.
+		credValue := ""
+		if useStdin, _ := cmd.Flags().GetBool("credential-value-stdin"); useStdin {
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				credValue = scanner.Text()
+			}
+		}
+		if credValue == "" {
+			if v, _ := cmd.Flags().GetString("credential-value"); v != "" {
+				fmt.Fprintln(os.Stderr, "warning: --credential-value is deprecated; pipe the secret via --credential-value-stdin instead")
+				credValue = v
+			}
+		}
+		if credValue != "" {
+			body["credential_value"] = credValue
 		}
 
 		client := newAPIClient()
@@ -332,7 +352,8 @@ func init() {
 	systemOnboardingSetupCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA")
 	systemOnboardingSetupCmd.Flags().String("llm-model", "", "LLM model identifier")
 	systemOnboardingSetupCmd.Flags().String("credential-name", "", "Display name for the stored API key")
-	systemOnboardingSetupCmd.Flags().String("credential-value", "", "API key value (skipped for OLLAMA)")
+	systemOnboardingSetupCmd.Flags().String("credential-value", "", "API key value (deprecated; visible in `ps` — use --credential-value-stdin)")
+	systemOnboardingSetupCmd.Flags().Bool("credential-value-stdin", false, "Read the credential value from stdin (preferred over --credential-value)")
 
 	systemOnboardingCmd.AddCommand(systemOnboardingStatusCmd)
 	systemOnboardingCmd.AddCommand(systemOnboardingSetupCmd)

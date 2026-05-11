@@ -172,10 +172,17 @@ points elsewhere.`,
 		if err != nil {
 			return fmt.Errorf("create output: %w", err)
 		}
-		defer f.Close()
 		n, err := io.Copy(f, resp.Body)
 		if err != nil {
+			f.Close()
+			// Leave nothing partial behind: a half-written bundle is
+			// worse than no file — restore would silently truncate.
+			_ = os.Remove(dest)
 			return fmt.Errorf("write bundle: %w", err)
+		}
+		if cerr := f.Close(); cerr != nil {
+			_ = os.Remove(dest)
+			return fmt.Errorf("close bundle: %w", cerr)
 		}
 		cli.PrintSuccess(fmt.Sprintf("Downloaded %s (%s)", dest, formatBytes(n)))
 		return nil

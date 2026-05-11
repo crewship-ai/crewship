@@ -11,6 +11,7 @@ package main
 // subcommand is invoked.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -190,18 +191,22 @@ Examples:
 			if tools == "" {
 				body["config_override_json"] = ""
 			} else {
-				// Minimal JSON wrapper — the server stores the string verbatim
-				// and the runtime side parses {tools:[…]} to filter exposed
-				// tools. Quoting via fmt to avoid pulling in encoding/json
-				// for a list of slugs.
+				// The server stores config_override_json as a string and
+				// the runtime side parses {tools:[…]} to filter exposed
+				// tools. Marshal via encoding/json so quoting and
+				// escaping are correct for any slug shape.
 				parts := strings.Split(tools, ",")
 				clean := make([]string, 0, len(parts))
 				for _, p := range parts {
 					if t := strings.TrimSpace(p); t != "" {
-						clean = append(clean, fmt.Sprintf("%q", t))
+						clean = append(clean, t)
 					}
 				}
-				body["config_override_json"] = `{"tools":[` + strings.Join(clean, ",") + `]}`
+				raw, mErr := json.Marshal(map[string][]string{"tools": clean})
+				if mErr != nil {
+					return fmt.Errorf("marshal tools: %w", mErr)
+				}
+				body["config_override_json"] = string(raw)
 			}
 		}
 

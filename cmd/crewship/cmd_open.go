@@ -13,7 +13,7 @@ import (
 
 // openCmd opens the relevant web-UI page for a CLI resource in the user's
 // default browser. Hybrid CLI/web workflow: do everything in the terminal
-// until you hit something better viewed visually (a chat, a Crow's Nest
+// until you hit something better viewed visually (a chat, a mission
 // timeline, an approval queue), then jump.
 //
 // Resource map mirrors the web app's routing so this stays a single

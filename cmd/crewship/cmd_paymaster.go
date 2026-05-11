@@ -293,7 +293,7 @@ plan + provider + call_count + token totals + last_used.
 Examples:
   crewship paymaster subscriptions
   crewship paymaster subscriptions --range 30d
-  crewship paymaster subscriptions --format json | jq '.rows[].calls'`,
+  crewship paymaster subscriptions --format json | jq '.[].call_count'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err

@@ -14,7 +14,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
-	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/spf13/cobra"
@@ -66,28 +65,31 @@ Unsafe fixes (installing Docker, repairing networks, setting env vars)
 are deliberately left to the operator with actionable URLs in the output.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fixMode, _ := cmd.Flags().GetBool("fix")
-		logger := logging.New("info", "text", os.Stdout)
-
-		logger.Info("doctor check",
-			"version", version,
-			"commit", commit,
-			"go_runtime", runtime.Version(),
-			"os_arch", runtime.GOOS+"/"+runtime.GOARCH,
-		)
-		fmt.Println()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		results := []checkResult{
-			checkContainerRuntime(ctx),
-			checkDataDir(fixMode),
-			checkDataDirWritable(),
-			checkDBMigrationVersion(ctx),
-			checkSidecarBinary(),
-			checkNextAuthSecret(),
-			checkServerReachable(ctx),
+		parentCtx := cmd.Context()
+		if parentCtx == nil {
+			parentCtx = context.Background()
 		}
+
+		// withTimeout derives a fresh per-probe context so one slow probe
+		// can't consume the whole budget and parent cancellation
+		// (SIGINT etc.) still flows.
+		withTimeout := func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(parentCtx, 10*time.Second)
+		}
+
+		results := make([]checkResult, 0, 7)
+		runProbe := func(fn func(context.Context) checkResult) {
+			ctx, cancel := withTimeout()
+			defer cancel()
+			results = append(results, fn(ctx))
+		}
+		runProbe(checkContainerRuntime)
+		results = append(results, checkDataDir(fixMode))
+		results = append(results, checkDataDirWritable())
+		runProbe(checkDBMigrationVersion)
+		results = append(results, checkSidecarBinary())
+		results = append(results, checkNextAuthSecret())
+		runProbe(checkServerReachable)
 
 		for _, r := range results {
 			r.print()
@@ -177,7 +179,7 @@ func checkDataDir(fixMode bool) checkResult {
 			name:   "data directory",
 			status: "WARN",
 			detail: dataDir.Root + " does not exist",
-			hint:   "re-run with --fix to create, or 'mkdir -p ' + path",
+			hint:   "re-run with --fix to create, or 'mkdir -p " + dataDir.Root + "'",
 		}
 	} else {
 		return checkResult{
@@ -247,7 +249,10 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 			hint:   "run 'crewship start' to initialise the database",
 		}
 	}
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	// Read-only open keeps doctor diagnostic-only: no WAL pragma (which
+	// would mutate state) and no risk of fighting crewshipd for an
+	// exclusive lock.
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
 	if err != nil {
 		return checkResult{
 			name:   "db migration version",
@@ -297,19 +302,24 @@ func checkDBMigrationVersion(ctx context.Context) checkResult {
 // sidecar at build time — a separate file isn't required. WARN with
 // the search paths is the honest signal.
 func checkSidecarBinary() checkResult {
+	// names captures both Unix and Windows (.exe) filenames so the probe
+	// works cross-platform. On non-Windows hosts the .exe variants are
+	// harmless extras that just won't exist.
+	names := []string{"crewship-sidecar", "sidecar"}
+	if runtime.GOOS == "windows" {
+		names = append(names, "crewship-sidecar.exe", "sidecar.exe")
+	}
 	candidates := []string{}
 	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(home, ".crewship", "bin", "crewship-sidecar"),
-			filepath.Join(home, ".crewship", "bin", "sidecar"),
-		)
+		for _, name := range names {
+			candidates = append(candidates, filepath.Join(home, ".crewship", "bin", name))
+		}
 	}
 	// Also check next to the CLI binary itself — useful in tarball installs.
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(filepath.Dir(exe), "crewship-sidecar"),
-			filepath.Join(filepath.Dir(exe), "sidecar"),
-		)
+		for _, name := range names {
+			candidates = append(candidates, filepath.Join(filepath.Dir(exe), name))
+		}
 	}
 	for _, p := range candidates {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {

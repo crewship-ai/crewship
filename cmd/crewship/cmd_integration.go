@@ -156,7 +156,9 @@ var intgAddCmd = &cobra.Command{
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		}
-		cli.ReadJSON(resp, &created)
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
 		fmt.Printf("Integration created: %s (%s)\n", created.Name, created.ID)
 		return nil
 	},
@@ -678,7 +680,9 @@ var intgCrewCreateCmd = &cobra.Command{
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		}
-		_ = cli.ReadJSON(resp, &created)
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
 		fmt.Printf("Crew integration created: %s (%s)\n", created.Name, created.ID)
 		return nil
 	},
@@ -935,8 +939,10 @@ the discovered tool array from the MCP probe.`,
 		if err != nil {
 			return err
 		}
-		// Empty list is intentional — see Long. Frontend/integration
-		// callers would supply real tool entries here.
+		// TODO: scaffolding only — real callers (MCP probe / frontend)
+		// should supply the discovered tool array. Empty list is
+		// intentional today; server treats it as a no-op confirming
+		// the route works. See Long for context.
 		body := map[string]interface{}{"tools": []map[string]string{}}
 		resp, err := client.Post(
 			"/api/v1/crews/"+crewID+"/integrations/"+args[1]+"/tools/refresh",

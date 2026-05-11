@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -300,7 +301,10 @@ var credAuditCmd = &cobra.Command{
 			return err
 		}
 		limit, _ := cmd.Flags().GetInt("limit")
-		path := fmt.Sprintf("/api/v1/credentials/%s/audit?limit=%d", credID, limit)
+		if limit < 1 || limit > 500 {
+			return fmt.Errorf("--limit must be between 1 and 500")
+		}
+		path := fmt.Sprintf("/api/v1/credentials/%s/audit?limit=%d", url.PathEscape(credID), limit)
 		resp, err := client.Get(path)
 		if err != nil {
 			return err
@@ -416,7 +420,7 @@ var credDefaultEnvVarCmd = &cobra.Command{
 		// Endpoint is workspace-agnostic — clear ws to match the
 		// existing pre-save `credential test` invocation.
 		client.WorkspaceID = ""
-		resp, err := client.Get("/api/v1/credentials/default-env-var?provider=" + provider)
+		resp, err := client.Get("/api/v1/credentials/default-env-var?provider=" + url.QueryEscape(provider))
 		if err != nil {
 			return err
 		}
