@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import {
   ScrollText, Calendar, BarChart3,
   Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
-  X, ArrowLeft, ChevronRight,
+  X, ChevronLeft, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -151,51 +151,29 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       {/* ---- Toolbar ---- */}
+      {/* Global toolbar always shows TabBar + actions. Breadcrumb back-bar
+          in detail mode is rendered separately inside the main content
+          area (matches the /issues pattern — top bar stays for global
+          context like List/Schedules/Insights + Import/New routine; the
+          page-specific 'Back to routines / <name>' lives one level down
+          so it doesn't compete with the global affordances). */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-        {selectedSlug ? (
-          /* Detail mode — breadcrumb back to the list. The detail panel
-             below renders its own close X too; the breadcrumb is the
-             higher-affordance path back since it sits where the tabs
-             used to be. */
-          <div className="flex items-center gap-1 text-xs">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1.5 px-2 text-xs"
-              onClick={() => setSelectedSlug(null)}
-              title="Back to all routines"
-            >
-              <ArrowLeft className="h-3 w-3" />
-              Routines
-            </Button>
-            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
-            <span className="truncate font-medium" title={selectedRoutine?.name || selectedSlug}>
-              {selectedRoutine?.name || selectedSlug}
-            </span>
-            {selectedRoutine?.slug && (
-              <span className="ml-2 truncate font-mono text-[10px] text-muted-foreground/60">
-                {selectedRoutine.slug}
+        <TabBar
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as RoutinesTab)}
+          layoutId="routines-tabs-indicator"
+          ariaLabel="Routines view"
+          className="h-full border-b-0 shrink-0"
+        >
+          {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
+            <TabBar.Item key={id} value={id} className="h-full whitespace-nowrap">
+              <span className="inline-flex items-center gap-1.5">
+                <Icon className="h-3 w-3 opacity-75" />
+                {label}
               </span>
-            )}
-          </div>
-        ) : (
-          <TabBar
-            value={activeTab}
-            onValueChange={(v) => setActiveTab(v as RoutinesTab)}
-            layoutId="routines-tabs-indicator"
-            ariaLabel="Routines view"
-            className="h-full border-b-0 shrink-0"
-          >
-            {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
-              <TabBar.Item key={id} value={id} className="h-full whitespace-nowrap">
-                <span className="inline-flex items-center gap-1.5">
-                  <Icon className="h-3 w-3 opacity-75" />
-                  {label}
-                </span>
-              </TabBar.Item>
-            ))}
-          </TabBar>
-        )}
+            </TabBar.Item>
+          ))}
+        </TabBar>
 
         <div className="flex-1" />
 
@@ -296,12 +274,13 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         </aside>
 
         {/* Main content area — full-width.
-            With selection: hosts the routine detail (Overview/Editor/
-            Runs/Versions/Schedules/Webhooks/Wait tabs) edge-to-edge
-            instead of cramming it into a 520px right panel. The Editor
-            tab in particular benefits — DSL YAML wants width.
-            Without selection: the existing List / Schedules / Insights
-            tabs that the toolbar above switches between. */}
+            With selection: breadcrumb back-bar + routine detail
+            (Overview/Editor/Runs/Versions/Schedules/Webhooks/Wait
+            tabs) edge-to-edge instead of cramming it into a 520px
+            right panel. The Editor tab in particular benefits — DSL
+            YAML wants width.
+            Without selection: the existing List / Schedules /
+            Insights tabs that the toolbar above switches between. */}
         <div className="flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
             {selectedSlug ? (
@@ -309,16 +288,42 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 key={`detail-${selectedSlug}`}
                 initial={{ opacity: 0, x: 12 }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 12 }}
+                exit={{ opacity: 0, x: -12 }}
                 transition={{ duration: 0.18, ease: "easeOut" }}
-                className="absolute inset-0 overflow-hidden"
+                className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <RoutinesDetailPanel
-                  workspaceId={workspaceId}
-                  slug={selectedSlug}
-                  onClose={() => setSelectedSlug(null)}
-                  onChanged={refresh}
-                />
+                {/* Breadcrumb back-bar — matches the /issues pattern:
+                    sits inside the content area, not in the global
+                    toolbar. Keeps global affordances (List/Schedules/
+                    Insights tabs, Import, New routine) where they
+                    belong. */}
+                <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSlug(null)}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Back to routines
+                  </button>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                  <span className="truncate text-xs font-medium text-foreground/85" title={selectedRoutine?.name || selectedSlug}>
+                    {selectedRoutine?.name || selectedSlug}
+                  </span>
+                  {selectedRoutine?.slug && (
+                    <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground/60">
+                      {selectedRoutine.slug}
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <RoutinesDetailPanel
+                    workspaceId={workspaceId}
+                    slug={selectedSlug}
+                    onClose={() => setSelectedSlug(null)}
+                    onChanged={refresh}
+                  />
+                </div>
               </motion.div>
             ) : activeTab === "list" ? (
               <motion.div
