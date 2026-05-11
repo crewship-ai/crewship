@@ -112,6 +112,18 @@ var projectCreateCmd = &cobra.Command{
 		if v, _ := cmd.Flags().GetString("target-date"); v != "" {
 			body["target_date"] = v
 		}
+		// Lead + start-date parity with the API surface; the handler
+		// already accepted these (project_handler.go:Create), only the
+		// CLI was lagging.
+		if v, _ := cmd.Flags().GetString("lead-id"); v != "" {
+			body["lead_id"] = v
+		}
+		if v, _ := cmd.Flags().GetString("lead-type"); v != "" {
+			body["lead_type"] = v
+		}
+		if v, _ := cmd.Flags().GetString("start-date"); v != "" {
+			body["start_date"] = v
+		}
 
 		client := newAPIClient()
 		resp, err := client.Post("/api/v1/projects", body)
@@ -190,10 +202,190 @@ var projectGetCmd = &cobra.Command{
 	},
 }
 
+// projectUpdateCmd patches mutable project fields. All flags optional;
+// only Changed() flags are sent. Mirrors the PATCH /projects/{id}
+// handler's accept-list (name/description/icon/color/status/priority/
+// health/lead_type/lead_id/start_date/target_date).
+var projectUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Update mutable project fields",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		body := map[string]interface{}{}
+		flags := cmd.Flags()
+		// Strings: only forward when the user actually set the flag, so
+		// "I didn't pass --name" doesn't clobber the stored name with an
+		// empty string. For nullable columns the user can explicitly set
+		// to "" to clear (server accepts string-pointer-empty).
+		stringFlags := []struct {
+			flag, field string
+		}{
+			{"name", "name"},
+			{"description", "description"},
+			{"icon", "icon"},
+			{"color", "color"},
+			{"status", "status"},
+			{"priority", "priority"},
+			{"health", "health"},
+			{"lead-id", "lead_id"},
+			{"lead-type", "lead_type"},
+			{"start-date", "start_date"},
+			{"target-date", "target_date"},
+		}
+		for _, sf := range stringFlags {
+			if flags.Changed(sf.flag) {
+				v, _ := flags.GetString(sf.flag)
+				body[sf.field] = v
+			}
+		}
+
+		if len(body) == 0 {
+			return fmt.Errorf("no fields to update — pass at least one of --name/--status/--priority/--health/--lead-id/--lead-type/--start-date/--target-date/--icon/--color/--description")
+		}
+
+		client := newAPIClient()
+		resp, err := client.Patch("/api/v1/projects/"+args[0], body)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Project %s updated.", args[0]))
+		return nil
+	},
+}
+
+// projectDeleteCmd hits DELETE /projects/{id}. The server unlinks
+// missions (sets project_id = NULL) in the same transaction so the
+// destroy doesn't cascade into issue loss. We prompt unless --yes.
+var projectDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Delete a project (issues are unlinked, not deleted)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		if err := confirmAction(cmd, fmt.Sprintf("Delete project %q? (issues will be unlinked, not deleted)", args[0])); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		resp, err := client.Delete("/api/v1/projects/" + args[0])
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Project %s deleted.", args[0]))
+		return nil
+	},
+}
+
+// projectStatsCmd hits GET /projects/{id}/stats. The response is the
+// detail-panel breakdown (totals, by_status, by_assignee, by_label,
+// crews). We render the summary inline; --json surfaces the raw shape
+// for piping into jq.
+var projectStatsCmd = &cobra.Command{
+	Use:   "stats <id>",
+	Short: "Show project breakdown (status / assignee / label / crews)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/projects/" + args[0] + "/stats")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var stats struct {
+			TotalIssues     int            `json:"total_issues"`
+			CompletedIssues int            `json:"completed_issues"`
+			ByStatus        map[string]int `json:"by_status"`
+			ByAssignee      []struct {
+				AgentName string `json:"agent_name"`
+				Total     int    `json:"total"`
+				Completed int    `json:"completed"`
+			} `json:"by_assignee"`
+			ByLabel []struct {
+				LabelName string `json:"label_name"`
+				Color     string `json:"color"`
+				Count     int    `json:"count"`
+			} `json:"by_label"`
+			Crews []string `json:"crews"`
+		}
+		if err := cli.ReadJSON(resp, &stats); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(stats)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(stats)
+		}
+
+		pct := 0
+		if stats.TotalIssues > 0 {
+			pct = stats.CompletedIssues * 100 / stats.TotalIssues
+		}
+		fmt.Printf("Issues: %d total / %d completed (%d%%)\n", stats.TotalIssues, stats.CompletedIssues, pct)
+		if len(stats.ByStatus) > 0 {
+			fmt.Println("\nBy status:")
+			for s, c := range stats.ByStatus {
+				fmt.Printf("  %-15s %d\n", s, c)
+			}
+		}
+		if len(stats.ByAssignee) > 0 {
+			fmt.Println("\nBy assignee:")
+			for _, a := range stats.ByAssignee {
+				fmt.Printf("  %-30s %d total / %d done\n", a.AgentName, a.Total, a.Completed)
+			}
+		}
+		if len(stats.ByLabel) > 0 {
+			fmt.Println("\nBy label:")
+			for _, l := range stats.ByLabel {
+				fmt.Printf("  %-30s %d\n", l.LabelName, l.Count)
+			}
+		}
+		if len(stats.Crews) > 0 {
+			fmt.Printf("\nCrews: %v\n", stats.Crews)
+		}
+		return nil
+	},
+}
+
 func init() {
 	projectCmd.AddCommand(projectListCmd)
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectGetCmd)
+	projectCmd.AddCommand(projectUpdateCmd)
+	projectCmd.AddCommand(projectDeleteCmd)
+	projectCmd.AddCommand(projectStatsCmd)
 
 	projectCreateCmd.Flags().String("name", "", "Project name (required)")
 	projectCreateCmd.Flags().String("description", "", "Project description")
@@ -202,4 +394,21 @@ func init() {
 	projectCreateCmd.Flags().String("priority", "none", "Priority: none, low, medium, high, urgent")
 	projectCreateCmd.Flags().String("icon", "", "Lucide icon name")
 	projectCreateCmd.Flags().String("target-date", "", "Target date (ISO format)")
+	projectCreateCmd.Flags().String("lead-id", "", "Lead user or agent ID")
+	projectCreateCmd.Flags().String("lead-type", "", "Lead type: user or agent")
+	projectCreateCmd.Flags().String("start-date", "", "Start date (ISO format)")
+
+	projectUpdateCmd.Flags().String("name", "", "New name")
+	projectUpdateCmd.Flags().String("description", "", "New description")
+	projectUpdateCmd.Flags().String("icon", "", "Lucide icon name")
+	projectUpdateCmd.Flags().String("color", "", "Hex color")
+	projectUpdateCmd.Flags().String("status", "", "Status: backlog, planned, in_progress, paused, completed, cancelled")
+	projectUpdateCmd.Flags().String("priority", "", "Priority: none, low, medium, high, urgent")
+	projectUpdateCmd.Flags().String("health", "", "Health: on_track, at_risk, off_track, on_hold, complete")
+	projectUpdateCmd.Flags().String("lead-id", "", "Lead user or agent ID")
+	projectUpdateCmd.Flags().String("lead-type", "", "Lead type: user or agent")
+	projectUpdateCmd.Flags().String("start-date", "", "Start date (ISO format)")
+	projectUpdateCmd.Flags().String("target-date", "", "Target date (ISO format)")
+
+	projectDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
