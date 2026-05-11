@@ -347,9 +347,21 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                   {issue.identifier || "--"}
                 </TableCell>
                 <TableCell>
-                  <span className="text-sm font-medium line-clamp-1">
-                    {issue.title}
-                  </span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium line-clamp-1 min-w-0">
+                      {issue.title}
+                    </span>
+                    {/* Sub-issues counter — small pill next to title. Hidden
+                        when zero so the row stays clean for leaf issues. */}
+                    {(issue.sub_issues_count ?? 0) > 0 && (
+                      <span
+                        title={`${issue.sub_issues_count} sub-issues`}
+                        className="shrink-0 inline-flex items-center gap-0.5 rounded bg-white/[0.05] border border-white/[0.06] px-1 py-px text-[9px] font-medium text-muted-foreground tabular-nums"
+                      >
+                        {issue.sub_issues_count}
+                      </span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">

@@ -28,6 +28,8 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { IssuesBoardInline, IssuesListInline } from "@/components/features/orchestration/issues-inline"
+import { IssuesStatusChips } from "@/components/features/issues/issues-status-chips"
+import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
 import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
 import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
 import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
@@ -165,6 +167,10 @@ export function OrchestrationLayout({
   const [filterProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
+  // Multi-select status filter (empty = show all). Priority filter is
+  // single-select because issues only have one priority value.
+  const [filterStatuses, setFilterStatuses] = useState<MissionStatus[]>([])
+  const [filterPriority, setFilterPriority] = useState<IssuePriority | null>(null)
   const [showCreateIssue, setShowCreateIssue] = useState(false)
   const [showCreateProject, setShowCreateProject] = useState(false)
 
@@ -192,6 +198,68 @@ export function OrchestrationLayout({
   useEffect(() => {
     if (isMobile) setLeftCollapsed(true)
   }, [isMobile])
+
+  // Keyboard shortcuts. The shortcuts are scoped to the issues page —
+  // they fire on any keystroke that isn't typed into a form control,
+  // so the user can press `/` from the list and land in the search box
+  // without picking up shortcuts while editing an inbox comment etc.
+  useEffect(() => {
+    if (activeTab !== "issues") return
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isInputContext =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+
+      // `/` — focus the issues search input (works only outside inputs)
+      if (e.key === "/" && !isInputContext) {
+        const el = document.querySelector<HTMLInputElement>(
+          "input[data-issues-search-input]",
+        )
+        if (el) {
+          e.preventDefault()
+          el.focus()
+          el.select()
+        }
+        return
+      }
+      // Esc — clear active filters (status/priority/crew/agent/search).
+      // Does NOT clear the saved-view choice; that's an explicit action.
+      if (e.key === "Escape" && !isInputContext) {
+        if (
+          filterStatuses.length > 0 ||
+          filterPriority ||
+          filterCrewId ||
+          filterAgentId ||
+          issueSearch
+        ) {
+          e.preventDefault()
+          setFilterStatuses([])
+          setFilterPriority(null)
+          setFilterCrewId(null)
+          setFilterAgentId(null)
+          setIssueSearch("")
+        }
+        return
+      }
+      // `c` — open the create-issue modal
+      if (e.key === "c" && !isInputContext && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        setShowCreateIssue(true)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [
+    activeTab,
+    filterStatuses.length,
+    filterPriority,
+    filterCrewId,
+    filterAgentId,
+    issueSearch,
+  ])
 
   // Derived data
   // When an issue is selected, filter to just that mission so Graph/Timeline/Activity focus on it
@@ -306,6 +374,12 @@ export function OrchestrationLayout({
     if (filterAgentId) {
       filtered = filtered.filter((i) => i.assignee_id === filterAgentId)
     }
+    if (filterStatuses.length > 0) {
+      filtered = filtered.filter((i) => filterStatuses.includes(i.status))
+    }
+    if (filterPriority) {
+      filtered = filtered.filter((i) => (i.priority || "none") === filterPriority)
+    }
     if (issueSearch) {
       const q = issueSearch.toLowerCase()
       filtered = filtered.filter((i) =>
@@ -316,7 +390,7 @@ export function OrchestrationLayout({
       )
     }
     return filtered
-  }, [issues, issueSearch, selectedProjectId, filterProjectId, filterCrewId, filterAgentId])
+  }, [issues, issueSearch, selectedProjectId, filterProjectId, filterCrewId, filterAgentId, filterStatuses, filterPriority])
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -576,6 +650,8 @@ export function OrchestrationLayout({
                         onCrewFilter={setFilterCrewId}
                         filterAgentId={filterAgentId}
                         onAgentFilter={setFilterAgentId}
+                        filterPriority={filterPriority}
+                        onPriorityFilter={setFilterPriority}
                       />
                     </div>
                   </motion.div>
@@ -635,6 +711,8 @@ export function OrchestrationLayout({
                     onCrewFilter={setFilterCrewId}
                     filterAgentId={filterAgentId}
                     onAgentFilter={setFilterAgentId}
+                    filterPriority={filterPriority}
+                    onPriorityFilter={setFilterPriority}
                   />
                 </motion.div>
               )}
@@ -663,6 +741,8 @@ export function OrchestrationLayout({
                     setSelectedProjectId(null)
                     setFilterCrewId(null)
                     setFilterAgentId(null)
+                    setFilterStatuses([])
+                    setFilterPriority(null)
                     setIssueSearch("")
                     return
                   }
@@ -697,11 +777,25 @@ export function OrchestrationLayout({
                   }
                 }}
               />
+              {/* Status filter chips — multi-select row over the list.
+                  Counts derive from the pre-status-filter set so the
+                  user can see how many issues are in each status without
+                  losing the current crew/agent/project filter context. */}
+              <IssuesStatusChips
+                issues={filteredIssues}
+                selected={filterStatuses}
+                onToggle={(s) =>
+                  setFilterStatuses((prev) =>
+                    prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
+                  )
+                }
+                onClear={() => setFilterStatuses([])}
+              />
               {/* Board or List view */}
-              <div className="p-4 h-[calc(100%-45px)]">
+              <div className="px-4 pb-4 h-[calc(100%-90px)]">
                 <AnimatePresence mode="wait">
                   <motion.div
-                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}`}
+                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}-${filterStatuses.join(",") || "all"}-${filterPriority || "all"}`}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}

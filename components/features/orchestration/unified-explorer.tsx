@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from "motion/react"
 import { Search, X, ChevronDown, Filter, ExternalLink } from "lucide-react"
 import Link from "next/link"
 import { StatusIcon } from "@/components/features/issues/status-icon"
-import { PriorityIcon } from "@/components/features/issues/priority-icon"
+import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
+import type { IssuePriority } from "@/lib/types/mission"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -31,6 +32,8 @@ interface UnifiedExplorerProps {
   onCrewFilter: (crewId: string | null) => void
   filterAgentId: string | null
   onAgentFilter: (agentId: string | null) => void
+  filterPriority?: IssuePriority | null
+  onPriorityFilter?: (priority: IssuePriority | null) => void
 }
 
 const sectionAnim = {
@@ -56,6 +59,7 @@ export function UnifiedExplorer({
   selectedIssue, selectedProjectId, onProjectSelect, onIssueSelect,
   crews, missions, onTaskSelect, onApproveGate,
   filterCrewId, onCrewFilter, filterAgentId, onAgentFilter,
+  filterPriority = null, onPriorityFilter,
 }: UnifiedExplorerProps) {
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [inboxOpen, setInboxOpen] = useState(true)
@@ -85,8 +89,9 @@ export function UnifiedExplorer({
   const filterLabel = useMemo(() => {
     if (filterAgentId) return agents.find(a => a.id === filterAgentId)?.name || "Agent"
     if (filterCrewId) return crews.find(c => c.id === filterCrewId)?.name || "Crew"
+    if (filterPriority) return priorityLabel[filterPriority] || "Priority"
     return null
-  }, [filterCrewId, filterAgentId, crews, agents])
+  }, [filterCrewId, filterAgentId, filterPriority, crews, agents])
 
   const displayed = useMemo(() => {
     let filtered = issues
@@ -105,7 +110,7 @@ export function UnifiedExplorer({
     return filtered
   }, [issues, search, selectedProjectId, filterCrewId, filterAgentId])
 
-  const clearFilters = () => { onCrewFilter(null); onAgentFilter(null) }
+  const clearFilters = () => { onCrewFilter(null); onAgentFilter(null); onPriorityFilter?.(null) }
 
   return (
     <div className="flex flex-col h-full">
@@ -116,6 +121,7 @@ export function UnifiedExplorer({
           <input
             type="text" value={search} onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search issues, agents..."
+            data-issues-search-input
             className="flex-1 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/40 outline-none min-w-0"
           />
           <AnimatePresence>
@@ -197,11 +203,27 @@ export function UnifiedExplorer({
                       {agents.map((a) => (
                         <button
                           key={a.id}
-                          onClick={() => { onAgentFilter(a.id); onCrewFilter(null); setFilterDropdownOpen(false) }}
+                          onClick={() => { onAgentFilter(a.id); onCrewFilter(null); onPriorityFilter?.(null); setFilterDropdownOpen(false) }}
                           className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterAgentId === a.id ? "text-blue-400" : "text-muted-foreground/80")}
                         >
                           <img src={getAgentAvatarUrl(a.id)} alt="" className="h-4 w-4 rounded-full shrink-0" />
                           {a.name}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {onPriorityFilter && (
+                    <>
+                      <div className="border-t border-white/[0.06] mt-1" />
+                      <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">Priority</div>
+                      {(["urgent", "high", "medium", "low", "none"] as IssuePriority[]).map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => { onPriorityFilter(p); onCrewFilter(null); onAgentFilter(null); setFilterDropdownOpen(false) }}
+                          className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterPriority === p ? "text-blue-400" : "text-muted-foreground/80")}
+                        >
+                          <PriorityIcon priority={p} className="h-3.5 w-3.5 shrink-0" />
+                          {priorityLabel[p]}
                         </button>
                       ))}
                     </>
@@ -229,17 +251,36 @@ export function UnifiedExplorer({
                 {projects.map((p) => {
                   const iconDef = getCrewIconDef(p.icon || "folder")
                   const IconComp = iconDef.icon
+                  // Progress bar — data already on Project type (0-100).
+                  // Renders only when there are issues; otherwise the bar
+                  // is meaningless and adds visual noise.
+                  const progress = Math.max(0, Math.min(100, p.progress || 0))
+                  const isSelected = selectedProjectId === p.id
                   return (
                     <button
                       key={p.id} onClick={() => onProjectSelect(p.id)}
                       className={cn(
-                        "flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-white/[0.04] transition-colors",
-                        selectedProjectId === p.id ? "bg-blue-500/10 border-l-2 border-blue-500" : "border-l-2 border-transparent",
+                        "w-full px-3 py-1.5 text-left",
+                        isSelected ? "row-interactive row-selected" : "row-interactive row-hover",
                       )}
+                      title={p.issue_count > 0 ? `${p.name} — ${progress}% complete` : p.name}
                     >
-                      <IconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(p.color).text)} />
-                      <span className="text-xs text-foreground/80 truncate flex-1" title={p.name}>{p.name}</span>
-                      <span className="text-[10px] text-foreground/40 tabular-nums">{p.issue_count}</span>
+                      <div className="flex items-center gap-2">
+                        <IconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(p.color).text)} />
+                        <span className="text-xs text-foreground/80 truncate flex-1">{p.name}</span>
+                        <span className="text-[10px] text-foreground/40 tabular-nums">{p.issue_count}</span>
+                      </div>
+                      {p.issue_count > 0 && (
+                        <div className="mt-1 ml-5 h-0.5 w-[calc(100%-2rem)] overflow-hidden rounded-full bg-white/[0.05]">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${progress}%` }}
+                            transition={{ duration: 0.4, ease: "easeOut" }}
+                            style={{ backgroundColor: getGradientPalette(p.color).dot }}
+                            className="h-full rounded-full"
+                          />
+                        </div>
+                      )}
                     </button>
                   )
                 })}
