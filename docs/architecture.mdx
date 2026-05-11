@@ -286,6 +286,8 @@ Crewship supports multiple AI coding CLIs, configured per agent:
 | `CODEX_CLI` | `codex --quiet` | N/A | Supports `--sandbox` for CODING profile |
 | `GEMINI_CLI` | `gemini` | Via `--system-instruction` | Uses `-p` for prompt |
 | `OPENCODE` | `opencode run` | Via `AGENTS.md` file in CWD | Reads system prompt from file |
+| `CURSOR_CLI` | `cursor-agent -p --output-format stream-json --stream-partial-output --force` | Folded into user message (no flag) | MCP listed but not invoked in headless mode (Cursor forum #143045/#148397); `SupportsMCP()` returns false |
+| `FACTORY_DROID` | `droid exec --auto <low\|medium\|high> -o stream-json` | Folded into user message (no flag) | Autonomy mapped from `tool_profile` (MINIMAL→low, CODING→medium, FULL→high); `--mission` avoided (Factory issue #794) |
 
 ## WebSocket Hub
 
