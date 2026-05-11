@@ -327,10 +327,9 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               <TableRow
                 key={issue.id}
                 className={cn(
-                  "cursor-pointer transition-all duration-200",
+                  "cursor-pointer row-hover transition-colors",
                   isDimmed && "opacity-40",
-                  isHighlighted && "bg-blue-500/5",
-                  selectedIds.has(issue.id) && "bg-blue-500/[0.06]",
+                  (isHighlighted || selectedIds.has(issue.id)) && "row-selected",
                   issue.status === "IN_PROGRESS" && "border-l-2 border-l-blue-400 agent-active-card",
                 )}
                 onClick={() => onIssueClick(issue)}

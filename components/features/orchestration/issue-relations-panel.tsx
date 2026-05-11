@@ -257,7 +257,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                 subIssues.map((sub) => (
                   <Link
                     key={sub.id}
-                    href={`/orchestration/issues/${sub.identifier}`}
+                    href={`/issues/${sub.identifier}`}
                     className="flex items-center gap-2 py-1 text-xs hover:bg-white/[0.04] rounded px-1"
                   >
                     <StatusIcon status={sub.status} className="h-3.5 w-3.5" />

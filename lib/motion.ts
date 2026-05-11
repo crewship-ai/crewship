@@ -43,3 +43,35 @@ export const stagger = {
   steps: { staggerChildren: 0.08 },
   chips: { staggerChildren: 0.05 },
 } as const;
+
+// Right/left side detail panel. Spring values lifted verbatim from the
+// original trace-side-panel implementation that the team already vetted.
+export const panel = {
+  side: {
+    initial: { x: 360, opacity: 0 },
+    animate: { x: 0, opacity: 1 },
+    exit: { x: 360, opacity: 0 },
+    transition: { type: "spring" as const, damping: 28, stiffness: 320 },
+  },
+  sideLeft: {
+    initial: { x: -360, opacity: 0 },
+    animate: { x: 0, opacity: 1 },
+    exit: { x: -360, opacity: 0 },
+    transition: { type: "spring" as const, damping: 28, stiffness: 320 },
+  },
+} as const;
+
+// Animated underline indicator for TabBar. Caller supplies the layoutId
+// (or uses the default below) so multiple tab groups on one page get
+// independent indicators.
+export const tabIndicator = {
+  layoutId: "tab-indicator",
+  transition: spring.smooth,
+} as const;
+
+// motion.li / motion.div used by ListRow — `layout` makes selection
+// transitions slide rather than snap when adjacent rows reflow.
+export const listRow = {
+  layout: true as const,
+  transition: spring.snappy,
+} as const;

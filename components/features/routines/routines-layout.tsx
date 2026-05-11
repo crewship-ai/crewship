@@ -17,6 +17,7 @@ import { RoutinesInsightsView } from "./routines-insights-view"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutinesFilterSidebar, type RoutineFilters } from "./routines-filter-sidebar"
 import { RoutineCreateDialog } from "./routine-create-dialog"
+import { TabBar } from "@/components/ui/tab-bar"
 
 // RoutinesLayout — full /routines page. The IA refactor cut the
 // previous 4 tabs (Routines / Graph / Timeline / Activity) down to 3:
@@ -88,22 +89,22 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       {/* ---- Toolbar ---- */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-        {/* Tabs */}
-        {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
-              activeTab === id
-                ? "border-blue-400 text-blue-400"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            <Icon className="h-3 w-3 opacity-75" />
-            {label}
-          </button>
-        ))}
+        <TabBar
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as RoutinesTab)}
+          layoutId="routines-tabs-indicator"
+          ariaLabel="Routines view"
+          className="h-full border-b-0 shrink-0"
+        >
+          {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
+            <TabBar.Item key={id} value={id} className="h-full whitespace-nowrap">
+              <span className="inline-flex items-center gap-1.5">
+                <Icon className="h-3 w-3 opacity-75" />
+                {label}
+              </span>
+            </TabBar.Item>
+          ))}
+        </TabBar>
 
         <div className="flex-1" />
 

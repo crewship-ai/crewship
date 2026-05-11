@@ -176,9 +176,9 @@ function RoutineRow({
         }
       }}
       className={cn(
-        "cursor-pointer border-b border-white/[0.04] transition-colors hover:bg-muted/40",
+        "cursor-pointer border-b border-white/[0.04] row-hover transition-colors",
         "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1 focus:ring-offset-background",
-        selected && "bg-blue-500/10",
+        selected && "row-selected",
       )}
     >
       <td className="px-4 py-2.5">

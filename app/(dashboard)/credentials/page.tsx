@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TabBar } from "@/components/ui/tab-bar"
 import {
   Select,
   SelectContent,
@@ -358,40 +359,28 @@ export default function CredentialsPage() {
           </div>
 
           {/* Tab strip */}
-          <div role="tablist" aria-label="Credential filter" className="flex items-center gap-0 border-b border-white/[0.08]">
-            <button
-              role="tab"
-              aria-selected={activeTab === "all"}
-              tabIndex={activeTab === "all" ? 0 : -1}
-              onClick={() => setActiveTab("all")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
-                activeTab === "all"
-                  ? "border-blue-400 text-blue-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80",
-              )}
-            >
-              All
-              <span className="text-[10px] font-mono opacity-60">{credentials.length}</span>
-            </button>
-            <button
-              role="tab"
-              aria-selected={activeTab === "needs"}
-              tabIndex={activeTab === "needs" ? 0 : -1}
-              onClick={() => setActiveTab("needs")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 h-9 text-xs font-medium border-b-2 transition-colors -mb-px",
-                activeTab === "needs"
-                  ? "border-blue-400 text-blue-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80",
-              )}
-            >
-              Needs attention
-              {needsAttention.length > 0 && (
-                <Badge variant="destructive" className="h-4 px-1.5 text-[10px]">{needsAttention.length}</Badge>
-              )}
-            </button>
-          </div>
+          <TabBar
+            value={activeTab}
+            onValueChange={(v) => setActiveTab(v as typeof activeTab)}
+            layoutId="credentials-tabs-indicator"
+            ariaLabel="Credential filter"
+            className="h-9"
+          >
+            <TabBar.Item value="all">
+              <span className="inline-flex items-center gap-1.5">
+                All
+                <span className="text-[10px] font-mono opacity-60">{credentials.length}</span>
+              </span>
+            </TabBar.Item>
+            <TabBar.Item value="needs">
+              <span className="inline-flex items-center gap-1.5">
+                Needs attention
+                {needsAttention.length > 0 && (
+                  <Badge variant="destructive" className="h-4 px-1.5 text-[10px]">{needsAttention.length}</Badge>
+                )}
+              </span>
+            </TabBar.Item>
+          </TabBar>
 
           {/* Banner */}
           {needsAttention.length > 0 && activeTab === "all" && (
@@ -618,7 +607,7 @@ function CredentialRow({ cred, selected, onToggleSelect, onOpen, onEdit, onDelet
 
   return (
     <TableRow
-      className={cn("cursor-pointer hover:bg-white/[0.02]", selected && "bg-blue-500/[0.04]")}
+      className={cn("cursor-pointer row-hover transition-colors", selected && "row-selected")}
       onClick={onOpen}
     >
       <TableCell onClick={(e) => e.stopPropagation()}>

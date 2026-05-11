@@ -320,7 +320,7 @@ export default function DashboardPage() {
         // resolves it to a Tailwind bg class internally.
         crew_color: crew?.color ?? null,
         cost: m.total_estimated_cost ?? 0,
-        href: m.identifier ? `/orchestration/issues/${m.identifier}` : "/orchestration",
+        href: m.identifier ? `/issues/${m.identifier}` : "/issues",
       }
     })
   }, [missions, crews])
@@ -353,7 +353,7 @@ export default function DashboardPage() {
       color: p.color || "#60a5fa",
       issueCount: p.issue_count,
       completedCount: Math.round((p.issue_count * p.progress) / 100),
-      href: `/orchestration?project=${encodeURIComponent(p.id)}`,
+      href: `/issues?project=${encodeURIComponent(p.id)}`,
     }))
   }, [projects])
 
@@ -421,7 +421,7 @@ export default function DashboardPage() {
         title: m.title,
         subtitle: m.identifier ? `${m.identifier} · awaiting review` : "awaiting review",
         relative: formatRelativeShort(m.updated_at),
-        href: m.identifier ? `/orchestration/issues/${m.identifier}` : "/orchestration",
+        href: m.identifier ? `/issues/${m.identifier}` : "/issues",
       })
     }
 
@@ -432,7 +432,7 @@ export default function DashboardPage() {
         title: `${escalationCount} unresolved escalation${escalationCount === 1 ? "" : "s"}`,
         subtitle: "click to triage",
         relative: "",
-        href: "/orchestration?tab=escalations",
+        href: "/inbox?filter=escalation",
       })
     }
 
@@ -602,7 +602,7 @@ export default function DashboardPage() {
       <DashboardCard
         title="Recent missions"
         icon={ListChecks}
-        action={<Link href="/orchestration" className="text-[10px] hover:text-foreground">Orchestration →</Link>}
+        action={<Link href="/issues" className="text-[10px] hover:text-foreground">Issues →</Link>}
       >
         <RecentMissionsTable missions={recentMissions} />
       </DashboardCard>

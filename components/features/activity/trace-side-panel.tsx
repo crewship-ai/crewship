@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { Braces, FileText, Inbox, ScrollText, Send, X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { panel } from "@/lib/motion"
+import { TabBar } from "@/components/ui/tab-bar"
 import type { TraceStep } from "@/lib/trace/types"
 import { JSONViewer } from "./json-viewer"
 import { extractArtifacts, type Artifact } from "@/lib/trace/extract-artifacts"
@@ -64,10 +66,10 @@ export function TraceSidePanel({
         <motion.aside
           role="complementary"
           aria-label="Step detail"
-          initial={{ x: 360, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: 360, opacity: 0 }}
-          transition={{ type: "spring", damping: 28, stiffness: 320 }}
+          initial={panel.side.initial}
+          animate={panel.side.animate}
+          exit={panel.side.exit}
+          transition={panel.side.transition}
           className="flex h-full w-full flex-col border-l border-white/[0.06] bg-card"
         >
           {/* Header */}
@@ -89,25 +91,22 @@ export function TraceSidePanel({
           </div>
 
           {/* Tab strip */}
-          <div className="flex shrink-0 items-center gap-0 border-b border-white/[0.06] px-1">
+          <TabBar
+            value={tab}
+            onValueChange={(v) => setTab(v as SidePanelTab)}
+            layoutId="trace-side-panel-tabs"
+            ariaLabel="Step detail view"
+            className="shrink-0 px-1"
+          >
             {TABS.map(({ id, label, Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                aria-pressed={tab === id}
-                className={cn(
-                  "flex items-center gap-1 border-b-2 px-2.5 py-1.5 text-[11px] font-medium transition-colors",
-                  tab === id
-                    ? "border-blue-400 text-blue-300"
-                    : "border-transparent text-muted-foreground/60 hover:text-foreground/80",
-                )}
-              >
-                <Icon className="h-3 w-3" />
-                {label}
-              </button>
+              <TabBar.Item key={id} value={id} className="text-[11px]">
+                <span className="inline-flex items-center gap-1">
+                  <Icon className="h-3 w-3" />
+                  {label}
+                </span>
+              </TabBar.Item>
             ))}
-          </div>
+          </TabBar>
 
           {/* Body */}
           <div className="min-h-0 flex-1 overflow-y-auto p-3">

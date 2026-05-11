@@ -1,9 +1,11 @@
-import { ProjectDetailClient } from "./project-detail-client"
+import { OrchestrationProjectRedirect } from "./redirect-client"
 
 export function generateStaticParams() {
   return [{ projectId: "_" }]
 }
 
-export default function ProjectDetailPage() {
-  return <ProjectDetailClient />
+// Projects subsumed into /issues during IA refactor. Stub kept one
+// release for bookmark compat.
+export default function Page() {
+  return <OrchestrationProjectRedirect />
 }

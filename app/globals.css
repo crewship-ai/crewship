@@ -76,6 +76,18 @@
   --typo-title-lh: 2rem;
   --typo-display: 1.875rem;         /* 30px – hero/stat numbers */
   --typo-display-lh: 2.25rem;
+
+  /* ── Interaction tokens (single source of truth for row/card/chip states) ──
+     Light theme uses primary-tinted overlays.
+     Consumed via utility classes below (.row-selected, .row-hover, .chip-*).
+     Components should NEVER hardcode bg-blue-500/X — use lib/interaction.ts. */
+  --selection-bg: oklch(0.5729 0.2337 264.3664 / 0.10);
+  --selection-bg-hover: oklch(0.5729 0.2337 264.3664 / 0.14);
+  --selection-border: oklch(0.5729 0.2337 264.3664);
+  --row-hover-bg: oklch(0 0 0 / 0.03);
+  --chip-active-bg: oklch(0.5729 0.2337 264.3664 / 0.12);
+  --chip-active-fg: oklch(0.5729 0.2337 264.3664);
+  --chip-idle-fg: oklch(0.45 0.02 270);
 }
 
 .dark {
@@ -130,6 +142,15 @@
   --shadow-xl: 0 20px 32px -8px oklch(0 0 0 / 0.48);
   --shadow-2xl: 0 32px 48px -12px oklch(0 0 0 / 0.56);
   --shadow-2xs: 0 1px 1px 0 oklch(0 0 0 / 0.18);
+
+  /* ── Interaction tokens (dark theme overrides) ── */
+  --selection-bg: oklch(0.6230 0.2140 259.8150 / 0.10);
+  --selection-bg-hover: oklch(0.6230 0.2140 259.8150 / 0.14);
+  --selection-border: oklch(0.6230 0.2140 259.8150);
+  --row-hover-bg: oklch(1 0 0 / 0.025);
+  --chip-active-bg: oklch(0.6230 0.2140 259.8150 / 0.16);
+  --chip-active-fg: oklch(0.78 0.14 259);
+  --chip-idle-fg: oklch(0.65 0.02 276);
 }
 
 @theme inline {
@@ -232,6 +253,80 @@ body {
     &::-webkit-scrollbar {
       display: none;
     }
+  }
+
+  /* ── Interaction states (single source of truth) ──
+     Composed by lib/interaction.ts constants.
+     Use these via the ListRow / FilterChip primitives, not directly. */
+
+  .row-interactive {
+    display: flex;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background-color 150ms ease, border-color 150ms ease;
+  }
+
+  .row-interactive:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--ring);
+  }
+
+  .row-hover:hover {
+    background-color: var(--row-hover-bg);
+  }
+
+  .row-selected {
+    background-color: var(--selection-bg);
+    border-left-color: var(--selection-border);
+  }
+
+  .row-selected.row-hover:hover {
+    background-color: var(--selection-bg-hover);
+  }
+
+  .chip-idle {
+    color: var(--chip-idle-fg);
+    background-color: transparent;
+    transition: color 120ms ease, background-color 120ms ease;
+  }
+
+  .chip-idle:hover {
+    color: var(--foreground);
+  }
+
+  .chip-active {
+    color: var(--chip-active-fg);
+    background-color: var(--chip-active-bg);
+  }
+
+  /* Card variants — for grid cards (skills, crews, integrations) that
+     need a full border instead of a left-edge accent. Same color
+     scheme as rows, different border treatment. */
+  .card-interactive {
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background-color: var(--card);
+    border-radius: 0.5rem;
+    transition: background-color 150ms ease, border-color 150ms ease;
+  }
+
+  .card-interactive:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
+  }
+
+  .card-hover:hover {
+    background-color: var(--row-hover-bg);
+    border-color: color-mix(in oklch, var(--border) 60%, transparent);
+  }
+
+  .card-selected {
+    background-color: var(--selection-bg);
+    border-color: color-mix(in oklch, var(--selection-border) 60%, transparent);
+  }
+
+  .card-selected.card-hover:hover {
+    background-color: var(--selection-bg-hover);
   }
 }
 
