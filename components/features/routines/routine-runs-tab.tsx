@@ -1,13 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ChevronRight, Loader2, CheckCircle2, XCircle, Eye } from "lucide-react"
+import { ChevronRight, Loader2, CheckCircle2, XCircle, Eye, Play } from "lucide-react"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
-import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { RoutineRunsSkeleton } from "./routine-skeletons"
+import { Card, EmptyState, Pill } from "./_shared"
 
 // RoutineRunsTab — list of recent runs for one routine. Click to
 // expand a run inline and see step-level waterfall.
@@ -116,64 +116,96 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
     setExpandedRunId(grouped[0].runId)
   }, [grouped, slug])
 
-  if (loading) return <RoutineRunsSkeleton rows={3} />
-  if (error) return <div className="py-4 text-xs text-red-400">Error: {error}</div>
-  if (grouped.length === 0)
+  if (loading) {
     return (
-      <div className="rounded-md border border-dashed border-border/60 p-6 text-center text-xs text-muted-foreground">
-        No runs yet. Trigger one with the Run button above, or invoke via agent / CLI / schedule.
-      </div>
+      <Card title="Run history" subtitle="loading…">
+        <div className="p-4">
+          <RoutineRunsSkeleton rows={3} />
+        </div>
+      </Card>
     )
+  }
+  if (error) {
+    return (
+      <Card title="Run history">
+        <div className="px-4 py-3 text-sm text-rose-400">Error: {error}</div>
+      </Card>
+    )
+  }
+  if (grouped.length === 0) {
+    return (
+      <Card title="Run history">
+        <EmptyState
+          icon={Play}
+          title="No runs yet"
+          description="Trigger one with the Run button above, or invoke via agent / CLI / schedule. Each invocation appears here with the step-level waterfall."
+        />
+      </Card>
+    )
+  }
 
   return (
-    <ol className="space-y-1.5">
-      {grouped.map((run) => {
-        const expanded = expandedRunId === run.runId
-        return (
-          <li
-            key={run.runId}
-            className={cn(
-              "rounded-md border border-white/[0.06] bg-card/40",
-              expanded && "ring-1 ring-blue-500/30",
-            )}
-          >
-            <button
-              onClick={() => setExpandedRunId(expanded ? null : run.runId)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/40"
+    <Card title="Run history" subtitle={`${grouped.length} total · click to expand`}>
+      <ol className="divide-y divide-white/[0.04]">
+        {grouped.map((run) => {
+          const expanded = expandedRunId === run.runId
+          return (
+            <li
+              key={run.runId}
+              className={cn("transition-colors", expanded && "bg-white/[0.015]")}
             >
-              <ChevronRight
-                className={cn("h-3 w-3 text-muted-foreground transition-transform", expanded && "rotate-90")}
-              />
-              <RunStatusIcon status={run.status} />
-              <span className="font-mono text-[11px]">{run.runId.slice(0, 16)}…</span>
-              <Badge variant="outline" className="text-[10px] capitalize">
-                {run.status}
-              </Badge>
-              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                {formatRelative(run.startedAt)}
-              </span>
-            </button>
-            {expanded && (
-              <div className="border-t border-white/[0.06] px-3 py-2">
-                <RunWaterfall
-                  runId={run.runId}
-                  journalEntries={run.entries}
-                  liveSteps={stepEvents.get(run.runId) ?? []}
+              <button
+                onClick={() => setExpandedRunId(expanded ? null : run.runId)}
+                className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.025]"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                    expanded && "rotate-90",
+                  )}
                 />
-              </div>
-            )}
-          </li>
-        )
-      })}
-    </ol>
+                <RunStatusIcon status={run.status} />
+                <span className="font-mono text-sm text-foreground/90">{run.runId.slice(0, 18)}…</span>
+                <Pill
+                  tone={
+                    run.status === "completed"
+                      ? "emerald"
+                      : run.status === "failed"
+                        ? "rose"
+                        : run.status === "running"
+                          ? "blue"
+                          : "default"
+                  }
+                  className="capitalize"
+                >
+                  {run.status}
+                </Pill>
+                <span className="ml-auto font-mono text-[12px] text-muted-foreground">
+                  {formatRelative(run.startedAt)}
+                </span>
+              </button>
+              {expanded && (
+                <div className="border-t border-white/[0.04] bg-black/20 px-5 py-4">
+                  <RunWaterfall
+                    runId={run.runId}
+                    journalEntries={run.entries}
+                    liveSteps={stepEvents.get(run.runId) ?? []}
+                  />
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </Card>
   )
 }
 
 function RunStatusIcon({ status }: { status: "running" | "completed" | "failed" | "unknown" }) {
-  if (status === "completed") return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-  if (status === "failed") return <XCircle className="h-3.5 w-3.5 text-red-400" />
-  if (status === "running") return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
-  return <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+  if (status === "completed") return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+  if (status === "failed") return <XCircle className="h-4 w-4 shrink-0 text-rose-400" />
+  if (status === "running") return <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-400" />
+  return <Eye className="h-4 w-4 shrink-0 text-muted-foreground" />
 }
 
 function RunWaterfall({
@@ -223,31 +255,34 @@ function RunWaterfall({
 
   if (deduped.length === 0) {
     return (
-      <p className="text-[11px] text-muted-foreground">
+      <p className="text-[13px] text-muted-foreground">
         No step events yet — waterfall will populate as the run executes.
       </p>
     )
   }
 
   return (
-    <ol className="space-y-1">
+    <ol className="space-y-1.5">
       {deduped.map((s, i) => (
-        <li key={i} className="flex items-baseline gap-2 text-[11px]">
-          <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+        <li key={i} className="flex items-center gap-3 text-sm">
+          <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
             {new Date(s.ts).toLocaleTimeString()}
           </span>
-          <Badge
-            variant="outline"
-            className={cn(
-              "text-[9px] capitalize",
-              s.kind === "completed" && "border-emerald-500/30 text-emerald-400",
-              s.kind === "failed" && "border-red-500/30 text-red-400",
-              s.kind === "validation_failed" && "border-amber-500/30 text-amber-400",
-            )}
+          <Pill
+            tone={
+              s.kind === "completed"
+                ? "emerald"
+                : s.kind === "failed"
+                  ? "rose"
+                  : s.kind === "validation_failed"
+                    ? "amber"
+                    : "default"
+            }
+            className="capitalize"
           >
             {s.kind.replace(/_/g, " ")}
-          </Badge>
-          <span className="font-mono text-foreground">{s.stepId}</span>
+          </Pill>
+          <span className="font-mono text-foreground/90">{s.stepId}</span>
         </li>
       ))}
     </ol>

@@ -139,7 +139,7 @@ export function RoutineOverviewTab({
   const lastRun = runs[0] ?? null
 
   return (
-    <div className="space-y-4 p-1">
+    <div className="space-y-4">
       {/* ── KPI strip ──────────────────────────────────────────────── */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiTile
