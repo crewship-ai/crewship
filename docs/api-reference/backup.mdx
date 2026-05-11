@@ -8,7 +8,7 @@ icon: "shield"
 
 All endpoints live under `/api/v1/admin/backups` and are gated by the `authed` + `wsCtx` middleware chain. Handlers additionally re-check the workspace role (`canRole(role, "manage")`) — only **OWNER** and **ADMIN** pass. Every mutation writes one row to `audit_log`.
 
-Routes are registered in `internal/api/router.go`; handlers live in `internal/api/backup.go`.
+Routes are registered in `internal/api/router_admin.go` (domain split in May 2026); handlers live in `internal/api/backup.go`.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -22,6 +22,7 @@ Routes are registered in `internal/api/router.go`; handlers live in `internal/ap
 | `POST` | `/api/v1/admin/backups/rotate` | Apply retention policy |
 | `GET` | `/api/v1/admin/backups/download` | Stream bundle bytes |
 | `POST` | `/api/v1/admin/backups/restore` | Restore a bundle |
+| `POST` | `/api/v1/admin/backups/self-test` | Run a backup self-test (round-trip create + verify) |
 | `DELETE` | `/api/v1/admin/backups` | Delete a bundle from disk |
 
 <Note>

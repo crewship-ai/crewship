@@ -11,12 +11,11 @@ All agent endpoints require authentication and workspace context (`workspace_id`
 ## Crews Status
 
 ```
-GET /api/v1/agents/fleet-status?workspace_id={workspaceId}
+GET /api/v1/agents/crews-status?workspace_id={workspaceId}
 
-# Note: `/fleet-status` is the historical endpoint name from before the
-# Crews UI rename. Response is a per-workspace aggregate counting agents
-# by status (IDLE/RUNNING/ERROR/STOPPED). Drives the 'Crews idle/online'
-# badge in the top toolbar.
+# Response is a per-workspace aggregate counting agents by status
+# (IDLE/RUNNING/ERROR/STOPPED). Drives the 'Crews idle/online' badge
+# in the top toolbar.
 ```
 
 Returns lightweight agent counts by status for toolbar/dashboard widgets.

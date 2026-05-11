@@ -24,7 +24,7 @@ Workspace / crew / agent / mission scope is **not** taken from request bodies. T
 
 ## Route catalog
 
-Sourced from `internal/api/router_routes.go`. Methods and paths are exact.
+Sourced from the per-domain `internal/api/router_*.go` files (split by domain in May 2026 — see `router_internal.go` for the internal IPC surface). Methods and paths are exact.
 
 ### Cost ledger
 
@@ -95,7 +95,7 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `GET` | `/api/v1/internal/escalations/{escalationId}/wait` | Long-poll for response. |
 | `POST` | `/api/v1/internal/report-confidence` | Report agent self-confidence after a turn. |
 
-### Missions, issues, proposals
+### Missions and issues
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -107,17 +107,14 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `POST` | `/api/v1/internal/issues` | Create issue. |
 | `PATCH` | `/api/v1/internal/issues/{identifier}` | Update issue status. |
 | `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. |
-| `GET` | `/api/v1/internal/mission-proposals` | List mission proposals. |
-| `POST` | `/api/v1/internal/mission-proposals` | Create proposal. |
-| `GET` | `/api/v1/internal/mission-proposals/{proposalId}` | Get proposal. |
 
 ### Keeper
 
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/v1/internal/keeper/request` | Sidecar forwards a credential read request. |
-
-The matching `keeper/execute` flow goes through the sidecar's HTTP surface (`POST /keeper/execute` on `127.0.0.1:9119`) which then forwards over the IPC socket — there is no `keeper/execute` on `/api/v1/internal/` because the agent never gets to make that request directly.
+| `GET` | `/api/v1/internal/keeper/request/{requestId}` | Fetch the status / decision of a previously submitted request. |
+| `POST` | `/api/v1/internal/keeper/execute` | Sidecar forwards a sealed credential-use request after gatekeeper approval. See the [Keeper section](#keeper) for the full request flow. |
 
 ### MCP audit
 
