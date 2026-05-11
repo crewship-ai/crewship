@@ -112,12 +112,10 @@ func init() {
 	rootCmd.AddCommand(seedCmd)
 	rootCmd.AddCommand(featuresCmd)
 	rootCmd.AddCommand(runtimesCmd)
-	rootCmd.AddCommand(seedIssuesCmd) // deprecated: use "crewship seed" instead
 	rootCmd.AddCommand(memoryCmd)
 	rootCmd.AddCommand(notificationCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(backupCmd)
-	rootCmd.AddCommand(connectorCmd)
 }
 
 func main() {

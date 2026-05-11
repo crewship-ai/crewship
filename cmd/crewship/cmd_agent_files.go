@@ -20,7 +20,6 @@ import (
 //	agent files <agent> --download → /api/v1/agents/{id}/files/download
 //	agent inbox <agent>            → /api/v1/agents/{id}/inbox
 //	agent git-log <agent>          → /api/v1/agents/{id}/git-log
-//	agent container-files <agent>  → /api/v1/agents/{id}/container-files
 //
 // They share the resolveAgentID + queryString pattern, so they live in
 // one file rather than five.

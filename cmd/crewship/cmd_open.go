@@ -21,26 +21,33 @@ import (
 // thing to update.
 var openCmd = &cobra.Command{
 	Use:   "open <resource> [id]",
-	Short: "Open the web UI page for a resource (chat, mission, journal, etc.)",
+	Short: "Open the web UI page for a resource (inbox, activity, chat, etc.)",
 	Long: `Open the appropriate web page in your default browser.
 
 Resources:
-  dashboard                 Workspace dashboard
+  inbox                     Daily-driver inbox (default landing)
+  activity                  Activity feed
   agents                    Agent list
   agent     <slug-or-id>    Agent detail page
   crews                     Crew list
   crew      <slug-or-id>    Crew detail page
-  chat      <chat-id>       Specific chat session
-  mission   <mission-id>    Mission detail / timeline
+  chat      <agent-slug>    Chat with a specific agent
+  mission   <mission-id>    Mission timeline
   journal                   Live journal page
   approvals                 Approval queue
-  paymaster                 Cost dashboard
-  crows-nest                Live agent observation
+  integrations              Installed integrations
+  routines                  Scheduled routines
+  issues                    Issue tracker
+  runs                      Run history
+  settings                  Workspace settings
+  admin                     Admin console
+  audit                     Audit log
+  credentials               Credential vault
 
 Examples:
-  crewship open chat c_abc123
+  crewship open inbox
+  crewship open chat viktor
   crewship open mission MIS-42
-  crewship open journal
   crewship open --print-only mission MIS-42   # print URL, don't open`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -76,8 +83,12 @@ func buildOpenURL(base string, args []string) (string, error) {
 
 	var path string
 	switch resource {
-	case "dashboard", "home":
-		path = "/"
+	case "dashboard", "home", "inbox":
+		// `dashboard`/`home` are kept as aliases for back-compat but route
+		// to the actual post-auth landing surface, /inbox.
+		path = "/inbox"
+	case "activity":
+		path = "/activity"
 	case "agents":
 		path = "/agents"
 	case "agent":
@@ -96,29 +107,42 @@ func buildOpenURL(base string, args []string) (string, error) {
 		if err := require(1); err != nil {
 			return "", err
 		}
-		// Web UI uses ?chat=<id> on the chat page in this repo. Earlier
-		// version of this code shipped `?id=<id>` which silently opened
-		// the chat list without selecting the target — fixed here.
-		path = "/chat?chat=" + esc(rest[0])
+		// Chat is per-agent: /chat/<agent-slug>. The earlier version of
+		// this code routed to /chat?chat=<id> which targeted a chat-list
+		// page that doesn't exist in this app.
+		path = "/chat/" + esc(rest[0])
 	case "mission":
 		if err := require(1); err != nil {
 			return "", err
 		}
-		path = "/missions/" + esc(rest[0])
+		// Mission detail lives under the timeline sub-route in this app.
+		path = "/missions/" + esc(rest[0]) + "/timeline"
 	case "journal":
 		path = "/journal"
 	case "approvals":
 		path = "/approvals"
-	case "paymaster", "cost":
-		path = "/paymaster"
-	case "crows-nest", "crowsnest", "watch":
+	case "integrations":
+		path = "/integrations"
+	case "routines":
+		path = "/routines"
+	case "issues":
 		if len(rest) > 0 {
-			path = "/crows-nest/" + esc(rest[0])
+			path = "/issues/" + esc(rest[0])
 		} else {
-			path = "/crows-nest"
+			path = "/issues"
 		}
+	case "runs":
+		path = "/runs"
+	case "settings":
+		path = "/settings"
+	case "admin":
+		path = "/admin"
+	case "audit":
+		path = "/audit"
+	case "credentials":
+		path = "/credentials"
 	default:
-		return "", fmt.Errorf("unknown resource %q (try: dashboard, agent, crew, chat, mission, journal, approvals, paymaster, crows-nest)", resource)
+		return "", fmt.Errorf("unknown resource %q (try: inbox, activity, agent, crew, chat, mission, journal, approvals, integrations, routines, issues, runs, settings, admin, audit, credentials)", resource)
 	}
 	return strings.TrimRight(base, "/") + path, nil
 }
