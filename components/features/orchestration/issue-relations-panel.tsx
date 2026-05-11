@@ -30,13 +30,15 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
   const [newRelationType, setNewRelationType] = useState<RelationType>("relates_to")
   const [addingRelation, setAddingRelation] = useState(false)
 
-  // Fetch sub-issues
+  // Fetch sub-issues — reset state on issue switch so the previous issue's
+  // subtasks don't briefly render while the new fetch is in flight.
   useEffect(() => {
+    setSubIssues([])
     if (!issue.crew_id || !issue.identifier || !issue.sub_issues_count) return
     fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/subtasks?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
       .then((data) => setSubIssues(Array.isArray(data) ? data : data.subtasks ?? []))
-      .catch(() => {})
+      .catch(() => setSubIssues([]))
   }, [issue.crew_id, issue.identifier, issue.sub_issues_count, workspaceId])
 
   // Fetch relations
@@ -128,7 +130,11 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
           action={
             <Popover open={addRelationOpen} onOpenChange={setAddRelationOpen}>
               <PopoverTrigger asChild>
-                <button className="p-0.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors">
+                <button
+                  type="button"
+                  aria-label="Add relation"
+                  className="p-0.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
+                >
                   <Plus className="h-3 w-3" />
                 </button>
               </PopoverTrigger>
@@ -136,6 +142,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                 <div className="space-y-2">
                   <p className="text-[11px] font-medium text-foreground/80">Add relation</p>
                   <input
+                    aria-label="Target issue identifier"
                     value={newRelationTarget}
                     onChange={(e) => setNewRelationTarget(e.target.value)}
                     placeholder="Target identifier (e.g. ENG-5)"
@@ -213,6 +220,8 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
                             {rel.target_title || "Untitled"}
                           </span>
                           <button
+                            type="button"
+                            aria-label={`Remove ${rel.target_identifier || "relation"}`}
                             onClick={() => handleDeleteRelation(rel.id)}
                             className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/[0.08] text-muted-foreground/40 hover:text-red-400 transition-all"
                           >
