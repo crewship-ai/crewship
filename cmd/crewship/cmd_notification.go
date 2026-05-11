@@ -12,6 +12,14 @@ var notificationCmd = &cobra.Command{
 	Use:     "notification",
 	Aliases: []string{"notifications", "notif"},
 	Short:   "Manage notifications for the current user",
+	Long: `Low-level per-entity event log for the current user. Notifications
+are entity-scoped (one per actor-action-entity event) and back the
+same flows as inbox items but at a different granularity.
+
+See also: 'crewship inbox' for actionable human-attention items
+(waitpoints, escalations, failed runs, messages) — inbox is the
+human-attention-scoped surface, notification is the entity-scoped
+event log feeding it.`,
 }
 
 type notificationItem struct {

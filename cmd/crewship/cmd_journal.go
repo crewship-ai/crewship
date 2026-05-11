@@ -338,6 +338,122 @@ func init() {
 	journalCmd.AddCommand(journalGetCmd)
 	journalCmd.AddCommand(journalCountCmd)
 	journalCmd.AddCommand(journalPriorityCmd)
+	journalCmd.AddCommand(journalLookupCmd)
+}
+
+// journalLookupCmd hits GET /api/v1/journal/lookup — the lightweight
+// reference table the frontend uses to enrich journal entry cards
+// (crew chips, agent chips, mission breadcrumbs) without round-tripping
+// the join on every list/stream query.
+//
+// On the CLI, lookup serves two scripting needs:
+//
+//  1. Resolving cryptic IDs in piped journal output (e.g.
+//     `crewship journal --format json | jq '.crew_id'` returns a CUID;
+//     join against `crewship journal lookup --format json` to surface
+//     the slug + name).
+//  2. Deep-link debugging: paste an entry ID from another tool and
+//     resolve the surrounding crew/agent/mission context without
+//     scrolling the timeline.
+//
+// The endpoint returns workspace-scoped crews/agents/missions; it does
+// NOT take a --trace filter (the trace-id filter lives on
+// `crewship journal --trace-id <id>` which narrows the entry list).
+var journalLookupCmd = &cobra.Command{
+	Use:   "lookup",
+	Short: "Fetch the workspace crew/agent/mission lookup table",
+	Long: `Return the same reference table the web timeline uses to render journal
+cards with human-readable crew/agent/mission names. Useful for joining
+journal output against names in shell pipelines.
+
+Examples:
+  crewship journal lookup --format json
+  crewship journal lookup --format json | jq '.crews[] | {id, slug, name}'
+
+Tip: to narrow journal entries to a specific run/trace, use
+'crewship journal --trace-id <run-id>' (the list endpoint), not lookup.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/journal/lookup")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var body struct {
+			Crews []struct {
+				ID    string  `json:"id"`
+				Name  string  `json:"name"`
+				Slug  string  `json:"slug"`
+				Icon  *string `json:"icon"`
+				Color *string `json:"color"`
+			} `json:"crews"`
+			Agents []struct {
+				ID     string  `json:"id"`
+				Name   string  `json:"name"`
+				Slug   string  `json:"slug"`
+				CrewID *string `json:"crew_id"`
+			} `json:"agents"`
+			Missions []struct {
+				ID     string `json:"id"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			} `json:"missions"`
+		}
+		if err := cli.ReadJSON(resp, &body); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(body)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(body)
+		}
+
+		// Text mode renders three short tables. Caps the rendered rows
+		// at 50 per section so the output stays scannable; the JSON
+		// path returns the full snapshot.
+		fmt.Printf("%sCrews (%d)%s\n", cli.Bold, len(body.Crews), cli.Reset)
+		for i, c := range body.Crews {
+			if i >= 50 {
+				fmt.Printf("  %s… +%d more (use --format json for full list)%s\n", cli.Dim, len(body.Crews)-i, cli.Reset)
+				break
+			}
+			fmt.Printf("  %-24s  %-24s  %s\n", truncateString(c.ID, 24), truncateString(c.Slug, 24), c.Name)
+		}
+		fmt.Printf("\n%sAgents (%d)%s\n", cli.Bold, len(body.Agents), cli.Reset)
+		for i, a := range body.Agents {
+			if i >= 50 {
+				fmt.Printf("  %s… +%d more%s\n", cli.Dim, len(body.Agents)-i, cli.Reset)
+				break
+			}
+			crew := "-"
+			if a.CrewID != nil {
+				crew = truncateString(*a.CrewID, 16)
+			}
+			fmt.Printf("  %-24s  %-24s  %-16s  %s\n", truncateString(a.ID, 24), truncateString(a.Slug, 24), crew, a.Name)
+		}
+		fmt.Printf("\n%sMissions (%d)%s\n", cli.Bold, len(body.Missions), cli.Reset)
+		for i, m := range body.Missions {
+			if i >= 50 {
+				fmt.Printf("  %s… +%d more%s\n", cli.Dim, len(body.Missions)-i, cli.Reset)
+				break
+			}
+			fmt.Printf("  %-24s  %-10s  %s\n", truncateString(m.ID, 24), truncateString(m.Status, 10), m.Title)
+		}
+		return nil
+	},
 }
 
 // followJournal opens the SSE stream and prints entries as they arrive,

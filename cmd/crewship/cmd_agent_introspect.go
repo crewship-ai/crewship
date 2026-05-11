@@ -236,6 +236,67 @@ var agentSkillsCmd = &cobra.Command{
 	},
 }
 
+// agentChatsCmd is a thin alias for the chat-side `crewship chat list`
+// command, exposed under `agent chats <slug>` so introspection lives next
+// to the other per-agent lookups (runs, skills, credentials). Both call
+// the same /agents/{id}/chats endpoint.
+var agentChatsCmd = &cobra.Command{
+	Use:     "chats <slug-or-id>",
+	Aliases: []string{"sessions"},
+	Short:   "List recent chats for an agent",
+	Long: `Show the agent's recent chat sessions: id, title, status, message
+count and when they started. Mirrors the SessionsSidebar shown in the web
+UI.
+
+Examples:
+  crewship agent chats viktor
+  crewship agent chats viktor --format json | jq '.[] | select(.status=="ACTIVE")'`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		var chats []struct {
+			ID           string  `json:"id"`
+			Title        *string `json:"title"`
+			Status       string  `json:"status"`
+			MessageCount int     `json:"message_count"`
+			StartedAt    string  `json:"started_at"`
+			EndedAt      *string `json:"ended_at"`
+			Origin       *string `json:"origin"`
+		}
+		if err := getJSON(client, "/api/v1/agents/"+agentID+"/chats", &chats); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"CHAT ID", "TITLE", "STATUS", "MSGS", "STARTED", "ENDED"}
+		var rows [][]string
+		for _, c := range chats {
+			title := "-"
+			if c.Title != nil && *c.Title != "" {
+				title = *c.Title
+			}
+			ended := "-"
+			if c.EndedAt != nil && *c.EndedAt != "" {
+				ended = *c.EndedAt
+			}
+			rows = append(rows, []string{
+				c.ID, title, c.Status,
+				fmt.Sprintf("%d", c.MessageCount),
+				c.StartedAt, ended,
+			})
+		}
+		return f.Auto(chats, headers, rows)
+	},
+}
+
 var agentCredentialsCmd = &cobra.Command{
 	Use:   "credentials <agent>",
 	Short: "List credentials assigned to an agent",
@@ -287,4 +348,11 @@ var agentCredentialsCmd = &cobra.Command{
 		}
 		return f.Auto(creds, headers, rows)
 	},
+}
+
+func init() {
+	// Registered here rather than in cmd_agent.go so the introspect file
+	// stays self-contained — the rest of the cmd_agent_*.go siblings do
+	// the same.
+	agentCmd.AddCommand(agentChatsCmd)
 }

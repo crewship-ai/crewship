@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/url"
@@ -20,7 +21,6 @@ import (
 //	agent files <agent> --download → /api/v1/agents/{id}/files/download
 //	agent inbox <agent>            → /api/v1/agents/{id}/inbox
 //	agent git-log <agent>          → /api/v1/agents/{id}/git-log
-//	agent container-files <agent>  → /api/v1/agents/{id}/container-files
 //
 // They share the resolveAgentID + queryString pattern, so they live in
 // one file rather than five.
@@ -329,6 +329,84 @@ func printGitLogTable(body any) {
 	}
 }
 
+// agentFileWriteCmd uploads bytes to an agent's working directory. Mirrors
+// the download path on the same file but in reverse: stdin / --from /
+// --content as source, PUT to /api/v1/agents/{id}/files/save with the
+// target path as a query string.
+//
+// The server-side handler (ProxyHandler.AgentFileSave) reads r.Body raw —
+// no JSON envelope — so we issue the PUT through the byte-level helper
+// rather than the JSON-encoding client.Patch / client.Post wrappers.
+var agentFileWriteCmd = &cobra.Command{
+	Use:   "file-write <agent-slug-or-id> <path>",
+	Short: "Write a file into an agent's working directory",
+	Long: `Upload bytes to the agent's /output/<slug>/ namespace. Source comes
+from --from (local file), --content (inline string), or stdin when neither
+flag is given.
+
+Examples:
+  echo "draft" | crewship agent file-write viktor notes/draft.md
+  crewship agent file-write viktor config/x.toml --from ./local.toml
+  crewship agent file-write viktor README.md --content "# hi"`,
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeAgentSlug,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		content, _ := cmd.Flags().GetString("content")
+		from, _ := cmd.Flags().GetString("from")
+		if cmd.Flags().Changed("content") && from != "" {
+			return fmt.Errorf("--content and --from are mutually exclusive")
+		}
+
+		var body io.Reader
+		var size int64
+		switch {
+		case from != "":
+			st, err := os.Stat(from)
+			if err != nil {
+				return fmt.Errorf("stat %s: %w", from, err)
+			}
+			fh, err := os.Open(from)
+			if err != nil {
+				return fmt.Errorf("open %s: %w", from, err)
+			}
+			defer fh.Close()
+			body = fh
+			size = st.Size()
+		case cmd.Flags().Changed("content"):
+			body = bytes.NewReader([]byte(content))
+			size = int64(len(content))
+		default:
+			buf, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("read stdin: %w", err)
+			}
+			body = bytes.NewReader(buf)
+			size = int64(len(buf))
+		}
+
+		// putBytes lives in cmd_crew_files.go in the same package; it
+		// handles base URL, auth, workspace_id injection without forcing
+		// the body through json.Marshal (which would corrupt binaries).
+		if err := putBytes(cmd.Context(), client,
+			"/api/v1/agents/"+url.PathEscape(agentID)+"/files/save?path="+url.QueryEscape(args[1]),
+			body); err != nil {
+			return err
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Wrote %d bytes to %s in agent %s.", size, args[1], args[0]))
+		return nil
+	},
+}
+
 func init() {
 	agentFilesCmd.Flags().String("download", "", "Download this specific file instead of listing")
 	agentFilesCmd.Flags().String("out", "", "Output path for --download (default: basename of file, '-' for stdout)")
@@ -336,7 +414,11 @@ func init() {
 	jqExprFlag(agentInboxCmd)
 	jqExprFlag(agentGitLogCmd)
 
+	agentFileWriteCmd.Flags().String("content", "", "Inline content string (alternative to stdin / --from)")
+	agentFileWriteCmd.Flags().String("from", "", "Local file path to upload (alternative to stdin / --content)")
+
 	agentCmd.AddCommand(agentFilesCmd)
 	agentCmd.AddCommand(agentInboxCmd)
 	agentCmd.AddCommand(agentGitLogCmd)
+	agentCmd.AddCommand(agentFileWriteCmd)
 }

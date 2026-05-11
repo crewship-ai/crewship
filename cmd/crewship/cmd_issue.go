@@ -339,6 +339,13 @@ func init() {
 	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent or user")
 	issueCreateCmd.Flags().String("labels", "", "Comma-separated label IDs")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
+	// PR #292 panel parity: project/milestone/parent/estimate/sort-order/routine-id
+	issueCreateCmd.Flags().String("project-id", "", "Attach to a project (ID)")
+	issueCreateCmd.Flags().String("milestone-id", "", "Attach to a milestone (ID)")
+	issueCreateCmd.Flags().String("parent-issue-id", "", "Make this a sub-issue of the given parent (issue ID)")
+	issueCreateCmd.Flags().Int("estimate", 0, "Effort estimate (story points or hours, depending on workspace)")
+	issueCreateCmd.Flags().Float64("sort-order", 0, "Manual sort order within a list (lower = top)")
+	issueCreateCmd.Flags().String("routine-id", "", "Bind to a routine (pipeline ID)")
 
 	// issue update flags
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -348,6 +355,13 @@ func init() {
 	issueUpdateCmd.Flags().String("assignee", "", "Assignee agent slug")
 	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent or user")
 	issueUpdateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
+	// PR #292 panel parity. Empty string on project/milestone/parent/routine clears it.
+	issueUpdateCmd.Flags().String("project-id", "", "Project ID (empty string = unlink)")
+	issueUpdateCmd.Flags().String("milestone-id", "", "Milestone ID (empty string = unlink)")
+	issueUpdateCmd.Flags().String("parent-issue-id", "", "Parent issue ID (empty string = make top-level)")
+	issueUpdateCmd.Flags().Int("estimate", 0, "Effort estimate")
+	issueUpdateCmd.Flags().Float64("sort-order", 0, "Manual sort order")
+	issueUpdateCmd.Flags().String("routine-id", "", "Routine (pipeline) ID; empty string = unbind")
 
 	// issue review flags
 	issueReviewCmd.Flags().String("action", "", "Review action: approve or request_changes (required)")

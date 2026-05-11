@@ -11,27 +11,93 @@ import (
 // approvalsCmd groups the human-in-the-loop approval workflow commands.
 // Mirrors the web UI approvals queue; list is safe for any member while
 // approve/deny require OWNER or ADMIN role server-side (403 otherwise).
-//
-// NOTE: `cancel` is deliberately absent — the backend does not expose a
-// cancel endpoint yet. Track its arrival and add the subcommand when
-// `POST /api/v1/approvals/{id}/cancel` lands.
 var approvalsCmd = &cobra.Command{
 	Use:   "approvals",
-	Short: "List and decide pending human-in-the-loop approval requests",
+	Short: "List, inspect, and decide pending human-in-the-loop approval requests",
 	Long: `Manage the approval queue — the set of agent-initiated actions that
 require a human decision (OWNER/ADMIN) before the agent can proceed.
 
 Examples:
   crewship approvals list
   crewship approvals list --status approved --limit 100
+  crewship approvals get <id>
   crewship approvals approve <id> --comment "looks safe"
   crewship approvals deny <id> --comment "wrong mission"
 
 Subcommand status:
   list      — live (GET /api/v1/approvals)
+  get       — live (GET /api/v1/approvals/{id})
   approve   — live (POST /api/v1/approvals/{id}/decide)
-  deny      — live (POST /api/v1/approvals/{id}/decide)
-  cancel    — backend endpoint pending; not yet available on the CLI.`,
+  deny      — live (POST /api/v1/approvals/{id}/decide)`,
+}
+
+// approvalsGetCmd fetches a single approval request by ID. Used by:
+//   - the web UI's detail drawer (same endpoint),
+//   - shell scripts that need to inspect the full payload (kind, args,
+//     reason, decision metadata) before deciding,
+//   - deep-link resolution from Slack/Linear notifications.
+//
+// Output respects --format. In text mode we render a key/value list
+// because approval payloads contain free-form structured data that
+// doesn't fit a fixed-column table.
+var approvalsGetCmd = &cobra.Command{
+	Use:   "get <id>",
+	Short: "Fetch a single approval request by ID",
+	Long: `Fetch one approval request and render its full detail (kind, args,
+reason, decision metadata). The entry is workspace-scoped — IDs from
+other workspaces return 404.
+
+Examples:
+  crewship approvals get apr_abc123
+  crewship approvals get apr_abc123 --format json | jq .args`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/approvals/" + url.PathEscape(args[0]))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var entry map[string]any
+		if err := cli.ReadJSON(resp, &entry); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(entry)
+		}
+		if f.Format == "yaml" {
+			return f.YAML(entry)
+		}
+
+		// Text mode: print canonical fields up top, then dump any extra
+		// keys verbatim so an evolving server payload still renders
+		// something useful without code changes here.
+		canon := []string{"id", "status", "kind", "reason", "crew_id", "agent_id", "mission_id",
+			"requested_by", "decided_by", "decided_at", "comment", "created_at", "updated_at"}
+		printed := map[string]bool{}
+		for _, k := range canon {
+			if v, ok := entry[k]; ok && v != nil && fmt.Sprintf("%v", v) != "" {
+				fmt.Printf("  %s%-14s%s %v\n", cli.Dim, k, cli.Reset, v)
+				printed[k] = true
+			}
+		}
+		for k, v := range entry {
+			if printed[k] || v == nil {
+				continue
+			}
+			fmt.Printf("  %s%-14s%s %v\n", cli.Dim, k, cli.Reset, v)
+		}
+		return nil
+	},
 }
 
 var approvalsListCmd = &cobra.Command{
@@ -184,6 +250,7 @@ func init() {
 	approvalsDenyCmd.Flags().String("comment", "", "Optional comment recorded with the decision")
 
 	approvalsCmd.AddCommand(approvalsListCmd)
+	approvalsCmd.AddCommand(approvalsGetCmd)
 	approvalsCmd.AddCommand(approvalsApproveCmd)
 	approvalsCmd.AddCommand(approvalsDenyCmd)
 	approvalsCmd.AddCommand(approvalsResetAutoTuningCmd)
