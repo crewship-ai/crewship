@@ -73,7 +73,7 @@ export function IssueRoutineBinder({
   if (routines.length === 0) return null
 
   return (
-    <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+    <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
       <SectionHeader
         title="Routine"
         open={routineSectionOpen}

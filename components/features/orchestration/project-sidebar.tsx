@@ -137,7 +137,7 @@ export function ProjectSidebar({
   return (
     <div className="p-4 space-y-1">
       {/* ── Properties ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+      <div className="rounded-lg border border-white/[0.04] bg-background">
         <SectionHeader
           title="Properties"
           open={propertiesOpen}
@@ -367,7 +367,7 @@ export function ProjectSidebar({
       </div>
 
       {/* ── Labels ─────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+      <div className="rounded-lg border border-white/[0.04] bg-background">
         <SectionHeader
           title="Labels"
           open={true}
@@ -394,7 +394,7 @@ export function ProjectSidebar({
       </div>
 
       {/* ── Milestones ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+      <div className="rounded-lg border border-white/[0.04] bg-background">
       <SectionHeader
         title={`Milestones${milestones.length > 0 ? ` (${milestones.length})` : ""}`}
         open={milestonesOpen}
@@ -514,7 +514,7 @@ export function ProjectSidebar({
       </div>
 
       {/* ── Progress ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+      <div className="rounded-lg border border-white/[0.04] bg-background">
         <SectionHeader
           title="Progress"
           open={progressOpen}
@@ -662,7 +662,7 @@ export function ProjectSidebar({
       </div>
 
       {/* ── Activity ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+      <div className="rounded-lg border border-white/[0.04] bg-background">
         <SectionHeader
           title="Activity"
           open={activityOpen}

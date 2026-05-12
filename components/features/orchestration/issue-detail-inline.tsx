@@ -379,7 +379,7 @@ export function IssueDetailInline({
           />
 
           {/* ── Labels section ───────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
             <SectionHeader
               title="Labels"
               open={labelsOpen}
@@ -489,7 +489,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Project section ────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
             <SectionHeader
               title="Project"
               open={projectOpen}

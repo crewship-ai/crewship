@@ -8,6 +8,7 @@ import {
   type EdgeProps,
 } from "@xyflow/react"
 import { cn } from "@/lib/utils"
+import { BRAND } from "@/lib/colors"
 import type { TraceDataFlowEdgeData } from "@/lib/trace/types"
 
 // TraceDataFlowEdge — labeled bezier edge for "data flowed from
@@ -51,7 +52,7 @@ function TraceDataFlowEdgeBase(props: EdgeProps) {
   })
 
   const active = d?.active ?? false
-  const stroke = "rgb(96, 165, 250)" // blue-400
+  const stroke = BRAND.primary
   const strokeWidth = 2.5
 
   return (
