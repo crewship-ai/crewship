@@ -70,9 +70,9 @@ function formatDuration(ms: number): string {
 const TASK_BAR_STYLES: Record<string, React.CSSProperties> = {
   COMPLETED: { background: "rgba(16,185,129,0.18)", border: "1px solid rgba(16,185,129,0.4)", color: "#6ee7b7" },
   IN_PROGRESS: {
-    background: "linear-gradient(90deg, #1d4ed8 0%, #3b82f6 40%, #60a5fa 60%, #3b82f6 100%)",
+    background: "linear-gradient(90deg, #0E6BE8 0%, #1E7BFE 40%, #5DA1FF 60%, #1E7BFE 100%)",
     backgroundSize: "300% 100%",
-    border: "1px solid rgba(59,130,246,0.5)",
+    border: "1px solid rgba(30,123,254,0.5)",
     color: "#fff",
     animation: "shimmer 2.5s linear infinite",
   },
