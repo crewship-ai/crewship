@@ -63,7 +63,7 @@ const TRIGGER_VISUAL = { Icon: Zap, label: "trigger", tint: "text-orange-300" }
 const STATUS_RING: Record<StepStatus, { ring: string; bg: string }> = {
   pending: { ring: "ring-1 ring-white/[0.08]", bg: "bg-card" },
   running: {
-    ring: "ring-2 ring-blue-400/60 shadow-[0_0_20px_rgba(59,130,246,0.25)]",
+    ring: "ring-2 ring-primary/60 shadow-[0_0_20px_rgba(30,123,254,0.25)]",
     bg: "bg-card",
   },
   waiting: {

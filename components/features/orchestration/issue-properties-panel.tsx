@@ -67,7 +67,7 @@ export function IssuePropertiesPanel({ issue, workspaceId, patchIssue }: IssuePr
   }, [issue.crew_id, workspaceId])
 
   return (
-    <div className="mt-2 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+    <div className="mt-2 mx-2 rounded-lg border border-white/[0.04] bg-background">
       <SectionHeader
         title="Properties"
         open={propertiesOpen}

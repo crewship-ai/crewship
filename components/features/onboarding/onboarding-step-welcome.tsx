@@ -2,6 +2,7 @@
 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 
 export interface StepWelcomeProps {
   workspaceName: string
@@ -15,6 +16,9 @@ export function StepWelcome({
   return (
     <div className="space-y-4">
       <div className="text-center space-y-2">
+        <div className="flex justify-center mb-2">
+          <CrewshipLogoTile />
+        </div>
         <h2 className="text-lg font-semibold">Welcome to Crewship!</h2>
         <p className="text-sm text-muted-foreground">
           Let&apos;s set up your workspace and get your first AI agent running in under a minute.

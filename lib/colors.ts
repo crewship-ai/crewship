@@ -1,7 +1,38 @@
 /**
  * Centralized color definitions — single source of truth.
  * All status, crew, edge, priority, and semantic colors live here.
+ *
+ * For brand colors prefer Tailwind utility classes (`bg-primary`,
+ * `text-primary`, `border-primary`) — they read CSS variables
+ * defined in app/globals.css and track theme changes automatically.
+ *
+ * The literal hex values in `BRAND` below exist ONLY for cases where
+ * the renderer cannot consume CSS variables: rgba shadow strings,
+ * dynamic SVG stroke/fill props, third-party canvas libraries, etc.
+ * If you can render with a Tailwind class, do that instead — the
+ * BRAND constants exist to avoid scattered hex literals, not as the
+ * default styling path.
  */
+
+// ── Brand palette ── (1:1 with --primary / --primary-hover / --info
+// CSS vars in app/globals.css; matches marketing site crewship-web)
+
+export const BRAND = {
+  /** Primary brand blue — dark-mode --primary. Use `bg-primary` in TSX. */
+  primary: "#1E7BFE",
+  /** Hover-state shift of brand blue. */
+  primaryHover: "#3D8FFE",
+  /** Light-mode primary — deeper variant for white-bg legibility. */
+  primaryLight: "#0E6BE8",
+  /** Info / lighter sibling — for journal entries, sparkbars, queued chips. */
+  info: "#5DA1FF",
+} as const
+
+/** Brand blue as `rgba()` — for shadow/glow strings that can't use CSS vars.
+ *  Usage: `box-shadow: 0 0 12px ${BRAND_RGBA(0.22)};` */
+export function BRAND_RGBA(alpha: number): string {
+  return `rgba(30, 123, 254, ${alpha})`
+}
 
 // ── Task/mission/agent status colors ──
 
