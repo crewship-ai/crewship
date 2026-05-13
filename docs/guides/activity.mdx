@@ -14,6 +14,18 @@ The intent is "one canvas, no switching" — open `/activity`, pick a run from t
 
 Architecturally, Activity is a thin reactive shell over the journal: the run + DSL payload comes from `/api/v1/runs/{id}`, realtime `pipeline.step.*` and `pipeline.waitpoint.*` events from the workspace WebSocket channel refresh that payload on each tick, and `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) rebuilds the React Flow node array on the next render. No imperative graph mutation, no per-event DOM diffing — the canvas is a function of run state, and the framework handles the diff.
 
+## When to use it
+
+Reach for `/activity` in these situations — every other surface either answers a different question or makes the answer slower to find:
+
+- **A run is stuck and you don't know which step.** Open the canvas, watch which node is in the amber `waiting` ring or pulsing blue `running` state for an unreasonable time. The trace graph makes "where did execution park" a visual question, not a log-grep question.
+- **A `wait` step needs approval and you don't want to context-switch.** Inline Approve / Deny on the node body is the canonical resolution path — same `waitpointDecide` helper as Inbox, so either surface clears the badge on the other.
+- **You're chasing a regression and want it scoped fast.** Filter the left rail to `failed` + `last 24h`, group by routine, and the rail rolls 200 failed runs of `daily-etl` into one expandable parent so a one-off outlier doesn't get drowned by an ongoing flake.
+- **You're hunting a cost or latency spike.** Toggle the heatmap to Cost or Time. The single dark-bordered node in the chain is the `agent_run` or `http` step that ate the budget; no per-node math required.
+- **You want to share *exactly what you're looking at* with a peer.** The URL (`/activity?run=<id>&step=<id>`) is the single source of truth for selection, so a copy-paste reconstructs the same canvas, the same selected node, and the same detail panel on someone else's screen.
+
+If you instead want to *author* a routine, look in [Routines](/guides/routines); to triage your own personal queue of waitpoints/escalations across all workspaces, use [Inbox](/guides/inbox); to read the underlying event log, use the [Crew Journal](/guides/crew-journal) API directly.
+
 ## The trace graph
 
 When you select a run, the canvas builds a directed graph from the routine's DSL and the run's recorded state:
