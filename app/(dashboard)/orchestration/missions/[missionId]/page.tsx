@@ -1,14 +1,11 @@
-import { MissionModesClient } from "./mission-modes-client"
+import { OrchestrationMissionRedirect } from "./redirect-client"
 
-/**
- * Static-export stub — dynamic missions are resolved client-side at
- * runtime. The placeholder keeps `next build --output=export` happy
- * for the orchestration mission detail route.
- */
 export function generateStaticParams() {
   return [{ missionId: "_" }]
 }
 
-export default function OrchestrationMissionPage() {
-  return <MissionModesClient />
+// Missions UI retired; deep links redirect to /activity (the unified
+// run surface). Stub kept one release for bookmark compat.
+export default function Page() {
+  return <OrchestrationMissionRedirect />
 }

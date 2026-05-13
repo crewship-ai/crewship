@@ -18,8 +18,11 @@ import Link from "next/link"
 import { cn } from "@/lib/utils"
 import { useInbox, type InboxItem } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
+import { ListRow } from "@/components/ui/list-row"
+import { TabBar } from "@/components/ui/tab-bar"
+import { ListRowSkeleton } from "@/components/ui/skeletons"
+import { EmptyState as PageEmptyState } from "@/components/layout/empty-state"
 import { toast } from "sonner"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import { waitpointDecide } from "@/lib/api/waitpoints"
@@ -82,41 +85,40 @@ export function InboxList() {
         </div>
 
         {/* State filter */}
-        <div className="flex shrink-0 gap-0 border-b border-white/[0.06]">
-          <FilterTab
-            label="Unread"
+        <TabBar
+          value={stateFilter}
+          onValueChange={(v) => setStateFilter(v as StateFilter)}
+          layoutId="inbox-filter-indicator"
+          ariaLabel="Filter inbox by state"
+          className="shrink-0 [&>button]:flex-1"
+        >
+          <TabBar.Item
+            value="unread"
             count={stateFilter === "unread" ? items.length : counts.unread}
-            active={stateFilter === "unread"}
-            onClick={() => setStateFilter("unread")}
-          />
-          <FilterTab
-            label="All"
-            count={stateFilter === "all" ? items.length : null}
-            active={stateFilter === "all"}
-            onClick={() => setStateFilter("all")}
-          />
-          <FilterTab
-            label="Resolved"
+          >
+            Unread
+          </TabBar.Item>
+          <TabBar.Item value="all" count={stateFilter === "all" ? items.length : null}>
+            All
+          </TabBar.Item>
+          <TabBar.Item
+            value="resolved"
             count={stateFilter === "resolved" ? items.length : null}
-            active={stateFilter === "resolved"}
-            onClick={() => setStateFilter("resolved")}
-          />
-        </div>
+          >
+            Resolved
+          </TabBar.Item>
+        </TabBar>
 
         {/* List */}
         <div className="flex-1 overflow-y-auto">
           {loading && items.length === 0 ? (
-            <div className="space-y-1 p-3">
-              {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-14 w-full rounded-md" />
-              ))}
-            </div>
+            <ListRowSkeleton rows={3} className="p-3" />
           ) : error ? (
             <div className="p-6 text-center text-xs text-rose-300">
               Inbox unavailable: {error}
             </div>
           ) : items.length === 0 ? (
-            <EmptyState filter={stateFilter} />
+            <InboxEmpty filter={stateFilter} />
           ) : (
             <ul className="divide-y divide-white/[0.04]">
               {items.map((item) => (
@@ -139,52 +141,41 @@ export function InboxList() {
 
       {/* ── Detail panel ───────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto bg-background">
-        {selected ? (
-          <InboxDetail
-            item={selected}
-            onResolve={async (action) => {
-              await patch(selected.id, "resolved", action)
-              toast.success(`Marked as ${action}`)
-              refresh()
-            }}
-            onMarkUnread={() => patch(selected.id, "unread")}
-          />
-        ) : (
-          <DetailEmpty />
-        )}
+        <AnimatePresence mode="wait">
+          {selected ? (
+            <motion.div
+              key={selected.id}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+              className="h-full"
+            >
+              <InboxDetail
+                item={selected}
+                onResolve={async (action) => {
+                  await patch(selected.id, "resolved", action)
+                  toast.success(`Marked as ${action}`)
+                  refresh()
+                }}
+                onMarkUnread={() => patch(selected.id, "unread")}
+              />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="h-full"
+            >
+              <DetailEmpty />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
-  )
-}
-
-function FilterTab({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string
-  count: number | null
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors",
-        active
-          ? "border-blue-400 text-blue-400"
-          : "border-transparent text-muted-foreground hover:text-foreground/80",
-      )}
-    >
-      <span>{label}</span>
-      {count !== null && (
-        <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] tabular-nums text-foreground/50">
-          {count}
-        </span>
-      )}
-    </button>
   )
 }
 
@@ -200,22 +191,11 @@ function InboxRow({
   const meta = KIND_META[item.kind]
   const Icon = meta.icon
   return (
-    <motion.li
-      layout
-      onClick={onSelect}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault()
-          onSelect()
-        }
-      }}
+    <ListRow
+      selected={selected}
+      onSelect={onSelect}
       className={cn(
-        "flex cursor-pointer items-start gap-2 px-3 py-2.5 transition-colors",
-        selected
-          ? "border-l-2 border-blue-500 bg-blue-500/10"
-          : "border-l-2 border-transparent hover:bg-white/[0.02]",
+        "items-start gap-2 px-3 py-2.5",
         item.state === "resolved" && "opacity-60",
       )}
     >
@@ -246,7 +226,7 @@ function InboxRow({
         </div>
       </div>
       <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/30" />
-    </motion.li>
+    </ListRow>
   )
 }
 
@@ -537,28 +517,35 @@ function KindActions({
   }
 }
 
-function EmptyState({ filter }: { filter: StateFilter }) {
+function InboxEmpty({ filter }: { filter: StateFilter }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-      <InboxIcon className="h-8 w-8 text-muted-foreground/30" />
-      <div className="text-sm font-medium">
-        {filter === "unread" ? "All caught up" : filter === "resolved" ? "No resolved items yet" : "Nothing here"}
-      </div>
-      <p className="max-w-xs text-xs text-muted-foreground">
-        {filter === "unread"
+    <PageEmptyState
+      size="inline"
+      icon={InboxIcon}
+      title={
+        filter === "unread"
+          ? "All caught up"
+          : filter === "resolved"
+            ? "No resolved items yet"
+            : "Nothing here"
+      }
+      description={
+        filter === "unread"
           ? "Agents have nothing waiting on you. New waitpoints, escalations, and failed runs will appear here."
-          : "Items will show up as they get resolved."}
-      </p>
-    </div>
+          : "Items will show up as they get resolved."
+      }
+    />
   )
 }
 
 function DetailEmpty() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 p-12 text-center">
-      <InboxIcon className="h-10 w-10 text-muted-foreground/20" />
-      <div className="text-sm text-muted-foreground/60">Select an item to see details</div>
-    </div>
+    <PageEmptyState
+      size="inline"
+      icon={InboxIcon}
+      title="Select an item"
+      description="Pick a waitpoint, escalation, failed run, or message on the left to see details."
+    />
   )
 }
 
@@ -576,5 +563,3 @@ function relTime(iso?: string) {
   return `${days}d ago`
 }
 
-// Suppress unused warning when AnimatePresence is only used on motion.li
-void AnimatePresence

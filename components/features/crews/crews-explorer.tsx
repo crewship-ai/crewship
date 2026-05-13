@@ -185,8 +185,8 @@ export function CrewsExplorer({
                     className={cn(
                       "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors group",
                       isSelected
-                        ? "bg-blue-500/10 border-l-2 border-blue-400"
-                        : "hover:bg-white/[0.04] border-l-2 border-transparent",
+                        ? "row-interactive row-selected"
+                        : "row-interactive row-hover",
                     )}
                     onClick={() => {
                       onCrewSelect(crew.id)
@@ -241,8 +241,8 @@ export function CrewsExplorer({
                         className={cn(
                           "w-full flex items-center gap-2 pl-9 pr-2 py-1 rounded-md text-left transition-colors",
                           isAgentSelected
-                            ? "bg-blue-500/10 border-l-2 border-blue-400"
-                            : "hover:bg-white/[0.04] border-l-2 border-transparent",
+                            ? "row-interactive row-selected"
+                            : "row-interactive row-hover",
                         )}
                         onClick={() => onAgentSelect(agent.id)}
                       >
@@ -287,10 +287,8 @@ export function CrewsExplorer({
                       key={agent.id}
                       aria-current={isAgentSelected ? "true" : undefined}
                       className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1 rounded-md text-left transition-colors",
-                        isAgentSelected
-                          ? "bg-blue-500/10 border-l-2 border-blue-400"
-                          : "hover:bg-white/[0.04] border-l-2 border-transparent",
+                        "w-full px-2 py-1 rounded-md text-left items-center gap-2",
+                        isAgentSelected ? "row-interactive row-selected" : "row-interactive row-hover",
                       )}
                       onClick={() => onAgentSelect(agent.id)}
                     >

@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Style 4 — Datadog/Grafana metrics-first</title>
+<style>
+  :root {
+    --bg: #0a0c14;
+    --bg-card: #121622;
+    --bg-elev: #1a2030;
+    --border: rgba(255,255,255,0.06);
+    --border-2: rgba(255,255,255,0.12);
+    --text: #e8edf5;
+    --muted: rgba(232,237,245,0.58);
+    --faint: rgba(232,237,245,0.32);
+    --accent: #6b9aff;
+    --green: #34d399;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --violet: #a78bfa;
+    --teal: #2dd4bf;
+    --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body { margin:0; padding:0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 12.5px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+
+  .wrap { padding: 14px 18px; }
+
+  /* Header strip ultra-compact */
+  .head {
+    display:flex; align-items:center; gap: 14px; padding: 10px 14px; margin-bottom: 12px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-card);
+  }
+  .head .badge { width: 36px; height: 36px; border-radius: 8px; background: rgba(52,211,153,0.12); color: var(--green); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+  .head h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  .head .slug { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .head .pills { display:flex; gap: 5px; align-items: center; }
+  .pill { display:inline-flex; align-items:center; gap: 4px; font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 500; }
+  .pill.green { background: rgba(52,211,153,0.12); color: var(--green); }
+  .pill.outline { border: 1px solid var(--border-2); color: var(--muted); }
+  .pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .head .actions { display:flex; gap: 4px; margin-left: auto; }
+  .btn { display:inline-flex; align-items:center; gap: 5px; padding: 5px 10px; font-size: 11.5px; border-radius: 5px; cursor: pointer; border: 1px solid var(--border-2); background: var(--bg-elev); color: var(--text); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 500; }
+  .btn:hover { filter: brightness(1.1); }
+
+  /* Time range selector */
+  .timebar { display:flex; align-items:center; gap: 6px; margin-bottom: 12px; padding: 6px 12px; background: var(--bg-card); border:1px solid var(--border); border-radius: 6px; font-size: 11px; }
+  .timebar .label { color: var(--muted); margin-right: 4px; }
+  .timebar .opt { padding: 3px 9px; border-radius: 4px; color: var(--muted); cursor: pointer; }
+  .timebar .opt:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+  .timebar .opt.active { background: rgba(107,154,255,0.12); color: var(--accent); }
+  .timebar .right { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 11px; }
+
+  /* Big KPI strip */
+  .kpis { display:grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 12px; }
+  .kpi { padding: 10px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+  .kpi .l { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .kpi .v { font-size: 24px; font-weight: 700; margin: 4px 0 0; font-variant-numeric: tabular-nums; line-height: 1; }
+  .kpi .u { font-size: 11px; color: var(--muted); margin-left: 2px; }
+  .kpi.green .v { color: var(--green); }
+  .kpi.amber .v { color: var(--amber); }
+
+  /* Panel grid */
+  .panels { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .panels.row2 { grid-template-columns: 1fr 1fr 1fr; }
+  .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+  .panel .h { display:flex; align-items: center; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+  .panel .h .t { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; flex:1; }
+  .panel .h .ctrl { font-size: 10px; color: var(--muted); padding: 2px 6px; border-radius: 3px; cursor: pointer; font-family: var(--mono); }
+  .panel .h .ctrl:hover { background: rgba(255,255,255,0.04); }
+  .panel .body { padding: 12px; }
+
+  /* SVG line chart */
+  .chart { height: 160px; }
+  .chart svg { width: 100%; height: 100%; }
+  .gauge { width: 100%; aspect-ratio: 1; max-width: 140px; margin: 0 auto; }
+
+  /* Bar list */
+  .bars { display:flex; flex-direction: column; gap: 8px; }
+  .bar-row { display:grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 11px; }
+  .bar-row .meta { display:flex; align-items: center; gap: 6px; }
+  .bar-row .v { color: var(--text); font-variant-numeric: tabular-nums; font-family: var(--mono); }
+  .bar-row .bar { grid-column: 1 / -1; height: 4px; background: rgba(255,255,255,0.04); border-radius: 2px; overflow: hidden; }
+  .bar-row .bar > span { display:block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--teal)); border-radius: 2px; }
+
+  /* IO compact heatmap-like */
+  .io-mini { display:flex; flex-direction: column; gap: 6px; }
+  .io-mini .row { display:grid; grid-template-columns: 22px 1fr auto; gap: 8px; padding: 6px; border: 1px solid var(--border); border-radius: 4px; align-items: center; font-size: 11px; background: rgba(255,255,255,0.01); }
+  .io-mini .row .arrow { color: var(--accent); font-family: var(--mono); }
+  .io-mini .row .name { font-family: var(--mono); font-weight: 600; color: var(--text); }
+  .io-mini .row .type { font-family: var(--mono); color: var(--faint); font-size: 10px; padding: 1px 5px; background: rgba(107,154,255,0.1); border-radius: 3px; }
+
+  /* Runs feed strip */
+  .feed { display: flex; flex-direction: column; }
+  .feed-row { display:grid; grid-template-columns: 14px 1fr auto auto; gap: 10px; padding: 6px 12px; border-bottom: 1px dashed var(--border); font-size: 11.5px; align-items: center; }
+  .feed-row:last-child { border-bottom: 0; }
+  .feed-row .dot-sm { width: 8px; height: 8px; border-radius: 50%; }
+  .feed-row .dot-sm.green { background: var(--green); }
+  .feed-row .id { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+  .feed-row .when { color: var(--faint); font-size: 10px; }
+  .feed-row .dur { color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+  /* Footer panel actions */
+  .footer { display:grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .footer .panel .body { display:flex; flex-direction: column; gap: 4px; font-size: 11px; }
+  .kv { display:flex; justify-content:space-between; padding: 3px 0; }
+  .kv .k { color: var(--muted); }
+  .kv .v { color: var(--text); font-family: var(--mono); font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Compact header -->
+    <div class="head">
+      <div class="badge">✓</div>
+      <div>
+        <h1>Eval: faithfulness (RAG)</h1>
+        <div class="slug">eval-faithfulness-rag</div>
+      </div>
+      <div class="pills">
+        <span class="pill green"><span class="dot"></span>healthy</span>
+        <span class="pill outline">DSL v1.0</span>
+        <span class="pill outline">step×1</span>
+      </div>
+      <div class="actions">
+        <button class="btn primary">▶ Run</button>
+        <button class="btn">⚗ Test</button>
+        <button class="btn">○ Dry</button>
+        <button class="btn">⋯</button>
+      </div>
+    </div>
+
+    <!-- Time bar -->
+    <div class="timebar">
+      <span class="label">Range:</span>
+      <span class="opt">1h</span>
+      <span class="opt">24h</span>
+      <span class="opt active">7d</span>
+      <span class="opt">30d</span>
+      <span class="opt">all</span>
+      <span class="right">refreshed <b>15s ago</b> · auto-refresh ◯</span>
+    </div>
+
+    <!-- 6 KPIs -->
+    <div class="kpis">
+      <div class="kpi">
+        <div class="l">Runs</div>
+        <div class="v">7</div>
+      </div>
+      <div class="kpi green">
+        <div class="l">Pass rate</div>
+        <div class="v">100<span class="u">%</span></div>
+      </div>
+      <div class="kpi">
+        <div class="l">P50 dur</div>
+        <div class="v">42.1<span class="u">s</span></div>
+      </div>
+      <div class="kpi">
+        <div class="l">P99 dur</div>
+        <div class="v">45.2<span class="u">s</span></div>
+      </div>
+      <div class="kpi amber">
+        <div class="l">Total cost</div>
+        <div class="v">$0.142</div>
+      </div>
+      <div class="kpi">
+        <div class="l">Tokens</div>
+        <div class="v">12.4<span class="u">k</span></div>
+      </div>
+    </div>
+
+    <!-- Charts panel row 1 -->
+    <div class="panels">
+      <div class="panel">
+        <div class="h">
+          <span class="t">📈 Runs · success vs failed</span>
+          <span class="ctrl">stack</span>
+          <span class="ctrl">avg</span>
+          <span class="ctrl">share</span>
+        </div>
+        <div class="body">
+          <div class="chart">
+            <svg viewBox="0 0 600 160" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="grad-green" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#34d399" stop-opacity="0.5"/>
+                  <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+                </linearGradient>
+                <pattern id="grid" width="60" height="40" patternUnits="userSpaceOnUse">
+                  <path d="M 60 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+                </pattern>
+              </defs>
+              <rect width="600" height="160" fill="url(#grid)"/>
+              <path d="M0,120 L60,110 L120,80 L180,90 L240,40 L300,55 L360,20 L420,30 L480,15 L540,45 L600,35 L600,160 L0,160 Z" fill="url(#grad-green)" />
+              <path d="M0,120 L60,110 L120,80 L180,90 L240,40 L300,55 L360,20 L420,30 L480,15 L540,45 L600,35" fill="none" stroke="#34d399" stroke-width="1.5" />
+              <text x="2" y="14" font-size="9" fill="rgba(255,255,255,0.4)">runs/d</text>
+              <text x="0" y="158" font-size="9" fill="rgba(255,255,255,0.4)">May 5</text>
+              <text x="278" y="158" font-size="9" fill="rgba(255,255,255,0.4)">May 8</text>
+              <text x="555" y="158" font-size="9" fill="rgba(255,255,255,0.4)">May 11</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="h"><span class="t">⏱ Duration p50 / p99</span></div>
+        <div class="body">
+          <div class="chart">
+            <svg viewBox="0 0 300 160" preserveAspectRatio="none">
+              <pattern id="grid2" width="50" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 50 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="1"/>
+              </pattern>
+              <rect width="300" height="160" fill="url(#grid2)"/>
+              <path d="M0,90 L40,85 L80,75 L120,80 L160,72 L200,78 L240,73 L280,76 L300,74" fill="none" stroke="#a78bfa" stroke-width="1.5" />
+              <path d="M0,60 L40,55 L80,40 L120,50 L160,32 L200,42 L240,30 L280,35 L300,33" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="3 2" />
+              <text x="4" y="14" font-size="9" fill="rgba(255,255,255,0.4)">s</text>
+              <circle cx="280" cy="76" r="2" fill="#a78bfa"/>
+              <text x="287" y="79" font-size="9" fill="#a78bfa">p50</text>
+              <circle cx="280" cy="35" r="2" fill="#fbbf24"/>
+              <text x="287" y="38" font-size="9" fill="#fbbf24">p99</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="h"><span class="t">🎯 Pass rate</span></div>
+        <div class="body" style="display:flex; flex-direction: column; align-items: center; justify-content: center;">
+          <svg class="gauge" viewBox="0 0 120 120">
+            <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="14"/>
+            <circle cx="60" cy="60" r="48" fill="none" stroke="#34d399" stroke-width="14" stroke-dasharray="301.6" stroke-dashoffset="0" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+            <text x="60" y="55" font-size="24" font-weight="700" text-anchor="middle" fill="#e8edf5">100%</text>
+            <text x="60" y="74" font-size="9" text-anchor="middle" fill="rgba(255,255,255,0.5)">7 / 7</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: I/O + Recent runs + Top costs -->
+    <div class="panels row2">
+      <div class="panel">
+        <div class="h"><span class="t">⇄ I/O schema · 2 in · 1 out</span></div>
+        <div class="body">
+          <div class="io-mini">
+            <div class="row"><span class="arrow">→</span><span><span class="name">context</span></span><span class="type">string</span></div>
+            <div class="row"><span class="arrow">→</span><span><span class="name">question</span></span><span class="type">string</span></div>
+            <div class="row" style="background: rgba(52,211,153,0.05); border-color: rgba(52,211,153,0.2);"><span class="arrow" style="color: var(--green);">←</span><span><span class="name">answer</span></span><span class="type">string</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="h"><span class="t">🕐 Recent runs · 7</span></div>
+        <div class="feed">
+          <div class="feed-row"><span class="dot-sm green"></span><span class="id">cmozxcupk</span><span class="dur">44.3s</span><span class="when">22h</span></div>
+          <div class="feed-row"><span class="dot-sm green"></span><span class="id">cmozxk2t4</span><span class="dur">41.7s</span><span class="when">22h</span></div>
+          <div class="feed-row"><span class="dot-sm green"></span><span class="id">cmozx9hjq</span><span class="dur">39.4s</span><span class="when">22h</span></div>
+          <div class="feed-row"><span class="dot-sm green"></span><span class="id">cmozxbmwm</span><span class="dur">43.1s</span><span class="when">22h</span></div>
+          <div class="feed-row"><span class="dot-sm green"></span><span class="id">cmozxfhsv</span><span class="dur">40.9s</span><span class="when">22h</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="h"><span class="t">💸 Spend breakdown</span></div>
+        <div class="body">
+          <div class="bars">
+            <div class="bar-row">
+              <div class="meta"><span style="color:var(--violet)">●</span> Anthropic Opus-4.7</div>
+              <div class="v">$0.124 · 87%</div>
+              <div class="bar"><span style="width: 87%; background: linear-gradient(90deg, #a78bfa, #6b8df7);"></span></div>
+            </div>
+            <div class="bar-row">
+              <div class="meta"><span style="color:var(--teal)">●</span> Anthropic Sonnet-4.6</div>
+              <div class="v">$0.012 · 8%</div>
+              <div class="bar"><span style="width: 8%; background: linear-gradient(90deg, #2dd4bf, #34d399);"></span></div>
+            </div>
+            <div class="bar-row">
+              <div class="meta"><span style="color:var(--amber)">●</span> Anthropic Haiku-4.5</div>
+              <div class="v">$0.006 · 4%</div>
+              <div class="bar"><span style="width: 4%; background: var(--amber);"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer with metadata -->
+    <div class="footer">
+      <div class="panel">
+        <div class="h"><span class="t">Identity</span></div>
+        <div class="body">
+          <div class="kv"><span class="k">slug</span><span class="v">eval-faithfulness-rag</span></div>
+          <div class="kv"><span class="k">DSL ver</span><span class="v">1.0</span></div>
+          <div class="kv"><span class="k">hash</span><span class="v">0fa3456b…</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="h"><span class="t">Authorship</span></div>
+        <div class="body">
+          <div class="kv"><span class="k">via</span><span class="v">user api</span></div>
+          <div class="kv"><span class="k">crew</span><span class="v">Engineering</span></div>
+          <div class="kv"><span class="k">created</span><span class="v">10. 5. 2026</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="h"><span class="t">Activity</span></div>
+        <div class="body">
+          <div class="kv"><span class="k">invocations</span><span class="v">7</span></div>
+          <div class="kv"><span class="k">last invoked</span><span class="v">22h ago</span></div>
+          <div class="kv"><span class="k">steps</span><span class="v">1</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="h"><span class="t">Credentials</span></div>
+        <div class="body">
+          <div class="kv"><span class="k">anthropic</span><span class="v" style="color: var(--green);">scope: any</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

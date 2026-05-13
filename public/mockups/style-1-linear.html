@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Style 1 — Linear/Notion clean</title>
+<style>
+  :root {
+    --bg: #0e0c14;
+    --bg-card: #19171f;
+    --bg-elev: #1f1d27;
+    --border: rgba(255,255,255,0.06);
+    --border-2: rgba(255,255,255,0.10);
+    --text: #ece9f3;
+    --muted: rgba(236,233,243,0.55);
+    --faint: rgba(236,233,243,0.32);
+    --accent: #6b8df7;
+    --accent-2: #8b5cf6;
+    --green: #34d399;
+    --red: #f43f5e;
+    --amber: #f59e0b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body { margin:0; padding:0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 32px 60px; }
+
+  /* Hero */
+  .hero { display:grid; grid-template-columns: 1fr auto; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .hero-meta { display:flex; align-items:center; gap: 10px; margin-bottom: 6px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 99px; font-weight: 500; display:inline-flex; align-items:center; gap:5px; }
+  .pill.green { background: rgba(52,211,153,0.12); color: var(--green); }
+  .pill.outline { background: transparent; border:1px solid var(--border-2); color: var(--muted); }
+  .pill .dot { width:6px; height:6px; border-radius:50%; background: currentColor; }
+  .hero h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 4px; }
+  .slug { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .desc { margin-top: 12px; color: rgba(236,233,243,0.78); max-width: 720px; }
+
+  .actions { display:flex; align-items: flex-start; gap: 6px; }
+  .btn { display:inline-flex; align-items:center; gap:6px; padding: 8px 14px; font-size: 13px; border-radius: 7px; cursor:pointer; border: 1px solid var(--border-2); background: var(--bg-elev); color: var(--text); font-weight: 500; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: white; box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset, 0 6px 16px -8px rgba(107,141,247,0.6); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn .kbd { font-family: var(--mono); font-size: 10px; padding: 1px 4px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-left: 4px; }
+
+  /* 2-column layout */
+  .grid { display:grid; grid-template-columns: 1fr 280px; gap: 32px; }
+  @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+
+  /* Main column */
+  .stats { display:grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 28px; }
+  .stat { padding: 14px 16px; border-radius: 10px; background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)); border: 1px solid var(--border); }
+  .stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+  .stat .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+  .stat .sub { font-size: 11px; color: var(--faint); margin-top: 4px; }
+  .stat .v.green { color: var(--green); }
+
+  h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 28px 0 12px; font-weight: 600; display:flex; align-items:center; gap: 8px; }
+  h2.section::before { content:""; width: 14px; height:2px; background: var(--accent); border-radius: 99px; }
+
+  .io { display:flex; flex-direction: column; gap: 10px; }
+  .io-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .io-card .head { display:flex; align-items:center; gap: 10px; margin-bottom: 6px; }
+  .io-card .name { font-family: var(--mono); color: var(--accent); font-weight: 600; font-size: 13px; }
+  .io-card .type { font-family: var(--mono); color: var(--faint); font-size: 11px; padding: 1px 7px; background: rgba(107,141,247,0.08); border-radius: 4px; }
+  .io-card .desc { color: var(--muted); font-size: 12px; }
+  .io-card .val { margin-top: 8px; padding: 10px 12px; background: rgba(0,0,0,0.3); border-radius: 6px; font-family: var(--mono); font-size: 12px; color: rgba(236,233,243,0.85); border: 1px solid var(--border); }
+
+  /* Last run card with subtle hero */
+  .lastrun { background: linear-gradient(135deg, rgba(52,211,153,0.06), rgba(107,141,247,0.04)); border: 1px solid rgba(52,211,153,0.18); border-radius: 12px; padding: 18px; }
+  .lastrun .top { display:flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .lastrun .runid { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .lastrun .metrics { display:flex; gap: 14px; margin-left: auto; font-size: 11px; }
+  .lastrun .metrics span { color: var(--muted); }
+  .lastrun .metrics b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .lastrun pre { background: rgba(0,0,0,0.35); padding: 12px 14px; border-radius: 7px; font-family: var(--mono); font-size: 12px; color: rgba(236,233,243,0.92); margin: 0; max-height: 180px; overflow-y:auto; line-height: 1.6; border: 1px solid var(--border); }
+  .lastrun .tabs { display:flex; gap: 2px; margin-bottom: 8px; }
+  .lastrun .tab { font-size: 11px; padding: 4px 9px; border-radius: 4px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); cursor:pointer; color: var(--muted); display:inline-flex; align-items:center; gap: 4px; }
+  .lastrun .tab.active { background: rgba(107,141,247,0.15); color: var(--accent); border-color: rgba(107,141,247,0.3); }
+
+  /* Right rail (compact properties) */
+  .rail { padding-top: 4px; }
+  .rail-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .rail-section:last-child { border-bottom: 0; }
+  .rail-section .title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+  .rail-row { display:flex; justify-content:space-between; gap: 8px; padding: 4px 0; font-size: 12px; }
+  .rail-row .k { color: var(--muted); }
+  .rail-row .v { color: var(--text); font-family: var(--mono); font-size: 11px; max-width: 65%; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .avatar { display:inline-block; width: 18px; height: 18px; border-radius: 50%; background: linear-gradient(135deg,#8b5cf6,#6b8df7); vertical-align: middle; margin-right: 6px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Hero -->
+    <div class="hero">
+      <div>
+        <div class="hero-meta">
+          <span class="pill green"><span class="dot"></span>Completed</span>
+          <span class="pill outline">v1.0</span>
+          <span class="pill outline">workspace-visible</span>
+        </div>
+        <h1>Eval: faithfulness (RAG)</h1>
+        <div class="slug">eval-faithfulness-rag</div>
+        <p class="desc">Answer a question strictly from supplied context. Hallucinated facts are caught by the cross-family grader.</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary">▶ Run<span class="kbd">⏎</span></button>
+        <button class="btn">⚗ Test run</button>
+        <button class="btn">○ Dry run</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="main">
+        <!-- KPI tiles -->
+        <div class="stats">
+          <div class="stat">
+            <div class="k">Total runs</div>
+            <div class="v">7</div>
+            <div class="sub">across 30 days</div>
+          </div>
+          <div class="stat">
+            <div class="k">Pass rate</div>
+            <div class="v green">100%</div>
+            <div class="sub">7 of 7 succeeded</div>
+          </div>
+          <div class="stat">
+            <div class="k">Avg duration</div>
+            <div class="v">42.1s</div>
+            <div class="sub">last: 44.3s</div>
+          </div>
+          <div class="stat">
+            <div class="k">Avg cost</div>
+            <div class="v">$0.020</div>
+            <div class="sub">total: $0.142</div>
+          </div>
+        </div>
+
+        <!-- Inputs -->
+        <h2 class="section">Inputs · 2</h2>
+        <div class="io">
+          <div class="io-card">
+            <div class="head"><span class="name">context</span><span class="type">string</span></div>
+            <div class="desc">Source-of-truth document the worker may quote from.</div>
+            <div class="val">"Crewship Routines (formerly Pipelines) are workspace-scoped declarative AI workflow recipes. They were renamed in PR #282 on 2026-05-08. The DSL version is 1.0 and supports six step types: agent_run, call_pipeline, http, code, wait, and transform."</div>
+          </div>
+          <div class="io-card">
+            <div class="head"><span class="name">question</span><span class="type">string</span></div>
+            <div class="desc">Question whose answer is fully present in the context.</div>
+            <div class="val">"How many step types does the Crewship Routines DSL support, and what is the DSL version?"</div>
+          </div>
+        </div>
+
+        <!-- Outputs -->
+        <h2 class="section">Outputs · 1</h2>
+        <div class="io">
+          <div class="io-card">
+            <div class="head"><span class="name">answer</span><span class="type">string</span></div>
+          </div>
+        </div>
+
+        <!-- Last run -->
+        <h2 class="section">Last run</h2>
+        <div class="lastrun">
+          <div class="top">
+            <span class="pill green"><span class="dot"></span>Completed</span>
+            <span class="runid">run_cmozxcupk000d227a468e</span>
+            <div class="metrics">
+              <span>22h ago</span>
+              <span>· duration <b>44.3s</b></span>
+              <span>· cost <b>$0.0212</b></span>
+            </div>
+          </div>
+          <div class="tabs">
+            <span class="tab active">{ } JSON</span>
+            <span class="tab">⊞ Table</span>
+          </div>
+<pre>{
+  "answer": "The Crewship Routines DSL version is 1.0 and supports six step types: agent_run, call_pipeline, http, code, wait, and transform."
+}</pre>
+        </div>
+      </div>
+
+      <!-- Right rail -->
+      <div class="rail">
+        <div class="rail-section">
+          <div class="title">Identity</div>
+          <div class="rail-row"><span class="k">DSL version</span><span class="v">1.0</span></div>
+          <div class="rail-row"><span class="k">Definition hash</span><span class="v" title="0fa3456b9f0c26fb…">0fa3456b9f0c…</span></div>
+          <div class="rail-row"><span class="k">Visibility</span><span class="v">workspace</span></div>
+        </div>
+        <div class="rail-section">
+          <div class="title">Authorship</div>
+          <div class="rail-row"><span class="k">Authored via</span><span class="v">user api</span></div>
+          <div class="rail-row"><span class="k">Crew</span><span class="v"><span class="avatar"></span>Engineering</span></div>
+          <div class="rail-row"><span class="k">Created</span><span class="v">10. 5. 2026</span></div>
+          <div class="rail-row"><span class="k">Updated</span><span class="v">10. 5. 2026</span></div>
+        </div>
+        <div class="rail-section">
+          <div class="title">Activity</div>
+          <div class="rail-row"><span class="k">Invocations</span><span class="v">7</span></div>
+          <div class="rail-row"><span class="k">Last invoked</span><span class="v">22h ago</span></div>
+          <div class="rail-row"><span class="k">Step count</span><span class="v">1</span></div>
+        </div>
+        <div class="rail-section">
+          <div class="title">Credentials</div>
+          <div class="rail-row"><span class="k">anthropic</span><span class="v">scope: any</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

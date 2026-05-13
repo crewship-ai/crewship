@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Style 3 — GitHub repo layout</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-card: #151b23;
+    --bg-elev: #1c232b;
+    --border: rgba(255,255,255,0.08);
+    --border-2: rgba(255,255,255,0.14);
+    --text: #e8ecf3;
+    --muted: rgba(232,236,243,0.65);
+    --faint: rgba(232,236,243,0.40);
+    --accent: #6b8df7;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body { margin:0; padding:0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 0 24px 64px; }
+
+  /* GitHub-style breadcrumb header */
+  .crumb-bar { padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; display:flex; align-items:center; gap: 8px; font-size: 13px; }
+  .crumb-bar a { color: var(--accent); text-decoration: none; }
+  .crumb-bar a:hover { text-decoration: underline; }
+  .crumb-bar .sep { color: var(--faint); }
+  .crumb-bar h1 { font-size: 20px; font-weight: 600; margin:0; color: var(--text); }
+  .crumb-bar .public { padding: 2px 7px; border-radius: 99px; font-size: 11px; color: var(--muted); border:1px solid var(--border-2); margin-left: 6px; }
+
+  /* "Action bar" inspired by GitHub buttons */
+  .action-bar { display:flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+  .btn { display:inline-flex; align-items:center; gap: 6px; padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border-2); background: var(--bg-elev); color: var(--text); font-weight: 500; }
+  .btn:hover { background: var(--bg-card); }
+  .btn.primary { background: #1f5128; border-color: #2b7e35; color: #c1f0c5; }
+  .btn.primary:hover { background: #226632; }
+  .btn .count { background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 99px; font-size: 11px; margin-left: 4px; font-variant-numeric: tabular-nums; }
+
+  /* Top about box */
+  .about { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-bottom: 18px; }
+  .about .desc { font-size: 14px; color: var(--text); margin-bottom: 12px; }
+  .about .meta { display:flex; flex-wrap: wrap; gap: 8px 14px; font-size: 12px; color: var(--muted); }
+  .about .meta .item { display:inline-flex; align-items:center; gap: 5px; }
+  .about .meta .item .ico { color: var(--faint); }
+  .about .meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* Insights row (commits/stars/etc analog) */
+  .insights { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .insight { padding: 14px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+  .insight .l { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .insight .v { font-size: 22px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .insight .s { font-size: 11px; color: var(--faint); margin-top: 4px; }
+  .insight .v.green { color: var(--green); }
+
+  /* Body = README + sidebar */
+  .body { display:grid; grid-template-columns: 1fr 280px; gap: 20px; }
+  @media (max-width: 880px) { .body { grid-template-columns: 1fr; } .insights { grid-template-columns: 1fr 1fr; } }
+
+  /* README card */
+  .readme { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; }
+  .readme-h { display:flex; align-items:center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); border-radius: 8px 8px 0 0; }
+  .readme-h .ico { color: var(--muted); }
+  .readme-h .name { font-weight: 600; font-size: 13px; }
+  .readme-h .right { margin-left: auto; color: var(--faint); font-size: 11px; }
+  .readme-body { padding: 18px 22px; }
+  .readme-body h2 { font-size: 16px; margin: 18px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; font-weight: 600; }
+  .readme-body h2:first-child { margin-top: 0; }
+  .readme-body h3 { font-size: 14px; margin: 14px 0 8px; font-weight: 600; }
+  .readme-body p { color: var(--muted); margin: 8px 0; }
+  .readme-body code { font-family: var(--mono); background: rgba(255,255,255,0.05); padding: 2px 5px; border-radius: 4px; font-size: 12px; color: #ffa657; }
+  .readme-body pre { background: rgba(0,0,0,0.4); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; overflow-x: auto; }
+
+  .schema-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .schema-table th, .schema-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  .schema-table th { font-weight: 600; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255,255,255,0.02); }
+  .schema-table td.name { font-family: var(--mono); color: #ffa657; font-weight: 500; }
+  .schema-table td.type { font-family: var(--mono); color: #a5d6ff; font-size: 12px; }
+  .schema-table td.desc { color: var(--muted); }
+
+  /* Right sidebar */
+  .side { display:flex; flex-direction: column; gap: 18px; }
+  .side h3 { font-size: 12px; margin: 0 0 8px; color: var(--text); font-weight: 600; }
+  .side-row { display:flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px; }
+  .side-row .k { color: var(--muted); }
+  .side-row .v { color: var(--text); font-variant-numeric: tabular-nums; max-width: 60%; text-align: right; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 11px; }
+  .topics { display:flex; flex-wrap: wrap; gap: 6px; }
+  .topic { font-size: 11px; padding: 2px 8px; background: rgba(107,141,247,0.12); color: var(--accent); border-radius: 99px; }
+  .contrib { display:flex; align-items:center; gap: 8px; padding: 4px 0; }
+  .avatar { width: 24px; height: 24px; border-radius: 50%; background: linear-gradient(135deg, #6b8df7, #a78bfa); }
+  .contrib .name { font-size: 13px; }
+  .contrib .role { font-size: 11px; color: var(--faint); }
+
+  /* Pill */
+  .pill { display:inline-flex; align-items:center; gap: 5px; font-size: 10px; padding: 2px 8px; border-radius: 99px; }
+  .pill.green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Crumb header -->
+    <div class="crumb-bar">
+      <a href="#">Routines</a>
+      <span class="sep">/</span>
+      <h1>eval-faithfulness-rag</h1>
+      <span class="public">workspace</span>
+      <span style="margin-left: auto;"><span class="pill green"><span class="dot"></span>last run completed</span></span>
+    </div>
+
+    <!-- Action bar -->
+    <div class="action-bar">
+      <button class="btn primary">▶ Run<span class="count">⏎</span></button>
+      <button class="btn">⚗ Test run</button>
+      <button class="btn">○ Dry run</button>
+      <button class="btn" style="margin-left: auto;">📝 Edit DSL</button>
+      <button class="btn">📂 Versions <span class="count">3</span></button>
+      <button class="btn">⏱ Schedules <span class="count">2</span></button>
+    </div>
+
+    <!-- About box -->
+    <div class="about">
+      <div class="desc">Answer a question strictly from supplied context. Hallucinated facts are caught by the cross-family grader.</div>
+      <div class="meta">
+        <span class="item"><span class="ico">📌</span>DSL <b>v1.0</b></span>
+        <span class="item"><span class="ico">🔖</span>head <b>v3</b></span>
+        <span class="item"><span class="ico">⚡</span><b>7</b> total invocations</span>
+        <span class="item"><span class="ico">✓</span><b>100%</b> pass rate</span>
+        <span class="item"><span class="ico">💸</span><b>$0.142</b> total spend</span>
+        <span class="item"><span class="ico">🕐</span>last run <b>22h ago</b></span>
+      </div>
+    </div>
+
+    <!-- Insights row -->
+    <div class="insights">
+      <div class="insight"><div class="l">Total runs</div><div class="v">7</div><div class="s">+2 last week</div></div>
+      <div class="insight"><div class="l">Pass rate</div><div class="v green">100%</div><div class="s">7/7 successful</div></div>
+      <div class="insight"><div class="l">Avg duration</div><div class="v">42.1s</div><div class="s">last 44.3s</div></div>
+      <div class="insight"><div class="l">Cost / run</div><div class="v">$0.020</div><div class="s">avg of 7</div></div>
+    </div>
+
+    <!-- Body: README + sidebar -->
+    <div class="body">
+      <!-- README -->
+      <div class="readme">
+        <div class="readme-h">
+          <span class="ico">📖</span>
+          <span class="name">README · Overview</span>
+          <span class="right">Anchors: Description · I/O · Last run · Versions</span>
+        </div>
+        <div class="readme-body">
+          <h2>Description</h2>
+          <p>
+            <code>eval-faithfulness-rag</code> evaluates whether an LLM answers a question strictly from a supplied
+            context. Hallucinated or out-of-context facts are flagged by a cross-family grader (e.g. Anthropic
+            generates the answer, OpenAI grades — keeps the grader independent of the answerer).
+          </p>
+
+          <h2>I/O schema</h2>
+          <h3>Inputs</h3>
+          <table class="schema-table">
+            <thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td class="name">context</td><td class="type">string</td><td class="desc">Source-of-truth document the worker may quote from.</td></tr>
+              <tr><td class="name">question</td><td class="type">string</td><td class="desc">Question whose answer is fully present in the context.</td></tr>
+            </tbody>
+          </table>
+          <h3>Outputs</h3>
+          <table class="schema-table">
+            <thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead>
+            <tbody>
+              <tr><td class="name">answer</td><td class="type">string</td><td class="desc">Verbatim or grounded synthesis of the answer.</td></tr>
+            </tbody>
+          </table>
+
+          <h2>Last run</h2>
+          <p style="display:flex; align-items:center; gap: 10px;">
+            <span class="pill green"><span class="dot"></span>Completed</span>
+            <code>run_cmozxcupk000d227a468e</code>
+            <span style="color: var(--faint); font-size: 12px;">· 22h ago · 44.3s · $0.0212</span>
+          </p>
+<pre>{
+  "answer": "The Crewship Routines DSL version is 1.0 and supports six step types: agent_run, call_pipeline, http, code, wait, and transform."
+}</pre>
+
+          <h2>Steps</h2>
+          <p>One step: <code>agent_run</code> using credential <code>anthropic</code>. See Editor tab for full YAML.</p>
+        </div>
+      </div>
+
+      <!-- Right sidebar -->
+      <div class="side">
+        <div>
+          <h3>About</h3>
+          <div class="side-row"><span class="k">DSL version</span><span class="v">1.0</span></div>
+          <div class="side-row"><span class="k">Hash</span><span class="v">0fa3456b…</span></div>
+          <div class="side-row"><span class="k">Visibility</span><span class="v">workspace</span></div>
+          <div class="side-row"><span class="k">Step count</span><span class="v">1</span></div>
+        </div>
+        <div>
+          <h3>Topics</h3>
+          <div class="topics">
+            <span class="topic">eval</span>
+            <span class="topic">rag</span>
+            <span class="topic">faithfulness</span>
+            <span class="topic">anthropic</span>
+          </div>
+        </div>
+        <div>
+          <h3>Activity</h3>
+          <div class="side-row"><span class="k">Invocations</span><span class="v">7</span></div>
+          <div class="side-row"><span class="k">Last run</span><span class="v">22h ago</span></div>
+          <div class="side-row"><span class="k">Pass rate</span><span class="v" style="color: var(--green);">100%</span></div>
+        </div>
+        <div>
+          <h3>Authored by</h3>
+          <div class="contrib">
+            <div class="avatar"></div>
+            <div>
+              <div class="name">user api</div>
+              <div class="role">Engineering · 10. 5. 2026</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <h3>Requires</h3>
+          <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+            <span style="width:24px; height:24px; border-radius: 5px; background: rgba(167,139,250,0.15); display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:11px; color: #a78bfa; font-weight:700;">An</span>
+            <div>
+              <div style="font-size:13px;">anthropic</div>
+              <div class="role">scope: any</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

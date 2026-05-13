@@ -426,7 +426,7 @@ function IssueSidebarBody({
             </Popover>
             {currentProject && (
               <a
-                href={`/orchestration/projects/${currentProject.id}`}
+                href={`/issues?project=${currentProject.id}`}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground/30 hover:text-blue-400 transition-all shrink-0"
                 title="Open project"
               >
@@ -449,7 +449,7 @@ function IssueSidebarBody({
                   className="flex items-center gap-2 w-full text-left hover:bg-accent rounded px-1.5 py-1 transition-colors"
                   onClick={() => {
                     if (rel.target_identifier) {
-                      router.push(`/orchestration/issues/${encodeURIComponent(rel.target_identifier)}`)
+                      router.push(`/issues/${encodeURIComponent(rel.target_identifier)}`)
                     }
                   }}
                 >

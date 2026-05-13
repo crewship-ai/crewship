@@ -408,7 +408,7 @@ export function CrewCanvas({
                   : "loading…"
               }
               tone={(health.openIssues ?? 0) > 0 ? "active" : "neutral"}
-              href="/orchestration"
+              href="/issues"
             />
             <HealthCard
               label="Missions"
@@ -603,8 +603,8 @@ export function CrewCanvas({
                   <span className="text-muted-foreground text-sm font-normal ml-2">{recentMissions.length}</span>
                 )}
               </h2>
-              <Link href="/orchestration" className="text-xs text-blue-300 hover:underline">
-                Open in /orchestration →
+              <Link href="/issues" className="text-xs text-blue-300 hover:underline">
+                Open in /issues →
               </Link>
             </div>
             {recentMissions.length === 0 ? (
@@ -646,8 +646,8 @@ export function CrewCanvas({
                   <span className="text-muted-foreground text-sm font-normal ml-2 font-mono uppercase">{crew.issue_prefix}</span>
                 )}
               </h2>
-              <Link href="/orchestration" className="text-xs text-blue-300 hover:underline">
-                Open in /orchestration →
+              <Link href="/issues" className="text-xs text-blue-300 hover:underline">
+                Open in /issues →
               </Link>
             </div>
             <div className="rounded-xl border border-white/8 bg-card grid grid-cols-5 divide-x divide-white/5">
@@ -665,7 +665,7 @@ export function CrewCanvas({
                 {recentIssues.map((i) => (
                   <li key={i.id}>
                     <Link
-                      href={i.identifier ? `/orchestration/issues/${encodeURIComponent(i.identifier)}` : "/orchestration"}
+                      href={i.identifier ? `/issues/${encodeURIComponent(i.identifier)}` : "/issues"}
                       className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
                     >
                       <span className={cn(

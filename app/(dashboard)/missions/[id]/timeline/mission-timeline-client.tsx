@@ -107,15 +107,15 @@ export function MissionTimelineClient() {
           variant="ghost"
           size="sm"
           className="h-7 px-2 text-xs shrink-0"
-          onClick={() => router.push("/orchestration")}
-          aria-label="Back to orchestration"
+          onClick={() => router.push("/activity")}
+          aria-label="Back to activity"
         >
           <ArrowLeft className="h-3 w-3 mr-1" /> Back
         </Button>
 
         <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
-          <Link href="/orchestration" className="hover:text-foreground transition-colors shrink-0">
-            Orchestration
+          <Link href="/activity" className="hover:text-foreground transition-colors shrink-0">
+            Activity
           </Link>
           <ChevronRight className="h-3 w-3 shrink-0 opacity-60" />
           <Link href={`/missions/${missionId}`} className="hover:text-foreground transition-colors shrink-0">

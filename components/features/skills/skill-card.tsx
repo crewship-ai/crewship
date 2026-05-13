@@ -8,6 +8,8 @@ import {
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { selection } from "@/lib/interaction"
+import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 // SkillInstalledAgent mirrors the backend skillInstalledAgent struct
@@ -153,15 +155,15 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
       onClick={() => onSelect?.(skill)}
       aria-label={`${vendor}/${skill.slug}: ${skill.description ?? "no description"}`}
       aria-pressed={selected}
+      data-selected={selected || undefined}
       // h-full + flex column lets the card stretch to fill its grid
       // cell. Combined with auto-rows-fr on the parent grid, every
       // card in the same row matches its tallest sibling — fixes the
       // visible "rozhodí se výška karet" the user pointed at.
-      className={`group w-full h-full text-left rounded-lg border transition-all duration-150 outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 flex ${
-        selected
-          ? "border-blue-400/60 bg-blue-500/[0.08]"
-          : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.16] hover:bg-white/[0.06]"
-      }`}
+      className={cn(
+        "group w-full h-full text-left flex",
+        selected ? selection.card.selected : selection.card.default,
+      )}
     >
       <Card className="border-0 bg-transparent shadow-none w-full flex flex-col">
         <CardContent className="p-4 flex flex-col h-full">

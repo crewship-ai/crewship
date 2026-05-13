@@ -1,20 +1,17 @@
 "use client"
 
-import { Calendar, Pause, Play, Webhook } from "lucide-react"
+import { useMemo } from "react"
+import { Calendar, Pause, Play, Webhook, Clock, CheckCircle2, AlertTriangle, XCircle } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import type { Pipeline } from "@/hooks/use-pipelines"
+import { Card, EmptyState, Pill } from "./_shared"
 
-// RoutinesSchedulesView — workspace-wide list of every cron schedule
-// bound to a routine. Replaces the per-routine Schedules tab inside the
-// detail panel as the primary entry point: when an operator wants to
-// know "what runs unattended this week" they look here, not at each
-// routine individually.
-//
-// Webhook triggers live on the routine itself (not as a separate row),
-// so we surface a small badge per routine with a webhook count rather
-// than mixing two trigger types into one table.
+// RoutinesSchedulesView — workspace-wide cron schedule dashboard.
+// Top: KPI strip (active / paused / firing-soon / last-failed).
+// Middle: "Firing next" upcoming list (sorted by next_run_at).
+// Bottom: Full schedules table inside a Card.
 
 interface RoutinesSchedulesViewProps {
   workspaceId: string
@@ -22,27 +19,25 @@ interface RoutinesSchedulesViewProps {
   onSelect: (slug: string) => void
 }
 
-function statusColor(status: string | undefined): string {
+function statusTone(status: string | undefined): "emerald" | "rose" | "blue" | "default" {
   switch (status?.toLowerCase()) {
     case "succeeded":
     case "success":
-      return "text-emerald-400"
+    case "completed":
+      return "emerald"
     case "failed":
     case "error":
-      return "text-rose-400"
+      return "rose"
     case "running":
-      return "text-blue-400"
+      return "blue"
     default:
-      return "text-muted-foreground"
+      return "default"
   }
 }
 
 function relativeTime(iso?: string): string {
   if (!iso) return "—"
   const d = new Date(iso)
-  // Guard against malformed timestamps from the wire — without this
-  // the formatter cascades through NaN math and renders "NaNd ago",
-  // which is worse than "—" because it looks intentional.
   if (Number.isNaN(d.getTime())) return "—"
   const diff = Date.now() - d.getTime()
   if (Math.abs(diff) < 60_000) return "just now"
@@ -63,138 +58,268 @@ export function RoutinesSchedulesView({
 }: RoutinesSchedulesViewProps) {
   const { schedules, loading, error } = usePipelineSchedules(workspaceId)
 
-  const slugByPipelineId = new Map(routines.map((r) => [r.id, r.slug]))
+  const slugByPipelineId = useMemo(() => new Map(routines.map((r) => [r.id, r.slug])), [routines])
+
+  const stats = useMemo(() => {
+    const active = schedules.filter((s) => s.enabled).length
+    const paused = schedules.length - active
+    const lastFailed = schedules.filter((s) => {
+      const t = s.last_status?.toLowerCase()
+      return t === "failed" || t === "error"
+    }).length
+    const now = Date.now()
+    const hourMs = 60 * 60 * 1000
+    const firingSoon = schedules.filter((s) => {
+      if (!s.enabled || !s.next_run_at) return false
+      const t = new Date(s.next_run_at).getTime()
+      return Number.isFinite(t) && t - now < 6 * hourMs
+    }).length
+    // Upcoming firings, soonest first, top 6
+    const upcoming = [...schedules]
+      .filter((s) => s.enabled && s.next_run_at)
+      .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
+      .slice(0, 6)
+    return { active, paused, lastFailed, firingSoon, upcoming }
+  }, [schedules])
 
   if (loading) {
     return (
-      <div className="p-6 space-y-2">
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-md" />
-        ))}
+      <div className="space-y-3 p-6">
+        <Skeleton className="h-24 w-full rounded-xl" />
+        <Skeleton className="h-40 w-full rounded-xl" />
+        <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="p-6 text-sm text-rose-400">
-        Schedules unavailable: {error}
+      <div className="p-6">
+        <Card tone="amber">
+          <div className="px-4 py-3 text-sm text-amber-300">Schedules unavailable: {error}</div>
+        </Card>
       </div>
     )
   }
 
-  // The "New schedule" entry point lives on each routine's detail
-  // panel today (Schedules tab). Surfacing a workspace-level create
-  // button here would need cross-routine plumbing we haven't built;
-  // copy below points users at the per-routine flow until that lands.
   if (schedules.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <Calendar className="h-10 w-10 text-muted-foreground/40" />
-        <div className="text-sm font-medium">No schedules yet</div>
-        <p className="max-w-md text-xs text-muted-foreground">
-          Schedules fire a saved routine on a cron expression — perfect for
-          recurring jobs like &quot;every weekday at 8am, summarize new
-          tickets.&quot; Open a routine in the List tab and use its
-          Schedules sub-tab to add one.
-        </p>
+      <div className="p-6">
+        <Card>
+          <EmptyState
+            icon={Calendar}
+            title="No schedules yet"
+            description='Schedules fire a saved routine on a cron expression — perfect for recurring jobs like "every weekday at 8am, summarize new tickets." Open a routine in the List tab and use its Schedules sub-tab to add one.'
+          />
+        </Card>
       </div>
     )
   }
 
   return (
-    <div className="h-full overflow-auto p-6">
-      <div className="mb-4">
-        <div className="text-base font-semibold">Schedules</div>
-        <div className="text-xs text-muted-foreground">
-          {schedules.length} schedule{schedules.length === 1 ? "" : "s"} across the workspace · open a routine to add or edit
+    <div className="h-full overflow-auto">
+      <div className="space-y-4 p-6">
+        {/* Header */}
+        <div>
+          <h2 className="text-base font-semibold tracking-tight">Schedules</h2>
+          <p className="text-[12px] text-muted-foreground">
+            <span className="tabular-nums text-foreground/85">{schedules.length}</span> cron triggers in this workspace · open a routine to add or edit
+          </p>
         </div>
-      </div>
 
-      <div className="overflow-hidden rounded-md border border-white/[0.06]">
-        <table className="w-full text-xs">
-          <thead className="bg-card/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">Name</th>
-              <th className="px-3 py-2 text-left font-medium">Routine</th>
-              <th className="px-3 py-2 text-left font-medium">Cron</th>
-              <th className="px-3 py-2 text-left font-medium">Last run</th>
-              <th className="px-3 py-2 text-left font-medium">Next run</th>
-              <th className="px-3 py-2 text-right font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/[0.04]">
-            {schedules.map((s) => {
-              const slug = s.target_pipeline_slug ?? slugByPipelineId.get(s.target_pipeline_id) ?? ""
-              // Only present the row as actionable when there's a slug
-              // to navigate to. Schedules that lost their target (manual
-              // delete, mid-rename) render as plain rows so screen readers
-              // don't announce a broken control.
-              const interactive = Boolean(slug)
-              const activate = () => { if (slug) onSelect(slug) }
-              return (
-                <tr
-                  key={s.id}
-                  {...(interactive
-                    ? {
-                        role: "button" as const,
-                        tabIndex: 0,
-                        "aria-label": `Open routine ${slug}`,
-                        onClick: activate,
-                        onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault()
-                            activate()
-                          }
-                        },
-                      }
-                    : {})}
-                  className={cn(
-                    "transition-colors",
-                    interactive
-                      ? "cursor-pointer hover:bg-card/40 focus:bg-card/40 focus:outline-none focus-visible:ring-1 focus-visible:ring-blue-400"
-                      : "opacity-70",
-                  )}
-                >
-                  <td className="px-3 py-2.5 font-medium">
-                    <div className="flex items-center gap-2">
-                      {s.enabled ? (
-                        <Play className="h-3 w-3 text-emerald-400" aria-label="enabled" />
-                      ) : (
-                        <Pause className="h-3 w-3 text-muted-foreground" aria-label="paused" />
+        {/* KPI strip */}
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <KpiTile
+            label="Active"
+            value={stats.active.toString()}
+            sub={stats.paused > 0 ? `${stats.paused} paused` : "all enabled"}
+            tone="emerald"
+            Icon={Play}
+          />
+          <KpiTile
+            label="Firing soon"
+            value={stats.firingSoon.toString()}
+            sub="within the next 6 hours"
+            tone="blue"
+            Icon={Clock}
+          />
+          <KpiTile
+            label="Last failed"
+            value={stats.lastFailed.toString()}
+            sub={stats.lastFailed === 0 ? "all healthy" : "schedules with failed last run"}
+            tone={stats.lastFailed > 0 ? "rose" : "default"}
+            Icon={AlertTriangle}
+          />
+          <KpiTile
+            label="Webhook triggers"
+            value="—"
+            sub="configured per-routine in detail"
+            tone="violet"
+            Icon={Webhook}
+          />
+        </section>
+
+        {/* Upcoming firings */}
+        {stats.upcoming.length > 0 && (
+          <Card title="Firing next" icon={Clock} subtitle={`${stats.upcoming.length} upcoming`}>
+            <ul className="divide-y divide-border/40">
+              {stats.upcoming.map((s) => {
+                const slug = s.target_pipeline_slug ?? slugByPipelineId.get(s.target_pipeline_id) ?? ""
+                return (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => slug && onSelect(slug)}
+                      disabled={!slug}
+                      className={cn(
+                        "grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-3 text-left transition-colors",
+                        slug
+                          ? "hover:bg-white/[0.025]"
+                          : "cursor-default opacity-60",
                       )}
-                      <span>{s.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-muted-foreground">{slug || "—"}</td>
-                  <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground">
-                    {s.cron_expr}
-                  </td>
-                  <td className="px-3 py-2.5 text-muted-foreground">
-                    {relativeTime(s.last_run_at)}
-                  </td>
-                  <td className="px-3 py-2.5 text-muted-foreground">
-                    {relativeTime(s.next_run_at)}
-                  </td>
-                  <td
-                    className={cn(
-                      "px-3 py-2.5 text-right font-medium",
-                      statusColor(s.last_status),
-                    )}
-                  >
-                    {s.last_status ?? "—"}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+                    >
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400">
+                        <Calendar className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{s.name}</div>
+                        <div className="font-mono text-[11px] text-muted-foreground">
+                          {s.cron_expr} · {s.timezone}
+                          {slug && <span className="ml-2 text-foreground/70">→ {slug}</span>}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-medium text-blue-400">{relativeTime(s.next_run_at)}</div>
+                        <div className="text-[10px] text-muted-foreground">{new Date(s.next_run_at!).toLocaleString()}</div>
+                      </div>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </Card>
+        )}
 
-      <div className="mt-4 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-        <Webhook className="h-3 w-3" />
-        Webhook triggers are configured per-routine in the detail panel.
+        {/* Full table */}
+        <Card title="All schedules" subtitle={`${schedules.length} total`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead className="border-b border-border/40 bg-card/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr className="text-left">
+                  <th className="px-4 py-2.5 font-semibold">Name</th>
+                  <th className="px-3 py-2.5 font-semibold">Routine</th>
+                  <th className="px-3 py-2.5 font-semibold">Cron</th>
+                  <th className="px-3 py-2.5 font-semibold">Last run</th>
+                  <th className="px-3 py-2.5 font-semibold">Next run</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {schedules.map((s) => {
+                  const slug = s.target_pipeline_slug ?? slugByPipelineId.get(s.target_pipeline_id) ?? ""
+                  const interactive = Boolean(slug)
+                  const activate = () => slug && onSelect(slug)
+                  return (
+                    <tr
+                      key={s.id}
+                      {...(interactive
+                        ? {
+                            role: "button" as const,
+                            tabIndex: 0,
+                            "aria-label": `Open routine ${slug}`,
+                            onClick: activate,
+                            onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault()
+                                activate()
+                              }
+                            },
+                          }
+                        : {})}
+                      className={cn(
+                        "transition-colors",
+                        interactive ? "cursor-pointer row-hover" : "opacity-70",
+                      )}
+                    >
+                      <td className="px-4 py-3 text-sm font-medium">
+                        <div className="flex items-center gap-2">
+                          {s.enabled ? (
+                            <Play className="h-3.5 w-3.5 text-emerald-400" aria-label="enabled" />
+                          ) : (
+                            <Pause className="h-3.5 w-3.5 text-muted-foreground" aria-label="paused" />
+                          )}
+                          <span>{s.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground">{slug || "—"}</td>
+                      <td className="px-3 py-3 font-mono text-[12px] text-muted-foreground">{s.cron_expr}</td>
+                      <td className="px-3 py-3 text-[12px] text-muted-foreground">{relativeTime(s.last_run_at)}</td>
+                      <td className="px-3 py-3 text-[12px] text-muted-foreground">{relativeTime(s.next_run_at)}</td>
+                      <td className="px-3 py-3 text-right">
+                        {s.last_status ? (
+                          <Pill tone={statusTone(s.last_status)} className="capitalize">
+                            {s.last_status}
+                          </Pill>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground/60">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <Webhook className="h-3.5 w-3.5" />
+          Webhook triggers are configured per-routine in its detail panel.
+        </div>
       </div>
     </div>
   )
 }
+
+/* ----------------------------------------------------------------- *
+ *  Internal KPI tile — same visual as List view's tiles.            *
+ * ----------------------------------------------------------------- */
+
+const KPI_TONE = {
+  default: "bg-muted text-muted-foreground",
+  emerald: "bg-emerald-500/20 text-emerald-400",
+  blue: "bg-blue-500/20 text-blue-400",
+  violet: "bg-violet-500/20 text-violet-400",
+  rose: "bg-rose-500/20 text-rose-400",
+  amber: "bg-amber-500/20 text-amber-400",
+} as const
+
+function KpiTile({
+  label,
+  value,
+  sub,
+  tone = "default",
+  Icon,
+}: {
+  label: string
+  value: string
+  sub?: string
+  tone?: keyof typeof KPI_TONE
+  Icon: typeof Calendar
+}) {
+  return (
+    <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-card px-4 py-4">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className={cn("flex h-6 w-6 items-center justify-center rounded-md", KPI_TONE[tone])}>
+          <Icon className="h-3.5 w-3.5" />
+        </div>
+      </div>
+      <div className="mt-1 text-[28px] font-semibold leading-none tabular-nums sm:text-[32px]">{value}</div>
+      {sub && <div className="mt-1 text-[11px] text-muted-foreground">{sub}</div>}
+    </div>
+  )
+}
+
+// Re-export reference so the parent module's import doesn't go stale.
+void CheckCircle2
+void XCircle

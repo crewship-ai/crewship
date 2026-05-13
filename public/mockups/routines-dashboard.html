@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Routines — Dashboard Pattern (mockup)</title>
+<style>
+  :root {
+    --bg:           #131119;
+    --bg-card:      #1c1a23;
+    --bg-elevated:  #232128;
+    --border:       rgba(255,255,255,0.06);
+    --border-strong:rgba(255,255,255,0.12);
+    --text:         #e6e4ec;
+    --text-muted:   rgba(230,228,236,0.50);
+    --text-faint:   rgba(230,228,236,0.30);
+    --accent:       #5b8def;
+    --accent-bg:    rgba(91,141,239,0.10);
+    --accent-border:rgba(91,141,239,0.30);
+    --green:        #34d399;
+    --red:          #f43f5e;
+    --amber:        #f59e0b;
+  }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body { margin:0; padding:0; height:100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Open Sans", sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display:grid; grid-template-rows: 36px 1fr; height:100vh; }
+  .topbar {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    display:flex; align-items:center; gap:6px;
+    padding: 0 12px; font-size: 12px;
+  }
+  .topbar .tab { padding: 6px 10px; color: var(--text-muted); border-bottom: 2px solid transparent; cursor:pointer; }
+  .topbar .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .topbar .spacer { flex:1; }
+  .topbar .btn { padding: 4px 10px; border-radius: 4px; background: var(--bg-elevated); color: var(--text); border:1px solid var(--border); font-size: 11px; cursor:pointer; }
+  .topbar .btn.primary { background: var(--accent); border-color: var(--accent); }
+
+  .body { display:grid; grid-template-columns: 300px 1fr; height:100%; overflow:hidden; }
+  .sidebar { background: var(--bg-card); border-right: 1px solid var(--border); overflow-y: auto; }
+  .main    { background: var(--bg); overflow-y: auto; padding: 16px 20px 32px; }
+
+  /* Sidebar */
+  .search-row { display:flex; gap:6px; padding: 8px; }
+  .search { flex:1; height: 30px; background: rgba(255,255,255,0.04); border:1px solid var(--border); border-radius: 6px; display:flex; align-items:center; padding: 0 10px; gap: 6px; }
+  .search input { background: transparent; border:0; outline:0; color: var(--text); font-size: 12px; width: 100%; }
+  .filter-btn { height: 30px; padding: 0 10px; border-radius: 6px; background: rgba(255,255,255,0.04); border:1px solid var(--border); color: var(--text-muted); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; }
+  .section { border-bottom: 1px solid var(--border); }
+  .section-head { display:flex; align-items:center; padding: 6px 12px; gap:6px; cursor:pointer; }
+  .section-head .label { flex:1; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; }
+  .section-head .count { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .row { display:flex; align-items:center; gap:8px; padding: 5px 12px; border-left: 2px solid transparent; cursor:pointer; font-size: 12px; }
+  .row:hover { background: rgba(255,255,255,0.03); }
+  .row.selected { background: var(--accent-bg); border-left-color: var(--accent); }
+  .row .icon { width:14px; height:14px; flex-shrink:0; }
+  .row .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color: rgba(230,228,236,0.85); }
+  .row .meta { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink:0; }
+  .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .dot.green { background: var(--green); }
+  .dot.red { background: var(--red); }
+  .dot.gray { background: rgba(230,228,236,0.25); }
+  .avatar { width:16px; height:16px; border-radius:50%; background: linear-gradient(135deg, #8b5cf6, #5b8def); flex-shrink:0; }
+
+  /* Main dashboard */
+  .h-meta { display:flex; align-items:baseline; gap:10px; margin-bottom: 14px; }
+  .h-meta h1 { margin:0; font-size: 18px; font-weight: 600; }
+  .h-meta .sub { color: var(--text-muted); font-size: 12px; }
+
+  .kpi-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .kpi { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .kpi .label { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; font-weight: 600; }
+  .kpi .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi .delta { font-size: 11px; margin-top: 4px; }
+  .kpi .delta.up { color: var(--green); }
+  .kpi .delta.down { color: var(--red); }
+
+  .panel-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .panel h3 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; display:flex; align-items:center; gap:6px; }
+  .panel .item { display:flex; align-items:center; gap:8px; padding: 5px 0; font-size: 12px; }
+  .panel .item + .item { border-top: 1px dashed var(--border); }
+  .panel .item .name { flex:1; color: var(--text); }
+  .panel .item .runs { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 11px; }
+  .panel .item .status { font-size: 10px; padding: 2px 6px; border-radius: 99px; }
+  .status.failed { background: rgba(244,63,94,0.15); color: var(--red); }
+  .status.completed { background: rgba(52,211,153,0.15); color: var(--green); }
+
+  /* Sparkline-ish bars */
+  .sparkbars { display:flex; align-items:flex-end; gap:3px; height: 56px; padding: 6px 0; }
+  .sparkbars span { flex:1; background: rgba(91,141,239,0.6); border-radius: 1px; }
+  .axis { display:flex; justify-content:space-between; color: var(--text-faint); font-size: 10px; margin-top: 4px; }
+
+  .schedule-list { display:flex; flex-direction: column; gap: 6px; }
+  .schedule-row { display:grid; grid-template-columns: 80px 1fr 60px; align-items:center; gap: 10px; padding: 4px 0; font-size: 12px; }
+  .schedule-row + .schedule-row { border-top: 1px dashed var(--border); padding-top: 8px; }
+  .schedule-row .time { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .schedule-row .crew { color: var(--text-muted); font-size: 11px; text-align: right; }
+
+  .recent-runs { display:flex; flex-direction: column; gap: 4px; }
+  .run-row { display:grid; grid-template-columns: 18px 1fr 50px 60px; align-items:center; gap:10px; font-size: 12px; padding: 4px 0; }
+  .run-row + .run-row { border-top: 1px dashed var(--border); padding-top: 8px; }
+  .run-row .name { color: var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .run-row .when { color: var(--text-muted); font-size: 11px; text-align: right; }
+  .run-row .dur { color: var(--text-faint); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .legend { display:flex; gap: 10px; color: var(--text-muted); font-size: 11px; margin-bottom: 6px; }
+  .legend .swatch { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- topbar = tabs + actions -->
+  <div class="topbar">
+    <div class="tab active">📊 Overview</div>
+    <div class="tab">List</div>
+    <div class="tab">Schedules</div>
+    <div class="tab">Insights</div>
+    <div class="spacer"></div>
+    <button class="btn">↑ Import</button>
+    <button class="btn primary">+ New routine</button>
+  </div>
+  <div class="body">
+    <!-- sidebar (kept as today, minor) -->
+    <div class="sidebar">
+      <div class="search-row">
+        <div class="search">🔍 <input placeholder="Search routines, agents…" /></div>
+        <button class="filter-btn">⌃ Filter</button>
+      </div>
+      <div class="section">
+        <div class="section-head">▾ <span class="label">Status</span><span class="count">4</span></div>
+        <div class="row selected"><span class="dot gray"></span><span class="name">All</span><span class="meta">22</span></div>
+        <div class="row"><span class="dot green"></span><span class="name">Completed</span><span class="meta">22</span></div>
+        <div class="row"><span class="dot red"></span><span class="name">Failed</span><span class="meta">1</span></div>
+        <div class="row"><span class="dot gray"></span><span class="name">Never invoked</span><span class="meta">0</span></div>
+      </div>
+      <div class="section">
+        <div class="section-head">▾ <span class="label">Routines</span><span class="count">22</span></div>
+        <div class="row"><span class="dot green"></span><span class="name">Eval: extract emails</span><span class="meta">139</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot green"></span><span class="name">Eval: translation roundtrip</span><span class="meta">9</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot green"></span><span class="name">Eval: faithfulness (RAG)</span><span class="meta">7</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot green"></span><span class="name">PR review (structured)</span><span class="meta">7</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot green"></span><span class="name">Eval: citation faithfulness</span><span class="meta">6</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot red"></span><span class="name">Eval: noisy-context</span><span class="meta">3</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot gray"></span><span class="name">Daily status digest</span><span class="meta">3</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot gray"></span><span class="name">… (15 more)</span></div>
+      </div>
+      <div class="section">
+        <div class="section-head">▾ <span class="label">Inbox</span><span class="count" style="background:var(--red); color:white; padding: 0 6px; border-radius: 99px;">1</span></div>
+        <div class="row"><span style="color:var(--red);">✗</span><span class="name">Failed: Map container limits</span></div>
+      </div>
+    </div>
+
+    <!-- main = DASHBOARD -->
+    <div class="main">
+      <div class="h-meta">
+        <h1>Overview</h1>
+        <span class="sub">Workspace-wide health · 22 routines · last 7 days</span>
+      </div>
+
+      <!-- KPI cards -->
+      <div class="kpi-grid">
+        <div class="kpi">
+          <div class="label">Total runs (7d)</div>
+          <div class="value">1,247</div>
+          <div class="delta up">▲ 12% vs prev week</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Pass rate (7d)</div>
+          <div class="value">92%</div>
+          <div class="delta down">▼ 2% vs prev</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Failed runs (7d)</div>
+          <div class="value">3</div>
+          <div class="delta">stable</div>
+        </div>
+        <div class="kpi">
+          <div class="label">Active schedules</div>
+          <div class="value">8</div>
+          <div class="delta">— no change</div>
+        </div>
+      </div>
+
+      <!-- Runs timeline -->
+      <div class="panel" style="margin-bottom: 14px;">
+        <h3>📈 Runs (last 7 days)</h3>
+        <div class="legend">
+          <span><span class="swatch" style="background:rgba(91,141,239,0.6)"></span>Total runs</span>
+          <span><span class="swatch" style="background:var(--red)"></span>Failed</span>
+        </div>
+        <div class="sparkbars">
+          <span style="height: 40%"></span>
+          <span style="height: 30%"></span>
+          <span style="height: 55%"></span>
+          <span style="height: 80%"></span>
+          <span style="height: 65%"></span>
+          <span style="height: 90%"></span>
+          <span style="height: 70%; background: linear-gradient(to top, var(--red), rgba(91,141,239,0.6) 12%)"></span>
+        </div>
+        <div class="axis"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+      </div>
+
+      <!-- Two-column rows: Top used / Needs attention -->
+      <div class="panel-grid">
+        <div class="panel">
+          <h3>🔥 Top used</h3>
+          <div class="item"><span class="name">Eval: extract emails</span><span class="runs">139 runs</span></div>
+          <div class="item"><span class="name">Eval: translation roundtrip</span><span class="runs">9 runs</span></div>
+          <div class="item"><span class="name">Eval: faithfulness (RAG)</span><span class="runs">7 runs</span></div>
+          <div class="item"><span class="name">PR review (structured)</span><span class="runs">7 runs</span></div>
+          <div class="item"><span class="name">Eval: citation faithfulness</span><span class="runs">6 runs</span></div>
+        </div>
+        <div class="panel">
+          <h3>⚠️ Needs attention</h3>
+          <div class="item"><span class="name">Eval: noisy-context extraction</span><span class="status failed">FAILED · 2h ago</span></div>
+          <div class="item"><span class="name">Eval: syllogism reasoning</span><span class="status failed">FAILED · 6h ago</span></div>
+          <div class="item" style="color:var(--text-muted)"><span class="name">No other failures in last 24h.</span></div>
+        </div>
+      </div>
+
+      <!-- Schedules + Recent runs -->
+      <div class="panel-grid">
+        <div class="panel">
+          <h3>📅 Next 24h schedules</h3>
+          <div class="schedule-list">
+            <div class="schedule-row"><span class="time">09:00</span><span>daily-report</span><span class="crew">Daniel</span></div>
+            <div class="schedule-row"><span class="time">12:00</span><span>hourly-poll</span><span class="crew">Filip</span></div>
+            <div class="schedule-row"><span class="time">18:00</span><span>eval-batch</span><span class="crew">Daniel</span></div>
+            <div class="schedule-row"><span class="time">21:00</span><span>nightly-cleanup</span><span class="crew">Martin</span></div>
+            <div class="schedule-row"><span class="time">09:00 +1d</span><span>daily-report</span><span class="crew">Daniel</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>🕐 Recent runs</h3>
+          <div class="recent-runs">
+            <div class="run-row"><span class="dot green"></span><span class="name">Eval: extract emails</span><span class="dur">$0.012</span><span class="when">6m ago</span></div>
+            <div class="run-row"><span class="dot green"></span><span class="name">Eval: translation roundtrip</span><span class="dur">$0.008</span><span class="when">21h ago</span></div>
+            <div class="run-row"><span class="dot green"></span><span class="name">PR review</span><span class="dur">$0.045</span><span class="when">21h ago</span></div>
+            <div class="run-row"><span class="dot red"></span><span class="name">Eval: noisy-context</span><span class="dur">$0.018</span><span class="when">2d ago</span></div>
+            <div class="run-row"><span class="dot green"></span><span class="name">Eval: citation faithfulness</span><span class="dur">$0.028</span><span class="when">2d ago</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

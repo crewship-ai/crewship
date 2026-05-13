@@ -172,24 +172,29 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
   return (
     <div className="flex h-full flex-col">
       {/* ── Toolbar ─────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center justify-between border-b border-white/[0.06] bg-card/30 px-3 py-1.5">
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-          <span>JSON DSL</span>
-          <span>·</span>
-          <span>{text.length.toLocaleString()} chars</span>
-          <span>·</span>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
+        <div className="flex items-center gap-2.5 text-[12px] text-muted-foreground">
+          <span className="font-medium text-foreground/85">JSON DSL</span>
+          <span className="opacity-60">·</span>
+          <span className="tabular-nums">{text.length.toLocaleString()} chars</span>
+          <span className="opacity-60">·</span>
           <span className="font-mono">v{routine.dsl_version}</span>
-          {dirty && <span className="text-amber-400">· unsaved</span>}
+          {dirty && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-medium text-amber-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              unsaved
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <Button
             size="sm"
             variant="ghost"
             onClick={handleCopy}
-            className="h-6 gap-1.5 text-[10px]"
+            className="h-8 gap-1.5 px-2.5 text-xs"
             title="Copy current buffer"
           >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
             {copied ? "Copied" : "Copy"}
           </Button>
           <Button
@@ -197,10 +202,10 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
             variant="ghost"
             onClick={handleFormat}
             disabled={!validation.ok}
-            className="h-6 gap-1.5 text-[10px]"
+            className="h-8 gap-1.5 px-2.5 text-xs"
             title="Re-pretty-print the buffer"
           >
-            <Wand2 className="h-3 w-3" />
+            <Wand2 className="h-3.5 w-3.5" />
             Format
           </Button>
           <Button
@@ -208,10 +213,10 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
             variant="ghost"
             onClick={handleRevert}
             disabled={!dirty}
-            className="h-6 gap-1.5 text-[10px]"
+            className="h-8 gap-1.5 px-2.5 text-xs"
             title="Discard changes and reload from server"
           >
-            <RotateCcw className="h-3 w-3" />
+            <RotateCcw className="h-3.5 w-3.5" />
             Revert
           </Button>
           <Button
@@ -219,10 +224,10 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
             variant="default"
             onClick={handleSave}
             disabled={!validation.ok || !dirty || saving}
-            className="h-6 gap-1.5 text-[10px]"
+            className="h-8 gap-1.5 px-3 text-xs font-semibold"
             title="Save changes (requires OWNER / ADMIN)"
           >
-            <Save className="h-3 w-3" />
+            <Save className="h-3.5 w-3.5" />
             {saving ? "Saving…" : "Save"}
           </Button>
         </div>
@@ -230,9 +235,9 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
 
       {/* ── Validation banner (only when the buffer is broken) ── */}
       {!validation.ok && (
-        <div className="shrink-0 border-b border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] text-rose-300">
-          <div className="flex items-start gap-1.5">
-            <AlertCircle className="mt-px h-3 w-3 shrink-0" />
+        <div className="shrink-0 border-b border-rose-500/30 bg-rose-500/[0.06] px-4 py-2.5 text-[13px] text-rose-300">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span className="font-mono">{validation.message}</span>
           </div>
         </div>
@@ -251,12 +256,9 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved }: Props) {
       </div>
 
       {/* ── Footer hint ────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-white/[0.06] bg-card/20 px-3 py-1.5 text-[10px] text-muted-foreground">
-        Cmd/Ctrl+S to flush buffer · Save lands changes when JSON is valid
-        and has both <span className="font-mono">name</span> +{" "}
-        <span className="font-mono">steps</span>. Save needs OWNER/ADMIN role
-        (lower roles get a clear 403; we&apos;ll add test_run+save chaining
-        next).
+      <div className="shrink-0 border-t border-border/60 bg-card/20 px-4 py-2 text-[11px] text-muted-foreground">
+        <span className="font-mono">⌘/Ctrl+S</span> flushes the buffer · Save lands changes when JSON parses with both{" "}
+        <span className="font-mono">name</span> and <span className="font-mono">steps</span>. Requires OWNER/ADMIN role.
       </div>
     </div>
   )

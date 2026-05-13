@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { motion, AnimatePresence } from "motion/react"
+import { spring } from "@/lib/motion"
 import { create as createOrama, insertMultiple, search as oramaSearch } from "@orama/orama"
 import type { AnyOrama } from "@orama/orama"
 import { VirtuosoGrid } from "react-virtuoso"
@@ -696,18 +698,28 @@ export function SkillsBrowser() {
             left edge has a drag handle (1px hit zone widens to 4px on
             hover) that resizes the panel; orchestration uses the same
             pattern via the bottom drawer separator. */}
-        {selected && (
-          <aside data-panel-id="skills-detail" className="relative flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden">
-            <div
-              role="separator"
-              aria-label="Resize detail panel"
-              aria-orientation="vertical"
-              className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
-              onMouseDown={onDetailDragStart}
-            />
-            <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
-          </aside>
-        )}
+        <AnimatePresence>
+          {selected && (
+            <motion.aside
+              key="skills-detail"
+              data-panel-id="skills-detail"
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 24 }}
+              transition={spring.smooth}
+              className="relative flex flex-col h-full bg-card border-l border-white/[0.1] overflow-hidden"
+            >
+              <div
+                role="separator"
+                aria-label="Resize detail panel"
+                aria-orientation="vertical"
+                className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors"
+                onMouseDown={onDetailDragStart}
+              />
+              <SkillsDetailPanel skill={selected} workspaceId={workspaceId} onClose={() => setSelected(null)} onChanged={reload} />
+            </motion.aside>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )
