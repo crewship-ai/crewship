@@ -1,5 +1,6 @@
 "use client"
 
+import { useId } from "react"
 import { motion } from "motion/react"
 import { ChevronDown } from "lucide-react"
 import { EditableField } from "@/components/shared/editable-field"
@@ -22,11 +23,14 @@ export function AdvancedSection({
   setShowAdvanced,
   patch,
 }: AdvancedSectionProps) {
+  const advancedPanelId = useId()
   return (
     <div className="rounded-xl border border-white/8 bg-card">
       <button
         type="button"
         onClick={() => setShowAdvanced((v) => !v)}
+        aria-expanded={showAdvanced}
+        aria-controls={advancedPanelId}
         className="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground hover:bg-white/[0.03] hover:text-foreground transition-colors"
       >
         <ChevronDown
@@ -36,6 +40,7 @@ export function AdvancedSection({
       </button>
       {showAdvanced && (
         <motion.div
+          id={advancedPanelId}
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: "auto" }}
           exit={{ opacity: 0, height: 0 }}
