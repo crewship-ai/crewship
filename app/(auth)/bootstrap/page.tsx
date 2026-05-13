@@ -148,7 +148,7 @@ export default function BootstrapPage() {
               className="flex justify-center mb-3"
             >
               <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/30 px-3 py-1 text-[11px] font-medium text-primary uppercase tracking-[0.12em]">
-                <Sparkles className="h-3 w-3" /> First-run setup
+                <Sparkles className="h-3 w-3" /> Initial setup
               </span>
             </motion.div>
             <motion.div
@@ -156,10 +156,10 @@ export default function BootstrapPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, ease, delay: 0.25 }}
             >
-              <CardTitle className="text-2xl tracking-tight">Welcome aboard</CardTitle>
+              <CardTitle className="text-2xl tracking-tight">Create administrator account</CardTitle>
               <CardDescription className="mt-2 text-balance">
-                This Crewship instance is fresh. Create the admin account to get started — you&apos;ll be the
-                workspace owner and can invite teammates later.
+                This is the first sign-in for this Crewship instance. The account you create will own the
+                workspace and can invite additional members afterwards.
               </CardDescription>
             </motion.div>
           </CardHeader>
@@ -188,12 +188,12 @@ export default function BootstrapPage() {
                 transition={{ duration: 0.35, ease }}
                 className="space-y-2"
               >
-                <Label htmlFor="full_name">Your name</Label>
+                <Label htmlFor="full_name">Full name</Label>
                 <Input
                   id="full_name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Captain Reynolds"
+                  placeholder="Alex Johnson"
                   autoFocus
                   required
                   className="h-11"
@@ -231,7 +231,7 @@ export default function BootstrapPage() {
                   className="h-11"
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Rotate this any time with{" "}
+                  Can be reset later via{" "}
                   <code className="font-mono text-foreground/80 rounded bg-muted/60 px-1 py-0.5">
                     crewship admin reset-password
                   </code>{" "}
@@ -246,11 +246,11 @@ export default function BootstrapPage() {
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Setting up…
+                      Creating account…
                     </>
                   ) : (
                     <>
-                      Create admin & continue
+                      Continue to workspace setup
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </>
                   )}
