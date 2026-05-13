@@ -17,6 +17,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { useCatalog } from "@/hooks/use-catalog"
 
 // ---- Types ----------------------------------------------------------------
 
@@ -34,7 +35,7 @@ import {
   parseDevcontainerConfig,
   parseMiseConfig,
 } from "./runtime-config-data"
-import type { CategoryFilter } from "./runtime-config-data"
+import type { CategoryFilter, FeatureMap } from "./runtime-config-data"
 
 export interface RuntimeConfigValue {
   runtimeImage: string
@@ -67,6 +68,18 @@ interface RuntimeEntry {
   backends?: string[]
 }
 
+// Module-scope extractors so the function identity is stable across
+// renders — avoids re-triggering useCatalog's effect on every render.
+function extractFeatures(json: unknown): CatalogFeature[] {
+  const features = (json as { features?: unknown })?.features
+  return Array.isArray(features) ? (features as CatalogFeature[]) : []
+}
+
+function extractRuntimes(json: unknown): RuntimeEntry[] {
+  const runtimes = (json as { runtimes?: unknown })?.runtimes
+  return Array.isArray(runtimes) ? (runtimes as RuntimeEntry[]) : []
+}
+
 
 export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   // Parse initial state from value
@@ -74,21 +87,31 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
   const initialMise = useMemo(() => parseMiseConfig(value.miseConfig), [value.miseConfig])
 
   // Feature catalog
-  const [catalog, setCatalog] = useState<CatalogFeature[]>([])
-  const [catalogLoading, setCatalogLoading] = useState(true)
-  const [catalogError, setCatalogError] = useState(false)
+  const {
+    data: catalogData,
+    loading: catalogLoading,
+    error: catalogErrorObj,
+    refetch: fetchCatalog,
+  } = useCatalog<CatalogFeature>("/api/v1/features/catalog", extractFeatures)
+  const catalog = useMemo(() => catalogData ?? [], [catalogData])
+  const catalogError = catalogErrorObj !== null
   const [searchQuery, setSearchQuery] = useState("")
   const [featureCategoryFilter, setFeatureCategoryFilter] = useState<CategoryFilter>("all")
 
   // Runtime catalog
-  const [runtimeCatalog, setRuntimeCatalog] = useState<RuntimeEntry[]>([])
-  const [runtimeCatalogLoading, setRuntimeCatalogLoading] = useState(true)
-  const [runtimeCatalogError, setRuntimeCatalogError] = useState(false)
+  const {
+    data: runtimeData,
+    loading: runtimeCatalogLoading,
+    error: runtimeCatalogErrorObj,
+    refetch: fetchRuntimeCatalog,
+  } = useCatalog<RuntimeEntry>("/api/v1/runtimes/catalog", extractRuntimes)
+  const runtimeCatalog = useMemo(() => runtimeData ?? [], [runtimeData])
+  const runtimeCatalogError = runtimeCatalogErrorObj !== null
   const [runtimeSearchQuery, setRuntimeSearchQuery] = useState("")
   const [runtimeCategoryFilter, setRuntimeCategoryFilter] = useState<CategoryFilter>("all")
 
   // Selected features (ref -> options)
-  const [selectedFeatures, setSelectedFeatures] = useState<Record<string, Record<string, unknown>>>(initialDC.features)
+  const [selectedFeatures, setSelectedFeatures] = useState<FeatureMap>(initialDC.features)
 
   // Base image
   const [baseImage, setBaseImage] = useState(initialDC.image)
@@ -124,45 +147,6 @@ export function RuntimeConfig({ value, onChange }: RuntimeConfigProps) {
 
   // Copy feedback
   const [copied, setCopied] = useState(false)
-
-  // Fetch feature catalog
-  const fetchCatalog = useCallback(() => {
-    setCatalogLoading(true)
-    setCatalogError(false)
-    fetch("/api/v1/features/catalog")
-      .then((r) => {
-        if (!r.ok) throw new Error(`Catalog fetch failed: ${r.status}`)
-        return r.json()
-      })
-      .then((data) => setCatalog(Array.isArray(data.features) ? data.features : []))
-      .catch(() => { setCatalog([]); setCatalogError(true) })
-      .finally(() => setCatalogLoading(false))
-  }, [])
-
-  useEffect(() => {
-    fetchCatalog()
-  }, [fetchCatalog])
-
-  // Fetch runtime catalog
-  const fetchRuntimeCatalog = useCallback(async () => {
-    setRuntimeCatalogLoading(true)
-    setRuntimeCatalogError(false)
-    try {
-      const r = await fetch("/api/v1/runtimes/catalog")
-      if (!r.ok) throw new Error(`Runtime catalog fetch failed: ${r.status}`)
-      const data = await r.json()
-      setRuntimeCatalog(Array.isArray(data.runtimes) ? data.runtimes : [])
-    } catch {
-      setRuntimeCatalog([])
-      setRuntimeCatalogError(true)
-    } finally {
-      setRuntimeCatalogLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchRuntimeCatalog()
-  }, [fetchRuntimeCatalog])
 
   // Compute effective image
   const effectiveImage = isCustomImage ? customImage || "debian:bookworm-slim" : baseImage

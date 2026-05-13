@@ -112,9 +112,14 @@ const BASE_IMAGES: Array<{
 // ---- Helpers --------------------------------------------------------------
 
 
+// Per containers.dev features spec, option values are primitives
+// (string | boolean | number); the outer map is feature-ref -> options.
+type FeatureOptions = Record<string, string | number | boolean>
+type FeatureMap = Record<string, FeatureOptions>
+
 function parseDevcontainerConfig(jsonStr: string): {
   image: string
-  features: Record<string, Record<string, unknown>>
+  features: FeatureMap
 } {
   if (!jsonStr) return { image: "debian:bookworm-slim", features: {} }
   try {
@@ -141,7 +146,7 @@ function parseMiseConfig(jsonStr: string): Record<string, string> {
 
 function buildDevcontainerJSON(
   image: string,
-  features: Record<string, Record<string, unknown>>
+  features: FeatureMap
 ): string {
   const config: Record<string, unknown> = { image }
   if (Object.keys(features).length > 0) {
@@ -158,7 +163,7 @@ function buildMiseJSON(tools: Record<string, string>): string {
 // ---- Component ------------------------------------------------------------
 
 
-export type { CategoryFilter }
+export type { CategoryFilter, FeatureOptions, FeatureMap }
 export {
   CATEGORY_LABELS,
   CATEGORY_FILTERS,
