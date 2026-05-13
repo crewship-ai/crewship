@@ -49,7 +49,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagServer, "server", "s", "", "Server URL (default: http://localhost:8080, env: CREWSHIP_SERVER)")
 	rootCmd.PersistentFlags().StringVarP(&flagWorkspace, "workspace", "w", "", "Workspace ID or slug (env: CREWSHIP_WORKSPACE)")
-	rootCmd.PersistentFlags().StringVarP(&flagFormat, "format", "f", "", "Output format: table|json|yaml|quiet (default: table)")
+	rootCmd.PersistentFlags().StringVarP(&flagFormat, "format", "f", "", "Output format: table|json|yaml|ndjson|quiet (default: table)")
 	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable ANSI colors")
 
@@ -120,6 +120,11 @@ func init() {
 }
 
 func main() {
+	// Mount user-defined slash commands AFTER built-ins so the
+	// collision-detection in registerSlashCommands sees the full
+	// built-in set and can warn-and-skip on name clashes.
+	registerSlashCommands()
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
