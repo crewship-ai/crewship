@@ -84,6 +84,25 @@ No tab-switch, no re-reading the routine's DSL.
 
 You're on `/activity?run=run_xyz&step=transform-2` and need a second pair of eyes. Copy the URL to Slack. Whoever opens it lands on the same run, the same selected step, the same side panel with the same rendered output — `useTraceSelection` keeps URL ↔ canvas in lock-step, so there is no "scroll down to the third box" instruction needed.
 
+## API reference
+
+Activity is a thin UI shell over two existing backend surfaces — it has no dedicated REST endpoint of its own. The full schemas live with their owning subsystems:
+
+- [`/api-reference/runs`](/api-reference/runs) — the run + DSL payload. `GET /api/v1/runs/{id}` is the single fetch the canvas does per selection; everything visible on the canvas comes from this one response.
+- [`/api-reference/journal`](/api-reference/journal) — the event stream the heatmap and side-panel duration/cost values read from. `useStepMetrics` queries `pipeline.step.completed` entries for the run.
+
+For waitpoint Approve / Deny, the canvas calls into the same `waitpointDecide` helper (`lib/api/waitpoints.ts`) that the Inbox uses; the underlying endpoint is documented under the [Harbormaster](/guides/harbormaster) guide.
+
+Realtime updates arrive over the workspace WebSocket channel (`/ws?workspace=<id>`). The events the page subscribes to, all broadcast by `internal/pipeline/runner.go`:
+
+| Event | When it fires | What the canvas does |
+|-------|---------------|----------------------|
+| `pipeline.run.started` / `completed` / `failed` | Run terminal hooks | Run row in the left rail refreshes; trigger node's status pip repaints |
+| `pipeline.step.started` / `completed` / `failed` / `validation_failed` | Per-step lifecycle | Step node's status ring + pip repaint; side panel (if step is selected) re-renders with new output / error |
+| `pipeline.waitpoint.created` | A `wait` step parks on a gate | Approve / Deny buttons appear on the corresponding node |
+
+There's nothing imperative on the consumer side — every event triggers a re-fetch of the run payload, and `buildTraceGraph` rebuilds the node array on the next render. The same shape as REST polling, just with a WebSocket-driven invalidation cadence.
+
 ## The trace graph
 
 When you select a run, the canvas builds a directed graph from the routine's DSL and the run's recorded state:
