@@ -1108,6 +1108,14 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// deploy. Future kinds (failed runs, agent messages) drop in
 	// via the kind discriminator. See migrate_consts_v85*.go.
 	{version: 85, name: "add_inbox_items", sql: migrationAddInboxItems},
+	// v86 adds a purpose discriminator to verification_tokens
+	// (existing email_verify rows backfill in place) so the same
+	// table can carry password-reset tokens, plus a cli_pairings
+	// table for the device-code handoff flow that lets users pair a
+	// local CLI (Claude Code, Gemini, Codex, OpenCode, Cursor,
+	// Factory Droid — adapter-agnostic) without copying a session
+	// token through their shell history. See migrate_consts_v86*.go.
+	{version: 86, name: "add_recovery_and_pairing", sql: migrationAddRecoveryAndPairing},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
