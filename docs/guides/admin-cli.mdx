@@ -26,6 +26,20 @@ Reach for `crewship admin` only when the in-band recovery paths can't apply. For
 
 If the server is healthy, the user is logged in, and the workspace still has at least one `OWNER`, prefer the corresponding HTTP endpoint or settings page — every admin-CLI call is one more uncontrolled DB write to keep out of the audit story.
 
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Data directory** | The directory holding `crewship.db` and adjacent state. Defaults to `~/.crewship`; overridable via `CREWSHIP_DATA_DIR`. Every admin subcommand reads the directory before doing anything — missing or unreadable directory aborts before any SQL runs. |
+| **Bcrypt hash** | The on-disk form of a user password. Stored in `users.password_hash`; admin `reset-password` calls `bcrypt.GenerateFromPassword` with the cost factor used elsewhere in the codebase, so a hash written by the CLI is indistinguishable from one minted by the web signup flow. |
+| **Workspace role** | One of `OWNER`, `ADMIN`, `MANAGER`. Persisted in the `workspace_members` table per `(workspace_id, user_id)`. `OWNER` is the only role that can delete a workspace or demote another `OWNER`; `ADMIN` covers everything else; `MANAGER` is the user-management tier. |
+| **`--workspace` resolution** | If the user belongs to exactly one workspace, `promote` infers it. If they belong to multiple, the flag is required and a clear error tells the operator which slugs are eligible. No silent "picks the first one" behaviour. |
+| **`journal.admin_cli` entry** | The audit record left behind by every successful admin-CLI write. Attributed to `host:$USER` (the OS user who ran the command), with the subcommand name and target user email — visible on the workspace timeline alongside in-app actions. |
+| **DB lock** | SQLite advisory lock taken by the running `crewshipd` process. Admin commands probe for it on startup; if held, the command refuses to run with the exact message that tells the operator to `crewship stop` first. This prevents a half-applied write from racing the server's own connection. |
+| **`reset-password`** | Mints a new bcrypt hash for `--email=…`. Interactive password prompt by default; `--password=…` for scripted use (CI bootstrap). Does NOT invalidate active sessions automatically — restart the server to drop them. |
+| **`list-users`** | Reads the `users` table and renders it via `text/tabwriter`. Email, role, created-at, last-login. Usually run before `reset-password` to verify the email row exists with the expected casing. |
+| **`promote`** | Rewrites a single `workspace_members` row. Refuses to demote the last `OWNER` of a workspace — the constraint lives in the same transaction so a botched call can't leave a workspace ownerless. |
+
 ## Related
 
 - [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
