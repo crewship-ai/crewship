@@ -421,6 +421,15 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 
 	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, noopEmitter{}, workspaceID, req.CrewTemplateSlug, crewName, "")
 	if err != nil {
+		// Roll back the onboarding_completed=1 flag we claimed above
+		// so the user can retry the wizard (with a corrected
+		// template slug, for example) instead of being stuck in a
+		// half-finished state forever.
+		if _, rbErr := h.db.ExecContext(r.Context(),
+			"UPDATE users SET onboarding_completed = 0, updated_at = ? WHERE id = ?",
+			time.Now().UTC().Format(time.RFC3339), userID); rbErr != nil {
+			h.logger.Error("onboarding template: rollback completion flag", "error", rbErr, "deploy_error", err)
+		}
 		switch {
 		case errors.Is(err, errTemplateNotFound):
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unknown crew template"})
@@ -486,14 +495,14 @@ func stringPtr(s string) *string {
 //
 // Two layers of checking:
 //
-//   1. Shape check: cheap regex / prefix gate that catches the
-//      "pasted the wrong thing from the wrong page" case before we
-//      even bother the upstream API.
-//   2. Live probe: a real authenticated request to the provider's
-//      API with the token. Catches "right shape, wrong / expired
-//      token" — the case that was leaving users with broken chat
-//      and silent empty bubbles. Optional via the `probe` flag so
-//      tests can skip it.
+//  1. Shape check: cheap regex / prefix gate that catches the
+//     "pasted the wrong thing from the wrong page" case before we
+//     even bother the upstream API.
+//  2. Live probe: a real authenticated request to the provider's
+//     API with the token. Catches "right shape, wrong / expired
+//     token" — the case that was leaving users with broken chat
+//     and silent empty bubbles. Optional via the `probe` flag so
+//     tests can skip it.
 //
 // Per-provider checks are intentionally narrow: we only reject shapes
 // we know will fail downstream, never anything ambiguous. A future

@@ -139,7 +139,11 @@ function LoginForm() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {registered && (
-              <div className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400">
+              <div
+                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
+                role="status"
+                aria-live="polite"
+              >
                 Account created! Please sign in.
               </div>
             )}
@@ -153,7 +157,11 @@ function LoginForm() {
               </div>
             )}
             {error && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              <div
+                className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                role="alert"
+                aria-live="assertive"
+              >
                 {error}
               </div>
             )}

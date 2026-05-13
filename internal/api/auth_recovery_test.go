@@ -51,6 +51,11 @@ func seedTestUserWithPassword(t *testing.T, db *sql.DB, email, password string) 
 
 func newRecoveryHandler(t *testing.T, db *sql.DB, mail mailer.Mailer, store sessions.Store) *RecoveryHandler {
 	t.Helper()
+	// Set a known CREWSHIP_PUBLIC_URL for the duration of the test so
+	// /forgot can build reset links. Tests that exercise the
+	// missing-public-url path (refusal-to-send) should override this
+	// with t.Setenv after the helper returns.
+	t.Setenv("CREWSHIP_PUBLIC_URL", "https://crewship.test")
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	return NewRecoveryHandler(db, logger, mail, store)
 }
@@ -266,5 +271,99 @@ func TestReset_RejectsShortPassword(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rr.Code)
+	}
+}
+
+// TestForgot_RefusesWhenPublicURLMissing locks in the contract that
+// /forgot does not mint a token when CREWSHIP_PUBLIC_URL is unset
+// even if a mailer is configured — without a server-controlled origin
+// the only way to build a reset URL is r.Host, which an attacker can
+// poison via a forged Host header to deliver a working link onto
+// their own domain.
+func TestForgot_RefusesWhenPublicURLMissing(t *testing.T) {
+	db := setupTestDB(t)
+	_ = seedTestUserWithPassword(t, db, "eve@example.com", "originalpw")
+	mail := &stubMailer{configured: true}
+	// Use NewRecoveryHandler directly so we can pass an empty env, not
+	// the helper which sets CREWSHIP_PUBLIC_URL by default.
+	t.Setenv("CREWSHIP_PUBLIC_URL", "")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	h := NewRecoveryHandler(db, logger, mail, nil)
+
+	body := bytes.NewBufferString(`{"email":"eve@example.com"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/forgot", body)
+	req.Header.Set("Content-Type", "application/json")
+	// Attacker-supplied Host header — must not end up in the email body.
+	req.Host = "evil.com"
+	rr := httptest.NewRecorder()
+	h.Forgot(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (no enumeration)", rr.Code)
+	}
+	if len(mail.sent) != 0 {
+		t.Fatalf("sent %d emails; must be 0 when public URL is unset", len(mail.sent))
+	}
+	// Token must NOT be persisted — otherwise /reset still works and we
+	// leak the existence of the account.
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM verification_tokens WHERE identifier=?`, "eve@example.com").Scan(&count); err != nil {
+		t.Fatalf("count tokens: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("tokens stored = %d, want 0 when public URL missing", count)
+	}
+}
+
+// TestReset_RaceFreeSingleUse simulates two concurrent /reset calls
+// with the same token. The first must succeed; the second must see
+// the token already burned and return 400 without touching the
+// password again.
+func TestReset_RaceFreeSingleUse(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUserWithPassword(t, db, "frank@example.com", "originalpw")
+	mail := &stubMailer{configured: true}
+	h := newRecoveryHandler(t, db, mail, nil)
+
+	// Mint a token directly so we have a known raw value.
+	rawToken := "frank-raw-test-token-1234567890abcdef"
+	tokenHash := hashResetToken(rawToken)
+	expires := time.Now().UTC().Add(15 * time.Minute).Format(time.RFC3339)
+	if _, err := db.Exec(`INSERT INTO verification_tokens (identifier, token, expires, purpose) VALUES (?, ?, ?, 'password_reset')`,
+		"frank@example.com", tokenHash, expires); err != nil {
+		t.Fatalf("seed token: %v", err)
+	}
+
+	// First /reset — should succeed.
+	body1 := bytes.NewBufferString(`{"token":"` + rawToken + `","new_password":"firstpass123"}`)
+	r1 := httptest.NewRequest("POST", "/api/v1/auth/reset", body1)
+	r1.Header.Set("Content-Type", "application/json")
+	rr1 := httptest.NewRecorder()
+	h.Reset(rr1, r1)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("first reset status = %d, body=%s", rr1.Code, rr1.Body.String())
+	}
+
+	// Second /reset with the same token — must be rejected.
+	body2 := bytes.NewBufferString(`{"token":"` + rawToken + `","new_password":"secondpass123"}`)
+	r2 := httptest.NewRequest("POST", "/api/v1/auth/reset", body2)
+	r2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	h.Reset(rr2, r2)
+	if rr2.Code != http.StatusBadRequest {
+		t.Fatalf("second reset status = %d, want 400 (token already burned)", rr2.Code)
+	}
+
+	// Password must match the FIRST reset, not the second — the loser
+	// must not have overwritten the winner's password.
+	var hashed string
+	if err := db.QueryRow(`SELECT hashed_password FROM users WHERE id=?`, userID).Scan(&hashed); err != nil {
+		t.Fatalf("read user: %v", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte("firstpass123")); err != nil {
+		t.Errorf("first password did not stick: %v", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte("secondpass123")); err == nil {
+		t.Errorf("second (rejected) password somehow committed — race protection broken")
 	}
 }

@@ -361,4 +361,3 @@ func promptPasswordTwice() (string, error) {
 	}
 	return string(pw1), nil
 }
-

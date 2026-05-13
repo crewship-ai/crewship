@@ -186,8 +186,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
           initial={reduce ? { opacity: 0 } : { opacity: 0, scaleY: 0 }}
           animate={{ opacity: 1, scaleY: 1 }}
           transition={{ duration: 0.35, ease, delay: 0.2 }}
-          style={{ originY: 0 }}
-          className="w-px h-6 bg-border"
+          className="w-px h-6 bg-border origin-top"
         />
       </div>
 
@@ -203,9 +202,14 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             className="bg-card border border-border rounded-[20px] p-4 shadow-lg"
           >
             <div className="flex items-center gap-3 mb-3 pb-3 border-b border-border">
+              {/* Inline styles are dynamic brand colors from the crew
+                  template registry. Tailwindifying these would require
+                  baking every brand palette into the tailwind safelist
+                  or duplicating the registry as a class map — deferred
+                  in favour of keeping the registry single-source. */}
               <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{ background: template.iconBg, borderColor: template.iconBorder, borderWidth: 1 }}
+                className="w-10 h-10 rounded-xl flex items-center justify-center border"
+                style={{ background: template.iconBg, borderColor: template.iconBorder }}
               >
                 <template.Icon className="h-5 w-5" style={{ color: template.iconColor }} />
               </div>
@@ -274,6 +278,8 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
       <AnimatePresence>
         {mode && (
           <motion.div
+            role="status"
+            aria-live="polite"
             key={`${mode}-${adapterKey ?? ""}-${pairingPending}`}
             initial={reduce ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -286,9 +292,15 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             }`}
           >
             {AdapterIcon && brand && (
+              // Adapter-brand colors come from a runtime registry
+              // (lib/cli-adapter-brand.ts) keyed off the user's
+              // selection — same reason as the template icon above:
+              // forcing every brand into a Tailwind class map would
+              // duplicate the source of truth. Border width set via
+              // the `border` utility; only color tokens are inline.
               <span
-                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                style={{ background: brand.bg, borderColor: brand.border, borderWidth: 1 }}
+                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border"
+                style={{ background: brand.bg, borderColor: brand.border }}
               >
                 <AdapterIcon className="h-4 w-4" style={{ color: brand.fg }} />
               </span>

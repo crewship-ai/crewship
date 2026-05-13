@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useState, type FormEvent } from "react"
+import { Suspense, useEffect, useState, type FormEvent } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Ship, ArrowLeft } from "lucide-react"
@@ -58,13 +58,20 @@ function ResetForm() {
       }
       setDone(true)
       setLoading(false)
-      // Redirect after 2s so the user sees the success state
-      setTimeout(() => router.push("/login"), 2000)
     } catch {
       setError("Network error. Please try again.")
       setLoading(false)
     }
   }
+
+  // Delayed redirect with cleanup — if the user closes the tab or
+  // navigates away before the 2s elapses, the timer is cleared so we
+  // don't fire router.push() on an unmounted component.
+  useEffect(() => {
+    if (!done) return
+    const timer = window.setTimeout(() => router.push("/login"), 2000)
+    return () => window.clearTimeout(timer)
+  }, [done, router])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">

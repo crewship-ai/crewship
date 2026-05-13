@@ -139,7 +139,7 @@ export default function OnboardingPage() {
 
   const [pairCode, setPairCode] = useState<string | null>(null)
   const [pairExpiresAt, setPairExpiresAt] = useState<string | null>(null)
-  const [pairStatus, setPairStatus] = useState<"idle" | "pending" | "consumed" | "expired">("idle")
+  const [pairStatus, setPairStatus] = useState<"idle" | "pending" | "consumed" | "expired" | "failed">("idle")
   const [pairCopied, setPairCopied] = useState(false)
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
 
@@ -158,18 +158,20 @@ export default function OnboardingPage() {
   }, [router])
 
   useEffect(() => {
-    if (workspaceName) return
+    // Prefill workspace name from the signed-in user's display name as
+    // a starting suggestion. Functional setter pattern lets the user
+    // type into the input before /api/auth/session resolves without
+    // having their typing overwritten — the setter sees the latest
+    // committed value and only applies the prefill when it's empty.
     fetch("/api/auth/session")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const name = d?.user?.name || d?.user?.email
-        if (name && !workspaceName) {
-          const base = String(name).split("@")[0]
-          setWorkspaceName(`${base}'s Workspace`)
-        }
+        if (!name) return
+        const base = String(name).split("@")[0]
+        setWorkspaceName((current) => (current ? current : `${base}'s Workspace`))
       })
       .catch(() => undefined)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -231,6 +233,10 @@ export default function OnboardingPage() {
 
   const startPairing = useCallback(async () => {
     setError(null)
+    // Reset to a known-loading state so the failure UI doesn't linger
+    // across retries. The status transitions: idle → (fetching) →
+    // pending on success, or → failed on any error path.
+    setPairStatus("idle")
     try {
       const res = await fetch("/api/v1/auth/pair/start", {
         method: "POST",
@@ -240,6 +246,7 @@ export default function OnboardingPage() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         setError(data.error ?? "Could not start pairing")
+        setPairStatus("failed")
         return
       }
       const data = await res.json()
@@ -248,14 +255,19 @@ export default function OnboardingPage() {
       setPairStatus("pending")
     } catch {
       setError("Network error starting pairing")
+      setPairStatus("failed")
     }
   }, [adapter])
 
   useEffect(() => {
-    if (mode === "cli" && step === 3 && !pairCode) {
+    // Auto-start pairing on first arrival at step 3 (CLI mode). Don't
+    // retry on failure — the "failed" status surfaces a manual retry
+    // button instead, so we don't hammer the server in a hot loop if
+    // /pair/start is consistently rejecting.
+    if (mode === "cli" && step === 3 && !pairCode && pairStatus === "idle") {
       void startPairing()
     }
-  }, [mode, step, pairCode, startPairing])
+  }, [mode, step, pairCode, pairStatus, startPairing])
 
   /**
    * The full CLI invocation the user should paste — code AND server.
@@ -701,6 +713,20 @@ export default function OnboardingPage() {
                                 </div>
                               )}
                             </>
+                          ) : pairStatus === "failed" ? (
+                            <div className="flex items-center justify-between gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs">
+                              <div className="flex items-center gap-2 text-destructive">
+                                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                <span>Couldn&apos;t start pairing. Check your connection and try again.</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void startPairing()}
+                                className="text-xs font-medium underline underline-offset-2 hover:text-foreground shrink-0"
+                              >
+                                Retry
+                              </button>
+                            </div>
                           ) : (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
                               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating code…

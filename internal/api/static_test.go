@@ -13,13 +13,13 @@ import (
 // file actually got served.
 func fakeFS() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":                  {Data: []byte("ROOT")},
-		"login.html":                  {Data: []byte("LOGIN")},
-		"crews.html":                  {Data: []byte("CREWS")},
-		"crews/agents.html":           {Data: []byte("CREWS_AGENTS")},
-		"chat/_.html":                 {Data: []byte("CHAT_PLACEHOLDER")},
-		"skills/_.html":               {Data: []byte("SKILLS_PLACEHOLDER")},
-		"issues/_.html":               {Data: []byte("ISSUES_PLACEHOLDER")},
+		"index.html":        {Data: []byte("ROOT")},
+		"login.html":        {Data: []byte("LOGIN")},
+		"crews.html":        {Data: []byte("CREWS")},
+		"crews/agents.html": {Data: []byte("CREWS_AGENTS")},
+		"chat/_.html":       {Data: []byte("CHAT_PLACEHOLDER")},
+		"skills/_.html":     {Data: []byte("SKILLS_PLACEHOLDER")},
+		"issues/_.html":     {Data: []byte("ISSUES_PLACEHOLDER")},
 		// Older / directory-style placeholder for parity coverage:
 		"old/_/index.html": {Data: []byte("OLD_DIR_PLACEHOLDER")},
 		"icon.svg":         {Data: []byte("SVG")},

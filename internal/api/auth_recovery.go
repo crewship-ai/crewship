@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -40,6 +41,14 @@ type RecoveryHandler struct {
 	logger   *slog.Logger
 	mail     mailer.Mailer
 	sessions sessions.Store
+	// publicBase is the validated CREWSHIP_PUBLIC_URL from env, parsed
+	// once at construction. Nil when the env var is unset. Used as the
+	// authoritative origin for reset links — never falls back to
+	// r.Host, which would be Host-header-injection-controllable by
+	// the attacker (POST /forgot with a Host header pointing at evil.com
+	// would otherwise mail the victim a working reset link that lands
+	// on evil.com's listener).
+	publicBase *url.URL
 }
 
 // NewRecoveryHandler constructs a RecoveryHandler. The mailer may be
@@ -47,8 +56,34 @@ type RecoveryHandler struct {
 // enumeration) but no email is sent and the user must use CLI
 // recovery. The sessions store is used to invalidate all active
 // sessions after a successful reset.
+//
+// CREWSHIP_PUBLIC_URL is read once here. If it's set but malformed
+// we refuse to mint reset tokens (logged at every /forgot call) —
+// far better than silently shipping broken links. If it's unset and
+// a mailer is configured, we also refuse to send: there's no safe
+// way to build an origin without it, and r.Host is attacker-tainted.
 func NewRecoveryHandler(db *sql.DB, logger *slog.Logger, mail mailer.Mailer, sessionsStore sessions.Store) *RecoveryHandler {
-	return &RecoveryHandler{db: db, logger: logger, mail: mail, sessions: sessionsStore}
+	h := &RecoveryHandler{db: db, logger: logger, mail: mail, sessions: sessionsStore}
+
+	raw := strings.TrimSpace(os.Getenv("CREWSHIP_PUBLIC_URL"))
+	if raw == "" {
+		if mail != nil && mail.Configured() {
+			logger.Warn("CREWSHIP_PUBLIC_URL is unset; password-reset emails will be skipped to prevent Host-header injection. Set CREWSHIP_PUBLIC_URL to your public origin (e.g. https://crewship.example.com).")
+		}
+		return h
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		logger.Error("CREWSHIP_PUBLIC_URL is malformed; password-reset emails will be skipped. Fix it to a fully-qualified http(s) URL with scheme + host.",
+			"value", raw, "parse_err", err)
+		return h
+	}
+	// Normalize: strip any path/query/fragment — we only need origin.
+	u.Path = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	h.publicBase = u
+	return h
 }
 
 type forgotRequest struct {
@@ -105,6 +140,18 @@ func (h *RecoveryHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CREWSHIP_PUBLIC_URL must be set + valid to build a trustworthy
+	// reset link. Without it we'd have to fall back to r.Host, which
+	// an attacker can poison with a forged Host header to redirect
+	// the reset link onto their own domain. Same 200 response so the
+	// failure isn't an enumeration side channel.
+	if h.publicBase == nil {
+		h.logger.Error("forgot password: CREWSHIP_PUBLIC_URL unset or malformed, refusing to mint token",
+			"email_hash", emailHashShort(email))
+		h.writeForgotResponse(w)
+		return
+	}
+
 	// Mint a 32-byte raw token (the secret that goes in the email),
 	// store only its SHA256 hash so a DB leak doesn't trivially
 	// produce working reset links.
@@ -134,7 +181,7 @@ func (h *RecoveryHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	link := buildResetURL(r, rawToken)
+	link := h.buildResetURL(rawToken)
 	msg := mailer.Message{
 		To:      email,
 		Subject: "Reset your Crewship password",
@@ -189,13 +236,22 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	tokenHash := hashResetToken(req.Token)
 
-	// Look up the token + its identifier. Constant-time compare via
-	// sha256 of the inbound token vs the stored hash — verification_tokens.token
-	// is the hash, so a direct WHERE token = ? leaks no timing for
-	// the hash itself, and the user_id we fetch belongs to whoever
-	// the token was issued to.
+	// Begin the tx up front so token-lookup → DELETE → user-update all
+	// see the same snapshot. Two requests racing the same token will
+	// serialize on the DELETE: only the first observes rowsAffected==1
+	// and proceeds; the loser sees zero rows and bails.
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("reset password: begin tx", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Look up the token row inside the tx.
 	var email, expiresStr string
-	err := h.db.QueryRowContext(r.Context(), `
+	err = tx.QueryRowContext(r.Context(), `
 		SELECT identifier, expires FROM verification_tokens
 		WHERE token = ? AND purpose = 'password_reset'`, tokenHash).Scan(&email, &expiresStr)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -219,19 +275,40 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	expires, err := time.Parse(time.RFC3339, expiresStr)
 	if err != nil || time.Now().UTC().After(expires) {
-		// Sweep the dead token so the table doesn't grow forever
-		// with expired rows. Best-effort.
-		_, _ = h.db.ExecContext(r.Context(),
-			"DELETE FROM verification_tokens WHERE token = ?", tokenHash)
+		// Sweep the dead token (best-effort, outside the tx — rollback
+		// will undo any work inside; the cleanup runs on its own).
+		if _, dbErr := h.db.ExecContext(r.Context(),
+			"DELETE FROM verification_tokens WHERE token = ?", tokenHash); dbErr != nil {
+			h.logger.Warn("reset password: cleanup expired token", "error", dbErr)
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
 		return
 	}
 
-	// Resolve the user. We could JOIN this above, but two queries
-	// keep the SQL grokable and the second query is on the indexed
-	// email column.
+	// Burn the token FIRST. Race-protection lives here: a parallel
+	// /reset with the same token will see rowsAffected == 0 and bail
+	// before touching the user's password. SQLite serializes writes,
+	// so the loser observes the post-DELETE state inside its own tx.
+	delRes, err := tx.ExecContext(r.Context(),
+		"DELETE FROM verification_tokens WHERE token = ?", tokenHash)
+	if err != nil {
+		h.logger.Error("reset password: delete token", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	deleted, _ := delRes.RowsAffected()
+	if deleted != 1 {
+		// Someone else consumed this token in parallel (or the row
+		// was swept between our SELECT and DELETE). Either way the
+		// caller sees the same generic error.
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
+		return
+	}
+
+	// Resolve the user. Second query (on the indexed email column)
+	// keeps the SQL readable; we already won the race above.
 	var userID string
-	if err := h.db.QueryRowContext(r.Context(),
+	if err := tx.QueryRowContext(r.Context(),
 		"SELECT id FROM users WHERE email = ?", email).Scan(&userID); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired token"})
 		return
@@ -243,15 +320,6 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		h.logger.Error("reset password: begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	defer tx.Rollback() //nolint:errcheck
 
 	// Update password and clear any active brute-force lockout state.
 	// The two are tied: if you can prove possession of the email
@@ -266,15 +334,6 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Burn the token. Doing this inside the tx means a concurrent
-	// second click can't race past a half-committed state.
-	if _, err := tx.ExecContext(r.Context(),
-		"DELETE FROM verification_tokens WHERE token = ?", tokenHash); err != nil {
-		h.logger.Error("reset password: delete token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("reset password: commit", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -283,10 +342,19 @@ func (h *RecoveryHandler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	// Invalidate every active session for this user. A stolen
 	// session cookie (the reason somebody often resets a password
-	// in the first place) must not outlive the reset.
+	// in the first place) must not outlive the reset, so a revoke
+	// failure has to be a hard failure: we tell the caller something
+	// went wrong instead of returning 200 with stale sessions still
+	// live. The password write has already committed, so the user's
+	// next login attempt will work — but they'll know to retry and
+	// the operator will see the cause in the logs.
 	if h.sessions != nil {
 		if _, err := h.sessions.RevokeAllForUser(r.Context(), userID, sessions.ReasonPasswordChange); err != nil {
-			h.logger.Warn("reset password: revoke sessions", "error", err, "user_id", userID)
+			h.logger.Error("reset password: revoke sessions failed; password updated but existing sessions remain valid", "error", err, "user_id", userID)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "Password was updated, but we couldn't sign out existing sessions. Please try again or contact your administrator.",
+			})
+			return
 		}
 	}
 
@@ -319,21 +387,21 @@ func emailHashShort(email string) string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// buildResetURL composes the URL that lands in the reset email. Uses
-// the request's Host header by default; operators can override with
-// CREWSHIP_PUBLIC_URL to force a canonical hostname (useful when the
-// app sits behind a reverse proxy and the Host header is the
-// internal address).
-func buildResetURL(r *http.Request, rawToken string) string {
-	if override := strings.TrimSpace(os.Getenv("CREWSHIP_PUBLIC_URL")); override != "" {
-		base := strings.TrimRight(override, "/")
-		return fmt.Sprintf("%s/reset-password?token=%s", base, rawToken)
+// buildResetURL composes the URL that lands in the reset email using
+// the validated origin from CREWSHIP_PUBLIC_URL. /forgot's caller has
+// already confirmed h.publicBase != nil; we keep a defensive nil check
+// here so a wiring bug fails loudly instead of producing
+// "://reset-password?token=…".
+func (h *RecoveryHandler) buildResetURL(rawToken string) string {
+	if h.publicBase == nil {
+		return ""
 	}
-	scheme := "http"
-	if isHTTPS(r) {
-		scheme = "https"
-	}
-	return fmt.Sprintf("%s://%s/reset-password?token=%s", scheme, r.Host, rawToken)
+	u := *h.publicBase
+	u.Path = "/reset-password"
+	q := u.Query()
+	q.Set("token", rawToken)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func resetEmailHTML(name, link string) string {

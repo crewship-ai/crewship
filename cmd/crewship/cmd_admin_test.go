@@ -121,7 +121,10 @@ func TestAdminResetPassword_RejectsShortPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	originalHash, _ := bcrypt.GenerateFromPassword([]byte("oldpassword"), 4)
+	originalHash, err := bcrypt.GenerateFromPassword([]byte("oldpassword"), 4)
+	if err != nil {
+		t.Fatalf("hash: %v", err)
+	}
 	if _, err := db.Exec(`INSERT INTO users (id, email, hashed_password) VALUES ('u1', 'admin@example.com', ?)`, string(originalHash)); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

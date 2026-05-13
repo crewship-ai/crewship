@@ -190,7 +190,7 @@ func TestNormalizePairingCode(t *testing.T) {
 		{"K3F9X2NM", "K3F9-X2NM"},
 		{"k3f9 x2nm", "K3F9-X2NM"},
 		{" K3F9-X2NM ", "K3F9-X2NM"},
-		{"K3F9X2", ""},  // too short
+		{"K3F9X2", ""}, // too short
 		{"", ""},
 	}
 	for _, c := range cases {

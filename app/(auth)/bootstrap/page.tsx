@@ -179,6 +179,8 @@ export default function BootstrapPage() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                  role="alert"
+                  aria-live="assertive"
                 >
                   {error}
                 </motion.div>
