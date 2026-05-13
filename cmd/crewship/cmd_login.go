@@ -16,8 +16,11 @@ import (
 )
 
 var (
-	loginTokenFlag  string
-	loginGoogleFlag bool
+	loginTokenFlag   string
+	loginGoogleFlag  bool
+	loginPairFlag    bool
+	loginCodeFlag    string
+	loginAdapterHint string
 )
 
 var loginCmd = &cobra.Command{
@@ -33,10 +36,17 @@ Token mode (API token):
 
 Google OAuth (browser-based; finishes the flow in the web UI, then
 paste the CLI token printed at the end):
-  crewship login --google`,
+  crewship login --google
+
+Device-code pairing (paste the code shown in the browser onboarding
+or Settings → Pair CLI):
+  crewship login --pair --code=XXXX-XXXX`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		server := cli.ResolveServer(flagServer, cliCfg)
 
+		if loginPairFlag {
+			return loginWithPairing(server, loginCodeFlag, loginAdapterHint)
+		}
 		if loginTokenFlag != "" {
 			return loginWithToken(server, loginTokenFlag)
 		}
@@ -131,6 +141,60 @@ var whoamiCmd = &cobra.Command{
 func init() {
 	loginCmd.Flags().StringVar(&loginTokenFlag, "token", "", "API token for non-interactive login")
 	loginCmd.Flags().BoolVar(&loginGoogleFlag, "google", false, "Sign in via Google OAuth (browser flow, finishes in the web UI)")
+	loginCmd.Flags().BoolVar(&loginPairFlag, "pair", false, "Redeem a device-code shown in the browser (use with --code)")
+	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
+	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
+}
+
+// loginWithPairing redeems a device-code shown in the browser
+// onboarding. Adapter-blind: the --adapter flag is telemetry only;
+// the server never routes on it, so a future 7th CLI adapter needs
+// only a frontend registry entry, no backend change.
+func loginWithPairing(serverURL, code, adapterHint string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return fmt.Errorf("--code is required (paste the code shown in the browser, e.g. K3F9-X2NM)")
+	}
+
+	client := cli.NewClient(serverURL, "", "")
+	payload := map[string]string{"code": code}
+	if adapterHint != "" {
+		payload["adapter_hint"] = adapterHint
+	}
+
+	resp, err := client.Post("/api/v1/auth/pair/redeem", payload)
+	if err != nil {
+		return fmt.Errorf("connect to server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := cli.CheckError(resp); err != nil {
+		return fmt.Errorf("pair: %w", err)
+	}
+
+	var redeem struct {
+		CliToken string `json:"cli_token"`
+		Email    string `json:"email"`
+	}
+	if err := cli.ReadJSON(resp, &redeem); err != nil {
+		return fmt.Errorf("parse redeem response: %w", err)
+	}
+	if redeem.CliToken == "" {
+		return fmt.Errorf("server returned empty cli_token")
+	}
+
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		cfg = &cli.CLIConfig{}
+	}
+	cfg.Server = serverURL
+	cfg.Token = redeem.CliToken
+	if err := cli.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	cli.PrintSuccess(fmt.Sprintf("Paired successfully as %s. Token saved to ~/.crewship/cli-config.yaml", redeem.Email))
+	return nil
 }
 
 func loginWithToken(serverURL, token string) error {
