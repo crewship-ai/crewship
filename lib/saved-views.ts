@@ -10,11 +10,22 @@ export interface SavedViewFilters {
   search: string
 }
 
+// Minimal runtime guard so malformed entries (missing/typo'd `id`/`name`,
+// non-string fields) don't crash consumers that read `v.id` / `v.name`.
+// We intentionally don't validate every nested field — `filters_json`
+// and `sort_json` are flexible payloads and `applySavedView` already
+// tolerates malformed JSON.
+function isSavedView(value: unknown): value is SavedView {
+  if (!value || typeof value !== "object") return false
+  const v = value as Record<string, unknown>
+  return typeof v.id === "string" && typeof v.name === "string"
+}
+
 export function parseSavedViews(raw: unknown): SavedView[] {
-  if (Array.isArray(raw)) return raw as SavedView[]
+  if (Array.isArray(raw)) return raw.filter(isSavedView)
   if (raw && typeof raw === "object" && "views" in raw) {
     const views = (raw as { views: unknown }).views
-    return Array.isArray(views) ? (views as SavedView[]) : []
+    return Array.isArray(views) ? views.filter(isSavedView) : []
   }
   return []
 }

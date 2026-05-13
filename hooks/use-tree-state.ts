@@ -105,8 +105,17 @@ export function useTreeState({ agentId, workspaceId, wsLoading }: UseTreeStateAr
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
+    // Reset the full tree-view state — not just `tree`/`selectedPath` —
+    // so switching agent/workspace doesn't leak `expandedPaths` /
+    // `loadingDirs` from the previous agent or briefly render the
+    // empty-state UI (loading=false, tree=[]) before the new fetch
+    // resolves.
+    setLoading(true)
     setTree([])
+    setBasePrefix("")
     setSelectedPath(null)
+    setExpandedPaths(new Set())
+    setLoadingDirs(new Set())
     setError(null)
     // Without a resolved agentId the legacy pathname would be
     // `/api/v1/agents//files`, which 404s. Short-circuit while the
@@ -151,15 +160,30 @@ export function useTreeState({ agentId, workspaceId, wsLoading }: UseTreeStateAr
 
   const fetchSubdir = useCallback(async (dirPath: string) => {
     if (!canQueryAgent) return
+    // Tie subdir loads to the same AbortController as the top-level
+    // fetch so a slow folder request from the previous agent/workspace
+    // can't repopulate the tree after a reset has cleared it.
+    const signal = abortRef.current?.signal
     setLoadingDirs((prev) => new Set(prev).add(dirPath))
     try {
       const relPath = dirPath.startsWith(basePrefix) ? dirPath.slice(basePrefix.length) : dirPath
-      const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
+      const res = await fetch(
+        `/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`,
+        signal ? { signal } : undefined,
+      )
       if (!res.ok) return
       const data: FileEntry[] | null = await res.json()
+      if (signal?.aborted) return
       setTree((prev) => insertChildren(prev, dirPath, data ?? []))
-    } catch { /* folder contents unavailable — tree shows empty */ }
-    finally { setLoadingDirs((prev) => { const next = new Set(prev); next.delete(dirPath); return next }) }
+    } catch (err) {
+      if (signal?.aborted) return
+      if (err instanceof DOMException && err.name === "AbortError") return
+      /* folder contents unavailable — tree shows empty */
+    } finally {
+      if (!signal?.aborted) {
+        setLoadingDirs((prev) => { const next = new Set(prev); next.delete(dirPath); return next })
+      }
+    }
   }, [agentId, workspaceId, canQueryAgent, basePrefix])
 
   const toggleFolder = useCallback((path: string) => {
