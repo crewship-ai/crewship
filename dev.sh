@@ -580,11 +580,26 @@ cmd_nuke() {
     warn "Docker not available — skipping container cleanup"
   fi
 
-  # 3. Remove data directories
+  # 3. Remove data directories.
+  # Files written by agent containers are owned by container UIDs (1001/1002),
+  # so a host-side `rm -rf` hits EACCES. Fall back to a one-shot Alpine
+  # container that is root inside and can clean its own droppings.
   log "Removing data..."
-  rm -rf "$DATA_DIR"
-  rm -rf "$STATE_DIR"
-  rm -rf "$LOG_PATH"
+  remove_data_dir() {
+    local dir="$1"
+    [[ -e "$dir" ]] || return 0
+    rm -rf "$dir" 2>/dev/null && return 0
+    if [[ -x "$docker_cmd" ]] || command -v docker &>/dev/null; then
+      local parent base
+      parent=$(dirname "$dir")
+      base=$(basename "$dir")
+      $docker_cmd run --rm -v "$parent:/target" alpine:3 sh -c "rm -rf /target/$base" 2>/dev/null || true
+    fi
+    [[ -e "$dir" ]] && warn "$dir not fully removed — try: sudo rm -rf $dir"
+  }
+  remove_data_dir "$DATA_DIR"
+  remove_data_dir "$STATE_DIR"
+  remove_data_dir "$LOG_PATH"
   rm -f "$SOCKET_PATH"
   ok "Data directories removed"
 
