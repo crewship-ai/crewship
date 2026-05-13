@@ -85,7 +85,6 @@ export default function BootstrapPage() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         setError(data.error ?? `Bootstrap failed (HTTP ${res.status}).`)
-        setLoading(false)
         return
       }
       // Bootstrap sets session cookies inline now (since 2026-05-13)
@@ -111,6 +110,11 @@ export default function BootstrapPage() {
           ? `Couldn't reach the server: ${e.message}. Check your connection and try again.`
           : "Couldn't reach the server. Check your connection and try again.",
       )
+    } finally {
+      // finally so the form re-enables on every exit path — an
+      // interrupted navigation (back button mid-redirect, browser
+      // throttling, etc.) used to leave the submit button stuck
+      // disabled forever.
       setLoading(false)
     }
   }

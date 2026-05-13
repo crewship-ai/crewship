@@ -391,6 +391,16 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		// gates that path; an unrecognised string is operator error.
 		llm, ok := resolveLLMProvider(req.LlmProvider)
 		if !ok && strings.TrimSpace(req.LlmProvider) != "" {
+			// We've already flipped onboarding_completed=1 in the CAS
+			// guard above. Bailing here without rolling that back would
+			// strand the user — wizard says "completed", but no crew /
+			// credential ever got persisted. Same compensating UPDATE
+			// pattern as the deploy-failure path further down.
+			if _, rbErr := h.db.ExecContext(r.Context(),
+				"UPDATE users SET onboarding_completed = 0, updated_at = ? WHERE id = ?",
+				time.Now().UTC().Format(time.RFC3339), userID); rbErr != nil {
+				h.logger.Error("onboarding template: rollback completion flag after llm_provider reject", "error", rbErr)
+			}
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "Unknown llm_provider — expected ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA",
 			})

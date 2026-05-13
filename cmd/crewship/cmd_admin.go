@@ -171,8 +171,14 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	}
 	// Guard against the row being deleted out from under us between
 	// the lookup above and this UPDATE — otherwise we'd print
-	// "password reset" while nothing changed.
-	if affected, _ := userRes.RowsAffected(); affected != 1 {
+	// "password reset" while nothing changed. Surface RowsAffected
+	// errors too so a driver-metadata failure doesn't masquerade as
+	// "no rows".
+	affected, err := userRes.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update password rows affected: %w", err)
+	}
+	if affected != 1 {
 		return fmt.Errorf("update password: expected 1 row affected, got %d", affected)
 	}
 
@@ -186,7 +192,10 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("revoke sessions: %w", err)
 	}
-	revoked, _ := res.RowsAffected()
+	revoked, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("revoke sessions rows affected: %w", err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
@@ -350,7 +359,13 @@ func runAdminPromote(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("update membership: %w", err)
 	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
+	affected, err := res.RowsAffected()
+	if err != nil {
+		// Surface driver-metadata failures instead of mis-reporting
+		// them as "user is not a member".
+		return fmt.Errorf("update membership rows affected: %w", err)
+	}
+	if affected == 0 {
 		return fmt.Errorf("user is not a member of workspace %q", wsSlug)
 	}
 

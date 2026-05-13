@@ -139,7 +139,13 @@ export default function OnboardingPage() {
 
   const [pairCode, setPairCode] = useState<string | null>(null)
   const [pairExpiresAt, setPairExpiresAt] = useState<string | null>(null)
-  const [pairStatus, setPairStatus] = useState<"idle" | "pending" | "consumed" | "expired" | "failed">("idle")
+  // "starting" is a distinct in-flight state so the auto-start effect
+  // doesn't race a manual retry click: the effect only fires when
+  // status === "idle", and startPairing flips to "starting" before
+  // any await. Without this, clicking Retry after an expiry could
+  // mint two codes — UI keeps the second one but the first stays
+  // valid server-side until its 10-min TTL elapses.
+  const [pairStatus, setPairStatus] = useState<"idle" | "starting" | "pending" | "consumed" | "expired" | "failed">("idle")
   const [pairCopied, setPairCopied] = useState(false)
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
 
@@ -233,10 +239,11 @@ export default function OnboardingPage() {
 
   const startPairing = useCallback(async () => {
     setError(null)
-    // Reset to a known-loading state so the failure UI doesn't linger
-    // across retries. The status transitions: idle → (fetching) →
-    // pending on success, or → failed on any error path.
-    setPairStatus("idle")
+    // Flip to "starting" BEFORE the await so the auto-start effect
+    // (which keys off status === "idle") can't fire in parallel and
+    // mint a second code. Status transitions:
+    //   idle → starting → pending (success) | failed (error)
+    setPairStatus("starting")
     try {
       const res = await fetch("/api/v1/auth/pair/start", {
         method: "POST",
@@ -701,9 +708,13 @@ export default function OnboardingPage() {
                                     type="button"
                                     className="underline font-medium"
                                     onClick={() => {
+                                      // startPairing flips to "starting"
+                                      // synchronously before its await, so
+                                      // we don't have to bridge through
+                                      // "idle" here — that would briefly
+                                      // open the auto-start race window.
                                       setPairCode(null)
                                       setPairExpiresAt(null)
-                                      setPairStatus("idle")
                                       void startPairing()
                                     }}
                                   >
