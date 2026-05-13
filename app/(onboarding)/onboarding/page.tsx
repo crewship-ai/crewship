@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter } from "@/lib/cli-adapters"
-import { getAdapterBrand, ADAPTER_KEY_CONSOLE, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
+import { getAdapterBrand, ADAPTER_TOKEN_GUIDE, ADAPTER_TOKEN_CMD, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import { LANGUAGES } from "@/lib/languages"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
@@ -741,15 +741,15 @@ export default function OnboardingPage() {
                     </div>
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <Label htmlFor="api_key">{adapterCfg?.envVar ?? "API key"}</Label>
-                        {ADAPTER_KEY_CONSOLE[adapter] && (
+                        <Label htmlFor="api_key">{adapterCfg?.label ?? "Adapter"} CLI token</Label>
+                        {ADAPTER_TOKEN_GUIDE[adapter] && (
                           <a
-                            href={ADAPTER_KEY_CONSOLE[adapter].url}
+                            href={ADAPTER_TOKEN_GUIDE[adapter].url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-[11px] text-primary inline-flex items-center gap-0.5 hover:underline"
                           >
-                            {ADAPTER_KEY_CONSOLE[adapter].label}
+                            {ADAPTER_TOKEN_GUIDE[adapter].label}
                             <ExternalLink className="h-2.5 w-2.5" />
                           </a>
                         )}
@@ -759,12 +759,22 @@ export default function OnboardingPage() {
                         type="password"
                         value={apiKey}
                         onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={`${adapterCfg?.envVar ?? "API_KEY"} value`}
+                        placeholder="CLI token (not your account API key)"
                         className="font-mono text-xs h-10"
                       />
+                      {ADAPTER_TOKEN_CMD[adapter] && (
+                        <div className="rounded-md border border-border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed">
+                          <span className="text-muted-foreground">Run this on your machine, paste the output above:</span>
+                          <div className="text-emerald-500 mt-1 select-all">$ {ADAPTER_TOKEN_CMD[adapter]}</div>
+                        </div>
+                      )}
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Stored encrypted in your workspace. Your agents use this to call{" "}
-                        {adapterCfg?.label ?? "the model"} — required even when you drive Crewship from a paired CLI.
+                        This is the{" "}
+                        <strong className="text-foreground/80">CLI token</strong>
+                        {" "}from <code className="font-mono text-foreground/80">{ADAPTER_TOKEN_CMD[adapter] ?? "<cli> setup-token"}</code>,{" "}
+                        <em>not</em> the raw account API key from the provider's console. The agents use the
+                        CLI token via the same OAuth flow your local CLI does — pasting an sk-ant-api… key
+                        here won&apos;t work.
                       </p>
                     </div>
 

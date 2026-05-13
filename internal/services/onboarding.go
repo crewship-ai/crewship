@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
-	"strings"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -134,27 +133,16 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 				return nil, encErr
 			}
 
-			// Detect Claude Code OAuth tokens (sk-ant-oat*) and store
-			// them as AI_CLI_TOKEN — the orchestrator picks an OAuth
-			// CONNECT-tunnel auth mode for that type. Everything else
-			// (plain sk-ant-api*, OpenAI sk-*, Google AI keys, …) is
-			// a raw API key and must land as API_KEY so the runtime
-			// injects it as an env var the underlying CLI can read.
-			//
-			// The previous hard-coded AI_CLI_TOKEN broke every fresh
-			// user who pasted an sk-ant-api… key in onboarding: their
-			// agent containers booted, Claude Code saw no credentials
-			// on disk (OAuth mode skips env injection), and replied
-			// "Not logged in · Please run /login".
-			credentialType := "API_KEY"
-			if strings.HasPrefix(p.CredentialValue, "sk-ant-oat") {
-				credentialType = "AI_CLI_TOKEN"
-			}
-
+			// Onboarding only accepts CLI tokens (the value the user
+			// gets out of `claude setup-token`, `gemini auth print-token`,
+			// etc.) — NOT raw provider API keys. The wizard's UI says
+			// so explicitly and the handler validates the prefix
+			// before we get here. Always store as AI_CLI_TOKEN so the
+			// runtime picks the matching auth mode.
 			if _, err = tx.ExecContext(ctx, `
 				INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, 'WORKSPACE', ?, ?, ?)
-			`, credentialID, p.WorkspaceID, p.CredentialName, encryptedValue, credentialType, p.LLMProvider, p.UserID, p.Now, p.Now); err != nil {
+				VALUES (?, ?, ?, ?, 'AI_CLI_TOKEN', ?, 'WORKSPACE', ?, ?, ?)
+			`, credentialID, p.WorkspaceID, p.CredentialName, encryptedValue, p.LLMProvider, p.UserID, p.Now, p.Now); err != nil {
 				s.logger.Error("insert credential", "error", err)
 				return nil, err
 			}

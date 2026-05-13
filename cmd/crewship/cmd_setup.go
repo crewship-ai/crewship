@@ -20,9 +20,11 @@ import (
 // can complete onboarding without opening a browser.
 //
 // Interactive by default: prompts for workspace name, language, crew
-// template, adapter, and API key. Each prompt has a sensible default
-// (browser-like wizard defaults) so a user can hit Enter through it.
-// All five fields are also flag-overridable for scripting / CI.
+// template, adapter, and the per-adapter CLI token (output of
+// `claude setup-token`, `gemini auth print-token`, etc. — NOT the
+// vendor's account-level API key from their console). Each prompt
+// has a sensible default so a user can hit Enter through it.
+// All fields are also flag-overridable for scripting / CI.
 //
 // Hits the same POST /api/v1/onboarding/setup endpoint as the
 // browser, so the server-side validation, language injection, and
@@ -52,7 +54,7 @@ Interactive mode (recommended):
 
 Non-interactive / scripted:
   crewship setup --crew=software-development --adapter=CLAUDE_CODE \
-                 --api-key=$ANTHROPIC_API_KEY --yes
+                 --token=$(claude setup-token) --yes
 
 Available crew templates:
   software-development   Tech Lead + Backend + Frontend + QA (4 agents)
@@ -69,7 +71,9 @@ func init() {
 	setupCmd.Flags().StringVar(&setupCrewFlag, "crew", "", "Crew template slug (software-development | devops-sre | content-marketing | accounting-finance | blank)")
 	setupCmd.Flags().StringVar(&setupAdapterFlag, "adapter", "", "CLI adapter (CLAUDE_CODE | OPENCODE | CODEX_CLI | GEMINI_CLI | CURSOR_CLI | FACTORY_DROID)")
 	setupCmd.Flags().StringVar(&setupModelFlag, "model", "", "LLM model (defaults to the adapter's recommended model)")
-	setupCmd.Flags().StringVar(&setupAPIKeyFlag, "api-key", "", "Provider API key (Anthropic / OpenAI / etc.) — required unless your workspace already has credentials")
+	setupCmd.Flags().StringVar(&setupAPIKeyFlag, "token", "", "CLI token (output of `claude setup-token`, `gemini auth print-token`, etc. — NOT the vendor's API key)")
+	setupCmd.Flags().StringVar(&setupAPIKeyFlag, "api-key", "", "Deprecated alias for --token (will be removed)")
+	_ = setupCmd.Flags().MarkDeprecated("api-key", "use --token instead — onboarding accepts CLI tokens, not raw API keys")
 	setupCmd.Flags().BoolVar(&setupYesFlag, "yes", false, "Skip interactive prompts; require all values via flags")
 
 	rootCmd.AddCommand(setupCmd)
@@ -150,21 +154,21 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	if apiKey == "" {
 		// Fall back to the env var the adapter would normally read
 		// before prompting — most users already have it set.
-		if env := strings.TrimSpace(os.Getenv(adapterCfg.envVar)); env != "" {
-			apiKey = env
-			fmt.Fprintf(cmd.OutOrStderr(), "Using API key from $%s.\n", adapterCfg.envVar)
-		} else if interactive {
+		if interactive {
 			var err error
-			apiKey, err = promptAPIKey(adapterCfg.envVar)
+			apiKey, err = promptAPIKey(adapterCfg.label)
 			if err != nil {
 				return err
 			}
 		} else {
-			return fmt.Errorf("no API key provided — pass --api-key or set $%s", adapterCfg.envVar)
+			return fmt.Errorf("no token provided — pass --token=$(claude setup-token) (or the equivalent for %s)", adapterCfg.label)
 		}
 	}
 	if len(apiKey) < 8 {
-		return errors.New("API key looks too short (need at least 8 characters)")
+		return errors.New("token looks too short (need at least 8 characters)")
+	}
+	if adapterCfg.provider == "ANTHROPIC" && strings.HasPrefix(apiKey, "sk-ant-api") {
+		return errors.New("that looks like an Anthropic API key (sk-ant-api…). Crewship needs the CLI token from `claude setup-token` (sk-ant-oat… value) — run that command on your machine and paste the result")
 	}
 
 	if language == "" && interactive {
@@ -294,14 +298,16 @@ func promptAdapter() (string, error) {
 	return "", fmt.Errorf("invalid choice %q", raw)
 }
 
-// promptAPIKey reads an API key without echo via x/term so the value
-// doesn't end up in shell scrollback.
-func promptAPIKey(envName string) (string, error) {
-	fmt.Fprintf(os.Stderr, "Paste your %s (input is hidden): ", envName)
+// promptAPIKey reads a CLI token without echo via x/term so the value
+// doesn't end up in shell scrollback. Caller passes a friendly
+// adapter label ("Claude Code", "Gemini CLI", …) which we drop into
+// the prompt so the user understands which CLI to run.
+func promptAPIKey(adapterLabel string) (string, error) {
+	fmt.Fprintf(os.Stderr, "Paste your %s CLI token (input is hidden): ", adapterLabel)
 	bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 	fmt.Fprintln(os.Stderr)
 	if err != nil {
-		return "", fmt.Errorf("read api key: %w", err)
+		return "", fmt.Errorf("read token: %w", err)
 	}
 	return strings.TrimSpace(string(bytes)), nil
 }

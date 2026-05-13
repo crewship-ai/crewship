@@ -237,6 +237,16 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// CLI-token-only contract: reject raw API keys with a clear
+	// message that points users at `claude setup-token` etc. The
+	// orchestrator's OAuth CONNECT-tunnel auth mode can't use a
+	// plain sk-ant-api… key — agents in the container can't see
+	// any on-disk credentials and Claude Code refuses to start.
+	if err := validateOnboardingCredential(req.LlmProvider, req.CredentialValue); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	// Template branch — when crew_template_slug is set, the wizard
 	// deploys a full crew (multiple agents, system prompts, model
 	// defaults) from a builtin template. Single-agent fields
@@ -439,32 +449,24 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// insertOnboardingCredential stores a workspace-scoped API key the
+// insertOnboardingCredential stores a workspace-scoped CLI token the
 // user pasted during onboarding. Same shape as the row that
 // internal/services/onboarding.go produces in the blank path, so the
 // auto-assign hook called by deployCrewTemplate finds it.
 //
-// Credential type is inferred from the value's shape: an OAuth token
-// from Claude Code starts with sk-ant-oat → AI_CLI_TOKEN (OAuth
-// CONNECT-tunnel auth mode). Anything else is a raw API key and
-// lands as API_KEY (env-var injection mode). Storing every onboarding
-// credential as AI_CLI_TOKEN — the pre-2026-05-13 default — broke
-// fresh users who pasted sk-ant-api… keys: containers booted, Claude
-// Code saw no on-disk credentials (OAuth mode skips env), and replied
-// "Not logged in".
+// Onboarding only accepts CLI tokens (output of `claude setup-token`
+// etc.), never raw API keys. The wizard UI says so explicitly and
+// validateCliToken() upstream rejects the call when the prefix
+// doesn't match. Always stored as AI_CLI_TOKEN.
 func insertOnboardingCredential(ctx context.Context, db *sql.DB, userID, workspaceID, name, provider, _ /*envVarName*/, value, now string) error {
 	encrypted, err := encryption.Encrypt(value)
 	if err != nil {
 		return fmt.Errorf("encrypt: %w", err)
 	}
-	credentialType := "API_KEY"
-	if strings.HasPrefix(value, "sk-ant-oat") {
-		credentialType = "AI_CLI_TOKEN"
-	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'WORKSPACE', ?, ?, ?)`,
-		generateCUID(), workspaceID, name, encrypted, credentialType, provider, userID, now, now); err != nil {
+		VALUES (?, ?, ?, ?, 'AI_CLI_TOKEN', ?, 'WORKSPACE', ?, ?, ?)`,
+		generateCUID(), workspaceID, name, encrypted, provider, userID, now, now); err != nil {
 		return fmt.Errorf("insert credential: %w", err)
 	}
 	return nil
@@ -475,4 +477,35 @@ func stringPtr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// validateOnboardingCredential rejects the obvious wrong-shape values
+// (most importantly: a raw Anthropic API key when the runtime expects
+// a Claude Code OAuth token). Empty value is allowed — pair mode and
+// users who skip credential setup land here without a value to check.
+//
+// Per-provider checks are intentionally narrow: we only reject shapes
+// we know will fail downstream, never anything ambiguous. A future
+// adapter whose token shape we don't yet recognise falls through.
+func validateOnboardingCredential(provider, value string) error {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return nil
+	}
+	switch strings.ToUpper(strings.TrimSpace(provider)) {
+	case "ANTHROPIC":
+		// Claude Code OAuth tokens look like `sk-ant-oat01-…`. Raw
+		// account-level API keys start with `sk-ant-api…` and are
+		// what users mistakenly grab from console.anthropic.com.
+		// Reject the latter loudly with a fix-it pointer.
+		if strings.HasPrefix(v, "sk-ant-api") {
+			return errors.New(
+				"That looks like a raw Anthropic API key (sk-ant-api…). " +
+					"Crewship onboarding needs a Claude Code CLI token instead — " +
+					"run `claude setup-token` on your machine and paste the resulting " +
+					"sk-ant-oat… value here.",
+			)
+		}
+	}
+	return nil
 }

@@ -79,18 +79,61 @@ export function getAdapterBrand(key: string): AdapterBrand {
 }
 
 /**
- * Direct links to each provider's API-key console page. These are the
- * highest-confidence "give me a key" URLs as of 2026-05; if a vendor
- * relocates their settings, update here and the onboarding wizard
- * picks it up automatically.
+ * Per-adapter "how do I get a CLI token?" docs. These deliberately
+ * point at our own future docs space (docs.crewship.ai/cli-tokens/<adapter>)
+ * rather than the vendor's API-key console: onboarding accepts CLI
+ * tokens ONLY — the OAuth-style values that come out of
+ * `claude setup-token`, `gemini auth print-token` etc. — never the
+ * raw account-level API keys those console pages hand out, because
+ * the agent runtime's OAuth CONNECT-tunnel mode can only inject the
+ * former.
+ *
+ * The pages don't exist yet; until they do the URLs are temporary
+ * deep-links into the vendor's own CLI-auth docs so a user clicking
+ * "How to generate a CLI token →" lands somewhere actionable. Swap
+ * to the Crewship guide path the moment docs ship.
  */
-export const ADAPTER_KEY_CONSOLE: Record<string, { url: string; label: string }> = {
-  CLAUDE_CODE: { url: "https://console.anthropic.com/settings/keys", label: "Get an Anthropic key" },
-  OPENCODE:    { url: "https://console.anthropic.com/settings/keys", label: "Get an Anthropic key" },
-  CODEX_CLI:   { url: "https://platform.openai.com/api-keys",         label: "Get an OpenAI key" },
-  GEMINI_CLI:  { url: "https://aistudio.google.com/app/apikey",       label: "Get a Google AI key" },
-  CURSOR_CLI:  { url: "https://cursor.com/settings",                   label: "Get a Cursor key" },
-  FACTORY_DROID: { url: "https://app.factory.ai/settings/api-keys",    label: "Get a Factory key" },
+export const ADAPTER_TOKEN_GUIDE: Record<string, { url: string; label: string }> = {
+  CLAUDE_CODE: {
+    url: "https://docs.claude.com/en/docs/claude-code/setup#anthropic-api-key",
+    label: "How to generate a Claude Code CLI token",
+  },
+  OPENCODE: {
+    url: "https://opencode.ai/docs/cli/#authentication",
+    label: "How to generate an OpenCode CLI token",
+  },
+  CODEX_CLI: {
+    url: "https://developers.openai.com/codex/auth",
+    label: "How to generate a Codex CLI token",
+  },
+  GEMINI_CLI: {
+    url: "https://ai.google.dev/gemini-api/docs/cli#authentication",
+    label: "How to generate a Gemini CLI token",
+  },
+  CURSOR_CLI: {
+    url: "https://cursor.com/docs/cli#authentication",
+    label: "How to generate a Cursor CLI token",
+  },
+  FACTORY_DROID: {
+    url: "https://docs.factory.ai/cli/auth",
+    label: "How to generate a Factory CLI token",
+  },
+}
+
+/**
+ * One-line command the user can copy-paste in their terminal to
+ * produce the CLI token Crewship expects. Shown inline next to the
+ * input field — beats hunting through external docs for the right
+ * incantation. Order of these strings matches the vendor's primary
+ * advertised onboarding command (`<cli> setup-token` family).
+ */
+export const ADAPTER_TOKEN_CMD: Record<string, string> = {
+  CLAUDE_CODE: "claude setup-token",
+  OPENCODE: "opencode auth",
+  CODEX_CLI: "codex login",
+  GEMINI_CLI: "gemini auth print-token",
+  CURSOR_CLI: "cursor login",
+  FACTORY_DROID: "droid auth login",
 }
 
 /**
