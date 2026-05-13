@@ -204,6 +204,13 @@ type Orchestrator struct {
 	episodicRecall EpisodicRecaller
 	presence       PresenceTracker
 	memoryMetrics  MemoryMetricsReader
+
+	// episodicUnreachableLogged guards against log spam when the episodic
+	// recall backend (e.g. Ollama at localhost:11434) is unreachable. We
+	// log the first failure for visibility, then suppress identical errors
+	// until a successful recall resets the flag — otherwise N parallel
+	// agent runs each emit their own log line per recall attempt.
+	episodicUnreachableLogged sync.Once
 }
 
 // HookDispatcher is the narrow interface the orchestrator uses to fire

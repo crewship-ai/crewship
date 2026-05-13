@@ -85,3 +85,45 @@ func TestBroadcast(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 }
+
+// TestBroadcastDropsOnFullSendBuffer verifies that a slow consumer (full send
+// channel) causes the hub to record dropped frames instead of stalling the
+// broadcast loop. Regression guard for the silent-drop bug — before this fix,
+// the default arm of the select returned with no side effect and ops had no
+// signal that a client was missing events.
+func TestBroadcastDropsOnFullSendBuffer(t *testing.T) {
+	logger := logging.New("error", "json", nil)
+	hub := NewHub(logger, nil, NopValidatorForTests, NopSessionsForTests)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go hub.Run(ctx)
+	time.Sleep(10 * time.Millisecond)
+
+	clientCtx, clientCancel := context.WithCancel(context.Background())
+	defer clientCancel()
+	stuck := &Client{
+		hub:      hub,
+		userID:   "stuck-user",
+		channels: map[string]bool{"test-channel": true},
+		// Tiny buffer that we never drain, so the second send must drop.
+		send:   make(chan []byte, 1),
+		ctx:    clientCtx,
+		cancel: clientCancel,
+	}
+	hub.mu.Lock()
+	if hub.channels["test-channel"] == nil {
+		hub.channels["test-channel"] = make(map[*Client]bool)
+	}
+	hub.channels["test-channel"][stuck] = true
+	hub.mu.Unlock()
+
+	for i := 0; i < 32; i++ {
+		hub.Broadcast("test-channel", ServerMessage{Type: "test", Payload: i})
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if got := hub.DroppedFrames(); got == 0 {
+		t.Fatalf("expected drops on stuck consumer, got 0")
+	}
+}

@@ -254,7 +254,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		})
 		cancel()
 		if err != nil {
-			o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
+			// "Ollama unreachable" is the common dev-mode case (no embedder
+			// running). It's expected, not a bug, but with N parallel agent
+			// runs the per-recall DEBUG line floods the log on every chat
+			// turn. Log the first occurrence at INFO so ops sees it once,
+			// then degrade to silence until something changes.
+			if strings.Contains(err.Error(), "ollama unreachable") {
+				o.episodicUnreachableLogged.Do(func() {
+					o.logger.Info("episodic recall backend unreachable; continuing without recall for this session", "err", err)
+				})
+			} else {
+				o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
+			}
 		} else if rendered != "" {
 			promptBuf.WriteString("\n\n")
 			promptBuf.WriteString(rendered)

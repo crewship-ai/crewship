@@ -305,8 +305,28 @@ func StartRegistrySyncWorker(db *sql.DB, logger *slog.Logger, stop <-chan struct
 		case <-time.After(10 * time.Second):
 		}
 
-		if err := SyncMCPRegistry(ctx, db, logger); err != nil {
-			logger.Error("initial MCP registry sync failed", "error", err)
+		// Initial sync may hit a momentarily unreachable registry; retry a
+		// few times with exponential backoff so a transient 4xx/5xx at boot
+		// doesn't leave the catalog permanently empty until the 24h ticker
+		// fires. Stop early if the server is shutting down.
+		const maxAttempts = 4
+		backoff := 15 * time.Second
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			err := SyncMCPRegistry(ctx, db, logger)
+			if err == nil {
+				break
+			}
+			if attempt == maxAttempts {
+				logger.Error("initial MCP registry sync failed (giving up)", "error", err, "attempts", attempt)
+				break
+			}
+			logger.Warn("initial MCP registry sync failed; will retry", "error", err, "attempt", attempt, "next_retry_in", backoff)
+			select {
+			case <-stop:
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
 		}
 
 		ticker := time.NewTicker(24 * time.Hour)
