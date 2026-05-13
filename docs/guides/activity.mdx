@@ -26,6 +26,24 @@ Reach for `/activity` in these situations — every other surface either answers
 
 If you instead want to *author* a routine, look in [Routines](/guides/routines); to triage your own personal queue of waitpoints/escalations across all workspaces, use [Inbox](/guides/inbox); to read the underlying event log, use the [Crew Journal](/guides/crew-journal) API directly.
 
+## Key concepts
+
+The canvas is small but every visual element has a specific meaning — getting the vocabulary right makes the page much faster to read.
+
+| Term | What it means here |
+|------|-------------------|
+| **Run** | One execution of a routine, identified by `run_id`. Every node on the canvas, every status pip, and the URL's `?run=…` parameter all hang off this. |
+| **Trace graph** | The directed graph drawn for the selected run. Built by `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) from the run's DSL + recorded state. |
+| **Trigger node** | The single synthetic entry-point node that sits left of every chain — labels the run's `triggered_via` (issue id, schedule cron, webhook name, sub-run, or `manual`). |
+| **Step node** | One node per DSL step (`agent_run`, `http`, `transform`, `code`, `wait`, `call_pipeline`). Its border colour is the status pip; its body shows the rendered prompt or expression. |
+| **Sequencing edge** | Solid line. Drawn from a step to every other step that lists it in `needs[]`. Means *must run first*. |
+| **Data-flow edge** | Dashed line, labelled with a JSON path. Parsed from `{{ steps.X.output[.path] }}` templates in any input field. Means *this value flows here*. |
+| **Waitpoint** | A `wait` step parked on a Harbormaster gate. Renders inline **Approve** / **Deny** in its body; mirrored as an `inbox_items` row so Inbox and Activity stay in lock-step. |
+| **Saved view** | A pinned snapshot of `(filter, sort, group, search)` on the left rail. Per-user, persisted, re-opens by name. |
+| **Heatmap mode** | A toolbar segmented control (Off / Cost / Time). Colours each node's border by the percentile bucket of its cost or duration in the run. Persisted per user. |
+| **Overview mode** | What the canvas shows when no run is selected — issues, their bound routines, and the last run of each chain. Click a last-run node to flip into trace mode for that run. |
+| **Trace selection** | URL state (`?run=<id>&step=<id>`) that uniquely identifies a single node + side panel. Copy-paste reconstructs the exact view on another machine. |
+
 ## The trace graph
 
 When you select a run, the canvas builds a directed graph from the routine's DSL and the run's recorded state:
