@@ -443,15 +443,28 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 // user pasted during onboarding. Same shape as the row that
 // internal/services/onboarding.go produces in the blank path, so the
 // auto-assign hook called by deployCrewTemplate finds it.
+//
+// Credential type is inferred from the value's shape: an OAuth token
+// from Claude Code starts with sk-ant-oat → AI_CLI_TOKEN (OAuth
+// CONNECT-tunnel auth mode). Anything else is a raw API key and
+// lands as API_KEY (env-var injection mode). Storing every onboarding
+// credential as AI_CLI_TOKEN — the pre-2026-05-13 default — broke
+// fresh users who pasted sk-ant-api… keys: containers booted, Claude
+// Code saw no on-disk credentials (OAuth mode skips env), and replied
+// "Not logged in".
 func insertOnboardingCredential(ctx context.Context, db *sql.DB, userID, workspaceID, name, provider, _ /*envVarName*/, value, now string) error {
 	encrypted, err := encryption.Encrypt(value)
 	if err != nil {
 		return fmt.Errorf("encrypt: %w", err)
 	}
+	credentialType := "API_KEY"
+	if strings.HasPrefix(value, "sk-ant-oat") {
+		credentialType = "AI_CLI_TOKEN"
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 'AI_CLI_TOKEN', ?, 'WORKSPACE', ?, ?, ?)`,
-		generateCUID(), workspaceID, name, encrypted, provider, userID, now, now); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, 'WORKSPACE', ?, ?, ?)`,
+		generateCUID(), workspaceID, name, encrypted, credentialType, provider, userID, now, now); err != nil {
 		return fmt.Errorf("insert credential: %w", err)
 	}
 	return nil
