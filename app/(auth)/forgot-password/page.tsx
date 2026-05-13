@@ -53,7 +53,11 @@ export default function ForgotPasswordPage() {
         <CardContent>
           {submitted ? (
             <div className="space-y-4">
-              <div className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-4 text-sm">
+              <div
+                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-4 text-sm"
+                role="status"
+                aria-live="polite"
+              >
                 <p className="font-medium text-emerald-700 dark:text-emerald-400">Check your inbox.</p>
                 <p className="mt-1 text-muted-foreground">
                   If an account exists for that email and email is configured on this server, a reset

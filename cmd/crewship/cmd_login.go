@@ -164,7 +164,11 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 
 	resp, err := client.Post("/api/v1/auth/pair/redeem", payload)
 	if err != nil {
-		return fmt.Errorf("could not reach %s — is the server running and the address correct?", serverURL)
+		// Wrap %w so the original transport error (DNS NXDOMAIN,
+		// connection refused, TLS handshake failure, etc.) survives
+		// — otherwise the user sees the same generic hint regardless
+		// of whether their DNS is broken or the server is just down.
+		return fmt.Errorf("could not reach %s — is the server running and the address correct? %w", serverURL, err)
 	}
 	defer resp.Body.Close()
 

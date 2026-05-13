@@ -181,9 +181,12 @@ try {
   // ────────────────────────────────────────────────────────────────
   await page.waitForSelector("button[aria-pressed]", { timeout: 5000 })
   const crewCardCount = await page.locator('button[aria-pressed]:has-text("Software Development"), button[aria-pressed]:has-text("DevOps"), button[aria-pressed]:has-text("Marketing"), button[aria-pressed]:has-text("Accounting"), button[aria-pressed]:has-text("blank")').count()
+  // Require all 5 templates — the looser `>= 4` would let one quietly
+  // disappear without failing the suite, which is exactly the kind of
+  // regression a crew-templates seed bug would produce.
   await expect(
     "T9 step 2 has 5 crew templates listed",
-    crewCardCount >= 4, // case-insensitive title-cased — at least 4 of 5 hit
+    crewCardCount === 5,
     `found ${crewCardCount}`,
   )
 

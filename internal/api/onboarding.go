@@ -242,6 +242,12 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// orchestrator's OAuth CONNECT-tunnel auth mode can't use a
 	// plain sk-ant-api… key — agents in the container can't see
 	// any on-disk credentials and Claude Code refuses to start.
+	// Trim once at the boundary so the validator and the eventual
+	// DB insert see the same value. A trailing newline (very easy to
+	// pick up from a copy/paste of `claude setup-token`) used to pass
+	// the prefix check on the trimmed copy but then get persisted
+	// verbatim, producing a credential that loaded but never worked.
+	req.CredentialValue = strings.TrimSpace(req.CredentialValue)
 	if err := validateOnboardingCredential(r.Context(), req.LlmProvider, req.CredentialValue); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -521,7 +527,16 @@ func validateOnboardingCredential(ctx context.Context, provider, value string) e
 	if v == "" {
 		return nil
 	}
-	switch strings.ToUpper(strings.TrimSpace(provider)) {
+	// Empty/unset provider defaults to ANTHROPIC — same default that
+	// resolveLLMProvider applies on the persistence side. Keeping the
+	// two in sync means a token submitted without a provider hint
+	// still gets the Anthropic prefix/probe checks rather than
+	// silently slipping through.
+	p := strings.ToUpper(strings.TrimSpace(provider))
+	if p == "" {
+		p = "ANTHROPIC"
+	}
+	switch p {
 	case "ANTHROPIC":
 		// Claude Code OAuth tokens look like `sk-ant-oat01-…`. Raw
 		// account-level API keys start with `sk-ant-api…` and are

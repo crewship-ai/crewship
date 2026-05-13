@@ -174,15 +174,21 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 
 	if apiKey == "" {
 		// Fall back to the env var the adapter would normally read
-		// before prompting — most users already have it set.
-		if interactive {
-			var err error
-			apiKey, err = promptAPIKey(adapterCfg.label)
-			if err != nil {
-				return err
+		// (e.g. ANTHROPIC_API_KEY, GEMINI_API_KEY). Most users who
+		// already use the adapter on the same host have it exported,
+		// so `crewship setup --yes` shouldn't have to be re-told the
+		// token. The previous code only mentioned this in a comment.
+		apiKey = strings.TrimSpace(os.Getenv(adapterCfg.envVar))
+		if apiKey == "" {
+			if interactive {
+				var err error
+				apiKey, err = promptAPIKey(adapterCfg.label)
+				if err != nil {
+					return err
+				}
+			} else {
+				return fmt.Errorf("no token provided — pass --token=$(claude setup-token) (or the equivalent for %s), or export %s before running setup", adapterCfg.label, adapterCfg.envVar)
 			}
-		} else {
-			return fmt.Errorf("no token provided — pass --token=$(claude setup-token) (or the equivalent for %s)", adapterCfg.label)
 		}
 	}
 	if len(apiKey) < 8 {
