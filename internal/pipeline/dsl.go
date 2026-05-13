@@ -83,6 +83,11 @@ func Parse(data []byte) (*DSL, error) {
 // registered in the workspace. call_pipeline steps that reference
 // outside this set are flagged as warnings, not errors — the target
 // might be authored later in the same session.
+//
+// The body of this function is intentionally thin: each major check
+// lives in a focused sibling file (dsl_validate_*.go) so adding a new
+// step-shape rule, credential mode, or gate doesn't bloat the
+// orchestrator.
 func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string]struct{}) error {
 	if dsl == nil {
 		return errors.New("pipeline: nil DSL")
@@ -100,211 +105,31 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		return errors.New("pipeline: at least one step required")
 	}
 
-	// Step IDs must be unique and well-formed.
 	seenStepIDs := make(map[string]struct{}, len(dsl.Steps))
 	for i, st := range dsl.Steps {
-		if st.ID == "" {
-			return fmt.Errorf("pipeline: step %d missing id", i)
+		if err := validateStepSlugs(i, st, dsl, agentSlugs, seenStepIDs); err != nil {
+			return err
 		}
-		if !stepIDRE.MatchString(st.ID) {
-			return fmt.Errorf("pipeline: step %d id %q invalid", i, st.ID)
+		if err := validateStepEgress(st); err != nil {
+			return err
 		}
-		if _, dup := seenStepIDs[st.ID]; dup {
-			return fmt.Errorf("pipeline: duplicate step id %q", st.ID)
+		if err := validateStepCredentials(st); err != nil {
+			return err
 		}
-		seenStepIDs[st.ID] = struct{}{}
-
-		// Step type-specific validation.
-		switch st.Type {
-		case StepAgentRun:
-			if st.AgentSlug == "" {
-				return fmt.Errorf("pipeline: step %q (agent_run) missing agent_slug", st.ID)
-			}
-			if !slugRE.MatchString(st.AgentSlug) {
-				return fmt.Errorf("pipeline: step %q agent_slug %q invalid shape", st.ID, st.AgentSlug)
-			}
-			if st.Prompt == "" {
-				return fmt.Errorf("pipeline: step %q (agent_run) missing prompt", st.ID)
-			}
-			if agentSlugs != nil {
-				if _, ok := agentSlugs[st.AgentSlug]; !ok {
-					return fmt.Errorf("pipeline: step %q references unknown agent_slug %q", st.ID, st.AgentSlug)
-				}
-			}
-		case StepCallPipeline:
-			if st.PipelineSlug == "" {
-				return fmt.Errorf("pipeline: step %q (call_pipeline) missing pipeline_slug", st.ID)
-			}
-			if !slugRE.MatchString(st.PipelineSlug) {
-				return fmt.Errorf("pipeline: step %q pipeline_slug %q invalid shape", st.ID, st.PipelineSlug)
-			}
-			if st.PipelineSlug == dsl.Name {
-				return fmt.Errorf("pipeline: step %q calls itself (%q) — direct self-recursion not allowed", st.ID, st.PipelineSlug)
-			}
-		case StepHTTP:
-			if st.HTTP == nil {
-				return fmt.Errorf("pipeline: step %q (http) missing http body", st.ID)
-			}
-			if st.HTTP.Method == "" {
-				return fmt.Errorf("pipeline: step %q (http) missing method", st.ID)
-			}
-			switch strings.ToUpper(st.HTTP.Method) {
-			case "GET", "POST", "PUT", "PATCH", "DELETE":
-				// ok
-			default:
-				return fmt.Errorf("pipeline: step %q (http) method %q invalid (allowed: GET POST PUT PATCH DELETE)", st.ID, st.HTTP.Method)
-			}
-			if st.HTTP.URL == "" {
-				return fmt.Errorf("pipeline: step %q (http) missing url", st.ID)
-			}
-			if st.HTTP.MaxResponseBytes < 0 {
-				return fmt.Errorf("pipeline: step %q (http) max_response_bytes cannot be negative", st.ID)
-			}
-			if st.HTTP.MaxResponseBytes > 50_000_000 {
-				return fmt.Errorf("pipeline: step %q (http) max_response_bytes too high (>50MB) — use code step for large payloads", st.ID)
-			}
-			if st.HTTP.CredentialRef != nil {
-				if st.HTTP.CredentialRef.Type == "" {
-					return fmt.Errorf("pipeline: step %q (http) credential_ref missing type", st.ID)
-				}
-				switch st.HTTP.CredentialRef.InjectAs {
-				case "", "bearer", "header", "query":
-					// ok
-				default:
-					return fmt.Errorf("pipeline: step %q (http) credential_ref.inject_as %q invalid (allowed: bearer header query)", st.ID, st.HTTP.CredentialRef.InjectAs)
-				}
-				if st.HTTP.CredentialRef.InjectAs == "header" && st.HTTP.CredentialRef.HeaderName == "" {
-					return fmt.Errorf("pipeline: step %q (http) credential_ref inject_as=header requires header_name", st.ID)
-				}
-				if st.HTTP.CredentialRef.InjectAs == "query" && st.HTTP.CredentialRef.QueryName == "" {
-					return fmt.Errorf("pipeline: step %q (http) credential_ref inject_as=query requires query_name", st.ID)
-				}
-			}
-		case StepCode:
-			if st.Code == nil {
-				return fmt.Errorf("pipeline: step %q (code) missing code body", st.ID)
-			}
-			switch st.Code.Runtime {
-			case "python", "go", "bash":
-				// ok
-			default:
-				return fmt.Errorf("pipeline: step %q (code) runtime %q invalid (allowed: python go bash)", st.ID, st.Code.Runtime)
-			}
-			if st.Code.Code == "" {
-				return fmt.Errorf("pipeline: step %q (code) missing code", st.ID)
-			}
-			if len(st.Code.Code) > 1_000_000 {
-				return fmt.Errorf("pipeline: step %q (code) script >1MB — externalize via skills/files instead", st.ID)
-			}
-		case StepWait:
-			if st.Wait == nil {
-				return fmt.Errorf("pipeline: step %q (wait) missing wait body", st.ID)
-			}
-			switch st.Wait.Kind {
-			case "approval":
-				if st.Wait.ApprovalPrompt == "" {
-					return fmt.Errorf("pipeline: step %q (wait approval) missing approval_prompt", st.ID)
-				}
-			case "datetime":
-				if st.Wait.Until == "" {
-					return fmt.Errorf("pipeline: step %q (wait datetime) missing until", st.ID)
-				}
-			case "event":
-				if st.Wait.EventType == "" {
-					return fmt.Errorf("pipeline: step %q (wait event) missing event_type", st.ID)
-				}
-			default:
-				return fmt.Errorf("pipeline: step %q (wait) kind %q invalid (allowed: approval datetime event)", st.ID, st.Wait.Kind)
-			}
-		case StepTransform:
-			if st.Transform == nil {
-				return fmt.Errorf("pipeline: step %q (transform) missing transform body", st.ID)
-			}
-			if st.Transform.Input == "" {
-				return fmt.Errorf("pipeline: step %q (transform) missing input", st.ID)
-			}
-			if st.Transform.Expression == "" {
-				return fmt.Errorf("pipeline: step %q (transform) missing expression", st.ID)
-			}
-		default:
-			return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform)", st.ID, st.Type)
-		}
-
-		// Complexity is optional but if set must be one of the four
-		// known tiers. Unknown values would silently fall back to
-		// moderate; making it an error is safer.
-		switch st.Complexity {
-		case "", ComplexityTrivial, ComplexityFast, ComplexityModerate, ComplexitySmart:
-			// ok
-		default:
-			return fmt.Errorf("pipeline: step %q complexity %q invalid (allowed: trivial|fast|moderate|smart)", st.ID, st.Complexity)
-		}
-
-		switch st.OnFail {
-		case "", OnFailEscalateTier, OnFailAbort, OnFailRetryStep:
-			// ok
-		default:
-			return fmt.Errorf("pipeline: step %q on_fail %q invalid (allowed: escalate_tier|abort|retry_step)", st.ID, st.OnFail)
-		}
-
-		// Outcomes (rubric-based grading) is only meaningful on
-		// agent_run steps — call_pipeline already runs through the
-		// nested pipeline's own validation/outcomes. Reject early
-		// so authors don't think rubrics will magically apply to
-		// nested runs.
-		if st.Outcomes != nil {
-			if st.Type != StepAgentRun {
-				return fmt.Errorf("pipeline: step %q outcomes are only supported on agent_run steps (got %q)", st.ID, st.Type)
-			}
-			if st.Outcomes.GraderAgentSlug == "" {
-				return fmt.Errorf("pipeline: step %q outcomes missing grader_agent_slug", st.ID)
-			}
-			if !slugRE.MatchString(st.Outcomes.GraderAgentSlug) {
-				return fmt.Errorf("pipeline: step %q outcomes.grader_agent_slug %q invalid shape", st.ID, st.Outcomes.GraderAgentSlug)
-			}
-			if agentSlugs != nil {
-				if _, ok := agentSlugs[st.Outcomes.GraderAgentSlug]; !ok {
-					return fmt.Errorf("pipeline: step %q outcomes.grader_agent_slug %q not found in author crew", st.ID, st.Outcomes.GraderAgentSlug)
-				}
-			}
-			if len(st.Outcomes.Criteria) == 0 {
-				return fmt.Errorf("pipeline: step %q outcomes.criteria empty (rubric needs at least one rule)", st.ID)
-			}
-			if len(st.Outcomes.Criteria) > 20 {
-				return fmt.Errorf("pipeline: step %q outcomes.criteria too long (max 20; got %d) — long rubrics produce noisy grader output", st.ID, len(st.Outcomes.Criteria))
-			}
-			seenCriteriaNames := make(map[string]struct{}, len(st.Outcomes.Criteria))
-			for i, c := range st.Outcomes.Criteria {
-				if c.Name == "" {
-					return fmt.Errorf("pipeline: step %q outcomes.criteria[%d] missing name", st.ID, i)
-				}
-				if c.Rule == "" {
-					return fmt.Errorf("pipeline: step %q outcomes.criteria[%d] (%q) missing rule", st.ID, i, c.Name)
-				}
-				if _, dup := seenCriteriaNames[c.Name]; dup {
-					return fmt.Errorf("pipeline: step %q outcomes.criteria duplicate name %q", st.ID, c.Name)
-				}
-				seenCriteriaNames[c.Name] = struct{}{}
-			}
-			if st.Outcomes.MaxIterations < 0 {
-				return fmt.Errorf("pipeline: step %q outcomes.max_iterations cannot be negative", st.ID)
-			}
-			if st.Outcomes.MaxIterations > 10 {
-				return fmt.Errorf("pipeline: step %q outcomes.max_iterations too high (max 10)", st.ID)
-			}
-			switch st.Outcomes.OnFail {
-			case "", OnFailEscalateTier, OnFailAbort, OnFailRetryStep:
-				// ok
-			default:
-				return fmt.Errorf("pipeline: step %q outcomes.on_fail %q invalid", st.ID, st.Outcomes.OnFail)
-			}
+		if err := validateStepGates(st, agentSlugs); err != nil {
+			return err
 		}
 	}
 
-	// Template references must point at known input names or earlier
-	// step IDs. We catch this here instead of at Render time so the
-	// author gets the error at save (with a useful message) rather
-	// than only at first run.
+	return validateTemplates(dsl)
+}
+
+// validateTemplates resolves every {{ ... }} placeholder across the
+// step graph against the inputs map and the step ordering. Source-
+// order semantics in linear pipelines; transitive `needs` closure
+// in DAG pipelines so a step can reference declared ancestors
+// regardless of source position.
+func validateTemplates(dsl *DSL) error {
 	inputNames := make(map[string]struct{}, len(dsl.Inputs))
 	for _, in := range dsl.Inputs {
 		inputNames[in.Name] = struct{}{}
@@ -346,17 +171,17 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 				return err
 			}
 		}
-	} else {
-		// Linear mode (preserve historical behaviour): source-order.
-		earlierSteps := make(map[string]struct{}, len(dsl.Steps))
-		for _, st := range dsl.Steps {
-			if err := validateTemplatesInStep(st, inputNames, earlierSteps); err != nil {
-				return err
-			}
-			earlierSteps[st.ID] = struct{}{}
-		}
+		return nil
 	}
 
+	// Linear mode (preserve historical behaviour): source-order.
+	earlierSteps := make(map[string]struct{}, len(dsl.Steps))
+	for _, st := range dsl.Steps {
+		if err := validateTemplatesInStep(st, inputNames, earlierSteps); err != nil {
+			return err
+		}
+		earlierSteps[st.ID] = struct{}{}
+	}
 	return nil
 }
 
