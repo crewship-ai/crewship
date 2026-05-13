@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import Image from "next/image"
 import {
@@ -18,8 +19,7 @@ import { CLI_ADAPTERS, getAdapterConfig } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { getLocalizedAgentAvatar } from "@/lib/agent-avatar-locale"
-import { getCrewNames } from "@/lib/agent-names-locale"
-import { DIVERSE_CREW_COMPOSITIONS } from "@/lib/agent-locale-composition"
+import { computeRandomCrew, type SlotComposition } from "@/lib/agent-locale-composition"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -160,6 +160,21 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
   const reduce = useReducedMotion()
   const AdapterIcon = adapterCfg?.icon
 
+  // Crew roster is rolled randomly on every (language | crew) change.
+  // For multi-ethnic locales each slot pulls a name + palette from a
+  // demographic-specific pool (defined in agent-locale-composition.ts);
+  // mono-ethnic locales draw distinct names from a single pool. The
+  // roster stays stable between renders until one of the deps moves,
+  // so a flicker of an unrelated avatar doesn't follow every keystroke.
+  const [crew, setCrew] = useState<SlotComposition[]>([])
+  useEffect(() => {
+    if (!template) {
+      setCrew([])
+      return
+    }
+    setCrew(computeRandomCrew(language ?? "English", template.agents.length))
+  }, [language, crewSlug, template])
+
   return (
     <div className="w-full max-w-md mx-auto">
       <motion.div
@@ -226,42 +241,26 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                 </div>
               </div>
             </div>
-            {/* Crew composition rules:
-                - Mono-ethnic locales (Czech, Japanese, Hungarian…)
-                  all four agents share the picked locale's palette
-                  and draw from one name pool, with dedup. Matches
-                  the real demographics of those countries.
-                - Multi-ethnic locales (English / French / German /
-                  Dutch / Spanish / Brazilian PT) — each slot has its
-                  own (palette, name pool) from
-                  DIVERSE_CREW_COMPOSITIONS. Reflects the actual
-                  population mix; rendering an all-white US team
-                  would be obviously wrong. */}
+            {/* Crew roster comes from React state rolled on each
+                (language | crew) change — see the useEffect above.
+                Mono-ethnic locales draw distinct names from one
+                palette + pool; multi-ethnic locales (English (US),
+                English, French, German, Dutch, Spanish, Brazilian
+                Portuguese) pull each slot from a demographic-
+                specific pool so the rendered team reflects each
+                country's actual mix. */}
             <div className="space-y-2">
-              {(() => {
-                const effectiveLocale = language ?? "English"
-                const slugs = template.agents.map((x) => x.slug)
-                const diverse = DIVERSE_CREW_COMPOSITIONS[effectiveLocale]
-                const monoNames = diverse ? null : getCrewNames(slugs, effectiveLocale)
-                return template.agents.map((a, i) => {
-                  let palette: string
-                  let personName: string
-                  if (diverse) {
-                    const slot = diverse[i % diverse.length]
-                    palette = slot.palette
-                    // Index this slot's pool by a cheap slug hash so
-                    // different crew templates (Dev / Ops / Marketing)
-                    // surface different teammates within each group.
-                    let h = 0
-                    for (let k = 0; k < a.slug.length; k++)
-                      h = (h * 31 + a.slug.charCodeAt(k)) >>> 0
-                    personName = slot.namePool[h % slot.namePool.length]
-                  } else {
-                    palette = effectiveLocale
-                    personName = monoNames![a.slug]
-                  }
-                  const avatarSrc = getLocalizedAgentAvatar(a.slug, palette)
-                  return (
+              {template.agents.map((a, i) => {
+                const slot = crew[i]
+                if (!slot) return null
+                const palette = slot.palette
+                const personName = slot.name
+                // Avatar seed includes the personName so a fresh
+                // random roll (same slug, new name) produces a
+                // matching new face — otherwise the avatar would
+                // stay frozen on the slug while the name flipped.
+                const avatarSrc = getLocalizedAgentAvatar(`${a.slug}-${personName}`, palette)
+                return (
                   <motion.div
                     key={a.slug}
                     initial={reduce ? { opacity: 0 } : { opacity: 0, x: -8 }}
@@ -295,8 +294,7 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                     </span>
                   </motion.div>
                 )
-              })
-              })()}
+              })}
             </div>
           </motion.div>
         ) : (
