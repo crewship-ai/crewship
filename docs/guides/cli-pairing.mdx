@@ -1,0 +1,21 @@
+---
+title: "CLI Pairing"
+description: "Device-code handoff that authenticates a locally-installed `crewship` CLI against a Crewship server using an 8-character one-time code shown in the browser."
+icon: "link"
+---
+
+# CLI Pairing
+
+## Overview
+
+CLI pairing is how a freshly installed `crewship` binary on an operator's laptop gets a long-lived token that lets it talk to a Crewship server without ever asking for the user's password. The flow is a device-code handoff modelled after RFC 8628: the browser-side onboarding wizard mints a short, human-typeable code; the operator pastes the code into a CLI snippet on the machine they want to authorise; the server matches the two ends, mints a CLI token, and hands it back to the binary. Passwords never leave the browser tab, and the CLI never needs to know how the user signed in.
+
+The implementation lives in three endpoints under `internal/api/cli_pair.go` and is intentionally small enough to read top-to-bottom in one file. `/api/v1/auth/pair/start` (authed) creates a `cli_pairings` row with a fresh 8-character Crockford-base32 code — the alphabet drops `0/O`, `1/I/L` and the visually ambiguous letters so operators can type the code from a screenshot without typos — and stamps a 10-minute TTL on it. `/api/v1/auth/pair/poll` (authed) lets the browser wizard watch for the code's status flipping to `consumed`. `/api/v1/auth/pair/redeem` is **intentionally unauthenticated**: the code itself is the credential, single-use and time-limited, so requiring a session on the redeem side would defeat the entire purpose of the handoff. Redeem mints a fresh row in `cli_tokens` (bcrypt-hashed at rest) and returns the raw token, which the CLI persists to `~/.crewship/cli-config.yaml`.
+
+One detail worth pinning down before changing this code: the `adapter_hint` field accepted by `/pair/start` is **telemetry only**. The backend never routes on it. When a new CLI adapter ships (Claude Code, Gemini, Codex, OpenCode, Cursor, Factory Droid, and whatever comes next), the only required change is a new entry in `lib/cli-adapters.ts` on the frontend — zero backend touch. That property is load-bearing; anyone tempted to make the server "smarter" about the hint is recreating the routing-on-untrusted-client-input bug the design was built to avoid.
+
+## Related
+
+- [Authentication](/guides/auth) — the broader auth surface that pairing sits inside.
+- [CLI Adapters](/guides/cli-adapters) — the seven supported adapters and how they consume the paired token.
+- [Onboarding](/guides/onboarding) — where most operators encounter the pairing prompt for the first time.
