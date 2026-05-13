@@ -165,15 +165,32 @@ func (h *RecoveryHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 	tokenHash := hashResetToken(rawToken)
 	expires := time.Now().UTC().Add(resetTokenTTL).Format(time.RFC3339)
 
-	// Best-effort cleanup of any prior reset tokens for this email —
-	// keeps the table small and means a user who clicks "Forgot"
-	// twice doesn't end up with two live tokens.
-	if _, err := h.db.ExecContext(r.Context(),
+	// Replace any prior reset token for this email atomically. Two
+	// concurrent /forgot calls for the same email used to be able to
+	// interleave (A: DELETE, B: DELETE, A: INSERT, B: INSERT) and
+	// leave two live password_reset rows — breaking the
+	// "newest request invalidates the old one" contract. SQLite
+	// serializes writes inside a single tx so the second caller's
+	// DELETE observes the loser's INSERT and produces a clean handoff.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("forgot password: begin tx", "error", err)
+		h.writeForgotResponse(w)
+		return
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM verification_tokens WHERE identifier = ? AND purpose = 'password_reset'", email); err != nil {
 		h.logger.Warn("forgot password: cleanup prior tokens", "error", err)
+		h.writeForgotResponse(w)
+		return
 	}
-
-	if _, err := h.db.ExecContext(r.Context(), `
+	if _, err := tx.ExecContext(r.Context(), `
 		INSERT INTO verification_tokens (identifier, token, expires, purpose)
 		VALUES (?, ?, ?, 'password_reset')`,
 		email, tokenHash, expires); err != nil {
@@ -181,6 +198,12 @@ func (h *RecoveryHandler) Forgot(w http.ResponseWriter, r *http.Request) {
 		h.writeForgotResponse(w)
 		return
 	}
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("forgot password: commit token swap", "error", err)
+		h.writeForgotResponse(w)
+		return
+	}
+	rollback = false
 
 	link := h.buildResetURL(rawToken)
 	msg := mailer.Message{

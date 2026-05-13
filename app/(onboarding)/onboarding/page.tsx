@@ -883,7 +883,11 @@ export default function OnboardingPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setStep((s) => (s > 1 ? ((s - 1) as Step) : s))}
-                disabled={step === 1}
+                // Lock Back/Skip while Launch is in flight — otherwise
+                // the user can step back mid-submit or fire /complete
+                // while /setup is still running, which races the two
+                // endpoints against each other.
+                disabled={step === 1 || submitting}
                 className={step === 1 ? "invisible" : ""}
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
@@ -895,12 +899,13 @@ export default function OnboardingPage() {
                   variant="ghost"
                   size="sm"
                   onClick={handleSkip}
+                  disabled={submitting}
                   className="text-muted-foreground"
                 >
                   Skip setup
                 </Button>
                 {step < 3 ? (
-                  <Button onClick={() => setStep((s) => (s + 1) as Step)} disabled={!canContinue()}>
+                  <Button onClick={() => setStep((s) => (s + 1) as Step)} disabled={!canContinue() || submitting}>
                     Continue
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>

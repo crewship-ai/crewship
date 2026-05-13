@@ -355,7 +355,15 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	rows, _ := guardRes.RowsAffected()
+	rows, err := guardRes.RowsAffected()
+	if err != nil {
+		// Driver metadata failure — don't silently translate it into
+		// "already completed", which would block a retry the user
+		// could otherwise succeed at.
+		h.logger.Error("onboarding template: lock rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	if rows == 0 {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
 		return

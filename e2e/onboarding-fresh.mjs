@@ -244,12 +244,16 @@ try {
   await expect(
     "T14 pair snippet contains --server flag",
     (snippet ?? "").includes("--server="),
-    `snippet="${snippet}"`,
+    // Don't dump the snippet itself — it carries the live pair code,
+    // which is the credential for /pair/redeem. Just signal presence
+    // so a failing run says "snippet missing" instead of broadcasting
+    // a usable code to CI logs.
+    `snippet_present=${Boolean(snippet)}`,
   )
   await expect(
     "T15 pair snippet contains --code with 8-char value",
     /--code=[A-Z2-9]{4}-[A-Z2-9]{4}/.test(snippet ?? ""),
-    `snippet="${snippet}"`,
+    `snippet_has_code=${/--code=[A-Z2-9]{4}-[A-Z2-9]{4}/.test(snippet ?? "")}`,
   )
 
   // ────────────────────────────────────────────────────────────────
@@ -444,7 +448,9 @@ try {
   await expect(
     "T31 /pair/start (authed) returns a code",
     startResp.status() === 200 && typeof startBody.code === "string" && /^[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(startBody.code),
-    `body=${JSON.stringify(startBody)}`,
+    // body contains the live pair code — log only shape/status so a
+    // passing CI run doesn't broadcast a usable credential.
+    `status=${startResp.status()} has_code=${typeof startBody.code === "string"}`,
   )
 
   // Redeem the code (unauthed) — this is the CLI's job. Use the
@@ -463,7 +469,9 @@ try {
     await expect(
       "T32 /pair/redeem (unauthed) returns cli_token",
       redeemResp.status() === 200 && typeof redeemBody.cli_token === "string" && redeemBody.cli_token.startsWith("crewship_cli_"),
-      `body=${JSON.stringify(redeemBody).slice(0, 200)}`,
+      // Same redaction rule — cli_token is the credential the CLI
+      // saves to ~/.crewship/cli-config.yaml; never dump it to logs.
+      `status=${redeemResp.status()} has_cli_token=${typeof redeemBody.cli_token === "string"}`,
     )
 
     // Second redeem should fail (single-use)

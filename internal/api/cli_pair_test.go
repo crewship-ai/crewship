@@ -198,8 +198,12 @@ func TestPairPoll_DoesNotLeakOtherUserCodes(t *testing.T) {
 	}
 	var pollResp pairPollResponse
 	_ = json.Unmarshal(rrPoll.Body.Bytes(), &pollResp)
-	if pollResp.Status == "pending" {
-		t.Errorf("intruder saw status=pending — code leaked across users")
+	// The contract for a foreign code is exactly "expired" — checking
+	// !="pending" would let a regression that returned "consumed" or
+	// some other wrong sentinel slip through. We want to lock in the
+	// concrete value the Poll handler ships.
+	if pollResp.Status != "expired" {
+		t.Errorf("foreign-user poll status = %q, want %q", pollResp.Status, "expired")
 	}
 }
 
