@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 
 const mockFetch = vi.fn()
@@ -18,6 +18,10 @@ const extract = (j: unknown): Item[] => {
 describe("useCatalog", () => {
   beforeEach(() => {
     mockFetch.mockReset()
+  })
+
+  afterAll(() => {
+    vi.unstubAllGlobals()
   })
 
   it("starts in loading state when enabled", () => {
