@@ -1,0 +1,21 @@
+---
+title: "Admin CLI"
+description: "Host-only `crewship admin` subcommands that bypass the HTTP API and write directly to the SQLite database — the recovery surface for an operator who's locked out of the UI."
+icon: "wrench"
+---
+
+# Admin CLI
+
+## Overview
+
+The `crewship admin` command group is the operator-on-the-host recovery surface. Every subcommand here runs a direct write against the local SQLite database, intentionally bypassing the HTTP API. The model is the same one GitLab (`gitlab-rake gitlab:password:reset`), Gitea (`gitea admin user change-password`), Nextcloud (`occ user:resetpassword`) and Mattermost (`mmctl user change-password`) all adopt: shell access to the host *is* the credential. If you can ssh to the box, you are the admin — no second authentication factor would be meaningful, since you already control the data directory and could rewrite the database manually anyway.
+
+The flow is deliberately non-circular. The most important caller is an admin whose account is locked out and whose server may or may not be running — routing recovery through the same server they're recovering would be a chicken-and-egg failure. `crewship admin` therefore takes a read+write lock on `~/.crewship/crewship.db` (or whatever `CREWSHIP_DATA_DIR` points at), runs the requested SQL in a transaction, and exits. The HTTP layer never sees the request, the auth middleware never runs, and the audit journal records a `journal.admin_cli` entry attributed to `host:$USER` so the action still shows up in the timeline.
+
+Three subcommands ship today, all in `cmd/crewship/cmd_admin.go`: `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default, or `--password` for scripted recovery); `list-users` dumps every row of the `users` table to a tab-aligned table so an operator can verify which email actually exists before resetting it; and `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. All three short-circuit early with a clear error if the data directory is missing or the database is locked by a running server.
+
+## Related
+
+- [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
+- [Backup](/guides/backup) — what to do before running admin commands against a production database.
+- [Installation](/guides/installation) — where `CREWSHIP_DATA_DIR` is configured and the SQLite file lives.
