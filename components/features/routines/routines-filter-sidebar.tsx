@@ -297,10 +297,8 @@ function FacetRow({ label, count, active, onClick, dot, avatar }: FacetRowProps)
     <button
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors",
-        active
-          ? "border-l-2 border-blue-500 bg-blue-500/10"
-          : "border-l-2 border-transparent hover:bg-white/[0.04]",
+        "w-full px-3 py-1.5 text-left",
+        active ? "row-interactive row-selected" : "row-interactive row-hover",
       )}
     >
       {avatar ? (

@@ -19,7 +19,7 @@ func fakeFS() fstest.MapFS {
 		"crews/agents.html":           {Data: []byte("CREWS_AGENTS")},
 		"chat/_.html":                 {Data: []byte("CHAT_PLACEHOLDER")},
 		"skills/_.html":               {Data: []byte("SKILLS_PLACEHOLDER")},
-		"orchestration/issues/_.html": {Data: []byte("ISSUES_PLACEHOLDER")},
+		"issues/_.html":               {Data: []byte("ISSUES_PLACEHOLDER")},
 		// Older / directory-style placeholder for parity coverage:
 		"old/_/index.html": {Data: []byte("OLD_DIR_PLACEHOLDER")},
 		"icon.svg":         {Data: []byte("SVG")},
@@ -73,11 +73,12 @@ func TestStaticFileHandler_DynamicRoute_FlatPlaceholder(t *testing.T) {
 
 func TestStaticFileHandler_DynamicRoute_NestedPlaceholder(t *testing.T) {
 	h := StaticFileHandler(fakeFS())
-	// /orchestration/issues/CRE-78 → walks deepest first; finds
-	// orchestration/issues/_.html before orchestration/_.html
-	code, body := get(t, h, "/orchestration/issues/CRE-78")
+	// /issues/CRE-78 → dynamic placeholder for top-level Issues route
+	// (the IA refactor split off Plan/Run/Build/System pages from the
+	// old /orchestration container).
+	code, body := get(t, h, "/issues/CRE-78")
 	if code != http.StatusOK || body != "ISSUES_PLACEHOLDER" {
-		t.Fatalf("/orchestration/issues/CRE-78 → code=%d body=%q; want 200 ISSUES_PLACEHOLDER", code, body)
+		t.Fatalf("/issues/CRE-78 → code=%d body=%q; want 200 ISSUES_PLACEHOLDER", code, body)
 	}
 }
 

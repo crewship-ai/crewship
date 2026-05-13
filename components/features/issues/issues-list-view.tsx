@@ -327,10 +327,9 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               <TableRow
                 key={issue.id}
                 className={cn(
-                  "cursor-pointer transition-all duration-200",
+                  "cursor-pointer row-hover transition-colors",
                   isDimmed && "opacity-40",
-                  isHighlighted && "bg-blue-500/5",
-                  selectedIds.has(issue.id) && "bg-blue-500/[0.06]",
+                  (isHighlighted || selectedIds.has(issue.id)) && "row-selected",
                   issue.status === "IN_PROGRESS" && "border-l-2 border-l-blue-400 agent-active-card",
                 )}
                 onClick={() => onIssueClick(issue)}
@@ -348,9 +347,21 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                   {issue.identifier || "--"}
                 </TableCell>
                 <TableCell>
-                  <span className="text-sm font-medium line-clamp-1">
-                    {issue.title}
-                  </span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium line-clamp-1 min-w-0">
+                      {issue.title}
+                    </span>
+                    {/* Sub-issues counter — small pill next to title. Hidden
+                        when zero so the row stays clean for leaf issues. */}
+                    {(issue.sub_issues_count ?? 0) > 0 && (
+                      <span
+                        title={`${issue.sub_issues_count} sub-issues`}
+                        className="shrink-0 inline-flex items-center gap-0.5 rounded bg-white/[0.05] border border-white/[0.06] px-1 py-px text-[9px] font-medium text-muted-foreground tabular-nums"
+                      >
+                        {issue.sub_issues_count}
+                      </span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">

@@ -1,11 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
+import { useRouter } from "next/navigation"
 import {
   ScrollText, Calendar, BarChart3,
   Plus, Upload, Settings, PanelLeftClose, PanelLeftOpen,
-  X,
+  X, ChevronLeft, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -15,8 +16,11 @@ import { RoutinesListView } from "./routines-list-view"
 import { RoutinesSchedulesView } from "./routines-schedules-view"
 import { RoutinesInsightsView } from "./routines-insights-view"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
-import { RoutinesFilterSidebar, type RoutineFilters } from "./routines-filter-sidebar"
+import { type RoutineFilters } from "./routines-filter-sidebar"
+import { RoutinesExplorer } from "./routines-explorer"
 import { RoutineCreateDialog } from "./routine-create-dialog"
+import { TabBar } from "@/components/ui/tab-bar"
+import type { Mission } from "@/lib/types/mission"
 
 // RoutinesLayout — full /routines page. The IA refactor cut the
 // previous 4 tabs (Routines / Graph / Timeline / Activity) down to 3:
@@ -56,6 +60,59 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  // Missions (with tasks) fed to the sidebar's Inbox section. Same
+  // endpoint + shape as orchestration-page-shell.tsx — fetched here so
+  // the inbox is live on /routines without depending on a separate
+  // shell. One-shot on mount; the inbox is intended as a peek + proklik
+  // to /inbox, not a live triage surface, so polling isn't justified.
+  const [missions, setMissions] = useState<Mission[]>([])
+  const router = useRouter()
+
+  useEffect(() => {
+    let cancelled = false
+    if (!workspaceId) return
+    fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data: Mission[]) => { if (!cancelled) setMissions(Array.isArray(data) ? data : []) })
+      .catch(() => { if (!cancelled) setMissions([]) })
+    return () => { cancelled = true }
+  }, [workspaceId])
+
+  // Keyboard shortcuts (mirrors /issues): `/` focuses the routines
+  // search input, `Esc` clears every filter, `c` opens the create
+  // dialog. Skips when typing in inputs/textarea/contentEditable.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      const isInputContext = target && (
+        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
+      )
+      if (e.key === "/" && !isInputContext) {
+        const el = document.querySelector<HTMLInputElement>("input[data-routines-search-input]")
+        if (el) {
+          e.preventDefault()
+          el.focus()
+          el.select()
+        }
+        return
+      }
+      if (e.key === "Escape" && !isInputContext) {
+        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral) {
+          e.preventDefault()
+          setSearch("")
+          setFilters({ status: "all", invocations: "all", authorAgentId: null, showEphemeral: false })
+        }
+        return
+      }
+      if (e.key === "c" && !isInputContext && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        setCreateDialogOpen(true)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -84,26 +141,39 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     return true
   })
 
+  // Selected routine — looked up from the loaded pipeline list so the
+  // toolbar breadcrumb can show the human name without a second fetch.
+  // The detail panel does its own fetch for the full DSL body.
+  const selectedRoutine = selectedSlug
+    ? pipelines.find((p) => p.slug === selectedSlug)
+    : null
+
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
       {/* ---- Toolbar ---- */}
-      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-        {/* Tabs */}
-        {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
-              activeTab === id
-                ? "border-blue-400 text-blue-400"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            <Icon className="h-3 w-3 opacity-75" />
-            {label}
-          </button>
-        ))}
+      {/* Global toolbar always shows TabBar + actions. Breadcrumb back-bar
+          in detail mode is rendered separately inside the main content
+          area (matches the /issues pattern — top bar stays for global
+          context like List/Schedules/Insights + Import/New routine; the
+          page-specific 'Back to routines / <name>' lives one level down
+          so it doesn't compete with the global affordances). */}
+      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+        <TabBar
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as RoutinesTab)}
+          layoutId="routines-tabs-indicator"
+          ariaLabel="Routines view"
+          className="h-full border-b-0 shrink-0"
+        >
+          {ROUTINES_TABS.map(({ id, label, icon: Icon }) => (
+            <TabBar.Item key={id} value={id} className="h-full whitespace-nowrap">
+              <span className="inline-flex items-center gap-1.5">
+                <Icon className="h-3 w-3 opacity-75" />
+                {label}
+              </span>
+            </TabBar.Item>
+          ))}
+        </TabBar>
 
         <div className="flex-1" />
 
@@ -164,25 +234,32 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             </div>
           ) : (
             <div className="relative flex h-full flex-col">
-              {/* The filter sidebar's "Showing X of Y" only matches
-                * reality on the List tab — Schedules + Insights walk
-                * the unfiltered pipelines list internally. To avoid
-                * misleading counts (and to disable filter UX that has
-                * no effect on those views), surface filteredCount
-                * verbatim on List, and totalRoutines on the others
-                * so the strip reads as "showing all". */}
-              <RoutinesFilterSidebar
-                filters={filters}
-                onChange={setFilters}
+              {/* New explorer-style sidebar — mirrors /issues UnifiedExplorer
+                  chrome (search + Filter dropdown), with a STATUS bucket
+                  section (like Projects), a ROUTINES list (like Issues),
+                  and an INBOX section at the bottom with hover proklik
+                  to /inbox. */}
+              <RoutinesExplorer
                 routines={pipelines}
-                totalRoutines={pipelines.length}
-                filteredCount={activeTab === "list" ? filteredRoutines.length : pipelines.length}
                 search={search}
                 onSearchChange={setSearch}
+                selectedSlug={selectedSlug}
+                onSelectRoutine={handleSelect}
+                filters={filters}
+                onChange={setFilters}
+                missions={missions}
+                onTaskSelect={(_task, mission) => {
+                  // Inbox click navigates to the related issue page so
+                  // the user can resolve/approve where the full context
+                  // lives. Falls back to /inbox if the mission has no
+                  // identifier yet.
+                  if (mission.identifier) {
+                    router.push(`/issues/${encodeURIComponent(mission.identifier)}`)
+                  } else {
+                    router.push("/inbox")
+                  }
+                }}
               />
-              {/* Collapse handle floats top-right so the sidebar's own
-                * search bar reaches edge-to-edge; matches the explorer
-                * pattern in /issues. */}
               <Button
                 size="sm"
                 variant="ghost"
@@ -196,10 +273,59 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           )}
         </aside>
 
-        {/* Main content area */}
+        {/* Main content area — full-width.
+            With selection: breadcrumb back-bar + routine detail
+            (Overview/Editor/Runs/Versions/Schedules/Webhooks/Wait
+            tabs) edge-to-edge instead of cramming it into a 520px
+            right panel. The Editor tab in particular benefits — DSL
+            YAML wants width.
+            Without selection: the existing List / Schedules /
+            Insights tabs that the toolbar above switches between. */}
         <div className="flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
-            {activeTab === "list" && (
+            {selectedSlug ? (
+              <motion.div
+                key={`detail-${selectedSlug}`}
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className="absolute inset-0 flex flex-col overflow-hidden"
+              >
+                {/* Breadcrumb back-bar — matches the /issues pattern:
+                    sits inside the content area, not in the global
+                    toolbar. Keeps global affordances (List/Schedules/
+                    Insights tabs, Import, New routine) where they
+                    belong. */}
+                <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSlug(null)}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Back to routines
+                  </button>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                  <span className="truncate text-xs font-medium text-foreground/85" title={selectedRoutine?.name || selectedSlug}>
+                    {selectedRoutine?.name || selectedSlug}
+                  </span>
+                  {selectedRoutine?.slug && (
+                    <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground/60">
+                      {selectedRoutine.slug}
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <RoutinesDetailPanel
+                    workspaceId={workspaceId}
+                    slug={selectedSlug}
+                    onClose={() => setSelectedSlug(null)}
+                    onChanged={refresh}
+                  />
+                </div>
+              </motion.div>
+            ) : activeTab === "list" ? (
               <motion.div
                 key="list"
                 initial={{ opacity: 0 }}
@@ -217,8 +343,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   onRefresh={refresh}
                 />
               </motion.div>
-            )}
-            {activeTab === "schedules" && (
+            ) : activeTab === "schedules" ? (
               <motion.div
                 key="schedules"
                 initial={{ opacity: 0 }}
@@ -233,8 +358,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   onSelect={handleSelect}
                 />
               </motion.div>
-            )}
-            {activeTab === "insights" && (
+            ) : (
               <motion.div
                 key="insights"
                 initial={{ opacity: 0 }}
@@ -248,18 +372,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             )}
           </AnimatePresence>
         </div>
-
-        {/* Right detail panel */}
-        {selectedSlug && (
-          <aside className="w-[520px] shrink-0 border-l border-white/[0.06] bg-card/30 overflow-hidden">
-            <RoutinesDetailPanel
-              workspaceId={workspaceId}
-              slug={selectedSlug}
-              onClose={() => setSelectedSlug(null)}
-              onChanged={refresh}
-            />
-          </aside>
-        )}
       </div>
 
       {/* Import dialog */}

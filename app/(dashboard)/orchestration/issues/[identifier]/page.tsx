@@ -1,9 +1,11 @@
-import { IssueDetailClient } from "./issue-detail-client"
+import { OrchestrationIssueRedirect } from "./redirect-client"
 
 export function generateStaticParams() {
   return [{ identifier: "_" }]
 }
 
-export default function IssueDetailPage() {
-  return <IssueDetailClient />
+// /orchestration/issues/[identifier] — client-side redirect stub kept
+// one release for bookmark compat. Canonical route is /issues/[id].
+export default function Page() {
+  return <OrchestrationIssueRedirect />
 }

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Routines — Workspace Pattern (mockup)</title>
+<style>
+  :root {
+    --bg:           #131119;
+    --bg-card:      #1c1a23;
+    --bg-elevated:  #232128;
+    --border:       rgba(255,255,255,0.06);
+    --border-strong:rgba(255,255,255,0.12);
+    --text:         #e6e4ec;
+    --text-muted:   rgba(230,228,236,0.50);
+    --text-faint:   rgba(230,228,236,0.30);
+    --accent:       #5b8def;
+    --accent-bg:    rgba(91,141,239,0.10);
+    --accent-border:rgba(91,141,239,0.30);
+    --green:        #34d399;
+    --red:          #f43f5e;
+    --amber:        #f59e0b;
+    --mono:         "SF Mono", Menlo, Monaco, Consolas, monospace;
+  }
+  *,*::before,*::after { box-sizing: border-box; }
+  html,body { margin:0; padding:0; height:100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Open Sans", sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { display:grid; grid-template-rows: 36px 1fr; height:100vh; }
+  .topbar {
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+    display:flex; align-items:center; gap:6px; padding: 0 12px; font-size: 12px;
+  }
+  .topbar .crumb { display:flex; align-items:center; gap:6px; color: var(--text-muted); }
+  .topbar .crumb .sep { color: var(--text-faint); }
+  .topbar .crumb .active { color: var(--text); }
+  .topbar .spacer { flex:1; }
+  .topbar .btn { padding: 4px 10px; border-radius: 4px; background: var(--bg-elevated); color: var(--text); border:1px solid var(--border); font-size: 11px; cursor:pointer; }
+  .topbar .btn.primary { background: var(--accent); border-color: var(--accent); color:white; }
+  .topbar .icon-btn { padding: 4px 6px; background:transparent; border:0; color:var(--text-muted); cursor:pointer; font-size:14px; }
+  .topbar .icon-btn:hover { color: var(--text); }
+
+  .body { display:grid; grid-template-columns: 300px 1fr; height:100%; overflow:hidden; }
+  .sidebar { background: var(--bg-card); border-right: 1px solid var(--border); overflow-y: auto; }
+  .main    { background: var(--bg); overflow-y: auto; }
+
+  /* Sidebar (same as dashboard mockup) */
+  .search-row { display:flex; gap:6px; padding: 8px; }
+  .search { flex:1; height: 30px; background: rgba(255,255,255,0.04); border:1px solid var(--border); border-radius: 6px; display:flex; align-items:center; padding: 0 10px; gap: 6px; }
+  .search input { background: transparent; border:0; outline:0; color: var(--text); font-size: 12px; width: 100%; }
+  .filter-btn { height: 30px; padding: 0 10px; border-radius: 6px; background: rgba(255,255,255,0.04); border:1px solid var(--border); color: var(--text-muted); font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; }
+  .section { border-bottom: 1px solid var(--border); }
+  .section-head { display:flex; align-items:center; padding: 6px 12px; gap:6px; cursor:pointer; }
+  .section-head .label { flex:1; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; }
+  .section-head .count { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+  .row { display:flex; align-items:center; gap:8px; padding: 5px 12px; border-left: 2px solid transparent; cursor:pointer; font-size: 12px; }
+  .row:hover { background: rgba(255,255,255,0.03); }
+  .row.selected { background: var(--accent-bg); border-left-color: var(--accent); }
+  .row .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color: rgba(230,228,236,0.85); }
+  .row.selected .name { color: var(--text); font-weight: 500; }
+  .row .meta { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; flex-shrink:0; }
+  .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .dot.green { background: var(--green); }
+  .dot.red { background: var(--red); }
+  .dot.gray { background: rgba(230,228,236,0.25); }
+  .avatar { width:16px; height:16px; border-radius:50%; background: linear-gradient(135deg, #8b5cf6, #5b8def); flex-shrink:0; }
+
+  /* MAIN = workspace detail */
+  .workspace { display:flex; flex-direction:column; height: 100%; }
+  .ws-header {
+    padding: 16px 24px 12px; border-bottom: 1px solid var(--border); display:flex; flex-direction:column; gap: 6px;
+  }
+  .ws-title-row { display:flex; align-items:center; gap: 10px; }
+  .ws-title { font-size: 18px; font-weight: 600; }
+  .ws-slug { color: var(--text-muted); font-size: 12px; font-family: var(--mono); }
+  .ws-status { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: rgba(52,211,153,0.15); color: var(--green); }
+  .ws-actions { display:flex; gap:6px; margin-left:auto; }
+  .ws-actions .btn { padding: 5px 12px; border-radius: 5px; font-size: 11px; cursor:pointer; }
+  .ws-actions .run { background: var(--accent); color:white; border:0; }
+  .ws-actions .test, .ws-actions .dry { background:var(--bg-elevated); color: var(--text); border: 1px solid var(--border); }
+
+  .ws-tabs { display:flex; gap: 2px; padding: 0 24px; border-bottom: 1px solid var(--border); }
+  .ws-tab { padding: 8px 12px; color: var(--text-muted); font-size: 12px; border-bottom: 2px solid transparent; cursor:pointer; }
+  .ws-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  .ws-body { padding: 18px 24px; display:grid; grid-template-columns: 1fr 320px; gap: 20px; flex: 1; min-height: 0; overflow: auto; }
+  .ws-main h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 8px; font-weight: 600; }
+  .ws-main h2:not(:first-child) { margin-top: 24px; }
+  .ws-main p { color: var(--text); margin: 0 0 12px; }
+  .ws-main .desc { color: var(--text); font-size: 14px; line-height: 1.55; max-width: 720px; }
+
+  .input-block { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; font-family: var(--mono); font-size: 12px; }
+  .input-block .key { color: var(--accent); }
+  .input-block .type { color: var(--text-muted); margin-left:6px; font-size:11px; }
+  .input-block .val { color: var(--text); display:block; margin-top:4px; max-height: 80px; overflow:hidden; text-overflow:ellipsis; }
+
+  /* Last run callout */
+  .last-run { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 6px; }
+  .last-run-head { display:flex; align-items:center; gap:8px; margin-bottom: 8px; }
+  .last-run-head .label { color: var(--text-muted); font-size:11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .last-run-meta { font-size: 11px; color: var(--text-muted); }
+  .last-run pre { background: var(--bg-elevated); border-radius: 4px; padding: 8px; font-family: var(--mono); font-size: 11px; color: var(--text); max-height: 140px; overflow:hidden; margin: 6px 0 0; white-space:pre-wrap; }
+
+  /* Right inspector — properties (compact, secondary) */
+  .ws-side { background: transparent; border-left: 1px solid var(--border); padding: 18px 0 18px 20px; }
+  .props { display: flex; flex-direction: column; gap: 14px; }
+  .prop-group .title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600; margin-bottom: 6px; }
+  .prop { display:flex; justify-content: space-between; gap:8px; font-size: 12px; padding: 3px 0; }
+  .prop .k { color: var(--text-muted); flex-shrink: 0; }
+  .prop .v { color: var(--text); text-align:right; min-width: 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family: var(--mono); font-size: 11px; }
+
+  /* Sparkline for runs */
+  .ws-spark { display:flex; align-items:flex-end; gap:2px; height: 40px; margin: 4px 0 10px; }
+  .ws-spark span { flex:1; background: rgba(91,141,239,0.5); border-radius: 1px; }
+  .ws-spark span.fail { background: var(--red); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <button class="icon-btn">←</button>
+    <div class="crumb">
+      <span>Routines</span>
+      <span class="sep">/</span>
+      <span class="active">eval-citation-faithfulness</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="icon-btn" title="Promote back to dashboard">▣</button>
+    <button class="icon-btn" title="Close">✕</button>
+  </div>
+
+  <div class="body">
+    <!-- sidebar -->
+    <div class="sidebar">
+      <div class="search-row">
+        <div class="search">🔍 <input placeholder="Search routines, agents…" /></div>
+        <button class="filter-btn">⌃ Filter</button>
+      </div>
+      <div class="section">
+        <div class="section-head">▾ <span class="label">Status</span><span class="count">4</span></div>
+        <div class="row"><span class="dot gray"></span><span class="name">All</span><span class="meta">22</span></div>
+        <div class="row"><span class="dot green"></span><span class="name">Completed</span><span class="meta">22</span></div>
+        <div class="row"><span class="dot red"></span><span class="name">Failed</span><span class="meta">1</span></div>
+        <div class="row"><span class="dot gray"></span><span class="name">Never invoked</span><span class="meta">0</span></div>
+      </div>
+      <div class="section">
+        <div class="section-head">▾ <span class="label">Routines</span><span class="count">22</span></div>
+        <div class="row"><span class="dot green"></span><span class="name">Eval: extract emails</span><span class="meta">139</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot green"></span><span class="name">Eval: translation roundtrip</span><span class="meta">9</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot green"></span><span class="name">Eval: faithfulness (RAG)</span><span class="meta">7</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot green"></span><span class="name">PR review (structured)</span><span class="meta">7</span><div class="avatar"></div></div>
+        <div class="row selected"><span class="dot green"></span><span class="name">Eval: citation faithfulness</span><span class="meta">6</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot red"></span><span class="name">Eval: noisy-context</span><span class="meta">3</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot gray"></span><span class="name">Daily status digest</span><span class="meta">3</span><div class="avatar"></div></div>
+        <div class="row"><span class="dot gray"></span><span class="name">… (15 more)</span></div>
+      </div>
+      <div class="section">
+        <div class="section-head">▾ <span class="label">Inbox</span><span class="count" style="background:var(--red); color:white; padding: 0 6px; border-radius: 99px;">1</span></div>
+        <div class="row"><span style="color:var(--red);">✗</span><span class="name">Failed: Map container limits</span></div>
+      </div>
+    </div>
+
+    <!-- main = full-width workspace -->
+    <div class="main">
+      <div class="workspace">
+        <div class="ws-header">
+          <div class="ws-title-row">
+            <div class="ws-title">Eval: citation faithfulness</div>
+            <div class="ws-slug">eval-citation-faithfulness</div>
+            <div class="ws-status">COMPLETED</div>
+            <div class="ws-actions">
+              <button class="btn run">▶ Run</button>
+              <button class="btn test">⚙ Test run</button>
+              <button class="btn dry">○ Dry run</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ws-tabs">
+          <div class="ws-tab active">Overview</div>
+          <div class="ws-tab">Editor</div>
+          <div class="ws-tab">Runs <span style="color:var(--text-faint); font-size:10px;">6</span></div>
+          <div class="ws-tab">Versions</div>
+          <div class="ws-tab">Schedules</div>
+          <div class="ws-tab">Webhooks</div>
+          <div class="ws-tab">Wait points</div>
+        </div>
+
+        <div class="ws-body">
+          <!-- Left: main detail content -->
+          <div class="ws-main">
+            <h2>Description</h2>
+            <p class="desc">
+              Answer a question and cite a verbatim quote from the context for every factual
+              claim. Stricter cousin of <code style="background:rgba(255,255,255,0.06); padding: 1px 5px; border-radius:3px; font-family:var(--mono); font-size:12px;">eval-faithfulness-rag</code>.
+            </p>
+
+            <h2>Recent runs (last 7d)</h2>
+            <div class="ws-spark">
+              <span style="height: 0%"></span>
+              <span style="height: 70%"></span>
+              <span style="height: 90%"></span>
+              <span style="height: 60%"></span>
+              <span style="height: 0%"></span>
+              <span style="height: 80%"></span>
+              <span style="height: 0%"></span>
+            </div>
+
+            <h2>Inputs (2)</h2>
+            <div class="input-block">
+              <span class="key">context</span><span class="type">· string</span>
+              <span class="val">"Crewship is a self-hosted agent runtime. The current released version is 0.4.2, shipped on 2026-04-30. It supports six step types: agent_run, call_pipeline, http, code, wait, transform..."</span>
+            </div>
+            <div class="input-block">
+              <span class="key">question</span><span class="type">· string</span>
+              <span class="val">"What is the current Crewship version, what model does it use for the smart tier, and what triggers tier escalation?"</span>
+            </div>
+
+            <h2>Last run result</h2>
+            <div class="last-run">
+              <div class="last-run-head">
+                <div class="ws-status">COMPLETED</div>
+                <div class="last-run-meta">run_cmozxcuph00080446f560 · 21h ago · 43.5s · $0.0284</div>
+              </div>
+              <pre>{
+  "answer": "The current Crewship version is 0.4.2, [source: \"The current released version is 0.4.2, shipped on 2026-04-30\"]. For the smart tier, the default execution tier mapping uses Opus-4.7..."
+}</pre>
+            </div>
+          </div>
+
+          <!-- Right: inspector (compact properties) -->
+          <div class="ws-side">
+            <div class="props">
+              <div class="prop-group">
+                <div class="title">Identity</div>
+                <div class="prop"><span class="k">DSL version</span><span class="v">1.0</span></div>
+                <div class="prop"><span class="k">Definition hash</span><span class="v">78abec587f3d…</span></div>
+                <div class="prop"><span class="k">Visibility</span><span class="v">workspace</span></div>
+              </div>
+              <div class="prop-group">
+                <div class="title">Authorship</div>
+                <div class="prop"><span class="k">Authored via</span><span class="v">user api</span></div>
+                <div class="prop"><span class="k">Author crew</span><span class="v">cmozupzj6000beb…</span></div>
+                <div class="prop"><span class="k">Created</span><span class="v">10. 5. 2026</span></div>
+                <div class="prop"><span class="k">Updated</span><span class="v">10. 5. 2026</span></div>
+              </div>
+              <div class="prop-group">
+                <div class="title">Activity</div>
+                <div class="prop"><span class="k">Total invocations</span><span class="v">6</span></div>
+                <div class="prop"><span class="k">Last invoked</span><span class="v">21h ago</span></div>
+                <div class="prop"><span class="k">Step count</span><span class="v">1</span></div>
+              </div>
+              <div class="prop-group">
+                <div class="title">Outputs</div>
+                <div class="prop"><span class="k">answer</span><span class="v">string</span></div>
+              </div>
+              <div class="prop-group">
+                <div class="title">Credentials</div>
+                <div class="prop"><span class="k">anthropic</span><span class="v">scope: any</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

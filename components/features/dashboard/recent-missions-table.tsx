@@ -69,7 +69,7 @@ export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
           return (
             <Link
               key={m.id}
-              href={m.identifier ? `/orchestration/issues/${m.identifier}` : "/orchestration"}
+              href={m.identifier ? `/issues/${m.identifier}` : "/issues"}
               className="grid items-center gap-3 px-1.5 py-2 text-[11px] border-b border-border/60 last:border-b-0 hover:bg-white/[0.02] rounded grid-cols-[56px_minmax(0,1fr)_110px_78px_64px_72px]"
             >
               <span className="font-mono text-[10px] text-muted-foreground truncate">{m.identifier ?? "—"}</span>

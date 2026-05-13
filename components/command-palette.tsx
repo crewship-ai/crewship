@@ -89,7 +89,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
-  { title: "Orchestration", href: "/orchestration", icon: CircleDot },
+  { title: "Issues", href: "/issues", icon: CircleDot },
   { title: "Crews", href: "/crews", icon: Network },
   { title: "Agents", href: "/crews/agents", icon: Bot },
   { title: "Skills", href: "/skills", icon: Zap },
@@ -201,7 +201,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   key={issue.id}
                   value={`issue ${issue.identifier} ${issue.title}`}
                   keywords={[issue.status, issue.priority, issue.assignee_name ?? "", issue.crew_name ?? ""]}
-                  onSelect={() => runCommand(() => router.push(`/orchestration/issues/${issue.identifier}`))}
+                  onSelect={() => runCommand(() => router.push(`/issues/${issue.identifier}`))}
                 >
                   <StatusIcon status={issue.status} className="h-4 w-4 shrink-0" />
                   <span className="text-xs font-mono text-muted-foreground shrink-0">{issue.identifier}</span>
@@ -222,7 +222,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   key={project.id}
                   value={`project ${project.name} ${project.slug}`}
                   keywords={[project.status]}
-                  onSelect={() => runCommand(() => router.push(`/orchestration/projects/${project.id}`))}
+                  onSelect={() => runCommand(() => router.push(`/issues?project=${project.id}`))}
                 >
                   <div className={cn("h-4 w-4 rounded shrink-0 flex items-center justify-center bg-gradient-to-br", getGradientPalette(project.color).from, getGradientPalette(project.color).to)}>
                     <FolderKanban className={cn("h-2.5 w-2.5", getGradientPalette(project.color).text)} />
