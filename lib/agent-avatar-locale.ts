@@ -180,7 +180,19 @@ export function getLocalizedAgentAvatar(seed: string, language: string): string 
   const cached = _cache.get(key)
   if (cached) return cached
 
-  const opts: Record<string, unknown> = { seed, size: 128 }
+  const opts: Record<string, unknown> = {
+    seed,
+    size: 128,
+    // facialHairProbability defaults to 10 — at 32×32 a beard on a
+    // feminine face reads as a surgical mask, which an early user
+    // flagged ("hele a nechceme mít avatary s rouškami"). Disabling
+    // facial hair entirely is cleaner than trying to gate on gender
+    // hints micah doesn't expose.
+    facialHairProbability: 0,
+    // earringsProbability defaults to 30. Earrings render as black
+    // dots at preview scale and add noise without identity signal.
+    earringsProbability: 0,
+  }
   if (palette.baseColor) opts.baseColor = palette.baseColor
   if (palette.hairColor) opts.hairColor = palette.hairColor
 

@@ -17,7 +17,6 @@ import {
 import { CLI_ADAPTERS, getAdapterConfig } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getLocalizedAgentAvatar, getDiverseLocale } from "@/lib/agent-avatar-locale"
 import { getCrewNames } from "@/lib/agent-names-locale"
 
@@ -252,10 +251,13 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                 return template.agents.map((a, i) => {
                   const isDiverse = willMix && i === total - 1
                   const effectiveLocale = isDiverse ? diverseLocale : primaryLocale
-                  const avatarSrc =
-                    effectiveLocale !== "English"
-                      ? getLocalizedAgentAvatar(a.slug, effectiveLocale)
-                      : getAgentAvatarUrl(a.slug, "micah")
+                  // Route every preview avatar through the localized
+                  // helper — for English the LOCALE_PALETTES entry is
+                  // empty so DiceBear uses the default mixed pool, but
+                  // the helper's facialHairProbability=0 + earrings=0
+                  // overrides still apply, so the "rouška" look (beard
+                  // on a feminine face) is suppressed uniformly.
+                  const avatarSrc = getLocalizedAgentAvatar(a.slug, effectiveLocale)
                   const personName = isDiverse ? diverseNames[a.slug] : primaryNames[a.slug]
                   return (
                   <motion.div
