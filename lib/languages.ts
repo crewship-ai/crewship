@@ -102,4 +102,44 @@ export const LANGUAGES: Language[] = [
   { code: "mk", flag: "\u{1F1F2}\u{1F1F0}", name: "Macedonian", native: "\u041C\u0430\u043A\u0435\u0434\u043E\u043D\u0441\u043A\u0438" },
   { code: "be", flag: "\u{1F1E7}\u{1F1FE}", name: "Belarusian", native: "\u0411\u0435\u043B\u0430\u0440\u0443\u0441\u043A\u0430\u044F" },
   { code: "mn", flag: "\u{1F1F2}\u{1F1F3}", name: "Mongolian", native: "\u041C\u043E\u043D\u0433\u043E\u043B" },
+  // Second-pass coverage 2026-05-13: large-speaker-count languages
+  // missing from the first pass. Each ~10 M+ native speakers.
+  { code: "yue", flag: "\u{1F1ED}\u{1F1F0}", name: "Cantonese", native: "\u7CB5\u8A9E" },
+  { code: "jv", flag: "\u{1F1EE}\u{1F1E9}", name: "Javanese", native: "\uA9A7\uA9B1\uA997\uA9AE" },
+  { code: "su", flag: "\u{1F1EE}\u{1F1E9}", name: "Sundanese", native: "Basa Sunda" },
+  { code: "ps", flag: "\u{1F1E6}\u{1F1EB}", name: "Pashto", native: "\u067E\u069A\u062A\u0648" },
+  { code: "ku", flag: "\u{1F1EE}\u{1F1F6}", name: "Kurdish", native: "Kurd\u00EE" },
+  { code: "so", flag: "\u{1F1F8}\u{1F1F4}", name: "Somali", native: "Soomaali" },
+  { code: "om", flag: "\u{1F1EA}\u{1F1F9}", name: "Oromo", native: "Afaan Oromoo" },
+  { code: "ti", flag: "\u{1F1EA}\u{1F1F7}", name: "Tigrinya", native: "\u1275\u130D\u122D\u129B" },
+  { code: "or", flag: "\u{1F1EE}\u{1F1F3}", name: "Odia", native: "\u0B13\u0B21\u0B3C\u0B3F\u0B06" },
+  { code: "as", flag: "\u{1F1EE}\u{1F1F3}", name: "Assamese", native: "\u0985\u09B8\u09AE\u09C0\u09AF\u09BC\u09BE" },
+  { code: "mai", flag: "\u{1F1EE}\u{1F1F3}", name: "Maithili", native: "\u092E\u0948\u0925\u093F\u0932\u0940" },
+  { code: "sd", flag: "\u{1F1F5}\u{1F1F0}", name: "Sindhi", native: "\u0633\u0646\u068C\u064A" },
+  { code: "bho", flag: "\u{1F1EE}\u{1F1F3}", name: "Bhojpuri", native: "\u092D\u094B\u091C\u092A\u0941\u0930\u0940" },
+  // European regional / minority languages with established literary
+  // tradition. Flag picks: Welsh / Scottish / Cornish fall under
+  // GB; Basque / Galician under ES; Breton under FR.
+  { code: "cy", flag: "\u{1F1EC}\u{1F1E7}", name: "Welsh", native: "Cymraeg" },
+  { code: "ga", flag: "\u{1F1EE}\u{1F1EA}", name: "Irish", native: "Gaeilge" },
+  { code: "gd", flag: "\u{1F1EC}\u{1F1E7}", name: "Scottish Gaelic", native: "G\u00E0idhlig" },
+  { code: "eu", flag: "\u{1F1EA}\u{1F1F8}", name: "Basque", native: "Euskara" },
+  { code: "gl", flag: "\u{1F1EA}\u{1F1F8}", name: "Galician", native: "Galego" },
+  { code: "lb", flag: "\u{1F1F1}\u{1F1FA}", name: "Luxembourgish", native: "L\u00EBtzebuergesch" },
+  { code: "fo", flag: "\u{1F1EB}\u{1F1F4}", name: "Faroese", native: "F\u00F8royskt" },
+  // Sub-Saharan African languages with 10M+ speakers we hadn't
+  // covered.
+  { code: "rw", flag: "\u{1F1F7}\u{1F1FC}", name: "Kinyarwanda", native: "Ikinyarwanda" },
+  { code: "sn", flag: "\u{1F1FF}\u{1F1FC}", name: "Shona", native: "ChiShona" },
+  { code: "wo", flag: "\u{1F1F8}\u{1F1F3}", name: "Wolof", native: "Wolof" },
+  { code: "ln", flag: "\u{1F1E8}\u{1F1E9}", name: "Lingala", native: "Ling\u00E1la" },
+  { code: "mg", flag: "\u{1F1F2}\u{1F1EC}", name: "Malagasy", native: "Malagasy" },
+  // Caucasus & Central Asia rounds.
+  { code: "ky", flag: "\u{1F1F0}\u{1F1EC}", name: "Kyrgyz", native: "\u041A\u044B\u0440\u0433\u044B\u0437\u0447\u0430" },
+  { code: "tg", flag: "\u{1F1F9}\u{1F1EF}", name: "Tajik", native: "\u0422\u043E\u04B7\u0438\u043A\u04E3" },
+  { code: "tk", flag: "\u{1F1F9}\u{1F1F2}", name: "Turkmen", native: "T\u00FCrkmen\u00E7e" },
+  // Constructed / classical, kept at the end so they don't crowd
+  // the natural-language section.
+  { code: "eo", flag: "\u{1F310}", name: "Esperanto", native: "Esperanto" },
+  { code: "la", flag: "\u{1F1FB}\u{1F1E6}", name: "Latin", native: "Latina" },
 ]
