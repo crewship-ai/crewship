@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import Image from "next/image"
 import {
@@ -18,8 +17,7 @@ import {
 import { CLI_ADAPTERS, getAdapterConfig } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
-import { getLocalizedAgentAvatar } from "@/lib/agent-avatar-locale"
-import { computeRandomCrew, type SlotComposition } from "@/lib/agent-locale-composition"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -138,14 +136,6 @@ interface Props {
   mode: HandoffMode | null
   pairingPending?: boolean
   adapterKey?: string
-  /**
-   * Selected workspace language. Biases the avatar palette toward
-   * the locale (subtle skin/hair-colour ranges) so a Czech user
-   * sees a believably-local team, an English user sees the default
-   * globally-mixed pool. Falls through to default for languages we
-   * don't map.
-   */
-  language?: string
 }
 
 /** Apple-tight easing — cubic-bezier(0.16, 1, 0.3, 1). Matches the
@@ -153,27 +143,12 @@ interface Props {
  *  the marketing site. */
 const ease = [0.16, 1, 0.3, 1] as const
 
-export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPending, adapterKey, language }: Props) {
+export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPending, adapterKey }: Props) {
   const template = crewSlug ? TEMPLATES[crewSlug] : null
   const adapterCfg = adapterKey ? getAdapterConfig(adapterKey) : undefined
   const brand = adapterKey ? getAdapterBrand(adapterKey) : undefined
   const reduce = useReducedMotion()
   const AdapterIcon = adapterCfg?.icon
-
-  // Crew roster is rolled randomly on every (language | crew) change.
-  // For multi-ethnic locales each slot pulls a name + palette from a
-  // demographic-specific pool (defined in agent-locale-composition.ts);
-  // mono-ethnic locales draw distinct names from a single pool. The
-  // roster stays stable between renders until one of the deps moves,
-  // so a flicker of an unrelated avatar doesn't follow every keystroke.
-  const [crew, setCrew] = useState<SlotComposition[]>([])
-  useEffect(() => {
-    if (!template) {
-      setCrew([])
-      return
-    }
-    setCrew(computeRandomCrew(language ?? "English", template.agents.length))
-  }, [language, crewSlug, template])
 
   return (
     <div className="w-full max-w-md mx-auto">
@@ -241,60 +216,44 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                 </div>
               </div>
             </div>
-            {/* Crew roster comes from React state rolled on each
-                (language | crew) change — see the useEffect above.
-                Mono-ethnic locales draw distinct names from one
-                palette + pool; multi-ethnic locales (English (US),
-                English, French, German, Dutch, Spanish, Brazilian
-                Portuguese) pull each slot from a demographic-
-                specific pool so the rendered team reflects each
-                country's actual mix. */}
+            {/* Crew roster uses the DiceBear bottts-neutral robot
+                style — the same avatar look the rest of the app
+                renders for deployed agents (lib/agent-avatar.ts
+                DEFAULT_AVATAR_STYLE). Robots side-step every
+                demographic landmine that human faces introduce in
+                a global product. Each agent's seed is its slug, so
+                the same role always renders the same robot.
+                Primary label is the role; no first names. */}
             <div className="space-y-2">
-              {template.agents.map((a, i) => {
-                const slot = crew[i]
-                if (!slot) return null
-                const palette = slot.palette
-                const personName = slot.name
-                // Avatar seed includes the personName so a fresh
-                // random roll (same slug, new name) produces a
-                // matching new face — otherwise the avatar would
-                // stay frozen on the slug while the name flipped.
-                const avatarSrc = getLocalizedAgentAvatar(`${a.slug}-${personName}`, palette)
-                return (
-                  <motion.div
-                    key={a.slug}
-                    initial={reduce ? { opacity: 0 } : { opacity: 0, x: -8 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.32, ease, delay: 0.08 + i * 0.06 }}
-                    className="flex items-center gap-2.5 text-sm"
-                  >
-                    <div className="relative shrink-0">
-                      <Image
-                        src={avatarSrc}
-                        alt={personName}
-                        width={32}
-                        height={32}
-                        className="rounded-full bg-muted ring-1 ring-border"
-                        unoptimized
-                      />
-                      {a.lead && (
-                        <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm">
-                          <Star className="h-2 w-2 fill-current" />
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="truncate leading-tight">{personName}</div>
-                      <div className="text-[11px] text-muted-foreground truncate leading-tight">
-                        {a.name}
-                      </div>
-                    </div>
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
-                      {a.lead ? "Lead" : a.role}
-                    </span>
-                  </motion.div>
-                )
-              })}
+              {template.agents.map((a, i) => (
+                <motion.div
+                  key={a.slug}
+                  initial={reduce ? { opacity: 0 } : { opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.32, ease, delay: 0.08 + i * 0.06 }}
+                  className="flex items-center gap-2.5 text-sm"
+                >
+                  <div className="relative shrink-0">
+                    <Image
+                      src={getAgentAvatarUrl(a.slug, "bottts-neutral")}
+                      alt={a.name}
+                      width={32}
+                      height={32}
+                      className="rounded-lg bg-muted ring-1 ring-border"
+                      unoptimized
+                    />
+                    {a.lead && (
+                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm">
+                        <Star className="h-2 w-2 fill-current" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="flex-1 min-w-0 truncate">{a.name}</span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                    {a.lead ? "Lead" : a.role}
+                  </span>
+                </motion.div>
+              ))}
             </div>
           </motion.div>
         ) : (
