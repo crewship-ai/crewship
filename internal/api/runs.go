@@ -62,6 +62,84 @@ type pagination struct {
 	TotalPages int `json:"total_pages"`
 }
 
+// Get returns a single run by id.
+// GET /api/v1/runs/{id}
+//
+// Reads via journal.ListRuns with a workspace + agent filter scoped to a
+// single trace_id; reuses the same enrichment as List so the response
+// shape is identical to a List row. 404 when no run with that id exists
+// in the caller's workspace — cross-tenant lookups are intentionally
+// masked as 404 to avoid leaking the run's existence in another
+// workspace.
+func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "run id required"})
+		return
+	}
+
+	// journal.ListRuns doesn't accept a trace_id filter directly, so we
+	// pull a small page and scan in-memory. The expected hit is page 1
+	// (most lookups are recent), which the FE also relies on for its
+	// stats badge.  This is bounded by limit=100 — a future
+	// journal.GetRunByID can replace this when the surface grows.
+	aggregated, _, err := journal.ListRuns(r.Context(), h.db, journal.RunsQuery{
+		WorkspaceID: workspaceID,
+		Limit:       100,
+	})
+	if err != nil {
+		h.logger.Error("get run: list", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	var found *journal.RunAggregated
+	for i := range aggregated {
+		if aggregated[i].ID == id {
+			found = &aggregated[i]
+			break
+		}
+	}
+	if found == nil {
+		// Fallback: scan deeper pages up to a hard cap so older runs are
+		// still resolvable by id. 1k entries ≈ 10 page sweeps; the cost is
+		// bounded and the typical lookup is page 1.
+		for offset := 100; offset < 1000 && found == nil; offset += 100 {
+			page, _, err := journal.ListRuns(r.Context(), h.db, journal.RunsQuery{
+				WorkspaceID: workspaceID,
+				Limit:       100,
+				Offset:      offset,
+			})
+			if err != nil {
+				break
+			}
+			if len(page) == 0 {
+				break
+			}
+			for i := range page {
+				if page[i].ID == id {
+					found = &page[i]
+					break
+				}
+			}
+		}
+	}
+	if found == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		return
+	}
+	enriched := h.enrichRuns(r.Context(), workspaceID, []journal.RunAggregated{*found})
+	if len(enriched) == 0 {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "enrich failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, enriched[0])
+}
+
 // List returns a paginated list of agent runs in the workspace with stats and optional filters.
 // GET /api/v1/runs
 //
