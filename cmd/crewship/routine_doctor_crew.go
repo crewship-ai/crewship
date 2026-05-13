@@ -17,6 +17,9 @@ func checkAuthorCrew(client doctorHTTPGetter, crewID string) doctorCheck {
 		}
 	}
 	resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/provision", url.PathEscape(crewID)))
+	if resp != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil || resp == nil {
 		return doctorCheck{
 			Name:    "author_crew",
@@ -25,7 +28,6 @@ func checkAuthorCrew(client doctorHTTPGetter, crewID string) doctorCheck {
 			Hint:    "the run will probably still work; this just means doctor couldn't verify the crew is ready",
 		}
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		return doctorCheck{
 			Name:    "author_crew",

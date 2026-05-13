@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -73,8 +76,9 @@ func toggleCrewIntegrationTool(crewSlug, integrationID, toolName string, enabled
 	if err != nil {
 		return err
 	}
+	escapedToolName := url.PathEscape(toolName)
 	resp, err := client.Patch(
-		"/api/v1/crews/"+crewID+"/integrations/"+integrationID+"/tools/"+toolName,
+		"/api/v1/crews/"+crewID+"/integrations/"+integrationID+"/tools/"+escapedToolName,
 		map[string]interface{}{"enabled": enabled},
 	)
 	if err != nil {
@@ -148,11 +152,18 @@ the discovered tool array from the MCP probe.`,
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var result map[string]any
-		if err := cli.ReadJSON(resp, &result); err != nil {
-			// Empty 200 is acceptable here.
+		defer resp.Body.Close()
+		data, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+		if err != nil {
+			return fmt.Errorf("read refresh response: %w", err)
+		}
+		if len(data) == 0 {
 			fmt.Printf("Tool bindings refresh requested for %s/%s.\n", args[0], args[1])
 			return nil
+		}
+		var result map[string]any
+		if err := json.Unmarshal(data, &result); err != nil {
+			return fmt.Errorf("decode refresh response: %w", err)
 		}
 		return newFormatter().JSON(result)
 	},

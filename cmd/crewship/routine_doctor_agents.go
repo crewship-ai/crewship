@@ -17,6 +17,13 @@ func checkAgentSlugs(client doctorHTTPGetter, crewID string, def map[string]inte
 	if !ok || len(steps) == 0 {
 		return []doctorCheck{{Name: "agent_slugs", Level: doctorWarn, Message: "no steps in DSL definition"}}
 	}
+	if crewID == "" {
+		return []doctorCheck{{
+			Name:    "agent_slugs",
+			Level:   doctorWarn,
+			Message: "author_crew_id is empty — skipping agent slug resolution",
+		}}
+	}
 
 	available := fetchAgentSlugsForCrew(client, crewID)
 	if available == nil {

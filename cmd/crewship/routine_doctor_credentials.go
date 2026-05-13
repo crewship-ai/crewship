@@ -53,6 +53,13 @@ func checkCredentialsRequired(client doctorHTTPGetter, ws string, def map[string
 			})
 		}
 	}
+	if len(out) == 0 {
+		return []doctorCheck{{
+			Name:    "credentials_required",
+			Level:   doctorWarn,
+			Message: "credentials_required declared but no valid credential types were found",
+		}}
+	}
 	return out
 }
 

@@ -5,7 +5,7 @@ import "fmt"
 func checkValidationGates(def map[string]interface{}) []doctorCheck {
 	steps, ok := def["steps"].([]interface{})
 	if !ok {
-		return nil
+		return []doctorCheck{{Name: "validation_gates", Level: doctorOK, Message: "no validation blocks to check"}}
 	}
 	out := make([]doctorCheck, 0, len(steps))
 	for _, raw := range steps {
