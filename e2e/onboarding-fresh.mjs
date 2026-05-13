@@ -188,15 +188,11 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T11 — preview pane renders 4 agent avatars (micah style)
   // ────────────────────────────────────────────────────────────────
-  // Next/Image with unoptimized=true emits real <img> tags but the
-  // attributes show up only after hydration completes. Wait until at
-  // least one of the role names appears as an alt, then count.
-  await page
-    .waitForSelector('img[alt*="Tech Lead"], img[alt*="Backend"], img[alt*="Frontend"], img[alt*="QA"]', { timeout: 5000 })
-    .catch(() => {})
-  const avatarCount = await page
-    .locator('img[alt*="Tech"], img[alt*="Backend"], img[alt*="Frontend"], img[alt*="QA"]')
-    .count()
+  // Avatar alts are now first names (Alex, Sam, Tomáš, etc.) instead
+  // of role titles. Wait for the preview card to mount then count
+  // images that live inside it.
+  await page.waitForSelector('img[width="32"]', { timeout: 5000 }).catch(() => {})
+  const avatarCount = await page.locator('img[width="32"]').count()
   await expect(
     "T11 step 2 preview shows 4 agent avatars",
     avatarCount === 4,

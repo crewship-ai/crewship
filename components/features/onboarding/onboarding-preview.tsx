@@ -18,7 +18,8 @@ import { CLI_ADAPTERS, getAdapterConfig } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { getLocalizedAgentAvatar } from "@/lib/agent-avatar-locale"
+import { getLocalizedAgentAvatar, getDiverseLocale } from "@/lib/agent-avatar-locale"
+import { getAgentName } from "@/lib/agent-names-locale"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -226,39 +227,59 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
               </div>
             </div>
             <div className="space-y-2">
-              {template.agents.map((a, i) => (
-                <motion.div
-                  key={a.slug}
-                  initial={reduce ? { opacity: 0 } : { opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.32, ease, delay: 0.08 + i * 0.06 }}
-                  className="flex items-center gap-2.5 text-sm"
-                >
-                  <div className="relative shrink-0">
-                    <Image
-                      src={
-                        language && language !== "English"
-                          ? getLocalizedAgentAvatar(a.slug, language)
-                          : getAgentAvatarUrl(a.slug, "micah")
-                      }
-                      alt={a.name}
-                      width={32}
-                      height={32}
-                      className="rounded-full bg-muted ring-1 ring-border"
-                      unoptimized
-                    />
-                    {a.lead && (
-                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm">
-                        <Star className="h-2 w-2 fill-current" />
-                      </span>
-                    )}
-                  </div>
-                  <span className="flex-1 min-w-0 truncate">{a.name}</span>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {a.lead ? "Lead" : a.role}
-                  </span>
-                </motion.div>
-              ))}
+              {template.agents.map((a, i) => {
+                // Per the user's "nejsme přeci rasisti" feedback: one
+                // agent per crew uses a contrasting locale so the team
+                // visibly mixes. We pick the last agent (typically the
+                // QA / Specialist role) because making the lead the
+                // outlier would read as tokenism; the supporting role
+                // feels more like natural team composition.
+                const total = template.agents.length
+                const isDiverse = total > 1 && i === total - 1 && language !== undefined && language !== "English"
+                const effectiveLocale = isDiverse ? getDiverseLocale(language!) : language
+                const avatarSrc =
+                  effectiveLocale && effectiveLocale !== "English"
+                    ? getLocalizedAgentAvatar(a.slug, effectiveLocale)
+                    : getAgentAvatarUrl(a.slug, "micah")
+                // Name pool follows the same locale as the avatar so
+                // the face and the first name match. The avatar stays
+                // deterministic per (slug, locale).
+                const personName = getAgentName(a.slug, effectiveLocale ?? "English")
+                return (
+                  <motion.div
+                    key={a.slug}
+                    initial={reduce ? { opacity: 0 } : { opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.32, ease, delay: 0.08 + i * 0.06 }}
+                    className="flex items-center gap-2.5 text-sm"
+                  >
+                    <div className="relative shrink-0">
+                      <Image
+                        src={avatarSrc}
+                        alt={personName}
+                        width={32}
+                        height={32}
+                        className="rounded-full bg-muted ring-1 ring-border"
+                        unoptimized
+                      />
+                      {a.lead && (
+                        <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm">
+                          <Star className="h-2 w-2 fill-current" />
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate leading-tight">{personName}</div>
+                      <div className="text-[11px] text-muted-foreground truncate leading-tight">
+                        {a.name}
+                      </div>
+                    </div>
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                      {a.lead ? "Lead" : a.role}
+                    </span>
+                  </motion.div>
+                )
+              })}
             </div>
           </motion.div>
         ) : (

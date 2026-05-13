@@ -188,3 +188,47 @@ export function getLocalizedAgentAvatar(seed: string, language: string): string 
   _cache.set(key, uri)
   return uri
 }
+
+/**
+ * Bucket inference — used by getDiverseLocale to pick a contrasting
+ * locale. Hand-mapped to the four reusable palettes so the result is
+ * stable when we add more language entries.
+ */
+function bucketOf(language: string): "light" | "mediterranean" | "mena" | "east_asian" | "sub_saharan" | "mixed" {
+  const palette = LOCALE_PALETTES[language]
+  if (!palette || !palette.baseColor || palette.baseColor.length === 0) return "mixed"
+  const base = palette.baseColor[0]
+  const hair = palette.hairColor?.[0] ?? ""
+  if (base === "f9c9b6" && hair === "000000") return "east_asian"
+  if (base === "f9c9b6") return "light"
+  if (base === "ac6651") return "mediterranean"
+  if (base === "77311d" && hair === "000000") return "sub_saharan"
+  if (base === "77311d") return "mena"
+  return "mixed"
+}
+
+/**
+ * Returns a locale that visually CONTRASTS with the given primary
+ * locale, so a crew preview can mix in one "different" agent and
+ * avoid looking monolithic. The mapping is deliberately asymmetric:
+ *
+ *   light European  → East Asian   (Japanese)
+ *   Mediterranean   → East Asian   (Korean)
+ *   MENA/South Asia → light Euro   (Czech)
+ *   East Asian      → Mediterranean (Italian)
+ *   sub-Saharan     → light Euro   (Czech)
+ *
+ * English (mixed bucket) keeps itself — the default pool is already
+ * varied so no extra rotation is needed.
+ */
+export function getDiverseLocale(primary: string): string {
+  switch (bucketOf(primary)) {
+    case "light":         return "Japanese"
+    case "mediterranean": return "Korean"
+    case "mena":          return "Czech"
+    case "east_asian":    return "Italian"
+    case "sub_saharan":   return "Czech"
+    case "mixed":
+    default:              return primary
+  }
+}
