@@ -444,6 +444,32 @@ export default function OnboardingPage() {
                         A workspace holds your crews, agents, and credentials. You can rename it later.
                       </p>
                     </div>
+
+                    {/* Upfront warning so users get the CLI token ready BEFORE
+                        step 3 instead of bouncing back and forth. Copy-paste
+                        cmd inline for the most common (Claude Code) case. */}
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="text-foreground/90 font-medium">
+                            Heads up — you&apos;ll need a CLI token in step 3
+                          </div>
+                          <div className="text-muted-foreground">
+                            Crewship uses your provider&apos;s <strong className="text-foreground/80">CLI token</strong>,{" "}
+                            <em>not</em> the account API key from their web console. Get it ready now:
+                          </div>
+                          <div className="rounded-md border border-border bg-card/60 p-2 font-mono mt-1.5">
+                            <span className="text-muted-foreground">Claude Code:</span>{" "}
+                            <span className="text-emerald-500 select-all">$ claude setup-token</span>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            Other adapters (Gemini, Codex, Cursor, OpenCode, Factory) have their own
+                            <code className="mx-1 font-mono">setup-token</code> equivalents — links in step 3.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="workspace_name">Workspace name</Label>
                       <Input
