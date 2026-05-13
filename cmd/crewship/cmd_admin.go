@@ -162,11 +162,18 @@ func runAdminResetPassword(cmd *cobra.Command, _ []string) error {
 	// Reset password + clear brute-force lockout state — they belong
 	// to the same operation. If shell access can reset a password,
 	// it can certainly clear a lockout the password change supersedes.
-	if _, err := tx.ExecContext(ctx, `
+	userRes, err := tx.ExecContext(ctx, `
 		UPDATE users
 		SET hashed_password = ?, failed_login_count = 0, locked_until = NULL, last_failed_login_at = NULL, updated_at = ?
-		WHERE id = ?`, string(hashed), now, userID); err != nil {
+		WHERE id = ?`, string(hashed), now, userID)
+	if err != nil {
 		return fmt.Errorf("update password: %w", err)
+	}
+	// Guard against the row being deleted out from under us between
+	// the lookup above and this UPDATE — otherwise we'd print
+	// "password reset" while nothing changed.
+	if affected, _ := userRes.RowsAffected(); affected != 1 {
+		return fmt.Errorf("update password: expected 1 row affected, got %d", affected)
 	}
 
 	// Revoke every active session so any leaked cookie can't outlive
@@ -308,14 +315,22 @@ func runAdminPromote(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("resolve workspace: %w", err)
 		}
 		// Cheap second-row probe: re-run the same query asking for
-		// the second match. If it returns rows, ambiguous.
+		// the second match. If it returns rows, ambiguous. sql.ErrNoRows
+		// is the happy path here (= "no second workspace = unambiguous");
+		// any other error must surface so a transient I/O failure can't
+		// silently fall through into a possibly-wrong promotion target.
 		var dummy string
-		if err := db.QueryRowContext(ctx, `
+		switch err := db.QueryRowContext(ctx, `
 			SELECT 'x' FROM workspaces w
 			JOIN workspace_members wm ON wm.workspace_id = w.id
 			WHERE wm.user_id = ? AND w.id != ?
-			LIMIT 1`, userID, workspaceID).Scan(&dummy); err == nil {
+			LIMIT 1`, userID, workspaceID).Scan(&dummy); {
+		case err == nil:
 			return errors.New("user belongs to multiple workspaces — pass --workspace=<slug>")
+		case errors.Is(err, sql.ErrNoRows):
+			// unambiguous — fall through to promotion
+		default:
+			return fmt.Errorf("resolve workspace ambiguity: %w", err)
 		}
 	} else {
 		err = db.QueryRowContext(ctx, `

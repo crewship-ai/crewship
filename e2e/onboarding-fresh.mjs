@@ -447,7 +447,11 @@ try {
   // Redeem the code (unauthed) — this is the CLI's job. Use the
   // request context (not the page) so we don't smuggle cookies.
   if (startBody.code) {
-    const cleanCtx = await browser.newContext()
+    // Playwright contexts are isolated — options don't inherit from
+    // the parent browser, so the main context's ignoreHTTPSErrors at
+    // line 62 doesn't carry over. Pass it explicitly or T32/T33 will
+    // false-fail on staging/self-signed HTTPS targets.
+    const cleanCtx = await browser.newContext({ ignoreHTTPSErrors: true })
     const redeemResp = await cleanCtx.request.post(`${URL}/api/v1/auth/pair/redeem`, {
       data: { code: startBody.code },
       headers: { "Content-Type": "application/json" },

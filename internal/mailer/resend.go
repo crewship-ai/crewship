@@ -35,11 +35,14 @@ type Resend struct {
 
 // NewResend constructs a Resend transport. apiKey and from must both
 // be non-empty; pass NewFromEnv if you want fallback to Disabled when
-// the env vars are missing.
+// the env vars are missing. Inputs are trimmed here so a caller that
+// hand-builds Resend (tests, future call sites) can't sneak through
+// with whitespace-only values that Configured() would otherwise read
+// as legitimately set.
 func NewResend(apiKey, from string) *Resend {
 	return &Resend{
-		apiKey: apiKey,
-		from:   from,
+		apiKey: strings.TrimSpace(apiKey),
+		from:   strings.TrimSpace(from),
 		// 10s is generous: Resend's median latency is ~200ms and the
 		// /forgot endpoint runs synchronously inside the request
 		// goroutine. Anything longer and a misconfigured SMTP/Resend
@@ -66,10 +69,14 @@ func NewFromEnv() Mailer {
 	return NewResend(apiKey, from)
 }
 
-// Configured always returns true for a constructed Resend — the
-// constructor refuses to build with missing credentials, so by the
-// time we hold one, the transport is wired.
-func (r *Resend) Configured() bool { return true }
+// Configured reports whether the transport actually has credentials
+// to make a Send attempt. Defends against direct callers of NewResend
+// passing empty values — the auth-recovery handler uses Configured()
+// to gate enumeration vs. real send paths, so an honest answer here
+// is load-bearing.
+func (r *Resend) Configured() bool {
+	return r.apiKey != "" && r.from != ""
+}
 
 type resendRequest struct {
 	From    string   `json:"from"`
