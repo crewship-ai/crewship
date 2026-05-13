@@ -245,9 +245,34 @@ export default function OnboardingPage() {
     }
   }, [mode, step, pairCode, startPairing])
 
+  /**
+   * The full CLI invocation the user should paste — code AND server.
+   * Without --server, the CLI defaults to http://localhost:8080,
+   * which only works for an operator who happens to be running the
+   * server on the same machine. The browser already knows where the
+   * server lives (window.location.origin), so we encode it directly
+   * into the snippet and the user doesn't have to figure it out.
+   *
+   * Skips localhost-style URLs since the CLI already defaults there
+   * — a shorter snippet on a developer's local machine reads more
+   * cleanly than `--server=http://localhost:8080`.
+   */
+  const pairCommand = (() => {
+    if (!pairCode) return ""
+    let server = ""
+    if (typeof window !== "undefined") {
+      const origin = window.location.origin
+      const isLocalDefault =
+        origin === "http://localhost:8080" || origin === "http://127.0.0.1:8080"
+      if (!isLocalDefault) {
+        server = ` --server=${origin}`
+      }
+    }
+    return `crewship login --pair --code=${pairCode}${server}`
+  })()
+
   const copyPairCmd = useCallback(() => {
-    if (!pairCode) return
-    const cmd = `crewship login --pair --code=${pairCode}`
+    if (!pairCommand) return
     const succeed = () => {
       setPairCopied(true)
       setTimeout(() => setPairCopied(false), 1500)
@@ -259,11 +284,11 @@ export default function OnboardingPage() {
       typeof window !== "undefined" &&
       window.isSecureContext
     if (modernAvailable) {
-      navigator.clipboard.writeText(cmd).then(succeed).catch(() => legacyCopy(cmd, succeed))
+      navigator.clipboard.writeText(pairCommand).then(succeed).catch(() => legacyCopy(pairCommand, succeed))
       return
     }
-    legacyCopy(cmd, succeed)
-  }, [pairCode])
+    legacyCopy(pairCommand, succeed)
+  }, [pairCommand])
 
   const canContinue = () => {
     if (step === 1) return workspaceName.trim().length >= 2
@@ -594,7 +619,7 @@ export default function OnboardingPage() {
                             <>
                               <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 font-mono text-xs shadow-sm">
                                 <code className="text-emerald-400 break-all leading-snug select-all">
-                                  $ crewship login --pair --code={pairCode}
+                                  $ {pairCommand}
                                 </code>
                                 <Button
                                   type="button"

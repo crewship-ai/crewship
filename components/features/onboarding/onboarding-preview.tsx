@@ -227,10 +227,10 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                 >
                   <div className="relative shrink-0">
                     <Image
-                      src={getAgentAvatarUrl(a.slug, "bottts-neutral")}
+                      src={getAgentAvatarUrl(a.slug, "micah")}
                       alt={a.name}
-                      width={28}
-                      height={28}
+                      width={32}
+                      height={32}
                       className="rounded-full bg-muted ring-1 ring-border"
                       unoptimized
                     />
