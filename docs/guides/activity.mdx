@@ -6,9 +6,13 @@ icon: "activity"
 
 # Activity
 
+## Overview
+
 **Activity** is the live operator surface for "what is happening right now". It lives at [`/activity`](/activity) under the **Run** group of the sidebar and replaces the legacy four-tab Orchestration shell (Runs / Graph / Timeline / Feed) with a single ReactFlow canvas that paints every step of every run as you watch.
 
-The intent is "one canvas, no switching" — open `/activity`, pick a run from the left rail, watch the steps light up in real time, click any node for the detail panel, and approve a paused waitpoint inline without ever leaving the page.
+The intent is "one canvas, no switching" — open `/activity`, pick a run from the left rail, watch the steps light up in real time, click any node for the detail panel, and approve a paused waitpoint inline without ever leaving the page. The page is purely operational: it doesn't author routines (that's [Routines](/guides/routines)), doesn't surface the per-user inbox (that's [Inbox](/guides/inbox)), and doesn't carry workspace-wide settings. It's the answer to one question — "what is running right now, and is anything stuck?" — and it commits to that focus by routing every other concern elsewhere.
+
+Architecturally, Activity is a thin reactive shell over the journal: the run + DSL payload comes from `/api/v1/runs/{id}`, realtime `pipeline.step.*` and `pipeline.waitpoint.*` events from the workspace WebSocket channel refresh that payload on each tick, and `buildTraceGraph` (`lib/trace/build-trace-graph.ts`) rebuilds the React Flow node array on the next render. No imperative graph mutation, no per-event DOM diffing — the canvas is a function of run state, and the framework handles the diff.
 
 ## The trace graph
 
