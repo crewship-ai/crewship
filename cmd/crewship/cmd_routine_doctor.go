@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -80,6 +79,21 @@ type doctorReport struct {
 	Passed      int           `json:"passed"`
 }
 
+// doctorHTTPGetter is the minimal client surface every doctor check
+// needs. Narrowed from *cli.Client so check functions stay testable
+// with a hand-rolled stub.
+type doctorHTTPGetter interface {
+	Get(string) (*http.Response, error)
+}
+
+// doctorChecker bundles a check name with the closure that produces
+// its report rows. The runner iterates the slice so adding a new
+// check is one entry, not a new branch in runRoutineDoctor.
+type doctorChecker struct {
+	name string
+	run  func() []doctorCheck
+}
+
 func runRoutineDoctor(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
@@ -112,28 +126,17 @@ func runRoutineDoctor(cmd *cobra.Command, args []string) error {
 		Message: fmt.Sprintf("routine found (author_crew_id=%s)", truncCrewID(pipeline.AuthorCrewID)),
 	})
 
-	// Crew + provisioning health
-	report.Checks = append(report.Checks, checkAuthorCrew(client, pipeline.AuthorCrewID))
-
-	// Agent slug + grader resolution
-	report.Checks = append(report.Checks,
-		checkAgentSlugs(client, pipeline.AuthorCrewID, pipeline.Definition)...)
-
-	// Credential type matching
-	report.Checks = append(report.Checks,
-		checkCredentialsRequired(client, ws, pipeline.Definition)...)
-
-	// Egress allowlist sanity
-	report.Checks = append(report.Checks,
-		checkEgressTargets(pipeline.Definition)...)
-
-	// Cost sanity
-	report.Checks = append(report.Checks,
-		checkCostCap(pipeline.Definition))
-
-	// Validation gate sanity
-	report.Checks = append(report.Checks,
-		checkValidationGates(pipeline.Definition)...)
+	checks := []doctorChecker{
+		{"author_crew", func() []doctorCheck { return []doctorCheck{checkAuthorCrew(client, pipeline.AuthorCrewID)} }},
+		{"agent_slugs", func() []doctorCheck { return checkAgentSlugs(client, pipeline.AuthorCrewID, pipeline.Definition) }},
+		{"credentials_required", func() []doctorCheck { return checkCredentialsRequired(client, ws, pipeline.Definition) }},
+		{"egress_allowlist", func() []doctorCheck { return checkEgressTargets(pipeline.Definition) }},
+		{"cost_cap", func() []doctorCheck { return []doctorCheck{checkCostCap(pipeline.Definition)} }},
+		{"validation_gates", func() []doctorCheck { return checkValidationGates(pipeline.Definition) }},
+	}
+	for _, check := range checks {
+		report.Checks = append(report.Checks, check.run()...)
+	}
 
 	return finishDoctorReport(cmd, report)
 }
@@ -191,8 +194,6 @@ func printDoctorTable(cmd *cobra.Command, report doctorReport) {
 		report.Passed, report.Warned, report.Failed)
 }
 
-// ── individual checks ────────────────────────────────────────────
-
 // fetchedRoutine is the minimal shape doctor needs from
 // /api/v1/workspaces/{ws}/pipelines/{slug}. We re-decode rather
 // than reuse a server-side struct to avoid coupling the CLI to
@@ -204,9 +205,7 @@ type fetchedRoutine struct {
 	DefinitionRaw json.RawMessage        `json:"definition_json"`
 }
 
-func fetchRoutineForDoctor(client interface {
-	Get(string) (*http.Response, error)
-}, ws, slug string) (fetchedRoutine, bool) {
+func fetchRoutineForDoctor(client doctorHTTPGetter, ws, slug string) (fetchedRoutine, bool) {
 	// Both ws and slug are escaped as path segments. Mirrors the
 	// fix in slug_suggest.go (CR2): a workspace id or routine slug
 	// containing reserved characters (slash, hash, %) would
@@ -250,436 +249,6 @@ func fetchRoutineForDoctor(client interface {
 		}
 	}
 	return out, true
-}
-
-func checkAuthorCrew(client interface {
-	Get(string) (*http.Response, error)
-}, crewID string) doctorCheck {
-	if crewID == "" {
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorFail,
-			Message: "author_crew_id is empty",
-			Hint:    "the routine has no owner crew — re-save with --author-crew",
-		}
-	}
-	resp, err := client.Get(fmt.Sprintf("/api/v1/crews/%s/provision", url.PathEscape(crewID)))
-	if err != nil || resp == nil {
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorWarn,
-			Message: "could not query crew provisioning status",
-			Hint:    "the run will probably still work; this just means doctor couldn't verify the crew is ready",
-		}
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorFail,
-			Message: "author crew not found in workspace",
-			Hint:    "crew was deleted — re-author this routine under a still-existing crew",
-		}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorWarn,
-			Message: fmt.Sprintf("crew status returned HTTP %d", resp.StatusCode),
-		}
-	}
-	var status struct {
-		Status             string `json:"status"`
-		DevcontainerConfig string `json:"devcontainer_config"`
-		CachedImage        string `json:"cached_image"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return doctorCheck{Name: "author_crew", Level: doctorWarn, Message: "could not decode crew status response"}
-	}
-	if status.DevcontainerConfig == "" {
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorWarn,
-			Message: "crew has no devcontainer config — Claude Code CLI may not be available",
-			Hint:    "set a devcontainer config on the crew so the OrchestratorRunner can spawn agents",
-		}
-	}
-	switch status.Status {
-	case "completed":
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorOK,
-			Message: fmt.Sprintf("provisioned (image cached: %s)", truncCrewID(status.CachedImage)),
-		}
-	case "in_progress":
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorWarn,
-			Message: "provisioning in progress — first run will block until image is built",
-			Hint:    "wait for `crewship crew provision status " + crewID + "` to show completed",
-		}
-	case "failed":
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorFail,
-			Message: "crew provisioning failed",
-			Hint:    "re-trigger via `crewship crew provision start " + crewID + "` and inspect logs",
-		}
-	default:
-		return doctorCheck{
-			Name:    "author_crew",
-			Level:   doctorWarn,
-			Message: "provisioning status: " + status.Status,
-		}
-	}
-}
-
-// checkAgentSlugs walks the DSL steps and verifies each agent_slug
-// + outcomes.grader_agent_slug exists in the author crew. The
-// pipeline parser already does this at save time, but agents can
-// be deleted/renamed AFTER save — this catches that drift.
-func checkAgentSlugs(client interface {
-	Get(string) (*http.Response, error)
-}, crewID string, def map[string]interface{}) []doctorCheck {
-	steps, ok := def["steps"].([]interface{})
-	if !ok || len(steps) == 0 {
-		return []doctorCheck{{Name: "agent_slugs", Level: doctorWarn, Message: "no steps in DSL definition"}}
-	}
-
-	available := fetchAgentSlugsForCrew(client, crewID)
-	if available == nil {
-		return []doctorCheck{{
-			Name:    "agent_slugs",
-			Level:   doctorWarn,
-			Message: "could not fetch crew agents — skipping resolution check",
-		}}
-	}
-
-	missing := map[string]string{} // slug → step ID where referenced
-	for _, raw := range steps {
-		step, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		stepID, _ := step["id"].(string)
-		if slug, _ := step["agent_slug"].(string); slug != "" {
-			if _, found := available[slug]; !found {
-				missing[slug] = stepID
-			}
-		}
-		if outcomes, ok := step["outcomes"].(map[string]interface{}); ok {
-			if grader, _ := outcomes["grader_agent_slug"].(string); grader != "" {
-				if _, found := available[grader]; !found {
-					missing[grader] = stepID + "/outcomes"
-				}
-			}
-		}
-	}
-	if len(missing) == 0 {
-		return []doctorCheck{{
-			Name:    "agent_slugs",
-			Level:   doctorOK,
-			Message: fmt.Sprintf("all agent_slug + grader references resolve in crew (%d agents available)", len(available)),
-		}}
-	}
-	out := make([]doctorCheck, 0, len(missing))
-	availList := make([]string, 0, len(available))
-	for slug := range available {
-		availList = append(availList, slug)
-	}
-	availList = truncateList(availList, 8)
-	for slug, stepID := range missing {
-		out = append(out, doctorCheck{
-			Name:    "agent_slug:" + slug,
-			Level:   doctorFail,
-			Message: fmt.Sprintf("step %q references agent_slug %q not in author crew", stepID, slug),
-			Hint:    "available slugs in crew: " + strings.Join(availList, ", "),
-		})
-	}
-	return out
-}
-
-func fetchAgentSlugsForCrew(client interface {
-	Get(string) (*http.Response, error)
-}, crewID string) map[string]struct{} {
-	// Workspace ID is auto-injected as ?workspace_id by the client;
-	// we just supply the crew filter. The list endpoint scopes by
-	// workspace + filter, returning only agents in this crew.
-	// crewID is escaped as a query value (not a path segment) so
-	// it survives any reserved character intact.
-	resp, err := client.Get(fmt.Sprintf("/api/v1/agents?crew_id=%s", url.QueryEscape(crewID)))
-	if err != nil || resp == nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		// Fall back to the workspace listing — slightly broader
-		// but still useful for the suggestion hint.
-		return nil
-	}
-	var rows []struct {
-		Slug string `json:"slug"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
-		return nil
-	}
-	out := make(map[string]struct{}, len(rows))
-	for _, r := range rows {
-		if r.Slug != "" {
-			out[r.Slug] = struct{}{}
-		}
-	}
-	return out
-}
-
-func checkCredentialsRequired(client interface {
-	Get(string) (*http.Response, error)
-}, ws string, def map[string]interface{}) []doctorCheck {
-	creds, ok := def["credentials_required"].([]interface{})
-	if !ok || len(creds) == 0 {
-		// No declared creds is fine — many routines need none.
-		return []doctorCheck{{
-			Name:    "credentials_required",
-			Level:   doctorOK,
-			Message: "no credentials declared",
-		}}
-	}
-
-	available := fetchActiveCredentialTypes(client, ws)
-	if available == nil {
-		return []doctorCheck{{
-			Name:    "credentials_required",
-			Level:   doctorWarn,
-			Message: "could not fetch workspace credentials — skipping match check",
-		}}
-	}
-
-	out := make([]doctorCheck, 0, len(creds))
-	for _, raw := range creds {
-		creq, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		credType, _ := creq["type"].(string)
-		credType = strings.ToUpper(credType)
-		if credType == "" {
-			continue
-		}
-		if _, found := available[credType]; !found {
-			out = append(out, doctorCheck{
-				Name:    "credential:" + credType,
-				Level:   doctorFail,
-				Message: fmt.Sprintf("declared credential type %q has no active match in workspace", credType),
-				Hint:    "create one with `crewship credential create --type=" + credType + " ...`",
-			})
-		} else {
-			out = append(out, doctorCheck{
-				Name:    "credential:" + credType,
-				Level:   doctorOK,
-				Message: "active credential of type found",
-			})
-		}
-	}
-	return out
-}
-
-func fetchActiveCredentialTypes(client interface {
-	Get(string) (*http.Response, error)
-}, _ string) map[string]struct{} {
-	resp, err := client.Get("/api/v1/credentials")
-	if err != nil || resp == nil {
-		return nil
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil
-	}
-	var rows []struct {
-		Provider string `json:"provider"`
-		Type     string `json:"type"`
-		Status   string `json:"status"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
-		return nil
-	}
-	out := map[string]struct{}{}
-	for _, r := range rows {
-		if r.Status != "ACTIVE" {
-			continue
-		}
-		// Match either provider name (e.g. "ANTHROPIC") or
-		// declared `type` field — different routines write the
-		// credentials_required.type with different conventions.
-		if r.Provider != "" {
-			out[strings.ToUpper(r.Provider)] = struct{}{}
-		}
-		if r.Type != "" {
-			out[strings.ToUpper(r.Type)] = struct{}{}
-		}
-	}
-	return out
-}
-
-func checkEgressTargets(def map[string]interface{}) []doctorCheck {
-	targets, ok := def["egress_targets"].([]interface{})
-	if !ok || len(targets) == 0 {
-		// Empty list is OK for routines without http steps. Only
-		// warn when http steps are declared but the list is empty.
-		if hasHTTPStep(def) {
-			return []doctorCheck{{
-				Name:    "egress_allowlist",
-				Level:   doctorWarn,
-				Message: "DSL has http step(s) but egress_targets is empty",
-				Hint:    "add the target hostnames to egress_targets so the runtime allowlist permits them",
-			}}
-		}
-		return []doctorCheck{{Name: "egress_allowlist", Level: doctorOK, Message: "no http steps; allowlist not required"}}
-	}
-	// Collect every issue rather than returning on the first.
-	// An operator iterating on a routine with both `*` and
-	// `localhost` in the allowlist gets BOTH problems in a
-	// single doctor pass — fewer round-trips while fixing.
-	issues := make([]doctorCheck, 0, 2)
-	for _, raw := range targets {
-		host, _ := raw.(string)
-		if host == "*" || host == "*.*" || host == "" {
-			issues = append(issues, doctorCheck{
-				Name:    "egress_allowlist",
-				Level:   doctorWarn,
-				Message: fmt.Sprintf("egress_targets contains wildcard %q", host),
-				Hint:    "wildcards open the routine to SSRF; pin to specific hostnames",
-			})
-			continue
-		}
-		// strings.HasPrefix(host, "127.") catches the full IPv4
-		// loopback /8 range — original "127.0.0.1" check missed
-		// 127.0.0.2 and other valid loopback aliases.
-		if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.") {
-			issues = append(issues, doctorCheck{
-				Name:    "egress_allowlist",
-				Level:   doctorWarn,
-				Message: fmt.Sprintf("egress_targets includes loopback host %q", host),
-				Hint:    "remove loopback from production routines; it points at the agent container, not the operator's machine",
-			})
-		}
-	}
-	if len(issues) > 0 {
-		return issues
-	}
-	return []doctorCheck{{
-		Name:    "egress_allowlist",
-		Level:   doctorOK,
-		Message: fmt.Sprintf("%d target(s) declared, no wildcards or loopback", len(targets)),
-	}}
-}
-
-func hasHTTPStep(def map[string]interface{}) bool {
-	steps, ok := def["steps"].([]interface{})
-	if !ok {
-		return false
-	}
-	for _, raw := range steps {
-		s, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if t, _ := s["type"].(string); t == "http" {
-			return true
-		}
-	}
-	return false
-}
-
-func checkCostCap(def map[string]interface{}) doctorCheck {
-	cap, _ := def["max_cost_usd"].(float64)
-	est, _ := def["estimated_cost_usd"].(float64)
-
-	if cap == 0 {
-		return doctorCheck{
-			Name:    "cost_cap",
-			Level:   doctorWarn,
-			Message: "max_cost_usd not set",
-			Hint:    "without a cap, a runaway tier escalation can spend uncapped — set max_cost_usd to ~10× estimated_cost_usd",
-		}
-	}
-	if est == 0 {
-		return doctorCheck{
-			Name:    "cost_cap",
-			Level:   doctorOK,
-			Message: fmt.Sprintf("max_cost_usd=$%.4f set; no estimate to compare", cap),
-		}
-	}
-	if cap < est*1.5 {
-		return doctorCheck{
-			Name:    "cost_cap",
-			Level:   doctorWarn,
-			Message: fmt.Sprintf("max_cost_usd $%.4f is < 1.5× estimated $%.4f", cap, est),
-			Hint:    "tier escalation or grader iterations will likely trip the cap; widen to 10× estimate",
-		}
-	}
-	return doctorCheck{
-		Name:    "cost_cap",
-		Level:   doctorOK,
-		Message: fmt.Sprintf("max $%.4f cap is %.1f× the estimated $%.4f", cap, cap/est, est),
-	}
-}
-
-func checkValidationGates(def map[string]interface{}) []doctorCheck {
-	steps, ok := def["steps"].([]interface{})
-	if !ok {
-		return nil
-	}
-	out := make([]doctorCheck, 0, len(steps))
-	for _, raw := range steps {
-		step, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		stepID, _ := step["id"].(string)
-		v, ok := step["validation"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		minLen := optionalInt(v, "min_length")
-		maxLen := optionalInt(v, "max_length")
-		if minLen != nil && maxLen != nil && *minLen > *maxLen {
-			out = append(out, doctorCheck{
-				Name:    "validation:" + stepID,
-				Level:   doctorFail,
-				Message: fmt.Sprintf("step %q validation has min_length %d > max_length %d", stepID, *minLen, *maxLen),
-				Hint:    "no output can satisfy this gate — fix the bounds",
-			})
-			continue
-		}
-		mc, _ := v["must_contain"].([]interface{})
-		mnc, _ := v["must_not_contain"].([]interface{})
-		// Detect direct contradiction: same string in both lists.
-		for _, c := range mc {
-			cs, _ := c.(string)
-			for _, n := range mnc {
-				ns, _ := n.(string)
-				if cs != "" && cs == ns {
-					out = append(out, doctorCheck{
-						Name:    "validation:" + stepID,
-						Level:   doctorFail,
-						Message: fmt.Sprintf("step %q validation: %q is in BOTH must_contain and must_not_contain", stepID, cs),
-						Hint:    "no output can satisfy a contradictory gate — remove from one list",
-					})
-					goto nextStep
-				}
-			}
-		}
-		out = append(out, doctorCheck{
-			Name:    "validation:" + stepID,
-			Level:   doctorOK,
-			Message: "gate is structurally satisfiable",
-		})
-	nextStep:
-	}
-	if len(out) == 0 {
-		return []doctorCheck{{Name: "validation_gates", Level: doctorOK, Message: "no validation blocks to check"}}
-	}
-	return out
 }
 
 // optionalInt extracts an int from a JSON-decoded map; numbers come
