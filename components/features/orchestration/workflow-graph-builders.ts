@@ -7,7 +7,7 @@ import {
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { Graph as DagreGraph, layout as dagreLayout } from "@dagrejs/dagre"
-import { STATUS_COLORS, EDGE_COLOR_PALETTE, CREW_COLOR_DEFAULT, GRAPH_CHROME } from "@/lib/colors"
+import { STATUS_COLORS, EDGE_COLOR_PALETTE, CREW_COLOR_DEFAULT, GRAPH_CHROME, BRAND } from "@/lib/colors"
 import { getPermissionMarkers } from "./permission-edge"
 
 // Pure graph-data construction extracted from workflow-graph.tsx —
@@ -648,13 +648,13 @@ function buildIssueRoutineEdges(
       source,
       target,
       type: "animated",
-      // Distinct visual treatment: dashed + steel-blue so the user
+      // Distinct visual treatment: dashed + brand-info blue so the user
       // reads this as a binding ("uses routine") rather than a
       // dependency arrow (solid → execution sequence).
       animated: false,
       style: { strokeWidth: 1.5, strokeDasharray: "4 3" },
-      data: { color: "#5b8def", active: false },
-      markerEnd: { type: MarkerType.ArrowClosed, color: "#5b8def", width: 12, height: 12 },
+      data: { color: BRAND.info, active: false },
+      markerEnd: { type: MarkerType.ArrowClosed, color: BRAND.info, width: 12, height: 12 },
     })
   }
   return out

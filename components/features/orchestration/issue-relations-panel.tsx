@@ -123,7 +123,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
   return (
     <>
       {/* ── Relations section ────────────────────────────────────────── */}
-      <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+      <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
         <SectionHeader
           title="Relations"
           open={relationsOpen}
@@ -243,7 +243,7 @@ export function IssueRelationsPanel({ issue, workspaceId }: IssueRelationsPanelP
 
       {/* ── Sub-issues section ──────────────────────────────────────── */}
       {issue.sub_issues_count != null && issue.sub_issues_count > 0 && (
-        <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+        <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
           <SectionHeader
             title={`Sub-issues (${issue.sub_issues_count})`}
             open={subIssuesOpen}

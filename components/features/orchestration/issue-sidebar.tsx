@@ -95,7 +95,7 @@ function IssueSidebarBody({
   return (
     <div className="space-y-1">
         {/* PROPERTIES */}
-        <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+        <div className="rounded-lg border border-white/[0.04] bg-background">
           <div className="flex items-center px-3 py-2">
             <span className="text-[11px] font-medium text-muted-foreground/70">Properties</span>
           </div>
@@ -314,7 +314,7 @@ function IssueSidebarBody({
         </div>
 
         {/* Labels */}
-        <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+        <div className="rounded-lg border border-white/[0.04] bg-background">
           <div className="flex items-center justify-between px-3 py-2">
             <span className="text-[11px] font-medium text-muted-foreground/70">Labels</span>
             <Popover open={labelsOpen} onOpenChange={setLabelsOpen}>
@@ -369,7 +369,7 @@ function IssueSidebarBody({
         </div>
 
         {/* Project */}
-        <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+        <div className="rounded-lg border border-white/[0.04] bg-background">
           <div className="flex items-center px-3 py-2">
             <span className="text-[11px] font-medium text-muted-foreground/70">Project</span>
           </div>
@@ -437,7 +437,7 @@ function IssueSidebarBody({
         </div>
 
         {/* Relations */}
-        <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+        <div className="rounded-lg border border-white/[0.04] bg-background">
           <div className="flex items-center px-3 py-2">
             <span className="text-[11px] font-medium text-muted-foreground/70">Relations</span>
           </div>

@@ -313,7 +313,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           </div>
 
           {/* ── Properties ─────────────────────────────────────────── */}
-          <div className="mt-2 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+          <div className="mt-2 mx-2 rounded-lg border border-white/[0.04] bg-background">
           <SectionHeader title="Properties" open={propertiesOpen} onToggle={() => setPropertiesOpen((v) => !v)} />
           {propertiesOpen && (
             <div className="px-1 pb-1">
@@ -480,7 +480,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           </div>
 
           {/* ── Labels ─────────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
             <SectionHeader title="Labels" open={true} onToggle={() => {}} />
             <div className="px-3 pb-2">
               {stats?.by_label && stats.by_label.length > 0 ? (
@@ -499,7 +499,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           </div>
 
           {/* ── Milestones ─────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
             <SectionHeader title="Milestones" open={milestonesOpen} onToggle={() => setMilestonesOpen((v) => !v)} />
             {milestonesOpen && (
               <div className="px-3 pb-2">
@@ -509,7 +509,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           </div>
 
           {/* ── Progress ─────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background">
           <SectionHeader title="Progress" open={progressOpen} onToggle={() => setProgressOpen((v) => !v)} />
           {progressOpen && (
             <div className="space-y-3 px-3 pb-3">
@@ -639,7 +639,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           </div>
 
           {/* ── Activity ─────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D] px-3 py-2 space-y-1">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-background px-3 py-2 space-y-1">
             <div className="text-[10px] text-muted-foreground/40 font-mono">
               Created: {new Date(project.created_at).toLocaleDateString()}
             </div>
