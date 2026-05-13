@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -409,6 +410,16 @@ func resetEmailHTML(name, link string) string {
 	if displayName == "" {
 		displayName = "there"
 	}
+	// Escape both the name and link before interpolation. full_name
+	// is user-controlled DB state — a crafted display name would
+	// otherwise inject HTML into the email body (image tags pulling
+	// from attacker domains for read-receipts, fake "click here" CTAs
+	// pointing elsewhere, etc.). link comes from CREWSHIP_PUBLIC_URL
+	// which we validate at startup, but escaping it costs nothing and
+	// defends against a future code path that builds links from less
+	// trusted state.
+	safeName := html.EscapeString(displayName)
+	safeLink := html.EscapeString(link)
 	return fmt.Sprintf(`<!doctype html>
 <html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px;color:#18181b;">
 <h2 style="margin:0 0 16px 0;font-size:20px;">Reset your Crewship password</h2>
@@ -417,7 +428,7 @@ func resetEmailHTML(name, link string) string {
 <p style="margin:24px 0;"><a href="%s" style="display:inline-block;background:#2563eb;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Reset password</a></p>
 <p style="color:#71717a;font-size:13px;">If you didn't request this, you can ignore this email — your password won't change. The link will expire on its own.</p>
 <p style="color:#71717a;font-size:13px;">Or copy this URL into your browser:<br><code style="word-break:break-all;">%s</code></p>
-</body></html>`, displayName, link, link)
+</body></html>`, safeName, safeLink, safeLink)
 }
 
 func resetEmailText(name, link string) string {

@@ -196,9 +196,14 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 		return fmt.Errorf("server returned empty cli_token — please report this to ops")
 	}
 
+	// LoadConfig returns (&CLIConfig{}, nil) when the file is missing
+	// — see internal/cli/config.go. A non-nil error therefore means
+	// the file *exists* but is unreadable / malformed YAML, and
+	// silently overwriting it would mask the real cause (typo, bad
+	// edit, permissions) and lose the user's other config. Surface it.
 	cfg, err := cli.LoadConfig()
 	if err != nil {
-		cfg = &cli.CLIConfig{}
+		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
 	}
 	cfg.Server = serverURL
 	cfg.Token = redeem.CliToken
@@ -240,9 +245,13 @@ func loginWithToken(serverURL, token string) error {
 	}
 	resp.Body.Close()
 
+	// Same rationale as the pairing path above: LoadConfig returns an
+	// empty config + nil err when the file is missing. Non-nil err
+	// means the existing file is unreadable / malformed YAML — don't
+	// silently overwrite the user's other config.
 	cfg, err := cli.LoadConfig()
 	if err != nil {
-		cfg = &cli.CLIConfig{}
+		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
 	}
 	cfg.Server = serverURL
 	cfg.Token = token
@@ -440,7 +449,7 @@ func loginInteractive(serverURL string) error {
 
 	cfg, err := cli.LoadConfig()
 	if err != nil {
-		cfg = &cli.CLIConfig{}
+		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
 	}
 	cfg.Server = serverURL
 	cfg.Token = finalToken

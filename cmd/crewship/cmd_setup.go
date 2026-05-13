@@ -39,10 +39,12 @@ func readLine() (string, error) {
 // This command closes that gap so a user who prefers the terminal
 // can complete onboarding without opening a browser.
 //
-// Interactive by default: prompts for workspace name, language, crew
-// template, adapter, and the per-adapter CLI token (output of
-// `claude setup-token`, `gemini auth print-token`, etc. — NOT the
-// vendor's account-level API key from their console). Each prompt
+// Interactive by default: prompts for crew template, adapter, the
+// per-adapter CLI token (output of `claude setup-token`,
+// `gemini auth print-token`, etc. — NOT the vendor's account-level
+// API key from their console), and optionally the agent language.
+// Workspace name is taken from --workspace-name; the server uses
+// the user's default workspace when it's left empty. Each prompt
 // has a sensible default so a user can hit Enter through it.
 // All fields are also flag-overridable for scripting / CI.
 //

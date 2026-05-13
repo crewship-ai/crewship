@@ -495,7 +495,7 @@ export default function OnboardingPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="language">Agent language</Label>
-                      <LanguagePicker value={language} onChange={setLanguage} />
+                      <LanguagePicker id="language" value={language} onChange={setLanguage} />
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
                         Sets only how your AI agents reply — the Crewship interface stays in English. Change it
                         anytime in Settings → Workspace.
@@ -1031,13 +1031,22 @@ function formatCountdown(sec: number): string {
  * understands all of them natively, so we don't need a code-table
  * translation layer.
  */
-function LanguagePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function LanguagePicker({
+  id,
+  value,
+  onChange,
+}: {
+  id?: string
+  value: string
+  onChange: (v: string) => void
+}) {
   const [open, setOpen] = useState(false)
   const selected = LANGUAGES.find((l) => l.name === value)
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
+          id={id}
           type="button"
           aria-label="Pick a language"
           className="flex h-11 w-full items-center justify-between rounded-md border border-border bg-background px-3 text-sm hover:border-ring transition-colors"
