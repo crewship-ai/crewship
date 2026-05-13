@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/services"
 )
@@ -353,6 +354,17 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 			// auto-assign hook emits credential.auto_assign_empty
 			// into the journal so the operator can see why.
 		}
+	}
+
+	// Make sure the builtin templates are seeded — the List handler
+	// does this lazily on first call, but a user who hits the wizard
+	// before ever loading the templates page (i.e. signs up → walks
+	// straight into onboarding) would otherwise face an empty
+	// crew_templates table and a 400 "Unknown crew template". Seeding
+	// is idempotent (UPSERT on slug) so calling it on every wizard
+	// submission is cheap and removes the ordering dependency.
+	if err := database.SeedBuiltinCrewTemplates(r.Context(), h.db, h.logger); err != nil {
+		h.logger.Warn("onboarding template: seed builtin templates", "error", err)
 	}
 
 	// Default the crew display name to the template's name when the

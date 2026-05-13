@@ -2,7 +2,8 @@
 
 import { useState, useEffect, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
-import { Sparkles } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
+import { Sparkles, ArrowRight, Loader2 } from "lucide-react"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,8 +11,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 /**
- * First-run bootstrap page — shown on a Crewship instance that has
- * never had a user. Distinct from /signup because:
+ * First-run bootstrap — shown on a Crewship instance that has never
+ * had a user. Visual language matches /onboarding so the two screens
+ * feel like consecutive frames of the same flow: gradient logo tile,
+ * Apple-tight typography, motion/react staggered reveals, hero glow.
+ *
+ * Distinct from /signup because:
  *   - copy frames it as "set up your Crewship instance" rather than
  *     "create an account on someone else's server"
  *   - hits POST /api/v1/bootstrap (only works while users table is
@@ -24,8 +29,12 @@ import { Label } from "@/components/ui/label"
  * visitors here automatically; this page is also linkable
  * directly for operators following install docs.
  */
+
+const ease = [0.16, 1, 0.3, 1] as const
+
 export default function BootstrapPage() {
   const router = useRouter()
+  const reduce = useReducedMotion()
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -33,9 +42,6 @@ export default function BootstrapPage() {
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
 
-  // Re-check setup status on mount so a user who tabs back here
-  // after bootstrap completes lands on /login instead of seeing a
-  // form that will 403.
   useEffect(() => {
     fetch("/api/v1/system/setup-status")
       .then((r) => (r.ok ? r.json() : { needs_bootstrap: true }))
@@ -73,20 +79,12 @@ export default function BootstrapPage() {
         setLoading(false)
         return
       }
-      // Bootstrap mints the session cookies as a side-effect of the
-      // matching credentials sign-in we run next. The bootstrap
-      // endpoint itself returns the user+workspace identifiers but
-      // not a session, so chain a /api/auth/callback/credentials
-      // call to put the cookies in place, then route to onboarding.
       const signin = await fetch("/api/auth/callback/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ email, password, redirect: "false" }).toString(),
       })
       if (!signin.ok) {
-        // Cookie write failed but the admin row exists. Send the user
-        // to /login so they can sign in manually — anything else
-        // would hide a real auth problem.
         router.replace("/login?registered=true")
         return
       }
@@ -102,73 +100,146 @@ export default function BootstrapPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-background to-muted/30 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <CrewshipLogoTile />
-          </div>
-          <div className="flex justify-center mb-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-              <Sparkles className="h-3.5 w-3.5" /> First-run setup
-            </span>
-          </div>
-          <CardTitle className="text-2xl">Welcome aboard</CardTitle>
-          <CardDescription>
-            This Crewship instance is fresh. Create the admin account to get started — you&apos;ll be
-            the workspace owner and can invite teammates later.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="full_name">Your name</Label>
-              <Input
-                id="full_name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Captain Reynolds"
-                autoFocus
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 8 characters"
-                required
-              />
-              <p className="text-[11px] text-muted-foreground">
-                You can rotate this any time from <code className="font-mono">crewship admin reset-password</code>{" "}
-                on the host.
-              </p>
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Setting up..." : "Create admin & continue"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+    <div className="relative flex min-h-screen items-center justify-center bg-background p-4 overflow-hidden">
+      {/* Hero glow — same radial pattern as onboarding so the two
+          screens feel like a continuous flow. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_70%_50%_at_50%_0%,rgba(30,123,254,0.14),transparent_60%)]" />
+
+      <motion.div
+        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.55, ease }}
+        className="relative w-full max-w-md"
+      >
+        <Card className="border-border/60 bg-card/95 backdrop-blur-sm rounded-[20px] shadow-2xl shadow-primary/10">
+          <CardHeader className="text-center pb-2">
+            <motion.div
+              initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, ease, delay: 0.1 }}
+              className="flex justify-center mb-4"
+            >
+              <CrewshipLogoTile size="h-14 w-14" iconSize="h-7 w-7" rounded="rounded-2xl" />
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease, delay: 0.2 }}
+              className="flex justify-center mb-3"
+            >
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/30 px-3 py-1 text-[11px] font-medium text-primary uppercase tracking-[0.12em]">
+                <Sparkles className="h-3 w-3" /> First-run setup
+              </span>
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, ease, delay: 0.25 }}
+            >
+              <CardTitle className="text-2xl tracking-tight">Welcome aboard</CardTitle>
+              <CardDescription className="mt-2 text-balance">
+                This Crewship instance is fresh. Create the admin account to get started — you&apos;ll be the
+                workspace owner and can invite teammates later.
+              </CardDescription>
+            </motion.div>
+          </CardHeader>
+          <CardContent className="pt-4">
+            <motion.form
+              onSubmit={handleSubmit}
+              initial="hidden"
+              animate="show"
+              variants={{
+                hidden: {},
+                show: { transition: { staggerChildren: 0.06, delayChildren: 0.32 } },
+              }}
+              className="space-y-4"
+            >
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                >
+                  {error}
+                </motion.div>
+              )}
+              <motion.div
+                variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
+                transition={{ duration: 0.35, ease }}
+                className="space-y-2"
+              >
+                <Label htmlFor="full_name">Your name</Label>
+                <Input
+                  id="full_name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Captain Reynolds"
+                  autoFocus
+                  required
+                  className="h-11"
+                />
+              </motion.div>
+              <motion.div
+                variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
+                transition={{ duration: 0.35, ease }}
+                className="space-y-2"
+              >
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  required
+                  className="h-11"
+                />
+              </motion.div>
+              <motion.div
+                variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
+                transition={{ duration: 0.35, ease }}
+                className="space-y-2"
+              >
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  required
+                  className="h-11"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Rotate this any time with{" "}
+                  <code className="font-mono text-foreground/80 rounded bg-muted/60 px-1 py-0.5">
+                    crewship admin reset-password
+                  </code>{" "}
+                  on the host.
+                </p>
+              </motion.div>
+              <motion.div
+                variants={{ hidden: { opacity: 0, y: 6 }, show: { opacity: 1, y: 0 } }}
+                transition={{ duration: 0.35, ease }}
+              >
+                <Button type="submit" className="w-full h-11 text-sm font-semibold" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Setting up…
+                    </>
+                  ) : (
+                    <>
+                      Create admin & continue
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </motion.div>
+            </motion.form>
+          </CardContent>
+        </Card>
+      </motion.div>
     </div>
   )
 }
