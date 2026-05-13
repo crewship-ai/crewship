@@ -65,6 +65,25 @@ func TestSlashCommand_Render_Args(t *testing.T) {
 	}
 }
 
+func TestSlashCommand_Render_PrefixOverlap(t *testing.T) {
+	// Regression: when one var name is a prefix of another (`a` vs
+	// `args`), the previous implementation iterated map keys in random
+	// order, so `$a` could chew off the front of any `$args` token.
+	// Sorting by descending length fixes it; run many iterations to
+	// guarantee we exercise every map order.
+	sc := SlashCommand{
+		Body: "x=$a y=$args",
+		Vars: []string{"a", "args"},
+	}
+	for i := 0; i < 200; i++ {
+		got := sc.Render([]string{"AAA", "BBB"})
+		want := "x=AAA y=BBB"
+		if got != want {
+			t.Fatalf("iter %d: got %q want %q", i, got, want)
+		}
+	}
+}
+
 func TestSlashCommand_Render_ImplicitArgs(t *testing.T) {
 	sc := SlashCommand{
 		Body: "Summarise $args",

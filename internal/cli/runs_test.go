@@ -46,7 +46,9 @@ func TestParsePRURL(t *testing.T) {
 	}{
 		{"github pull", "https://github.com/foo/bar/pull/123", "foo", "bar", 123, true},
 		{"github pulls alias", "https://github.com/foo/bar/pulls/123", "foo", "bar", 123, true},
-		{"gitlab mr", "https://gitlab.com/foo/bar/-/merge_requests/42", "foo", "bar", 42, true},
+		{"gitlab mr flat", "https://gitlab.com/foo/bar/-/merge_requests/42", "foo", "bar", 42, true},
+		{"gitlab mr subgroup", "https://gitlab.com/group/subgroup/repo/-/merge_requests/9", "group/subgroup", "repo", 9, true},
+		{"gitlab mr deep subgroup", "https://gitlab.com/a/b/c/repo/-/merge_requests/77", "a/b/c", "repo", 77, true},
 		{"bitbucket pull-requests", "https://bitbucket.org/foo/bar/pull-requests/7", "foo", "bar", 7, true},
 		{"github issue rejected", "https://github.com/foo/bar/issues/1", "", "", 0, false},
 		{"non-url rejected", "not a url", "", "", 0, false},

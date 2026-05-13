@@ -103,28 +103,41 @@ func (c *Client) PollRun(ctx context.Context, id string, interval time.Duration,
 		}
 		select {
 		case <-ctx.Done():
-			return detail, ctx.Err()
+			// Wrap with the run id so a cancelled / deadlined poll
+			// reads in logs as "poll run <id>: context deadline
+			// exceeded" instead of an isolated context error.
+			return detail, fmt.Errorf("poll run %q: %w", id, ctx.Err())
 		case <-t.C:
 			continue
 		}
 	}
 }
 
-// prURLPattern matches GitHub/GitLab/Bitbucket-style PR URLs and extracts
-// (owner, repo, number). Sites tested:
+// prURLPattern matches GitHub/GitLab/Bitbucket-style PR URLs and
+// extracts (owner-or-group-path, repo, number). Sites tested:
 //
 //	https://github.com/foo/bar/pull/123
 //	https://gitlab.com/foo/bar/-/merge_requests/123
+//	https://gitlab.com/group/subgroup/repo/-/merge_requests/123
 //	https://bitbucket.org/foo/bar/pull-requests/123
 //
-// Per-host quirks (gitlab's `-/merge_requests`, bitbucket's hyphenated
-// `pull-requests`) are why this is a single permissive regex rather than
-// a URL-path match — adding a new host is a one-line alternation.
-var prURLPattern = regexp.MustCompile(`(?i)^https?://[^/]+/([^/]+)/([^/]+)/(?:pull|pulls|pull-requests|-/merge_requests)/(\d+)`)
+// GitLab supports nested subgroups (`group/subgroup/.../repo`). To keep
+// resume-lookups working across those, the first capture is a greedy
+// path component that allows additional `/` segments — we then assume
+// the LAST path segment before the keyword is the repo and everything
+// preceding it is the owner/group path. Per-host quirks (gitlab's
+// `-/merge_requests`, bitbucket's hyphenated `pull-requests`) live in
+// the alternation so adding a new host is a one-line change.
+var prURLPattern = regexp.MustCompile(`(?i)^https?://[^/]+/(.+?)/([^/]+)/(?:pull|pulls|pull-requests|-/merge_requests)/(\d+)`)
 
 // ParsePRURL extracts (owner, repo, number) from a pull-request URL.
 // Returns ok=false when the URL doesn't match any supported pattern;
 // callers should fall back to treating the input as a session-id.
+//
+// For GitLab subgroups, owner contains the full group/subgroup path
+// (e.g. "group/subgroup"). That matches what GitLab actually stores
+// for the project namespace, so journal searches keyed on `owner/repo`
+// stay round-trippable.
 func ParsePRURL(s string) (owner, repo string, number int, ok bool) {
 	s = strings.TrimSpace(s)
 	m := prURLPattern.FindStringSubmatch(s)

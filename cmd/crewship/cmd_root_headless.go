@@ -73,6 +73,11 @@ func runHeadlessAsk(cmd *cobra.Command, prompt string) error {
 		args = append(args, prompt)
 	}
 	if askCmd.RunE != nil {
+		// Forward the root command's context so SIGINT / SIGTERM and
+		// any deadline reach askCmd. Without this, askCmd.Context() in
+		// BuildPrompt and HTTP calls falls back to context.Background
+		// and the headless run can't be interrupted.
+		askCmd.SetContext(cmd.Context())
 		return askCmd.RunE(askCmd, args)
 	}
 	return fmt.Errorf("internal: ask command has no RunE")
@@ -89,15 +94,18 @@ func init() {
 	// gate on flagRootPrompt being set so a bare `crewship` still falls
 	// through to Cobra's default usage screen.
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		// If the user typed positional args without a subcommand, treat
-		// the joined args as the prompt. `crewship "say hi"` works.
-		if flagRootPrompt == "" && len(args) > 0 {
-			flagRootPrompt = strings.Join(args, " ")
+		// Copy into a local so we don't mutate the package-level
+		// flagRootPrompt — repeated in-process executions (REPL, tests)
+		// would otherwise see a stale value from a previous run when
+		// the user typed `crewship "first"` followed by `crewship -p ""`.
+		prompt := flagRootPrompt
+		if prompt == "" && len(args) > 0 {
+			prompt = strings.Join(args, " ")
 		}
-		if flagRootPrompt == "" {
+		if prompt == "" {
 			return cmd.Help()
 		}
-		return runHeadlessAsk(cmd, flagRootPrompt)
+		return runHeadlessAsk(cmd, prompt)
 	}
 	// Print Help() on `crewship` with no flags/args so the new RunE
 	// doesn't change the default empty-invocation behaviour.

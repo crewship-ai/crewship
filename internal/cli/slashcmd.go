@@ -219,6 +219,12 @@ func slashNameValid(s string) bool {
 //
 // Unsubstituted placeholders are left as-is so the agent at least sees
 // a plain-text marker if a var was forgotten.
+//
+// Substitution iterates placeholders sorted by name length, longest
+// first. Without that order, a shorter var name that is a prefix of a
+// longer one (e.g. `a` vs `args`) would let `$a` greedily match inside
+// `$args` and corrupt the output. Map iteration in Go is randomised,
+// so the bug used to surface intermittently.
 func (c SlashCommand) Render(args []string) string {
 	out := c.Body
 	values := map[string]string{}
@@ -239,12 +245,21 @@ func (c SlashCommand) Render(args []string) string {
 			values[last] = strings.TrimSpace(values[last])
 		}
 	}
-	// Replace ${VAR} first so $VARNAME doesn't gobble adjacent text.
-	for k, v := range values {
-		out = strings.ReplaceAll(out, "${"+k+"}", v)
+	// Sort keys by descending length so `$args` is substituted before
+	// `$a` — otherwise `$a` would chew off the leading two characters
+	// of any `$args` token before the longer name even gets a chance.
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
 	}
-	for k, v := range values {
-		out = strings.ReplaceAll(out, "$"+k, v)
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+
+	// Replace ${VAR} first so $VARNAME doesn't gobble adjacent text.
+	for _, k := range keys {
+		out = strings.ReplaceAll(out, "${"+k+"}", values[k])
+	}
+	for _, k := range keys {
+		out = strings.ReplaceAll(out, "$"+k, values[k])
 	}
 	return out
 }

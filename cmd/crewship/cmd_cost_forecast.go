@@ -48,8 +48,15 @@ input on average).`,
 			ratio = 2.0
 		}
 
+		// Exactly one of --prompt / --from-history must be set. The
+		// modes are conceptually different (heuristic projection vs.
+		// historical average) and silently preferring one would mask
+		// user intent.
 		if promptFlag == "" && historyAgent == "" {
 			return fmt.Errorf("provide --prompt or --from-history")
+		}
+		if promptFlag != "" && historyAgent != "" {
+			return fmt.Errorf("--prompt and --from-history are mutually exclusive")
 		}
 
 		f := newFormatter()

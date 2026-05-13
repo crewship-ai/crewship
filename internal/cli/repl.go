@@ -98,44 +98,86 @@ func (r *REPL) Run(ctx context.Context) error {
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1<<20)
 
+	// scanner.Scan() blocks indefinitely on a quiet stdin, so ctx
+	// cancellation would never be observed if we called Scan inline.
+	// Pump scanned lines through a channel and select against ctx.Done
+	// instead. The producer goroutine exits naturally on Ctrl-D / EOF
+	// (Scan returns false) or when the caller closes r.In.
+	type scanned struct {
+		line string
+		err  error
+		eof  bool
+	}
+	lines := make(chan scanned)
+	go func() {
+		defer close(lines)
+		for scanner.Scan() {
+			lines <- scanned{line: scanner.Text()}
+		}
+		if err := scanner.Err(); err != nil {
+			lines <- scanned{err: err}
+			return
+		}
+		lines <- scanned{eof: true}
+	}()
+
 	fmt.Fprint(r.Out, r.Prompt)
-	for scanner.Scan() {
-		if ctx.Err() != nil {
+	for {
+		select {
+		case <-ctx.Done():
 			return ctx.Err()
-		}
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			fmt.Fprint(r.Out, r.Prompt)
-			continue
-		}
-		if strings.HasPrefix(line, "/") {
-			cont, err := r.dispatchSlash(ctx, line)
-			if err != nil {
-				fmt.Fprintf(r.Err, "[err] %v\n", err)
-			}
-			if !cont {
+		case s, ok := <-lines:
+			if !ok {
+				// Producer closed without emitting EOF — treat as
+				// clean shutdown to avoid an infinite select.
+				fmt.Fprintln(r.Out)
 				return nil
 			}
-		} else {
-			expanded, err := ExpandAtFiles(ctx, line)
-			if err != nil {
-				fmt.Fprintf(r.Err, "[err] @-expansion: %v\n", err)
-			} else if r.BareHandler != nil {
-				if err := r.BareHandler(ctx, expanded); err != nil {
-					fmt.Fprintf(r.Err, "[err] %v\n", err)
+			if s.err != nil {
+				return s.err
+			}
+			if s.eof {
+				fmt.Fprintln(r.Out)
+				return nil
+			}
+			line := strings.TrimSpace(s.line)
+			if line == "" {
+				fmt.Fprint(r.Out, r.Prompt)
+				continue
+			}
+			if strings.HasPrefix(line, "/") {
+				cont, err := r.dispatchSlash(ctx, line)
+				if err != nil {
+					// ErrREPLExit is a sentinel for "leave cleanly" —
+					// don't pollute the user's screen with a fake
+					// error line for an intentional /exit.
+					if !errors.Is(err, ErrREPLExit) {
+						fmt.Fprintf(r.Err, "[err] %v\n", err)
+					}
+				}
+				if !cont {
+					// Surface any other stop-error so callers can
+					// react. ErrREPLExit collapses to nil.
+					if err != nil && !errors.Is(err, ErrREPLExit) {
+						return err
+					}
+					return nil
 				}
 			} else {
-				fmt.Fprintf(r.Out, "[no handler] %s\n", expanded)
+				expanded, err := ExpandAtFiles(ctx, line)
+				if err != nil {
+					fmt.Fprintf(r.Err, "[err] @-expansion: %v\n", err)
+				} else if r.BareHandler != nil {
+					if err := r.BareHandler(ctx, expanded); err != nil {
+						fmt.Fprintf(r.Err, "[err] %v\n", err)
+					}
+				} else {
+					fmt.Fprintf(r.Out, "[no handler] %s\n", expanded)
+				}
 			}
+			fmt.Fprint(r.Out, r.Prompt)
 		}
-		fmt.Fprint(r.Out, r.Prompt)
 	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	// Clean EOF (Ctrl-D).
-	fmt.Fprintln(r.Out)
-	return nil
 }
 
 // dispatchSlash splits "/cmd arg1 arg2" → name + args, looks up, calls.
