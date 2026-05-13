@@ -19,6 +19,7 @@ import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter } from "@/lib/cli-a
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import {
   OnboardingPreview,
+  TEMPLATES,
   type CrewTemplateSlug,
   type HandoffMode,
 } from "@/components/features/onboarding/onboarding-preview"
@@ -72,13 +73,59 @@ function legacyCopy(text: string, onSuccess: () => void) {
   }
 }
 
-const CREW_OPTIONS: { slug: CrewTemplateSlug; label: string; emoji: string; color: string }[] = [
-  { slug: "software-development", label: "Software Development", emoji: "\u{1F4BB}", color: "#5DA1FF" },
-  { slug: "devops-sre", label: "DevOps / SRE", emoji: "\u{1F527}", color: "#F472B6" },
-  { slug: "content-marketing", label: "Content Marketing", emoji: "\u{1F4E2}", color: "#C084FC" },
-  { slug: "accounting-finance", label: "Accounting & Finance", emoji: "\u{1F9EE}", color: "#34D399" },
-  { slug: "blank", label: "Start blank", emoji: "➕", color: "#A1A1AA" },
+/**
+ * Crew picker list — sourced from the same TEMPLATES map the preview
+ * uses so the row icon + tint and the right-pane card match. Adding
+ * a 5th builtin template only needs an entry in onboarding-preview.tsx
+ * and the seed file; this list reads from the map.
+ */
+const CREW_OPTIONS: { slug: CrewTemplateSlug; label: string }[] = [
+  { slug: "software-development", label: "Software Development" },
+  { slug: "devops-sre", label: "DevOps / SRE" },
+  { slug: "content-marketing", label: "Content Marketing" },
+  { slug: "accounting-finance", label: "Accounting & Finance" },
+  { slug: "blank", label: "Start blank" },
 ]
+
+/**
+ * Languages the orchestrator handles cleanly today. The value lands
+ * verbatim in workspaces.preferred_language and gets injected as
+ * "respond in <value>" into every agent's system prompt — so the
+ * label is what the user sees AND what we send. Adding a language
+ * here costs nothing beyond the new <SelectItem>.
+ */
+const LANGUAGES = [
+  { value: "English", label: "English" },
+  { value: "Čeština", label: "Čeština" },
+  { value: "Slovenčina", label: "Slovenčina" },
+  { value: "Deutsch", label: "Deutsch" },
+  { value: "Français", label: "Français" },
+  { value: "Español", label: "Español" },
+  { value: "Polski", label: "Polski" },
+  { value: "Português", label: "Português" },
+  { value: "Italiano", label: "Italiano" },
+  { value: "Nederlands", label: "Nederlands" },
+] as const
+
+/**
+ * Map the browser's reported language to a sensible default in the
+ * LANGUAGES list. Anything we don't recognise falls back to English so
+ * the picker is never blank.
+ */
+function detectDefaultLanguage(): string {
+  if (typeof navigator === "undefined") return "English"
+  const tag = (navigator.language || "en").toLowerCase()
+  if (tag.startsWith("cs")) return "Čeština"
+  if (tag.startsWith("sk")) return "Slovenčina"
+  if (tag.startsWith("de")) return "Deutsch"
+  if (tag.startsWith("fr")) return "Français"
+  if (tag.startsWith("es")) return "Español"
+  if (tag.startsWith("pl")) return "Polski"
+  if (tag.startsWith("pt")) return "Português"
+  if (tag.startsWith("it")) return "Italiano"
+  if (tag.startsWith("nl")) return "Nederlands"
+  return "English"
+}
 
 type Step = 1 | 2 | 3
 
@@ -91,6 +138,7 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [workspaceName, setWorkspaceName] = useState("")
+  const [language, setLanguage] = useState<string>("English")
   const [crewSlug, setCrewSlug] = useState<CrewTemplateSlug | null>(null)
   const [mode, setMode] = useState<HandoffMode>("browser")
   const [adapter, setAdapter] = useState<string>("CLAUDE_CODE")
@@ -137,6 +185,14 @@ export default function OnboardingPage() {
       .then((r) => (r.ok ? r.json() : { available: false }))
       .then((d) => setRuntimeReady(Boolean(d.available)))
       .catch(() => setRuntimeReady(false))
+  }, [])
+
+  // Seed the language picker from the browser locale so a Czech
+  // visitor gets "Čeština" preselected and English speakers see
+  // "English" without having to touch the picker. Effect runs once
+  // on mount; if the user overrides we never re-detect.
+  useEffect(() => {
+    setLanguage(detectDefaultLanguage())
   }, [])
 
   useEffect(() => {
@@ -226,6 +282,7 @@ export default function OnboardingPage() {
       const adapterCfg = CLI_ADAPTERS[adapter]
       const body: Record<string, unknown> = {
         workspace_name: workspaceName,
+        preferred_language: language,
         crew_template_slug: crewSlug && crewSlug !== "blank" ? crewSlug : undefined,
         crew_name: crewSlug === "blank" ? "My Crew" : undefined,
         agent_name: crewSlug === "blank" ? `${adapterCfg?.label ?? "Agent"} #1` : undefined,
@@ -333,6 +390,24 @@ export default function OnboardingPage() {
                         className="h-11"
                       />
                     </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="language">Agent language</Label>
+                      <Select value={language} onValueChange={setLanguage}>
+                        <SelectTrigger id="language" className="h-11">
+                          <SelectValue placeholder="Pick a language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LANGUAGES.map((l) => (
+                            <SelectItem key={l.value} value={l.value}>
+                              {l.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">
+                        Agents will respond in this language. Change it later in Settings → Workspace.
+                      </p>
+                    </div>
                     {runtimeReady === true && (
                       <motion.div
                         initial={{ opacity: 0, x: -6 }}
@@ -360,7 +435,9 @@ export default function OnboardingPage() {
                     </div>
                     <div className="space-y-2">
                       {CREW_OPTIONS.map((opt, i) => {
+                        const tpl = TEMPLATES[opt.slug]
                         const active = crewSlug === opt.slug
+                        const Icon = tpl.Icon
                         return (
                           <motion.button
                             key={opt.slug}
@@ -377,18 +454,18 @@ export default function OnboardingPage() {
                             }`}
                           >
                             <span
-                              className="w-9 h-9 rounded-xl flex items-center justify-center text-lg shrink-0"
+                              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
                               style={{
-                                backgroundColor: `${opt.color}1F`,
-                                borderColor: `${opt.color}66`,
+                                backgroundColor: tpl.iconBg,
+                                borderColor: tpl.iconBorder,
                                 borderWidth: 1,
                               }}
                             >
-                              <span style={{ color: opt.color }}>{opt.emoji}</span>
+                              <Icon className="h-5 w-5" style={{ color: tpl.iconColor }} />
                             </span>
                             <span className="text-sm font-medium flex-1 tracking-tight">{opt.label}</span>
                             <span className="text-xs text-muted-foreground tabular-nums">
-                              {opt.slug === "blank" ? "1 agent" : "4 agents"}
+                              {tpl.agents.length} {tpl.agents.length === 1 ? "agent" : "agents"}
                             </span>
                           </motion.button>
                         )

@@ -1,10 +1,23 @@
 "use client"
 
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import { Building2, Star, User, Check, Clock } from "lucide-react"
+import Image from "next/image"
+import {
+  Building2,
+  Star,
+  Check,
+  Clock,
+  Code2,
+  Wrench,
+  Megaphone,
+  Calculator,
+  Plus,
+  type LucideIcon,
+} from "lucide-react"
 import { CLI_ADAPTERS, getAdapterConfig } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -36,23 +49,31 @@ interface CrewTemplateMeta {
   iconColor: string
   iconBg: string
   iconBorder: string
-  emoji: string
-  agents: { name: string; role: string; lead?: boolean }[]
+  Icon: LucideIcon
+  agents: { name: string; slug: string; role: string; lead?: boolean }[]
   defaultModel: string
 }
 
-const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
+/**
+ * Crew template metadata for the preview pane. Agents carry slug
+ * strings so the right-pane avatars stay deterministic across
+ * re-renders (DiceBear seeds the SVG generation from the slug). The
+ * slugs here mirror the ones the backend's seed_crew_templates.go
+ * uses, so a real workspace deploy + the preview show the same face
+ * for each role.
+ */
+export const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
   "software-development": {
     name: "Software Dev",
     iconColor: "#5DA1FF",
     iconBg: "rgba(30, 123, 254, 0.12)",
     iconBorder: "rgba(30, 123, 254, 0.40)",
-    emoji: "💻",
+    Icon: Code2,
     agents: [
-      { name: "Tech Lead", role: "Architect", lead: true },
-      { name: "Backend Dev", role: "Engineer" },
-      { name: "Frontend Dev", role: "Engineer" },
-      { name: "QA Engineer", role: "Quality" },
+      { name: "Tech Lead", slug: "tech-lead-software-development", role: "Architect", lead: true },
+      { name: "Backend Dev", slug: "backend-dev-software-development", role: "Engineer" },
+      { name: "Frontend Dev", slug: "frontend-dev-software-development", role: "Engineer" },
+      { name: "QA Engineer", slug: "qa-engineer-software-development", role: "Quality" },
     ],
     defaultModel: "Claude Sonnet 4.6",
   },
@@ -61,12 +82,12 @@ const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
     iconColor: "#F472B6",
     iconBg: "rgba(244, 114, 182, 0.12)",
     iconBorder: "rgba(244, 114, 182, 0.40)",
-    emoji: "🔧",
+    Icon: Wrench,
     agents: [
-      { name: "SRE Lead", role: "Reliability", lead: true },
-      { name: "Platform Eng", role: "Infra" },
-      { name: "Security Analyst", role: "Security" },
-      { name: "CI/CD Specialist", role: "Deploy" },
+      { name: "SRE Lead", slug: "sre-lead-devops-sre", role: "Reliability", lead: true },
+      { name: "Platform Eng", slug: "platform-eng-devops-sre", role: "Infra" },
+      { name: "Security Analyst", slug: "security-analyst-devops-sre", role: "Security" },
+      { name: "CI/CD Specialist", slug: "cicd-specialist-devops-sre", role: "Deploy" },
     ],
     defaultModel: "Claude Sonnet 4.6",
   },
@@ -75,12 +96,12 @@ const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
     iconColor: "#C084FC",
     iconBg: "rgba(192, 132, 252, 0.12)",
     iconBorder: "rgba(192, 132, 252, 0.40)",
-    emoji: "📢",
+    Icon: Megaphone,
     agents: [
-      { name: "Content Lead", role: "Strategy", lead: true },
-      { name: "Researcher", role: "Insights" },
-      { name: "Copywriter", role: "Writing" },
-      { name: "SEO Specialist", role: "Distribution" },
+      { name: "Content Lead", slug: "content-lead-content-marketing", role: "Strategy", lead: true },
+      { name: "Researcher", slug: "researcher-content-marketing", role: "Insights" },
+      { name: "Copywriter", slug: "copywriter-content-marketing", role: "Writing" },
+      { name: "SEO Specialist", slug: "seo-specialist-content-marketing", role: "Distribution" },
     ],
     defaultModel: "Claude Sonnet 4.6",
   },
@@ -89,12 +110,12 @@ const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
     iconColor: "#34D399",
     iconBg: "rgba(52, 211, 153, 0.12)",
     iconBorder: "rgba(52, 211, 153, 0.40)",
-    emoji: "🧮",
+    Icon: Calculator,
     agents: [
-      { name: "Finance Lead", role: "Strategy", lead: true },
-      { name: "Bookkeeper", role: "Ledger" },
-      { name: "Tax Analyst", role: "Compliance" },
-      { name: "Reporting", role: "Analytics" },
+      { name: "Finance Lead", slug: "finance-lead-accounting-finance", role: "Strategy", lead: true },
+      { name: "Bookkeeper", slug: "bookkeeper-accounting-finance", role: "Ledger" },
+      { name: "Tax Analyst", slug: "tax-analyst-accounting-finance", role: "Compliance" },
+      { name: "Reporting", slug: "reporting-accounting-finance", role: "Analytics" },
     ],
     defaultModel: "Claude Sonnet 4.6",
   },
@@ -103,8 +124,8 @@ const TEMPLATES: Record<CrewTemplateSlug, CrewTemplateMeta> = {
     iconColor: "#A1A1AA",
     iconBg: "rgba(161, 161, 170, 0.12)",
     iconBorder: "rgba(161, 161, 170, 0.40)",
-    emoji: "➕",
-    agents: [{ name: "Your first agent", role: "(you'll pick)", lead: true }],
+    Icon: Plus,
+    agents: [{ name: "Your first agent", slug: "blank-first-agent", role: "(you'll pick)", lead: true }],
     defaultModel: "Claude Sonnet 4.6",
   },
 }
@@ -183,10 +204,10 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
           >
             <div className="flex items-center gap-3 mb-3 pb-3 border-b border-border">
               <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
                 style={{ background: template.iconBg, borderColor: template.iconBorder, borderWidth: 1 }}
               >
-                <span style={{ color: template.iconColor }}>{template.emoji}</span>
+                <template.Icon className="h-5 w-5" style={{ color: template.iconColor }} />
               </div>
               <div className="min-w-0">
                 <div className="font-semibold truncate tracking-tight">{template.name}</div>
@@ -198,14 +219,26 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             <div className="space-y-2">
               {template.agents.map((a, i) => (
                 <motion.div
-                  key={a.name}
+                  key={a.slug}
                   initial={reduce ? { opacity: 0 } : { opacity: 0, x: -8 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.32, ease, delay: 0.08 + i * 0.06 }}
-                  className="flex items-center gap-2 text-sm"
+                  className="flex items-center gap-2.5 text-sm"
                 >
-                  <div className="w-7 h-7 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
-                    {a.lead ? <Star className="h-3.5 w-3.5 text-amber-400" /> : <User className="h-3.5 w-3.5" />}
+                  <div className="relative shrink-0">
+                    <Image
+                      src={getAgentAvatarUrl(a.slug, "bottts-neutral")}
+                      alt={a.name}
+                      width={28}
+                      height={28}
+                      className="rounded-full bg-muted ring-1 ring-border"
+                      unoptimized
+                    />
+                    {a.lead && (
+                      <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-400 text-amber-950 shadow-sm">
+                        <Star className="h-2 w-2 fill-current" />
+                      </span>
+                    )}
                   </div>
                   <span className="flex-1 min-w-0 truncate">{a.name}</span>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground">

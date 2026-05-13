@@ -172,6 +172,13 @@ type onboardingSetupRequest struct {
 	// — the CLI redeem flow lands the auth via a separate cli_token
 	// row, not as a workspace credential.
 	PairingMode bool `json:"pairing_mode"`
+	// PreferredLanguage is what the user picked in the workspace
+	// step. Stored as workspaces.preferred_language so the
+	// orchestrator can inject it into every agent's system prompt
+	// (see internal/api/assignments_run.go). Free-form text so the
+	// orchestrator can pass it through verbatim ("Czech", "English",
+	// "Português", etc.) without us maintaining an ISO-code map.
+	PreferredLanguage string `json:"preferred_language"`
 }
 
 var slugRegex = regexp.MustCompile(`[^a-z0-9-]`)
@@ -216,6 +223,18 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("find workspace", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Persist preferred_language for both forks (template + blank).
+	// Doing it before the branch means the orchestrator gets the
+	// setting regardless of which crew shape the user picked, and a
+	// failed write here doesn't take down the rest of the flow.
+	if lang := strings.TrimSpace(req.PreferredLanguage); lang != "" {
+		if _, err := h.db.ExecContext(r.Context(),
+			"UPDATE workspaces SET preferred_language = ?, updated_at = ? WHERE id = ?",
+			lang, time.Now().UTC().Format(time.RFC3339), workspaceID); err != nil {
+			h.logger.Warn("set preferred_language", "error", err)
+		}
 	}
 
 	// Template branch — when crew_template_slug is set, the wizard
@@ -329,6 +348,8 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 			// failed rename doesn't abort the whole onboarding.
 		}
 	}
+	// (preferred_language is set in the parent Setup() before this
+	// fork — applies to both template + blank paths.)
 
 	// If the user pasted an Anthropic API key (browser mode), store
 	// it as a workspace-scoped credential BEFORE deploying the
