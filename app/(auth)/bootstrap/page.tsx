@@ -75,22 +75,28 @@ export default function BootstrapPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(data.error ?? "Bootstrap failed.")
+        setError(data.error ?? `Bootstrap failed (HTTP ${res.status}).`)
         setLoading(false)
         return
       }
-      const signin = await fetch("/api/auth/callback/credentials", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ email, password, redirect: "false" }).toString(),
-      })
-      if (!signin.ok) {
+      // Bootstrap sets session cookies inline now (since 2026-05-13)
+      // so there's no follow-up auth chain to await — the cookie
+      // jar is already populated by the time this response lands.
+      // If the server couldn't establish the session for any reason
+      // it returns session_pending=true; we fall through to /login
+      // so the user can sign in with the password they just typed.
+      const data = await res.json().catch(() => ({}))
+      if (data?.session_pending) {
         router.replace("/login?registered=true")
         return
       }
       router.replace("/onboarding")
-    } catch {
-      setError("Network error. Please try again.")
+    } catch (e) {
+      setError(
+        e instanceof Error && e.message
+          ? `Couldn't reach the server: ${e.message}. Check your connection and try again.`
+          : "Couldn't reach the server. Check your connection and try again.",
+      )
       setLoading(false)
     }
   }

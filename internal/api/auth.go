@@ -373,6 +373,33 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set browser session cookies inline so the freshly-created admin
+	// lands authenticated on /onboarding without the frontend having
+	// to chain a /api/auth/callback/credentials call (which was racing
+	// against the auth-tier rate limiter and getting 403'd, dropping
+	// the user back on /login?registered=true).
+	//
+	// Same pattern Signup uses: background-derived context decoupled
+	// from r.Context() so a client disconnect between tx.Commit and
+	// sessions.Create doesn't roll back the user we just created.
+	authCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h.setSessionCookies(authCtx, w, r, userID, req.FullName, req.Email); err != nil {
+		h.logger.Error("bootstrap: set session cookies", "error", err)
+		// Don't roll back the admin row — bootstrap can't be retried
+		// once a user exists, and the user can always log in manually
+		// with the password they just typed. Surface the partial
+		// success so the frontend can route to /login?registered=true.
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"user_id":         userID,
+			"email":           req.Email,
+			"workspace_id":    workspaceID,
+			"cli_token":       cliToken,
+			"session_pending": true,
+		})
+		return
+	}
+
 	h.logger.Info("bootstrap: admin created", "email", req.Email, "workspace", slug)
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{

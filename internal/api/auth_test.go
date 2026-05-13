@@ -162,6 +162,28 @@ func TestAuthBootstrap_Success(t *testing.T) {
 	if !strings.HasPrefix(tok, "crewship_cli_") {
 		t.Errorf("cli_token = %q, want crewship_cli_*", tok)
 	}
+
+	// Bootstrap sets session cookies inline (since 2026-05-13) so a
+	// fresh-install admin lands on /onboarding authenticated. Verify
+	// both the access and refresh cookies came back — without them
+	// the frontend would have to chain /api/auth/callback/credentials
+	// (which used to race the auth-tier rate limiter and 403).
+	cookies := rr.Result().Cookies()
+	var hasAccess, hasRefresh bool
+	for _, c := range cookies {
+		if c.Name == "authjs.session-token" {
+			hasAccess = true
+		}
+		if c.Name == "authjs.refresh-token" {
+			hasRefresh = true
+		}
+	}
+	if !hasAccess {
+		t.Errorf("missing access cookie 'authjs.session-token' after bootstrap")
+	}
+	if !hasRefresh {
+		t.Errorf("missing refresh cookie 'authjs.refresh-token' after bootstrap")
+	}
 }
 
 // TestAuthBootstrap_LeavesOnboardingPending guards the 2026-05-13
