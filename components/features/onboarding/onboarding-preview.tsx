@@ -19,6 +19,7 @@ import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { getLocalizedAgentAvatar } from "@/lib/agent-avatar-locale"
 import { getCrewNames } from "@/lib/agent-names-locale"
+import { DIVERSE_CREW_COMPOSITIONS } from "@/lib/agent-locale-composition"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -225,32 +226,41 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                 </div>
               </div>
             </div>
-            {/* Resolve crew member metadata once per render. The
-                last slot is drawn from a contrasting locale so the
-                team visibly mixes ("nejsme přeci rasisti") — the
-                lead stays on-locale so it doesn't read as tokenism.
-                Name dedup runs per-pool, so the three primary
-                agents never collide on the same first name even
-                when the slug-hash produces a tight cluster. */}
+            {/* Crew composition rules:
+                - Mono-ethnic locales (Czech, Japanese, Hungarian…)
+                  all four agents share the picked locale's palette
+                  and draw from one name pool, with dedup. Matches
+                  the real demographics of those countries.
+                - Multi-ethnic locales (English / French / German /
+                  Dutch / Spanish / Brazilian PT) — each slot has its
+                  own (palette, name pool) from
+                  DIVERSE_CREW_COMPOSITIONS. Reflects the actual
+                  population mix; rendering an all-white US team
+                  would be obviously wrong. */}
             <div className="space-y-2">
               {(() => {
-                // All four agents come from the same locale — names
-                // already anchor identity per the picked language, so
-                // swapping one slot for a "diverse" face added confusion
-                // without payoff. Dedup walks the pool on collisions so
-                // a 4-of-8 draw never repeats within the crew.
-                const slugs = template.agents.map((x) => x.slug)
                 const effectiveLocale = language ?? "English"
-                const names = getCrewNames(slugs, effectiveLocale)
+                const slugs = template.agents.map((x) => x.slug)
+                const diverse = DIVERSE_CREW_COMPOSITIONS[effectiveLocale]
+                const monoNames = diverse ? null : getCrewNames(slugs, effectiveLocale)
                 return template.agents.map((a, i) => {
-                  // Route every preview avatar through the localized
-                  // helper — for English the LOCALE_PALETTES entry is
-                  // empty so DiceBear uses the default mixed pool, but
-                  // facialHairProbability=0 + earrings=0 overrides
-                  // still apply, so the "rouška" look (beard on a
-                  // feminine face) is suppressed uniformly.
-                  const avatarSrc = getLocalizedAgentAvatar(a.slug, effectiveLocale)
-                  const personName = names[a.slug]
+                  let palette: string
+                  let personName: string
+                  if (diverse) {
+                    const slot = diverse[i % diverse.length]
+                    palette = slot.palette
+                    // Index this slot's pool by a cheap slug hash so
+                    // different crew templates (Dev / Ops / Marketing)
+                    // surface different teammates within each group.
+                    let h = 0
+                    for (let k = 0; k < a.slug.length; k++)
+                      h = (h * 31 + a.slug.charCodeAt(k)) >>> 0
+                    personName = slot.namePool[h % slot.namePool.length]
+                  } else {
+                    palette = effectiveLocale
+                    personName = monoNames![a.slug]
+                  }
+                  const avatarSrc = getLocalizedAgentAvatar(a.slug, palette)
                   return (
                   <motion.div
                     key={a.slug}

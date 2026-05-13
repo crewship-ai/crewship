@@ -458,8 +458,9 @@ export default function OnboardingPage() {
                     <div className="space-y-2">
                       <Label htmlFor="language">Agent language</Label>
                       <LanguagePicker value={language} onChange={setLanguage} />
-                      <p className="text-[11px] text-muted-foreground">
-                        Agents will respond in this language. Change it later in Settings → Workspace.
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Sets only how your AI agents reply — the Crewship interface stays in English. Change it
+                        anytime in Settings → Workspace.
                       </p>
                     </div>
                     {runtimeReady === true && (
