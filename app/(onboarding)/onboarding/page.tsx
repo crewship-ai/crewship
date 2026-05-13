@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import { Loader2, ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle } from "lucide-react"
+import { Loader2, ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle, ChevronsUpDown } from "lucide-react"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,6 +17,9 @@ import {
 } from "@/components/ui/select"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter } from "@/lib/cli-adapters"
 import { getAdapterBrand, ADAPTER_KEY_CONSOLE, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
+import { LANGUAGES } from "@/lib/languages"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import {
   OnboardingPreview,
   TEMPLATES,
@@ -88,42 +91,27 @@ const CREW_OPTIONS: { slug: CrewTemplateSlug; label: string }[] = [
 ]
 
 /**
- * Languages the orchestrator handles cleanly today. The value lands
- * verbatim in workspaces.preferred_language and gets injected as
- * "respond in <value>" into every agent's system prompt — so the
- * label is what the user sees AND what we send. Adding a language
- * here costs nothing beyond the new <SelectItem>.
- */
-const LANGUAGES = [
-  { value: "English", label: "English" },
-  { value: "Čeština", label: "Čeština" },
-  { value: "Slovenčina", label: "Slovenčina" },
-  { value: "Deutsch", label: "Deutsch" },
-  { value: "Français", label: "Français" },
-  { value: "Español", label: "Español" },
-  { value: "Polski", label: "Polski" },
-  { value: "Português", label: "Português" },
-  { value: "Italiano", label: "Italiano" },
-  { value: "Nederlands", label: "Nederlands" },
-] as const
-
-/**
- * Map the browser's reported language to a sensible default in the
- * LANGUAGES list. Anything we don't recognise falls back to English so
- * the picker is never blank.
+ * Map the browser's reported language tag (navigator.language, e.g.
+ * "cs-CZ") to one of the entries in our shared LANGUAGES catalog so
+ * the picker opens on something familiar. Matches on the leading
+ * ISO-639 subtag and prefers exact regional matches (cs-CZ → Czech,
+ * pt-BR → Portuguese (Brazil)).
+ *
+ * Returns the English `name` field, which is what we store verbatim
+ * in workspaces.preferred_language and what the orchestrator drops
+ * into the system prompt. Falls through to "English" on anything we
+ * don't recognise.
  */
 function detectDefaultLanguage(): string {
   if (typeof navigator === "undefined") return "English"
   const tag = (navigator.language || "en").toLowerCase()
-  if (tag.startsWith("cs")) return "Čeština"
-  if (tag.startsWith("sk")) return "Slovenčina"
-  if (tag.startsWith("de")) return "Deutsch"
-  if (tag.startsWith("fr")) return "Français"
-  if (tag.startsWith("es")) return "Español"
-  if (tag.startsWith("pl")) return "Polski"
-  if (tag.startsWith("pt")) return "Português"
-  if (tag.startsWith("it")) return "Italiano"
-  if (tag.startsWith("nl")) return "Nederlands"
+  // Exact match first (covers pt-BR, zh-TW)
+  const exact = LANGUAGES.find((l) => l.code.toLowerCase() === tag)
+  if (exact) return exact.name
+  // Fall back to leading subtag (covers "en-US" → "en")
+  const lead = tag.split(/[-_]/)[0]
+  const partial = LANGUAGES.find((l) => l.code.toLowerCase() === lead)
+  if (partial) return partial.name
   return "English"
 }
 
@@ -469,18 +457,7 @@ export default function OnboardingPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="language">Agent language</Label>
-                      <Select value={language} onValueChange={setLanguage}>
-                        <SelectTrigger id="language" className="h-11">
-                          <SelectValue placeholder="Pick a language" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {LANGUAGES.map((l) => (
-                            <SelectItem key={l.value} value={l.value}>
-                              {l.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <LanguagePicker value={language} onChange={setLanguage} />
                       <p className="text-[11px] text-muted-foreground">
                         Agents will respond in this language. Change it later in Settings → Workspace.
                       </p>
@@ -975,4 +952,85 @@ function formatCountdown(sec: number): string {
   const m = Math.floor(sec / 60)
   const s = sec % 60
   return `${m}:${s.toString().padStart(2, "0")}`
+}
+
+/**
+ * Searchable language picker — Popover + cmdk Command, same pattern
+ * Settings → General uses so a user who lands first in onboarding
+ * and later opens settings sees the identical control. Searches
+ * English name, native name, AND ISO code so a user who only
+ * remembers "cs" or "Čeština" still finds Czech.
+ *
+ * Stores the English `name` (e.g. "Czech") in the parent state so it
+ * lands verbatim in workspaces.preferred_language. The orchestrator
+ * injects that string into every agent's system prompt; Claude
+ * understands all of them natively, so we don't need a code-table
+ * translation layer.
+ */
+function LanguagePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const selected = LANGUAGES.find((l) => l.name === value)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label="Pick a language"
+          className="flex h-11 w-full items-center justify-between rounded-md border border-border bg-background px-3 text-sm hover:border-ring transition-colors"
+        >
+          {selected ? (
+            <span className="inline-flex items-center gap-2 truncate">
+              <span className="text-base leading-none">{selected.flag}</span>
+              <span className="truncate">{selected.name}</span>
+              <span className="text-xs text-muted-foreground truncate">· {selected.native}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Select language…</span>
+          )}
+          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command
+          filter={(itemValue, search) => {
+            // itemValue is the English name we set on each CommandItem.
+            // Match on English name, native name, and ISO code so a
+            // user typing "cs", "Čeština", or "Czech" all find Czech.
+            const lang = LANGUAGES.find((l) => l.name === itemValue)
+            if (!lang) return 0
+            const s = search.toLowerCase()
+            if (!s) return 1
+            return lang.name.toLowerCase().includes(s) ||
+              lang.native.toLowerCase().includes(s) ||
+              lang.code.toLowerCase().includes(s)
+              ? 1
+              : 0
+          }}
+        >
+          <CommandInput placeholder="Search language…" />
+          <CommandList>
+            <CommandEmpty>No language found.</CommandEmpty>
+            <CommandGroup>
+              {LANGUAGES.map((lang) => (
+                <CommandItem
+                  key={lang.code}
+                  value={lang.name}
+                  onSelect={() => {
+                    onChange(lang.name)
+                    setOpen(false)
+                  }}
+                  className="text-sm"
+                >
+                  <span className="mr-2 text-base leading-none">{lang.flag}</span>
+                  <span>{lang.name}</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">{lang.native}</span>
+                  {value === lang.name && <Check className="ml-2 h-3.5 w-3.5 text-primary" />}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
 }

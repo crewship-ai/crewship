@@ -40,52 +40,91 @@ interface LocalePalette {
   hairColor?: string[]
 }
 
+/**
+ * Keys are the English `name` field from lib/languages.ts (e.g.
+ * "Czech", not "Čeština") so what gets stored in
+ * workspaces.preferred_language is consistent across the onboarding
+ * wizard and Settings → General. Adding more locales is a one-entry
+ * change; anything we don't list falls through to the DiceBear
+ * default pool, which is itself a fine globally-mixed look.
+ *
+ * Palette buckets are intentionally broad — each locale still draws
+ * from a mix of skin and hair colours so the preview never feels
+ * monolithic. The bias just nudges the distribution toward what a
+ * native speaker of that language would typically expect to see in
+ * a team meeting in their region.
+ */
 const LOCALE_PALETTES: Record<string, LocalePalette> = {
-  // Central Europe — lighter skin range biased, mix of brown / blonde
-  // / red hair. Czech, Slovak, Polish demographics are similar enough
-  // that one palette covers all three without being uniform.
-  "Čeština": {
-    skinColor: ["f9c9b6", "f4cdb8", "ac6651"],
-    hairColor: ["6a4e35", "4f3922", "9e1822", "f4d150", "77311d"],
-  },
-  "Slovenčina": {
-    skinColor: ["f9c9b6", "f4cdb8", "ac6651"],
-    hairColor: ["6a4e35", "4f3922", "9e1822", "f4d150", "77311d"],
-  },
-  "Polski": {
-    skinColor: ["f9c9b6", "f4cdb8", "ac6651"],
-    hairColor: ["6a4e35", "4f3922", "9e1822", "f4d150"],
-  },
-  // Germanic — lighter palette, more blonde / light-brown hair.
-  Deutsch: {
-    skinColor: ["f9c9b6", "f4cdb8", "ac6651"],
-    hairColor: ["f4d150", "6a4e35", "4f3922", "c8a165"],
-  },
-  Nederlands: {
-    skinColor: ["f9c9b6", "f4cdb8", "ac6651"],
-    hairColor: ["f4d150", "6a4e35", "4f3922", "c8a165"],
-  },
-  // Mediterranean — warmer skin, darker hair pool.
-  Français: {
-    skinColor: ["f4cdb8", "ac6651", "77311d", "f9c9b6"],
-    hairColor: ["4f3922", "6a4e35", "1e1e1e", "9e1822"],
-  },
-  Italiano: {
-    skinColor: ["ac6651", "f4cdb8", "77311d"],
-    hairColor: ["1e1e1e", "4f3922", "6a4e35"],
-  },
-  Español: {
-    skinColor: ["ac6651", "f4cdb8", "77311d", "5e3826"],
-    hairColor: ["1e1e1e", "4f3922", "6a4e35"],
-  },
-  Português: {
-    skinColor: ["ac6651", "f4cdb8", "77311d", "5e3826"],
-    hairColor: ["1e1e1e", "4f3922", "6a4e35"],
-  },
-  // English — explicitly empty so the default DiceBear pool kicks in
-  // (full mix). Present in the map so a lookup miss falls through
-  // deliberately to "unknown locale" rather than silently using
-  // English defaults.
+  // Central / Eastern Europe — lighter skin range, mix of brown /
+  // blonde / red hair.
+  Czech:      { skinColor: ["f9c9b6", "f4cdb8", "ac6651"], hairColor: ["6a4e35", "4f3922", "9e1822", "f4d150", "77311d"] },
+  Slovak:     { skinColor: ["f9c9b6", "f4cdb8", "ac6651"], hairColor: ["6a4e35", "4f3922", "9e1822", "f4d150", "77311d"] },
+  Polish:     { skinColor: ["f9c9b6", "f4cdb8", "ac6651"], hairColor: ["6a4e35", "4f3922", "9e1822", "f4d150"] },
+  Hungarian:  { skinColor: ["f9c9b6", "f4cdb8", "ac6651"], hairColor: ["4f3922", "6a4e35", "9e1822", "1e1e1e"] },
+  Slovenian:  { skinColor: ["f9c9b6", "f4cdb8", "ac6651"], hairColor: ["6a4e35", "4f3922", "f4d150"] },
+  Croatian:   { skinColor: ["f4cdb8", "ac6651", "f9c9b6"], hairColor: ["4f3922", "6a4e35", "1e1e1e"] },
+  Romanian:   { skinColor: ["f4cdb8", "ac6651", "77311d"], hairColor: ["4f3922", "6a4e35", "1e1e1e"] },
+  Bulgarian:  { skinColor: ["f4cdb8", "ac6651", "f9c9b6"], hairColor: ["4f3922", "6a4e35", "1e1e1e"] },
+  Serbian:    { skinColor: ["f4cdb8", "ac6651"], hairColor: ["4f3922", "6a4e35", "1e1e1e"] },
+
+  // Germanic / Nordic — lighter skin, blonde-leaning hair pool.
+  German:     { skinColor: ["f9c9b6", "f4cdb8", "ac6651"], hairColor: ["f4d150", "6a4e35", "4f3922", "c8a165"] },
+  Dutch:      { skinColor: ["f9c9b6", "f4cdb8", "ac6651"], hairColor: ["f4d150", "6a4e35", "4f3922", "c8a165"] },
+  Swedish:    { skinColor: ["f9c9b6", "f4cdb8"],            hairColor: ["f4d150", "c8a165", "6a4e35"] },
+  Norwegian:  { skinColor: ["f9c9b6", "f4cdb8"],            hairColor: ["f4d150", "c8a165", "6a4e35"] },
+  Danish:     { skinColor: ["f9c9b6", "f4cdb8"],            hairColor: ["f4d150", "c8a165", "6a4e35"] },
+  Finnish:    { skinColor: ["f9c9b6", "f4cdb8"],            hairColor: ["f4d150", "c8a165", "6a4e35"] },
+
+  // Baltic
+  Estonian:   { skinColor: ["f9c9b6", "f4cdb8"], hairColor: ["f4d150", "6a4e35", "c8a165"] },
+  Latvian:    { skinColor: ["f9c9b6", "f4cdb8"], hairColor: ["f4d150", "6a4e35", "c8a165"] },
+  Lithuanian: { skinColor: ["f9c9b6", "f4cdb8"], hairColor: ["f4d150", "6a4e35", "c8a165"] },
+
+  // Romance / Mediterranean — warmer skin, darker hair pool.
+  French:     { skinColor: ["f4cdb8", "ac6651", "77311d", "f9c9b6"], hairColor: ["4f3922", "6a4e35", "1e1e1e", "9e1822"] },
+  Italian:    { skinColor: ["ac6651", "f4cdb8", "77311d"],            hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+  Spanish:    { skinColor: ["ac6651", "f4cdb8", "77311d", "5e3826"],  hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+  Portuguese: { skinColor: ["ac6651", "f4cdb8", "77311d", "5e3826"],  hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+  "Portuguese (Brazil)": { skinColor: ["ac6651", "77311d", "5e3826", "f4cdb8"], hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+  Catalan:    { skinColor: ["ac6651", "f4cdb8", "77311d"], hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+  Greek:      { skinColor: ["ac6651", "f4cdb8", "77311d"], hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+
+  // Slavic east
+  Russian:    { skinColor: ["f4cdb8", "f9c9b6", "ac6651"], hairColor: ["6a4e35", "4f3922", "f4d150", "9e1822"] },
+  Ukrainian:  { skinColor: ["f4cdb8", "f9c9b6", "ac6651"], hairColor: ["6a4e35", "4f3922", "f4d150"] },
+
+  // Middle East / North Africa
+  Arabic:     { skinColor: ["ac6651", "77311d", "5e3826"], hairColor: ["1e1e1e", "4f3922"] },
+  Hebrew:     { skinColor: ["ac6651", "f4cdb8", "77311d"], hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+  Persian:    { skinColor: ["ac6651", "77311d", "5e3826"], hairColor: ["1e1e1e", "4f3922"] },
+  Turkish:    { skinColor: ["ac6651", "77311d", "f4cdb8"], hairColor: ["1e1e1e", "4f3922", "6a4e35"] },
+
+  // South Asia
+  Hindi:      { skinColor: ["77311d", "5e3826", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+  Bengali:    { skinColor: ["77311d", "5e3826", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+  Tamil:      { skinColor: ["77311d", "5e3826"],            hairColor: ["1e1e1e", "4f3922"] },
+  Urdu:       { skinColor: ["77311d", "5e3826", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+
+  // East Asia
+  Japanese:   { skinColor: ["f4cdb8", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+  Korean:     { skinColor: ["f4cdb8", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+  Chinese:    { skinColor: ["f4cdb8", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+  "Chinese (Traditional)": { skinColor: ["f4cdb8", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+
+  // Southeast Asia
+  Vietnamese: { skinColor: ["f4cdb8", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+  Thai:       { skinColor: ["f4cdb8", "ac6651"], hairColor: ["1e1e1e", "4f3922"] },
+  Indonesian: { skinColor: ["ac6651", "77311d", "f4cdb8"], hairColor: ["1e1e1e", "4f3922"] },
+  Malay:      { skinColor: ["ac6651", "77311d", "f4cdb8"], hairColor: ["1e1e1e", "4f3922"] },
+
+  // Sub-Saharan Africa
+  Swahili:    { skinColor: ["77311d", "5e3826", "3a1a0d"], hairColor: ["1e1e1e"] },
+  Afrikaans:  { skinColor: ["f4cdb8", "ac6651", "77311d", "5e3826"], hairColor: ["1e1e1e", "4f3922", "f4d150"] },
+
+  // English — explicit empty palette so the default DiceBear pool
+  // (full global mix) kicks in. Present here so a hit on "English"
+  // is observable; languages we don't list fall through with the
+  // same empty-options result via the lookup fallback.
   English: {},
 }
 
