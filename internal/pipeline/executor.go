@@ -299,7 +299,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// rendered concurrency_key (template-substituted from inputs)
 	// so per-tenant gating works without DSL edits.
 	if e.runs != nil && in.Mode == ModeRun {
-		key := renderConcurrencyKey(dsl.ConcurrencyKey, in.Inputs)
+		key := renderConcurrencyKey(ctx, dsl.ConcurrencyKey, in.Inputs)
 		regCtx, release, regErr := e.runs.Acquire(ctx, AcquireOpts{
 			RunID:          preallocRunID,
 			WorkspaceID:    in.WorkspaceID,

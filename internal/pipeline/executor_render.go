@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"strconv"
@@ -19,8 +20,6 @@ import (
 // already covers the substitution side).
 func evalIfCondition(rendered string) bool {
 	s := rendered
-	// Trim ASCII whitespace without importing strings (keeps the
-	// hot path allocation-free).
 	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
 		s = s[1:]
 	}
@@ -54,7 +53,7 @@ func evalIfCondition(rendered string) bool {
 // against the inputs map. We only support `{{ inputs.X }}` here —
 // the full Render pipeline isn't reachable yet (no step outputs at
 // reservation time). Empty template → empty key (no gate).
-func renderConcurrencyKey(template string, inputs map[string]any) string {
+func renderConcurrencyKey(_ context.Context, template string, inputs map[string]any) string {
 	if template == "" {
 		return ""
 	}
