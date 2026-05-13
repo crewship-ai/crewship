@@ -44,6 +44,19 @@ The canvas is small but every visual element has a specific meaning — getting 
 | **Overview mode** | What the canvas shows when no run is selected — issues, their bound routines, and the last run of each chain. Click a last-run node to flip into trace mode for that run. |
 | **Trace selection** | URL state (`?run=<id>&step=<id>`) that uniquely identifies a single node + side panel. Copy-paste reconstructs the exact view on another machine. |
 
+## Usage
+
+The page is designed to be scanned, not learned — every visible element is wired up. The shortest path through it:
+
+1. **Open `/activity`.** With no run selected you land in overview mode (issues → routines → last run). If you came from somewhere with a specific run in mind, paste the URL and you'll skip straight to step 4.
+2. **Find your run on the left rail.** Default sort is newest first across everything; reach for `[Filter • N]` if the rail is too noisy. `failed` + last 24h grouped by routine is the canonical regression-hunting filter set. Save it as a view if you'll want it tomorrow morning.
+3. **Click the run row.** The canvas paints the trace graph from left to right. Status pips light up live from the workspace's `pipeline.step.*` events — no refresh needed.
+4. **Read the canvas.** Solid edges show *what must run first* (`needs[]`); dashed edges show *what value flows where* (`{{ steps.X.output }}` templates). A pulsing blue node is mid-flight; an amber node is parked on a waitpoint; a rose node failed and shows its error message in the side panel.
+5. **Click a step** to open the right-hand detail panel — rendered prompt, output, duration/cost from the journal, and (for failures) the captured error. The URL updates to `?run=<id>&step=<id>` so anything you select is shareable.
+6. **For waitpoints, decide inline.** Approve / Deny buttons sit in the node body. The run resumes immediately on Approve and the badge clears on Inbox within the realtime round-trip. Click the node body (not the buttons) to see the prompt that produced the value you're being asked to approve.
+
+Toggle the **Heatmap** segmented control to Cost or Time when you want the canvas to surface the one node that ate the budget instead of reading them all by hand — the percentile colouring is relative to the rest of the *current* run, so the dark border is always the right node to investigate first.
+
 ## The trace graph
 
 When you select a run, the canvas builds a directed graph from the routine's DSL and the run's recorded state:
