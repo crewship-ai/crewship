@@ -172,7 +172,15 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T11 — preview pane renders 4 agent avatars (micah style)
   // ────────────────────────────────────────────────────────────────
-  const avatarCount = await page.locator('img[alt="Tech Lead"], img[alt="Backend Dev"], img[alt="Frontend Dev"], img[alt="QA Engineer"]').count()
+  // Next/Image with unoptimized=true emits real <img> tags but the
+  // attributes show up only after hydration completes. Wait until at
+  // least one of the role names appears as an alt, then count.
+  await page
+    .waitForSelector('img[alt*="Tech Lead"], img[alt*="Backend"], img[alt*="Frontend"], img[alt*="QA"]', { timeout: 5000 })
+    .catch(() => {})
+  const avatarCount = await page
+    .locator('img[alt*="Tech"], img[alt*="Backend"], img[alt*="Frontend"], img[alt*="QA"]')
+    .count()
   await expect(
     "T11 step 2 preview shows 4 agent avatars",
     avatarCount === 4,
@@ -243,7 +251,21 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T18 — adapter toolchain + API key + per-provider link always visible
   // ────────────────────────────────────────────────────────────────
-  const adapterChipsCount = await page.locator('button[aria-pressed]:has-text("Claude Code"), button[aria-pressed]:has-text("Gemini"), button[aria-pressed]:has-text("Codex"), button[aria-pressed]:has-text("OpenCode"), button[aria-pressed]:has-text("Cursor"), button[aria-pressed]:has-text("Factory")').count()
+  // Scope to the "Agent toolchain" label so the Mode card descriptions
+  // (which also contain "Claude Code, Gemini, Codex…" as plain text)
+  // don't get counted as buttons.
+  const toolchainLabel = page.locator('label:has-text("Agent toolchain")')
+  const adapterChipsCount = await toolchainLabel
+    .locator('xpath=following-sibling::div//button[@aria-pressed]')
+    .count()
+    .catch(async () => {
+      // Fallback: count buttons whose VISIBLE TEXT EXACTLY equals one
+      // of the adapter labels (no MEME-prefix descriptions match).
+      return await page
+        .locator('button[aria-pressed]')
+        .filter({ hasText: /^(Claude Code|OpenCode|Codex CLI|Gemini CLI|Cursor CLI|Factory Droid)$/ })
+        .count()
+    })
   await expect(
     "T18 step 3 has 6 adapter chips",
     adapterChipsCount === 6,
