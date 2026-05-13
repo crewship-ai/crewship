@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"text/tabwriter"
 
@@ -182,14 +183,68 @@ func (f *Formatter) YAML(v interface{}) error {
 	return yaml.NewEncoder(f.Writer).Encode(v)
 }
 
+// NDJSON prints data as newline-delimited JSON.
+//
+// When v is any slice or array kind, each element is encoded as its
+// own line — this is the pipe-friendly format consumed by tools like
+// jq -c, fx, or any stream-processing pipeline. When v is anything
+// else (struct, map, scalar), the whole value is encoded as a single
+// line.
+//
+// The reflect path handles both `[]interface{}` (untyped) and
+// `[]Concrete` slices (e.g. `[]runResponse`). The previous fast-path-
+// only implementation silently encoded the whole typed slice as one
+// JSON line, which broke `--format ndjson` for every command that
+// passed a concrete slice type.
+//
+// The encoder is configured with no indentation; each row is one JSON
+// object terminated by "\n".
+func (f *Formatter) NDJSON(v interface{}) error {
+	enc := json.NewEncoder(f.Writer)
+	enc.SetIndent("", "")
+	if v == nil {
+		return nil
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		// Byte-slices are special-cased — `[]byte` is conventionally
+		// raw JSON or a string; emitting one byte per line would be
+		// nonsense. Treat as a single record.
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return enc.Encode(v)
+		}
+		n := rv.Len()
+		for i := 0; i < n; i++ {
+			if err := enc.Encode(rv.Index(i).Interface()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return enc.Encode(v)
+}
+
+// WriteNDJSONRow writes one v as a JSON object followed by "\n" to f.Writer.
+//
+// Useful for streaming sources where callers produce rows one at a time —
+// e.g., SSE event handlers, paginated REST consumers, REPL output. Each
+// call is self-contained; no buffering between calls.
+func (f *Formatter) WriteNDJSONRow(v interface{}) error {
+	enc := json.NewEncoder(f.Writer)
+	enc.SetIndent("", "")
+	return enc.Encode(v)
+}
+
 // Auto routes to the correct format based on f.Format.
-// tableHeaders/tableRows for table format, v for json/yaml.
+// tableHeaders/tableRows for table format, v for json/yaml/ndjson.
 func (f *Formatter) Auto(v interface{}, tableHeaders []string, tableRows [][]string) error {
 	switch f.Format {
 	case "json":
 		return f.JSON(v)
 	case "yaml":
 		return f.YAML(v)
+	case "ndjson":
+		return f.NDJSON(v)
 	case "quiet":
 		for _, row := range tableRows {
 			if len(row) > 0 {
@@ -210,6 +265,8 @@ func (f *Formatter) AutoDetail(v interface{}, pairs [][]string) error {
 		return f.JSON(v)
 	case "yaml":
 		return f.YAML(v)
+	case "ndjson":
+		return f.NDJSON(v)
 	case "quiet":
 		// For quiet mode on detail, print the first value (usually ID)
 		if len(pairs) > 0 && len(pairs[0]) >= 2 {

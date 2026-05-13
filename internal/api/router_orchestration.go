@@ -139,6 +139,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Runs (require workspace context)
 	runs := NewRunHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
+	r.mux.Handle("GET /api/v1/runs/{id}", authed(wsCtx(http.HandlerFunc(runs.Get))))
 
 	// Crew Journal: workspace-wide event stream. Reads only — writes are
 	// internal via journal.Writer emits from handlers across the codebase.

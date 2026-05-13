@@ -20,6 +20,13 @@ type CLIConfig struct {
 	// "auto" (default) renders only when stdout is a TTY; "on" forces;
 	// "off" disables. Overridden by --no-markdown / --markdown flags.
 	Markdown string `yaml:"markdown,omitempty"`
+	// Notifications enables desktop notifications for long-running run
+	// completions, escalations, and pending approvals. Off by default
+	// so the CLI never starts pinging without explicit opt-in.
+	Notifications bool `yaml:"notifications,omitempty"`
+	// PlanByDefault toggles the `--plan` flag default to true for run/ask.
+	// Useful for teams that want plan-first to be the norm.
+	PlanByDefault bool `yaml:"plan_by_default,omitempty"`
 }
 
 // DefaultConfigDir returns the path to ~/.crewship.
