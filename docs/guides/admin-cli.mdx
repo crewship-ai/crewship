@@ -14,6 +14,18 @@ The flow is deliberately non-circular. The most important caller is an admin who
 
 Three subcommands ship today, all in `cmd/crewship/cmd_admin.go`: `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default, or `--password` for scripted recovery); `list-users` dumps every row of the `users` table to a tab-aligned table so an operator can verify which email actually exists before resetting it; and `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. All three short-circuit early with a clear error if the data directory is missing or the database is locked by a running server.
 
+## When to use it
+
+Reach for `crewship admin` only when the in-band recovery paths can't apply. For everyday user management — invites, role changes on a healthy server, password rotation from inside the app — the web UI is the right surface; bypassing it leaves the audit trail thinner and risks racing the running server. The narrow set of legitimate uses:
+
+- **You can't log in at all.** Forgot password, sole owner of the workspace, mailer not configured, OAuth provider misconfigured — any combination where the web `/forgot` flow won't deliver a reset link. `crewship admin reset-password --email=…` mints a new hash directly.
+- **The mailer is unreachable or never set up.** Fresh self-hosted installs without `RESEND_API_KEY` get a deliberate `mailer.Disabled` — `/forgot` still returns 200 (no enumeration) but no email goes out. Use the CLI instead of standing up SMTP just to recover one account.
+- **CI / unattended provisioning needs a seeded admin.** A Dockerfile that bakes a baseline workspace can run `crewship admin reset-password --email=admin@example.com --password=$BOOTSTRAP_PASSWORD` non-interactively against the freshly migrated database, then start the server. The HTTP API isn't available yet at that point, so this is the only path.
+- **You need to verify which email actually exists.** Operators routinely guess at email casing (`Admin@…` vs `admin@…`) before a reset. `crewship admin list-users` dumps the table so the reset command targets the right row instead of silently failing.
+- **A botched RBAC change locked everyone out of a workspace.** If a `promote` from the UI accidentally demoted the last `OWNER`, the UI can no longer fix it (no `OWNER` left to call the endpoint). Re-promoting from the CLI is the unblock.
+
+If the server is healthy, the user is logged in, and the workspace still has at least one `OWNER`, prefer the corresponding HTTP endpoint or settings page — every admin-CLI call is one more uncontrolled DB write to keep out of the audit story.
+
 ## Related
 
 - [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
