@@ -236,18 +236,21 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
             <div className="space-y-2">
               {(() => {
                 const total = template.agents.length
-                const primarySlugs = template.agents.slice(0, total - 1).map((x) => x.slug)
-                const lastSlug = total > 0 ? template.agents[total - 1].slug : null
+                // Diversity only kicks in when the user actually
+                // picked a regional language — for English the
+                // default pool is already globally mixed, so all
+                // four agents stay on the primary pool.
+                const willMix = total > 1 && language !== undefined && language !== "English"
+                const primarySlugs = willMix
+                  ? template.agents.slice(0, total - 1).map((x) => x.slug)
+                  : template.agents.map((x) => x.slug)
+                const lastSlug = willMix && total > 0 ? template.agents[total - 1].slug : null
                 const primaryLocale = language ?? "English"
-                const diverseLocale =
-                  total > 1 && language !== undefined && language !== "English"
-                    ? getDiverseLocale(language)
-                    : primaryLocale
+                const diverseLocale = willMix ? getDiverseLocale(language!) : primaryLocale
                 const primaryNames = getCrewNames(primarySlugs, primaryLocale)
                 const diverseNames = lastSlug ? getCrewNames([lastSlug], diverseLocale) : {}
                 return template.agents.map((a, i) => {
-                  const isDiverse =
-                    total > 1 && i === total - 1 && language !== undefined && language !== "English"
+                  const isDiverse = willMix && i === total - 1
                   const effectiveLocale = isDiverse ? diverseLocale : primaryLocale
                   const avatarSrc =
                     effectiveLocale !== "English"
