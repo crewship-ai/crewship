@@ -139,6 +139,24 @@ Examples:
 			return fmt.Errorf("prompt is required (positional, --prompt, stdin pipe, or --with-* flag)")
 		}
 
+		// --plan flag opts this run into plan-mode (prompt-engineered,
+		// no backend mode change). The latch is also set by `crewship
+		// plan` which dispatches into this same RunE.
+		planFlag, _ := cmd.Flags().GetBool("plan")
+		if planFlag {
+			planModeRequested = true
+		}
+		prompt = ApplyPlanFlag(prompt)
+
+		if eff, _ := cmd.Flags().GetString("effort"); eff != "" {
+			if err := SetEffort(eff); err != nil {
+				return err
+			}
+		}
+		if st, _ := cmd.Flags().GetBool("show-thinking"); st {
+			SetShowThinking(true)
+		}
+
 		if dryRun {
 			fmt.Print(prompt)
 			if !strings.HasSuffix(prompt, "\n") {
@@ -191,10 +209,7 @@ Examples:
 		}
 
 		// Create one-shot chat (origin=CLI keeps web UI sidebar tagged correctly).
-		resp, err := client.Post("/api/v1/agents/"+agentID+"/chats", map[string]string{
-			"mode":   "CHAT",
-			"origin": "CLI",
-		})
+		resp, err := client.Post("/api/v1/agents/"+agentID+"/chats", ChatCreationBody())
 		if err != nil {
 			return fmt.Errorf("create chat: %w", err)
 		}
@@ -302,4 +317,7 @@ func init() {
 	askCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	askCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	askCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")
+	askCmd.Flags().Bool("plan", false, "Plan mode: output a step-by-step plan without executing tools")
+	askCmd.Flags().String("effort", "", "Reasoning effort: minimal|low|medium|high|xhigh")
+	askCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
 }

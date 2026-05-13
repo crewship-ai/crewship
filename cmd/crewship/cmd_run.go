@@ -89,6 +89,23 @@ Examples:
 			return err
 		}
 
+		// Plan mode is a prompt-prefix injection rather than a server
+		// flag — see cmd_plan.go for the full rationale.
+		planFlag, _ := cmd.Flags().GetBool("plan")
+		if planFlag {
+			planModeRequested = true
+		}
+		prompt = ApplyPlanFlag(prompt)
+
+		if eff, _ := cmd.Flags().GetString("effort"); eff != "" {
+			if err := SetEffort(eff); err != nil {
+				return err
+			}
+		}
+		if st, _ := cmd.Flags().GetBool("show-thinking"); st {
+			SetShowThinking(true)
+		}
+
 		interactive, _ := cmd.Flags().GetBool("interactive")
 		noStream, _ := cmd.Flags().GetBool("no-stream")
 		quiet, _ := cmd.Flags().GetBool("quiet")
@@ -122,11 +139,9 @@ Examples:
 			// Tag the session as CLI-origin so the SessionsSidebar in
 			// the chat UI shows a violet "CLI" chip — lets the user
 			// tell at a glance which sessions were spun up from a
-			// terminal vs the web UI.
-			resp, err := client.Post("/api/v1/agents/"+agentID+"/chats", map[string]string{
-				"mode":   "CHAT",
-				"origin": "CLI",
-			})
+			// terminal vs the web UI. ChatCreationBody folds in plan /
+			// effort metadata when active.
+			resp, err := client.Post("/api/v1/agents/"+agentID+"/chats", ChatCreationBody())
 			if err != nil {
 				return fmt.Errorf("create chat: %w", err)
 			}
@@ -411,6 +426,7 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 }
 
 func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *cli.AtomicFile) error {
+	startedAt := time.Now()
 	flush := func() {
 		if md != nil {
 			fmt.Print(md.Flush())
@@ -472,7 +488,16 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 		case "text":
 			emitText(event.Content)
 		case "thinking":
-			if !quiet {
+			// --show-thinking emits the full reasoning to stdout so it
+			// becomes part of the captured output; --quiet alone still
+			// suppresses the dim stderr peek. Untruncated text can be
+			// huge for some models — that's the user's choice.
+			if showThinking {
+				fmt.Print(event.Content)
+				if !strings.HasSuffix(event.Content, "\n") {
+					fmt.Println()
+				}
+			} else if !quiet {
 				fmt.Fprintf(os.Stderr, "%s[thinking]%s %s\n", cli.Gray, cli.Reset, truncate(event.Content, 100))
 			}
 		case "tool_call":
@@ -492,6 +517,7 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// Don't commit save — defer Close in the caller discards the
 			// tempfile so an aborted run never overwrites a previous artefact.
 			fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, event.Content)
+			maybeNotifyRunComplete(startedAt, "", "FAILED")
 			return joinErrs(fmt.Errorf("agent error: %s", event.Content))
 		case "done":
 			flush()
@@ -504,6 +530,7 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "\n%s[done]%s\n", cli.Green, cli.Reset)
 			}
+			maybeNotifyRunComplete(startedAt, "", "COMPLETED")
 			return saveErr
 		}
 	}
@@ -589,6 +616,9 @@ func init() {
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	runCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")
+	runCmd.Flags().Bool("plan", false, "Plan mode: output a step-by-step plan without executing tools")
+	runCmd.Flags().String("effort", "", "Reasoning effort: minimal|low|medium|high|xhigh")
+	runCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
 
 	runCmd.AddCommand(runListCmd)
 }
