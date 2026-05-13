@@ -28,7 +28,7 @@ export interface TeamTabProps {
 }
 
 export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
-  const { data, loading } = useAgentFetch<TeamPayload>(
+  const { data, loading, error } = useAgentFetch<TeamPayload>(
     async (signal) => {
       const r = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, { signal })
       if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
@@ -68,9 +68,16 @@ export function TeamTab({ agentId, workspaceId }: TeamTabProps) {
     )
   }
 
-  const crewId = data?.crewId ?? null
-  const agentSlug = data?.agentSlug ?? null
-  const messages = data?.messages ?? []
+  if (error || !data) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-6">
+        <Users className="h-8 w-8 text-muted-foreground/30 mb-2" />
+        <p className="text-label text-muted-foreground">Unable to load team conversations.</p>
+      </div>
+    )
+  }
+
+  const { crewId, agentSlug, messages } = data
 
   if (!crewId) {
     return (

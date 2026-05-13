@@ -48,7 +48,7 @@ export function AdvancedSection({
               onSave={(v) => {
                 const n = parseInt(v, 10)
                 if (!Number.isInteger(n) || n < 1) return
-                patch({ timeout_seconds: n })
+                return patch({ timeout_seconds: n })
               }}
             />
           </Row>
@@ -79,11 +79,16 @@ export function AdvancedSection({
           <Row label="Memory">
             <button
               type="button"
-              onClick={() => patch({ memory_enabled: !agent.memory_enabled })}
+              onClick={() => {
+                void patch({ memory_enabled: !agent.memory_enabled }).catch(() => {})
+              }}
               className={cn(
                 "relative inline-flex items-center w-9 h-5 rounded-full transition-colors",
                 agent.memory_enabled ? "bg-emerald-600/70" : "bg-zinc-700",
               )}
+              role="switch"
+              aria-checked={agent.memory_enabled}
+              aria-label="Enable memory for agent"
               aria-pressed={agent.memory_enabled}
             >
               <span
