@@ -164,11 +164,20 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 
 	resp, err := client.Post("/api/v1/auth/pair/redeem", payload)
 	if err != nil {
-		return fmt.Errorf("connect to server: %w", err)
+		return fmt.Errorf("could not reach %s — is the server running and the address correct?", serverURL)
 	}
 	defer resp.Body.Close()
 
 	if err := cli.CheckError(resp); err != nil {
+		// The redeem endpoint folds "wrong code" / "expired code" /
+		// "already consumed" into the same generic message to avoid
+		// being an enumeration oracle. The most likely cause from a
+		// user's perspective is the 10-minute TTL — call that out
+		// directly so they know to grab a fresh code.
+		msg := err.Error()
+		if strings.Contains(msg, "Invalid or expired code") {
+			return fmt.Errorf("the pair code didn't work — codes expire after 10 minutes; go back to the browser and click \"get a new one\"")
+		}
 		return fmt.Errorf("pair: %w", err)
 	}
 
@@ -180,7 +189,7 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 		return fmt.Errorf("parse redeem response: %w", err)
 	}
 	if redeem.CliToken == "" {
-		return fmt.Errorf("server returned empty cli_token")
+		return fmt.Errorf("server returned empty cli_token — please report this to ops")
 	}
 
 	cfg, err := cli.LoadConfig()
@@ -193,7 +202,19 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 		return fmt.Errorf("save config: %w", err)
 	}
 
-	cli.PrintSuccess(fmt.Sprintf("Paired successfully as %s. Token saved to ~/.crewship/cli-config.yaml", redeem.Email))
+	cli.PrintSuccess(fmt.Sprintf("Paired as %s. Token saved to ~/.crewship/cli-config.yaml", redeem.Email))
+
+	// Next-step guidance — without this the user is left holding a
+	// valid token and no idea what to do. Two paths from here:
+	//   1. Go back to the browser; the wizard's poll loop sees the
+	//      pair consumed and unlocks Launch.
+	//   2. Skip the browser entirely; run `crewship setup` here.
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Println("  • Back in the browser the onboarding wizard will unlock automatically.")
+	fmt.Println("  • Or finish from the terminal:")
+	fmt.Printf("      %screwship setup%s\n", cli.Bold, cli.Reset)
+	fmt.Println("    (interactive prompts for crew template, adapter, API key, language)")
 	return nil
 }
 

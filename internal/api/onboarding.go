@@ -268,13 +268,19 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pairing-mode users skip credential creation here — the CLI
-	// redeem flow has already produced a cli_token, which is the
-	// auth surface they'll actually use.
+	// IMPORTANT: pair mode does NOT skip credential creation any
+	// more. The CLI token from /pair/redeem authenticates the user
+	// to crewshipd; it does NOT give the agents in containers a way
+	// to call Claude. Agents always need a workspace-scoped provider
+	// credential (Anthropic key, OpenAI key, etc.) — that's
+	// independent of how the user drives Crewship.
+	//
+	// Previously this branch zeroed CredentialValue when
+	// pairing_mode=true. The result was a workspace full of agents
+	// with env_var_name set but no row in agent_credentials —
+	// agents booted, hit Claude, got "ANTHROPIC_API_KEY missing",
+	// and went silent. We caught this on the first end-to-end smoke.
 	credentialValue := req.CredentialValue
-	if req.PairingMode {
-		credentialValue = ""
-	}
 	credName := req.CredentialName
 	if credName == "" && credentialValue != "" {
 		credName = "API Key"
@@ -351,12 +357,13 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 	// (preferred_language is set in the parent Setup() before this
 	// fork — applies to both template + blank paths.)
 
-	// If the user pasted an Anthropic API key (browser mode), store
-	// it as a workspace-scoped credential BEFORE deploying the
-	// template so the template's auto-assign hooks pick it up. In
-	// pairing mode we skip — the CLI redemption has already minted
-	// a cli_token that is the user's auth surface.
-	if !req.PairingMode && strings.TrimSpace(req.CredentialValue) != "" {
+	// Always store the API key when one was provided, regardless of
+	// pairing mode. The CLI token from /pair/redeem authenticates
+	// the user to crewshipd, but agents in containers still need a
+	// workspace-scoped provider credential to actually call Claude.
+	// Storing BEFORE deploy lets the template's auto-assign hook
+	// wire it onto every freshly-created agent in one step.
+	if strings.TrimSpace(req.CredentialValue) != "" {
 		credName := req.CredentialName
 		if credName == "" {
 			credName = "API Key"

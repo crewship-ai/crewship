@@ -77,3 +77,32 @@ export function getAdapterBrand(key: string): AdapterBrand {
     border: "rgba(161, 161, 170, 0.40)",
   }
 }
+
+/**
+ * Direct links to each provider's API-key console page. These are the
+ * highest-confidence "give me a key" URLs as of 2026-05; if a vendor
+ * relocates their settings, update here and the onboarding wizard
+ * picks it up automatically.
+ */
+export const ADAPTER_KEY_CONSOLE: Record<string, { url: string; label: string }> = {
+  CLAUDE_CODE: { url: "https://console.anthropic.com/settings/keys", label: "Get an Anthropic key" },
+  OPENCODE:    { url: "https://console.anthropic.com/settings/keys", label: "Get an Anthropic key" },
+  CODEX_CLI:   { url: "https://platform.openai.com/api-keys",         label: "Get an OpenAI key" },
+  GEMINI_CLI:  { url: "https://aistudio.google.com/app/apikey",       label: "Get a Google AI key" },
+  CURSOR_CLI:  { url: "https://cursor.com/settings",                   label: "Get a Cursor key" },
+  FACTORY_DROID: { url: "https://app.factory.ai/settings/api-keys",    label: "Get a Factory key" },
+}
+
+/**
+ * Install / docs URL for each adapter's local CLI binary — used when
+ * the user picks "Pair my CLI" so they know where to grab the tool
+ * if they don't already have it.
+ */
+export const ADAPTER_CLI_INSTALL: Record<string, { url: string; label: string }> = {
+  CLAUDE_CODE: { url: "https://docs.claude.com/code", label: "Install Claude Code" },
+  OPENCODE:    { url: "https://opencode.ai/docs",      label: "Install OpenCode" },
+  CODEX_CLI:   { url: "https://platform.openai.com/docs/codex/overview", label: "Install Codex CLI" },
+  GEMINI_CLI:  { url: "https://ai.google.dev/gemini-api/docs/cli", label: "Install Gemini CLI" },
+  CURSOR_CLI:  { url: "https://cursor.com/docs/cli",   label: "Install Cursor CLI" },
+  FACTORY_DROID: { url: "https://docs.factory.ai/cli", label: "Install Factory Droid" },
+}

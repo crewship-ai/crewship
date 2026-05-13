@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
-import { Loader2, ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check } from "lucide-react"
+import { Loader2, ArrowRight, ArrowLeft, Rocket, Globe, Terminal, Copy, Check, ExternalLink, Sparkles, AlertTriangle } from "lucide-react"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelsForAdapter } from "@/lib/cli-adapters"
-import { getAdapterBrand } from "@/lib/cli-adapter-brand"
+import { getAdapterBrand, ADAPTER_KEY_CONSOLE, ADAPTER_CLI_INSTALL } from "@/lib/cli-adapter-brand"
 import {
   OnboardingPreview,
   TEMPLATES,
@@ -140,10 +140,14 @@ export default function OnboardingPage() {
   const [workspaceName, setWorkspaceName] = useState("")
   const [language, setLanguage] = useState<string>("English")
   const [crewSlug, setCrewSlug] = useState<CrewTemplateSlug | null>(null)
-  const [mode, setMode] = useState<HandoffMode>("browser")
+  // Default to "cli" — Claude Code users (our primary persona) almost
+  // always have a local CLI already; flagging it as the recommended
+  // path matters more than the browser-chat fallback.
+  const [mode, setMode] = useState<HandoffMode>("cli")
   const [adapter, setAdapter] = useState<string>("CLAUDE_CODE")
   const [model, setModel] = useState<string>("")
   const [apiKey, setApiKey] = useState("")
+  const [pairRemainingSec, setPairRemainingSec] = useState<number | null>(null)
 
   const [pairCode, setPairCode] = useState<string | null>(null)
   const [pairExpiresAt, setPairExpiresAt] = useState<string | null>(null)
@@ -216,6 +220,26 @@ export default function OnboardingPage() {
     }, 2000)
     return () => clearInterval(interval)
   }, [mode, step, pairCode, pairStatus])
+
+  // Live countdown for the pair-code expiry. Updates every second
+  // while the code is pending so the user can see at a glance how
+  // long they have before they need a fresh code. We refresh from
+  // pairExpiresAt rather than counting locally so a brief tab-switch
+  // doesn't desync the countdown.
+  useEffect(() => {
+    if (!pairExpiresAt || pairStatus !== "pending") {
+      setPairRemainingSec(null)
+      return
+    }
+    const tick = () => {
+      const remaining = Math.max(0, Math.round((new Date(pairExpiresAt).getTime() - Date.now()) / 1000))
+      setPairRemainingSec(remaining)
+      if (remaining === 0) setPairStatus("expired")
+    }
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [pairExpiresAt, pairStatus])
 
   const startPairing = useCallback(async () => {
     setError(null)
@@ -290,12 +314,20 @@ export default function OnboardingPage() {
     legacyCopy(pairCommand, succeed)
   }, [pairCommand])
 
+  /**
+   * Step 3 validation — API key is required in BOTH modes because the
+   * agents in containers always need a provider credential to call
+   * Claude (the CLI token is for the user's terminal, not the agents).
+   * In CLI mode we ALSO require the pair to be consumed so the local
+   * CLI is ready to drive the workspace.
+   */
   const canContinue = () => {
     if (step === 1) return workspaceName.trim().length >= 2
     if (step === 2) return crewSlug !== null
     if (step === 3) {
-      if (mode === "browser") return apiKey.trim().length >= 8
-      if (mode === "cli") return pairStatus === "consumed"
+      const keyOK = apiKey.trim().length >= 8
+      if (mode === "browser") return keyOK
+      if (mode === "cli") return keyOK && pairStatus === "consumed"
     }
     return false
   }
@@ -315,7 +347,10 @@ export default function OnboardingPage() {
         llm_provider: adapterCfg?.provider,
         llm_model: model || undefined,
         credential_name: adapterCfg?.envVar,
-        credential_value: mode === "browser" ? apiKey : undefined,
+        // API key is always sent now — agents need it regardless of
+        // browser vs CLI mode. Pairing mode just decides how the
+        // human drives Crewship.
+        credential_value: apiKey,
         pairing_mode: mode === "cli",
       }
       const res = await fetch("/api/v1/onboarding/setup", {
@@ -323,9 +358,19 @@ export default function OnboardingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
+      // 409 = onboarding already completed (another tab raced through).
+      // No point showing an error — we just bounce them onto the
+      // dashboard so they're not stuck on a wizard with no exit.
+      if (res.status === 409) {
+        router.push("/")
+        return
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(data.error ?? "Onboarding failed")
+        // Surface the server's actual message — usually a validation
+        // error with concrete cause (e.g. "Unknown crew template").
+        // Generic catch-all only fires when the response had no body.
+        setError(data.error ?? `Setup failed (HTTP ${res.status}). Try again or contact your admin.`)
         setSubmitting(false)
         return
       }
@@ -335,8 +380,15 @@ export default function OnboardingPage() {
       } else {
         router.push("/")
       }
-    } catch {
-      setError("Network error. Please try again.")
+    } catch (e) {
+      // Real network failure (no response). Differentiate from the
+      // "server returned 5xx" case above so users can tell whether
+      // to retry the action or check their connection.
+      setError(
+        e instanceof Error && e.message
+          ? `Couldn't reach the server: ${e.message}. Check your connection and try again.`
+          : "Couldn't reach the server. Check your connection and try again.",
+      )
       setSubmitting(false)
     }
   }
@@ -500,120 +552,58 @@ export default function OnboardingPage() {
                 )}
 
                 {step === 3 && (
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     <div>
                       <h2 className="text-2xl font-semibold tracking-tight">How will you work?</h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Browser is the fastest start. Pair a local CLI to drive things from your own machine.
+                        Drive Crewship from your terminal or stay in the browser. Either way the agents need an
+                        API key below to call their model.
                       </p>
                     </div>
 
+                    {/* MODE PICKER — CLI first with Recommended badge,
+                        because Claude Code users are our primary
+                        persona and they already have a terminal open. */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <ModeCard
+                        icon={Terminal}
+                        title="Pair my CLI"
+                        description="Claude Code, Gemini, Codex, OpenCode…"
+                        active={mode === "cli"}
+                        recommended
+                        onClick={() => setMode("cli")}
+                      />
                       <ModeCard
                         icon={Globe}
                         title="Chat in browser"
-                        description="Quickest start. Paste an API key."
+                        description="No terminal required."
                         active={mode === "browser"}
                         onClick={() => setMode("browser")}
                       />
-                      <ModeCard
-                        icon={Terminal}
-                        title="Pair local CLI"
-                        description="Claude Code, Gemini, Codex…"
-                        active={mode === "cli"}
-                        onClick={() => setMode("cli")}
-                      />
                     </div>
 
-                    <AnimatePresence mode="wait">
-                      {mode === "browser" && (
-                        <motion.div
-                          key="browser-config"
-                          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          transition={{ duration: 0.3, ease }}
-                          className="space-y-3"
-                        >
-                          <div className="space-y-2">
-                            <Label>CLI Adapter</Label>
-                            <div className="grid grid-cols-2 gap-2">
-                              {CLI_ADAPTER_KEYS.map((key) => {
-                                const cfg = CLI_ADAPTERS[key]
-                                const Icon = cfg.icon
-                                const brand = getAdapterBrand(key)
-                                const active = adapter === key
-                                return (
-                                  <motion.button
-                                    key={key}
-                                    type="button"
-                                    aria-pressed={active}
-                                    onClick={() => {
-                                      setAdapter(key)
-                                      setModel(cfg.defaultModel)
-                                    }}
-                                    whileTap={{ scale: 0.98 }}
-                                    className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors ${
-                                      active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                                    }`}
-                                  >
-                                    <span
-                                      className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                                      style={{
-                                        backgroundColor: brand.bg,
-                                        borderColor: brand.border,
-                                        borderWidth: 1,
-                                      }}
-                                    >
-                                      <Icon className="h-3.5 w-3.5" style={{ color: brand.fg }} />
-                                    </span>
-                                    <span className="text-xs font-medium truncate">{cfg.label}</span>
-                                  </motion.button>
-                                )
-                              })}
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="model">Model</Label>
-                            <Select value={model} onValueChange={setModel}>
-                              <SelectTrigger id="model" className="font-mono text-xs h-10">
-                                <SelectValue placeholder="Select model" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {getModelsForAdapter(adapter).map((m) => (
-                                  <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
-                                    {m.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="api_key">API key</Label>
-                            <Input
-                              id="api_key"
-                              type="password"
-                              value={apiKey}
-                              onChange={(e) => setApiKey(e.target.value)}
-                              placeholder={`${adapterCfg?.envVar ?? "API_KEY"} value`}
-                              className="font-mono text-xs h-10"
-                            />
-                          </div>
-                        </motion.div>
-                      )}
-
+                    {/* CLI PAIRING BLOCK (only when CLI mode active) */}
+                    <AnimatePresence>
                       {mode === "cli" && (
                         <motion.div
-                          key="cli-config"
+                          key="cli-pair"
                           initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0 }}
                           transition={{ duration: 0.3, ease }}
-                          className="space-y-3"
+                          className="space-y-2"
                         >
-                          <div className="text-xs text-muted-foreground">
-                            Run this on the machine where your CLI lives. Works with any of the six supported
-                            adapters — the server doesn&apos;t care which.
+                          <div className="text-xs text-muted-foreground leading-relaxed">
+                            Don&apos;t have the Crewship CLI yet? Download from{" "}
+                            <a
+                              href="https://github.com/crewship-ai/crewship/releases"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary underline-offset-2 hover:underline"
+                            >
+                              GitHub releases
+                            </a>
+                            , then run this on the machine where it lives:
                           </div>
                           {pairCode ? (
                             <>
@@ -655,12 +645,25 @@ export default function OnboardingPage() {
                                 </Button>
                               </div>
                               {pairStatus === "pending" && (
-                                <div className="flex items-center gap-2 text-xs text-amber-500">
-                                  <span className="relative inline-flex h-2 w-2">
-                                    <span className="absolute inset-0 rounded-full bg-amber-500 animate-ping opacity-75" />
-                                    <span className="relative inline-block h-2 w-2 rounded-full bg-amber-500" />
-                                  </span>
-                                  Waiting for your CLI to connect…
+                                <div className="flex items-center justify-between text-xs">
+                                  <div className="flex items-center gap-2 text-amber-500">
+                                    <span className="relative inline-flex h-2 w-2">
+                                      <span className="absolute inset-0 rounded-full bg-amber-500 animate-ping opacity-75" />
+                                      <span className="relative inline-block h-2 w-2 rounded-full bg-amber-500" />
+                                    </span>
+                                    Waiting for your CLI…
+                                  </div>
+                                  {pairRemainingSec !== null && (
+                                    <div
+                                      className={`tabular-nums font-mono ${
+                                        pairRemainingSec < 60
+                                          ? "text-amber-500"
+                                          : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      {formatCountdown(pairRemainingSec)}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                               {pairStatus === "consumed" && (
@@ -670,15 +673,17 @@ export default function OnboardingPage() {
                                   transition={{ duration: 0.35, ease }}
                                   className="flex items-center gap-2 text-xs text-emerald-500"
                                 >
-                                  <Check className="h-3.5 w-3.5" /> CLI paired. Ready to launch.
+                                  <Check className="h-3.5 w-3.5" /> CLI paired. You can finish below or jump
+                                  to <code className="font-mono">crewship setup</code> in the terminal.
                                 </motion.div>
                               )}
                               {pairStatus === "expired" && (
                                 <div className="flex items-center gap-2 text-xs text-destructive">
+                                  <AlertTriangle className="h-3.5 w-3.5" />
                                   Code expired —{" "}
                                   <button
                                     type="button"
-                                    className="underline"
+                                    className="underline font-medium"
                                     onClick={() => {
                                       setPairCode(null)
                                       setPairExpiresAt(null)
@@ -691,11 +696,6 @@ export default function OnboardingPage() {
                                   .
                                 </div>
                               )}
-                              {pairExpiresAt && pairStatus === "pending" && (
-                                <div className="text-[10px] text-muted-foreground tabular-nums">
-                                  Expires at {new Date(pairExpiresAt).toLocaleTimeString()}.
-                                </div>
-                              )}
                             </>
                           ) : (
                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -705,6 +705,110 @@ export default function OnboardingPage() {
                         </motion.div>
                       )}
                     </AnimatePresence>
+
+                    {/* ADAPTER + API KEY — always visible because agents
+                        need a credential regardless of mode. */}
+                    <div className="space-y-2">
+                      <Label>Agent toolchain</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {CLI_ADAPTER_KEYS.map((key) => {
+                          const cfg = CLI_ADAPTERS[key]
+                          const Icon = cfg.icon
+                          const brand = getAdapterBrand(key)
+                          const active = adapter === key
+                          return (
+                            <motion.button
+                              key={key}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => {
+                                setAdapter(key)
+                                setModel(cfg.defaultModel)
+                              }}
+                              whileTap={{ scale: 0.98 }}
+                              className={`flex items-center gap-2 rounded-xl border p-2.5 text-left transition-colors ${
+                                active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                              }`}
+                            >
+                              <span
+                                className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                                style={{
+                                  backgroundColor: brand.bg,
+                                  borderColor: brand.border,
+                                  borderWidth: 1,
+                                }}
+                              >
+                                <Icon className="h-3.5 w-3.5" style={{ color: brand.fg }} />
+                              </span>
+                              <span className="text-xs font-medium truncate">{cfg.label}</span>
+                            </motion.button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="model">Model</Label>
+                      <Select value={model} onValueChange={setModel}>
+                        <SelectTrigger id="model" className="font-mono text-xs h-10">
+                          <SelectValue placeholder="Select model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getModelsForAdapter(adapter).map((m) => (
+                            <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
+                              {m.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="api_key">{adapterCfg?.envVar ?? "API key"}</Label>
+                        {ADAPTER_KEY_CONSOLE[adapter] && (
+                          <a
+                            href={ADAPTER_KEY_CONSOLE[adapter].url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] text-primary inline-flex items-center gap-0.5 hover:underline"
+                          >
+                            {ADAPTER_KEY_CONSOLE[adapter].label}
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        )}
+                      </div>
+                      <Input
+                        id="api_key"
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder={`${adapterCfg?.envVar ?? "API_KEY"} value`}
+                        className="font-mono text-xs h-10"
+                      />
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Stored encrypted in your workspace. Your agents use this to call{" "}
+                        {adapterCfg?.label ?? "the model"} — required even when you drive Crewship from a paired CLI.
+                      </p>
+                    </div>
+
+                    {/* Adapter install hint — only relevant in CLI mode */}
+                    {mode === "cli" && ADAPTER_CLI_INSTALL[adapter] && (
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs flex items-start gap-2">
+                        <Sparkles className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                        <div className="flex-1 leading-relaxed text-muted-foreground">
+                          New to {adapterCfg?.label}?{" "}
+                          <a
+                            href={ADAPTER_CLI_INSTALL[adapter].url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline inline-flex items-center gap-0.5"
+                          >
+                            {ADAPTER_CLI_INSTALL[adapter].label}
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                          {" — "}then come back and paste the snippet above.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </motion.div>
@@ -828,12 +932,14 @@ function ModeCard({
   title,
   description,
   active,
+  recommended,
   onClick,
 }: {
   icon: typeof Globe
   title: string
   description: string
   active: boolean
+  recommended?: boolean
   onClick: () => void
 }) {
   return (
@@ -842,13 +948,30 @@ function ModeCard({
       aria-pressed={active}
       onClick={onClick}
       whileTap={{ scale: 0.99 }}
-      className={`flex flex-col gap-1 rounded-2xl border p-4 text-left transition-colors ${
+      className={`relative flex flex-col gap-1 rounded-2xl border p-4 text-left transition-colors ${
         active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
       }`}
     >
+      {recommended && (
+        <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/30 px-2 py-0.5 text-[10px] font-semibold text-primary uppercase tracking-[0.06em]">
+          Recommended
+        </span>
+      )}
       <Icon className={`h-5 w-5 ${active ? "text-primary" : "text-muted-foreground"}`} />
       <div className="text-sm font-medium tracking-tight">{title}</div>
       <div className="text-xs text-muted-foreground">{description}</div>
     </motion.button>
   )
+}
+
+/**
+ * Format a number of seconds as "m:ss" — used by the pair-code
+ * countdown so the user has a concrete sense of how long their code
+ * stays valid. Anything 60s+ shows as minutes:seconds; under a minute
+ * still shows as 0:NN for visual consistency.
+ */
+function formatCountdown(sec: number): string {
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${s.toString().padStart(2, "0")}`
 }
