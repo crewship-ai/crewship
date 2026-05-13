@@ -3,11 +3,21 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/logging"
 )
+
+// testLogger returns a slog.Logger that writes human-readable WARN-level
+// output to stderr — the project convention for *_test.go files (see
+// crewship-ai/crewship#34 review thread). Adopted here so the hub tests
+// don't bury real failures under noisy info-level JSON.
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+}
 
 func TestHubConnectionCount(t *testing.T) {
 	logger := logging.New("error", "json", nil)
@@ -92,59 +102,63 @@ func TestBroadcast(t *testing.T) {
 // the default arm of the select returned with no side effect and ops had no
 // signal that a client was missing events.
 func TestBroadcastDropsOnFullSendBuffer(t *testing.T) {
-	logger := logging.New("error", "json", nil)
-	hub := NewHub(logger, nil, NopValidatorForTests, NopSessionsForTests)
+	t.Run("drops on full send buffer", func(t *testing.T) {
+		logger := testLogger()
+		hub := NewHub(logger, nil, NopValidatorForTests, NopSessionsForTests)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// Join hub.Run before the test returns so the runtime doesn't leak the
-	// goroutine into adjacent tests (which would race on shared logger fields).
-	hubDone := make(chan struct{})
-	go func() {
-		hub.Run(ctx)
-		close(hubDone)
-	}()
-	defer func() {
-		cancel()
-		select {
-		case <-hubDone:
-		case <-time.After(time.Second):
-			t.Errorf("hub.Run did not exit within 1s of cancel")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// Join hub.Run before the test returns so the runtime doesn't leak the
+		// goroutine into adjacent tests (which would race on shared logger fields).
+		hubDone := make(chan struct{})
+		go func() {
+			hub.Run(ctx)
+			close(hubDone)
+		}()
+		defer func() {
+			cancel()
+			select {
+			case <-hubDone:
+			case <-time.After(time.Second):
+				// Fatalf so a stuck Run goroutine surfaces as a hard test
+				// failure rather than a silent passed-but-leaking run.
+				t.Fatalf("hub.Run did not exit within 1s of cancel")
+			}
+		}()
+
+		clientCtx, clientCancel := context.WithCancel(context.Background())
+		stuck := &Client{
+			hub:      hub,
+			userID:   "stuck-user",
+			channels: map[string]bool{"test-channel": true},
+			// Tiny buffer that we never drain, so the second send must drop.
+			send:   make(chan []byte, 1),
+			ctx:    clientCtx,
+			cancel: clientCancel,
 		}
-	}()
-
-	clientCtx, clientCancel := context.WithCancel(context.Background())
-	stuck := &Client{
-		hub:      hub,
-		userID:   "stuck-user",
-		channels: map[string]bool{"test-channel": true},
-		// Tiny buffer that we never drain, so the second send must drop.
-		send:   make(chan []byte, 1),
-		ctx:    clientCtx,
-		cancel: clientCancel,
-	}
-	defer clientCancel() // tear down even on early failure to avoid goroutine leak.
-	hub.mu.Lock()
-	if hub.channels["test-channel"] == nil {
-		hub.channels["test-channel"] = make(map[*Client]bool)
-	}
-	hub.channels["test-channel"][stuck] = true
-	hub.mu.Unlock()
-
-	// Send enough to cross dropLogThreshold so the dedup log fires at least once.
-	for i := 0; i < dropLogThreshold*2+1; i++ {
-		hub.Broadcast("test-channel", ServerMessage{Type: "test", Payload: i})
-	}
-
-	// Poll for the drop counter to advance — avoids relying on a fixed
-	// time.Sleep that flakes under slow CI.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if hub.DroppedFrames() > 0 && hub.loggedDropMark.Load() > 0 {
-			return
+		defer clientCancel() // tear down even on early failure to avoid goroutine leak.
+		hub.mu.Lock()
+		if hub.channels["test-channel"] == nil {
+			hub.channels["test-channel"] = make(map[*Client]bool)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("expected drops + loggedDropMark > 0 within deadline; got dropped=%d mark=%d",
-		hub.DroppedFrames(), hub.loggedDropMark.Load())
+		hub.channels["test-channel"][stuck] = true
+		hub.mu.Unlock()
+
+		// Send enough to cross dropLogThreshold so the dedup log fires at least once.
+		for i := 0; i < dropLogThreshold*2+1; i++ {
+			hub.Broadcast("test-channel", ServerMessage{Type: "test", Payload: i})
+		}
+
+		// Poll for the drop counter to advance — avoids relying on a fixed
+		// time.Sleep that flakes under slow CI.
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if hub.DroppedFrames() > 0 && hub.loggedDropMark.Load() > 0 {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("expected drops + loggedDropMark > 0 within deadline; got dropped=%d mark=%d",
+			hub.DroppedFrames(), hub.loggedDropMark.Load())
+	})
 }
