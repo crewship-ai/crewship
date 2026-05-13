@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useAuth } from "@/hooks/use-auth"
 
 /**
  * First-run bootstrap — shown on a Crewship instance that has never
@@ -35,6 +36,14 @@ const ease = [0.16, 1, 0.3, 1] as const
 export default function BootstrapPage() {
   const router = useRouter()
   const reduce = useReducedMotion()
+  // refresh() asks AuthProvider to re-fetch /api/auth/session. The
+  // provider only fetches once on mount; after bootstrap writes
+  // session cookies inline we need to nudge it so the (onboarding)
+  // layout's useSession sees `authenticated` instead of the stale
+  // `unauthenticated` from page load — without this nudge the
+  // layout fires its unauth redirect and the freshly-bootstrapped
+  // user lands back on /login.
+  const { refresh } = useAuth()
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -90,6 +99,11 @@ export default function BootstrapPage() {
         router.replace("/login?registered=true")
         return
       }
+      // Pull the new session into AuthContext BEFORE navigating so the
+      // (onboarding) layout's useSession sees authenticated state.
+      // Without this the layout's unauth-redirect fires before the
+      // re-fetch can update the context.
+      await refresh()
       router.replace("/onboarding")
     } catch (e) {
       setError(

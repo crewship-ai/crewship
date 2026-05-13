@@ -116,8 +116,20 @@ try {
   // ────────────────────────────────────────────────────────────────
   // T6 — step 1: workspace name pre-filled from email, language picker present
   // ────────────────────────────────────────────────────────────────
-  await page.waitForSelector("#workspace_name", { timeout: 10000 })
-  const wsValue = await page.inputValue("#workspace_name")
+  // Give the onboarding page time to settle: it fetches
+  // /api/v1/onboarding/status on mount, and the `checking` loader
+  // is shown until that resolves. A long-haul network blip should
+  // not bounce the suite.
+  await page.waitForLoadState("networkidle").catch(() => {})
+  const sawWorkspaceField = await page
+    .waitForSelector("#workspace_name", { timeout: 20000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!sawWorkspaceField) {
+    console.log(`  [debug] current url = ${page.url()}`)
+    console.log(`  [debug] body text = ${(await page.locator("body").textContent())?.slice(0, 400)}`)
+  }
+  const wsValue = sawWorkspaceField ? await page.inputValue("#workspace_name") : ""
   await expect(
     "T6 step 1 workspace name pre-filled",
     wsValue.length >= 2,
