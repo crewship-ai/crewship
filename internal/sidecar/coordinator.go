@@ -14,10 +14,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
 )
+
+// maxProxyBodyBytes caps every body the sidecar will buffer when
+// forwarding a workspace-scoped POST/PATCH/PUT upstream to crewshipd.
+// The sidecar runs as UID 1002 inside the agent container — the agent
+// process (UID 1001) is what writes to these endpoints, and a buggy or
+// adversarial agent could otherwise OOM the sidecar by streaming a
+// multi-GB body. 1 MiB matches the internal/api/readJSON cap on the
+// destination handler so legitimate workspace-scoped payloads (agent
+// records, credential metadata) always fit comfortably.
+const maxProxyBodyBytes = 1 << 20
 
 // handleListCrews proxies GET /crews to the crewshipd internal API.
 // Used by AGENT and LEAD agents to discover all workspace crews.
@@ -108,8 +119,17 @@ func (s *Server) proxyToAPI(w http.ResponseWriter, r *http.Request, method, path
 
 	var bodyReader io.Reader
 	if r.Body != nil && (method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut) {
-		bodyBytes, err := io.ReadAll(r.Body)
+		// MaxBytesReader closes the underlying body on overflow and
+		// returns a sentinel *http.MaxBytesError on the next Read.
+		limited := http.MaxBytesReader(w, r.Body, maxProxyBodyBytes)
+		bodyBytes, err := io.ReadAll(limited)
 		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				writeJSONResponse(w, http.StatusRequestEntityTooLarge,
+					map[string]string{"error": "request body exceeds sidecar limit"})
+				return
+			}
 			writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "failed to read body"})
 			return
 		}

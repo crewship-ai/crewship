@@ -293,6 +293,36 @@ func TestProxyToAPI_BodyReadFailureReturns400(t *testing.T) {
 	}
 }
 
+// TestProxyToAPI_BodyOverflowReturns413 verifies the maxProxyBodyBytes
+// cap fires before the sidecar buffers a runaway body into memory. An
+// agent process inside the container could otherwise crash its own
+// sidecar by POSTing a multi-GB body — the proxy buffered the whole
+// thing via io.ReadAll. Sending one byte past the cap is enough to
+// trip http.MaxBytesReader's *http.MaxBytesError.
+func TestProxyToAPI_BodyOverflowReturns413(t *testing.T) {
+	upstreamHit := false
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mock.Close()
+
+	srv := newQueryServer(t, &IPCConfig{BaseURL: mock.URL, Token: "tok"}, nil)
+
+	oversized := strings.Repeat("a", maxProxyBodyBytes+1)
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(oversized))
+	w := httptest.NewRecorder()
+
+	srv.proxyToAPI(w, req, http.MethodPost, "/x")
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413 on body overflow, got %d (body=%q)", w.Code, w.Body.String())
+	}
+	if upstreamHit {
+		t.Error("upstream must not be reached when body exceeds sidecar cap")
+	}
+}
+
 func TestProxyToAPI_InvalidUpstreamJSONIsBadGateway(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
