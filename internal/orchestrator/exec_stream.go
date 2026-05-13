@@ -11,6 +11,12 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
+// endOfStreamEmitTimeout bounds the fallback context used when the request
+// context was already cancelled and we still want to flush a post-mortem
+// journal entry. Long enough that a healthy journal write completes, short
+// enough that a stuck store can't pin the goroutine indefinitely.
+const endOfStreamEmitTimeout = 5 * time.Second
+
 // streamJSONMessage represents a line from Claude Code --output-format stream-json.
 // The format varies: top-level messages have "type" like "assistant", "result", "system";
 // stream events have type "stream_event" with nested "event" containing deltas.
@@ -162,14 +168,18 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// End-of-stream Crow's Nest emit. We run unconditionally (even when
 	// totalBytes is 0) because an empty-output run is still interesting for
 	// debugging — the UI can render "agent produced no stdout" explicitly
-	// instead of showing a hanging block. Use a fresh context in case the
-	// request context was cancelled (user pressed stop); we still want the
-	// capture recorded for post-mortem. ExecID lives on the provider
-	// ExecResult so we record it in the payload for correlation with the
-	// exec.command end event.
+	// instead of showing a hanging block. When the request context was
+	// cancelled (user pressed stop) we still want the capture recorded for
+	// post-mortem, but the fallback must be bounded — a fresh
+	// context.Background() can pin the goroutine forever if the journal
+	// store is slow or stuck. ExecID lives on the provider ExecResult so we
+	// record it in the payload for correlation with the exec.command end
+	// event.
 	emitCtx := ctx
 	if emitCtx.Err() != nil {
-		emitCtx = context.Background()
+		var cancelEmit context.CancelFunc
+		emitCtx, cancelEmit = context.WithTimeout(context.Background(), endOfStreamEmitTimeout)
+		defer cancelEmit()
 	}
 	payload := map[string]any{
 		"output":      string(captureBuf),

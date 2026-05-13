@@ -52,7 +52,20 @@ type Hub struct {
 	cancelFns    map[string]context.CancelFunc // session_id -> cancel function for active runs
 	cancelMu     sync.Mutex
 	channelAuth  ChannelAuthorizer
+
+	// Counts events dropped because a client's send buffer was full. The
+	// channel-level dispatch (Broadcast, BroadcastExcept) uses a non-blocking
+	// send to avoid one slow consumer stalling the whole hub; we lose the
+	// frame in that case but still want it visible to ops. Logged at WARN on
+	// each crossing of dropLogThreshold.
+	droppedFrames  atomic.Uint64
+	loggedDropMark atomic.Uint64
 }
+
+// dropLogThreshold is how many dropped frames must accumulate between WARN
+// log lines. Picked large enough that healthy traffic never logs and small
+// enough that a real stuck client is noticed within a few seconds.
+const dropLogThreshold = 16
 
 // Client represents a single authenticated WebSocket connection with its
 // channel subscriptions and outbound message buffer. authSessionID is
@@ -223,6 +236,7 @@ func (h *Hub) Run(ctx context.Context) {
 					select {
 					case client.send <- msg.Data:
 					default:
+						h.recordDrop(msg.Channel, client.userID)
 					}
 				}
 			}
@@ -286,10 +300,37 @@ func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage
 			select {
 			case client.send <- data:
 			default:
+				h.recordDrop(channel, client.userID)
 			}
 		}
 	}
 	h.mu.RUnlock()
+}
+
+// recordDrop increments the dropped-frame counter and emits a WARN log
+// roughly every dropLogThreshold drops, so a slow or stuck consumer can be
+// noticed without spamming for every single non-blocking send miss.
+func (h *Hub) recordDrop(channel, userID string) {
+	total := h.droppedFrames.Add(1)
+	lastLogged := h.loggedDropMark.Load()
+	if total-lastLogged < dropLogThreshold {
+		return
+	}
+	if !h.loggedDropMark.CompareAndSwap(lastLogged, total) {
+		return
+	}
+	h.logger.Warn("websocket broadcast dropped — slow consumer",
+		"channel", channel,
+		"user_id", userID,
+		"dropped_total", total,
+	)
+}
+
+// DroppedFrames returns the cumulative number of WebSocket broadcast frames
+// that were silently dropped because a client's send buffer was full.
+// Exposed for tests and the runtime stats endpoint.
+func (h *Hub) DroppedFrames() uint64 {
+	return h.droppedFrames.Load()
 }
 
 // HandleUpgrade authenticates the JWT token from the query parameter and
