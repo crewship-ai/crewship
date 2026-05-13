@@ -230,17 +230,7 @@ func (h *Hub) Run(ctx context.Context) {
 			}
 			h.mu.Unlock()
 		case msg := <-h.broadcast:
-			h.mu.RLock()
-			if subs, ok := h.channels[msg.Channel]; ok {
-				for client := range subs {
-					select {
-					case client.send <- msg.Data:
-					default:
-						h.recordDrop(msg.Channel, client.userID)
-					}
-				}
-			}
-			h.mu.RUnlock()
+			h.dispatch(msg.Channel, msg.Data, nil)
 		}
 	}
 }
@@ -257,9 +247,8 @@ func (h *Hub) SetChatHandler(handler ChatHandler) {
 
 // Broadcast sends a message to all clients subscribed to the given channel.
 func (h *Hub) Broadcast(channel string, msg ServerMessage) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("broadcast marshal error", "error", err)
+	data, ok := h.marshalFrame(msg)
+	if !ok {
 		return
 	}
 	h.broadcast <- ChannelMessage{Channel: channel, Data: data}
@@ -286,25 +275,42 @@ func (h *Hub) BroadcastWorkspace(wsID, eventType string, payload any) {
 
 // BroadcastExcept sends a message to all channel subscribers except the excluded client.
 func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage) {
+	data, ok := h.marshalFrame(msg)
+	if !ok {
+		return
+	}
+	h.dispatch(channel, data, func(c *Client) bool { return c != exclude })
+}
+
+func (h *Hub) marshalFrame(msg ServerMessage) ([]byte, bool) {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("broadcast marshal error", "error", err)
+		return nil, false
+	}
+	return data, true
+}
+
+// dispatch is the canonical fan-out loop: iterate the channel's subscribers,
+// apply filter (nil = accept all), attempt a non-blocking send, account for
+// backpressure drops. Acquires the hub RLock; callers must not already hold it.
+func (h *Hub) dispatch(channel string, data []byte, filter func(*Client) bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	subs, ok := h.channels[channel]
+	if !ok {
 		return
 	}
-	h.mu.RLock()
-	if subs, ok := h.channels[channel]; ok {
-		for client := range subs {
-			if client == exclude {
-				continue
-			}
-			select {
-			case client.send <- data:
-			default:
-				h.recordDrop(channel, client.userID)
-			}
+	for client := range subs {
+		if filter != nil && !filter(client) {
+			continue
+		}
+		select {
+		case client.send <- data:
+		default:
+			h.recordDrop(channel, client.userID)
 		}
 	}
-	h.mu.RUnlock()
 }
 
 // recordDrop increments the dropped-frame counter and emits a WARN log
