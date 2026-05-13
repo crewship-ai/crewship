@@ -18,6 +18,7 @@ import { CLI_ADAPTERS, getAdapterConfig } from "@/lib/cli-adapters"
 import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { getLocalizedAgentAvatar } from "@/lib/agent-avatar-locale"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -136,6 +137,14 @@ interface Props {
   mode: HandoffMode | null
   pairingPending?: boolean
   adapterKey?: string
+  /**
+   * Selected workspace language. Biases the avatar palette toward
+   * the locale (subtle skin/hair-colour ranges) so a Czech user
+   * sees a believably-local team, an English user sees the default
+   * globally-mixed pool. Falls through to default for languages we
+   * don't map.
+   */
+  language?: string
 }
 
 /** Apple-tight easing — cubic-bezier(0.16, 1, 0.3, 1). Matches the
@@ -143,7 +152,7 @@ interface Props {
  *  the marketing site. */
 const ease = [0.16, 1, 0.3, 1] as const
 
-export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPending, adapterKey }: Props) {
+export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPending, adapterKey, language }: Props) {
   const template = crewSlug ? TEMPLATES[crewSlug] : null
   const adapterCfg = adapterKey ? getAdapterConfig(adapterKey) : undefined
   const brand = adapterKey ? getAdapterBrand(adapterKey) : undefined
@@ -227,7 +236,11 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                 >
                   <div className="relative shrink-0">
                     <Image
-                      src={getAgentAvatarUrl(a.slug, "micah")}
+                      src={
+                        language && language !== "English"
+                          ? getLocalizedAgentAvatar(a.slug, language)
+                          : getAgentAvatarUrl(a.slug, "micah")
+                      }
                       alt={a.name}
                       width={32}
                       height={32}

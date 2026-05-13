@@ -874,6 +874,7 @@ export default function OnboardingPage() {
             mode={step === 3 ? mode : null}
             pairingPending={mode === "cli" && pairStatus !== "consumed"}
             adapterKey={adapter}
+            language={language}
           />
         </div>
       </div>
