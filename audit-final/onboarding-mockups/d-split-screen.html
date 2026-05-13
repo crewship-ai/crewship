@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>D — Split-screen with live preview</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Open Sans', system-ui, sans-serif; }
+  .fade-in { animation: fadeIn .3s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .grow-in { animation: growIn .35s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes growIn { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+
+<nav class="border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400 flex justify-between">
+  <a href="index.html" class="hover:text-white">← Back to comparison</a>
+  <span>Variant D — Split-screen w/ live preview</span>
+</nav>
+
+<div class="grid grid-cols-1 lg:grid-cols-[1fr_1fr] min-h-[calc(100vh-40px)]">
+
+  <!-- LEFT: form -->
+  <div class="border-r border-zinc-800 p-8 lg:p-12 flex items-center">
+    <div class="w-full max-w-md mx-auto space-y-6">
+
+      <!-- header -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-xl">⛵</div>
+        <div>
+          <div class="text-xs text-zinc-500">Crewship</div>
+          <h1 class="text-lg font-semibold">Setup</h1>
+        </div>
+      </div>
+
+      <!-- vertical stepper -->
+      <div class="space-y-1">
+        <div class="flex items-center gap-2 text-sm">
+          <div id="dot-1" class="w-2 h-2 rounded-full bg-blue-500"></div>
+          <span id="lbl-1" class="font-medium">Workspace</span>
+        </div>
+        <div class="ml-1 w-px h-3 bg-zinc-700"></div>
+        <div class="flex items-center gap-2 text-sm">
+          <div id="dot-2" class="w-2 h-2 rounded-full bg-zinc-700"></div>
+          <span id="lbl-2" class="text-zinc-500">Crew</span>
+        </div>
+        <div class="ml-1 w-px h-3 bg-zinc-700"></div>
+        <div class="flex items-center gap-2 text-sm">
+          <div id="dot-3" class="w-2 h-2 rounded-full bg-zinc-700"></div>
+          <span id="lbl-3" class="text-zinc-500">Adapter</span>
+        </div>
+      </div>
+
+      <!-- STEP 1 -->
+      <div id="step-1" class="space-y-4 fade-in">
+        <div>
+          <h2 class="text-xl font-semibold mb-1">What's your workspace called?</h2>
+          <p class="text-sm text-zinc-400">A workspace holds your crews and agents.</p>
+        </div>
+        <input id="ws-input" value="Acme Engineering" oninput="updatePreview()" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500" />
+        <div class="text-xs text-emerald-400 flex items-center gap-1.5"><span>✓</span> Docker detected (v25.0.3)</div>
+        <div class="flex justify-end">
+          <button onclick="show(2)" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-md text-sm font-medium transition">Continue →</button>
+        </div>
+      </div>
+
+      <!-- STEP 2 -->
+      <div id="step-2" class="hidden space-y-4">
+        <div>
+          <h2 class="text-xl font-semibold mb-1">Pick your first crew</h2>
+          <p class="text-sm text-zinc-400">Watch the preview update on the right.</p>
+        </div>
+        <div class="space-y-2">
+          <label class="flex items-center gap-3 p-3 bg-zinc-900 border border-zinc-700 rounded-md cursor-pointer hover:border-blue-500">
+            <input type="radio" name="crew" value="dev" onchange="selectCrew('dev')" class="accent-blue-500" />
+            <span class="text-xl">💻</span>
+            <span class="text-sm font-medium">Software Dev</span>
+            <span class="ml-auto text-xs text-zinc-500">4 agents</span>
+          </label>
+          <label class="flex items-center gap-3 p-3 bg-zinc-900 border border-zinc-700 rounded-md cursor-pointer hover:border-blue-500">
+            <input type="radio" name="crew" value="ops" onchange="selectCrew('ops')" class="accent-blue-500" />
+            <span class="text-xl">🔧</span>
+            <span class="text-sm font-medium">DevOps / SRE</span>
+            <span class="ml-auto text-xs text-zinc-500">4 agents</span>
+          </label>
+          <label class="flex items-center gap-3 p-3 bg-zinc-900 border border-zinc-700 rounded-md cursor-pointer hover:border-blue-500">
+            <input type="radio" name="crew" value="mkt" onchange="selectCrew('mkt')" class="accent-blue-500" />
+            <span class="text-xl">📢</span>
+            <span class="text-sm font-medium">Marketing</span>
+            <span class="ml-auto text-xs text-zinc-500">4 agents</span>
+          </label>
+          <label class="flex items-center gap-3 p-3 bg-zinc-900 border border-zinc-700 rounded-md cursor-pointer hover:border-blue-500">
+            <input type="radio" name="crew" value="fin" onchange="selectCrew('fin')" class="accent-blue-500" />
+            <span class="text-xl">🧮</span>
+            <span class="text-sm font-medium">Finance</span>
+            <span class="ml-auto text-xs text-zinc-500">4 agents</span>
+          </label>
+          <label class="flex items-center gap-3 p-3 bg-zinc-900 border border-zinc-700 rounded-md cursor-pointer hover:border-blue-500">
+            <input type="radio" name="crew" value="blank" onchange="selectCrew('blank')" class="accent-blue-500" />
+            <span class="text-xl">➕</span>
+            <span class="text-sm font-medium">Blank</span>
+            <span class="ml-auto text-xs text-zinc-500">1 agent</span>
+          </label>
+        </div>
+        <div class="flex justify-between">
+          <button onclick="show(1)" class="text-sm text-zinc-400 hover:text-white px-3 py-2">← Back</button>
+          <button onclick="show(3)" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-md text-sm font-medium transition">Continue →</button>
+        </div>
+      </div>
+
+      <!-- STEP 3 -->
+      <div id="step-3" class="hidden space-y-4">
+        <div>
+          <h2 class="text-xl font-semibold mb-1">How will you work?</h2>
+          <p class="text-sm text-zinc-400">Pick browser or pair your local CLI.</p>
+        </div>
+        <div class="space-y-2">
+          <label class="flex items-center gap-3 p-3 bg-zinc-900 border border-blue-500 rounded-md cursor-pointer">
+            <input type="radio" name="mode" value="browser" onchange="selectMode('browser')" checked class="accent-blue-500" />
+            <span class="text-xl">🌐</span>
+            <div>
+              <div class="text-sm font-medium">Chat in browser</div>
+              <div class="text-xs text-zinc-500">Quickest start</div>
+            </div>
+          </label>
+          <label class="flex items-center gap-3 p-3 bg-zinc-900 border border-zinc-700 rounded-md cursor-pointer hover:border-blue-500">
+            <input type="radio" name="mode" value="cli" onchange="selectMode('cli')" class="accent-blue-500" />
+            <span class="text-xl">💻</span>
+            <div>
+              <div class="text-sm font-medium">Pair my local CLI</div>
+              <div class="text-xs text-zinc-500">Claude Code, Gemini, Codex…</div>
+            </div>
+          </label>
+        </div>
+
+        <div id="mode-browser" class="space-y-2">
+          <select class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm">
+            <option>Claude Code (Anthropic)</option>
+            <option>Gemini CLI (Google)</option>
+            <option>Codex CLI (OpenAI)</option>
+            <option>OpenCode</option>
+            <option>Cursor CLI</option>
+            <option>Factory Droid</option>
+          </select>
+          <input type="password" value="sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxx" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm font-mono" />
+        </div>
+
+        <div id="mode-cli" class="hidden space-y-2">
+          <div class="bg-zinc-900 border border-zinc-700 rounded-md p-3 flex items-center justify-between">
+            <code class="text-xs font-mono text-emerald-400">$ crewship login --pair --code=K3F9-X2NM</code>
+            <button class="text-xs text-blue-400 hover:text-blue-300">📋</button>
+          </div>
+          <div class="text-xs text-zinc-500 flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+            Waiting for CLI…
+          </div>
+        </div>
+
+        <div class="flex justify-between">
+          <button onclick="show(2)" class="text-sm text-zinc-400 hover:text-white px-3 py-2">← Back</button>
+          <button class="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-md text-sm font-semibold transition">🚀 Launch</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT: live preview -->
+  <div class="bg-zinc-900/30 p-8 lg:p-12 flex items-center">
+    <div class="w-full max-w-md mx-auto">
+      <div class="text-xs uppercase tracking-wider text-zinc-500 mb-4">Live preview</div>
+
+      <!-- workspace card -->
+      <div class="bg-zinc-900 border border-zinc-700 rounded-xl p-4 flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-lg font-bold">🏢</div>
+        <div class="flex-1">
+          <div id="preview-ws-name" class="font-semibold">Acme Engineering</div>
+          <div class="text-xs text-zinc-500">Workspace</div>
+        </div>
+      </div>
+
+      <!-- arrow -->
+      <div class="flex justify-center my-2">
+        <div class="w-px h-6 bg-zinc-700"></div>
+      </div>
+
+      <!-- crew card -->
+      <div id="preview-crew-empty" class="bg-zinc-900/50 border border-dashed border-zinc-700 rounded-xl p-6 text-center text-sm text-zinc-500">
+        Pick a crew template ↑
+      </div>
+
+      <div id="preview-crew-filled" class="hidden bg-zinc-900 border border-zinc-700 rounded-xl p-4 grow-in">
+        <div class="flex items-center gap-3 mb-3 pb-3 border-b border-zinc-800">
+          <div id="preview-crew-icon" class="w-10 h-10 rounded-lg bg-blue-950/50 border border-blue-900/50 flex items-center justify-center text-xl">💻</div>
+          <div>
+            <div id="preview-crew-name" class="font-semibold">Software Dev</div>
+            <div id="preview-crew-meta" class="text-xs text-zinc-500">4 agents · Claude Sonnet 4.6</div>
+          </div>
+        </div>
+        <div id="preview-agents" class="space-y-2"></div>
+      </div>
+
+      <div id="preview-adapter" class="hidden mt-4 bg-emerald-950/30 border border-emerald-900/50 rounded-xl p-3 text-xs text-emerald-300 grow-in">
+        <div class="flex items-center gap-2">
+          <span>✓</span>
+          <span id="preview-adapter-text">Ready to launch with Claude Code</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+const CREWS = {
+  dev:   { name: 'Software Dev',  icon: '💻', bg: 'bg-blue-950/50',    bd: 'border-blue-900/50',    agents: ['Tech Lead', 'Backend Dev', 'Frontend Dev', 'QA Engineer'] },
+  ops:   { name: 'DevOps / SRE',  icon: '🔧', bg: 'bg-rose-950/50',    bd: 'border-rose-900/50',    agents: ['SRE Lead', 'Platform Eng', 'Security', 'CI/CD'] },
+  mkt:   { name: 'Marketing',     icon: '📢', bg: 'bg-violet-950/50',  bd: 'border-violet-900/50',  agents: ['Content Lead', 'Researcher', 'Copywriter', 'SEO'] },
+  fin:   { name: 'Finance',       icon: '🧮', bg: 'bg-emerald-950/50', bd: 'border-emerald-900/50', agents: ['Finance Lead', 'Bookkeeper', 'Tax Analyst', 'Reporting'] },
+  blank: { name: 'Blank crew',    icon: '➕', bg: 'bg-zinc-800',       bd: 'border-zinc-700',       agents: ['Your first agent'] },
+};
+
+function show(n) {
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById('step-' + i).classList.toggle('hidden', i !== n);
+    const dot = document.getElementById('dot-' + i);
+    const lbl = document.getElementById('lbl-' + i);
+    if (i <= n) {
+      dot.classList.remove('bg-zinc-700'); dot.classList.add('bg-blue-500');
+      lbl.classList.remove('text-zinc-500'); lbl.classList.add('font-medium');
+    } else {
+      dot.classList.add('bg-zinc-700'); dot.classList.remove('bg-blue-500');
+      lbl.classList.add('text-zinc-500'); lbl.classList.remove('font-medium');
+    }
+  }
+}
+
+function updatePreview() {
+  document.getElementById('preview-ws-name').textContent = document.getElementById('ws-input').value || '(unnamed)';
+}
+
+function selectCrew(slug) {
+  const c = CREWS[slug];
+  document.getElementById('preview-crew-empty').classList.add('hidden');
+  document.getElementById('preview-crew-filled').classList.remove('hidden');
+  document.getElementById('preview-crew-filled').classList.remove('grow-in');
+  void document.getElementById('preview-crew-filled').offsetWidth;
+  document.getElementById('preview-crew-filled').classList.add('grow-in');
+
+  document.getElementById('preview-crew-name').textContent = c.name;
+  document.getElementById('preview-crew-meta').textContent = c.agents.length + (c.agents.length === 1 ? ' agent' : ' agents') + ' · Claude Sonnet 4.6';
+  const iconEl = document.getElementById('preview-crew-icon');
+  iconEl.textContent = c.icon;
+  iconEl.className = 'w-10 h-10 rounded-lg ' + c.bg + ' border ' + c.bd + ' flex items-center justify-center text-xl';
+
+  const list = document.getElementById('preview-agents');
+  list.innerHTML = c.agents.map((a, i) => `
+    <div class="flex items-center gap-2 text-sm">
+      <div class="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-400">${i === 0 ? '⭐' : '👤'}</div>
+      <span>${a}</span>
+      ${i === 0 ? '<span class="text-[10px] uppercase text-zinc-500 ml-auto">Lead</span>' : ''}
+    </div>
+  `).join('');
+}
+
+function selectMode(mode) {
+  document.getElementById('mode-browser').classList.toggle('hidden', mode !== 'browser');
+  document.getElementById('mode-cli').classList.toggle('hidden', mode !== 'cli');
+  document.querySelectorAll('input[name=mode]').forEach(r => {
+    r.closest('label').classList.toggle('border-blue-500', r.checked);
+    r.closest('label').classList.toggle('border-zinc-700', !r.checked);
+  });
+  document.getElementById('preview-adapter').classList.remove('hidden');
+  document.getElementById('preview-adapter').classList.remove('grow-in');
+  void document.getElementById('preview-adapter').offsetWidth;
+  document.getElementById('preview-adapter').classList.add('grow-in');
+  document.getElementById('preview-adapter-text').textContent =
+    mode === 'browser' ? 'Ready to launch with Claude Code in browser' : 'Waiting for local CLI to pair…';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>B — Template-first gallery</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Open Sans', system-ui, sans-serif; }
+  .fade-in { animation: fadeIn .3s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .expand-in { animation: expand .35s ease-out; }
+  @keyframes expand { from { opacity: 0; max-height: 0; } to { opacity: 1; max-height: 800px; } }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+
+<nav class="border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400 flex justify-between">
+  <a href="index.html" class="hover:text-white">← Back to comparison</a>
+  <span>Variant B — Template-first gallery <span class="ml-2 bg-blue-600 text-white px-1.5 py-0.5 rounded text-[10px]">Recommended</span></span>
+</nav>
+
+<div class="min-h-[calc(100vh-40px)] p-6">
+  <div class="max-w-5xl mx-auto space-y-8">
+
+    <!-- header -->
+    <div class="text-center space-y-2 pt-4">
+      <div class="flex justify-center">
+        <div class="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center text-2xl">⛵</div>
+      </div>
+      <h1 class="text-2xl font-semibold">Welcome to Crewship</h1>
+      <p class="text-zinc-400">What kind of crew do you need first?</p>
+    </div>
+
+    <!-- gallery -->
+    <div id="gallery" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+      <button onclick="pickTemplate('dev')" data-tpl="dev" class="tpl bg-zinc-900 border border-zinc-800 hover:border-blue-500 rounded-xl p-5 text-left transition">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-10 h-10 rounded-lg bg-blue-950/50 border border-blue-900/50 flex items-center justify-center text-xl">💻</div>
+          <div>
+            <div class="font-semibold">Software Dev</div>
+            <div class="text-xs text-zinc-500">Engineering</div>
+          </div>
+        </div>
+        <ul class="text-xs text-zinc-400 space-y-1 mb-3">
+          <li>👤 Tech Lead <span class="text-zinc-600">— architect</span></li>
+          <li>👤 Backend Dev</li>
+          <li>👤 Frontend Dev</li>
+          <li>👤 QA Engineer</li>
+        </ul>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-600">4 agents · Claude Sonnet</div>
+      </button>
+
+      <button onclick="pickTemplate('ops')" data-tpl="ops" class="tpl bg-zinc-900 border border-zinc-800 hover:border-blue-500 rounded-xl p-5 text-left transition">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-10 h-10 rounded-lg bg-rose-950/50 border border-rose-900/50 flex items-center justify-center text-xl">🔧</div>
+          <div>
+            <div class="font-semibold">DevOps / SRE</div>
+            <div class="text-xs text-zinc-500">Engineering</div>
+          </div>
+        </div>
+        <ul class="text-xs text-zinc-400 space-y-1 mb-3">
+          <li>👤 SRE Lead</li>
+          <li>👤 Platform Engineer</li>
+          <li>👤 Security Analyst</li>
+          <li>👤 CI/CD Specialist</li>
+        </ul>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-600">4 agents · Claude Sonnet</div>
+      </button>
+
+      <button onclick="pickTemplate('mkt')" data-tpl="mkt" class="tpl bg-zinc-900 border border-zinc-800 hover:border-blue-500 rounded-xl p-5 text-left transition">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-10 h-10 rounded-lg bg-violet-950/50 border border-violet-900/50 flex items-center justify-center text-xl">📢</div>
+          <div>
+            <div class="font-semibold">Content Marketing</div>
+            <div class="text-xs text-zinc-500">Marketing</div>
+          </div>
+        </div>
+        <ul class="text-xs text-zinc-400 space-y-1 mb-3">
+          <li>👤 Content Lead</li>
+          <li>👤 Researcher</li>
+          <li>👤 Copywriter</li>
+          <li>👤 SEO Specialist</li>
+        </ul>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-600">4 agents · Claude Sonnet</div>
+      </button>
+
+      <button onclick="pickTemplate('fin')" data-tpl="fin" class="tpl bg-zinc-900 border border-zinc-800 hover:border-blue-500 rounded-xl p-5 text-left transition">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-10 h-10 rounded-lg bg-emerald-950/50 border border-emerald-900/50 flex items-center justify-center text-xl">🧮</div>
+          <div>
+            <div class="font-semibold">Accounting & Finance</div>
+            <div class="text-xs text-zinc-500">Operations</div>
+          </div>
+        </div>
+        <ul class="text-xs text-zinc-400 space-y-1 mb-3">
+          <li>👤 Finance Lead</li>
+          <li>👤 Bookkeeper</li>
+          <li>👤 Tax Analyst</li>
+          <li>👤 Reporting</li>
+        </ul>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-600">4 agents · Claude Sonnet</div>
+      </button>
+
+      <button onclick="pickTemplate('blank')" data-tpl="blank" class="tpl bg-zinc-900 border border-zinc-800 hover:border-blue-500 rounded-xl p-5 text-left transition md:col-span-2">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="w-10 h-10 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xl">➕</div>
+          <div>
+            <div class="font-semibold">Start blank</div>
+            <div class="text-xs text-zinc-500">Build your own crew from scratch</div>
+          </div>
+        </div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-600">1 agent · You pick role</div>
+      </button>
+
+    </div>
+
+    <!-- inline expansion (hidden until template picked) -->
+    <div id="config" class="hidden">
+      <div class="bg-zinc-900 border-2 border-blue-600 rounded-xl p-6 expand-in space-y-6">
+
+        <div class="flex items-center justify-between border-b border-zinc-800 pb-4">
+          <div class="flex items-center gap-3">
+            <div id="picked-icon" class="w-10 h-10 rounded-lg bg-blue-950/50 border border-blue-900/50 flex items-center justify-center text-xl">💻</div>
+            <div>
+              <div class="text-xs text-zinc-500">Selected template</div>
+              <div id="picked-name" class="font-semibold">Software Dev</div>
+            </div>
+          </div>
+          <button onclick="resetPick()" class="text-xs text-zinc-400 hover:text-white">change →</button>
+        </div>
+
+        <div class="space-y-2">
+          <label class="text-xs font-medium uppercase tracking-wider text-zinc-400">Workspace name</label>
+          <input value="Acme Engineering" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+          <div class="text-xs text-emerald-400 flex items-center gap-1.5"><span>✓</span> Docker detected (v25.0.3)</div>
+        </div>
+
+        <div class="space-y-2">
+          <label class="text-xs font-medium uppercase tracking-wider text-zinc-400">How will the crew run?</label>
+          <div class="grid grid-cols-2 gap-3">
+            <button onclick="selectMode('browser')" data-mode="browser" class="mode-tile bg-zinc-950 border border-blue-500 rounded-lg p-4 text-left transition">
+              <div class="text-xl mb-1">🌐</div>
+              <div class="text-sm font-semibold">Chat in browser</div>
+              <div class="text-xs text-zinc-500 mt-1">Quickest start</div>
+            </button>
+            <button onclick="selectMode('cli')" data-mode="cli" class="mode-tile bg-zinc-950 border border-zinc-700 rounded-lg p-4 text-left hover:border-blue-500 transition">
+              <div class="text-xl mb-1">💻</div>
+              <div class="text-sm font-semibold">Pair my local CLI</div>
+              <div class="text-xs text-zinc-500 mt-1">Use your own CLI tool</div>
+            </button>
+          </div>
+        </div>
+
+        <div id="mode-browser" class="space-y-2">
+          <label class="text-xs font-medium uppercase tracking-wider text-zinc-400">CLI Adapter & API key</label>
+          <select class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm">
+            <option>Claude Code (Anthropic)</option>
+            <option>Gemini CLI (Google)</option>
+            <option>Codex CLI (OpenAI)</option>
+            <option>OpenCode</option>
+            <option>Cursor CLI</option>
+            <option>Factory Droid</option>
+          </select>
+          <input type="password" value="sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxx" placeholder="sk-ant-..." class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm font-mono" />
+        </div>
+
+        <div id="mode-cli" class="hidden space-y-3">
+          <div class="text-xs text-zinc-400">Run this on the machine where your CLI is installed:</div>
+          <div class="bg-zinc-950 border border-zinc-700 rounded-md p-3 flex items-center justify-between">
+            <code class="text-xs font-mono text-emerald-400">$ crewship login --pair --code=K3F9-X2NM</code>
+            <button class="text-xs text-blue-400 hover:text-blue-300">📋 Copy</button>
+          </div>
+          <div class="text-xs text-zinc-500 flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+            Waiting for your CLI to connect…
+          </div>
+          <div class="text-[10px] text-zinc-600 flex items-center gap-2 flex-wrap">
+            <span>Works with:</span>
+            <span class="bg-zinc-800 px-1.5 py-0.5 rounded">Claude Code</span>
+            <span class="bg-zinc-800 px-1.5 py-0.5 rounded">Gemini CLI</span>
+            <span class="bg-zinc-800 px-1.5 py-0.5 rounded">Codex CLI</span>
+            <span class="bg-zinc-800 px-1.5 py-0.5 rounded">OpenCode</span>
+            <span class="bg-zinc-800 px-1.5 py-0.5 rounded">Cursor</span>
+            <span class="bg-zinc-800 px-1.5 py-0.5 rounded">Factory Droid</span>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-2 border-t border-zinc-800">
+          <button onclick="resetPick()" class="text-sm text-zinc-400 hover:text-white px-3 py-2">← Back to templates</button>
+          <button class="bg-blue-600 hover:bg-blue-500 px-5 py-2.5 rounded-md text-sm font-medium transition">🚀 Launch crew</button>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="text-center text-xs text-zinc-600 pt-4">
+      <button class="hover:text-zinc-400">Skip setup →</button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const TPL_META = {
+  dev:   { name: 'Software Dev',         icon: '💻', bg: 'bg-blue-950/50',    bd: 'border-blue-900/50' },
+  ops:   { name: 'DevOps / SRE',         icon: '🔧', bg: 'bg-rose-950/50',    bd: 'border-rose-900/50' },
+  mkt:   { name: 'Content Marketing',    icon: '📢', bg: 'bg-violet-950/50',  bd: 'border-violet-900/50' },
+  fin:   { name: 'Accounting & Finance', icon: '🧮', bg: 'bg-emerald-950/50', bd: 'border-emerald-900/50' },
+  blank: { name: 'Start blank',          icon: '➕', bg: 'bg-zinc-800',       bd: 'border-zinc-700' },
+};
+
+function pickTemplate(slug) {
+  const meta = TPL_META[slug];
+  const iconEl = document.getElementById('picked-icon');
+  iconEl.textContent = meta.icon;
+  iconEl.className = `w-10 h-10 rounded-lg ${meta.bg} border ${meta.bd} flex items-center justify-center text-xl`;
+  document.getElementById('picked-name').textContent = meta.name;
+  document.getElementById('gallery').classList.add('hidden');
+  document.getElementById('config').classList.remove('hidden');
+}
+
+function resetPick() {
+  document.getElementById('gallery').classList.remove('hidden');
+  document.getElementById('config').classList.add('hidden');
+}
+
+function selectMode(mode) {
+  document.querySelectorAll('.mode-tile').forEach(t => {
+    t.classList.toggle('border-blue-500', t.dataset.mode === mode);
+    t.classList.toggle('border-zinc-700', t.dataset.mode !== mode);
+  });
+  document.getElementById('mode-browser').classList.toggle('hidden', mode !== 'browser');
+  document.getElementById('mode-cli').classList.toggle('hidden', mode !== 'cli');
+}
+</script>
+</body>
+</html>

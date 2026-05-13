@@ -7,6 +7,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/services"
 )
 
@@ -28,6 +29,15 @@ func (r *Router) registerAuthRoutes() {
 	r.mux.HandleFunc("POST /api/v1/bootstrap", authH.Bootstrap)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
+
+	// Password recovery (no auth required — token IS the credential).
+	// Mailer reads RESEND_API_KEY / RESEND_FROM at startup; falls back
+	// to mailer.Disabled which returns ErrDisabled on Send. /forgot
+	// returns 200 either way (no enumeration); /reset is the
+	// token-redemption endpoint.
+	recoveryH := NewRecoveryHandler(r.db, r.logger, mailer.NewFromEnv(), r.sessionsStore)
+	r.mux.HandleFunc("POST /api/v1/auth/forgot", recoveryH.Forgot)
+	r.mux.HandleFunc("POST /api/v1/auth/reset", recoveryH.Reset)
 
 	// Google OAuth2
 	googleAuth := NewGoogleAuthHandler(r.db, r.logger, r.authMw.validator, r.sessionsStore, r.googleClientID, r.googleSecret, r.authBaseURL)

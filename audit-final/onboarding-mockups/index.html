@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Crewship onboarding — mockup comparison</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Open Sans', system-ui, sans-serif; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+<div class="max-w-6xl mx-auto px-6 py-12">
+  <header class="mb-10">
+    <div class="flex items-center gap-3 mb-3">
+      <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-xl">⛵</div>
+      <div>
+        <h1 class="text-2xl font-semibold">Crewship onboarding — 4 directions</h1>
+        <p class="text-zinc-400 text-sm">Klikni na variantu pro funkční prokliké demo. Pak mi řekni která se ti líbí nejvíc.</p>
+      </div>
+    </div>
+  </header>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <a href="a-classic-wizard.html" class="block bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-blue-500 hover:bg-zinc-900/80 transition">
+      <div class="text-xs uppercase text-zinc-500 mb-2 tracking-wider">Variant A</div>
+      <h2 class="text-lg font-semibold mb-2">Classic wizard</h2>
+      <p class="text-sm text-zinc-400 mb-4">Stepper nahoře, jeden krok najednou, Back/Next. Linear/Stripe esthetic. Bezpečná volba, nízké riziko.</p>
+      <ul class="text-xs text-zinc-500 space-y-1">
+        <li>+ Familiar pattern, low cognitive load</li>
+        <li>+ Easy to add/remove steps later</li>
+        <li>− "Seen it everywhere" feel</li>
+      </ul>
+    </a>
+
+    <a href="b-template-first.html" class="block bg-zinc-900 border-2 border-blue-600 rounded-xl p-6 hover:bg-zinc-900/80 transition relative">
+      <div class="absolute top-3 right-3 text-[10px] uppercase tracking-wider bg-blue-600 text-white px-2 py-0.5 rounded-full">Recommended</div>
+      <div class="text-xs uppercase text-zinc-500 mb-2 tracking-wider">Variant B</div>
+      <h2 class="text-lg font-semibold mb-2">Template-first gallery</h2>
+      <p class="text-sm text-zinc-400 mb-4">Hned na 1. screenu mapa crew templates s náhledem agentů. Výběr rozbalí inline workspace + adapter. Maximum wow.</p>
+      <ul class="text-xs text-zinc-500 space-y-1">
+        <li>+ Fastest time-to-value (~60s)</li>
+        <li>+ Templates as the hero</li>
+        <li>− 5 templates need polished art</li>
+      </ul>
+    </a>
+
+    <a href="c-scroll-reveal.html" class="block bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-blue-500 hover:bg-zinc-900/80 transition">
+      <div class="text-xs uppercase text-zinc-500 mb-2 tracking-wider">Variant C</div>
+      <h2 class="text-lg font-semibold mb-2">Single-page scroll reveal</h2>
+      <p class="text-sm text-zinc-400 mb-4">Všechny sekce na jedné stránce. Vyplnění odemyká další. Bez Back/Next. Notion/Vercel feel.</p>
+      <ul class="text-xs text-zinc-500 space-y-1">
+        <li>+ Power-user feel, dev-tool aesthetic</li>
+        <li>+ Easy to scan/revise</li>
+        <li>− Less guidance for first-time users</li>
+      </ul>
+    </a>
+
+    <a href="d-split-screen.html" class="block bg-zinc-900 border border-zinc-800 rounded-xl p-6 hover:border-blue-500 hover:bg-zinc-900/80 transition">
+      <div class="text-xs uppercase text-zinc-500 mb-2 tracking-wider">Variant D</div>
+      <h2 class="text-lg font-semibold mb-2">Split-screen w/ live preview</h2>
+      <p class="text-sm text-zinc-400 mb-4">Levý panel form, pravý živý náhled crew. Při výběru "Software Dev" se vpravo ihned vykreslí 4 agent karty.</p>
+      <ul class="text-xs text-zinc-500 space-y-1">
+        <li>+ Highest wow factor</li>
+        <li>+ User vidí co buduje v real time</li>
+        <li>− Mobile breakpoint je drama</li>
+      </ul>
+    </a>
+  </div>
+
+  <footer class="mt-10 text-xs text-zinc-600">
+    Mockup data: Software Dev / DevOps SRE / Marketing / Finance crew templates (existující seed_crew_templates.go).
+    CLI adapters: Claude Code, Gemini, Codex, OpenCode, Cursor, Factory Droid (lib/cli-adapters.ts).
+  </footer>
+</div>
+</body>
+</html>

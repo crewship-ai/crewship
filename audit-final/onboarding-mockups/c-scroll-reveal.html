@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>C — Single-page scroll reveal</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Open Sans', system-ui, sans-serif; }
+  .locked { opacity: 0.4; pointer-events: none; filter: grayscale(40%); }
+  .section { transition: opacity .4s ease, filter .4s ease; }
+  .badge-done { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+  .badge-pend { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+  .badge-lock { background: rgba(82,82,91,0.3); color: #a1a1aa; border: 1px solid rgba(82,82,91,0.4); }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+
+<nav class="border-b border-zinc-800 px-4 py-2 text-xs text-zinc-400 flex justify-between sticky top-0 bg-zinc-950/95 backdrop-blur z-10">
+  <a href="index.html" class="hover:text-white">← Back to comparison</a>
+  <span>Variant C — Scroll reveal</span>
+</nav>
+
+<div class="max-w-3xl mx-auto p-6 space-y-8">
+
+  <!-- header -->
+  <div class="flex items-center justify-between py-4">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-xl">⛵</div>
+      <div>
+        <div class="text-xs text-zinc-500">Crewship</div>
+        <h1 class="text-lg font-semibold">Setup</h1>
+      </div>
+    </div>
+    <button class="text-xs text-zinc-500 hover:text-zinc-300">Skip ×</button>
+  </div>
+
+  <!-- 1. Workspace -->
+  <section class="section">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm uppercase tracking-wider text-zinc-300">
+        <span class="text-zinc-500 mr-2">1.</span> Your workspace
+      </h2>
+      <span id="badge-1" class="badge-done text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">✓ Done</span>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-3">
+      <div class="space-y-2">
+        <label class="text-xs font-medium text-zinc-400">Name</label>
+        <input id="ws-input" value="Acme Engineering" oninput="updateState()" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
+      </div>
+      <div class="text-xs text-emerald-400 flex items-center gap-1.5"><span>✓</span> Docker detected (v25.0.3)</div>
+    </div>
+  </section>
+
+  <!-- 2. Crew -->
+  <section id="sec-2" class="section">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm uppercase tracking-wider text-zinc-300">
+        <span class="text-zinc-500 mr-2">2.</span> Pick your first crew
+      </h2>
+      <span id="badge-2" class="badge-pend text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">Required</span>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <button onclick="selectCrew('dev')" data-crew="dev" class="crew-tile bg-zinc-950 border border-zinc-700 hover:border-blue-500 rounded-lg p-3 text-center transition">
+          <div class="text-xl mb-1">💻</div>
+          <div class="text-xs font-semibold">Software Dev</div>
+          <div class="text-[10px] text-zinc-500">4 agents</div>
+        </button>
+        <button onclick="selectCrew('ops')" data-crew="ops" class="crew-tile bg-zinc-950 border border-zinc-700 hover:border-blue-500 rounded-lg p-3 text-center transition">
+          <div class="text-xl mb-1">🔧</div>
+          <div class="text-xs font-semibold">DevOps</div>
+          <div class="text-[10px] text-zinc-500">4 agents</div>
+        </button>
+        <button onclick="selectCrew('mkt')" data-crew="mkt" class="crew-tile bg-zinc-950 border border-zinc-700 hover:border-blue-500 rounded-lg p-3 text-center transition">
+          <div class="text-xl mb-1">📢</div>
+          <div class="text-xs font-semibold">Marketing</div>
+          <div class="text-[10px] text-zinc-500">4 agents</div>
+        </button>
+        <button onclick="selectCrew('fin')" data-crew="fin" class="crew-tile bg-zinc-950 border border-zinc-700 hover:border-blue-500 rounded-lg p-3 text-center transition">
+          <div class="text-xl mb-1">🧮</div>
+          <div class="text-xs font-semibold">Finance</div>
+          <div class="text-[10px] text-zinc-500">4 agents</div>
+        </button>
+        <button onclick="selectCrew('blank')" data-crew="blank" class="crew-tile bg-zinc-950 border border-zinc-700 hover:border-blue-500 rounded-lg p-3 text-center transition">
+          <div class="text-xl mb-1">➕</div>
+          <div class="text-xs font-semibold">Blank</div>
+          <div class="text-[10px] text-zinc-500">1 agent</div>
+        </button>
+      </div>
+      <div id="crew-preview" class="hidden mt-4 bg-zinc-950 border border-zinc-800 rounded-lg p-3">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">What's inside</div>
+        <div id="crew-agents" class="flex flex-wrap gap-2 text-xs"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Adapter -->
+  <section id="sec-3" class="section locked">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-semibold text-sm uppercase tracking-wider text-zinc-300">
+        <span class="text-zinc-500 mr-2">3.</span> How will you work?
+      </h2>
+      <span id="badge-3" class="badge-lock text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full">🔒 Locked</span>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+      <div id="locked-hint" class="text-xs text-zinc-500 italic">Fill in the sections above to unlock this step.</div>
+      <div id="adapter-content" class="hidden space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <button onclick="selectMode('browser')" data-mode="browser" class="mode-tile bg-zinc-950 border border-blue-500 rounded-lg p-4 text-left transition">
+            <div class="text-xl mb-1">🌐</div>
+            <div class="text-sm font-semibold">Chat in browser</div>
+            <div class="text-xs text-zinc-500 mt-1">Just paste an API key.</div>
+          </button>
+          <button onclick="selectMode('cli')" data-mode="cli" class="mode-tile bg-zinc-950 border border-zinc-700 rounded-lg p-4 text-left hover:border-blue-500 transition">
+            <div class="text-xl mb-1">💻</div>
+            <div class="text-sm font-semibold">Pair my local CLI</div>
+            <div class="text-xs text-zinc-500 mt-1">Claude Code, Gemini, Codex…</div>
+          </button>
+        </div>
+        <div id="mode-browser" class="space-y-2">
+          <select class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm">
+            <option>Claude Code (Anthropic)</option>
+            <option>Gemini CLI (Google)</option>
+            <option>Codex CLI (OpenAI)</option>
+            <option>OpenCode</option>
+            <option>Cursor CLI</option>
+            <option>Factory Droid</option>
+          </select>
+          <input type="password" value="sk-ant-xxxxxxxxxxxxxxxxxxxxxxxxxxx" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-sm font-mono" />
+        </div>
+        <div id="mode-cli" class="hidden space-y-2">
+          <div class="bg-zinc-950 border border-zinc-700 rounded-md p-3 flex items-center justify-between">
+            <code class="text-xs font-mono text-emerald-400">$ crewship login --pair --code=K3F9-X2NM</code>
+            <button class="text-xs text-blue-400 hover:text-blue-300">📋 Copy</button>
+          </div>
+          <div class="text-xs text-zinc-500 flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+            Waiting for your CLI to connect…
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- launch -->
+  <div class="flex justify-end pt-4">
+    <button id="btn-launch" disabled class="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 px-6 py-3 rounded-md text-sm font-semibold transition">
+      🚀 Launch
+    </button>
+  </div>
+
+  <div class="text-center text-xs text-zinc-600 pt-2">
+    Scroll up to revise any section. Nothing is saved until you press Launch.
+  </div>
+
+</div>
+
+<script>
+const CREWS = {
+  dev:   ['Tech Lead', 'Backend Dev', 'Frontend Dev', 'QA Engineer'],
+  ops:   ['SRE Lead', 'Platform Eng', 'Security', 'CI/CD'],
+  mkt:   ['Content Lead', 'Researcher', 'Copywriter', 'SEO'],
+  fin:   ['Finance Lead', 'Bookkeeper', 'Tax Analyst', 'Reporting'],
+  blank: ['Your first agent'],
+};
+let crewPicked = null;
+
+function selectCrew(slug) {
+  crewPicked = slug;
+  document.querySelectorAll('.crew-tile').forEach(t => {
+    t.classList.toggle('border-blue-500', t.dataset.crew === slug);
+    t.classList.toggle('border-zinc-700', t.dataset.crew !== slug);
+    t.classList.toggle('bg-blue-950/30', t.dataset.crew === slug);
+  });
+  const preview = document.getElementById('crew-preview');
+  const list = document.getElementById('crew-agents');
+  list.innerHTML = CREWS[slug].map(a => '<span class="bg-zinc-800 px-2 py-0.5 rounded">' + a + '</span>').join('');
+  preview.classList.remove('hidden');
+  updateState();
+}
+
+function updateState() {
+  const ws = document.getElementById('ws-input').value.trim();
+  const crewDone = crewPicked !== null;
+  const wsDone = ws.length >= 2;
+
+  // Unlock section 3 only when both are done
+  const sec3 = document.getElementById('sec-3');
+  const adapter = document.getElementById('adapter-content');
+  const hint = document.getElementById('locked-hint');
+  const badge3 = document.getElementById('badge-3');
+  if (wsDone && crewDone) {
+    sec3.classList.remove('locked');
+    adapter.classList.remove('hidden');
+    hint.classList.add('hidden');
+    badge3.className = 'badge-pend text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full';
+    badge3.textContent = 'Ready';
+    document.getElementById('btn-launch').disabled = false;
+  } else {
+    sec3.classList.add('locked');
+    adapter.classList.add('hidden');
+    hint.classList.remove('hidden');
+    badge3.className = 'badge-lock text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full';
+    badge3.textContent = '🔒 Locked';
+    document.getElementById('btn-launch').disabled = true;
+  }
+
+  // badge 2
+  const b2 = document.getElementById('badge-2');
+  if (crewDone) {
+    b2.className = 'badge-done text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full';
+    b2.textContent = '✓ Done';
+  } else {
+    b2.className = 'badge-pend text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full';
+    b2.textContent = 'Required';
+  }
+}
+
+function selectMode(mode) {
+  document.querySelectorAll('.mode-tile').forEach(t => {
+    t.classList.toggle('border-blue-500', t.dataset.mode === mode);
+    t.classList.toggle('border-zinc-700', t.dataset.mode !== mode);
+  });
+  document.getElementById('mode-browser').classList.toggle('hidden', mode !== 'browser');
+  document.getElementById('mode-cli').classList.toggle('hidden', mode !== 'cli');
+}
+
+updateState();
+</script>
+</body>
+</html>
