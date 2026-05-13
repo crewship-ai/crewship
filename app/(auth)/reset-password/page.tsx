@@ -90,7 +90,11 @@ function ResetForm() {
         <CardContent>
           {done ? (
             <div className="space-y-4">
-              <div className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-4 text-sm">
+              <div
+                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-4 text-sm"
+                role="status"
+                aria-live="polite"
+              >
                 <p className="font-medium text-emerald-700 dark:text-emerald-400">Password updated.</p>
                 <p className="mt-1 text-muted-foreground">
                   All existing sessions have been signed out. Redirecting to sign in…
@@ -100,7 +104,11 @@ function ResetForm() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
-                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                <div
+                  className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                  role="alert"
+                  aria-live="assertive"
+                >
                   {error}
                 </div>
               )}

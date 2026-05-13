@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -12,6 +14,25 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
+
+// readLineOrEmpty reads a single line from stdin and returns the
+// trimmed value, or "" on EOF / empty input. Avoids the previous
+// `err.Error() == "unexpected newline"` string match, which depended
+// on fmt.Scanln's internal error text — stable since Go 1.3 but
+// brittle by Go-idiom standards and flagged in code review.
+//
+// Returns "" on any read error too — every caller treats "" as
+// "user accepted the default", which is the same fallback the old
+// code took on a bare Enter.
+var stdinReader = bufio.NewReader(os.Stdin)
+
+func readLineOrEmpty() string {
+	line, err := stdinReader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return ""
+	}
+	return strings.TrimSpace(line)
+}
 
 // `crewship setup` is the CLI-side counterpart to the web onboarding
 // wizard. After `crewship login --pair` mints a CLI token, the user
@@ -223,7 +244,12 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	))
 	if result.AgentID != "" {
 		fmt.Printf("First agent ID: %s\n", result.AgentID)
-		fmt.Printf("Open it in the browser: %s/crews/agents/%s/chat\n", strings.TrimRight(cliCfg.Server, "/"), result.AgentID)
+		// Use the resolved server URL (flag > env > config > default),
+		// the same one newAPIClient() used to talk to the backend
+		// just above. Reading cliCfg.Server directly would print a
+		// stale URL when the user passed --server.
+		server := cli.ResolveServer(flagServer, cliCfg)
+		fmt.Printf("Open it in the browser: %s/crews/agents/%s/chat\n", strings.TrimRight(server, "/"), result.AgentID)
 	}
 	return nil
 }
@@ -258,12 +284,7 @@ func promptCrew() (string, error) {
 		fmt.Printf("  %d) %s\n", i+1, t.label)
 	}
 	fmt.Print("Choice [1]: ")
-	var raw string
-	if _, err := fmt.Scanln(&raw); err != nil && err.Error() != "unexpected newline" {
-		// Empty input → default.
-		return supportedCrewTemplates[0].slug, nil
-	}
-	raw = strings.TrimSpace(raw)
+	raw := readLineOrEmpty()
 	if raw == "" {
 		return supportedCrewTemplates[0].slug, nil
 	}
@@ -282,11 +303,7 @@ func promptAdapter() (string, error) {
 		fmt.Printf("  %d) %s\n", i+1, a.label)
 	}
 	fmt.Print("Choice [1]: ")
-	var raw string
-	if _, err := fmt.Scanln(&raw); err != nil && err.Error() != "unexpected newline" {
-		return supportedAdapters[0].key, nil
-	}
-	raw = strings.TrimSpace(raw)
+	raw := readLineOrEmpty()
 	if raw == "" {
 		return supportedAdapters[0].key, nil
 	}
@@ -314,11 +331,7 @@ func promptAPIKey(adapterLabel string) (string, error) {
 
 func promptOptional(prompt, defaultValue string) string {
 	fmt.Printf("%s: ", prompt)
-	var raw string
-	if _, err := fmt.Scanln(&raw); err != nil && err.Error() != "unexpected newline" {
-		return defaultValue
-	}
-	raw = strings.TrimSpace(raw)
+	raw := readLineOrEmpty()
 	if raw == "" {
 		return defaultValue
 	}

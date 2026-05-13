@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -364,7 +365,12 @@ func promptPasswordTwice() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read password (confirm): %w", err)
 	}
-	if string(pw1) != string(pw2) {
+	// Constant-time compare: even though this CLI tool has a tiny
+	// attack surface, naive `==` on two passwords short-circuits at
+	// the first differing byte and could theoretically leak prefix
+	// match length to a sufficiently noisy local observer. Cheap
+	// to do right, no reason not to.
+	if subtle.ConstantTimeCompare(pw1, pw2) != 1 {
 		return "", errors.New("passwords don't match")
 	}
 	return string(pw1), nil

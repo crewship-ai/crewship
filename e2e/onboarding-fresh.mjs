@@ -23,7 +23,18 @@ const URL = (process.env.ONBOARDING_URL ?? "http://localhost:3011").replace(/\/$
 const EMAIL = process.env.BOOTSTRAP_EMAIL ?? `qa-${Date.now()}@example.com`
 const PASSWORD = process.env.BOOTSTRAP_PASSWORD ?? "playwright-onboarding-pw"
 const NAME = process.env.BOOTSTRAP_NAME ?? "QA Tester"
-const API_KEY = process.env.BOOTSTRAP_API_KEY ?? "sk-ant-test-placeholder-key-not-real"
+// The onboarding submit hits Anthropic's /v1/messages with the token
+// to validate it, so a placeholder string just makes the launch step
+// false-fail. Require a real CLI token via env — there's no safe
+// in-repo default for a credential-shaped value that the server is
+// about to live-probe.
+const API_KEY = process.env.BOOTSTRAP_API_KEY
+if (!API_KEY) {
+  throw new Error(
+    "Set BOOTSTRAP_API_KEY to a valid Claude Code CLI token " +
+      "(output of `claude setup-token`) before running this script.",
+  )
+}
 
 let passed = 0
 let failed = 0
@@ -95,9 +106,12 @@ try {
     `name=${hasName} email=${hasEmail} pwd=${hasPwd}`,
   )
 
-  // First-run chip ("First-run setup") visible
-  const chipVisible = await page.getByText(/first-run setup/i).count()
-  await expect("T4 bootstrap shows 'First-run setup' chip", chipVisible >= 1)
+  // Initial-setup chip visible. Copy was reworded from "First-run
+  // setup" → "Initial setup" during the corporate-tone pass; this
+  // assertion has to track the live string or T4 false-fails before
+  // the real onboarding flow ever runs.
+  const chipVisible = await page.getByText(/initial setup/i).count()
+  await expect("T4 bootstrap shows 'Initial setup' chip", chipVisible >= 1)
 
   // ────────────────────────────────────────────────────────────────
   // T5 — bootstrap success creates session and redirects to /onboarding

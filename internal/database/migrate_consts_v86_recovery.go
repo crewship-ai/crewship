@@ -50,7 +50,16 @@ CREATE TABLE IF NOT EXISTS cli_pairings (
     adapter_hint  TEXT,                                -- telemetry only: 'CLAUDE_CODE' | 'GEMINI_CLI' | ...
     created_at    TEXT NOT NULL,
     expires_at    TEXT NOT NULL,                       -- created_at + 10 min
-    consumed_at   TEXT
+    consumed_at   TEXT,
+    -- Enforce status <-> consumed_at consistency at the DB level: a
+    -- consumed row MUST carry a consumed_at timestamp; a pending or
+    -- expired row MUST NOT. Without this, a buggy writer could leave
+    -- the table in a state the application code reads as both
+    -- "consumed but never consumed" and "still pending but expired".
+    CHECK (
+      (status = 'consumed' AND consumed_at IS NOT NULL) OR
+      (status IN ('pending', 'expired') AND consumed_at IS NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_cli_pairings_code

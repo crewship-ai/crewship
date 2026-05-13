@@ -162,9 +162,13 @@ func (h *CliPairHandler) Poll(w http.ResponseWriter, r *http.Request) {
 		if expires, err := time.Parse(time.RFC3339, expiresStr); err == nil && time.Now().UTC().After(expires) {
 			status = "expired"
 			// Best-effort flip so the next poll doesn't keep
-			// re-checking a dead row.
+			// re-checking a dead row. Filter on user_id + status =
+			// 'pending' so a poll racing a successful /redeem can't
+			// flip a freshly-consumed row back to 'expired' and
+			// strand the UI in the wrong terminal state.
 			_, _ = h.db.ExecContext(r.Context(),
-				"UPDATE cli_pairings SET status='expired' WHERE code = ?", code)
+				"UPDATE cli_pairings SET status='expired' WHERE code = ? AND user_id = ? AND status = 'pending'",
+				code, user.ID)
 		}
 	}
 

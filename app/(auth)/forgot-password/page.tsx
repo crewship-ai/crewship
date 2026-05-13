@@ -27,9 +27,13 @@ export default function ForgotPasswordPage() {
       // means a real failure looks identical to a real success from
       // the user's POV, and a visible error would itself be a side
       // channel ("oh, it WOULD have worked but I'm offline").
+    } finally {
+      // finally so the spinner can't get wedged if fetch() throws
+      // synchronously (e.g. a malformed URL) — try/catch above only
+      // handles the awaited rejection.
+      setLoading(false)
+      setSubmitted(true)
     }
-    setLoading(false)
-    setSubmitted(true)
   }
 
   return (

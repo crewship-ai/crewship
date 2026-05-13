@@ -78,7 +78,7 @@ export const LANGUAGES: Language[] = [
   { code: "pa", flag: "\u{1F1EE}\u{1F1F3}", name: "Punjabi", native: "\u0A2A\u0A70\u0A1C\u0A3E\u0A2C\u0A40" },
   { code: "mr", flag: "\u{1F1EE}\u{1F1F3}", name: "Marathi", native: "\u092E\u0930\u093E\u0920\u0940" },
   { code: "te", flag: "\u{1F1EE}\u{1F1F3}", name: "Telugu", native: "\u0C24\u0C46\u0C32\u0C41\u0C17\u0C41" },
-  { code: "gu", flag: "\u{1F1EE}\u{1F1F3}", name: "Gujarati", native: "\u0AAA\u0AC1\u0A9C\u0AB0\u0ABE\u0AA4\u0AC0" },
+  { code: "gu", flag: "\u{1F1EE}\u{1F1F3}", name: "Gujarati", native: "\u0A97\u0AC1\u0A9C\u0AB0\u0ABE\u0AA4\u0AC0" },
   { code: "kn", flag: "\u{1F1EE}\u{1F1F3}", name: "Kannada", native: "\u0C95\u0CA8\u0CCD\u0CA8\u0CA1" },
   { code: "ml", flag: "\u{1F1EE}\u{1F1F3}", name: "Malayalam", native: "\u0D2E\u0D32\u0D2F\u0D3E\u0D33\u0D02" },
   { code: "ne", flag: "\u{1F1F3}\u{1F1F5}", name: "Nepali", native: "\u0928\u0947\u092A\u093E\u0932\u0940" },
