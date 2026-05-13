@@ -1,0 +1,21 @@
+---
+title: "Onboarding"
+description: "First-run flow from empty database to a logged-in user with a primary LLM provider configured and a first crew ready to run."
+icon: "rocket"
+---
+
+# Onboarding
+
+## Overview
+
+Onboarding is the path Crewship takes a fresh installation through on its very first start — from an empty SQLite database to a single admin account, a configured LLM provider, and a ready-to-run first crew. It owns the moment between `crewship start` and the user's first agent message, and is the only flow where most of Crewship's safety rails (auth required, RBAC enforced, credentials encrypted at rest) get bootstrapped from defaults rather than from existing rows.
+
+Two surfaces drive it. The web wizard at `/onboarding` (`app/(onboarding)/onboarding/page.tsx`) is the default experience — a multi-step form that walks the operator through workspace naming, admin account creation, LLM provider selection, and first-crew templating, with a live preview pane on the right showing the chat surface that's being provisioned. The CLI mirror `crewship setup` (`cmd/crewship/cmd_setup.go`) covers headless installs and CI-driven provisioning, accepting the same inputs as flags and emitting the same final state.
+
+Behind both surfaces the onboarding service (`internal/api/onboarding.go` and `internal/services/onboarding.go`) is the single funnel: it validates inputs, resolves the chosen LLM provider against the same `resolveLLMProvider` registry that the agents API uses (so a value accepted here cannot be rejected later when the first agent runs), encrypts and stores the API key as a `SECRET`-tier credential, creates the workspace + admin user + first crew rows transactionally, and marks setup complete. After that flag flips, both `/onboarding` and the bootstrap auth page redirect to the regular sign-in flow — the wizard is intentionally one-shot.
+
+## Related
+
+- [First Crew](/guides/first-crew) — what the wizard's "first crew" step actually provisions.
+- [Credentials](/guides/credentials) — how the LLM API key entered during onboarding is encrypted and surfaced to agents.
+- [Installation](/guides/installation) — getting the binary onto the host before the wizard can run.
