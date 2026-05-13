@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -205,13 +206,21 @@ type Orchestrator struct {
 	presence       PresenceTracker
 	memoryMetrics  MemoryMetricsReader
 
-	// episodicUnreachableLogged guards against log spam when the episodic
-	// recall backend (e.g. Ollama at localhost:11434) is unreachable. We
-	// log the first failure for visibility, then suppress identical errors
-	// until a successful recall resets the flag — otherwise N parallel
-	// agent runs each emit their own log line per recall attempt.
-	episodicUnreachableLogged sync.Once
+	// episodicUnreachableLastLogged tracks when we last surfaced an
+	// "ollama unreachable" log so we can dedup the spam without going
+	// permanently silent. N parallel agent runs each hit recall every
+	// turn; without this dedup we'd log every miss. With it we log the
+	// first miss, then nothing until the suppression window elapses —
+	// long enough to keep logs quiet, short enough that a *new* outage
+	// after recovery still surfaces.
+	episodicUnreachableLastLogged atomic.Int64 // unix nano of last log
 }
+
+// episodicUnreachableLogInterval is the minimum gap between two
+// "ollama unreachable" log lines. Picked at the human-attention scale —
+// short enough to flag a recurring problem within one work block, long
+// enough that a stuck Ollama doesn't drown the log.
+const episodicUnreachableLogInterval = 10 * time.Minute
 
 // HookDispatcher is the narrow interface the orchestrator uses to fire
 // lifecycle hook events (pre/post agent start, pre/post LLM call, etc.)

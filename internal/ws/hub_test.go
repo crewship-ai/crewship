@@ -101,7 +101,6 @@ func TestBroadcastDropsOnFullSendBuffer(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
-	defer clientCancel()
 	stuck := &Client{
 		hub:      hub,
 		userID:   "stuck-user",
@@ -111,6 +110,7 @@ func TestBroadcastDropsOnFullSendBuffer(t *testing.T) {
 		ctx:    clientCtx,
 		cancel: clientCancel,
 	}
+	defer clientCancel() // tear down even on early failure to avoid goroutine leak.
 	hub.mu.Lock()
 	if hub.channels["test-channel"] == nil {
 		hub.channels["test-channel"] = make(map[*Client]bool)
@@ -118,12 +118,18 @@ func TestBroadcastDropsOnFullSendBuffer(t *testing.T) {
 	hub.channels["test-channel"][stuck] = true
 	hub.mu.Unlock()
 
-	for i := 0; i < 32; i++ {
+	// Send enough to cross dropLogThreshold so the dedup log fires at least once.
+	for i := 0; i < dropLogThreshold*2+1; i++ {
 		hub.Broadcast("test-channel", ServerMessage{Type: "test", Payload: i})
 	}
 	time.Sleep(50 * time.Millisecond)
 
 	if got := hub.DroppedFrames(); got == 0 {
 		t.Fatalf("expected drops on stuck consumer, got 0")
+	}
+	// Verify the threshold-based dedup actually advanced — without this assert
+	// the test would still pass even if recordDrop never logged anything.
+	if mark := hub.loggedDropMark.Load(); mark == 0 {
+		t.Fatalf("expected loggedDropMark > 0 after %d drops, got 0", hub.DroppedFrames())
 	}
 }

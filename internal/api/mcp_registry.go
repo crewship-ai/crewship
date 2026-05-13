@@ -308,16 +308,21 @@ func StartRegistrySyncWorker(db *sql.DB, logger *slog.Logger, stop <-chan struct
 		// Initial sync may hit a momentarily unreachable registry; retry a
 		// few times with exponential backoff so a transient 4xx/5xx at boot
 		// doesn't leave the catalog permanently empty until the 24h ticker
-		// fires. Stop early if the server is shutting down.
+		// fires. Stop early if the server is shutting down. This goroutine
+		// is already detached from server startup, so the retry total of
+		// ~3.75 min does not block boot.
 		const maxAttempts = 4
 		backoff := 15 * time.Second
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			err := SyncMCPRegistry(ctx, db, logger)
 			if err == nil {
+				if attempt > 1 {
+					logger.Info("initial MCP registry sync succeeded after retry", "attempt", attempt)
+				}
 				break
 			}
 			if attempt == maxAttempts {
-				logger.Error("initial MCP registry sync failed (giving up)", "error", err, "attempts", attempt)
+				logger.Error("initial MCP registry sync failed (giving up; daily ticker will retry)", "error", err, "attempts", attempt)
 				break
 			}
 			logger.Warn("initial MCP registry sync failed; will retry", "error", err, "attempt", attempt, "next_retry_in", backoff)

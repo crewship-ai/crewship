@@ -583,8 +583,11 @@ cmd_nuke() {
   # 3. Remove data directories.
   # Files written by agent containers are owned by container UIDs (1001/1002),
   # so a host-side `rm -rf` hits EACCES. Fall back to a one-shot Alpine
-  # container that is root inside and can clean its own droppings.
+  # container that is root inside and can clean its own droppings. The image
+  # tag is pinned (not `alpine:3`) so an offline box surfaces a pull failure
+  # loudly instead of silently no-op'ing.
   log "Removing data..."
+  local cleanup_image="alpine:3.19"
   remove_data_dir() {
     local dir="$1"
     [[ -e "$dir" ]] || return 0
@@ -593,9 +596,16 @@ cmd_nuke() {
       local parent base
       parent=$(dirname "$dir")
       base=$(basename "$dir")
-      $docker_cmd run --rm -v "$parent:/target" alpine:3 sh -c "rm -rf /target/$base" 2>/dev/null || true
+      if ! "$docker_cmd" image inspect "$cleanup_image" &>/dev/null; then
+        if ! "$docker_cmd" pull "$cleanup_image" &>/dev/null; then
+          warn "could not fetch $cleanup_image — skipping container-assisted rm"
+          return
+        fi
+      fi
+      "$docker_cmd" run --rm -v "$parent:/target" "$cleanup_image" \
+        sh -c 'rm -rf "/target/$1"' -- "$base" 2>/dev/null || true
     fi
-    [[ -e "$dir" ]] && warn "$dir not fully removed — try: sudo rm -rf $dir"
+    [[ -e "$dir" ]] && warn "$dir not fully removed — try: sudo rm -rf \"$dir\""
   }
   remove_data_dir "$DATA_DIR"
   remove_data_dir "$STATE_DIR"
