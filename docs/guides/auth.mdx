@@ -1,0 +1,21 @@
+---
+title: "Authentication"
+description: "Sign-in, signup, password recovery, OAuth, sessions, and the CLI tokens / device-pairing flow — every way a user proves identity to Crewship."
+icon: "shield-check"
+---
+
+# Authentication
+
+## Overview
+
+Authentication in Crewship is the gate every other surface sits behind — agents, credentials, journal, runs, even the onboarding wizard run inside a session, and every subsystem trusts the user identity stamped on the request without re-checking. The auth layer therefore has to handle four distinct entry points: an email/password sign-in for the web UI, a Google OAuth flow for SSO installs, an out-of-band password recovery path for accounts that have lost their credential, and a token-and-pairing handshake for the `crewship` CLI to authenticate against the same server.
+
+The implementation funnels every entry point through one router file (`internal/api/router_auth.go`) so the entire surface can be audited at once. Routes split into three trust tiers: public bootstrap endpoints (signup, /bootstrap, OAuth callbacks, password-reset redemption) that establish a session cookie; session-authed endpoints (session list/revoke, CLI token issuance, pairing start/poll) that act on the caller's own identity; and the NextAuth-compatible `/api/auth/*` shim that lets the Next.js frontend treat Crewship as a drop-in NextAuth provider. CLI tokens are persisted as bcrypt hashes; passwords likewise — neither is recoverable from the database.
+
+Two safety properties are load-bearing and worth knowing before changing this code. First, `/forgot` always returns 200 regardless of whether the email matches a real account, so the endpoint cannot be used to enumerate users; real-vs-fake is signalled only by what arrives in the user's inbox. Second, the reset-link origin is `CREWSHIP_PUBLIC_URL` and never `r.Host` — the latter is attacker-tainted via the `Host` header and would otherwise let a POST `/forgot` mail the victim a working reset link pointing at an attacker-controlled domain. The handler refuses to send reset mail if `CREWSHIP_PUBLIC_URL` is unset or malformed, on the principle that a broken email is strictly safer than a hijackable one.
+
+## Related
+
+- [Onboarding](/guides/onboarding) — the first-run flow that bootstraps the initial admin account.
+- [Credentials](/guides/credentials) — where the auth layer's `SECRET`-tier credentials (OAuth client secrets, mailer keys) live.
+- [Installation](/guides/installation) — the `CREWSHIP_PUBLIC_URL` and `RESEND_API_KEY` env vars that the recovery flow depends on.
