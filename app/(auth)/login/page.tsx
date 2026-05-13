@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useState, useEffect, type FormEvent } from "react"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { useAuth } from "@/hooks/use-auth"
@@ -93,29 +94,35 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-background to-muted/30 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
             <CrewshipLogoTile />
           </div>
-          <CardTitle className="text-xl">Welcome to Crewship</CardTitle>
+          <CardTitle className="text-2xl">Welcome to Crewship</CardTitle>
           <CardDescription>Sign in to manage your AI workforce</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {registered && (
-              <p className="text-sm text-center text-emerald-600 dark:text-emerald-400">
+              <div className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400">
                 Account created! Please sign in.
-              </p>
+              </div>
             )}
             {expired && !error && (
-              <p className="text-sm text-center text-amber-600 dark:text-amber-400" role="status" aria-live="polite">
+              <div
+                className="rounded-md border border-amber-200/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                role="status"
+                aria-live="polite"
+              >
                 Your session expired. Please sign in again.
-              </p>
+              </div>
             )}
             {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                {error}
+              </div>
             )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -129,7 +136,15 @@ function LoginForm() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 id="password"
                 type="password"
