@@ -9,10 +9,11 @@ import "net/http"
 
 // registerSystemRoutes wires health + system-info endpoints.
 //
-//	GET /api/health            (no auth)
-//	GET /api/v1/system/runtime (auth)
-//	GET /api/v1/system/license (auth)
-//	GET /api/v1/system/keeper  (auth)
+//	GET /api/health                  (no auth)
+//	GET /api/v1/system/setup-status  (no auth — first-run gate)
+//	GET /api/v1/system/runtime       (auth)
+//	GET /api/v1/system/license       (auth)
+//	GET /api/v1/system/keeper        (auth)
 func (r *Router) registerSystemRoutes() {
 	authed := r.authMw.RequireAuth
 
@@ -20,6 +21,11 @@ func (r *Router) registerSystemRoutes() {
 	r.mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	// First-run gate (no auth) — tells the login page whether to
+	// redirect a visitor to /bootstrap on an empty database.
+	setupH := NewSetupStatusHandler(r.db, r.logger, r.allowSignup)
+	r.mux.HandleFunc("GET /api/v1/system/setup-status", setupH.Status)
 
 	// System info (auth required)
 	system := NewSystemHandler(r.logger)

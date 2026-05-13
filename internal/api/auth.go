@@ -309,8 +309,17 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// onboarding_completed=0 on purpose: the new /bootstrap → /onboarding
+	// flow runs the workspace + crew template + adapter wizard AFTER
+	// the admin row exists. Pre-2026-05-13 the bootstrap handler WAS
+	// the entire onboarding (it created a default workspace and that
+	// was it), so this column was set to 1 unconditionally. With the
+	// split-screen onboarding wizard now responsible for picking the
+	// crew template and adapter, the flag must stay 0 until /onboarding/setup
+	// fires — otherwise the dashboard gate sees "done" and skips
+	// straight past the wizard the user just sent themselves into.
 	_, err = tx.ExecContext(r.Context(),
-		"INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+		"INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert user", "error", err)
@@ -361,6 +370,33 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("bootstrap: commit", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Set browser session cookies inline so the freshly-created admin
+	// lands authenticated on /onboarding without the frontend having
+	// to chain a /api/auth/callback/credentials call (which was racing
+	// against the auth-tier rate limiter and getting 403'd, dropping
+	// the user back on /login?registered=true).
+	//
+	// Same pattern Signup uses: background-derived context decoupled
+	// from r.Context() so a client disconnect between tx.Commit and
+	// sessions.Create doesn't roll back the user we just created.
+	authCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := h.setSessionCookies(authCtx, w, r, userID, req.FullName, req.Email); err != nil {
+		h.logger.Error("bootstrap: set session cookies", "error", err)
+		// Don't roll back the admin row — bootstrap can't be retried
+		// once a user exists, and the user can always log in manually
+		// with the password they just typed. Surface the partial
+		// success so the frontend can route to /login?registered=true.
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"user_id":         userID,
+			"email":           req.Email,
+			"workspace_id":    workspaceID,
+			"cli_token":       cliToken,
+			"session_pending": true,
+		})
 		return
 	}
 

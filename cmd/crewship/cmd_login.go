@@ -16,8 +16,11 @@ import (
 )
 
 var (
-	loginTokenFlag  string
-	loginGoogleFlag bool
+	loginTokenFlag   string
+	loginGoogleFlag  bool
+	loginPairFlag    bool
+	loginCodeFlag    string
+	loginAdapterHint string
 )
 
 var loginCmd = &cobra.Command{
@@ -33,10 +36,17 @@ Token mode (API token):
 
 Google OAuth (browser-based; finishes the flow in the web UI, then
 paste the CLI token printed at the end):
-  crewship login --google`,
+  crewship login --google
+
+Device-code pairing (paste the code shown in the browser onboarding
+or Settings → Pair CLI):
+  crewship login --pair --code=XXXX-XXXX`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		server := cli.ResolveServer(flagServer, cliCfg)
 
+		if loginPairFlag {
+			return loginWithPairing(server, loginCodeFlag, loginAdapterHint)
+		}
 		if loginTokenFlag != "" {
 			return loginWithToken(server, loginTokenFlag)
 		}
@@ -131,6 +141,90 @@ var whoamiCmd = &cobra.Command{
 func init() {
 	loginCmd.Flags().StringVar(&loginTokenFlag, "token", "", "API token for non-interactive login")
 	loginCmd.Flags().BoolVar(&loginGoogleFlag, "google", false, "Sign in via Google OAuth (browser flow, finishes in the web UI)")
+	loginCmd.Flags().BoolVar(&loginPairFlag, "pair", false, "Redeem a device-code shown in the browser (use with --code)")
+	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
+	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
+}
+
+// loginWithPairing redeems a device-code shown in the browser
+// onboarding. Adapter-blind: the --adapter flag is telemetry only;
+// the server never routes on it, so a future 7th CLI adapter needs
+// only a frontend registry entry, no backend change.
+func loginWithPairing(serverURL, code, adapterHint string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return fmt.Errorf("--code is required (paste the code shown in the browser, e.g. K3F9-X2NM)")
+	}
+
+	client := cli.NewClient(serverURL, "", "")
+	payload := map[string]string{"code": code}
+	if adapterHint != "" {
+		payload["adapter_hint"] = adapterHint
+	}
+
+	resp, err := client.Post("/api/v1/auth/pair/redeem", payload)
+	if err != nil {
+		// Wrap %w so the original transport error (DNS NXDOMAIN,
+		// connection refused, TLS handshake failure, etc.) survives
+		// — otherwise the user sees the same generic hint regardless
+		// of whether their DNS is broken or the server is just down.
+		return fmt.Errorf("could not reach %s — is the server running and the address correct? %w", serverURL, err)
+	}
+	defer resp.Body.Close()
+
+	if err := cli.CheckError(resp); err != nil {
+		// The redeem endpoint folds "wrong code" / "expired code" /
+		// "already consumed" into the same generic message to avoid
+		// being an enumeration oracle. The most likely cause from a
+		// user's perspective is the 10-minute TTL — call that out
+		// directly so they know to grab a fresh code.
+		msg := err.Error()
+		if strings.Contains(msg, "Invalid or expired code") {
+			return fmt.Errorf("the pair code didn't work — codes expire after 10 minutes; go back to the browser and click \"get a new one\"")
+		}
+		return fmt.Errorf("pair: %w", err)
+	}
+
+	var redeem struct {
+		CliToken string `json:"cli_token"`
+		Email    string `json:"email"`
+	}
+	if err := cli.ReadJSON(resp, &redeem); err != nil {
+		return fmt.Errorf("parse redeem response: %w", err)
+	}
+	if redeem.CliToken == "" {
+		return fmt.Errorf("server returned empty cli_token — please report this to ops")
+	}
+
+	// LoadConfig returns (&CLIConfig{}, nil) when the file is missing
+	// — see internal/cli/config.go. A non-nil error therefore means
+	// the file *exists* but is unreadable / malformed YAML, and
+	// silently overwriting it would mask the real cause (typo, bad
+	// edit, permissions) and lose the user's other config. Surface it.
+	cfg, err := cli.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
+	}
+	cfg.Server = serverURL
+	cfg.Token = redeem.CliToken
+	if err := cli.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("save config: %w", err)
+	}
+
+	cli.PrintSuccess(fmt.Sprintf("Paired as %s. Token saved to ~/.crewship/cli-config.yaml", redeem.Email))
+
+	// Next-step guidance — without this the user is left holding a
+	// valid token and no idea what to do. Two paths from here:
+	//   1. Go back to the browser; the wizard's poll loop sees the
+	//      pair consumed and unlocks Launch.
+	//   2. Skip the browser entirely; run `crewship setup` here.
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Println("  • Back in the browser the onboarding wizard will unlock automatically.")
+	fmt.Println("  • Or finish from the terminal:")
+	fmt.Printf("      %screwship setup%s\n", cli.Bold, cli.Reset)
+	fmt.Println("    (interactive prompts for crew template, adapter, API key, language)")
+	return nil
 }
 
 func loginWithToken(serverURL, token string) error {
@@ -151,9 +245,13 @@ func loginWithToken(serverURL, token string) error {
 	}
 	resp.Body.Close()
 
+	// Same rationale as the pairing path above: LoadConfig returns an
+	// empty config + nil err when the file is missing. Non-nil err
+	// means the existing file is unreadable / malformed YAML — don't
+	// silently overwrite the user's other config.
 	cfg, err := cli.LoadConfig()
 	if err != nil {
-		cfg = &cli.CLIConfig{}
+		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
 	}
 	cfg.Server = serverURL
 	cfg.Token = token
@@ -351,7 +449,7 @@ func loginInteractive(serverURL string) error {
 
 	cfg, err := cli.LoadConfig()
 	if err != nil {
-		cfg = &cli.CLIConfig{}
+		return fmt.Errorf("load CLI config (refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry): %w", err)
 	}
 	cfg.Server = serverURL
 	cfg.Token = finalToken

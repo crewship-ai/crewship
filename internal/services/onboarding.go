@@ -133,6 +133,12 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 				return nil, encErr
 			}
 
+			// Onboarding only accepts CLI tokens (the value the user
+			// gets out of `claude setup-token`, `gemini auth print-token`,
+			// etc.) — NOT raw provider API keys. The wizard's UI says
+			// so explicitly and the handler validates the prefix
+			// before we get here. Always store as AI_CLI_TOKEN so the
+			// runtime picks the matching auth mode.
 			if _, err = tx.ExecContext(ctx, `
 				INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
 				VALUES (?, ?, ?, ?, 'AI_CLI_TOKEN', ?, 'WORKSPACE', ?, ?, ?)

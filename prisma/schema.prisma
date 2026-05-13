@@ -218,6 +218,7 @@ model User {
   audit_logs            AuditLog[]
   authored_skills       Skill[]               @relation("SkillAuthor")
   skill_reviews         SkillReview[]
+  cli_pairings          CliPairing[]
 
   @@map("users")
 }
@@ -263,9 +264,27 @@ model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
+  purpose    String   @default("email_verify")
 
   @@unique([identifier, token])
+  @@index([purpose, expires])
   @@map("verification_tokens")
+}
+
+model CliPairing {
+  id           String    @id @default(cuid())
+  user_id      String
+  code         String    @unique
+  status       String    @default("pending")
+  adapter_hint String?
+  created_at   DateTime  @default(now())
+  expires_at   DateTime
+  consumed_at  DateTime?
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, status])
+  @@map("cli_pairings")
 }
 
 // ============================================================
