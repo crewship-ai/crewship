@@ -40,6 +40,82 @@ If the server is healthy, the user is logged in, and the workspace still has at 
 | **`list-users`** | Reads the `users` table and renders it via `text/tabwriter`. Email, role, created-at, last-login. Usually run before `reset-password` to verify the email row exists with the expected casing. |
 | **`promote`** | Rewrites a single `workspace_members` row. Refuses to demote the last `OWNER` of a workspace — the constraint lives in the same transaction so a botched call can't leave a workspace ownerless. |
 
+## Usage
+
+Every admin subcommand expects access to the same SQLite file the server uses. Stop the server first — concurrent writes from two processes against the same DB are the failure mode this guard exists to prevent.
+
+### 1. Stop the server (if running)
+
+```bash
+crewship stop
+# Or if you started it as a systemd unit:
+sudo systemctl stop crewshipd
+```
+
+The admin commands refuse to run while another process holds the SQLite lock. The error message names the lock-holder PID so you don't have to guess.
+
+### 2. Verify the user exists
+
+```bash
+crewship admin list-users
+```
+
+Outputs a tab-aligned table:
+
+```
+EMAIL                    ROLE     CREATED              LAST_LOGIN
+admin@example.com        OWNER    2025-11-14 09:21     2026-05-13 18:04
+pavel@unify.cz           ADMIN    2026-02-01 12:00     2026-05-13 17:55
+```
+
+Casing matters. `Admin@example.com` and `admin@example.com` are different rows for the `users` table; if the row you want isn't here, `reset-password` will fail loudly rather than silently create a new one.
+
+### 3. Reset a password
+
+Interactive (preferred — the password is not logged anywhere):
+
+```bash
+crewship admin reset-password --email=admin@example.com
+# New password: ********
+# Confirm:      ********
+# Updated user admin@example.com (last login 2026-05-13). Restart the server to drop active sessions.
+```
+
+Scripted (for CI / Docker provisioning):
+
+```bash
+crewship admin reset-password \
+  --email=admin@example.com \
+  --password="$BOOTSTRAP_PASSWORD"
+```
+
+Never embed the password as a literal in a shell history — pass it via env var or stdin redirection so it lands neither in `~/.bash_history` nor in `ps`.
+
+### 4. Promote (or demote) a workspace role
+
+```bash
+# Single-workspace user — slug is inferred:
+crewship admin promote --email=pavel@unify.cz --role=OWNER
+
+# Multi-workspace user — slug is required:
+crewship admin promote \
+  --email=pavel@unify.cz \
+  --role=ADMIN \
+  --workspace=acme-research
+```
+
+If the change would demote the last `OWNER` of a workspace, the command refuses with a message telling you which other user to promote first.
+
+### 5. Restart the server
+
+```bash
+crewship start
+# or
+sudo systemctl start crewshipd
+```
+
+The new password is now active. The user logs in normally — the audit timeline shows a `journal.admin_cli` entry recording who on the host (`host:pavel`) ran which subcommand, so the change is traceable even though the HTTP API was bypassed.
+
 ## Related
 
 - [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
