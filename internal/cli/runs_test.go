@@ -112,7 +112,13 @@ func TestPollRun_TerminatesOnTerminalStatus(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "tok", "ws")
-	detail, err := c.PollRun(context.Background(), "r_x", 5*time.Millisecond, nil)
+	// Bound the test so a regression that broke terminal-status
+	// detection fails fast (within 500 ms) instead of stalling the
+	// suite up to the global -timeout. The expected wall time at
+	// 5 ms interval is ~15 ms across three polls.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	detail, err := c.PollRun(ctx, "r_x", 5*time.Millisecond, nil)
 	if err != nil {
 		t.Fatalf("PollRun: %v", err)
 	}
