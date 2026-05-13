@@ -295,6 +295,28 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req, keeperEnabled)
+		// TEMP DEBUG (2026-05-13): tracking why CLAUDE_CODE_OAUTH_TOKEN
+		// doesn't land in the exec env even when an AI_CLI_TOKEN cred
+		// is present. Drop this log once the root cause is fixed.
+		credSummary := make([]map[string]any, 0, len(req.Credentials))
+		for _, c := range req.Credentials {
+			credSummary = append(credSummary, map[string]any{
+				"env": c.EnvVarName, "type": c.Type, "value_len": len(c.PlainValue),
+			})
+		}
+		hasOAuthEnv := false
+		for _, e := range env {
+			if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+				hasOAuthEnv = true
+				break
+			}
+		}
+		o.logger.Info("env builder debug",
+			"agent_id", req.AgentID,
+			"creds", credSummary,
+			"has_oauth_env", hasOAuthEnv,
+			"env_count", len(env),
+		)
 		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {
