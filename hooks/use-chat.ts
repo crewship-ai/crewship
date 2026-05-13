@@ -206,6 +206,490 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
     cancelledRef.current = false
   }, [sessionId])
 
+  const handleAssignmentEvent = useCallback(
+    (type: AssignmentEventType, payload: Record<string, unknown>) => {
+      let content = ""
+      const target = assignmentField(payload.target)
+      const task = assignmentField(payload.task)
+      const result = assignmentField(payload.result)
+      const errMsg = assignmentField(payload.error)
+      switch (type) {
+        case "assignment_created":
+          content = `[Assignment] Assigning task to @${target}: ${task}`
+          break
+        case "assignment_running":
+          content = `[Assignment] @${target} is working on the task...`
+          break
+        case "assignment_completed":
+          content = `[Assignment] @${target} completed the task.`
+          if (result) content += `\nResult: ${result}`
+          break
+        case "assignment_failed":
+          content = `[Assignment] @${target} failed: ${errMsg}`
+          break
+      }
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: uuid(),
+          role: "system",
+          parts: [{ id: uuid(), type: "text", content, timestamp: new Date() }],
+          isStreaming: false,
+          timestamp: new Date(),
+        },
+      ])
+    },
+    [],
+  )
+
+  const handleStatusEvent = useCallback((content: string) => {
+    setTurns((prev) => {
+      const last = prev[prev.length - 1]
+      if (last?.role === "assistant" && last.isStreaming) {
+        // Add status part to current assistant turn
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            parts: [
+              ...last.parts,
+              { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
+            ],
+          },
+        ]
+      }
+      // Create new assistant turn with status part
+      return [
+        ...prev,
+        {
+          id: uuid(),
+          role: "assistant",
+          parts: [{ id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() }],
+          isStreaming: true,
+          timestamp: new Date(),
+        },
+      ]
+    })
+  }, [])
+
+  const handleThinkingEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      // Streaming deltas (thinking_delta from backend) accumulate into one part.
+      // Complete thinking blocks create separate parts.
+      const isStreamingDelta = metadata?.streaming === true
+      if (isStreamingDelta) {
+        thinkingBufferRef.current += content
+      }
+      setTurns((prev) => {
+        const last = prev[prev.length - 1]
+        if (last?.role === "assistant" && last.isStreaming) {
+          if (isStreamingDelta) {
+            // Find existing streaming thinking part to accumulate into
+            const thinkingIdx = last.parts.findLastIndex(
+              (p) => p.type === "thinking" && p.isStreaming
+            )
+            if (thinkingIdx >= 0) {
+              const updatedParts = [...last.parts]
+              updatedParts[thinkingIdx] = {
+                ...updatedParts[thinkingIdx],
+                content: thinkingBufferRef.current,
+              }
+              return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+            }
+            // First thinking delta — remove status parts, create new streaming thinking part
+            thinkingBufferRef.current = content
+            const cleanedParts = last.parts.filter((p) => p.type !== "status")
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                parts: [
+                  ...cleanedParts,
+                  { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
+                ],
+              },
+            ]
+          }
+          // Complete thinking block — remove status parts, create a new non-streaming part
+          const cleanedParts = last.parts.filter((p) => p.type !== "status")
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...last,
+              parts: [
+                ...cleanedParts,
+                { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: false, timestamp: new Date() },
+              ],
+            },
+          ]
+        }
+        // Create new assistant turn — remove any orphaned status-only turns
+        if (isStreamingDelta) {
+          thinkingBufferRef.current = content
+        }
+        const cleaned = prev.filter((t) => {
+          if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
+            return false
+          }
+          return true
+        })
+        return [
+          ...cleaned,
+          {
+            id: uuid(),
+            role: "assistant",
+            parts: [{ id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: !isStreamingDelta ? false : true, timestamp: new Date() }],
+            isStreaming: true,
+            timestamp: new Date(),
+          },
+        ]
+      })
+    },
+    [],
+  )
+
+  const handleTextEvent = useCallback((content: string) => {
+    textBufferRef.current += content
+    setTurns((prev) => {
+      const last = prev[prev.length - 1]
+      if (last?.role === "assistant" && last.isStreaming) {
+        // Find existing streaming text part
+        const textIdx = last.parts.findLastIndex(
+          (p) => p.type === "text" && p.isStreaming
+        )
+        if (textIdx >= 0) {
+          const updatedParts = [...last.parts]
+          updatedParts[textIdx] = {
+            ...updatedParts[textIdx],
+            content: textBufferRef.current,
+          }
+          return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+        }
+        // First text arriving: remove status parts + close streaming thinking
+        const cleanedParts = last.parts
+          .filter((p) => p.type !== "status")
+          .map((p) =>
+            p.type === "thinking" && p.isStreaming ? { ...p, isStreaming: false } : p
+          )
+        // New text part
+        textBufferRef.current = content
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            parts: [
+              ...cleanedParts,
+              { id: uuid(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
+            ],
+          },
+        ]
+      }
+      // Create new assistant turn — remove any orphaned status-only turns
+      const cleaned = prev.filter((t) => {
+        if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
+          return false
+        }
+        return true
+      })
+      textBufferRef.current = content
+      return [
+        ...cleaned,
+        {
+          id: uuid(),
+          role: "assistant",
+          parts: [{ id: uuid(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
+          isStreaming: true,
+          timestamp: new Date(),
+        },
+      ]
+    })
+  }, [])
+
+  const handleToolCallEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      setTurns((prev) => {
+        const last = prev[prev.length - 1]
+        const part: TurnPart = {
+          id: uuid(),
+          type: "tool_call",
+          content,
+          metadata,
+          timestamp: new Date(),
+        }
+        if (last?.role === "assistant" && last.isStreaming) {
+          return [
+            ...prev.slice(0, -1),
+            { ...last, parts: [...last.parts, part] },
+          ]
+        }
+        return [
+          ...prev,
+          {
+            id: uuid(),
+            role: "assistant",
+            parts: [part],
+            isStreaming: true,
+            timestamp: new Date(),
+          },
+        ]
+      })
+    },
+    [],
+  )
+
+  const handleToolResultEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      setTurns((prev) => {
+        const last = prev[prev.length - 1]
+        const part: TurnPart = {
+          id: uuid(),
+          type: "tool_result",
+          content,
+          metadata,
+          timestamp: new Date(),
+        }
+        if (last?.role === "assistant" && last.isStreaming) {
+          // Try to mark matching tool_call as completed via tool_use_id
+          const toolUseId = metadata?.tool_use_id as string | undefined
+          const updatedParts = toolUseId
+            ? last.parts.map((p) => {
+                if (p.type === "tool_call" && p.metadata?.tool_id === toolUseId) {
+                  return { ...p, metadata: { ...p.metadata, completed: true } }
+                }
+                return p
+              })
+            : last.parts
+          return [
+            ...prev.slice(0, -1),
+            { ...last, parts: [...updatedParts, part] },
+          ]
+        }
+        return [
+          ...prev,
+          {
+            id: uuid(),
+            role: "assistant",
+            parts: [part],
+            isStreaming: true,
+            timestamp: new Date(),
+          },
+        ]
+      })
+    },
+    [],
+  )
+
+  const handleImageEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      setTurns((prev) => {
+        const last = prev[prev.length - 1]
+        const part: TurnPart = {
+          id: uuid(),
+          type: "image",
+          content,
+          metadata,
+          timestamp: new Date(),
+        }
+        if (last?.role === "assistant" && last.isStreaming) {
+          return [
+            ...prev.slice(0, -1),
+            { ...last, parts: [...last.parts, part] },
+          ]
+        }
+        return [
+          ...prev,
+          {
+            id: uuid(),
+            role: "assistant",
+            parts: [part],
+            isStreaming: true,
+            timestamp: new Date(),
+          },
+        ]
+      })
+    },
+    [],
+  )
+
+  const handleResultEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      // Run result with cost/usage/duration metadata — add as result part
+      setTurns((prev) => {
+        const last = prev[prev.length - 1]
+        const part: TurnPart = {
+          id: uuid(),
+          type: "result",
+          content: content || "",
+          metadata,
+          timestamp: new Date(),
+        }
+        if (last?.role === "assistant" && last.isStreaming) {
+          return [
+            ...prev.slice(0, -1),
+            { ...last, parts: [...last.parts, part] },
+          ]
+        }
+        return [
+          ...prev,
+          {
+            id: uuid(),
+            role: "assistant",
+            parts: [part],
+            isStreaming: true,
+            timestamp: new Date(),
+          },
+        ]
+      })
+    },
+    [],
+  )
+
+  const handleSystemEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      // Claude Code system events: init (model, tools, cwd) or compact_boundary
+      const subtype = metadata?.subtype as string | undefined
+      if (subtype === "init") {
+        setTurns((prev) => {
+          // Only show session init once per session — skip if already shown
+          const alreadyHasInit = prev.some((t) =>
+            t.role === "system" && t.parts.some((p) => p.type === "system_init")
+          )
+          if (alreadyHasInit) return prev
+
+          // Remove preceding status-only assistant turn (Starting container..., etc.)
+          let cleaned = prev
+          const last = prev[prev.length - 1]
+          if (last?.role === "assistant" && last.isStreaming && last.parts.every((p) => p.type === "status")) {
+            cleaned = prev.slice(0, -1)
+          }
+
+          return [
+            ...cleaned,
+            {
+              id: uuid(),
+              role: "system",
+              parts: [{
+                id: uuid(),
+                type: "system_init" as TurnPartType,
+                content: content || "init",
+                metadata,
+                timestamp: new Date(),
+              }],
+              isStreaming: false,
+              timestamp: new Date(),
+            },
+          ]
+        })
+      } else {
+        // Other system events (sidecar security logs, etc.) — add as status-like parts
+        setTurns((prev) => {
+          const last = prev[prev.length - 1]
+          if (last?.role === "assistant" && last.isStreaming) {
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                parts: [
+                  ...last.parts,
+                  { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
+                ],
+              },
+            ]
+          }
+          return prev
+        })
+      }
+    },
+    [],
+  )
+
+  const handleDoneEvent = useCallback(() => {
+    setTurns((prev) => {
+      // Remove any orphaned status-only assistant turns and finalize the streaming turn
+      const cleaned = prev.filter((t) => {
+        if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
+          return false
+        }
+        return true
+      })
+      const last = cleaned[cleaned.length - 1]
+      if (last?.role === "assistant" && last.isStreaming) {
+        const finalParts = last.parts
+          .map((p) => (p.isStreaming ? { ...p, isStreaming: false } : p))
+          // Remove status parts once done (they were just progress indicators)
+          .filter((p) => p.type !== "status")
+        return [
+          ...cleaned.slice(0, -1),
+          { ...last, parts: finalParts, isStreaming: false },
+        ]
+      }
+      return cleaned
+    })
+    textBufferRef.current = ""
+    thinkingBufferRef.current = ""
+    setIsStreaming(false)
+  }, [])
+
+  const handleCrewProvisioningEvent = useCallback(
+    (content: string, metadata: Record<string, unknown> | undefined) => {
+      // Auto-provision kicked off by chatbridge — render a system turn
+      // carrying the crew_id so the chat surface can render the same
+      // build progress card the toolbar popover shows. Replaces the
+      // legacy red "Run `crewship crew provision …` first" error.
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: uuid(),
+          role: "system",
+          parts: [
+            {
+              id: uuid(),
+              type: "crew_provisioning",
+              content: content || "Building crew image…",
+              metadata,
+              timestamp: new Date(),
+            },
+          ],
+          isStreaming: false,
+          timestamp: new Date(),
+        },
+      ])
+      setIsStreaming(false)
+    },
+    [],
+  )
+
+  const handleErrorEvent = useCallback((content: string) => {
+    setTurns((prev) => {
+      const last = prev[prev.length - 1]
+      const errorPart: TurnPart = {
+        id: uuid(),
+        type: "error",
+        content: content || "An error occurred",
+        timestamp: new Date(),
+      }
+      if (last?.role === "assistant" && last.isStreaming) {
+        return [
+          ...prev.slice(0, -1),
+          { ...last, parts: [...last.parts, errorPart], isStreaming: false },
+        ]
+      }
+      return [
+        ...prev,
+        {
+          id: uuid(),
+          role: "system",
+          parts: [errorPart],
+          isStreaming: false,
+          timestamp: new Date(),
+        },
+      ]
+    })
+    textBufferRef.current = ""
+    thinkingBufferRef.current = ""
+    setIsStreaming(false)
+  }, [])
+
   const handleMessage = useCallback(
     (msg: { type: string; payload?: string | Record<string, unknown>; channel?: string; [key: string]: unknown }) => {
       // Handle assignment lifecycle events
@@ -216,36 +700,7 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
         const payload = (typeof msg.payload === "object" && msg.payload !== null)
           ? msg.payload as Record<string, unknown>
           : {}
-        let content = ""
-        const target = assignmentField(payload.target)
-        const task = assignmentField(payload.task)
-        const result = assignmentField(payload.result)
-        const errMsg = assignmentField(payload.error)
-        switch (msg.type as AssignmentEventType) {
-          case "assignment_created":
-            content = `[Assignment] Assigning task to @${target}: ${task}`
-            break
-          case "assignment_running":
-            content = `[Assignment] @${target} is working on the task...`
-            break
-          case "assignment_completed":
-            content = `[Assignment] @${target} completed the task.`
-            if (result) content += `\nResult: ${result}`
-            break
-          case "assignment_failed":
-            content = `[Assignment] @${target} failed: ${errMsg}`
-            break
-        }
-        setTurns((prev) => [
-          ...prev,
-          {
-            id: uuid(),
-            role: "system",
-            parts: [{ id: uuid(), type: "text", content, timestamp: new Date() }],
-            isStreaming: false,
-            timestamp: new Date(),
-          },
-        ])
+        handleAssignmentEvent(msg.type as AssignmentEventType, payload)
         return
       }
 
@@ -270,436 +725,55 @@ export function useChat({ wsUrl, getToken, sessionId }: UseChatOptions) {
 
       switch (eventType) {
         case "status":
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            if (last?.role === "assistant" && last.isStreaming) {
-              // Add status part to current assistant turn
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...last,
-                  parts: [
-                    ...last.parts,
-                    { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
-                  ],
-                },
-              ]
-            }
-            // Create new assistant turn with status part
-            return [
-              ...prev,
-              {
-                id: uuid(),
-                role: "assistant",
-                parts: [{ id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() }],
-                isStreaming: true,
-                timestamp: new Date(),
-              },
-            ]
-          })
+          handleStatusEvent(content)
           break
-
-        case "thinking": {
-          // Streaming deltas (thinking_delta from backend) accumulate into one part.
-          // Complete thinking blocks create separate parts.
-          const isStreamingDelta = metadata?.streaming === true
-          if (isStreamingDelta) {
-            thinkingBufferRef.current += content
-          }
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            if (last?.role === "assistant" && last.isStreaming) {
-              if (isStreamingDelta) {
-                // Find existing streaming thinking part to accumulate into
-                const thinkingIdx = last.parts.findLastIndex(
-                  (p) => p.type === "thinking" && p.isStreaming
-                )
-                if (thinkingIdx >= 0) {
-                  const updatedParts = [...last.parts]
-                  updatedParts[thinkingIdx] = {
-                    ...updatedParts[thinkingIdx],
-                    content: thinkingBufferRef.current,
-                  }
-                  return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
-                }
-                // First thinking delta — remove status parts, create new streaming thinking part
-                thinkingBufferRef.current = content
-                const cleanedParts = last.parts.filter((p) => p.type !== "status")
-                return [
-                  ...prev.slice(0, -1),
-                  {
-                    ...last,
-                    parts: [
-                      ...cleanedParts,
-                      { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
-                    ],
-                  },
-                ]
-              }
-              // Complete thinking block — remove status parts, create a new non-streaming part
-              const cleanedParts = last.parts.filter((p) => p.type !== "status")
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...last,
-                  parts: [
-                    ...cleanedParts,
-                    { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: false, timestamp: new Date() },
-                  ],
-                },
-              ]
-            }
-            // Create new assistant turn — remove any orphaned status-only turns
-            if (isStreamingDelta) {
-              thinkingBufferRef.current = content
-            }
-            const cleaned = prev.filter((t) => {
-              if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
-                return false
-              }
-              return true
-            })
-            return [
-              ...cleaned,
-              {
-                id: uuid(),
-                role: "assistant",
-                parts: [{ id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: !isStreamingDelta ? false : true, timestamp: new Date() }],
-                isStreaming: true,
-                timestamp: new Date(),
-              },
-            ]
-          })
+        case "thinking":
+          handleThinkingEvent(content, metadata)
           break
-        }
-
         case "text":
-          textBufferRef.current += content
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            if (last?.role === "assistant" && last.isStreaming) {
-              // Find existing streaming text part
-              const textIdx = last.parts.findLastIndex(
-                (p) => p.type === "text" && p.isStreaming
-              )
-              if (textIdx >= 0) {
-                const updatedParts = [...last.parts]
-                updatedParts[textIdx] = {
-                  ...updatedParts[textIdx],
-                  content: textBufferRef.current,
-                }
-                return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
-              }
-              // First text arriving: remove status parts + close streaming thinking
-              const cleanedParts = last.parts
-                .filter((p) => p.type !== "status")
-                .map((p) =>
-                  p.type === "thinking" && p.isStreaming ? { ...p, isStreaming: false } : p
-                )
-              // New text part
-              textBufferRef.current = content
-              return [
-                ...prev.slice(0, -1),
-                {
-                  ...last,
-                  parts: [
-                    ...cleanedParts,
-                    { id: uuid(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
-                  ],
-                },
-              ]
-            }
-            // Create new assistant turn — remove any orphaned status-only turns
-            const cleaned = prev.filter((t) => {
-              if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
-                return false
-              }
-              return true
-            })
-            textBufferRef.current = content
-            return [
-              ...cleaned,
-              {
-                id: uuid(),
-                role: "assistant",
-                parts: [{ id: uuid(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
-                isStreaming: true,
-                timestamp: new Date(),
-              },
-            ]
-          })
+          handleTextEvent(content)
           break
-
         case "tool_call":
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            const part: TurnPart = {
-              id: uuid(),
-              type: "tool_call",
-              content,
-              metadata,
-              timestamp: new Date(),
-            }
-            if (last?.role === "assistant" && last.isStreaming) {
-              return [
-                ...prev.slice(0, -1),
-                { ...last, parts: [...last.parts, part] },
-              ]
-            }
-            return [
-              ...prev,
-              {
-                id: uuid(),
-                role: "assistant",
-                parts: [part],
-                isStreaming: true,
-                timestamp: new Date(),
-              },
-            ]
-          })
+          handleToolCallEvent(content, metadata)
           break
-
         case "tool_result":
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            const part: TurnPart = {
-              id: uuid(),
-              type: "tool_result",
-              content,
-              metadata,
-              timestamp: new Date(),
-            }
-            if (last?.role === "assistant" && last.isStreaming) {
-              // Try to mark matching tool_call as completed via tool_use_id
-              const toolUseId = metadata?.tool_use_id as string | undefined
-              const updatedParts = toolUseId
-                ? last.parts.map((p) => {
-                    if (p.type === "tool_call" && p.metadata?.tool_id === toolUseId) {
-                      return { ...p, metadata: { ...p.metadata, completed: true } }
-                    }
-                    return p
-                  })
-                : last.parts
-              return [
-                ...prev.slice(0, -1),
-                { ...last, parts: [...updatedParts, part] },
-              ]
-            }
-            return [
-              ...prev,
-              {
-                id: uuid(),
-                role: "assistant",
-                parts: [part],
-                isStreaming: true,
-                timestamp: new Date(),
-              },
-            ]
-          })
+          handleToolResultEvent(content, metadata)
           break
-
         case "image":
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            const part: TurnPart = {
-              id: uuid(),
-              type: "image",
-              content,
-              metadata,
-              timestamp: new Date(),
-            }
-            if (last?.role === "assistant" && last.isStreaming) {
-              return [
-                ...prev.slice(0, -1),
-                { ...last, parts: [...last.parts, part] },
-              ]
-            }
-            return [
-              ...prev,
-              {
-                id: uuid(),
-                role: "assistant",
-                parts: [part],
-                isStreaming: true,
-                timestamp: new Date(),
-              },
-            ]
-          })
+          handleImageEvent(content, metadata)
           break
-
         case "result":
-          // Run result with cost/usage/duration metadata — add as result part
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            const part: TurnPart = {
-              id: uuid(),
-              type: "result",
-              content: content || "",
-              metadata,
-              timestamp: new Date(),
-            }
-            if (last?.role === "assistant" && last.isStreaming) {
-              return [
-                ...prev.slice(0, -1),
-                { ...last, parts: [...last.parts, part] },
-              ]
-            }
-            return [
-              ...prev,
-              {
-                id: uuid(),
-                role: "assistant",
-                parts: [part],
-                isStreaming: true,
-                timestamp: new Date(),
-              },
-            ]
-          })
+          handleResultEvent(content, metadata)
           break
-
-        case "system": {
-          // Claude Code system events: init (model, tools, cwd) or compact_boundary
-          const subtype = metadata?.subtype as string | undefined
-          if (subtype === "init") {
-            setTurns((prev) => {
-              // Only show session init once per session — skip if already shown
-              const alreadyHasInit = prev.some((t) =>
-                t.role === "system" && t.parts.some((p) => p.type === "system_init")
-              )
-              if (alreadyHasInit) return prev
-
-              // Remove preceding status-only assistant turn (Starting container..., etc.)
-              let cleaned = prev
-              const last = prev[prev.length - 1]
-              if (last?.role === "assistant" && last.isStreaming && last.parts.every((p) => p.type === "status")) {
-                cleaned = prev.slice(0, -1)
-              }
-
-              return [
-                ...cleaned,
-                {
-                  id: uuid(),
-                  role: "system",
-                  parts: [{
-                    id: uuid(),
-                    type: "system_init" as TurnPartType,
-                    content: content || "init",
-                    metadata,
-                    timestamp: new Date(),
-                  }],
-                  isStreaming: false,
-                  timestamp: new Date(),
-                },
-              ]
-            })
-          } else {
-            // Other system events (sidecar security logs, etc.) — add as status-like parts
-            setTurns((prev) => {
-              const last = prev[prev.length - 1]
-              if (last?.role === "assistant" && last.isStreaming) {
-                return [
-                  ...prev.slice(0, -1),
-                  {
-                    ...last,
-                    parts: [
-                      ...last.parts,
-                      { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
-                    ],
-                  },
-                ]
-              }
-              return prev
-            })
-          }
+        case "system":
+          handleSystemEvent(content, metadata)
           break
-        }
-
         case "done":
-          setTurns((prev) => {
-            // Remove any orphaned status-only assistant turns and finalize the streaming turn
-            const cleaned = prev.filter((t) => {
-              if (t.role === "assistant" && t.isStreaming && t.parts.every((p) => p.type === "status")) {
-                return false
-              }
-              return true
-            })
-            const last = cleaned[cleaned.length - 1]
-            if (last?.role === "assistant" && last.isStreaming) {
-              const finalParts = last.parts
-                .map((p) => (p.isStreaming ? { ...p, isStreaming: false } : p))
-                // Remove status parts once done (they were just progress indicators)
-                .filter((p) => p.type !== "status")
-              return [
-                ...cleaned.slice(0, -1),
-                { ...last, parts: finalParts, isStreaming: false },
-              ]
-            }
-            return cleaned
-          })
-          textBufferRef.current = ""
-          thinkingBufferRef.current = ""
-          setIsStreaming(false)
+          handleDoneEvent()
           break
-
         case "crew_provisioning":
-          // Auto-provision kicked off by chatbridge — render a system turn
-          // carrying the crew_id so the chat surface can render the same
-          // build progress card the toolbar popover shows. Replaces the
-          // legacy red "Run `crewship crew provision …` first" error.
-          setTurns((prev) => [
-            ...prev,
-            {
-              id: uuid(),
-              role: "system",
-              parts: [
-                {
-                  id: uuid(),
-                  type: "crew_provisioning",
-                  content: content || "Building crew image…",
-                  metadata,
-                  timestamp: new Date(),
-                },
-              ],
-              isStreaming: false,
-              timestamp: new Date(),
-            },
-          ])
-          setIsStreaming(false)
+          handleCrewProvisioningEvent(content, metadata)
           break
-
         case "error":
-          setTurns((prev) => {
-            const last = prev[prev.length - 1]
-            const errorPart: TurnPart = {
-              id: uuid(),
-              type: "error",
-              content: content || "An error occurred",
-              timestamp: new Date(),
-            }
-            if (last?.role === "assistant" && last.isStreaming) {
-              return [
-                ...prev.slice(0, -1),
-                { ...last, parts: [...last.parts, errorPart], isStreaming: false },
-              ]
-            }
-            return [
-              ...prev,
-              {
-                id: uuid(),
-                role: "system",
-                parts: [errorPart],
-                isStreaming: false,
-                timestamp: new Date(),
-              },
-            ]
-          })
-          textBufferRef.current = ""
-          thinkingBufferRef.current = ""
-          setIsStreaming(false)
+          handleErrorEvent(content)
           break
       }
     },
-    [sessionId],
+    [
+      sessionId,
+      handleAssignmentEvent,
+      handleStatusEvent,
+      handleThinkingEvent,
+      handleTextEvent,
+      handleToolCallEvent,
+      handleToolResultEvent,
+      handleImageEvent,
+      handleResultEvent,
+      handleSystemEvent,
+      handleDoneEvent,
+      handleCrewProvisioningEvent,
+      handleErrorEvent,
+    ],
   )
 
   const { status, send } = useWebSocket({
