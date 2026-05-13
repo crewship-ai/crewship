@@ -271,12 +271,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			} else {
 				o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
 			}
-		} else if rendered != "" {
-			// Recall succeeded — reset the dedup so a *future* outage logs
-			// again. Avoids the "logged once at startup, never again" trap.
+		} else {
+			// Any successful recall (even an empty result for queries with
+			// no matches) means the backend is healthy again; reset the
+			// dedup so a *future* outage logs anew.
 			o.episodicUnreachableLastLogged.Store(0)
-			promptBuf.WriteString("\n\n")
-			promptBuf.WriteString(rendered)
+			if rendered != "" {
+				promptBuf.WriteString("\n\n")
+				promptBuf.WriteString(rendered)
+			}
 		}
 	}
 

@@ -605,7 +605,11 @@ cmd_nuke() {
       "$docker_cmd" run --rm -v "$parent:/target" "$cleanup_image" \
         sh -c 'rm -rf "/target/$1"' -- "$base" 2>/dev/null || true
     fi
-    [[ -e "$dir" ]] && warn "$dir not fully removed — try: sudo rm -rf \"$dir\""
+    # set -e is on; use an explicit if so the [[ ]] test returning false
+    # (i.e. dir is finally gone) doesn't abort cmd_nuke before later steps.
+    if [[ -e "$dir" ]]; then
+      warn "$dir not fully removed — try: sudo rm -rf \"$dir\""
+    fi
   }
   remove_data_dir "$DATA_DIR"
   remove_data_dir "$STATE_DIR"

@@ -97,8 +97,21 @@ func TestBroadcastDropsOnFullSendBuffer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go hub.Run(ctx)
-	time.Sleep(10 * time.Millisecond)
+	// Join hub.Run before the test returns so the runtime doesn't leak the
+	// goroutine into adjacent tests (which would race on shared logger fields).
+	hubDone := make(chan struct{})
+	go func() {
+		hub.Run(ctx)
+		close(hubDone)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-hubDone:
+		case <-time.After(time.Second):
+			t.Errorf("hub.Run did not exit within 1s of cancel")
+		}
+	}()
 
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	stuck := &Client{
@@ -122,14 +135,16 @@ func TestBroadcastDropsOnFullSendBuffer(t *testing.T) {
 	for i := 0; i < dropLogThreshold*2+1; i++ {
 		hub.Broadcast("test-channel", ServerMessage{Type: "test", Payload: i})
 	}
-	time.Sleep(50 * time.Millisecond)
 
-	if got := hub.DroppedFrames(); got == 0 {
-		t.Fatalf("expected drops on stuck consumer, got 0")
+	// Poll for the drop counter to advance — avoids relying on a fixed
+	// time.Sleep that flakes under slow CI.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if hub.DroppedFrames() > 0 && hub.loggedDropMark.Load() > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	// Verify the threshold-based dedup actually advanced — without this assert
-	// the test would still pass even if recordDrop never logged anything.
-	if mark := hub.loggedDropMark.Load(); mark == 0 {
-		t.Fatalf("expected loggedDropMark > 0 after %d drops, got 0", hub.DroppedFrames())
-	}
+	t.Fatalf("expected drops + loggedDropMark > 0 within deadline; got dropped=%d mark=%d",
+		hub.DroppedFrames(), hub.loggedDropMark.Load())
 }
