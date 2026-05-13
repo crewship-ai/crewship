@@ -18,6 +18,8 @@ import type { BundledLanguage } from "shiki"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useRealtimeEvent, useRealtimeChannel } from "@/hooks/use-realtime"
+import { useTreeState, findNode } from "@/hooks/use-tree-state"
+import { fmtSize, fmtTime, getLang, isPreviewable } from "@/lib/file-format"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type { FileEntry, TreeNode } from "@/lib/types/agent"
@@ -26,111 +28,6 @@ const FileEditor = dynamic(() => import("@/components/features/files/file-editor
   ssr: false,
   loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>,
 })
-
-function sortNodes(nodes: TreeNode[]) {
-  nodes.sort((a, b) => {
-    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
-}
-
-function buildTopLevel(files: FileEntry[]): TreeNode[] {
-  const roots: TreeNode[] = files.map((f) => ({
-    ...f,
-    children: [],
-    childrenLoaded: !f.is_dir,
-  }))
-  sortNodes(roots)
-  return roots
-}
-
-function mergeTopLevel(existing: TreeNode[], fresh: FileEntry[]): TreeNode[] {
-  const oldByPath = new Map(existing.map((n) => [n.path, n]))
-  const merged = fresh.map((f) => {
-    const prev = oldByPath.get(f.path)
-    if (prev && prev.is_dir && prev.childrenLoaded) {
-      return { ...prev, size: f.size, mod_time: f.mod_time }
-    }
-    return { ...f, children: [], childrenLoaded: !f.is_dir }
-  })
-  sortNodes(merged)
-  return merged
-}
-
-function insertChildren(tree: TreeNode[], parentPath: string, children: FileEntry[]): TreeNode[] {
-  return tree.map((node) => {
-    if (node.path === parentPath) {
-      const newChildren = children.map((f) => ({
-        ...f,
-        children: [],
-        childrenLoaded: !f.is_dir,
-      }))
-      sortNodes(newChildren)
-      return { ...node, children: newChildren, childrenLoaded: true }
-    }
-    if (node.is_dir && node.children.length > 0) {
-      return { ...node, children: insertChildren(node.children, parentPath, children) }
-    }
-    return node
-  })
-}
-
-function fmtSize(bytes: number): string {
-  if (!bytes) return "—"
-  const units = ["B", "KB", "MB", "GB"]
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  const v = bytes / Math.pow(1024, i)
-  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`
-}
-
-function fmtTime(modTime: string): string {
-  const mins = Math.floor((Date.now() - new Date(modTime).getTime()) / 60000)
-  if (mins < 1) return "Just now"
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  const days = Math.floor(hrs / 24)
-  if (days === 1) return "Yesterday"
-  if (days < 7) return `${days}d ago`
-  return new Date(modTime).toLocaleDateString()
-}
-
-function getLang(name: string): string {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  const map: Record<string, string> = {
-    ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
-    py: "python", go: "go", rs: "rust", sh: "bash",
-    json: "json", yaml: "yaml", yml: "yaml", xml: "xml",
-    html: "html", css: "css", md: "markdown", txt: "text",
-    sql: "sql", toml: "toml", env: "bash",
-  }
-  return map[ext] ?? "text"
-}
-
-const PREVIEWABLE_EXTENSIONS = new Set([
-  "txt", "md", "mdx", "py", "js", "jsx", "ts", "tsx", "go", "rs", "rb",
-  "sh", "bash", "zsh", "fish", "bat", "ps1",
-  "json", "yaml", "yml", "toml", "xml", "csv", "ini", "cfg",
-  "html", "css", "scss", "less", "svg",
-  "sql", "graphql", "prisma",
-  "gitignore", "gitattributes", "editorconfig", "prettierrc",
-  "dockerfile", "makefile", "cmakelists",
-  "c", "cpp", "h", "hpp", "java", "kt", "swift", "dart", "lua", "r",
-  "tf", "hcl", "proto",
-])
-
-const PREVIEWABLE_FILENAMES = new Set([
-  "dockerfile", "makefile", "cmakelists.txt", ".gitignore",
-  ".gitattributes", ".editorconfig", ".prettierrc", ".eslintrc",
-  "license", "readme", "changelog", "authors",
-])
-
-function isPreviewable(name: string): boolean {
-  const n = name.toLowerCase()
-  if (PREVIEWABLE_FILENAMES.has(n)) return true
-  const ext = n.split(".").pop() ?? ""
-  return PREVIEWABLE_EXTENSIONS.has(ext)
-}
 
 function getFileIcon(name: string, isDir: boolean, isOpen?: boolean) {
   // All file/folder icons render with muted-foreground — semantic distinction
@@ -193,17 +90,6 @@ function TreeNodeRow({ node, depth, selectedPath, expandedPaths, loadingDirs, on
   )
 }
 
-function findNode(nodes: TreeNode[], path: string): TreeNode | undefined {
-  for (const n of nodes) {
-    if (n.path === path) return n
-    if (n.is_dir && n.children.length > 0) {
-      const found = findNode(n.children, path)
-      if (found) return found
-    }
-  }
-  return undefined
-}
-
 function flatCount(nodes: TreeNode[]): { fileCount: number; dirCount: number; totalBytes: number } {
   let fileCount = 0, dirCount = 0, totalBytes = 0
   for (const n of nodes) {
@@ -223,16 +109,15 @@ export function FilesPageClient() {
   // keeps the four existing guard sites (mount effect, save handler,
   // container tab, git tab) from drifting in future edits.
   const canQueryAgent = Boolean(workspaceId && agentId)
-  const [tree, setTree] = useState<TreeNode[]>([])
-  const [basePrefix, setBasePrefix] = useState("")
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const {
+    tree, loading, error,
+    selectedPath, setSelectedPath,
+    expandedPaths, loadingDirs, toggleFolder,
+    refresh: refreshTree,
+  } = useTreeState({ agentId, workspaceId, wsLoading })
   const [fileContent, setFileContent] = useState<string | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
-  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
   const [activeFileTab, setActiveFileTab] = useState<"home" | "container" | "git">("home")
   const [containerFiles, setContainerFiles] = useState<FileEntry[]>([])
   const [containerLoading, setContainerLoading] = useState(false)
@@ -249,72 +134,27 @@ export function FilesPageClient() {
   const fileAbortRef = useRef<AbortController | null>(null)
   const containerAbortRef = useRef<AbortController | null>(null)
   const gitAbortRef = useRef<AbortController | null>(null)
-  const fetchFilesRef = useRef<(() => void) | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useRealtimeChannel(crewId ? `crew:${crewId}` : null)
 
+  // Reset file-editor state on agent/workspace switch. The tree itself is
+  // managed by useTreeState; this clears the editor + error that the
+  // previous agent's selection might have left behind.
   useEffect(() => {
-    if (wsLoading) return
-    if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
-    // Flush the previous agent's tree + editor state before we decide
-    // whether to fetch. If we leave state in place while agentId is
-    // unresolved, the panel flashes the last agent's files until the
-    // new fetch resolves — confusing when the two agents have very
-    // different workspaces.
     fileAbortRef.current?.abort()
-    setTree([])
-    setSelectedPath(null)
     setFileContent(null)
+    setFileError(null)
     setEditMode(false)
     setIsDirty(false)
-    // Clear errors alongside the tree reset. Without this, an error
-    // raised against the previous agent (e.g. "Network error. Is the
-    // engine running?") stays visible while the new agent's fetch is
-    // in flight, making it look like the new agent is failing too.
-    setError(null)
-    setFileError(null)
-    // Without a resolved agentId the legacy pathname would be
-    // `/api/v1/agents//files`, which 404s. Short-circuit while the
-    // AgentDetailProvider is still resolving.
-    if (!agentId) { setLoading(false); return }
-    let cancelled = false
-    let isFirstLoad = true
-    async function fetchFiles() {
-      try {
-        const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
-        if (!res.ok) { if (!cancelled) setError("Failed to load files"); return }
-        const data: FileEntry[] | null = await res.json()
-        if (!cancelled) {
-          const safeData = data ?? []
-          if (isFirstLoad) {
-            setTree(buildTopLevel(safeData))
-            isFirstLoad = false
-          } else {
-            setTree((prev) => mergeTopLevel(prev, safeData))
-          }
-          if (safeData.length > 0) {
-            const first = safeData[0]
-            const idx = first.path.lastIndexOf(first.name)
-            setBasePrefix(idx > 0 ? first.path.slice(0, idx) : "")
-          }
-          setError(null)
-        }
-      } catch { if (!cancelled) setError("Network error. Is the engine running?") }
-      finally { if (!cancelled) setLoading(false) }
-    }
-    fetchFilesRef.current = fetchFiles
-    fetchFiles()
-    const interval = setInterval(fetchFiles, 120000)
-    return () => { cancelled = true; clearInterval(interval); fetchFilesRef.current = null }
-  }, [agentId, workspaceId, wsLoading])
+  }, [agentId, workspaceId])
 
   useRealtimeEvent("file.event", useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
-      fetchFilesRef.current?.()
+      refreshTree()
     }, 500)
-  }, []))
+  }, [refreshTree]))
 
   useEffect(() => {
     return () => {
@@ -340,19 +180,6 @@ export function FilesPageClient() {
     setGitError(null)
   }, [agentId, workspaceId])
 
-  const fetchSubdir = useCallback(async (dirPath: string) => {
-    if (!canQueryAgent) return
-    setLoadingDirs((prev) => new Set(prev).add(dirPath))
-    try {
-      const relPath = dirPath.startsWith(basePrefix) ? dirPath.slice(basePrefix.length) : dirPath
-      const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
-      if (!res.ok) return
-      const data: FileEntry[] | null = await res.json()
-      setTree((prev) => insertChildren(prev, dirPath, data ?? []))
-    } catch { /* folder contents unavailable — tree shows empty */ }
-    finally { setLoadingDirs((prev) => { const next = new Set(prev); next.delete(dirPath); return next }) }
-  }, [agentId, workspaceId, canQueryAgent, basePrefix])
-
   const openFile = useCallback((path: string) => {
     const file = findNode(tree, path)
     if (!file || file.is_dir) return
@@ -374,7 +201,7 @@ export function FilesPageClient() {
       .then((text) => { if (!ac.signal.aborted) setFileContent(text) })
       .catch((err) => { if (err.name !== "AbortError") { setFileContent(null); setFileError(err.message ?? "Network error") } })
       .finally(() => { if (!ac.signal.aborted) setLoadingContent(false) })
-  }, [agentId, workspaceId, tree])
+  }, [agentId, workspaceId, tree, setSelectedPath])
 
   const handleSave = useCallback(async (content: string) => {
     if (!selectedPath || !canQueryAgent) return
@@ -403,20 +230,6 @@ export function FilesPageClient() {
     setEditMode(false)
     setIsDirty(false)
   }, [])
-
-  const toggleFolder = useCallback((path: string) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev)
-      if (next.has(path)) { next.delete(path) } else {
-        next.add(path)
-        const node = findNode(tree, path)
-        if (node && node.is_dir && !node.childrenLoaded) {
-          fetchSubdir(path)
-        }
-      }
-      return next
-    })
-  }, [tree, fetchSubdir])
 
   const handleDownload = useCallback(() => {
     if (!selectedPath) return
