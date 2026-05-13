@@ -1,124 +1,35 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { toast } from "sonner"
-import { Files, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { Files } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EditableField } from "@/components/shared/editable-field"
-import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
-import { CrewRuntimeConfig } from "@/components/features/crews/crew-runtime-config"
-import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
-import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
-import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
-import { CrewEscalations } from "@/components/features/crews/crew-escalations"
-import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { cn } from "@/lib/utils"
 
-import { HealthCard, QuickAction } from "./crew-canvas-cards"
-import { Collapsible, ProvisioningBanner } from "./crew-canvas-banner"
+import { ProvisioningBanner } from "./crew-canvas-banner"
 import {
-  CanvasRow as Row,
   CanvasShell,
   CanvasTabs,
   useEntityFetch,
   usePatchEntity,
   useResetTabOnSlugChange,
 } from "./canvas-base"
-
-
-interface AgentSummary {
-  id: string
-  name: string
-  slug: string
-  status: string
-  role_title: string | null
-  agent_role: string
-  avatar_seed?: string | null
-  avatar_style?: string | null
-  llm_provider?: string | null
-  llm_model?: string | null
-  _count?: { skills: number; credentials: number }
-}
-
-interface CrewRecord {
-  id: string
-  workspace_id: string
-  name: string
-  slug: string
-  description: string | null
-  color: string | null
-  icon: string | null
-  avatar_style: string | null
-  issue_prefix: string | null
-  network_mode: string
-  allowed_domains: string[] | string | null
-  container_memory_mb: number
-  container_cpus: number
-  container_ttl_hours: number | null
-  runtime_image: string | null
-  devcontainer_config: string | null
-  mise_config: string | null
-  escalation_config: string | null
-  cached_image: string | null
-  created_at: string
-  updated_at: string
-  _count?: { agents: number; members: number }
-}
-
-interface MissionData {
-  id: string
-  title: string
-  status: string
-  crew_id: string
-  created_at: string
-}
-
-interface IssuesSnapshot {
-  Backlog: number
-  Todo: number
-  InProgress: number
-  InReview: number
-  Done: number
-}
-
-interface IssueRow {
-  id: string
-  identifier: string | null
-  title: string
-  status: string
-  created_at?: string
-}
-
-interface CrewIntegration {
-  id: string
-  integration_id: string
-  name: string
-  type: string
-  status: string
-}
-
-interface MemberUser {
-  id: string
-  email: string
-  full_name: string | null
-  avatar_url: string | null
-}
-
-interface CrewMemberRow {
-  id: string
-  crew_id: string
-  user_id: string
-  created_at: string
-  user?: MemberUser | null
-}
-
-
-const STYLE_OPTIONS = (Object.entries(AVATAR_STYLES) as Array<[
-  string,
-  { label: string; style: unknown },
-]>).map(([value, meta]) => ({ value, label: meta.label }))
+import { OverviewTab } from "./crew-canvas-tabs/overview-tab"
+import { RosterTab } from "./crew-canvas-tabs/roster-tab"
+import { MissionsTab } from "./crew-canvas-tabs/missions-tab"
+import { FilesTab } from "./crew-canvas-tabs/files-tab"
+import { SettingsTab } from "./crew-canvas-tabs/settings-tab"
+import type {
+  AgentSummary,
+  CrewIntegration,
+  CrewMemberRow,
+  CrewRecord,
+  IssueRow,
+  IssuesSnapshot,
+  MissionData,
+} from "./crew-canvas-tabs/types"
+import { formatMemory } from "./crew-canvas-tabs/types"
 
 
 type CrewTab = "overview" | "roster" | "missions" | "files" | "settings"
@@ -386,537 +297,51 @@ export function CrewCanvas({
       <CanvasTabs<CrewTab> tabs={TABS} active={tab} onChange={setTab} />
 
       {tab === "overview" && (
-        <div className="space-y-7">
-          {/* Health 3-card strip — derived stats, no extra fetches */}
-          <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <HealthCard
-              label="Agents"
-              value={`${agentsForCrew.length}`}
-              hint={
-                health.errored > 0
-                  ? `${health.errored} error${health.errored === 1 ? "" : "s"} · ${health.running} running`
-                  : `${health.running} running · ${agentsForCrew.length - health.running} idle`
-              }
-              tone={health.errored > 0 ? "danger" : health.running > 0 ? "active" : "neutral"}
-            />
-            <HealthCard
-              label="Open issues"
-              value={health.openIssues !== null ? String(health.openIssues) : "–"}
-              hint={
-                issues
-                  ? `${issues.InProgress} in progress · ${issues.InReview} in review`
-                  : "loading…"
-              }
-              tone={(health.openIssues ?? 0) > 0 ? "active" : "neutral"}
-              href="/issues"
-            />
-            <HealthCard
-              label="Missions"
-              value={`${health.activeMissions}`}
-              hint={
-                health.activeMissions > 0
-                  ? "active missions running"
-                  : "no active missions"
-              }
-              tone={health.activeMissions > 0 ? "active" : "neutral"}
-            />
-          </section>
-
-          {/* Activity with per-agent filter chips */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between flex-wrap gap-2">
-              <h2 className="text-lg font-semibold">Recent activity</h2>
-              <div className="flex items-center gap-1.5 text-xs flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setActivityFilter("all")}
-                  aria-pressed={activityFilter === "all"}
-                  className={cn(
-                    "px-2 py-0.5 rounded border transition-colors",
-                    activityFilter === "all"
-                      ? "border-blue-500/45 bg-blue-500/15 text-blue-300"
-                      : "border-white/10 text-muted-foreground hover:text-foreground/80",
-                  )}
-                >
-                  All
-                </button>
-                {agentsForCrew.slice(0, 6).map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => setActivityFilter(a.id)}
-                    aria-pressed={activityFilter === a.id}
-                    className={cn(
-                      "px-2 py-0.5 rounded border transition-colors",
-                      activityFilter === a.id
-                        ? "border-blue-500/45 bg-blue-500/15 text-blue-300"
-                        : "border-white/10 text-muted-foreground hover:text-foreground/80",
-                    )}
-                  >
-                    {a.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-xl border border-white/8 bg-card max-h-[420px] overflow-hidden">
-              <CrewActivityFeed
-                workspaceId={workspaceId}
-                crewId={activityFilter === "all" ? crew.id : undefined}
-                agentId={activityFilter === "all" ? undefined : activityFilter}
-              />
-            </div>
-          </section>
-
-          {/* Quick actions */}
-          <section className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-            <QuickAction
-              icon={<Files className="h-3.5 w-3.5" />}
-              label="Open Files"
-              onClick={onOpenFiles}
-            />
-            <QuickAction
-              icon={<RotateCcw className="h-3.5 w-3.5" />}
-              label="Apply avatar style"
-              onClick={() => applyAvatarStyle(false)}
-              disabled={agentsForCrew.length === 0}
-            />
-            <QuickAction
-              icon={<RotateCcw className="h-3.5 w-3.5" />}
-              label="Reset avatar overrides"
-              onClick={() => applyAvatarStyle(true)}
-              disabled={agentsForCrew.length === 0}
-            />
-          </section>
-        </div>
+        <OverviewTab
+          workspaceId={workspaceId}
+          crewId={crew.id}
+          agentsForCrew={agentsForCrew}
+          missions={missions}
+          issues={issues}
+          health={health}
+          activityFilter={activityFilter}
+          setActivityFilter={setActivityFilter}
+          onOpenFiles={onOpenFiles}
+          applyAvatarStyle={applyAvatarStyle}
+        />
       )}
 
       {tab === "roster" && (
-        <div className="space-y-7">
-          {/* Agents */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-lg font-semibold">
-                Agents <span className="text-muted-foreground text-sm font-normal ml-1">{agentsForCrew.length}</span>
-              </h2>
-            </div>
-            {agentsForCrew.length === 0 ? (
-              <div className="rounded-xl border border-white/8 bg-card p-6 text-center text-xs text-muted-foreground">
-                No agents in this crew. Use <strong className="text-foreground/80">+ Agent</strong> in the toolbar to add one.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {agentsForCrew.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => onSelectAgent(a.slug)}
-                    className="rounded-xl border border-white/8 bg-card p-3.5 text-left hover:border-white/15 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={getAgentAvatarUrl(a.avatar_seed || a.name, a.avatar_style || crew.avatar_style)}
-                        alt=""
-                        className="w-10 h-10 rounded-xl"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium truncate">{a.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{a.status?.toLowerCase()}</span>
-                          {a.agent_role !== "AGENT" && (
-                            <span className="text-[8px] px-1 rounded bg-violet-500/20 text-violet-300">{a.agent_role}</span>
-                          )}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate">{a.role_title || "—"}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 mt-3 text-[11px] text-muted-foreground">
-                      {a.llm_model && (
-                        <span className="px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 truncate">
-                          {a.llm_model}
-                        </span>
-                      )}
-                      {a._count?.skills !== undefined && <span>{a._count.skills} skills</span>}
-                      {a._count?.credentials !== undefined && <span>{a._count.credentials} keys</span>}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Workspace users — humans with crew access (different from agents) */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-lg font-semibold">
-                Workspace users <span className="text-muted-foreground text-sm font-normal ml-1">{members?.length ?? 0}</span>
-              </h2>
-              <Link
-                href="/settings?tab=members"
-                className="text-xs px-2.5 py-1 rounded border border-white/10 hover:bg-white/5 text-foreground/80 flex items-center gap-1.5"
-              >
-                <Plus className="h-3 w-3" />
-                Manage in settings
-              </Link>
-            </div>
-            <div className="rounded-xl border border-white/8 bg-card overflow-hidden divide-y divide-white/5">
-              {members === null ? (
-                <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
-              ) : members.length === 0 ? (
-                <div className="px-4 py-6 text-xs text-muted-foreground italic">
-                  No workspace users assigned yet. By default, OWNERs and ADMINs of the workspace already have full access — assign individual MEMBERs here to scope their reach to this crew only.
-                </div>
-              ) : (
-                members.map((m) => (
-                  <div key={m.id} className="px-4 py-2.5 flex items-center gap-3">
-                    {m.user?.avatar_url ? (
-                      <img src={m.user.avatar_url} alt="" className="w-8 h-8 rounded-full" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-violet-600 grid place-items-center text-[11px]">
-                        {(m.user?.full_name ?? m.user?.email ?? "?").slice(0, 2).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm text-foreground truncate">
-                        {m.user?.full_name ?? m.user?.email ?? "Unknown user"}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground truncate">
-                        {m.user?.email}
-                        {m.created_at && ` · joined ${new Date(m.created_at).toLocaleDateString()}`}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-        </div>
+        <RosterTab
+          crew={crew}
+          agentsForCrew={agentsForCrew}
+          members={members}
+          onSelectAgent={onSelectAgent}
+        />
       )}
 
       {tab === "missions" && (
-        <div className="space-y-7">
-          {/* Recent missions */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-lg font-semibold">
-                Recent missions
-                {recentMissions.length > 0 && (
-                  <span className="text-muted-foreground text-sm font-normal ml-2">{recentMissions.length}</span>
-                )}
-              </h2>
-              <Link href="/issues" className="text-xs text-blue-300 hover:underline">
-                Open in /issues →
-              </Link>
-            </div>
-            {recentMissions.length === 0 ? (
-              <div className="rounded-xl border border-white/8 bg-card p-6 text-center text-xs text-muted-foreground">
-                No missions yet for this crew.
-              </div>
-            ) : (
-              <ul className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
-                {recentMissions.map((m) => (
-                  <li key={m.id}>
-                    <Link
-                      href={`/missions/${encodeURIComponent(m.id)}/timeline`}
-                      className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
-                    >
-                      <span className={cn(
-                        "w-1.5 h-1.5 rounded-full shrink-0",
-                        m.status === "RUNNING" ? "bg-emerald-400" : m.status === "FAILED" ? "bg-red-500" : "bg-zinc-500",
-                      )} />
-                      <span className="truncate flex-1 text-foreground/85">{m.title}</span>
-                      <span className="text-[10px] text-muted-foreground shrink-0 uppercase">
-                        {m.status?.replace(/_/g, " ").toLowerCase()}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground shrink-0">
-                        {new Date(m.created_at).toLocaleDateString()}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          {/* Issues */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-lg font-semibold">
-                Issues
-                {crew.issue_prefix && (
-                  <span className="text-muted-foreground text-sm font-normal ml-2 font-mono uppercase">{crew.issue_prefix}</span>
-                )}
-              </h2>
-              <Link href="/issues" className="text-xs text-blue-300 hover:underline">
-                Open in /issues →
-              </Link>
-            </div>
-            <div className="rounded-xl border border-white/8 bg-card grid grid-cols-5 divide-x divide-white/5">
-              {(["Backlog", "Todo", "InProgress", "InReview", "Done"] as const).map((bucket) => (
-                <div key={bucket} className="px-4 py-3">
-                  <div className="text-[10px] text-muted-foreground uppercase">{bucket.replace(/([A-Z])/g, " $1").trim()}</div>
-                  <div className={cn("text-2xl font-semibold mt-1", issues?.[bucket] ? "text-foreground" : "text-muted-foreground")}>
-                    {issues?.[bucket] ?? "—"}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {recentIssues.length > 0 && (
-              <ul className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
-                {recentIssues.map((i) => (
-                  <li key={i.id}>
-                    <Link
-                      href={i.identifier ? `/issues/${encodeURIComponent(i.identifier)}` : "/issues"}
-                      className="px-4 py-2 flex items-center gap-3 text-sm hover:bg-white/[0.03] transition-colors"
-                    >
-                      <span className={cn(
-                        "w-1.5 h-1.5 rounded-full shrink-0",
-                        issueStatusColor(i.status),
-                      )} />
-                      {i.identifier && (
-                        <code className="text-[11px] text-muted-foreground shrink-0 font-mono">
-                          {i.identifier}
-                        </code>
-                      )}
-                      <span className="truncate flex-1 text-foreground/85">{i.title}</span>
-                      <span className="text-[10px] text-muted-foreground shrink-0 uppercase">
-                        {i.status?.replace(/_/g, " ").toLowerCase()}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </div>
+        <MissionsTab
+          crew={crew}
+          recentMissions={recentMissions}
+          issues={issues}
+          recentIssues={recentIssues}
+        />
       )}
 
-      {tab === "files" && (
-        <div className="space-y-4">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold">Crew files</h2>
-            <span className="text-xs text-muted-foreground">shared at <code className="text-foreground/80">/crew/shared</code></span>
-          </div>
-          <div className="rounded-xl border border-white/8 bg-card p-6 flex items-center gap-4">
-            <div className="flex-1">
-              <div className="text-sm font-medium">Crew-wide shared files</div>
-              <div className="text-xs text-muted-foreground mt-1">
-                Browse and edit files in <code className="text-foreground/80">/crew/shared</code>. All agents in this crew read from the same tree —
-                use it for runbooks, policies, and templates that should be visible to every agent.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onOpenFiles}
-              className="text-sm px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-400 text-white"
-            >
-              Open Files panel
-            </button>
-          </div>
-        </div>
-      )}
+      {tab === "files" && <FilesTab onOpenFiles={onOpenFiles} />}
 
       {tab === "settings" && (
-        <div className="space-y-7">
-          {/* Profile */}
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold">Profile</h2>
-            <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
-              <Row label="Name">
-                <EditableField value={crew.name} onSave={(v) => patch({ name: v })} />
-              </Row>
-              <Row label="Slug">
-                <EditableField value={crew.slug} onSave={(v) => patch({ slug: v })} mono />
-              </Row>
-              <Row label="Description" align="start">
-                <EditableField value={crew.description} onSave={(v) => patch({ description: v })} />
-              </Row>
-              <Row label="Issue prefix">
-                <EditableField
-                  value={crew.issue_prefix ?? ""}
-                  onSave={(v) => patch({ issue_prefix: (v || null) && v.toUpperCase().slice(0, 5) })}
-                  mono
-                  placeholder="ENG"
-                />
-                <span className="text-[10px] text-muted-foreground ml-1">max 5 · uppercase</span>
-              </Row>
-              <Row label="Avatar style">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <EditableField
-                    value={crew.avatar_style ?? "bottts-neutral"}
-                    onSave={(v) => patch({ avatar_style: v })}
-                    options={STYLE_OPTIONS}
-                    format={(v) => STYLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
-                  />
-                  {agentsForCrew.length > 0 && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => applyAvatarStyle(false)}
-                        className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
-                      >
-                        Apply to all
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => applyAvatarStyle(true)}
-                        className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
-                        title="Apply this style and clear per-agent overrides"
-                      >
-                        Reset overrides
-                      </button>
-                    </>
-                  )}
-                </div>
-              </Row>
-            </div>
-          </section>
-
-          {/* Runtime &amp; security — collapsibles per wireframe spec */}
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold">Runtime &amp; security</h2>
-            <Collapsible
-              title="Container resources"
-              summary={`${formatMemory(crew.container_memory_mb)} · ${crew.container_cpus} CPU · TTL ${crew.container_ttl_hours ?? "—"}h`}
-            >
-              <CrewContainerConfig
-                memoryMb={crew.container_memory_mb}
-                cpus={crew.container_cpus}
-                ttlHours={crew.container_ttl_hours}
-                canEdit
-                onSave={async (config) => { await patch(config) }}
-              />
-            </Collapsible>
-
-            <Collapsible
-              title="Network policy"
-              summary={`${crew.network_mode}${Array.isArray(crew.allowed_domains) && crew.allowed_domains.length > 0 ? ` · ${crew.allowed_domains.length} allowed` : ""}`}
-            >
-              <CrewNetworkPolicy
-                networkMode={crew.network_mode === "restricted" ? "restricted" : "free"}
-                allowedDomains={Array.isArray(crew.allowed_domains)
-                  ? crew.allowed_domains
-                  : (crew.allowed_domains ? String(crew.allowed_domains).split(",").map((s) => s.trim()).filter(Boolean) : [])}
-                canEdit
-                onSave={async (mode, domains) => {
-                  await patch({ network_mode: mode, allowed_domains: domains.length > 0 ? domains : null })
-                }}
-              />
-            </Collapsible>
-
-            <Collapsible
-              title="MCP servers"
-              summary="crew-wide model context protocol servers"
-            >
-              <CrewMCPConfig crewId={crew.id} workspaceId={workspaceId} />
-            </Collapsible>
-
-            <Collapsible
-              title="Container image &amp; features"
-              summary={crew.runtime_image ?? "debian:trixie-slim"}
-            >
-              <CrewRuntimeConfig
-                crewId={crew.id}
-                workspaceId={workspaceId}
-                runtimeImage={crew.runtime_image}
-                devcontainerConfig={crew.devcontainer_config}
-                miseConfig={crew.mise_config}
-                cachedImage={crew.cached_image}
-                canEdit
-                onSave={async (config) => { await patch(config) }}
-              />
-            </Collapsible>
-
-            <Collapsible
-              title="Escalations"
-              summary="harbormaster sync · deny on miss"
-            >
-              <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
-            </Collapsible>
-          </section>
-
-          {/* Integrations */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-lg font-semibold">
-                Integrations
-                <span className="text-muted-foreground text-sm font-normal ml-1">{integrations?.length ?? 0}</span>
-              </h2>
-              <Link href="/integrations" className="text-xs text-blue-300 hover:underline">
-                Manage workspace integrations →
-              </Link>
-            </div>
-            {!integrations || integrations.length === 0 ? (
-              <div className="rounded-xl border border-white/8 bg-card p-4 text-xs text-muted-foreground">
-                No integrations bound to this crew.
-              </div>
-            ) : (
-              <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
-                {integrations.map((i) => (
-                  <div key={i.id} className="px-4 py-2.5 flex items-center gap-3">
-                    <div className="w-7 h-7 rounded bg-violet-500/20 text-violet-300 grid place-items-center text-xs font-semibold">
-                      {i.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-sm">{i.name}</div>
-                      <div className="text-[11px] text-muted-foreground">{i.type}</div>
-                    </div>
-                    <span className={cn(
-                      "text-[10px]",
-                      i.status === "connected" ? "text-emerald-400" : "text-muted-foreground",
-                    )}>
-                      {i.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Danger */}
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-red-400">Danger zone</h2>
-            <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium">Delete this crew</div>
-                <div className="text-xs text-muted-foreground">
-                  All {agentsForCrew.length} agent{agentsForCrew.length === 1 ? "" : "s"} will be detached. Container torn down. Journal kept 30 days.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="text-xs px-3 py-1.5 rounded bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 flex items-center gap-1.5"
-              >
-                <Trash2 className="h-3 w-3" />
-                Delete {crew.name}
-              </button>
-            </div>
-          </section>
-        </div>
+        <SettingsTab
+          workspaceId={workspaceId}
+          crew={crew}
+          agentsForCrew={agentsForCrew}
+          integrations={integrations}
+          patch={patch}
+          applyAvatarStyle={applyAvatarStyle}
+          onDelete={handleDelete}
+        />
       )}
     </CanvasShell>
   )
-}
-
-// =============================================================================
-// Layout helpers
-// =============================================================================
-
-
-function formatMemory(mb: number): string {
-  if (!Number.isFinite(mb) || mb <= 0) return "—"
-  if (mb < 1024) return `${mb} MB`
-  const gb = mb / 1024
-  return gb >= 10 ? `${gb.toFixed(0)} GB` : `${gb.toFixed(1)} GB`
-}
-
-
-function issueStatusColor(status: string | undefined): string {
-  const s = (status ?? "").toLowerCase()
-  if (s.includes("progress")) return "bg-blue-400"
-  if (s.includes("review")) return "bg-amber-400"
-  if (s.includes("done") || s.includes("closed") || s.includes("complete")) return "bg-emerald-400"
-  if (s.includes("blocked") || s.includes("error") || s.includes("cancel")) return "bg-red-500"
-  if (s.includes("todo")) return "bg-zinc-400"
-  return "bg-zinc-600"
 }

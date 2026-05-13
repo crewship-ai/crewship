@@ -5,14 +5,11 @@ import Link from "next/link"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  ChevronDown, MessageSquare, MoreHorizontal, Square,
+  MessageSquare, MoreHorizontal, Square,
   Trash2, RotateCcw,
 } from "lucide-react"
 import { EditableField } from "@/components/shared/editable-field"
-import { SystemPromptEditor } from "@/components/features/crews/system-prompt-editor"
-import { InboxBanner } from "@/components/features/crews/inbox-banner"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
-import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,41 +18,31 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { CLI_ADAPTERS, getProviderLabel } from "@/lib/cli-adapters"
-import { ModelLibraryPicker, getCompatibleAdapters } from "./model-library-picker"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 
 import {
-  PeersCard,
-  RecentRunsCard,
-  RecentSessionsCard,
-  WorkspaceTab,
-} from "./agent-canvas-cards"
-import {
-  CredentialsManager,
-  SkillsManager,
-} from "./agent-canvas-managers"
-import {
-  CanvasRow as Row,
   CanvasShell,
   CanvasTabs,
   useEntityFetch,
   usePatchEntity,
   useResetTabOnSlugChange,
 } from "./canvas-base"
+import { ActivityTab } from "./agent-canvas-tabs/activity-tab"
+import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
+import { SettingsTab } from "./agent-canvas-tabs/settings-tab"
+import { SkillsTab } from "./agent-canvas-tabs/skills-tab"
+import { WorkspaceTab } from "./agent-canvas-tabs/workspace-tab"
+import type {
+  AgentRecord,
+  ChatRow as ChatRowType,
+  InboxSummary,
+  PeerMessageRow as PeerMessageRowType,
+  RunRow as RunRowType,
+} from "./agent-canvas-tabs/types"
 
-const ROLE_OPTIONS = [
-  { value: "AGENT", label: "Agent" },
-  { value: "LEAD", label: "Lead" },
-] as const
-
-const TOOL_PROFILE_OPTIONS = [
-  { value: "CODING", label: "Coding (full)" },
-  { value: "SANDBOX", label: "Sandbox (restricted)" },
-  { value: "READONLY", label: "Read-only" },
-] as const
+export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } from "./agent-canvas-tabs/types"
 
 type AgentTab = "overview" | "workspace" | "skills" | "activity" | "settings"
 
@@ -66,88 +53,6 @@ const TABS: Array<{ id: AgentTab; label: string }> = [
   { id: "activity", label: "Activity" },
   { id: "settings", label: "Settings" },
 ]
-
-interface AgentRecord {
-  id: string
-  workspace_id: string
-  crew_id: string | null
-  name: string
-  slug: string
-  description: string | null
-  role_title: string | null
-  agent_role: string
-  lead_mode: string | null
-  status: string
-  cli_adapter: string
-  llm_provider: string | null
-  llm_model: string | null
-  system_prompt: string | null
-  timeout_seconds: number
-  tool_profile: string
-  memory_enabled: boolean
-  cli_tools?: string[] | null
-  schedule_cron?: string | null
-  schedule_prompt?: string | null
-  schedule_enabled?: boolean | null
-  schedule_last_run?: string | null
-  schedule_next_run?: string | null
-  avatar_seed: string | null
-  avatar_style: string | null
-  updated_at: string
-  crew: { id?: string; name: string; slug: string; color: string | null; avatar_style: string | null } | null
-  _count?: { skills: number; credentials: number; chats: number }
-  last_active_at?: string | null
-}
-
-interface InboxSummary { count: number; summary?: string; cost?: number }
-
-export interface ChatRow {
-  id: string
-  title: string | null
-  message_count: number
-  status: string
-  started_at: string
-  ended_at: string | null
-  created_at: string
-}
-
-export interface RunRow {
-  id: string
-  status: string
-  trigger_type: string
-  started_at: string | null
-  finished_at: string | null
-  error_message: string | null
-  created_at: string
-}
-
-export interface AgentSkillRow {
-  id: string
-  skill_id: string
-  enabled: boolean
-  skill: { id: string; name: string; slug: string; display_name?: string | null; description?: string | null; category?: string | null; icon?: string | null; version?: string | null }
-}
-
-export interface AgentCredRow {
-  id: string
-  credential_id: string
-  credential_name: string
-  credential_type: string
-  credential_provider: string
-  credential_status: string
-  env_var_name: string
-  priority: number
-  created_at: string
-}
-
-export interface PeerMessageRow {
-  id?: string
-  from_agent_id?: string
-  from_agent_name?: string
-  from_agent_slug?: string
-  preview?: string
-  created_at?: string
-}
 
 export interface AgentCanvasProps {
   workspaceId: string
@@ -218,7 +123,7 @@ export function AgentCanvas({
 
   // Inbox + cost summary (used by stats strip + InboxBanner).
   const [inbox, setInbox] = useState<InboxSummary>({ count: 0 })
-  const [peerMessages, setPeerMessages] = useState<PeerMessageRow[]>([])
+  const [peerMessages, setPeerMessages] = useState<PeerMessageRowType[]>([])
   const agentId = agent?.id
   useEffect(() => {
     if (!agentId) return
@@ -234,7 +139,7 @@ export function AgentCanvas({
         const escalations = Number(data.escalations_open ?? 0)
         const assignments = Number(data.assignments_open ?? 0)
         const approvals = Number(data.approvals_pending ?? 0)
-        const peers: PeerMessageRow[] = Array.isArray(data.peer_messages) ? data.peer_messages : []
+        const peers: PeerMessageRowType[] = Array.isArray(data.peer_messages) ? data.peer_messages : []
         const total = escalations + assignments + approvals + peers.length
         const parts: string[] = []
         if (escalations) parts.push(`${escalations} escalation${escalations === 1 ? "" : "s"}`)
@@ -251,8 +156,8 @@ export function AgentCanvas({
   // Runs + chats are fetched once at canvas-level and shared with the
   // overview tab's Recent cards (avoids three separate hits to the
   // same endpoints + the rate-limiter pile-up that used to follow).
-  const [runs, setRuns] = useState<RunRow[] | null>(null)
-  const [chats, setChats] = useState<ChatRow[] | null>(null)
+  const [runs, setRuns] = useState<RunRowType[] | null>(null)
+  const [chats, setChats] = useState<ChatRowType[] | null>(null)
   useEffect(() => {
     if (!agentId) return
     let cancelled = false
@@ -262,13 +167,13 @@ export function AgentCanvas({
     setChats(null)
     fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: RunRow[] | null) => {
+      .then((data: RunRowType[] | null) => {
         if (!cancelled && Array.isArray(data)) setRuns(data)
       })
       .catch(() => { /* tolerate */ })
     fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: ChatRow[] | null) => {
+      .then((data: ChatRowType[] | null) => {
         if (!cancelled && Array.isArray(data)) setChats(data)
       })
       .catch(() => { /* tolerate */ })
@@ -342,11 +247,6 @@ export function AgentCanvas({
 
   const status = STATUS_BADGE[agent.status] || STATUS_BADGE.IDLE
   const isRunning = agent.status === "RUNNING"
-  const isLead = agent.agent_role === "LEAD"
-  const crewOptions = [
-    { value: "", label: "(no crew)" },
-    ...crews.map((c) => ({ value: c.id, label: c.name })),
-  ]
 
   return (
     <CanvasShell loading={false} error={null} notLoadedLabel="">
@@ -487,73 +387,15 @@ export function AgentCanvas({
 
       {/* Tab content */}
       {tab === "overview" && (
-        <div className="space-y-7">
-          <InboxBanner agentId={agent.id} count={inbox.count} summary={inbox.summary} />
-
-          {/* Profile */}
-          <section className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-lg font-semibold">Profile</h2>
-              <span className="text-[10px] text-muted-foreground">
-                updated {new Date(agent.updated_at).toLocaleDateString()}
-              </span>
-            </div>
-            <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
-              <Row label="Name">
-                <EditableField value={agent.name} onSave={(v) => patch({ name: v })} />
-              </Row>
-              <Row label="Slug">
-                <EditableField value={agent.slug} onSave={(v) => patch({ slug: v })} mono />
-              </Row>
-              <Row label="Role title">
-                <EditableField value={agent.role_title} onSave={(v) => patch({ role_title: v })} />
-              </Row>
-              <Row label="Description" align="start">
-                <EditableField value={agent.description} onSave={(v) => patch({ description: v })} />
-              </Row>
-              <Row label="Crew">
-                <EditableField
-                  value={agent.crew_id ?? ""}
-                  onSave={(v) => patch({ crew_id: v || null })}
-                  options={crewOptions}
-                  format={(_v) => agent.crew?.name ?? "(no crew)"}
-                />
-              </Row>
-              <Row label="Agent role">
-                <EditableField
-                  value={agent.agent_role}
-                  onSave={(v) => patch({ agent_role: v })}
-                  options={[...ROLE_OPTIONS]}
-                  format={(v) => ROLE_OPTIONS.find((o) => o.value === v)?.label ?? v}
-                />
-              </Row>
-              {isLead && (
-                <Row label="Lead mode" align="center">
-                  <EditableField
-                    value={agent.lead_mode || "active"}
-                    onSave={(v) => patch({ lead_mode: v })}
-                    options={[
-                      { value: "active", label: "Active (orchestrates crew)" },
-                      { value: "passive", label: "Passive (frontend only)" },
-                    ]}
-                    format={(v) => (v === "active" ? "Active" : "Passive")}
-                  />
-                </Row>
-              )}
-            </div>
-          </section>
-
-          {/* Recent sessions + Recent runs */}
-          <section className="grid md:grid-cols-2 gap-4">
-            <RecentSessionsCard agentSlug={agent.slug} chats={chats} />
-            <RecentRunsCard agentId={agent.id} runs={runs} />
-          </section>
-
-          {/* Crew peers (LEAD only — uses inbox.peer_messages) */}
-          {isLead && peerMessages.length > 0 && (
-            <PeersCard messages={peerMessages} />
-          )}
-        </div>
+        <OverviewTab
+          agent={agent}
+          crews={crews}
+          inbox={inbox}
+          chats={chats}
+          runs={runs}
+          peerMessages={peerMessages}
+          patch={patch}
+        />
       )}
 
       {tab === "workspace" && (
@@ -561,263 +403,30 @@ export function AgentCanvas({
       )}
 
       {tab === "skills" && (
-        <div className="space-y-7">
-          <SkillsManager agentId={agent.id} agentSlug={agent.slug} workspaceId={workspaceId} onChange={onAgentChanged} />
-          <CredentialsManager agentId={agent.id} agentSlug={agent.slug} workspaceId={workspaceId} onChange={onAgentChanged} />
-        </div>
+        <SkillsTab
+          agentId={agent.id}
+          agentSlug={agent.slug}
+          workspaceId={workspaceId}
+          onAgentChanged={onAgentChanged}
+        />
       )}
 
       {tab === "activity" && (
-        <section className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-lg font-semibold">Activity</h2>
-            <Link href={`/journal?agent_id=${encodeURIComponent(agent.id)}`} className="text-xs text-blue-300 hover:underline">
-              View all →
-            </Link>
-          </div>
-          <div className="rounded-xl border border-white/8 bg-card max-h-[640px] overflow-hidden">
-            <CrewActivityFeed
-              workspaceId={workspaceId}
-              agentId={agent.id}
-            />
-          </div>
-        </section>
+        <ActivityTab workspaceId={workspaceId} agentId={agent.id} />
       )}
 
       {tab === "settings" && (
-        <div className="space-y-7">
-          {/* System Prompt — top, biggest single setting that matters */}
-          <SystemPromptEditor
-            value={agent.system_prompt}
-            onSave={(v) => patch({ system_prompt: v })}
-            updatedHint={`updated ${new Date(agent.updated_at).toLocaleDateString()}`}
-          />
-
-          {/* Runtime — provider chips + rich model dropdown */}
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold">Runtime</h2>
-
-            <div className="rounded-xl border border-white/8 bg-card p-4 space-y-4">
-              {/* Model — primary, model-first picker. Adapter is auto-resolved
-                  and shown only when the choice is meaningful (Anthropic ↔
-                  Claude Code / OpenCode). */}
-              <div className="space-y-2">
-                <div className="text-xs text-muted-foreground">Model</div>
-                <ModelLibraryPicker
-                  cliAdapter={agent.cli_adapter}
-                  llmModel={agent.llm_model ?? ""}
-                  onPick={(next) => safePatch(next)}
-                  onCustom={() => setCustomModelOpen(true)}
-                />
-              </div>
-
-              {/* Adapter — inline pill selector. Renders only when the
-                  current provider has more than one compatible CLI binary
-                  (Anthropic ↔ Claude Code / OpenCode). For OpenAI / Google
-                  the row is hidden so the UI stays focused on the model. */}
-              {(() => {
-                const compat = agent.llm_provider
-                  ? getCompatibleAdapters(agent.llm_provider)
-                  : []
-                if (compat.length <= 1) return null
-                return (
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground">CLI adapter</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {compat.map((key) => {
-                        const cfg = CLI_ADAPTERS[key]
-                        if (!cfg) return null
-                        const Icon = cfg.icon
-                        const isActive = agent.cli_adapter === key
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => {
-                              if (!isActive) safePatch({ cli_adapter: key })
-                            }}
-                            className={cn(
-                              "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
-                              isActive
-                                ? "border-blue-400 bg-blue-500/10 ring-1 ring-blue-500/30"
-                                : "border-white/10 hover:bg-white/[0.03]",
-                            )}
-                          >
-                            <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-blue-300" : "text-muted-foreground")} />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium leading-tight">{cfg.label}</div>
-                              <div className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
-                                {cfg.description}
-                              </div>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground pl-1">
-                      Both adapters run {getProviderLabel(agent.llm_provider ?? "")} models — stick with the default unless you have a reason to switch.
-                    </p>
-                  </div>
-                )
-              })()}
-            </div>
-
-            {/* Custom model name — modal swap on the picker */}
-            {customModelOpen && (
-              <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
-                <div className="text-xs text-amber-300">Custom model identifier</div>
-                <div className="flex gap-2">
-                  <input
-                    autoFocus
-                    type="text"
-                    value={customModelDraft}
-                    onChange={(e) => setCustomModelDraft(e.target.value)}
-                    placeholder="e.g. claude-3-7-sonnet or my-fine-tuned-llama"
-                    className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-zinc-900 text-sm font-mono outline-none focus:border-blue-400"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && customModelDraft.trim()) {
-                        safePatch({ llm_model: customModelDraft.trim() })
-                        setCustomModelOpen(false)
-                        setCustomModelDraft("")
-                      } else if (e.key === "Escape") {
-                        setCustomModelOpen(false)
-                        setCustomModelDraft("")
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (customModelDraft.trim()) {
-                        safePatch({ llm_model: customModelDraft.trim() })
-                        setCustomModelOpen(false)
-                        setCustomModelDraft("")
-                      }
-                    }}
-                    disabled={!customModelDraft.trim()}
-                    className="px-3 py-1.5 rounded-md bg-blue-500 hover:bg-blue-400 disabled:opacity-40 text-sm text-white"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomModelOpen(false)
-                      setCustomModelDraft("")
-                    }}
-                    className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/5 text-sm text-muted-foreground"
-                  >
-                    Cancel
-                  </button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  ⏎ to save · Esc to cancel · keeps current adapter and provider.
-                </p>
-              </div>
-            )}
-
-            {/* Advanced — collapsible */}
-            <div className="rounded-xl border border-white/8 bg-card">
-              <button
-                type="button"
-                onClick={() => setShowAdvanced((v) => !v)}
-                className="w-full px-4 py-2.5 flex items-center gap-2 text-xs text-muted-foreground hover:bg-white/[0.03] hover:text-foreground transition-colors"
-              >
-                <ChevronDown
-                  className={cn("h-3 w-3 transition-transform duration-200", !showAdvanced && "-rotate-90")}
-                />
-                Advanced (LLM tuning, tools, memory, webhook, hooks)
-              </button>
-              {showAdvanced && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: "auto" }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.18, ease: "easeOut" }}
-                  className="divide-y divide-white/5 border-t border-white/5 overflow-hidden"
-                >
-                  <Row label="Timeout (s)">
-                    <EditableField
-                      value={String(agent.timeout_seconds)}
-                      onSave={(v) => {
-                        const n = parseInt(v, 10)
-                        if (!Number.isInteger(n) || n < 1) return
-                        patch({ timeout_seconds: n })
-                      }}
-                    />
-                  </Row>
-                  <Row label="Tool profile">
-                    <EditableField
-                      value={agent.tool_profile}
-                      onSave={(v) => patch({ tool_profile: v })}
-                      options={[...TOOL_PROFILE_OPTIONS]}
-                      format={(v) => TOOL_PROFILE_OPTIONS.find((o) => o.value === v)?.label ?? v}
-                    />
-                  </Row>
-                  <Row label="Tools enabled" align="start">
-                    <div className="flex flex-wrap items-center gap-1">
-                      {(agent.cli_tools && agent.cli_tools.length > 0) ? (
-                        agent.cli_tools.slice(0, 6).map((t) => (
-                          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-white/10 text-foreground/80">
-                            {t}
-                          </span>
-                        ))
-                      ) : (
-                        <em className="text-sm text-muted-foreground italic">(default for tool profile)</em>
-                      )}
-                      {agent.cli_tools && agent.cli_tools.length > 6 && (
-                        <span className="text-[10px] text-muted-foreground">+ {agent.cli_tools.length - 6} more</span>
-                      )}
-                    </div>
-                  </Row>
-                  <Row label="Memory">
-                    <button
-                      type="button"
-                      onClick={() => patch({ memory_enabled: !agent.memory_enabled })}
-                      className={cn(
-                        "relative inline-flex items-center w-9 h-5 rounded-full transition-colors",
-                        agent.memory_enabled ? "bg-emerald-600/70" : "bg-zinc-700",
-                      )}
-                      aria-pressed={agent.memory_enabled}
-                    >
-                      <span
-                        className={cn(
-                          "absolute w-4 h-4 rounded-full bg-white transition-transform",
-                          agent.memory_enabled ? "translate-x-[18px]" : "translate-x-0.5",
-                        )}
-                      />
-                    </button>
-                    <span className="text-sm text-muted-foreground ml-2">
-                      {agent.memory_enabled ? "enabled" : "disabled"}
-                    </span>
-                  </Row>
-                  <Row label="Hooks" align="center">
-                    <span className="text-sm text-muted-foreground">
-                      Manage via CLI:{" "}
-                      <code className="text-foreground/80">crewship hooks list</code>
-                      {" / "}
-                      <code className="text-foreground/80">enable</code>
-                      {" / "}
-                      <code className="text-foreground/80">disable</code>
-                    </span>
-                  </Row>
-                  <Row label="Webhook" align="center">
-                    <span className="text-sm text-muted-foreground">
-                      Manage via CLI: <code className="text-foreground/80">crewship agent webhook {agent.slug}</code>
-                    </span>
-                  </Row>
-                </motion.div>
-              )}
-            </div>
-          </section>
-
-          <p className="text-xs text-muted-foreground">
-            Schedule moved to orchestration · Delete agent moved to the {" "}
-            <span className="inline-flex items-center gap-0.5">
-              <MoreHorizontal className="h-3 w-3" /> menu
-            </span>{" "} next to the Chat button (owners only).
-          </p>
-        </div>
+        <SettingsTab
+          agent={agent}
+          patch={patch}
+          safePatch={safePatch}
+          showAdvanced={showAdvanced}
+          setShowAdvanced={setShowAdvanced}
+          customModelOpen={customModelOpen}
+          setCustomModelOpen={setCustomModelOpen}
+          customModelDraft={customModelDraft}
+          setCustomModelDraft={setCustomModelDraft}
+        />
       )}
     </CanvasShell>
   )
