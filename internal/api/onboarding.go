@@ -1,14 +1,17 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/services"
 )
 
@@ -155,6 +158,19 @@ type onboardingSetupRequest struct {
 	LlmModel        string `json:"llm_model"`
 	CredentialName  string `json:"credential_name"`
 	CredentialValue string `json:"credential_value"`
+	// CrewTemplateSlug, when non-empty, branches the setup into the
+	// "deploy a full crew from a builtin template" path. The template
+	// supplies all agent metadata (names, roles, system prompts,
+	// LLM model defaults), so CrewName / AgentName / CliAdapter are
+	// optional in this mode. Slug must match a row in crew_templates
+	// where is_builtin = 1 (or workspace-scoped).
+	CrewTemplateSlug string `json:"crew_template_slug"`
+	// PairingMode signals the user picked "Pair my local CLI" in
+	// step 3 of the wizard. The setup still creates the workspace +
+	// (optionally) the templated crew, but skips credential creation
+	// — the CLI redeem flow lands the auth via a separate cli_token
+	// row, not as a workspace credential.
+	PairingMode bool `json:"pairing_mode"`
 }
 
 var slugRegex = regexp.MustCompile(`[^a-z0-9-]`)
@@ -185,15 +201,6 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.CrewName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_name is required"})
-		return
-	}
-	if req.AgentName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_name is required"})
-		return
-	}
-
 	// Get user's first workspace
 	var workspaceID string
 	err := h.db.QueryRowContext(r.Context(), `
@@ -210,6 +217,27 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Template branch — when crew_template_slug is set, the wizard
+	// deploys a full crew (multiple agents, system prompts, model
+	// defaults) from a builtin template. Single-agent fields
+	// (CrewName, AgentName, CliAdapter) become optional inputs.
+	if strings.TrimSpace(req.CrewTemplateSlug) != "" {
+		h.setupFromTemplate(w, r, user.ID, workspaceID, req)
+		return
+	}
+
+	// Blank / single-agent branch — preserves the pre-template
+	// onboarding shape so users who pick "Start blank" still get a
+	// workable initial agent. CrewName + AgentName are required here.
+	if req.CrewName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_name is required"})
+		return
+	}
+	if req.AgentName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_name is required"})
+		return
+	}
+
 	cliAdapter := req.CliAdapter
 	if cliAdapter == "" {
 		cliAdapter = "CLAUDE_CODE"
@@ -219,8 +247,16 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
 		return
 	}
+
+	// Pairing-mode users skip credential creation here — the CLI
+	// redeem flow has already produced a cli_token, which is the
+	// auth surface they'll actually use.
+	credentialValue := req.CredentialValue
+	if req.PairingMode {
+		credentialValue = ""
+	}
 	credName := req.CredentialName
-	if credName == "" && req.CredentialValue != "" {
+	if credName == "" && credentialValue != "" {
 		credName = "API Key"
 	}
 
@@ -237,7 +273,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		LLMModel:        stringPtr(req.LlmModel),
 		EnvVarName:      llm.envVarName,
 		CredentialName:  credName,
-		CredentialValue: req.CredentialValue,
+		CredentialValue: credentialValue,
 		Now:             time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
@@ -253,6 +289,132 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// setupFromTemplate handles the crew-template path of onboarding.
+// Atomically claims onboarding (CAS guard like the service-layer
+// path), renames the workspace if requested, deploys the template
+// via the shared deployCrewTemplate helper (which seeds the full
+// agent roster and auto-assigns workspace credentials), and stores
+// an Anthropic credential when the user pasted an API key.
+func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Request, userID, workspaceID string, req onboardingSetupRequest) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// CAS guard: only proceed if onboarding hasn't been claimed yet.
+	// Race-safe equivalent of services.OnboardingService.Setup's
+	// guard. The template branch lives in the handler (not the
+	// service) because crew_templates loading + deployment is itself
+	// a handler-level helper already.
+	guardRes, err := h.db.ExecContext(r.Context(),
+		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ? AND onboarding_completed = 0",
+		now, userID)
+	if err != nil {
+		h.logger.Error("onboarding template: lock", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	rows, _ := guardRes.RowsAffected()
+	if rows == 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
+		return
+	}
+
+	if strings.TrimSpace(req.WorkspaceName) != "" {
+		if _, err := h.db.ExecContext(r.Context(),
+			"UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?",
+			req.WorkspaceName, now, workspaceID); err != nil {
+			h.logger.Error("onboarding template: update workspace name", "error", err)
+			// Soft failure: continue to template deployment so a
+			// failed rename doesn't abort the whole onboarding.
+		}
+	}
+
+	// If the user pasted an Anthropic API key (browser mode), store
+	// it as a workspace-scoped credential BEFORE deploying the
+	// template so the template's auto-assign hooks pick it up. In
+	// pairing mode we skip — the CLI redemption has already minted
+	// a cli_token that is the user's auth surface.
+	if !req.PairingMode && strings.TrimSpace(req.CredentialValue) != "" {
+		credName := req.CredentialName
+		if credName == "" {
+			credName = "API Key"
+		}
+		// Default the provider to ANTHROPIC; the wizard collects the
+		// matching adapter so the credential maps onto the right
+		// env var by the template's deploy hook.
+		llm, _ := resolveLLMProvider(req.LlmProvider)
+		if llm.provider == "" {
+			llm.provider = "ANTHROPIC"
+			llm.envVarName = "ANTHROPIC_API_KEY"
+		}
+		if err := insertOnboardingCredential(r.Context(), h.db, userID, workspaceID, credName, llm.provider, llm.envVarName, req.CredentialValue, now); err != nil {
+			h.logger.Error("onboarding template: store credential", "error", err)
+			// Continue — template deploys but with no creds, the
+			// auto-assign hook emits credential.auto_assign_empty
+			// into the journal so the operator can see why.
+		}
+	}
+
+	// Default the crew display name to the template's name when the
+	// user didn't supply one. The deploy helper accepts an empty
+	// crew slug input and derives it from the name.
+	crewName := strings.TrimSpace(req.CrewName)
+	if crewName == "" {
+		// Look up template's display name for a sane default.
+		_ = h.db.QueryRowContext(r.Context(),
+			"SELECT name FROM crew_templates WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)",
+			req.CrewTemplateSlug, workspaceID).Scan(&crewName)
+		if crewName == "" {
+			crewName = req.CrewTemplateSlug
+		}
+	}
+
+	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, noopEmitter{}, workspaceID, req.CrewTemplateSlug, crewName, "")
+	if err != nil {
+		switch {
+		case errors.Is(err, errTemplateNotFound):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unknown crew template"})
+		case errors.Is(err, errCrewSlugConflict):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		default:
+			h.logger.Error("onboarding template: deploy", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		}
+		return
+	}
+
+	// Return the same shape as the single-agent path so the frontend
+	// can route in one place. AgentID points to the first agent in
+	// the deployed roster (typically the lead).
+	var firstAgentID string
+	if len(result.AgentIDs) > 0 {
+		firstAgentID = result.AgentIDs[0]
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"workspace_id": workspaceID,
+		"crew_id":      result.CrewID,
+		"agent_id":     firstAgentID,
+		"agent_ids":    result.AgentIDs,
+		"agent_count":  result.AgentCount,
+	})
+}
+
+// insertOnboardingCredential stores a workspace-scoped API key the
+// user pasted during onboarding. Same shape as the row that
+// internal/services/onboarding.go produces in the blank path, so the
+// auto-assign hook called by deployCrewTemplate finds it.
+func insertOnboardingCredential(ctx context.Context, db *sql.DB, userID, workspaceID, name, provider, _ /*envVarName*/, value, now string) error {
+	encrypted, err := encryption.Encrypt(value)
+	if err != nil {
+		return fmt.Errorf("encrypt: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'AI_CLI_TOKEN', ?, 'WORKSPACE', ?, ?, ?)`,
+		generateCUID(), workspaceID, name, encrypted, provider, userID, now, now); err != nil {
+		return fmt.Errorf("insert credential: %w", err)
+	}
+	return nil
 }
 
 func stringPtr(s string) *string {
