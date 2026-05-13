@@ -242,7 +242,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// orchestrator's OAuth CONNECT-tunnel auth mode can't use a
 	// plain sk-ant-api… key — agents in the container can't see
 	// any on-disk credentials and Claude Code refuses to start.
-	if err := validateOnboardingCredential(req.LlmProvider, req.CredentialValue); err != nil {
+	if err := validateOnboardingCredential(r.Context(), req.LlmProvider, req.CredentialValue); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -387,10 +387,19 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 			llm.envVarName = "ANTHROPIC_API_KEY"
 		}
 		if err := insertOnboardingCredential(r.Context(), h.db, userID, workspaceID, credName, llm.provider, llm.envVarName, req.CredentialValue, now); err != nil {
+			// The user explicitly provided a credential — if we can't
+			// persist it, we cannot pretend onboarding succeeded.
+			// Roll the completion flag back so they can retry, then
+			// 500 so the UI surfaces the error instead of dumping
+			// them into a workspace that can't actually run agents.
 			h.logger.Error("onboarding template: store credential", "error", err)
-			// Continue — template deploys but with no creds, the
-			// auto-assign hook emits credential.auto_assign_empty
-			// into the journal so the operator can see why.
+			if _, rbErr := h.db.ExecContext(r.Context(),
+				"UPDATE users SET onboarding_completed = 0, updated_at = ? WHERE id = ?",
+				time.Now().UTC().Format(time.RFC3339), userID); rbErr != nil {
+				h.logger.Error("onboarding template: rollback completion flag", "error", rbErr, "store_error", err)
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store credential"})
+			return
 		}
 	}
 
@@ -507,7 +516,7 @@ func stringPtr(s string) *string {
 // Per-provider checks are intentionally narrow: we only reject shapes
 // we know will fail downstream, never anything ambiguous. A future
 // adapter whose token shape we don't yet recognise falls through.
-func validateOnboardingCredential(provider, value string) error {
+func validateOnboardingCredential(ctx context.Context, provider, value string) error {
 	v := strings.TrimSpace(value)
 	if v == "" {
 		return nil
@@ -532,7 +541,7 @@ func validateOnboardingCredential(provider, value string) error {
 					"Run `claude setup-token` on your machine and paste the resulting value.",
 			)
 		}
-		return probeAnthropicOAuthToken(v)
+		return probeAnthropicOAuthToken(ctx, v)
 	}
 	return nil
 }
@@ -547,10 +556,14 @@ func validateOnboardingCredential(provider, value string) error {
 // exercises the auth path. 401 → token bad. Anything 2xx → token
 // works. Other failures (network, 5xx) are treated as soft — we
 // log + accept rather than block onboarding on Anthropic flaking.
-func probeAnthropicOAuthToken(token string) error {
+func probeAnthropicOAuthToken(parent context.Context, token string) error {
 	const url = "https://api.anthropic.com/v1/messages"
 	const body = `{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"ok"}]}`
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	// Derive from the parent so request cancellation propagates here
+	// — without it a slow Anthropic probe outlives the HTTP request
+	// it's gating, which CodeRabbit flagged as a context-propagation
+	// violation per the repo guideline.
+	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
 	if err != nil {

@@ -295,15 +295,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req, keeperEnabled)
-		// TEMP DEBUG (2026-05-13): tracking why CLAUDE_CODE_OAUTH_TOKEN
-		// doesn't land in the exec env even when an AI_CLI_TOKEN cred
-		// is present. Drop this log once the root cause is fixed.
-		credSummary := make([]map[string]any, 0, len(req.Credentials))
-		for _, c := range req.Credentials {
-			credSummary = append(credSummary, map[string]any{
-				"env": c.EnvVarName, "type": c.Type, "value_len": len(c.PlainValue),
-			})
-		}
+		// Minimal env-builder signal at debug level. The previous Info
+		// log dumped every credential's EnvVarName + Type + value_len,
+		// which leaks auth metadata into production logs. Keep just a
+		// boolean for whether the Claude OAuth env was produced; the
+		// credential-injection root cause is being tracked separately.
 		hasOAuthEnv := false
 		for _, e := range env {
 			if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
@@ -311,9 +307,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				break
 			}
 		}
-		o.logger.Info("env builder debug",
+		o.logger.Debug("env builder",
 			"agent_id", req.AgentID,
-			"creds", credSummary,
 			"has_oauth_env", hasOAuthEnv,
 			"env_count", len(env),
 		)

@@ -95,7 +95,11 @@ export function getAdapterBrand(key: string): AdapterBrand {
  */
 export const ADAPTER_TOKEN_GUIDE: Record<string, { url: string; label: string }> = {
   CLAUDE_CODE: {
-    url: "https://docs.claude.com/en/docs/claude-code/setup#anthropic-api-key",
+    // Avoid the #anthropic-api-key anchor — onboarding rejects API
+    // keys, so deep-linking to "raw API key" guidance sends the user
+    // down the wrong path. Land on the setup page itself; users find
+    // the `claude setup-token` instructions from there.
+    url: "https://docs.claude.com/en/docs/claude-code/setup",
     label: "How to generate a Claude Code CLI token",
   },
   OPENCODE: {

@@ -257,20 +257,32 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		tokenName = "pair-" + strings.ToLower(hint)
 	}
 
+	// Consume the pairing row FIRST and require exactly one updated
+	// row. Two concurrent redeems both pass the earlier SELECT, but
+	// only one's UPDATE … WHERE status='pending' affects a row — the
+	// loser sees rowsAffected==0 and bails before inserting a second
+	// valid cli_tokens row for the same code. Identical race-protection
+	// pattern as the password-reset flow.
+	updRes, err := tx.ExecContext(r.Context(), `
+		UPDATE cli_pairings SET status='consumed', consumed_at=?, adapter_hint=COALESCE(?, adapter_hint)
+		WHERE code = ? AND status='pending'`,
+		now, nullableHint(hint), code)
+	if err != nil {
+		h.logger.Error("cli pair redeem: mark consumed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	affected, _ := updRes.RowsAffected()
+	if affected != 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired code"})
+		return
+	}
+
 	if _, err := tx.ExecContext(r.Context(), `
 		INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at)
 		VALUES (?, ?, ?, ?, ?)`,
 		tokenID, userID, tokenName, tokenHashHex, now); err != nil {
 		h.logger.Error("cli pair redeem: insert cli_token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	if _, err := tx.ExecContext(r.Context(), `
-		UPDATE cli_pairings SET status='consumed', consumed_at=?, adapter_hint=COALESCE(?, adapter_hint)
-		WHERE code = ? AND status='pending'`,
-		now, nullableHint(hint), code); err != nil {
-		h.logger.Error("cli pair redeem: mark consumed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}

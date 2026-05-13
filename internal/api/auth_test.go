@@ -171,18 +171,22 @@ func TestAuthBootstrap_Success(t *testing.T) {
 	cookies := rr.Result().Cookies()
 	var hasAccess, hasRefresh bool
 	for _, c := range cookies {
-		if c.Name == "authjs.session-token" {
+		// Accept either prefix — under HTTPS / behind a TLS-terminating
+		// proxy the cookie names get the `__Secure-` prefix, so a test
+		// that only checked the plain names would silently miss the
+		// secure-path behaviour.
+		if c.Name == "authjs.session-token" || c.Name == "__Secure-authjs.session-token" {
 			hasAccess = true
 		}
-		if c.Name == "authjs.refresh-token" {
+		if c.Name == "authjs.refresh-token" || c.Name == "__Secure-authjs.refresh-token" {
 			hasRefresh = true
 		}
 	}
 	if !hasAccess {
-		t.Errorf("missing access cookie 'authjs.session-token' after bootstrap")
+		t.Errorf("missing access cookie 'authjs.session-token' (or __Secure- variant) after bootstrap")
 	}
 	if !hasRefresh {
-		t.Errorf("missing refresh cookie 'authjs.refresh-token' after bootstrap")
+		t.Errorf("missing refresh cookie 'authjs.refresh-token' (or __Secure- variant) after bootstrap")
 	}
 }
 

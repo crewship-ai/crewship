@@ -95,7 +95,15 @@ func openAdminDB() (*database.DB, error) {
 		return nil, fmt.Errorf("resolve data dir: %w", err)
 	}
 	if _, err := os.Stat(dd.DatabasePath()); err != nil {
-		return nil, fmt.Errorf("database not found at %s — set DATABASE_URL or run `crewship init` first", dd.DatabasePath())
+		// Only treat ENOENT as "not initialised" — permission denied,
+		// I/O error, or symlink-loop should surface verbatim instead
+		// of being mis-reported as a missing database. Otherwise the
+		// operator chases the wrong fix (`crewship init`) when the
+		// real problem is access rights.
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("database not found at %s — set DATABASE_URL or run `crewship init` first", dd.DatabasePath())
+		}
+		return nil, fmt.Errorf("stat database path %s: %w", dd.DatabasePath(), err)
 	}
 	return database.Open(dd.DatabaseURL())
 }

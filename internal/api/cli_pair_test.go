@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -85,32 +87,50 @@ func TestPairRedeem_SingleUse(t *testing.T) {
 		t.Fatalf("no code from /start")
 	}
 
-	// First redeem succeeds.
-	body1 := bytes.NewBufferString(`{"code":"` + start.Code + `","adapter_hint":"CLAUDE_CODE"}`)
-	req1 := httptest.NewRequest("POST", "/api/v1/auth/pair/redeem", body1)
-	req1.Header.Set("Content-Type", "application/json")
-	rr1 := httptest.NewRecorder()
-	h.Redeem(rr1, req1)
-	if rr1.Code != http.StatusOK {
-		t.Fatalf("first redeem status = %d, body=%s", rr1.Code, rr1.Body.String())
+	// Fire two redeems concurrently to actually exercise the
+	// double-redeem race. Both goroutines wait on a barrier so they
+	// hit Redeem at essentially the same instant — the sequential
+	// version of this test passed even when the code path was racy.
+	var (
+		barrier   = make(chan struct{})
+		wg        sync.WaitGroup
+		okCount   atomic.Int32
+		badCount  atomic.Int32
+		seenToken atomic.Value // string — the cli_token from the winning call
+	)
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer wg.Done()
+			body := bytes.NewBufferString(`{"code":"` + start.Code + `","adapter_hint":"CLAUDE_CODE"}`)
+			req := httptest.NewRequest("POST", "/api/v1/auth/pair/redeem", body)
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			<-barrier
+			h.Redeem(rr, req)
+			switch rr.Code {
+			case http.StatusOK:
+				okCount.Add(1)
+				var redeem pairRedeemResponse
+				_ = json.Unmarshal(rr.Body.Bytes(), &redeem)
+				seenToken.Store(redeem.CliToken)
+			case http.StatusBadRequest:
+				badCount.Add(1)
+			}
+		}()
 	}
-	var redeem pairRedeemResponse
-	_ = json.Unmarshal(rr1.Body.Bytes(), &redeem)
-	if !strings.HasPrefix(redeem.CliToken, cliTokenPrefix) {
-		t.Errorf("cli_token = %q, want %s* prefix", redeem.CliToken, cliTokenPrefix)
+	close(barrier)
+	wg.Wait()
+
+	if got := okCount.Load(); got != 1 {
+		t.Fatalf("got %d successful redeems, want exactly 1 (race protection broken)", got)
 	}
-	if redeem.UserID != userID {
-		t.Errorf("user_id = %q, want %q", redeem.UserID, userID)
+	if got := badCount.Load(); got != 1 {
+		t.Fatalf("got %d rejected redeems, want exactly 1", got)
 	}
 
-	// Second redeem with the same code must fail (single-use).
-	body2 := bytes.NewBufferString(`{"code":"` + start.Code + `"}`)
-	req2 := httptest.NewRequest("POST", "/api/v1/auth/pair/redeem", body2)
-	req2.Header.Set("Content-Type", "application/json")
-	rr2 := httptest.NewRecorder()
-	h.Redeem(rr2, req2)
-	if rr2.Code != http.StatusBadRequest {
-		t.Errorf("second redeem status = %d, want 400 (single-use)", rr2.Code)
+	if tok, _ := seenToken.Load().(string); !strings.HasPrefix(tok, cliTokenPrefix) {
+		t.Errorf("winning cli_token = %q, want %s* prefix", tok, cliTokenPrefix)
 	}
 
 	// cli_tokens table should have exactly one row for this user.

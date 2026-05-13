@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -315,10 +317,12 @@ func TestForgot_RefusesWhenPublicURLMissing(t *testing.T) {
 	}
 }
 
-// TestReset_RaceFreeSingleUse simulates two concurrent /reset calls
-// with the same token. The first must succeed; the second must see
-// the token already burned and return 400 without touching the
-// password again.
+// TestReset_RaceFreeSingleUse fires two /reset calls with the same
+// token *concurrently*. Exactly one must win (200), exactly one must
+// lose (400), and the surviving password must be the winner's — never
+// the loser's, never a mix. A sequential version of this test would
+// still pass if the handler read the token twice before either DELETE
+// landed, which is exactly the bug the race-fix protects against.
 func TestReset_RaceFreeSingleUse(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUserWithPassword(t, db, "frank@example.com", "originalpw")
@@ -334,36 +338,65 @@ func TestReset_RaceFreeSingleUse(t *testing.T) {
 		t.Fatalf("seed token: %v", err)
 	}
 
-	// First /reset — should succeed.
-	body1 := bytes.NewBufferString(`{"token":"` + rawToken + `","new_password":"firstpass123"}`)
-	r1 := httptest.NewRequest("POST", "/api/v1/auth/reset", body1)
-	r1.Header.Set("Content-Type", "application/json")
-	rr1 := httptest.NewRecorder()
-	h.Reset(rr1, r1)
-	if rr1.Code != http.StatusOK {
-		t.Fatalf("first reset status = %d, body=%s", rr1.Code, rr1.Body.String())
+	// Two goroutines hammer Reset at the same instant. The barrier
+	// channel forces both calls to be in flight before either DELETE
+	// can take effect — that's the only way to actually trip a
+	// real race in the handler.
+	var (
+		barrier    = make(chan struct{})
+		wg         sync.WaitGroup
+		okCount    atomic.Int32
+		badCount   atomic.Int32
+		winningPwd atomic.Value // string — password sent by the winner
+	)
+	wg.Add(2)
+	attempts := []string{"firstpass123", "secondpass123"}
+	for _, pwd := range attempts {
+		pwd := pwd
+		go func() {
+			defer wg.Done()
+			body := bytes.NewBufferString(`{"token":"` + rawToken + `","new_password":"` + pwd + `"}`)
+			req := httptest.NewRequest("POST", "/api/v1/auth/reset", body)
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			<-barrier
+			h.Reset(rr, req)
+			switch rr.Code {
+			case http.StatusOK:
+				okCount.Add(1)
+				winningPwd.Store(pwd)
+			case http.StatusBadRequest:
+				badCount.Add(1)
+			}
+		}()
+	}
+	close(barrier)
+	wg.Wait()
+
+	if got := okCount.Load(); got != 1 {
+		t.Fatalf("got %d successful resets, want exactly 1", got)
+	}
+	if got := badCount.Load(); got != 1 {
+		t.Fatalf("got %d rejected resets, want exactly 1", got)
 	}
 
-	// Second /reset with the same token — must be rejected.
-	body2 := bytes.NewBufferString(`{"token":"` + rawToken + `","new_password":"secondpass123"}`)
-	r2 := httptest.NewRequest("POST", "/api/v1/auth/reset", body2)
-	r2.Header.Set("Content-Type", "application/json")
-	rr2 := httptest.NewRecorder()
-	h.Reset(rr2, r2)
-	if rr2.Code != http.StatusBadRequest {
-		t.Fatalf("second reset status = %d, want 400 (token already burned)", rr2.Code)
-	}
-
-	// Password must match the FIRST reset, not the second — the loser
-	// must not have overwritten the winner's password.
+	// Whichever password won should be the one that committed. The
+	// loser's password must NOT verify — that would mean both writes
+	// hit the row, which is the bug the race protection prevents.
 	var hashed string
 	if err := db.QueryRow(`SELECT hashed_password FROM users WHERE id=?`, userID).Scan(&hashed); err != nil {
 		t.Fatalf("read user: %v", err)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte("firstpass123")); err != nil {
-		t.Errorf("first password did not stick: %v", err)
+	winner, _ := winningPwd.Load().(string)
+	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(winner)); err != nil {
+		t.Errorf("winner password (%q) did not stick: %v", winner, err)
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte("secondpass123")); err == nil {
-		t.Errorf("second (rejected) password somehow committed — race protection broken")
+	for _, pwd := range attempts {
+		if pwd == winner {
+			continue
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(hashed), []byte(pwd)); err == nil {
+			t.Errorf("loser password (%q) somehow committed — race protection broken", pwd)
+		}
 	}
 }
