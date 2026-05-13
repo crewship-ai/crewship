@@ -57,6 +57,33 @@ The page is designed to be scanned, not learned — every visible element is wir
 
 Toggle the **Heatmap** segmented control to Cost or Time when you want the canvas to surface the one node that ate the budget instead of reading them all by hand — the percentile colouring is relative to the rest of the *current* run, so the dark border is always the right node to investigate first.
 
+## Examples
+
+### Finding the cost spike in last night's nightly-etl
+
+The Paymaster digest flagged `nightly-etl` at 3× its usual cost. To isolate which step regressed:
+
+1. Open `/activity`, filter the rail to `routine = nightly-etl` + `date = last 24h`, group by `none` so individual runs are visible.
+2. Click the most expensive run (sort by `costliest`). The canvas paints the chain.
+3. Flip the heatmap toolbar to **Cost**. One `agent_run` node lights up dark amber while everything else is muted — that's the regression.
+4. Click that node. The side panel shows the rendered prompt; comparing it to the previous night's run (open in a second tab via `?run=<previous_id>`) reveals the prompt grew by 40k tokens because an upstream `transform` step started returning the full document instead of a summary.
+
+The whole investigation is three clicks plus one URL copy, no log-greps.
+
+### Approving a paused waitpoint without leaving the canvas
+
+A teammate pings you: "the publish-blog-post run is stuck waiting for approval." Paste the URL they shared (`/activity?run=run_abc123`):
+
+1. The canvas opens already focused on `run_abc123`. One node sits in the amber `waiting` ring with **Approve** / **Deny** buttons in its body.
+2. Click the node body (not the buttons) — the side panel shows the rendered draft post produced by the previous `agent_run` step. You scan it, decide it's fine.
+3. Click **Approve**. The waitpoint resolves, the node flips to `success`, the next step starts, and the badge counter on Inbox clears at the same time (same `waitpointDecide` helper backs both surfaces).
+
+No tab-switch, no re-reading the routine's DSL.
+
+### Sharing exactly what you're looking at
+
+You're on `/activity?run=run_xyz&step=transform-2` and need a second pair of eyes. Copy the URL to Slack. Whoever opens it lands on the same run, the same selected step, the same side panel with the same rendered output — `useTraceSelection` keeps URL ↔ canvas in lock-step, so there is no "scroll down to the third box" instruction needed.
+
 ## The trace graph
 
 When you select a run, the canvas builds a directed graph from the routine's DSL and the run's recorded state:
