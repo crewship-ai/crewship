@@ -484,6 +484,17 @@ func stringPtr(s string) *string {
 // a Claude Code OAuth token). Empty value is allowed — pair mode and
 // users who skip credential setup land here without a value to check.
 //
+// Two layers of checking:
+//
+//   1. Shape check: cheap regex / prefix gate that catches the
+//      "pasted the wrong thing from the wrong page" case before we
+//      even bother the upstream API.
+//   2. Live probe: a real authenticated request to the provider's
+//      API with the token. Catches "right shape, wrong / expired
+//      token" — the case that was leaving users with broken chat
+//      and silent empty bubbles. Optional via the `probe` flag so
+//      tests can skip it.
+//
 // Per-provider checks are intentionally narrow: we only reject shapes
 // we know will fail downstream, never anything ambiguous. A future
 // adapter whose token shape we don't yet recognise falls through.
@@ -506,6 +517,55 @@ func validateOnboardingCredential(provider, value string) error {
 					"sk-ant-oat… value here.",
 			)
 		}
+		if !strings.HasPrefix(v, "sk-ant-oat") {
+			return errors.New(
+				"This doesn't look like a Claude Code CLI token (expected prefix `sk-ant-oat`). " +
+					"Run `claude setup-token` on your machine and paste the resulting value.",
+			)
+		}
+		return probeAnthropicOAuthToken(v)
+	}
+	return nil
+}
+
+// probeAnthropicOAuthToken hits api.anthropic.com with the token to
+// confirm the upstream actually accepts it. The whole point of this
+// check is to fail the onboarding submit BEFORE the user spends
+// 5 minutes wondering why chat goes silent — see the
+// CLAUDE_CODE_OAUTH_TOKEN regression we caught the hard way.
+//
+// Uses /v1/messages with max_tokens=1 — cheapest call that still
+// exercises the auth path. 401 → token bad. Anything 2xx → token
+// works. Other failures (network, 5xx) are treated as soft — we
+// log + accept rather than block onboarding on Anthropic flaking.
+func probeAnthropicOAuthToken(token string) error {
+	const url = "https://api.anthropic.com/v1/messages"
+	const body = `{"model":"claude-3-5-haiku-latest","max_tokens":1,"messages":[{"role":"user","content":"ok"}]}`
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
+	if err != nil {
+		// Caller never sees this — request construction is local.
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// Network blip / DNS issue / Anthropic outage. Don't block
+		// the user — the runtime will surface a real error if the
+		// token still doesn't work when chat runs.
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return errors.New(
+			"Anthropic rejected your CLI token (401). The most common cause is pasting just part of the value " +
+				"or copying from a page that truncates it — run `claude setup-token` again and paste the entire " +
+				"sk-ant-oat… string in one go.",
+		)
 	}
 	return nil
 }
