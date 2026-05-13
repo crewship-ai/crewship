@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useState, useEffect, type FormEvent } from "react"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { useAuth } from "@/hooks/use-auth"
@@ -54,9 +55,35 @@ function LoginForm() {
   // collapsed both into "disabled" and surfaced the "set GOOGLE_CLIENT_ID"
   // copy during transient outages.
   const [googleStatus, setGoogleStatus] = useState<"loading" | "enabled" | "disabled" | "error">("loading")
+  // First-run gate: on an empty Crewship install the visitor should
+  // never see the login form — they should land on /bootstrap to
+  // create the initial admin. `gateChecked` lets us render nothing
+  // until /system/setup-status resolves so the form doesn't flash on
+  // every page load.
+  const [gateChecked, setGateChecked] = useState(false)
+  const [signupAllowed, setSignupAllowed] = useState(true)
 
   useEffect(() => {
     let cancelled = false
+
+    void fetch("/api/v1/system/setup-status")
+      .then(async (r) => (r.ok ? r.json() : { needs_bootstrap: false, allow_signup: true }))
+      .then((data: { needs_bootstrap?: boolean; allow_signup?: boolean }) => {
+        if (cancelled) return
+        if (data.needs_bootstrap) {
+          // Preserve any redirect target through the bootstrap flow
+          // so a session-expired user who clicked a deep link still
+          // lands where they meant to go after onboarding finishes.
+          const next = redirectTarget && redirectTarget !== "/" ? `?next=${encodeURIComponent(redirectTarget)}` : ""
+          router.replace(`/bootstrap${next}`)
+          return
+        }
+        setSignupAllowed(data.allow_signup !== false)
+        setGateChecked(true)
+      })
+      .catch(() => {
+        if (!cancelled) setGateChecked(true)
+      })
 
     void fetch("/api/v1/auth/google/status")
       .then(async (r) => {
@@ -73,7 +100,7 @@ function LoginForm() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [router, redirectTarget])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -92,30 +119,51 @@ function LoginForm() {
     router.push(redirectTarget)
   }
 
+  // Block the entire form until the first-run gate resolves —
+  // otherwise a fresh install would briefly flash the login UI before
+  // redirecting to /bootstrap.
+  if (!gateChecked) {
+    return <div className="min-h-screen bg-gradient-to-b from-background to-muted/30" />
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-background to-muted/30 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
             <CrewshipLogoTile />
           </div>
-          <CardTitle className="text-xl">Welcome to Crewship</CardTitle>
+          <CardTitle className="text-2xl">Welcome to Crewship</CardTitle>
           <CardDescription>Sign in to manage your AI workforce</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {registered && (
-              <p className="text-sm text-center text-emerald-600 dark:text-emerald-400">
+              <div
+                className="rounded-md border border-emerald-200/40 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400"
+                role="status"
+                aria-live="polite"
+              >
                 Account created! Please sign in.
-              </p>
+              </div>
             )}
             {expired && !error && (
-              <p className="text-sm text-center text-amber-600 dark:text-amber-400" role="status" aria-live="polite">
+              <div
+                className="rounded-md border border-amber-200/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                role="status"
+                aria-live="polite"
+              >
                 Your session expired. Please sign in again.
-              </p>
+              </div>
             )}
             {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
+              <div
+                className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+                role="alert"
+                aria-live="assertive"
+              >
+                {error}
+              </div>
             )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -129,7 +177,15 @@ function LoginForm() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 id="password"
                 type="password"
@@ -176,12 +232,14 @@ function LoginForm() {
             >
               Sign in with Google
             </Button>
-            <p className="text-center text-xs text-muted-foreground">
-              Don&apos;t have an account?{" "}
-              <a href="/signup" className="text-primary hover:underline">
-                Sign up
-              </a>
-            </p>
+            {signupAllowed && (
+              <p className="text-center text-xs text-muted-foreground">
+                Don&apos;t have an account?{" "}
+                <a href="/signup" className="text-primary hover:underline">
+                  Sign up
+                </a>
+              </p>
+            )}
           </form>
         </CardContent>
       </Card>

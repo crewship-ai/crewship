@@ -81,3 +81,6 @@ coverage_log.md
 # Internal — not for public repo
 CLAUDE.md
 internal-docs/
+
+# Local mockups / audit artifacts (kept untracked per user preference)
+audit-final/

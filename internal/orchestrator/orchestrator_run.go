@@ -317,6 +317,23 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req, keeperEnabled)
+		// Minimal env-builder signal at debug level. The previous Info
+		// log dumped every credential's EnvVarName + Type + value_len,
+		// which leaks auth metadata into production logs. Keep just a
+		// boolean for whether the Claude OAuth env was produced; the
+		// credential-injection root cause is being tracked separately.
+		hasOAuthEnv := false
+		for _, e := range env {
+			if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+				hasOAuthEnv = true
+				break
+			}
+		}
+		o.logger.Debug("env builder",
+			"agent_id", req.AgentID,
+			"has_oauth_env", hasOAuthEnv,
+			"env_count", len(env),
+		)
 		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {
@@ -834,9 +851,26 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	status := "completed"
+	var execErr error
 	if exitCode != 0 {
 		status = "error"
 		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
+		// Bridge-level error so the chat surfaces a visible message
+		// instead of an empty assistant bubble. exit_code 123 from
+		// Claude Code specifically means startup auth check failed —
+		// almost always a missing or wrong-shape CLAUDE_CODE_OAUTH_TOKEN.
+		// Other CLIs reuse the same code for "generic exec failure"; we
+		// still surface SOMETHING actionable instead of silence.
+		switch exitCode {
+		case 123:
+			execErr = fmt.Errorf(
+				"agent exited with code %d — most likely a missing or invalid CLI token. "+
+					"Run `claude setup-token` (or the equivalent for your adapter) and re-paste the value in Settings → Credentials.",
+				exitCode,
+			)
+		default:
+			execErr = fmt.Errorf("agent exited with code %d — check the journal for details", exitCode)
+		}
 	}
 	o.updateRunStatus(ctx, runState.ID, status)
 
@@ -849,7 +883,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// recordContainerSnapshot so a probe error never breaks the run.
 	o.recordContainerSnapshot(ctx, req, req.ContainerID)
 
-	return nil
+	return execErr
 }
 
 // Start runs the container TTL manager, periodically stopping idle containers
