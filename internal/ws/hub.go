@@ -67,6 +67,16 @@ type Hub struct {
 // enough that a real stuck client is noticed within a few seconds.
 const dropLogThreshold = 16
 
+// consecutiveDropsBeforeDisconnect is the per-client cutoff: once that
+// many broadcasts in a row have failed to enqueue, dispatch treats the
+// connection as stuck and tears it down asynchronously. The client's
+// send buffer is 64, so this lets a full buffer drain twice before we
+// give up — comfortably past any transient backpressure but short of
+// "the consumer will eventually catch up." The frontend already
+// auto-reconnects on close, so a healthy client just sees a brief
+// blip; a genuinely stuck one stops costing us per-broadcast work.
+const consecutiveDropsBeforeDisconnect = 128
+
 // ClientMessage is a JSON message received from a WebSocket client.
 type ClientMessage struct {
 	Type    string          `json:"type"`
@@ -276,6 +286,13 @@ func (h *Hub) marshalFrame(msg ServerMessage) ([]byte, bool) {
 // dispatch is the canonical fan-out loop: iterate the channel's subscribers,
 // apply filter (nil = accept all), attempt a non-blocking send, account for
 // backpressure drops. Acquires the hub RLock; callers must not already hold it.
+//
+// Slow-consumer policy: a successful enqueue resets the client's
+// consecutiveDrops counter to zero, so isolated backpressure spikes
+// have no lasting effect. A run of drops past consecutiveDropsBeforeDisconnect
+// flips the client into "force-close on the next goroutine" mode and the
+// disconnect is dispatched asynchronously so this loop never blocks on
+// network teardown.
 func (h *Hub) dispatch(channel string, data []byte, filter func(*Client) bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -289,9 +306,37 @@ func (h *Hub) dispatch(channel string, data []byte, filter func(*Client) bool) {
 		}
 		select {
 		case client.send <- data:
+			client.consecutiveDrops.Store(0)
 		default:
 			h.recordDrop(channel, client.userID)
+			if client.consecutiveDrops.Add(1) >= consecutiveDropsBeforeDisconnect {
+				if client.disconnectFired.CompareAndSwap(false, true) {
+					h.logger.Warn("websocket force-closing stuck consumer",
+						"user_id", client.userID,
+						"channel", channel,
+						"consecutive_drops", consecutiveDropsBeforeDisconnect,
+					)
+					go client.forceDisconnect()
+				}
+			}
 		}
+	}
+}
+
+// forceDisconnect tears the WebSocket connection down so a stuck client
+// stops receiving fan-out work. Closing c.conn unblocks readPump's
+// websocket.Message.Receive call; readPump's defer then handles the
+// hub.unregister send (which closes c.send, exiting writePump). The
+// cancel() also releases anyone parked in safeSend's c.ctx.Done()
+// select arm.
+//
+// Safe to call when c.conn is nil — that's the shape test fixtures
+// build via newClient, and the disconnect should still cancel the
+// context so test assertions can observe the trip.
+func (c *Client) forceDisconnect() {
+	c.cancel()
+	if c.conn != nil {
+		c.conn.Close()
 	}
 }
 
