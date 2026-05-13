@@ -15,6 +15,7 @@ import {
   SkipForward,
   Container,
 } from "lucide-react"
+import { CrewshipLogoTile } from "@/components/branding/crewship-logo"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
@@ -193,9 +194,7 @@ export default function OnboardingPage() {
         {/* Header */}
         <div className="text-center space-y-2">
           <div className="flex justify-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Ship className="h-6 w-6" />
-            </div>
+            <CrewshipLogoTile />
           </div>
           <h1 className="text-xl font-semibold">Set up Crewship</h1>
         </div>
