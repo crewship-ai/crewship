@@ -27,6 +27,8 @@ import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { useFilteredIssues } from "@/hooks/use-filtered-issues"
+import { parseSavedViews, applySavedView } from "@/lib/saved-views"
 import { IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
 import { IssuesStatusChips } from "@/components/features/issues/issues-status-chips"
 import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
@@ -329,10 +331,7 @@ export function OrchestrationLayout({
     if (!workspaceId) return
     try {
       const res = await fetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (res.ok) {
-        const data = await res.json()
-        setSavedViews(Array.isArray(data) ? data : data.views ?? [])
-      }
+      if (res.ok) setSavedViews(parseSavedViews(await res.json()))
     } catch { /* ignore */ }
   }, [workspaceId])
 
@@ -369,36 +368,16 @@ export function OrchestrationLayout({
   const projectDetailFullWidth =
     selectedProjectId !== null && !selectedIssue && activeTab === "issues"
 
-  const filteredIssues = useMemo(() => {
-    let filtered = issues
-    // Prefer explicit selection (user clicked a project) over saved-view filter.
-    const effectiveProjectId = selectedProjectId ?? filterProjectId
-    if (effectiveProjectId) {
-      filtered = filtered.filter((i) => i.project_id === effectiveProjectId)
-    }
-    if (filterCrewId) {
-      filtered = filtered.filter((i) => i.crew_id === filterCrewId)
-    }
-    if (filterAgentId) {
-      filtered = filtered.filter((i) => i.assignee_id === filterAgentId)
-    }
-    if (filterStatuses.length > 0) {
-      filtered = filtered.filter((i) => filterStatuses.includes(i.status))
-    }
-    if (filterPriority) {
-      filtered = filtered.filter((i) => (i.priority || "none") === filterPriority)
-    }
-    if (issueSearch) {
-      const q = issueSearch.toLowerCase()
-      filtered = filtered.filter((i) =>
-        i.title.toLowerCase().includes(q) ||
-        (i.identifier && i.identifier.toLowerCase().includes(q)) ||
-        (i.assignee_name && i.assignee_name.toLowerCase().includes(q)) ||
-        (i.crew_name && i.crew_name.toLowerCase().includes(q))
-      )
-    }
-    return filtered
-  }, [issues, issueSearch, selectedProjectId, filterProjectId, filterCrewId, filterAgentId, filterStatuses, filterPriority])
+  const filteredIssues = useFilteredIssues({
+    issues,
+    search: issueSearch,
+    selectedProjectId,
+    filterProjectId,
+    filterCrewId,
+    filterAgentId,
+    filterStatuses,
+    filterPriority,
+  })
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -854,33 +833,16 @@ export function OrchestrationLayout({
                   }
 
                   // Look up the saved view and apply any filter fields that
-                  // map onto the state consumed by `filteredIssues`. The
-                  // `filters_json` payload schema is flexible; we apply what
-                  // is clearly mappable and ignore anything else.
+                  // map onto the state consumed by `filteredIssues`.
+                  // TODO: wire up status/label/priority filters and
+                  // sort_json once the issue list supports them.
                   const view = savedViews.find((v) => v.id === id)
                   if (!view) return
-                  try {
-                    const parsed: Record<string, unknown> = view.filters_json
-                      ? JSON.parse(view.filters_json)
-                      : {}
-                    const projectId = parsed.project_id ?? parsed.projectId
-                    setSelectedProjectId(
-                      typeof projectId === "string" ? projectId : null,
-                    )
-                    const crewId = parsed.crew_id ?? parsed.crewId
-                    setFilterCrewId(typeof crewId === "string" ? crewId : null)
-                    const agentId =
-                      parsed.assignee_id ?? parsed.assigneeId ?? parsed.agent_id
-                    setFilterAgentId(
-                      typeof agentId === "string" ? agentId : null,
-                    )
-                    const search = parsed.search ?? parsed.query
-                    setIssueSearch(typeof search === "string" ? search : "")
-                    // TODO: wire up status/label/priority filters and
-                    // sort_json once the issue list supports them.
-                  } catch {
-                    /* ignore malformed filters_json */
-                  }
+                  const f = applySavedView(view)
+                  setSelectedProjectId(f.projectId)
+                  setFilterCrewId(f.crewId)
+                  setFilterAgentId(f.agentId)
+                  setIssueSearch(f.search)
                 }}
               />
               {/* Status filter chips — multi-select row over the list.
