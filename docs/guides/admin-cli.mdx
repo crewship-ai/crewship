@@ -116,6 +116,65 @@ sudo systemctl start crewshipd
 
 The new password is now active. The user logs in normally — the audit timeline shows a `journal.admin_cli` entry recording who on the host (`host:pavel`) ran which subcommand, so the change is traceable even though the HTTP API was bypassed.
 
+## Examples
+
+### Locked-out solo admin, no mailer configured
+
+You're the sole `OWNER` of a self-hosted Crewship instance. The mailer was never set up (`RESEND_API_KEY` is unset), `/forgot` returns 200 but no email goes out, and you've forgotten your password. SSH to the host:
+
+```bash
+ssh crewship-prod
+sudo systemctl stop crewshipd
+sudo -u crewship crewship admin list-users
+# admin@example.com   OWNER   2025-09-01 14:22   2026-04-30 09:15
+sudo -u crewship crewship admin reset-password --email=admin@example.com
+# New password: ********
+sudo systemctl start crewshipd
+```
+
+The whole recovery is four commands. The `sudo -u crewship` matters: the data directory is owned by the service account, so running the admin CLI as `root` would create root-owned WAL files that confuse the next server start.
+
+### CI bootstrap of a freshly migrated database
+
+A Dockerfile that bakes a baseline workspace for a demo deployment:
+
+```dockerfile
+FROM crewship-ai/crewship:latest
+
+# Apply migrations so the schema exists
+RUN crewship migrate
+
+# Seed the OWNER account using a build-arg secret
+ARG BOOTSTRAP_EMAIL
+ARG BOOTSTRAP_PASSWORD
+RUN crewship admin reset-password \
+      --email="$BOOTSTRAP_EMAIL" \
+      --password="$BOOTSTRAP_PASSWORD" \
+  && crewship admin promote \
+      --email="$BOOTSTRAP_EMAIL" \
+      --role=OWNER
+
+CMD ["crewship", "start"]
+```
+
+The HTTP API isn't running during `RUN` steps — `crewship admin` is the only path that can produce a logged-in-able user before the server boots for the first time. Pair with `--secret` BuildKit mounts so the password doesn't bake into the image layer.
+
+### Restoring `OWNER` after a botched demotion
+
+A `MANAGER` accidentally clicked "Demote to ADMIN" on the only `OWNER` of the `marketing` workspace. The web UI now refuses every elevation request from that user (no `OWNER` left to authorise it). Recovery on the host:
+
+```bash
+sudo systemctl stop crewshipd
+crewship admin promote \
+  --email=lead@example.com \
+  --role=OWNER \
+  --workspace=marketing
+# Promoted lead@example.com to OWNER in workspace marketing.
+sudo systemctl start crewshipd
+```
+
+The audit timeline gets a `journal.admin_cli` entry attributed to the OS user who ran the rescue, so postmortem readers can see *exactly* how the workspace got unstuck without the change appearing as if the system had self-healed.
+
 ## Related
 
 - [Authentication](/guides/auth) — the in-band recovery flow (email-based password reset) for users without shell access.
