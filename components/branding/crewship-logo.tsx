@@ -119,18 +119,23 @@ export function CrewshipLogoMark({
 }
 
 /**
- * `CrewshipLogoTile` — sail mark inside a tinted square tile.
- * Convenience wrapper for the common "logo on rounded primary square"
+ * `CrewshipLogoTile` — sail mark inside the brand "blue-white" tile.
+ * Convenience wrapper for the common "logo on rounded blue square"
  * pattern used in login/signup hero, onboarding welcome, error pages.
  *
- * Defaults to `bg-primary` + `text-primary-foreground` so it tracks
- * theme automatically. Pass any Tailwind utilities via `className` to
- * override size, rounding, or palette.
+ * The default tint mirrors `crewship-blue-white.svg` exactly:
+ *   - vertical gradient `#1B75FE → #2B90FF`
+ *   - white sail (`text-white` so `currentColor` resolves)
+ *   - 230/1024 corner radius (≈ `rounded-2xl` at the default 48px size)
+ *
+ * That way the favicon (which uses the same SVG variant) and any
+ * in-app tile that uses this component remain visually identical.
+ * Pass Tailwind utilities via `className` to override.
  */
 export function CrewshipLogoTile({
   className,
   size = "h-12 w-12",
-  rounded = "rounded-xl",
+  rounded = "rounded-2xl",
   iconSize = "h-6 w-6",
 }: {
   className?: string
@@ -140,7 +145,7 @@ export function CrewshipLogoTile({
 }) {
   return (
     <div
-      className={`flex items-center justify-center bg-primary text-primary-foreground ${size} ${rounded} ${className ?? ""}`}
+      className={`flex items-center justify-center bg-gradient-to-b from-[#1B75FE] to-[#2B90FF] text-white ${size} ${rounded} ${className ?? ""}`}
     >
       <CrewshipLogo className={iconSize} />
     </div>
