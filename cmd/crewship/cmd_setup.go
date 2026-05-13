@@ -15,23 +15,22 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-// readLineOrEmpty reads a single line from stdin and returns the
-// trimmed value, or "" on EOF / empty input. Avoids the previous
-// `err.Error() == "unexpected newline"` string match, which depended
-// on fmt.Scanln's internal error text — stable since Go 1.3 but
-// brittle by Go-idiom standards and flagged in code review.
+// readLine reads a single line from stdin, returns the trimmed
+// value. EOF on a bare Enter is treated as an empty-input "accept the
+// default" signal (no error). Any other read error is surfaced so a
+// terminal that gets closed mid-prompt fails loudly instead of
+// silently returning the default.
 //
-// Returns "" on any read error too — every caller treats "" as
-// "user accepted the default", which is the same fallback the old
-// code took on a bare Enter.
+// Replaces the previous err.Error() == "unexpected newline" check,
+// which depended on fmt.Scanln's internal error text.
 var stdinReader = bufio.NewReader(os.Stdin)
 
-func readLineOrEmpty() string {
+func readLine() (string, error) {
 	line, err := stdinReader.ReadString('\n')
 	if err != nil && err != io.EOF {
-		return ""
+		return "", fmt.Errorf("read stdin: %w", err)
 	}
-	return strings.TrimSpace(line)
+	return strings.TrimSpace(line), nil
 }
 
 // `crewship setup` is the CLI-side counterpart to the web onboarding
@@ -199,7 +198,11 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	}
 
 	if language == "" && interactive {
-		language = promptOptional("Agent language (e.g. English, Čeština) [English]", "English")
+		var err error
+		language, err = promptOptional("Agent language (e.g. English, Čeština) [English]", "English")
+		if err != nil {
+			return err
+		}
 	}
 
 	body := map[string]any{
@@ -290,7 +293,10 @@ func promptCrew() (string, error) {
 		fmt.Printf("  %d) %s\n", i+1, t.label)
 	}
 	fmt.Print("Choice [1]: ")
-	raw := readLineOrEmpty()
+	raw, err := readLine()
+	if err != nil {
+		return "", err
+	}
 	if raw == "" {
 		return supportedCrewTemplates[0].slug, nil
 	}
@@ -309,7 +315,10 @@ func promptAdapter() (string, error) {
 		fmt.Printf("  %d) %s\n", i+1, a.label)
 	}
 	fmt.Print("Choice [1]: ")
-	raw := readLineOrEmpty()
+	raw, err := readLine()
+	if err != nil {
+		return "", err
+	}
 	if raw == "" {
 		return supportedAdapters[0].key, nil
 	}
@@ -335,13 +344,16 @@ func promptAPIKey(adapterLabel string) (string, error) {
 	return strings.TrimSpace(string(bytes)), nil
 }
 
-func promptOptional(prompt, defaultValue string) string {
+func promptOptional(prompt, defaultValue string) (string, error) {
 	fmt.Printf("%s: ", prompt)
-	raw := readLineOrEmpty()
-	if raw == "" {
-		return defaultValue
+	raw, err := readLine()
+	if err != nil {
+		return "", err
 	}
-	return raw
+	if raw == "" {
+		return defaultValue, nil
+	}
+	return raw, nil
 }
 
 // jsonEscape is reserved for future structured prompts that need to

@@ -384,10 +384,18 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 		if credName == "" {
 			credName = "API Key"
 		}
-		// Default the provider to ANTHROPIC; the wizard collects the
-		// matching adapter so the credential maps onto the right
-		// env var by the template's deploy hook.
-		llm, _ := resolveLLMProvider(req.LlmProvider)
+		// Default empty provider to ANTHROPIC (matches the validation
+		// path), but reject *unknown* values so a typo doesn't end
+		// up persisting the credential under the wrong provider.
+		// An empty hint is fine — the wizard's adapter selector
+		// gates that path; an unrecognised string is operator error.
+		llm, ok := resolveLLMProvider(req.LlmProvider)
+		if !ok && strings.TrimSpace(req.LlmProvider) != "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "Unknown llm_provider — expected ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA",
+			})
+			return
+		}
 		if llm.provider == "" {
 			llm.provider = "ANTHROPIC"
 			llm.envVarName = "ANTHROPIC_API_KEY"
