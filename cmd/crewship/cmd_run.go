@@ -90,7 +90,10 @@ Examples:
 		}
 
 		// Plan mode is a prompt-prefix injection rather than a server
-		// flag — see cmd_plan.go for the full rationale.
+		// flag — see cmd_plan.go for the full rationale. Reset latches
+		// on the way out so a second invocation in the same process
+		// (REPL turn, test) sees a clean slate.
+		defer ResetAIFirstLatches()
 		planFlag, _ := cmd.Flags().GetBool("plan")
 		if planFlag {
 			planModeRequested = true

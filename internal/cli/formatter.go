@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"text/tabwriter"
 
@@ -184,36 +185,43 @@ func (f *Formatter) YAML(v interface{}) error {
 
 // NDJSON prints data as newline-delimited JSON.
 //
-// When v is a slice, each element is encoded as its own line — this is
-// the pipe-friendly format consumed by tools like jq -c, fx, or any
-// stream-processing pipeline.  When v is anything else (struct, map),
-// the whole value is encoded as a single line.
+// When v is any slice or array kind, each element is encoded as its
+// own line — this is the pipe-friendly format consumed by tools like
+// jq -c, fx, or any stream-processing pipeline. When v is anything
+// else (struct, map, scalar), the whole value is encoded as a single
+// line.
+//
+// The reflect path handles both `[]interface{}` (untyped) and
+// `[]Concrete` slices (e.g. `[]runResponse`). The previous fast-path-
+// only implementation silently encoded the whole typed slice as one
+// JSON line, which broke `--format ndjson` for every command that
+// passed a concrete slice type.
 //
 // The encoder is configured with no indentation; each row is one JSON
 // object terminated by "\n".
 func (f *Formatter) NDJSON(v interface{}) error {
 	enc := json.NewEncoder(f.Writer)
 	enc.SetIndent("", "")
-	// Reflect over slice-like values so a single Encode-per-row produces
-	// the stream form. Strings/maps/structs fall through as one row.
-	switch t := v.(type) {
-	case nil:
+	if v == nil {
 		return nil
-	case []interface{}:
-		for _, item := range t {
-			if err := enc.Encode(item); err != nil {
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		// Byte-slices are special-cased — `[]byte` is conventionally
+		// raw JSON or a string; emitting one byte per line would be
+		// nonsense. Treat as a single record.
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return enc.Encode(v)
+		}
+		n := rv.Len()
+		for i := 0; i < n; i++ {
+			if err := enc.Encode(rv.Index(i).Interface()); err != nil {
 				return err
 			}
 		}
 		return nil
-	default:
-		// Use reflection only when the static-type fast path miss
-		// for []T where T is a concrete type. We avoid importing reflect
-		// here for the common case by handling a few well-known shapes
-		// inline; everything else encodes as a single JSON line which is
-		// still valid NDJSON (one record).
-		return enc.Encode(v)
 	}
+	return enc.Encode(v)
 }
 
 // WriteNDJSONRow writes one v as a JSON object followed by "\n" to f.Writer.

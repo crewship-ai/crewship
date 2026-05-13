@@ -11,48 +11,56 @@ import (
 
 func TestRunDetail_IsTerminal(t *testing.T) {
 	cases := []struct {
+		name   string
 		status string
 		want   bool
 	}{
-		{"COMPLETED", true},
-		{"FAILED", true},
-		{"CANCELLED", true},
-		{"TIMEOUT", true},
-		{"completed", true},
-		{"RUNNING", false},
-		{"", false},
-		{"queued", false},
+		{"completed uppercase", "COMPLETED", true},
+		{"failed uppercase", "FAILED", true},
+		{"cancelled uppercase", "CANCELLED", true},
+		{"timeout uppercase", "TIMEOUT", true},
+		{"completed lowercase", "completed", true},
+		{"running not terminal", "RUNNING", false},
+		{"empty not terminal", "", false},
+		{"unknown not terminal", "queued", false},
 	}
-	for _, c := range cases {
-		got := (&RunDetail{Status: c.status}).IsTerminal()
-		if got != c.want {
-			t.Errorf("IsTerminal(%q) = %v, want %v", c.status, got, c.want)
-		}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := (&RunDetail{Status: tc.status}).IsTerminal()
+			if got != tc.want {
+				t.Errorf("IsTerminal(%q) = %v, want %v", tc.status, got, tc.want)
+			}
+		})
 	}
 }
 
 func TestParsePRURL(t *testing.T) {
 	cases := []struct {
-		in        string
-		owner     string
-		repo      string
-		num       int
-		ok        bool
+		name  string
+		in    string
+		owner string
+		repo  string
+		num   int
+		ok    bool
 	}{
-		{"https://github.com/foo/bar/pull/123", "foo", "bar", 123, true},
-		{"https://github.com/foo/bar/pulls/123", "foo", "bar", 123, true},
-		{"https://gitlab.com/foo/bar/-/merge_requests/42", "foo", "bar", 42, true},
-		{"https://bitbucket.org/foo/bar/pull-requests/7", "foo", "bar", 7, true},
-		{"https://github.com/foo/bar/issues/1", "", "", 0, false},
-		{"not a url", "", "", 0, false},
-		{"", "", "", 0, false},
+		{"github pull", "https://github.com/foo/bar/pull/123", "foo", "bar", 123, true},
+		{"github pulls alias", "https://github.com/foo/bar/pulls/123", "foo", "bar", 123, true},
+		{"gitlab mr", "https://gitlab.com/foo/bar/-/merge_requests/42", "foo", "bar", 42, true},
+		{"bitbucket pull-requests", "https://bitbucket.org/foo/bar/pull-requests/7", "foo", "bar", 7, true},
+		{"github issue rejected", "https://github.com/foo/bar/issues/1", "", "", 0, false},
+		{"non-url rejected", "not a url", "", "", 0, false},
+		{"empty rejected", "", "", "", 0, false},
 	}
-	for _, c := range cases {
-		o, r, n, ok := ParsePRURL(c.in)
-		if ok != c.ok || o != c.owner || r != c.repo || n != c.num {
-			t.Errorf("ParsePRURL(%q) = (%q,%q,%d,%v), want (%q,%q,%d,%v)",
-				c.in, o, r, n, ok, c.owner, c.repo, c.num, c.ok)
-		}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			o, r, n, ok := ParsePRURL(tc.in)
+			if ok != tc.ok || o != tc.owner || r != tc.repo || n != tc.num {
+				t.Errorf("ParsePRURL(%q) = (%q,%q,%d,%v), want (%q,%q,%d,%v)",
+					tc.in, o, r, n, ok, tc.owner, tc.repo, tc.num, tc.ok)
+			}
+		})
 	}
 }
 

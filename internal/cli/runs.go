@@ -58,14 +58,14 @@ func (c *Client) GetRun(ctx context.Context, id string) (*RunDetail, error) {
 	}
 	resp, err := c.WithContext(ctx).Get("/api/v1/runs/" + url.PathEscape(id))
 	if err != nil {
-		return nil, fmt.Errorf("get run: %w", err)
+		return nil, fmt.Errorf("get run %q: %w", id, err)
 	}
 	if err := CheckError(resp); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get run %q: %w", id, err)
 	}
 	var detail RunDetail
 	if err := ReadJSON(resp, &detail); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode run %q: %w", id, err)
 	}
 	return &detail, nil
 }
@@ -93,7 +93,7 @@ func (c *Client) PollRun(ctx context.Context, id string, interval time.Duration,
 	for {
 		detail, err := c.GetRun(ctx, id)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("poll run %q: %w", id, err)
 		}
 		if detail.IsTerminal() {
 			return detail, nil

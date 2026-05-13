@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -21,7 +22,11 @@ import (
 // CLI from starting; they degrade to a warning. The CLI must keep
 // working without user-defined commands.
 func registerSlashCommands() {
-	cmds, err := cli.LoadSlashCommands()
+	// Startup-time registration uses Background — the calling shell's
+	// cobra context isn't bound yet at init() time. A slow commands
+	// directory is bounded by os.ReadDir's own timeout characteristics
+	// and the loader's per-file error swallowing.
+	cmds, err := cli.LoadSlashCommands(context.Background())
 	if err != nil {
 		cli.PrintWarning("loading slash commands: " + err.Error())
 		return

@@ -11,6 +11,12 @@ import (
 	"strings"
 )
 
+// MaxAtFileBytes caps how much content @file expansion will pull from
+// any single referenced file. Prompts that need more than this should
+// be assembled with `crewship run --with-file <path>` which has its
+// own context-budget plumbing.
+const MaxAtFileBytes = 1 << 20 // 1 MiB
+
 // REPLHandler is one callback for a slash-prefixed command in the
 // interactive shell. Returns (continueLoop, err) — set continueLoop
 // false to exit the REPL cleanly (e.g. `/exit`).
@@ -111,7 +117,7 @@ func (r *REPL) Run(ctx context.Context) error {
 				return nil
 			}
 		} else {
-			expanded, err := ExpandAtFiles(line)
+			expanded, err := ExpandAtFiles(ctx, line)
 			if err != nil {
 				fmt.Fprintf(r.Err, "[err] @-expansion: %v\n", err)
 			} else if r.BareHandler != nil {
@@ -157,18 +163,34 @@ func (r *REPL) dispatchSlash(ctx context.Context, line string) (bool, error) {
 // are expanded against $HOME. Files that don't exist remain as-is so
 // the user sees the literal token rather than a silent drop.
 //
+// The ctx parameter is honored so a hung file open on a network mount
+// can be cancelled by REPL shutdown. Reads are capped at MaxAtFileBytes
+// (1 MiB) per file — larger payloads should be assembled via
+// `crewship run --with-file` which has dedicated context-budget logic.
+//
 // Token rules:
 //   - `@-` is reserved (stdin) and left untouched here; only file
 //     references are inlined.
 //   - The token ends at the first whitespace; quoted filenames are
 //     out of scope for the v1 surface.
-func ExpandAtFiles(s string) (string, error) {
+//   - `~/` expansion: if os.UserHomeDir fails, the token is preserved
+//     verbatim instead of being silently dropped — a misleading "file
+//     not found" downstream is worse than a literal `~/notes.md` the
+//     user can debug.
+func ExpandAtFiles(ctx context.Context, s string) (string, error) {
 	if !strings.Contains(s, "@") {
 		return s, nil
 	}
 	var b strings.Builder
 	i := 0
 	for i < len(s) {
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return b.String(), ctx.Err()
+			default:
+			}
+		}
 		r := s[i]
 		if r != '@' {
 			b.WriteByte(r)
@@ -188,12 +210,18 @@ func ExpandAtFiles(s string) (string, error) {
 		}
 		path := token
 		if strings.HasPrefix(path, "~/") {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				path = filepath.Join(home, path[2:])
+			home, herr := os.UserHomeDir()
+			if herr != nil {
+				// Preserve the literal token rather than synthesising
+				// a bogus absolute path. Downstream "file not found"
+				// would be less obvious than the original ~/ form.
+				b.WriteString(s[i:j])
+				i = j
+				continue
 			}
+			path = filepath.Join(home, path[2:])
 		}
-		data, err := os.ReadFile(path)
+		data, err := readAtFileBounded(path)
 		if err != nil {
 			b.WriteString(s[i:j])
 		} else {
@@ -202,6 +230,21 @@ func ExpandAtFiles(s string) (string, error) {
 		i = j
 	}
 	return b.String(), nil
+}
+
+// readAtFileBounded opens path and reads up to MaxAtFileBytes. Returns
+// the (possibly truncated) bytes and a wrapped error on failure.
+func readAtFileBounded(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, MaxAtFileBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return data, nil
 }
 
 func isSpace(c byte) bool {

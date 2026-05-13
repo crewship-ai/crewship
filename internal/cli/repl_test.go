@@ -62,28 +62,52 @@ func TestExpandAtFiles(t *testing.T) {
 	if err := os.WriteFile(p, []byte("FOO BAR\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ExpandAtFiles("look at @" + p + " and decide")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(got, "FOO BAR") {
-		t.Errorf("expansion missing content: %q", got)
-	}
-	if !strings.Contains(got, "and decide") {
-		t.Errorf("expansion lost trailing text: %q", got)
-	}
 
-	// Non-existent file is preserved as-is.
-	got2, _ := ExpandAtFiles("nope @/does/not/exist done")
-	if !strings.Contains(got2, "@/does/not/exist") {
-		t.Errorf("missing-file token should be preserved: %q", got2)
-	}
+	t.Run("expands existing file", func(t *testing.T) {
+		got, err := ExpandAtFiles(context.Background(), "look at @"+p+" and decide")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, "FOO BAR") {
+			t.Errorf("expansion missing content: %q", got)
+		}
+		if !strings.Contains(got, "and decide") {
+			t.Errorf("expansion lost trailing text: %q", got)
+		}
+	})
 
-	// @- left untouched.
-	got3, _ := ExpandAtFiles("read @- now")
-	if !strings.Contains(got3, "@-") {
-		t.Errorf("@- should be preserved: %q", got3)
-	}
+	t.Run("preserves missing-file token", func(t *testing.T) {
+		got, _ := ExpandAtFiles(context.Background(), "nope @/does/not/exist done")
+		if !strings.Contains(got, "@/does/not/exist") {
+			t.Errorf("missing-file token should be preserved: %q", got)
+		}
+	})
+
+	t.Run("preserves @- stdin marker", func(t *testing.T) {
+		got, _ := ExpandAtFiles(context.Background(), "read @- now")
+		if !strings.Contains(got, "@-") {
+			t.Errorf("@- should be preserved: %q", got)
+		}
+	})
+
+	t.Run("caps reads at MaxAtFileBytes", func(t *testing.T) {
+		big := filepath.Join(dir, "big.txt")
+		buf := make([]byte, MaxAtFileBytes+1024)
+		for i := range buf {
+			buf[i] = 'a'
+		}
+		if err := os.WriteFile(big, buf, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := ExpandAtFiles(context.Background(), "@"+big)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// `a`-only file → fully readable up to the cap, no error.
+		if len(got) > MaxAtFileBytes {
+			t.Errorf("expansion exceeded cap: %d bytes (cap %d)", len(got), MaxAtFileBytes)
+		}
+	})
 }
 
 func TestApplyPlanShellPrefix(t *testing.T) {

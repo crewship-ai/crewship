@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -79,7 +82,7 @@ var notifyTestCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Fire a test notification right now",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := cli.OSNotify("Crewship", "test notification — your setup works", cli.NotifyInfo); err != nil {
+		if err := cli.OSNotify(cmd.Context(), "Crewship", "test notification — your setup works", cli.NotifyInfo); err != nil {
 			return err
 		}
 		fmt.Println("notification sent")
@@ -100,7 +103,7 @@ var notifySendCmd = &cobra.Command{
 		case "critical":
 			level = cli.NotifyCritical
 		}
-		return cli.OSNotify(args[0], args[1], level)
+		return cli.OSNotify(cmd.Context(), args[0], args[1], level)
 	},
 }
 
@@ -108,14 +111,20 @@ var notifySendCmd = &cobra.Command{
 // events. It only fires when the user opted in AND the run took longer
 // than the threshold — short runs would feel noisy.
 //
-// The threshold defaults to 30s; users can override via the
-// NotifyLongRunSeconds env var for tighter integration in shells.
+// Threshold defaults to 30 seconds; override with CREWSHIP_NOTIFY_LONG_RUN
+// (integer seconds) when a tighter or looser cadence fits the workflow.
 func maybeNotifyRunComplete(startedAt time.Time, agentSlug, finalStatus string) {
 	if !cli.NotificationsEnabled(cliCfg) {
 		return
 	}
+	threshold := 30 * time.Second
+	if v := os.Getenv("CREWSHIP_NOTIFY_LONG_RUN"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+			threshold = time.Duration(secs) * time.Second
+		}
+	}
 	elapsed := time.Since(startedAt)
-	if elapsed < 30*time.Second {
+	if elapsed < threshold {
 		return
 	}
 	title := "Crewship — run done"
@@ -125,7 +134,13 @@ func maybeNotifyRunComplete(startedAt time.Time, agentSlug, finalStatus string) 
 		level = cli.NotifyCritical
 	}
 	body := fmt.Sprintf("agent=%s elapsed=%s status=%s", agentSlug, elapsed.Truncate(time.Second), finalStatus)
-	_ = cli.OSNotify(title, body, level)
+	// Bounded ctx so a hung notification process never holds the run
+	// completion path; cli.OSNotify imposes its own 5s timeout but we
+	// want the parent ctx to also be cancellable from here in case
+	// callers shut down mid-stream.
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	_ = cli.OSNotify(ctx, title, body, level)
 }
 
 // maybeNotifyApproval is called by `approvals` poller / SSE listeners
@@ -134,7 +149,9 @@ func maybeNotifyApproval(approvalID, title string) {
 	if !cli.NotificationsEnabled(cliCfg) {
 		return
 	}
-	_ = cli.OSNotify("Crewship — approval needed", fmt.Sprintf("%s — %s", approvalID, title), cli.NotifyCritical)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	_ = cli.OSNotify(ctx, "Crewship — approval needed", fmt.Sprintf("%s — %s", approvalID, title), cli.NotifyCritical)
 }
 
 func init() {

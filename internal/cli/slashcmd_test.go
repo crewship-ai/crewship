@@ -76,19 +76,26 @@ func TestSlashCommand_Render_ImplicitArgs(t *testing.T) {
 }
 
 func TestSlashNameValid(t *testing.T) {
-	cases := map[string]bool{
-		"review":    true,
-		"do-thing":  true,
-		"r12":       true,
-		"":          false,
-		"-bad":      false,
-		"Foo":       false,
-		"rm -rf":    false,
-		"plan/act":  false,
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"simple word", "review", true},
+		{"hyphenated", "do-thing", true},
+		{"digits", "r12", true},
+		{"empty rejected", "", false},
+		{"leading hyphen rejected", "-bad", false},
+		{"uppercase rejected", "Foo", false},
+		{"shell metacharacter rejected", "rm -rf", false},
+		{"slash rejected", "plan/act", false},
 	}
-	for in, want := range cases {
-		if got := slashNameValid(in); got != want {
-			t.Errorf("%q: got %v want %v", in, got, want)
-		}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := slashNameValid(tc.in); got != tc.want {
+				t.Errorf("slashNameValid(%q) = %v want %v", tc.in, got, tc.want)
+			}
+		})
 	}
 }

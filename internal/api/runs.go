@@ -108,6 +108,10 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 		// Fallback: scan deeper pages up to a hard cap so older runs are
 		// still resolvable by id. 1k entries ≈ 10 page sweeps; the cost is
 		// bounded and the typical lookup is page 1.
+		//
+		// A query failure on a deeper page is a 500, NOT a 404 — silently
+		// breaking out of the loop and returning "run not found" would
+		// misreport a transient SQL error as the run not existing.
 		for offset := 100; offset < 1000 && found == nil; offset += 100 {
 			page, _, err := journal.ListRuns(r.Context(), h.db, journal.RunsQuery{
 				WorkspaceID: workspaceID,
@@ -115,7 +119,9 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 				Offset:      offset,
 			})
 			if err != nil {
-				break
+				h.logger.Error("get run: deep page", "error", err, "offset", offset)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
 			}
 			if len(page) == 0 {
 				break

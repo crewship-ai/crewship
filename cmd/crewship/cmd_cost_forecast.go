@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -139,24 +141,90 @@ type forecastRow struct {
 	OutTokens   int     `json:"output_tokens"`
 }
 
-// providerRates pairs a display name with input/output $/1M.
-var providerRates = []struct {
-	name             string
-	inputUSDPerMTok  float64
-	outputUSDPerMTok float64
-}{
+// providerRate is one model + its public per-1M-token list price.
+type providerRate struct {
+	Name             string
+	InputUSDPerMTok  float64
+	OutputUSDPerMTok float64
+}
+
+// providerRates is the canonical CLI-side rate table for `cost
+// forecast` (and `--estimate` via FormatEstimate). These mirror
+// Anthropic's published list prices and are deliberately hardcoded —
+// pulling them dynamically from the paymaster `model_rates` table
+// would couple the CLI to a server round-trip just to render a dry-run
+// forecast.
+//
+// When list prices change, update this slice AND
+// internal/cli/tokens.go's FormatEstimate block in the same commit so
+// the two forecast surfaces stay in sync. Override at runtime with
+// CREWSHIP_FORECAST_RATES (CSV: name,in,out;…) for teams on
+// negotiated / volume-discount pricing.
+//
+// Last reviewed: 2026-05 (Sonnet 4.6, Opus 4.7, Haiku 4.5).
+var providerRates = []providerRate{
 	{"Sonnet 4.6", 3, 15},
 	{"Opus 4.7", 15, 75},
 	{"Haiku 4.5", 1, 5},
 }
 
+// loadProviderRates returns the active rate table, applying the
+// CREWSHIP_FORECAST_RATES env-var override when set. Format is
+// `Name,inPerM,outPerM;Name,inPerM,outPerM;…`. Parse failures fall
+// back to the hardcoded defaults with a one-time stderr warning so a
+// typo never silently produces phantom-zero forecasts.
+func loadProviderRates() []providerRate {
+	v := os.Getenv("CREWSHIP_FORECAST_RATES")
+	if v == "" {
+		return providerRates
+	}
+	out := make([]providerRate, 0, 4)
+	for _, entry := range strings.Split(v, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parts := strings.Split(entry, ",")
+		if len(parts) != 3 {
+			fmt.Fprintf(os.Stderr, "%s[forecast]%s ignoring malformed CREWSHIP_FORECAST_RATES entry %q\n",
+				cli.Yellow, cli.Reset, entry)
+			return providerRates
+		}
+		in, err1 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+		o, err2 := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+		if err1 != nil || err2 != nil {
+			fmt.Fprintf(os.Stderr, "%s[forecast]%s ignoring bad rate in %q\n",
+				cli.Yellow, cli.Reset, entry)
+			return providerRates
+		}
+		out = append(out, providerRate{Name: strings.TrimSpace(parts[0]), InputUSDPerMTok: in, OutputUSDPerMTok: o})
+	}
+	if len(out) == 0 {
+		return providerRates
+	}
+	return out
+}
+
+// structuredForecast assembles the shared map the json/yaml renderers
+// emit. Extracted to one place so the schema stays consistent across
+// format flags.
+func structuredForecast(source string, inTok, outTok int, rows []forecastRow) map[string]any {
+	return map[string]any{
+		"source":        source,
+		"input_tokens":  inTok,
+		"output_tokens": outTok,
+		"rows":          rows,
+	}
+}
+
 func buildForecastRows(inTok, outTok int) []forecastRow {
-	rows := make([]forecastRow, 0, len(providerRates))
-	for _, p := range providerRates {
-		in := float64(inTok) / 1_000_000 * p.inputUSDPerMTok
-		out := float64(outTok) / 1_000_000 * p.outputUSDPerMTok
+	rates := loadProviderRates()
+	rows := make([]forecastRow, 0, len(rates))
+	for _, p := range rates {
+		in := float64(inTok) / 1_000_000 * p.InputUSDPerMTok
+		out := float64(outTok) / 1_000_000 * p.OutputUSDPerMTok
 		rows = append(rows, forecastRow{
-			Model:     p.name,
+			Model:     p.Name,
 			InputUSD:  in,
 			OutputUSD: out,
 			TotalUSD:  in + out,
@@ -168,28 +236,24 @@ func buildForecastRows(inTok, outTok int) []forecastRow {
 }
 
 func renderForecast(f *Formatter, source string, inTok, outTok int, rows []forecastRow) error {
+	// Structured outputs return early; only the table-render path falls
+	// through to the Printf block below. The inner switch is exhaustive
+	// over its parent's three cases — the previous nested form
+	// confused readers and static analysers about whether the table
+	// path was reachable for ndjson.
 	switch f.Format {
-	case "json", "yaml", "ndjson":
-		v := map[string]any{
-			"source":         source,
-			"input_tokens":   inTok,
-			"output_tokens":  outTok,
-			"rows":           rows,
-		}
-		switch f.Format {
-		case "json":
-			return f.JSON(v)
-		case "yaml":
-			return f.YAML(v)
-		case "ndjson":
-			// Stream one row per model line so jq -c composes well.
-			for _, r := range rows {
-				if err := f.WriteNDJSONRow(r); err != nil {
-					return err
-				}
+	case "json":
+		return f.JSON(structuredForecast(source, inTok, outTok, rows))
+	case "yaml":
+		return f.YAML(structuredForecast(source, inTok, outTok, rows))
+	case "ndjson":
+		// Stream one row per model line so jq -c composes well.
+		for _, r := range rows {
+			if err := f.WriteNDJSONRow(r); err != nil {
+				return err
 			}
-			return nil
 		}
+		return nil
 	}
 	fmt.Printf("%sCost forecast%s  %ssource: %s%s\n", cli.Bold, cli.Reset, cli.Dim, source, cli.Reset)
 	fmt.Printf("%sinput ≈ %d tok    output ≈ %d tok%s\n\n", cli.Dim, inTok, outTok, cli.Reset)

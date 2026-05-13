@@ -1,20 +1,27 @@
 package cli
 
 import (
+	"context"
 	"testing"
 )
 
 func TestNotificationsEnabled(t *testing.T) {
-	if NotificationsEnabled(nil) {
-		t.Fatal("nil cfg should return false")
+	cases := []struct {
+		name string
+		cfg  *CLIConfig
+		want bool
+	}{
+		{"nil config", nil, false},
+		{"default config (zero value)", &CLIConfig{}, false},
+		{"explicitly enabled", &CLIConfig{Notifications: true}, true},
 	}
-	cfg := &CLIConfig{}
-	if NotificationsEnabled(cfg) {
-		t.Fatal("default cfg should return false")
-	}
-	cfg.Notifications = true
-	if !NotificationsEnabled(cfg) {
-		t.Fatal("enabled cfg should return true")
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NotificationsEnabled(tc.cfg); got != tc.want {
+				t.Errorf("NotificationsEnabled = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -27,5 +34,5 @@ func TestOSNotify_DoesNotPanicOnUnsupported(t *testing.T) {
 			t.Fatalf("OSNotify panicked: %v", r)
 		}
 	}()
-	_ = OSNotify("test", "body", NotifyInfo)
+	_ = OSNotify(context.Background(), "test", "body", NotifyInfo)
 }

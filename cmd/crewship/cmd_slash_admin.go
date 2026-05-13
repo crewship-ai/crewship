@@ -24,7 +24,7 @@ var slashListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List loaded slash commands",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cmds, err := cli.LoadSlashCommands()
+		cmds, err := cli.LoadSlashCommands(cmd.Context())
 		if err != nil {
 			return err
 		}

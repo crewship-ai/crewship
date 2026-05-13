@@ -142,7 +142,11 @@ func pickRecentChat(client *cli.Client) (chatID, agentSlug string, err error) {
 			} `json:"data"`
 		}
 		if err2 := getJSON(client, "/api/v1/runs?limit=10", &runs); err2 != nil {
-			return "", "", fmt.Errorf("list recent: %w", err)
+			// Surface BOTH errors — without %w-chaining the user only
+			// sees the /chats failure and never learns that /runs
+			// also failed (which is the more informative one when
+			// /chats is simply a 404 endpoint mismatch).
+			return "", "", fmt.Errorf("list recent: chats endpoint: %w; fallback runs: %v", err, err2)
 		}
 		for _, r := range runs.Data {
 			if r.ChatID == nil || *r.ChatID == "" {
@@ -188,7 +192,10 @@ func pickRecentChat(client *cli.Client) (chatID, agentSlug string, err error) {
 		Options(options...).
 		Value(&pickedID).
 		Run(); err != nil {
-		return "", "", fmt.Errorf("aborted")
+		// Wrap the huh error so the caller can distinguish Ctrl-C
+		// (terminal aborted) from a render failure (TTY changed mid-
+		// run, missing terminfo) instead of seeing a flat "aborted".
+		return "", "", fmt.Errorf("picker aborted: %w", err)
 	}
 	for _, p := range picks {
 		if p.ID == pickedID {

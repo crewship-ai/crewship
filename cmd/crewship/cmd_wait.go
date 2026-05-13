@@ -77,12 +77,17 @@ Exit code reflects the terminal status (0 done, 1 failed, 2 cancelled,
 
 		detail, err := client.PollRun(ctx, runID, interval, onTick)
 		if err != nil {
-			if errors := []string{ctx.Err().Error()}; ctx.Err() != nil {
+			// Order matters: check ctx.Err() FIRST so we don't call
+			// .Error() on a nil context error in the timeout branch.
+			// A short-statement init-expression evaluates before the
+			// condition, so the previous form `ctx.Err().Error()` would
+			// panic when ctx had no error but PollRun returned a non-
+			// context error of its own.
+			if ctx.Err() != nil {
 				if !quiet {
-					fmt.Fprintf(os.Stderr, "%s[wait]%s timeout after %s\n",
-						cli.Yellow, cli.Reset, time.Since(start).Truncate(time.Second))
+					fmt.Fprintf(os.Stderr, "%s[wait]%s timeout after %s: %v\n",
+						cli.Yellow, cli.Reset, time.Since(start).Truncate(time.Second), ctx.Err())
 				}
-				_ = errors
 				os.Exit(3)
 			}
 			fmt.Fprintf(os.Stderr, "%s[wait]%s error: %v\n", cli.Red, cli.Reset, err)

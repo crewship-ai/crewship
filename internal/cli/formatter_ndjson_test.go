@@ -53,6 +53,27 @@ func TestWriteNDJSONRow(t *testing.T) {
 	}
 }
 
+func TestNDJSON_TypedSlice(t *testing.T) {
+	// Regression test: passing a `[]T` (concrete) instead of `[]any`
+	// previously encoded the whole slice as a single JSON array on one
+	// line, which broke `--format ndjson` for every command that uses
+	// typed result slices.
+	type row struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	var b bytes.Buffer
+	f := &Formatter{Format: "ndjson", Writer: &b}
+	in := []row{{"1", "a"}, {"2", "b"}, {"3", "c"}}
+	if err := f.NDJSON(in); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
+	if len(lines) != 3 {
+		t.Errorf("want 3 lines for typed slice, got %d: %q", len(lines), b.String())
+	}
+}
+
 func TestAuto_NDJSONRouting(t *testing.T) {
 	var b bytes.Buffer
 	f := &Formatter{Format: "ndjson", Writer: &b}

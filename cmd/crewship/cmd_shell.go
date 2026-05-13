@@ -137,11 +137,16 @@ Examples (typed at the prompt):
 			if activeAgent == "" {
 				return fmt.Errorf("no active agent. Set one with /agent <slug>")
 			}
-			// Apply sticky state.
+			// Apply sticky state. effortVal was already validated by
+			// the /effort handler at set time, so SetEffort here cannot
+			// fail — but defensively check so a refactor of validation
+			// doesn't silently break the REPL.
 			_ = askCmd.Flags().Set("agent", activeAgent)
 			_ = askCmd.Flags().Set("quiet", "true")
 			if effortVal != "" {
-				_ = SetEffort(effortVal)
+				if err := SetEffort(effortVal); err != nil {
+					return fmt.Errorf("re-apply effort %q: %w", effortVal, err)
+				}
 			}
 			if planSticky {
 				planModeRequested = true

@@ -141,7 +141,10 @@ Examples:
 
 		// --plan flag opts this run into plan-mode (prompt-engineered,
 		// no backend mode change). The latch is also set by `crewship
-		// plan` which dispatches into this same RunE.
+		// plan` which dispatches into this same RunE. Reset on exit so
+		// REPL turns / tests / sequential invocations see a clean
+		// slate.
+		defer ResetAIFirstLatches()
 		planFlag, _ := cmd.Flags().GetBool("plan")
 		if planFlag {
 			planModeRequested = true

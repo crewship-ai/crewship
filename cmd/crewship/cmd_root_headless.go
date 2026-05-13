@@ -7,8 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-
-	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // flagRootPrompt holds the value of the top-level `-p / --prompt` flag.
@@ -116,6 +114,3 @@ func init() {
 	rootCmd.Args = cobra.ArbitraryArgs
 }
 
-// ensureHeadlessAlias keeps the root-level flag wiring discoverable from
-// `crewship help`. Unused-style symbol but importable for tests.
-var _ = cli.NotifyInfo

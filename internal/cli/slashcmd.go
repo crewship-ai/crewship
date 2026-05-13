@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -76,10 +77,14 @@ func DefaultSlashDir() (string, error) {
 // SlashCommand per *.md file. Missing directory → empty slice + nil
 // (slash commands are an opt-in surface; absence is not an error).
 //
+// The ctx parameter is honoured between per-file parses so a slow
+// network-mounted commands directory can be aborted by CLI shutdown
+// without leaving the directory walk stuck.
+//
 // Each file is parsed independently; one malformed file warns to
 // stderr but does not abort the rest, so a single bad command doesn't
 // break the whole CLI.
-func LoadSlashCommands() ([]SlashCommand, error) {
+func LoadSlashCommands(ctx context.Context) ([]SlashCommand, error) {
 	dir, err := DefaultSlashDir()
 	if err != nil {
 		return nil, nil
@@ -89,10 +94,17 @@ func LoadSlashCommands() ([]SlashCommand, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read slash dir: %w", err)
+		return nil, fmt.Errorf("read slash dir %s: %w", dir, err)
 	}
 	out := make([]SlashCommand, 0, len(entries))
 	for _, e := range entries {
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return out, ctx.Err()
+			default:
+			}
+		}
 		if e.IsDir() {
 			continue
 		}
@@ -160,8 +172,14 @@ func parseSlashReader(r io.Reader, source string) (SlashCommand, error) {
 		bodyBuf.WriteString("\n")
 	}
 
-	// Body = rest of the file.
-	rest, _ := io.ReadAll(br)
+	// Body = rest of the file. A read failure here means the file is
+	// being truncated mid-load (rare but seen on network mounts) —
+	// surface it rather than silently writing a partial body that
+	// would then be saved as a slash command.
+	rest, err := io.ReadAll(br)
+	if err != nil {
+		return SlashCommand{}, fmt.Errorf("read body of %s: %w", source, err)
+	}
 	bodyBuf.Write(rest)
 
 	name := fm.Name

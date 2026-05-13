@@ -47,6 +47,19 @@ func SetShowThinking(on bool) {
 	showThinking = on
 }
 
+// ResetAIFirstLatches zeroes every AI-first global so a subsequent
+// command in the same process (REPL turn, test) sees a clean slate.
+//
+// Tests use this via t.Cleanup. The REPL invokes it after each turn
+// when sticky state was explicitly disabled (e.g. /plan toggled off)
+// so the next bare-text prompt isn't silently mutated by a previous
+// turn's settings.
+func ResetAIFirstLatches() {
+	planModeRequested = false
+	effortMode = ""
+	showThinking = false
+}
+
 // ChatCreationMetadata builds the metadata sub-object included in the
 // POST /api/v1/agents/:id/chats body. Plan / effort / show-thinking
 // land here together so a single source of truth controls "what extra
