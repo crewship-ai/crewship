@@ -254,10 +254,32 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		})
 		cancel()
 		if err != nil {
-			o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
-		} else if rendered != "" {
-			promptBuf.WriteString("\n\n")
-			promptBuf.WriteString(rendered)
+			// "Ollama unreachable" is the common dev-mode case (no embedder
+			// running). It's expected, not a bug, but with N parallel agent
+			// runs the per-recall DEBUG line floods the log on every chat
+			// turn. Log at INFO at most once per episodicUnreachableLogInterval
+			// so a single outage doesn't spam, but a *new* outage after
+			// recovery still surfaces.
+			if strings.Contains(err.Error(), "ollama unreachable") {
+				now := time.Now().UnixNano()
+				last := o.episodicUnreachableLastLogged.Load()
+				if last == 0 || time.Duration(now-last) >= episodicUnreachableLogInterval {
+					if o.episodicUnreachableLastLogged.CompareAndSwap(last, now) {
+						o.logger.Info("episodic recall backend unreachable; continuing without recall", "err", err)
+					}
+				}
+			} else {
+				o.logger.Debug("episodic recall failed; continuing without", "err", err, "agent", req.AgentSlug)
+			}
+		} else {
+			// Any successful recall (even an empty result for queries with
+			// no matches) means the backend is healthy again; reset the
+			// dedup so a *future* outage logs anew.
+			o.episodicUnreachableLastLogged.Store(0)
+			if rendered != "" {
+				promptBuf.WriteString("\n\n")
+				promptBuf.WriteString(rendered)
+			}
 		}
 	}
 
