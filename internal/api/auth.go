@@ -309,8 +309,17 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// onboarding_completed=0 on purpose: the new /bootstrap → /onboarding
+	// flow runs the workspace + crew template + adapter wizard AFTER
+	// the admin row exists. Pre-2026-05-13 the bootstrap handler WAS
+	// the entire onboarding (it created a default workspace and that
+	// was it), so this column was set to 1 unconditionally. With the
+	// split-screen onboarding wizard now responsible for picking the
+	// crew template and adapter, the flag must stay 0 until /onboarding/setup
+	// fires — otherwise the dashboard gate sees "done" and skips
+	// straight past the wizard the user just sent themselves into.
 	_, err = tx.ExecContext(r.Context(),
-		"INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+		"INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
 		userID, req.FullName, req.Email, string(hashed), now, now)
 	if err != nil {
 		h.logger.Error("bootstrap: insert user", "error", err)

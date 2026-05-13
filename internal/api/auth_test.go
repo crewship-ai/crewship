@@ -164,6 +164,39 @@ func TestAuthBootstrap_Success(t *testing.T) {
 	}
 }
 
+// TestAuthBootstrap_LeavesOnboardingPending guards the 2026-05-13
+// behaviour change: the bootstrap handler used to set
+// onboarding_completed=1 because bootstrap WAS the entire onboarding.
+// With the split-screen wizard now responsible for picking a crew
+// template + adapter, the flag must stay 0 — otherwise the dashboard
+// gate sees "done" and skips the wizard the user just sent themselves
+// into. Caught a regression that landed an admin straight on the
+// dashboard with zero crews provisioned.
+func TestAuthBootstrap_LeavesOnboardingPending(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	v := newTestJWTValidator(t)
+	h := NewAuthHandler(db, logger, v, sessions.NewDBStore(db), false)
+
+	body := bytes.NewBufferString(`{"full_name":"Admin User","email":"admin@example.com","password":"longenough"}`)
+	req := httptest.NewRequest("POST", "/api/v1/auth/bootstrap", body)
+	rr := httptest.NewRecorder()
+	h.Bootstrap(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("bootstrap status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	// onboarding_completed must be 0 — onboarding wizard runs next.
+	var completed int
+	if err := db.QueryRow(`SELECT onboarding_completed FROM users WHERE email='admin@example.com'`).Scan(&completed); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if completed != 0 {
+		t.Fatalf("onboarding_completed = %d after bootstrap, want 0 (wizard must still run)", completed)
+	}
+}
+
 func TestAuthBootstrap_AlreadyInitialized(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
