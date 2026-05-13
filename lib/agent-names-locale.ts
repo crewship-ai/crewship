@@ -89,28 +89,56 @@ export const NAMES_BY_LOCALE: Record<string, string[]> = {
 }
 
 /**
- * Cheap string hash → non-negative integer. Used to pick a name
- * from the pool deterministically from a slug. Mirrors the
- * standard DJB2 variant so any agent slug produces the same
- * index across renders and across users.
+ * FNV-1a 32-bit hash. Better distribution than DJB2 for short
+ * highly-similar strings (e.g. tech-lead-X, backend-dev-X,
+ * frontend-dev-X all share the same suffix and DJB2 was producing
+ * three identical picks against an 8-name pool).
  */
 function hashSeed(s: string): number {
-  let h = 5381
+  let h = 2166136261 >>> 0
   for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619) >>> 0
   }
   return h
 }
 
 /**
- * Deterministic name pick for an agent given a slug and a locale.
- * Falls through to the English mixed pool when we don't have a map
- * for the requested language, so adding a new entry to
- * lib/languages.ts never makes the preview crash — at worst the
- * user sees neutral English names until we extend this file.
+ * Deterministic name pick for an agent. Standalone single-agent
+ * use — for crew rendering use getCrewNames() instead, which
+ * enforces uniqueness within the crew.
  */
 export function getAgentName(slug: string, language: string): string {
   const pool = NAMES_BY_LOCALE[language] ?? NAMES_BY_LOCALE.English
   const idx = hashSeed(slug) % pool.length
   return pool[idx]
+}
+
+/**
+ * Assigns unique first names to every agent in a crew. Each slug
+ * starts at its hashed offset in the pool; if that name is already
+ * taken by an earlier agent, walk forward one slot at a time until
+ * a free one shows up. Guarantees no duplicate names within the
+ * same crew (pool size 8, crew size ≤ 8). Determinism is preserved
+ * because the input slug list and the locale fully decide the
+ * outcome.
+ *
+ * Returns a slug → name map so callers can pull the name without
+ * re-passing the slug list.
+ */
+export function getCrewNames(slugs: string[], language: string): Record<string, string> {
+  const pool = NAMES_BY_LOCALE[language] ?? NAMES_BY_LOCALE.English
+  const out: Record<string, string> = {}
+  const used = new Set<string>()
+  for (const slug of slugs) {
+    let idx = hashSeed(slug) % pool.length
+    let attempts = 0
+    while (used.has(pool[idx]) && attempts < pool.length) {
+      idx = (idx + 1) % pool.length
+      attempts++
+    }
+    out[slug] = pool[idx]
+    used.add(pool[idx])
+  }
+  return out
 }

@@ -19,7 +19,7 @@ import { getAdapterBrand } from "@/lib/cli-adapter-brand"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getLocalizedAgentAvatar, getDiverseLocale } from "@/lib/agent-avatar-locale"
-import { getAgentName } from "@/lib/agent-names-locale"
+import { getCrewNames } from "@/lib/agent-names-locale"
 
 /**
  * OnboardingPreview — right pane of the split-screen Variant D
@@ -226,26 +226,35 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                 </div>
               </div>
             </div>
+            {/* Resolve crew member metadata once per render. The
+                last slot is drawn from a contrasting locale so the
+                team visibly mixes ("nejsme přeci rasisti") — the
+                lead stays on-locale so it doesn't read as tokenism.
+                Name dedup runs per-pool, so the three primary
+                agents never collide on the same first name even
+                when the slug-hash produces a tight cluster. */}
             <div className="space-y-2">
-              {template.agents.map((a, i) => {
-                // Per the user's "nejsme přeci rasisti" feedback: one
-                // agent per crew uses a contrasting locale so the team
-                // visibly mixes. We pick the last agent (typically the
-                // QA / Specialist role) because making the lead the
-                // outlier would read as tokenism; the supporting role
-                // feels more like natural team composition.
+              {(() => {
                 const total = template.agents.length
-                const isDiverse = total > 1 && i === total - 1 && language !== undefined && language !== "English"
-                const effectiveLocale = isDiverse ? getDiverseLocale(language!) : language
-                const avatarSrc =
-                  effectiveLocale && effectiveLocale !== "English"
-                    ? getLocalizedAgentAvatar(a.slug, effectiveLocale)
-                    : getAgentAvatarUrl(a.slug, "micah")
-                // Name pool follows the same locale as the avatar so
-                // the face and the first name match. The avatar stays
-                // deterministic per (slug, locale).
-                const personName = getAgentName(a.slug, effectiveLocale ?? "English")
-                return (
+                const primarySlugs = template.agents.slice(0, total - 1).map((x) => x.slug)
+                const lastSlug = total > 0 ? template.agents[total - 1].slug : null
+                const primaryLocale = language ?? "English"
+                const diverseLocale =
+                  total > 1 && language !== undefined && language !== "English"
+                    ? getDiverseLocale(language)
+                    : primaryLocale
+                const primaryNames = getCrewNames(primarySlugs, primaryLocale)
+                const diverseNames = lastSlug ? getCrewNames([lastSlug], diverseLocale) : {}
+                return template.agents.map((a, i) => {
+                  const isDiverse =
+                    total > 1 && i === total - 1 && language !== undefined && language !== "English"
+                  const effectiveLocale = isDiverse ? diverseLocale : primaryLocale
+                  const avatarSrc =
+                    effectiveLocale !== "English"
+                      ? getLocalizedAgentAvatar(a.slug, effectiveLocale)
+                      : getAgentAvatarUrl(a.slug, "micah")
+                  const personName = isDiverse ? diverseNames[a.slug] : primaryNames[a.slug]
+                  return (
                   <motion.div
                     key={a.slug}
                     initial={reduce ? { opacity: 0 } : { opacity: 0, x: -8 }}
@@ -279,7 +288,8 @@ export function OnboardingPreview({ workspaceName, crewSlug, mode, pairingPendin
                     </span>
                   </motion.div>
                 )
-              })}
+              })
+              })()}
             </div>
           </motion.div>
         ) : (
