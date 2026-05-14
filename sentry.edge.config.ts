@@ -11,6 +11,11 @@
 
 import * as Sentry from "@sentry/nextjs"
 
+// Narrow shape for the legacy `modules` field that some Sentry
+// integrations still attach to events but is not part of the public
+// ErrorEvent type. Mirrors sentry.client.config.ts + server.config.ts.
+type ErrorEventWithModules = Sentry.ErrorEvent & { modules?: Record<string, string> }
+
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN ?? ""
 
 function classifyEnv(version: string): string {
@@ -35,6 +40,11 @@ if (DSN) {
         delete event.contexts.culture
       }
       event.user = undefined
+      // Modules scrub mirrors client + server configs. The pinning
+      // test in lib/__tests__/sentry-scrub.test.ts targets the
+      // client scrubEvent export; if it changes, sync here too.
+      const withModules = event as ErrorEventWithModules
+      if (withModules.modules) withModules.modules = undefined
       if (Array.isArray(event.breadcrumbs)) {
         for (const bc of event.breadcrumbs) {
           if (bc) bc.data = undefined

@@ -15,6 +15,11 @@
 
 import * as Sentry from "@sentry/nextjs"
 
+// Narrow shape for the legacy `modules` field that some Sentry
+// integrations still attach to events but is not part of the public
+// ErrorEvent type. Mirrors the same workaround in sentry.client.config.ts.
+type ErrorEventWithModules = Sentry.ErrorEvent & { modules?: Record<string, string> }
+
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN ?? ""
 
 function classifyEnv(version: string): string {
@@ -49,6 +54,13 @@ if (DSN) {
         delete event.contexts.culture
       }
       event.user = undefined
+      // Modules: bundled-deps inventory. Not strictly PII but reveals
+      // the toolchain. Release tag already covers the triage need.
+      // Mirrors client.config + the Go-side internal/crashreport
+      // adapter. See lib/__tests__/sentry-scrub.test.ts for the
+      // pinning assertions that catch regressions here.
+      const withModules = event as ErrorEventWithModules
+      if (withModules.modules) withModules.modules = undefined
       if (Array.isArray(event.breadcrumbs)) {
         for (const bc of event.breadcrumbs) {
           if (bc) bc.data = undefined
