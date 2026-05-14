@@ -9,6 +9,92 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+(empty — next version's entries go here)
+
+## [0.1.0-beta.1] — 2026-05-14
+
+**First public beta release.** APIs and data models may break across
+minor bumps until v1.0. See `RELEASING.md` for upgrade and rollback
+guidance.
+
+### TL;DR for beta testers
+
+- Install: `brew install crewship-ai/tap/crewship` (macOS) or
+  `docker pull ghcr.io/crewship-ai/crewship:v0.1.0-beta.1` (Linux/Docker).
+- One adapter is production-ready in beta: **Claude Code (Anthropic)**.
+  Codex / Gemini / OpenCode / Cursor / Factory Droid have scaffolds
+  but lack parity testing — see README "Beta status & limitations".
+- Telemetry (Sentry crash reporting) is **enabled by default** during
+  v0.1 beta to give the solo maintainer signal from real installs.
+  Disable any time with `crewship telemetry off`. Reverts to opt-in
+  for v1.0 GA. See `RELEASING.md` Telemetry section.
+- Storage is SQLite-only in v0.1; PostgreSQL is on the v0.2 roadmap.
+
+### Added — Release infrastructure
+
+- **Auto-snapshot before migrations.** `database.SnapshotBeforeMigrate`
+  takes a `VACUUM INTO` copy as `<db>.pre-migrate-vN-to-vM-<UTC>.bak`
+  whenever a migration is pending. Keeps 10 newest snapshots; opt out
+  with `CREWSHIP_SKIP_MIGRATION_BACKUP=1`.
+- **Migration lint in CI.** `.github/workflows/migration-lint.yml` +
+  `scripts/lint-migrations` enforce append-only ordering — versions
+  strictly increase, no rename of a version already shipped to `main`.
+  In-tree Go tests guard monotonicity and uniqueness on every PR.
+- **GHCR multi-arch Docker images.** linux/amd64 + linux/arm64,
+  cosign keyless signed via GitHub OIDC. Tags published per release:
+  `:vX.Y.Z`, `:vX.Y`, and `:latest` (last one ONLY on clean semver tags
+  — pre-release tags never bump `:latest`).
+- **Nightly channel.** `.github/workflows/nightly.yml` rebuilds on every
+  push to `main`: `:nightly` and `:main-<sha>` Docker tags, plus a
+  rolling `nightly` GitHub pre-release with prebuilt binaries.
+- **One-line installer.** `scripts/install.sh` detects OS+arch, verifies
+  sha256 + cosign signatures, installs to `~/.local/bin` (no sudo) or
+  `/usr/local/bin`. Designed for `curl -fsSL https://crewship.ai/install | sh`.
+- **Update notification.** `internal/update` queries GitHub Releases API
+  daily (cached in `~/.crewship/cache`). CLI prints upgrade banner at
+  startup; web UI surfaces a dismissable banner via
+  `GET /api/v1/system/version`. Optional `GITHUB_TOKEN` to lift the
+  60/h unauthenticated rate limit to 5000/h.
+- **Sentry crash reporting (opt-out by default in beta).** New
+  `internal/crashreport` package wraps `getsentry/sentry-go` behind a
+  consent gate stored in `app_settings`. DSN injected at link time via
+  ldflag from `SENTRY_DSN` GitHub Actions secret. Strict client-side
+  scrubbing of headers, query strings, request bodies, User field, and
+  device/runtime/culture contexts; server-side regex rules in Sentry UI
+  cover email/Bearer/`sk-*`/`ghp_`/`xox*-` patterns in error messages.
+  `CREWSHIP_SENTRY_DSN` env var redirects to a self-hosted/own Sentry.
+- **`crewship telemetry on/off/status`** sub-commands manage consent at
+  runtime; `status` shows the resolved endpoint host plus DSN source
+  (vendor default vs env override). First-run prompt removed — beta
+  default is enabled.
+- **Sentry alert-rule provisioner** (`scripts/sentry-setup-alerts.sh`):
+  idempotent bash script that calls the Sentry REST API to create the
+  "New issue (beta)" and "Spike — 50+ events/hour" alert rules.
+- **PR + repo hygiene.** Stale-bot workflow (issues 90d, PRs 44d, generous
+  opt-out labels), PR template Migration Safety checklist,
+  `scripts/setup-branch-protection.sh` one-shot for required checks +
+  linear history. Hotfix runbook in `RELEASING.md`.
+- **CODE_OF_CONDUCT.md** (Contributor Covenant 2.1 by reference) +
+  `ee/README.md` scaffold for future dual-licensed enterprise add-ons.
+
+### Added — Connectors (catalog → install → MCP)
+
+- **`ConnectorCatalog`** tile-grid UI for browsing the bundled manifest
+  catalog under `manifests/` (`feat/connector-catalog-impl`).
+- **`SchemaForm`** five-field-type renderer (text/secret/select/toggle/
+  number) with per-field validation and defaults.
+- **`ConnectorConnectSheet`** wires SchemaForm into the install flow —
+  validates inputs, persists credentials via the sidecar, hands off
+  OAuth where applicable.
+- **Backend connector handlers** — `ParseManifest`, `Validate`,
+  `Resolve`, `MaterializeMCP`, `LoadAll`; HTTP routes for List / Get /
+  Verify / Install (incl. credential persistence + OAuth handoff).
+
+### Added — Auth + onboarding overhaul (PR #314)
+
+Pre-beta sweep: account recovery, device pairing, split-screen
+onboarding wizard, session-rotation + lockout primitives.
+
 ### Added — CLI: AI-first 2026 (15 new commands and flags)
 
 Major CLI surface expansion aligning Crewship with the 2026 agent-CLI playbook (long-running workflows, plan/act separation, headless scripting, real-time dashboards, model-tiering control). All additions live in `cmd/crewship` and `internal/cli`; one server endpoint added (`GET /api/v1/runs/{id}`).
@@ -200,6 +286,78 @@ logs, and encrypted credential vault out of the box.
 - Goreleaser pipeline: cross-compiled binaries (Mac amd64+arm64, Linux
   amd64+arm64, Windows amd64), keyless cosign signatures, SPDX +
   CycloneDX SBOMs, Homebrew tap auto-publish.
+
+### Security — Pentest 2026-05-14 hardening pass
+
+Internal pentest of `dev2` (`crewship-dev:8082`, build `a78e8ac`)
+produced 11 findings across 7 surfaces. All fixes have PoCs that
+confirm the bypass before and the block after (reports gitignored
+under `.pentest-2026-05-14/`).
+
+- **F-001 (HIGH):** SSRF in skills import via DNS-resolved hostname
+  bypass — blocked.
+- **F-002 (MEDIUM):** SSRF error messages leaked internal network
+  state — generic error masking.
+- **F-003 (MEDIUM):** `/metrics` exposed without auth — now gated.
+- **F-004 (LOW):** Next.js SPA fallback masked 404 for sensitive paths.
+- **F-005 (INFO):** Inconsistent path-traversal validation — unified.
+- **F-006 (MEDIUM):** No backend Origin check on state-changing routes.
+- **F-007 (HIGH):** Rate limiter bypassable via X-Forwarded-For
+  rotation — IP resolution hardened.
+- **F-009 (LOW):** Scrubber regex bypassable via zero-width characters.
+- **F-011 (HIGH conditional):** Devcontainer features could request
+  `Privileged` / dangerous `CapAdd` — denylist applied.
+- **F-012 (MEDIUM):** `CREWSHIP_DISABLE_RATELIMIT=true` shipped in dev
+  `.env.local`.
+- **F-A1/A3/A4 (HIGH):** Workspace-IDOR on relations + parent_issue_id
+  — workspace-scope enforcement.
+- **F-B4 (LOW):** Capability-URL proxy leaked `Referer` to upstream.
+- **G-002:** Memory injection guard hardening.
+
+### Security — Pass-2 quickfixes
+
+Four backlog items bundled (each <70 LOC, independently revertible):
+
+- Sidecar credential reads now emit audit events.
+- Emoji reactions XSS — payload validation tightened
+  (`emoji_reaction_test.go` covers 24 cases including real XSS strings).
+- `/admin/backups/metrics` redacted to drop cross-owner workspace IDs.
+- WebSocket frames capped at 1 MiB; fan-out N-amplifier closed.
+
+### Security — Supply chain
+
+- All release artifacts signed with cosign keyless via GitHub Actions
+  OIDC (SLSA-3-ish provenance chain). Verify with
+  `cosign verify-blob --certificate-identity-regexp ...`.
+- SBOMs in SPDX and CycloneDX shipped with every release.
+- `migration-lint` CI gate prevents the rebase-collision class of
+  schema-divergence bug that bricks customer DB on upgrade.
+- Goreleaser builds are reproducible (`-trimpath`, fixed `GOFLAGS`).
+- `gitleaks` + `govulncheck` + `grype` run on every PR via
+  `.github/workflows/security.yml`.
+
+### Changed
+
+- **README** rewritten for honest beta status — every feature labeled
+  ✅ stable / 🟡 early / 🚧 WIP. Adapter scaffolds for non-Anthropic
+  CLIs explicitly marked WIP rather than equal-billing alongside the
+  production-tested Claude Code adapter.
+- **Distribution channels** documented in `RELEASING.md` — stable /
+  beta / nightly with their respective Docker tag policies. `:latest`
+  Docker tag only moves on clean semver tags; pre-releases NEVER
+  overwrite `:latest`.
+- **Hotfix workflow** documented in `RELEASING.md`: cherry-pick onto
+  release branch, fix-forward (never untag), forward-port to `main`.
+
+### Removed — Repo hygiene (PR #344, #348)
+
+- `.claude/context/prd/*` and `.claude/context/wireframes/*` —
+  ~52 000 lines of pre-implementation design docs untracked.
+  Mintlify (`docs/`) is now the canonical user-facing docs source.
+- `internal-docs/audit-archive/*`, `internal-docs/wireframes/*` —
+  archived audit reports and HTML wireframes.
+- `mockups/activity-rail-v{2,3}.html` — wireframes for the
+  activity-rail feature shipped in #287.
 
 ### v0.2 roadmap
 
