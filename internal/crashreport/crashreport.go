@@ -315,14 +315,6 @@ func Status(ctx context.Context, db *sql.DB) (enabled, asked bool, installID str
 
 // --- helpers ---
 
-func optInEnabled(ctx context.Context, db *sql.DB) (bool, error) {
-	val, found, err := readSetting(ctx, db, SettingOptIn)
-	if err != nil || !found {
-		return false, err
-	}
-	return val == "1", nil
-}
-
 func ensureInstallID(ctx context.Context, db *sql.DB) (string, error) {
 	id, found, err := readSetting(ctx, db, SettingInstallID)
 	if err != nil {
