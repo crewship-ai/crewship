@@ -28,8 +28,114 @@ permissions:
 
 env:
   GO_VERSION: "1.26"
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10"
 
 jobs:
+  # ── Onboarding wizard E2E ─────────────────────────────────────────
+  # First-run flow: empty DB → /bootstrap → 3-step wizard → Launch.
+  # Runs in a parallel job (own runner, own DB) so it doesn't fight
+  # the devcontainer test for the bootstrap one-shot. Total ~5-8 min.
+  e2e-onboarding-wizard:
+    name: E2E Onboarding Wizard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Build CLI
+        run: go build -o crewship ./cmd/crewship
+
+      - name: Generate ephemeral test secrets
+        # Same rationale as the devcontainer job — per-run randomness
+        # so nothing trips Gitleaks and runs start from a clean slate.
+        run: |
+          {
+            echo "NEXTAUTH_SECRET=$(openssl rand -hex 32)"
+            echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Playwright browsers
+        # `--with-deps` pulls the apt packages chromium needs on the
+        # GitHub-hosted ubuntu runner. Without it, the headless launch
+        # fails with cryptic .so lookups.
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start crewship server in background
+        env:
+          CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
+          CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
+          CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
+          DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
+          CREWSHIP_NEXTJS_URL: http://localhost:8080
+          CREWSHIP_SKIP_SIDECAR: "1"
+          # Short-circuits the live api.anthropic.com probe in
+          # internal/api/onboarding.go so the wizard's Launch step
+          # accepts a fake sk-ant-oat token. Without this the test
+          # would either need a real Anthropic secret in GH or flake
+          # whenever Anthropic has a hiccup. See the spec header.
+          CREWSHIP_E2E_SKIP_TOKEN_PROBE: "1"
+        run: |
+          mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"
+          ./crewship start >/tmp/crewship.log 2>&1 &
+          echo $! > /tmp/crewship.pid
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null "http://localhost:8080/healthz"; then
+              echo "server up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server failed to start" >&2
+          cat /tmp/crewship.log >&2
+          exit 1
+
+      - name: Confirm fresh-DB precondition
+        # Sanity check before Playwright spins up — if needs_bootstrap
+        # comes back false the spec would skip silently and CI would
+        # turn green with zero real assertions, which is worse than
+        # red. Fail fast with a clear message instead.
+        run: |
+          body=$(curl -sf http://localhost:8080/api/v1/system/setup-status)
+          echo "setup-status: $body"
+          echo "$body" | grep -q '"needs_bootstrap":true' || {
+            echo "::error::Expected needs_bootstrap=true on a fresh CI DB, got $body"
+            exit 1
+          }
+
+      - name: Run onboarding-wizard Playwright spec
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:8080
+        run: pnpm exec playwright test --config=playwright.fresh.config.ts
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: playwright-report-onboarding
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Dump server log on failure
+        if: failure()
+        run: cat /tmp/crewship.log || true
+
+      - name: Stop server
+        if: always()
+        run: |
+          [ -f /tmp/crewship.pid ] && kill "$(cat /tmp/crewship.pid)" 2>/dev/null || true
+
   e2e-devcontainer:
     name: E2E Devcontainer Provisioning
     runs-on: ubuntu-latest
