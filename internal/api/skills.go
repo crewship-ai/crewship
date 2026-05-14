@@ -368,7 +368,11 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	imp := skills.NewImporter(h.db, h.logger)
-	imp.SkipURLValidation = h.SkipURLValidation
+	if h.SkipURLValidation {
+		// Flips both the validator AND the dial-time guard, so test
+		// fixtures using httptest.NewServer (loopback) keep working.
+		imp.SetSkipURLValidation(true)
+	}
 	result, err := imp.Import(r.Context(), wsID, user.ID, skills.ImportRequest{
 		URL:                req.URL,
 		Content:            req.Content,

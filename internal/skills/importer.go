@@ -53,18 +53,40 @@ type Importer struct {
 //     alone can see.
 //   - CheckRedirect re-runs ValidateImportURL on every 3xx so an attacker
 //     can't bounce off a permissive host into an internal one.
+//
+// The dialer is rebuilt lazily on first use so tests that flip
+// SkipURLValidation after construction (the convention in skills_test.go)
+// get an unrestricted client. Production code never flips the flag.
 func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 	imp := &Importer{
 		db:     db,
 		logger: logger,
 	}
+	imp.rebuildClient()
+	return imp
+}
+
+// SetSkipURLValidation flips the test-only flag and rebuilds the http
+// client so the dial-time SSRF guard is also disabled. Production code
+// must never call this.
+func (imp *Importer) SetSkipURLValidation(v bool) {
+	imp.SkipURLValidation = v
+	imp.rebuildClient()
+}
+
+// rebuildClient constructs the http.Client with or without the SSRF
+// dial-time guard depending on SkipURLValidation. Called from NewImporter
+// and again from any code path that flips the flag.
+func (imp *Importer) rebuildClient() {
 	transport := &http.Transport{
-		DialContext:           safeDialContext(),
 		TLSHandshakeTimeout:   10 * time.Second,
 		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		MaxIdleConns:          16,
 		IdleConnTimeout:       90 * time.Second,
+	}
+	if !imp.SkipURLValidation {
+		transport.DialContext = safeDialContext()
 	}
 	imp.client = &http.Client{
 		Timeout:   30 * time.Second,
@@ -79,7 +101,6 @@ func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 			return ValidateImportURL(req.Context(), req.URL.String())
 		},
 	}
-	return imp
 }
 
 // Import imports a skill from the given request and upserts it into the database.
