@@ -84,6 +84,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Empty fallback means an unconfigured secret produces a binary
+          # with telemetry disabled at the link level — safer than failing
+          # the release on a missing secret.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
   # Multi-arch Docker image published to GHCR alongside the binary release.
   # Runs in parallel with `release` because the two share no artifacts — the
@@ -162,10 +166,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.tags.outputs.list }}
+          # SENTRY_DSN is sourced from secrets.* via an interpolation; the
+          # docker/build-push-action does NOT expose it as a Docker `secret`
+          # because it has to be baked into the binary via ldflags at compile
+          # time, not mounted at runtime. Empty fallback keeps PR builds and
+          # forks (which don't see secrets) working.
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ github.event.repository.updated_at }}
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
           # GitHub Actions cache for buildx — survives across runs and cuts
           # repeated layer rebuilds (pnpm install, go mod download) to seconds.
           cache-from: type=gha

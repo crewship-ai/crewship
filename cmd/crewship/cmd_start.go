@@ -14,6 +14,7 @@ import (
 	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/crashreport"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -104,6 +105,18 @@ var startCmd = &cobra.Command{
 		if err := bundledSkills.Install(context.Background(), db.DB, logger); err != nil {
 			logger.Warn("failed to install bundled anthropic skills", "error", err)
 		}
+
+		// First-run telemetry prompt. Runs only on a TTY (skip in
+		// containers / non-interactive boots) and only when the operator
+		// has not been asked before. Default answer is NO — silently
+		// boot disabled if they Ctrl+C the prompt.
+		if err := maybePromptTelemetry(context.Background(), db, logger); err != nil {
+			logger.Warn("telemetry prompt failed; continuing with telemetry disabled", "error", err)
+		}
+		if err := crashreport.Init(context.Background(), db.DB, version, logger); err != nil {
+			logger.Warn("crashreport init failed", "error", err)
+		}
+		defer crashreport.Flush(2 * time.Second)
 
 		lic := license.New()
 		if cfg.License.FilePath != "" {

@@ -117,6 +117,7 @@ func init() {
 	rootCmd.AddCommand(notificationCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(backupCmd)
+	rootCmd.AddCommand(telemetryCmd)
 }
 
 func main() {

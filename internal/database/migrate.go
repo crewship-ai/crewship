@@ -1134,6 +1134,23 @@ CREATE INDEX IF NOT EXISTS idx_chats_ws_created ON chats(workspace_id, created_a
 CREATE INDEX IF NOT EXISTS idx_credentials_ws_created ON credentials(workspace_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_pipelines_ws_created ON pipelines(workspace_id, created_at DESC) WHERE deleted_at IS NULL;
 `},
+	// Generic single-row key/value store for instance-wide settings that
+	// don't fit any existing domain table. Currently used by the telemetry
+	// subsystem to record:
+	//   - telemetry_opt_in     ("0" | "1")  — operator-chosen
+	//   - telemetry_install_id (uuid)       — generated on first opt-in,
+	//                                          identifies the install for
+	//                                          crash-grouping without leaking
+	//                                          anything user-identifying.
+	// The opt-in row's absence is treated as "not asked yet" so cmd_start
+	// can prompt at first boot.
+	{version: 88, name: "add_app_settings", sql: `
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

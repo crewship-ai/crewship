@@ -78,6 +78,7 @@ jobs:
             VERSION=nightly-${{ github.sha }}
             COMMIT=${{ github.sha }}
             DATE=${{ github.event.repository.updated_at }}
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -139,6 +140,8 @@ jobs:
           # --snapshot: skip tag validation; --skip=publish,sign,homebrew: just
           # produce dist/ artifacts. We attach those ourselves via gh release.
           args: release --snapshot --clean --skip=publish,sign,homebrew
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
       # Rolling pre-release: delete and recreate to ensure assets reflect HEAD.
       # gh release delete is idempotent enough — if the release doesn't exist
