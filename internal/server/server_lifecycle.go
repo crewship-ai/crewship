@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
@@ -164,6 +165,10 @@ func (s *Server) Shutdown() error {
 	if s.runCancel != nil {
 		s.runCancel()
 	}
+	// Stop background goroutines launched by New() itself (catalog
+	// refresh, etc.) and wait for them to exit so any disk writes they
+	// were mid-stream have settled before the process exits.
+	s.StopBackground()
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Server.ShutdownTimeout)
 	defer cancel()
@@ -221,6 +226,24 @@ func (s *Server) Shutdown() error {
 	}
 
 	return firstErr
+}
+
+// StopBackground cancels server-owned background goroutines that were
+// launched by New() (rather than Start()) — currently the devcontainer
+// catalog refresh and mise runtime refresh tickers — and waits for them
+// to exit. Safe to call multiple times and from any state.
+//
+// Production callers should prefer Shutdown(), which calls this as part
+// of its sequence. Direct use is for handler-only unit tests that build
+// a Server with New() but never run the full Start/Shutdown lifecycle —
+// without this their async catalog HTTP fetch keeps writing to the
+// test's t.TempDir() after the test returns, racing with TempDir
+// cleanup and surfacing as "directory not empty" under -race -count=3.
+func (s *Server) StopBackground() {
+	if s.bgCancel != nil {
+		s.bgCancel()
+	}
+	s.bgWg.Wait()
 }
 
 func (s *Server) startIPC() error {
@@ -374,10 +397,16 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 // (but decoupled from startup with a 60s timeout); subsequent refreshes run
 // every 6h. Failures are logged, not fatal — the fetchers fall back to the
 // disk cache / embedded data.
+//
+// The lifetime is bounded by parentCtx: cancelling it stops the ticker loop
+// and propagates into the in-flight refresh's HTTP requests. wg lets the
+// Server wait for both goroutines to exit before returning from Shutdown
+// (or StopBackground in tests), so on-disk writes have settled before
+// callers reclaim the storage path.
 
-func startCatalogRefresh(catalog *devcontainer.CatalogFetcher, runtimes *devcontainer.RuntimeFetcher, logger *slog.Logger) {
+func startCatalogRefresh(parentCtx context.Context, wg *sync.WaitGroup, catalog *devcontainer.CatalogFetcher, runtimes *devcontainer.RuntimeFetcher, logger *slog.Logger) {
 	refresh := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
 		defer cancel()
 		if err := catalog.RefreshCatalog(ctx); err != nil {
 			logger.Warn("devcontainer catalog refresh failed, using cached/fallback", "error", err)
@@ -387,13 +416,23 @@ func startCatalogRefresh(catalog *devcontainer.CatalogFetcher, runtimes *devcont
 		}
 	}
 
-	go refresh()
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		refresh()
+	}()
 
 	go func() {
+		defer wg.Done()
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
-		for range ticker.C {
-			refresh()
+		for {
+			select {
+			case <-ticker.C:
+				refresh()
+			case <-parentCtx.Done():
+				return
+			}
 		}
 	}()
 }

@@ -68,6 +68,7 @@ func TestHandleFileList_RecursiveAndSubdir(t *testing.T) {
 	logger := logging.New("error", "json", nil)
 	stor, _ := localfs.New(dir)
 	s := New(cfg, logger, &Deps{Storage: stor, DB: openTestDB(t)})
+	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 
 	// Seed files: crewA/agentX/notes.txt, crewA/root.txt

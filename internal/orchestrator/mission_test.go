@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -390,14 +391,30 @@ func TestProgressWriter(t *testing.T) {
 	}
 }
 
-// mockDispatcher records dispatched assignments for testing.
+// mockDispatcher records dispatched assignments for testing. The mutex
+// is required because scheduleTask dispatches from a goroutine (see
+// mission_tasks.go), so the test's read of m.dispatched runs in a
+// different goroutine than DispatchAssignment's append. `time.Sleep`
+// in the test gives the dispatcher time to run but doesn't establish
+// a happens-before edge — the race detector flags both accesses.
 type mockDispatcher struct {
+	mu         sync.Mutex
 	dispatched []DispatchRequest
 }
 
 func (m *mockDispatcher) DispatchAssignment(_ context.Context, req DispatchRequest) error {
+	m.mu.Lock()
 	m.dispatched = append(m.dispatched, req)
+	m.mu.Unlock()
 	return nil
+}
+
+func (m *mockDispatcher) snapshot() []DispatchRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]DispatchRequest, len(m.dispatched))
+	copy(out, m.dispatched)
+	return out
 }
 
 func TestScheduleTask_CrossCrew_Connected(t *testing.T) {
@@ -467,10 +484,11 @@ func TestScheduleTask_CrossCrew_Connected(t *testing.T) {
 	// Give goroutine time to dispatch
 	time.Sleep(100 * time.Millisecond)
 
-	if len(disp.dispatched) != 1 {
-		t.Fatalf("expected 1 dispatch, got %d", len(disp.dispatched))
+	got := disp.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 dispatch, got %d", len(got))
 	}
-	d := disp.dispatched[0]
+	d := got[0]
 	if d.CrewID != crewB {
 		t.Errorf("expected dispatch to crew-b, got %s", d.CrewID)
 	}
