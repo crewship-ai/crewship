@@ -53,12 +53,21 @@ SKIP_GH="${SKIP_GH:-0}"
 #                    NEXT_PUBLIC_SENTRY_DSN at build time)
 # crewship-web     → web repo, SENTRY_DSN (crewship.ai marketing site,
 #                    Next.js static export, same NEXT_PUBLIC_* mechanism)
+# The default project set scopes the script to the crewship-ai org —
+# touching personal repos by default would be a footgun for anyone
+# who clones this script and runs it expecting only Crewship work.
+# Set INCLUDE_PERSONAL_REPOS=1 to opt into the personal/non-org rows
+# below.
 PROJECTS=(
   "crewship-backend    crewship-ai/crewship      SENTRY_DSN"
   "crewship-frontend   crewship-ai/crewship      SENTRY_DSN_FRONTEND"
   "crewship-web        crewship-ai/crewship-web  SENTRY_DSN"
-  "unify-web           Srbino/unify-web          SENTRY_DSN"
 )
+if [ "${INCLUDE_PERSONAL_REPOS:-0}" = "1" ]; then
+  PROJECTS+=(
+    "unify-web           Srbino/unify-web          SENTRY_DSN"
+  )
+fi
 
 # ---------- preflight ----------
 if [ -z "${SENTRY_AUTH_TOKEN:-}" ] && [ -f "${HOME}/.sentryclirc" ]; then
@@ -79,11 +88,16 @@ EOF
   exit 1
 fi
 
-for cmd in curl jq gh; do
+# curl + jq are always required (we always hit the Sentry API). gh
+# only matters for the secrets-set path; SKIP_GH=1 audits run on
+# machines without gh installed (e.g. a sandboxed CI runner doing a
+# DSN-only check).
+for cmd in curl jq; do
   command -v "$cmd" >/dev/null || { echo "missing: $cmd" >&2; exit 1; }
 done
 
 if [ "$SKIP_GH" != "1" ]; then
+  command -v gh >/dev/null || { echo "missing: gh (or set SKIP_GH=1 for a DSN-only run)" >&2; exit 1; }
   # `gh auth status` exits non-zero when ANY known account has stale
   # credentials, even if the active one is healthy. We need only the
   # active account to work — probe it directly via a cheap API call
@@ -133,31 +147,50 @@ provision_rules() {
   # If the project has never received an event in environment=beta, the
   # rules API rejects the rule with "This environment has not been
   # created." — same chicken-and-egg as the original alerts script.
+  #
+  # If the environments endpoint itself fails (network blip, permission
+  # change), surface the error rather than silently fall through to a
+  # rule without environment filtering — silently un-scoping the rule
+  # would route prod events into the beta firehose, which is exactly
+  # what scoping is meant to prevent.
   local env_json has_beta
-  env_json=$(sentry_api "${API}/projects/${SENTRY_ORG}/${project}/environments/" 2>/dev/null || echo '[]')
+  env_json=$(sentry_api "${API}/projects/${SENTRY_ORG}/${project}/environments/")
   has_beta=$(echo "$env_json" | jq -r '[.[] | select(.name == "beta")] | length')
   local beta_line=''
   if [ "$has_beta" = "1" ]; then
     beta_line='"environment": "beta",'
   fi
 
-  # Delete any rule whose name matches one we manage. The named-overwrite
-  # pattern is what makes re-runs idempotent.
+  # upsert_rule: PUT to update an existing rule by id, POST to create new.
+  # The earlier delete-then-POST shape had a brief window where the project
+  # had NO alert rule for the managed name — if the POST then failed for
+  # any reason (rate limit, transient 5xx), we'd leave the project
+  # alerting-blind. Update-in-place keeps the rule live across the call.
+  #
+  # Stale duplicates (same name but unexpected extras from manual edits)
+  # are pruned at the end of this function so the project ends in a
+  # known good state without ever being unprotected mid-run.
   local existing
   existing=$(sentry_api "${API}/projects/${SENTRY_ORG}/${project}/rules/")
-  for name in "${RULES_OWNED[@]}"; do
-    local ids
-    ids=$(echo "$existing" | jq -r --arg n "$name" '.[] | select(.name == $n) | .id')
-    while IFS= read -r id; do
-      [ -z "$id" ] && continue
-      sentry_api -X DELETE \
-        "${API}/projects/${SENTRY_ORG}/${project}/rules/${id}/" >/dev/null
-    done <<< "$ids"
-  done
 
-  # Create "New issue (beta)" — first-seen event filter.
-  cat <<JSON | sentry_api -X POST --data @- \
-    "${API}/projects/${SENTRY_ORG}/${project}/rules/" >/dev/null
+  upsert_rule() {
+    local name=$1
+    local payload=$2
+    local existing_id
+    existing_id=$(echo "$existing" | jq -r --arg n "$name" '[.[] | select(.name == $n)] | .[0].id // empty')
+    if [ -n "$existing_id" ]; then
+      echo "$payload" | sentry_api -X PUT --data @- \
+        "${API}/projects/${SENTRY_ORG}/${project}/rules/${existing_id}/" >/dev/null
+      echo "$existing_id"
+    else
+      echo "$payload" | sentry_api -X POST --data @- \
+        "${API}/projects/${SENTRY_ORG}/${project}/rules/" \
+        | jq -r '.id'
+    fi
+  }
+
+  local new_issue_id spike_id
+  new_issue_id=$(upsert_rule "New issue (beta) — Crewship" "$(cat <<JSON
 {
   "name": "New issue (beta) — Crewship",
   "actionMatch": "all",
@@ -177,10 +210,9 @@ provision_rules() {
   ]
 }
 JSON
+  )")
 
-  # Create "Spike 50+/h" — runaway-loop detector.
-  cat <<JSON | sentry_api -X POST --data @- \
-    "${API}/projects/${SENTRY_ORG}/${project}/rules/" >/dev/null
+  spike_id=$(upsert_rule "Spike — 50+ events / hour" "$(cat <<JSON
 {
   "name": "Spike — 50+ events / hour",
   "actionMatch": "all",
@@ -204,6 +236,22 @@ JSON
   ]
 }
 JSON
+  )")
+
+  # Prune stale duplicates: any rule with a managed name whose id is not
+  # one of the two we just upserted. Runs AFTER both upserts so the
+  # project is never alerting-blind mid-call.
+  for name in "${RULES_OWNED[@]}"; do
+    local ids
+    ids=$(echo "$existing" | jq -r --arg n "$name" '.[] | select(.name == $n) | .id')
+    while IFS= read -r id; do
+      [ -z "$id" ] && continue
+      if [ "$id" != "$new_issue_id" ] && [ "$id" != "$spike_id" ]; then
+        sentry_api -X DELETE \
+          "${API}/projects/${SENTRY_ORG}/${project}/rules/${id}/" >/dev/null
+      fi
+    done <<< "$ids"
+  done
 
   echo "    ✓ rules provisioned (env-scope: $([ "$has_beta" = "1" ] && echo "beta" || echo "all"))"
 }
