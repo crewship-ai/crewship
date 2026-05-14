@@ -139,7 +139,12 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := backup.Inspect(ctx, path)
 	if err != nil {
-		replyError(w, http.StatusNotFound, err.Error())
+		// Inspect can fail because the file is gone (the realistic case
+		// after validateBackupPath passed) or because the bundle is
+		// malformed. Either way the caller doesn't need the raw error
+		// — surface "not found" and keep the detail in logs.
+		h.logger.Warn("backup inspect", "error", err)
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
