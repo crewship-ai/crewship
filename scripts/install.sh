@@ -2,7 +2,13 @@
 #
 # Crewship installer
 #
-#   curl -fsSL https://crewship.ai/install | sh
+#   curl -fsSL https://crewship.ai/install | bash
+#
+# (Pipe to `bash`, not `sh`. The script uses `set -euo pipefail` and
+#  array expansion guards that POSIX sh does not implement; piping to
+#  plain `sh` on Debian/Ubuntu — where /bin/sh is dash — produces an
+#  obscure "Bad substitution" failure halfway through. The shebang
+#  above protects direct execution; the one-liner needs the same.)
 #
 # Detects OS+arch, downloads the matching release archive from GitHub,
 # verifies the SHA-256 checksum against the signed checksums.txt, and
@@ -23,7 +29,11 @@ set -euo pipefail
 
 REPO="crewship-ai/crewship"
 EXPECTED_OIDC_ISSUER="https://token.actions.githubusercontent.com"
-EXPECTED_CERT_IDENTITY_RE="https://github.com/${REPO}/.github/workflows/release.yml@.*"
+# Literal-dot escapes matter: with unescaped `.` an attacker who got a
+# different cosign identity to claim e.g. "githubXcom/crewship-ai/..."
+# would slip past the regex. The `.+` tail is intentional — cosign
+# matches the full URL including the ref suffix (`@refs/tags/vX.Y.Z`).
+EXPECTED_CERT_IDENTITY_RE="https://github\.com/${REPO}/\.github/workflows/release\.yml@.*"
 
 # ---------- colors ----------
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
@@ -176,10 +186,29 @@ install_binary() {
   if [ -w "$dst_dir" ]; then
     mv "$src" "$dst"
     chmod +x "$dst"
-  else
+    ok "installed: $dst"
+    return
+  fi
+
+  # Need elevated permissions. Three cases:
+  #   (a) already root → mv/chmod directly, no sudo needed
+  #   (b) sudo present → use it, prompt the user once
+  #   (c) neither     → hard fail with a clear remediation hint
+  # The previous version blindly called `sudo` and produced
+  # "sudo: command not found" in case (c) — common in minimal Docker
+  # images (Alpine, distroless build stages, BusyBox-only systems).
+  if [ "$(id -u)" = "0" ]; then
+    mv "$src" "$dst"
+    chmod +x "$dst"
+  elif command -v sudo >/dev/null 2>&1; then
     info "installing to $dst (sudo required)"
     sudo mv "$src" "$dst"
     sudo chmod +x "$dst"
+  else
+    err "cannot write to $dst_dir and sudo is not available.
+  Either run this script as root, install sudo, or set
+  CREWSHIP_INSTALL_DIR to a directory you own (e.g. \$HOME/.local/bin)
+  and re-run."
   fi
   ok "installed: $dst"
 }
