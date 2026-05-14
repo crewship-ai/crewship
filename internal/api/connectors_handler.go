@@ -23,10 +23,15 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/connectors"
 )
@@ -124,40 +129,190 @@ func notImplemented(w http.ResponseWriter, name string) {
 	http.Error(w, "connectors: "+name+" not implemented", http.StatusNotImplemented)
 }
 
-// List handles GET /api/v1/connectors.
-//
-// Response: 200 with []ConnectorListItem (stable order). Empty array
-// if catalog is empty. No filtering parameters in v1 — frontend filters
-// client-side.
-//
-// TDD STUB — returns 501 until wired up.
+// verifyHTTPClient handles the outbound HTTP request the Verify
+// endpoint issues against a provider. Bounded timeout keeps a slow
+// provider from holding a server worker indefinitely. Package-level
+// so tests using httptest.NewServer don't need to override anything.
+var verifyHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
+// List handles GET /api/v1/connectors. Returns 200 with the catalog
+// as []ConnectorListItem in stable insertion order. Empty array (not
+// null) on an empty catalog so the frontend's `.map` doesn't blow up.
+// No filtering parameters in v1 — frontend filters client-side.
 func (h *ConnectorHandler) List(w http.ResponseWriter, r *http.Request) {
-	notImplemented(w, "List")
+	if UserFromContext(r.Context()) == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+	manifests := h.catalog.List()
+	items := make([]ConnectorListItem, 0, len(manifests))
+	for _, m := range manifests {
+		items = append(items, ConnectorListItem{
+			ID:          m.ID,
+			Name:        m.Name,
+			Description: m.Description,
+			Category:    m.Category,
+			AuthMode:    string(m.AuthMode),
+			BrandLogo:   m.Brand.Logo,
+			BrandColor:  m.Brand.Color,
+		})
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
-// Get handles GET /api/v1/connectors/{connectorId}.
-//
-// Response: 200 with the full Manifest. 404 if the catalog has no
-// matching id. Returns the manifest verbatim so frontend can render
-// the schema-driven form without a second round-trip.
-//
-// TDD STUB — returns 501 until wired up.
+// Get handles GET /api/v1/connectors/{connectorId}. Returns 200 with
+// the full Manifest verbatim so the frontend can render the
+// schema-driven form without a second round-trip. 404 when the
+// catalog has no matching id.
 func (h *ConnectorHandler) Get(w http.ResponseWriter, r *http.Request) {
-	notImplemented(w, "Get")
+	if UserFromContext(r.Context()) == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+	id := r.PathValue("connectorId")
+	m, err := h.catalog.LoadByID(id)
+	if err != nil {
+		if errors.Is(err, connectors.ErrConnectorNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "connector not found"})
+			return
+		}
+		h.logger.Error("connector lookup", "error", err, "id", id)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
 // Verify handles POST /api/v1/connectors/{connectorId}/verify.
 //
-// For PAT manifests this typically resolves Verify.HTTP and makes one
-// HTTP call. For ConnString it can attempt a TCP dial to host:port.
-// For mcp_oauth and byo_oauth, Verify is a no-op (returns ok=true)
-// since auth happens via redirect, not paste.
+// For PAT manifests this resolves Verify.HTTP against the submitted
+// field values and makes one HTTP call. mcp_oauth and byo_oauth skip
+// the probe (auth happens via redirect) and return ok=true.
 //
-// Auth: requires ?workspace_id=X and MANAGER+ role.
+// Auth: requires an authenticated user, ?workspace_id=X, and a
+// MANAGER+ role on that workspace. Lower roles get 403.
 //
-// TDD STUB — returns 501 until wired up.
+// 200 ok=true means credentials look valid. 200 ok=false means the
+// provider rejected them — but the system call itself succeeded; the
+// caller should treat that as user-correctable, not a server error.
+// 4xx is reserved for system-level problems (missing fields, RBAC,
+// unknown connector).
 func (h *ConnectorHandler) Verify(w http.ResponseWriter, r *http.Request) {
-	notImplemented(w, "Verify")
+	if UserFromContext(r.Context()) == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+	role := RoleFromContext(r.Context())
+	// MANAGER+ is the lower bound — canRole("create") covers
+	// OWNER/ADMIN/MANAGER, which matches the documented gate. The
+	// "manage" action is OWNER/ADMIN only and would lock out the
+	// MANAGER role this endpoint is supposed to allow.
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: MANAGER+ required"})
+		return
+	}
+
+	id := r.PathValue("connectorId")
+	m, err := h.catalog.LoadByID(id)
+	if err != nil {
+		if errors.Is(err, connectors.ErrConnectorNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "connector not found"})
+			return
+		}
+		h.logger.Error("connector lookup", "error", err, "id", id)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	var req VerifyRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	// mcp_oauth + byo_oauth + none have nothing to probe — credentials
+	// come from a redirect flow, not a paste. Surface ok=true so the
+	// frontend can move straight to install without an empty round-trip.
+	if m.AuthMode == connectors.AuthModeMCPOAuth || m.AuthMode == connectors.AuthModeBYOOAuth || m.AuthMode == connectors.AuthModeNone {
+		writeJSON(w, http.StatusOK, VerifyResponse{OK: true})
+		return
+	}
+
+	// Validate required-field coverage before resolving the URL so the
+	// caller sees a 400 with a clear cause, not a 500 from the resolver.
+	for i := range m.Fields {
+		f := &m.Fields[i]
+		if f.Required && strings.TrimSpace(req.Fields[f.Key]) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "missing required field: " + f.Key,
+			})
+			return
+		}
+	}
+
+	// Manifests without a verify block accept the credentials at face
+	// value — install will still surface auth errors at first MCP call.
+	if m.Verify == nil || m.Verify.HTTP == nil {
+		writeJSON(w, http.StatusOK, VerifyResponse{OK: true})
+		return
+	}
+
+	ok, msg := h.probeVerifyHTTP(r.Context(), m, req.Fields)
+	writeJSON(w, http.StatusOK, VerifyResponse{OK: ok, Message: msg})
+}
+
+// probeVerifyHTTP runs Verify.HTTP against the provider with the
+// submitted field values substituted into URL + headers. Returns
+// (ok, message) — message is human-readable when ok=false so the
+// frontend can surface it directly. Network errors are reported as
+// ok=false rather than bubbled up as 5xx so callers don't have to
+// special-case "provider unreachable" vs "invalid token".
+func (h *ConnectorHandler) probeVerifyHTTP(ctx context.Context, m *connectors.Manifest, fields map[string]string) (bool, string) {
+	v := m.Verify.HTTP
+	rctx := connectors.ResolveContext{Fields: fields}
+	url, err := m.Resolve(v.URL, rctx)
+	if err != nil {
+		return false, "verify URL resolution failed: " + err.Error()
+	}
+
+	method := v.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	if err != nil {
+		return false, "verify request build failed: " + err.Error()
+	}
+	for k, tmpl := range v.Headers {
+		resolved, herr := m.Resolve(tmpl, rctx)
+		if herr != nil {
+			return false, "verify header " + k + " resolution failed: " + herr.Error()
+		}
+		req.Header.Set(k, resolved)
+	}
+
+	resp, err := verifyHTTPClient.Do(req)
+	if err != nil {
+		return false, "provider unreachable: " + err.Error()
+	}
+	defer resp.Body.Close()
+
+	expect := v.ExpectStatus
+	if expect == 0 {
+		expect = http.StatusOK
+	}
+	if resp.StatusCode != expect {
+		// Echo a small slice of the body so the user can see what the
+		// provider said — bounded to keep large HTML error pages from
+		// leaking into the API response.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		snippet := strings.TrimSpace(string(body))
+		if snippet != "" {
+			return false, "provider returned " + http.StatusText(resp.StatusCode) + ": " + snippet
+		}
+		return false, "provider returned " + http.StatusText(resp.StatusCode)
+	}
+	return true, ""
 }
 
 // Install handles POST /api/v1/connectors/{connectorId}/install.
