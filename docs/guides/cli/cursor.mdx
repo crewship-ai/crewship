@@ -70,7 +70,7 @@ Cursor-specific env-var syntax: `${env:VAR}` (NOT `${VAR}`). Crewship's writer t
 
 ## Memory
 
-Cursor reads `.cursor/rules/`, `AGENTS.md`, AND `CLAUDE.md` (merged). Crewship writes the full canonical set including `.cursor/rules/crewship.md` (Cursor priority path).
+Cursor reads `.cursor/rules/`, `AGENTS.md`, AND `CLAUDE.md` (merged). Crewship writes the full canonical set including `.cursor/rules/crewship.md` (Cursor priority path). On turn 1 the orchestrator also prepends the preamble inline with `[SYSTEM]/[USER]` delimiters because Cursor's headless mode has no `--system-prompt` flag and file-discovery doesn't fire until the second invocation.
 
 ## Output stream
 

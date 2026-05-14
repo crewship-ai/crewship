@@ -26,9 +26,21 @@ Code of record:
 | `X-XSS-Protection` | `0` | Disable the legacy XSS auditor (known to introduce bugs; CSP is the modern path). |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Leak only origin — not path — to cross-origin navigations. |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` | Explicitly deny powerful features the UI does not use. |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Isolate the browsing context so a top-level cross-origin opener cannot access `window` references (Spectre / XS-Leak hardening). |
+| `Content-Security-Policy` | path-aware (see below) | Lockdown for API / health / WS surfaces; SPA-friendly policy for the bundled Next.js UI. |
+
+### Path-aware CSP
+
+`securityHeadersMiddleware` (`internal/server/security_headers.go`) inspects the request path and applies one of three policies:
+
+| Path | CSP value |
+|---|---|
+| SPA UI (anything outside `/api/`, `/healthz`, `/readyz`, `/metrics`, `/ws*`, `/exposed/`) | `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
+| API / health / WebSocket | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'` (reapplied by `api.SecurityHeaders` inside the API router so the lockdown survives even if the outer wrapper is bypassed) |
+| `/exposed/` (port-exposed user apps) | **No CSP header.** Upstream owns its own policy; the reverse proxy does not stamp ours on arbitrary HTML/JS. |
 
 <Note>
-  HSTS and a full CSP are intentionally **not** set here. The single binary must support plain-HTTP deployments (dev, on-prem behind a TLS-terminating reverse proxy), and CSP requires a per-deployment analysis. Set HSTS at your reverse proxy when TLS is in front.
+  HSTS is intentionally **not** set: the single binary must support plain-HTTP deployments (dev, on-prem behind a TLS-terminating reverse proxy). Set HSTS at the reverse proxy when TLS is in front.
 </Note>
 
 ## Per-IP rate limiting
