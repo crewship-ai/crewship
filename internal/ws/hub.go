@@ -77,6 +77,15 @@ const dropLogThreshold = 16
 // blip; a genuinely stuck one stops costing us per-broadcast work.
 const consecutiveDropsBeforeDisconnect = 128
 
+// wsMaxInboundFrameBytes caps the size of a single inbound WebSocket
+// frame the server is willing to read. 64 KiB is large enough for every
+// legitimate ClientMessage we route (subscribe/unsubscribe/ping/
+// send_message/cancel_message — all four-figure payloads at most) and
+// small enough that an attacker can't use a single frame to amplify
+// fan-out across all subscribers on the channel. See D5 in the
+// 2026-05-14 chat/WS pentest agent report.
+const wsMaxInboundFrameBytes = 64 * 1024
+
 // ClientMessage is a JSON message received from a WebSocket client.
 type ClientMessage struct {
 	Type    string          `json:"type"`
@@ -446,6 +455,18 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		Handler: func(conn *websocket.Conn) {
+			// Cap inbound frame size at 64 KiB. The WS protocol allows
+			// arbitrarily large messages, but our use cases — subscribe,
+			// unsubscribe, ping, send_message, cancel_message — all fit
+			// well under 4 KiB in practice. A 1 MB JSON sent on
+			// `send_message` would otherwise be parsed and then fanned
+			// out to every other subscriber on the channel, an
+			// N-amplifier on memory and bandwidth (D5 from the chat/WS
+			// pentest agent). The x/net/websocket Conn returns
+			// ErrFrameTooLarge from Receive when a frame exceeds the
+			// limit; readPump treats that as a normal read error and
+			// closes the connection.
+			conn.MaxPayloadBytes = wsMaxInboundFrameBytes
 			ctx, cancel := context.WithCancel(context.Background())
 			client := &Client{
 				conn:          conn,

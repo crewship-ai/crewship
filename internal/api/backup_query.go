@@ -255,7 +255,28 @@ func (h *BackupHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, "instance owner required")
 		return
 	}
-	writeJSON(w, http.StatusOK, backup.Snapshot())
+
+	// Pre-fix: the snapshot's `lock_held_seconds_by_workspace` map is
+	// keyed by workspace ID, so calling instance owners learned the IDs
+	// of every other workspace currently holding a backup lock — even
+	// workspaces they are not members of. Filter the map to the calling
+	// owner's own workspace before emitting. The aggregate counters
+	// (created_total / failed_total / restored_total) stay full because
+	// they're scalars and don't reveal cross-workspace identity.
+	snapshot := backup.Snapshot()
+	wsID := WorkspaceIDFromContext(ctx)
+	if wsID != "" {
+		if v, ok := snapshot.LockHeld[wsID]; ok {
+			snapshot.LockHeld = map[string]int64{wsID: v}
+		} else {
+			snapshot.LockHeld = map[string]int64{}
+		}
+	} else {
+		// No workspace context — drop the map entirely rather than
+		// leaking IDs the caller doesn't have a request scope for.
+		snapshot.LockHeld = map[string]int64{}
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 // statusForBackupError maps a backup package error to the right HTTP

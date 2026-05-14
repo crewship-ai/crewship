@@ -197,7 +197,7 @@ ALTER TABLE crews ADD COLUMN cached_requirements TEXT;
 	// writing the tar.zst bundle; concurrent backups on the same
 	// workspace are refused with ErrLockHeld. The TTL column lets a
 	// crashed backup be reclaimed after one hour without operator
-	// intervention. See .claude/context/prd/BACKUP.md section 4.3.
+	// intervention.
 	{version: 48, name: "add_backup_locks", sql: `
 CREATE TABLE IF NOT EXISTS backup_locks (
     workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -212,7 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_backup_locks_expires ON backup_locks(expires_at);
 	// refresh. Populated on CreateBackup success, pruned on Delete. An
 	// idempotent startup scan in internal/backup/catalog.go walks the
 	// default backups dir and back-fills rows for bundles that existed
-	// before this migration. See CRE-128 in .claude/context/prd/BACKUP.md.
+	// before this migration. Tracked as CRE-128.
 	{version: 49, name: "add_backup_catalog", sql: `
 CREATE TABLE IF NOT EXISTS backup_catalog (
     id TEXT PRIMARY KEY,
@@ -1067,8 +1067,7 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// v78 introduces pipelines — declarative DSL documents persisted
 	// per-workspace, authored by AI agents (or users) and reusable
 	// across crews via the [AVAILABLE PIPELINES] system-prompt block.
-	// See .claude/context/prd/PIPELINES.md and
-	// migrate_consts_v78_pipelines.go for full design rationale.
+	// See migrate_consts_v78_pipelines.go for the table DDL.
 	{version: 78, name: "add_pipelines", sql: migrationAddPipelines},
 	// v79 adds pipeline versioning + waitpoints. Versioning makes
 	// the in-place edits from v78 immutable history (each save = new
