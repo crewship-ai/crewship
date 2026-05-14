@@ -323,20 +323,6 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		})
 	}
 
-	// Wire the orchestrator's container-ready callback now that `s` is
-	// constructed. The callback fans out to two concerns: (1) register
-	// the container with the stats poller so container.metrics journal
-	// entries flow, (2) ensure the file watcher is running for the crew
-	// so file.written entries flow. Both are idempotent — repeated
-	// calls for the same container/crew are no-ops.
-	if statsCollector != nil {
-		sc := statsCollector
-		orch.SetStatsRegisterCallback(func(containerID, crewID, workspaceID string) {
-			sc.Register(containerID, crewID, workspaceID)
-			s.ensureFileWatcher(crewID)
-		})
-	}
-
 	s.registerRoutes()
 	s.registerIPCRoutes()
 
