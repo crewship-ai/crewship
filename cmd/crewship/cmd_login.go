@@ -297,7 +297,7 @@ func loginWithGoogle(serverURL string) error {
 		return fmt.Errorf("parse google status: %w", err)
 	}
 	if !status.Enabled {
-		return fmt.Errorf("Google sign-in is not configured on %s (server returned enabled=false)", serverURL)
+		return fmt.Errorf("Google sign-in is not configured on %s (server returned enabled=false)", serverURL) //nolint:staticcheck // ST1005: user-facing CLI message ("Google" is a proper noun)
 	}
 
 	authURL := strings.TrimRight(serverURL, "/") + "/api/v1/auth/google/redirect"

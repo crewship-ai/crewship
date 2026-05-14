@@ -129,11 +129,7 @@ func (sc *StatsCollector) Tracked() []TrackedContainer {
 	defer sc.mu.RUnlock()
 	out := make([]TrackedContainer, 0, len(sc.tracked))
 	for _, t := range sc.tracked {
-		out = append(out, TrackedContainer{
-			ContainerID: t.ContainerID,
-			CrewID:      t.CrewID,
-			WorkspaceID: t.WorkspaceID,
-		})
+		out = append(out, TrackedContainer(t))
 	}
 	return out
 }

@@ -60,8 +60,7 @@ var trustedProxyCIDRs = parseTrustedProxies(os.Getenv("CREWSHIP_TRUSTED_PROXY_CI
 //
 // The "set" bit is what `resolveRateLimitDisabled` uses to give the
 // canonical name precedence over the legacy alias even when its value
-// is `false`. parseBoolEnv stays as a lossy two-state wrapper for any
-// other caller that doesn't care about the distinction.
+// is `false`.
 func lookupBoolEnv(name string) (bool, bool) {
 	raw, ok := os.LookupEnv(name)
 	if !ok {
@@ -77,18 +76,6 @@ func lookupBoolEnv(name string) (bool, bool) {
 		return false, true
 	}
 	return b, true
-}
-
-func parseBoolEnv(name string) bool {
-	v := strings.TrimSpace(os.Getenv(name))
-	if v == "" {
-		return false
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return false
-	}
-	return b
 }
 
 // parseTrustedProxies parses a comma-separated CIDR list. Defaults to
@@ -337,7 +324,3 @@ func MustNotDisableRateLimitInProd() {
 			"; refusing to start. Unset the flag or change CREWSHIP_ENV to a non-prod value.")
 	}
 }
-
-// RateLimitDisabled reports whether rate limiting is currently bypassed.
-// Exposed for /api/health to surface the runtime state to scrapers.
-func RateLimitDisabled() bool { return rateLimitDisabled }

@@ -598,7 +598,7 @@ func validateOnboardingCredential(ctx context.Context, provider, value string) e
 		// what users mistakenly grab from console.anthropic.com.
 		// Reject the latter loudly with a fix-it pointer.
 		if strings.HasPrefix(v, "sk-ant-api") {
-			return errors.New(
+			return errors.New( //nolint:staticcheck // ST1005: user-facing onboarding message, rendered verbatim in UI
 				"That looks like a raw Anthropic API key (sk-ant-api…). " +
 					"Crewship onboarding needs a Claude Code CLI token instead — " +
 					"run `claude setup-token` on your machine and paste the resulting " +
@@ -606,7 +606,7 @@ func validateOnboardingCredential(ctx context.Context, provider, value string) e
 			)
 		}
 		if !strings.HasPrefix(v, "sk-ant-oat") {
-			return errors.New(
+			return errors.New( //nolint:staticcheck // ST1005: user-facing onboarding message, rendered verbatim in UI
 				"This doesn't look like a Claude Code CLI token (expected prefix `sk-ant-oat`). " +
 					"Run `claude setup-token` on your machine and paste the resulting value.",
 			)
@@ -656,7 +656,7 @@ func probeAnthropicOAuthToken(parent context.Context, token string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return errors.New(
+		return errors.New( //nolint:staticcheck // ST1005: user-facing onboarding message, rendered verbatim in UI
 			"Anthropic rejected your CLI token (401). The most common cause is pasting just part of the value " +
 				"or copying from a page that truncates it — run `claude setup-token` again and paste the entire " +
 				"sk-ant-oat… string in one go.",

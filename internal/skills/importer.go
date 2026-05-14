@@ -271,7 +271,7 @@ func (imp *Importer) upsertEnriched(
 	// concrete remediation — pick a different slug, or `crewship
 	// skill delete` first if they really meant to replace it.
 	if err == nil && existingSource == "BUNDLED" {
-		return nil, fmt.Errorf(
+		return nil, fmt.Errorf( //nolint:staticcheck // ST1005: user-facing API error rendered verbatim to the operator
 			"skill %q is BUNDLED (curated, ships with the binary); "+
 				"refusing to overwrite. Pick a different slug, or delete the bundled "+
 				"row first if this is intentional.", slug)

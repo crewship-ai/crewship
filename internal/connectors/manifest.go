@@ -411,9 +411,7 @@ func checkDerivedCycles(derived map[string]string) error {
 	// Build adjacency list: derived key → derived keys it references.
 	deps := make(map[string][]string, len(derived))
 	for k, tmpl := range derived {
-		for _, ref := range extractDerivedRefs(tmpl) {
-			deps[k] = append(deps[k], ref)
-		}
+		deps[k] = append(deps[k], extractDerivedRefs(tmpl)...)
 	}
 
 	// 3-color DFS (white=0, gray=1, black=2) for cycle detection.

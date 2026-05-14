@@ -400,7 +400,7 @@ func TestWithRunID_EmptyIsNoop(t *testing.T) {
 	if RunIDFromContext(ctx) != "" {
 		t.Error("RunIDFromContext on plain ctx should return empty")
 	}
-	if RunIDFromContext(nil) != "" { //nolint:staticcheck
+	if RunIDFromContext(nil) != "" { //nolint:staticcheck // intentionally passing nil to verify nil-tolerance contract
 		t.Error("RunIDFromContext on nil ctx should return empty")
 	}
 }
