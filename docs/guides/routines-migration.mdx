@@ -140,7 +140,7 @@ Cost dashboards may show a step-down in pipeline-attributed LLM cost after this 
 
 ## CodeRabbit-flagged fixes carried forward
 
-The original PR review flagged 23 inline issues. The vast majority were addressed in the original `7715ee7` sweep; the remaining items shipped with this release. See the [CHANGELOG](/CHANGELOG.md) for the full list, or [PIPELINES.md §17.5](./../../.claude/context/prd/PIPELINES.md) for the bug-list with rationale per fix.
+The original PR review flagged 23 inline issues. The vast majority were addressed in the original `7715ee7` sweep; the remaining items shipped with this release. See the [CHANGELOG](/CHANGELOG.md) for the full list.
 
 Highlights for security/stability-conscious users:
 - **DAG completion bookkeeping** — failed steps no longer mark `completed=true` (would have let downstream branches advance with empty inputs)
@@ -163,5 +163,3 @@ Highlights for security/stability-conscious users:
 | Auto-disable after N consecutive failures | Foundation PRD scope. |
 | Inbound MCP server exposing routines as MCP tools | Future. |
 | Cross-adapter tier swap (Claude → Gemini) | Same-provider model swap works (Haiku → Opus). Cross-provider adapter constants need shorthand→constant mapping. |
-
-See [PIPELINES.md §17.7](./../../.claude/context/prd/PIPELINES.md) for the full deferred-features list and the rationale per item.

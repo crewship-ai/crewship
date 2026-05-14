@@ -49,9 +49,6 @@ To restore:
        # Or for passphrase-encrypted bundles:
        age -d -p payload > payload.tar
        tar -xf payload.tar
-
-See .claude/context/prd/DEPLOYMENT.md ("Restore mimo Crewship") in the
-Crewship source tree for the full recovery guide.
 `
 
 // WriteBundleOptions controls how WriteBundle produces its output. At

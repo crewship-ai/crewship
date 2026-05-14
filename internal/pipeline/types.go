@@ -1,8 +1,6 @@
 // Package pipeline implements Crewship's declarative pipeline primitive:
 // AI-authored, workspace-scoped, reusable workflow recipes that run on a
 // cheaper execution tier than the model that authored them.
-//
-// See .claude/context/prd/PIPELINES.md for the full design.
 package pipeline
 
 import (

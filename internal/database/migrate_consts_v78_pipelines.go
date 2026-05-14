@@ -5,7 +5,7 @@ package database
 // agents (or users) and reusable across crews via the
 // [AVAILABLE PIPELINES] system-prompt block.
 //
-// Design notes (see .claude/context/prd/PIPELINES.md for full spec):
+// Design notes:
 //
 //   - id is a CUID with the "pln_" prefix. The prefix is decorative
 //     only — application code is the source of truth — but it makes

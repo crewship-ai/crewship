@@ -39,7 +39,6 @@ documentation:
   - changed-files:
       - any-glob-to-any-file:
           - '**/*.md'
-          - '.claude/context/**'
 
 dependencies:
   - changed-files:

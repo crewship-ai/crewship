@@ -80,7 +80,6 @@ paths = [
   '''docs/internal/launch-audit-2026-04-29\.md$''',
 
   # HTML wireframes with mockup data (static design artifacts).
-  '''\.claude/context/wireframes/.*\.html$''',
   '''\.factory/context/wireframes/.*\.html$''',
   '''\.factory/context/K8S-READINESS\.md$''',
 
