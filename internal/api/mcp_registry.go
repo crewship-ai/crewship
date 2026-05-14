@@ -460,7 +460,7 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	whereClause, whereArgs, err := parseRegistryFilters(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	where := ""
@@ -478,7 +478,7 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list MCP registry", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
+		replyError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 	defer rows.Close()
@@ -523,7 +523,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	// verified servers from the marketplace UI.
 	filterClause, filterArgs, ferr := parseRegistryFilters(r)
 	if ferr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": ferr.Error()})
+		replyError(w, http.StatusBadRequest, ferr.Error())
 		return
 	}
 	likeClause := "(name LIKE ? OR description LIKE ? OR category LIKE ? OR display_name LIKE ?)"
@@ -547,7 +547,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		queryArgs...)
 	if err != nil {
 		h.logger.Error("search MCP registry", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
+		replyError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 	defer rows.Close()
@@ -571,7 +571,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		// failures rather than silently returning total=0 with a 200
 		// response (CodeRabbit caught this).
 		h.logger.Error("count search results", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
+		replyError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 
@@ -588,7 +588,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 func (h *MCPRegistryHandler) Sync(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 

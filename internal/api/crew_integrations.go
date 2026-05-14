@@ -70,7 +70,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		ORDER BY c.name, cs.name`, workspaceID)
 	if err != nil {
 		h.logger.Error("list all crew integrations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -91,7 +91,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("iterate all crew integrations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	// Populate auth_status via a batch query. Use MAX on a priority CASE so
@@ -111,7 +111,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		GROUP BY ab.mcp_server_id`, workspaceID)
 	if err != nil {
 		h.logger.Error("query auth status batch", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	for authRows.Next() {
@@ -124,7 +124,7 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 	if err := authRows.Err(); err != nil {
 		h.logger.Error("iterate auth status batch", "error", err)
 		authRows.Close()
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	authRows.Close()
@@ -164,11 +164,11 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("crew exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 
@@ -192,7 +192,7 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 		ORDER BY cs.created_at DESC`, crewID)
 	if err != nil {
 		h.logger.Error("list crew integrations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -212,13 +212,13 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("iterate crew integrations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	// Populate auth_status
 	if err := h.populateAuthStatus(r.Context(), results); err != nil {
 		h.logger.Error("populate auth status", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if results == nil {

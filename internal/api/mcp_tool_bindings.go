@@ -50,7 +50,7 @@ func (h *IntegrationHandler) ListCrewIntegrationTools(w http.ResponseWriter, r *
 		ORDER BY tool_name ASC`, serverID)
 	if err != nil {
 		h.logger.Error("list mcp tool bindings", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -61,7 +61,7 @@ func (h *IntegrationHandler) ListCrewIntegrationTools(w http.ResponseWriter, r *
 		var enabled int
 		if err := rows.Scan(&b.ID, &b.ToolName, &b.Description, &enabled, &b.CreatedAt, &b.UpdatedAt); err != nil {
 			h.logger.Error("scan mcp tool binding", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		b.Enabled = enabled != 0
@@ -69,7 +69,7 @@ func (h *IntegrationHandler) ListCrewIntegrationTools(w http.ResponseWriter, r *
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (mcp tool bindings)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -98,7 +98,7 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 	serverID := r.PathValue("integrationId")
 	toolName := strings.TrimSpace(r.PathValue("toolName"))
 	if toolName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "toolName required"})
+		replyError(w, http.StatusBadRequest, "toolName required")
 		return
 	}
 
@@ -109,11 +109,11 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 
 	var req updateToolBindingRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if req.Enabled == nil && req.Description == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Provide at least one of: enabled, description"})
+		replyError(w, http.StatusBadRequest, "Provide at least one of: enabled, description")
 		return
 	}
 
@@ -154,7 +154,7 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 		id, serverID, toolName, desc, enabledArg, now, now, enabledArg)
 	if err != nil {
 		h.logger.Error("upsert mcp tool binding", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -168,7 +168,7 @@ func (h *IntegrationHandler) UpdateCrewIntegrationTool(w http.ResponseWriter, r 
 		WHERE mcp_server_id = ? AND mcp_server_scope = 'crew' AND tool_name = ?`,
 		serverID, toolName).Scan(&out.ID, &out.ToolName, &out.Description, &enabledOut, &out.CreatedAt, &out.UpdatedAt); err != nil {
 		h.logger.Error("read back mcp tool binding", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	out.Enabled = enabledOut != 0
@@ -206,7 +206,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -220,7 +220,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 
 	var req refreshToolsRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -228,7 +228,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin tx (refresh tools)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer func() {
@@ -263,7 +263,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 			generateCUID(), serverID, name, desc, now, now)
 		if err != nil {
 			h.logger.Error("upsert refresh tool", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
@@ -276,7 +276,7 @@ func (h *IntegrationHandler) RefreshCrewIntegrationTools(w http.ResponseWriter, 
 	}
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit refresh tools", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -324,9 +324,9 @@ func (h *IntegrationHandler) assertCrewServerExists(r *http.Request, workspaceID
 // false 404s and makes ops blind to genuine issues.
 func (h *IntegrationHandler) respondCrewServerErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
+		replyError(w, http.StatusNotFound, "Crew integration not found")
 		return
 	}
 	h.logger.Error("assert crew server exists", "error", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+	replyError(w, http.StatusInternalServerError, "Internal server error")
 }

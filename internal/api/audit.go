@@ -46,7 +46,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -139,7 +139,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list audit logs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -151,14 +151,14 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.EntityType, &a.EntityID, &a.Metadata, &a.IPAddress,
 			&a.UserAgent, &a.CreatedAt, &a.UserEmail, &a.UserName); err != nil {
 			h.logger.Error("scan audit log", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		result = append(result, a)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (audit logs)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if result == nil {
@@ -168,7 +168,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	var total int
 	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total); err != nil {
 		h.logger.Error("count audit logs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

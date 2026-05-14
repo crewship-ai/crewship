@@ -12,9 +12,7 @@ import (
 // ── Update — PATCH /api/v1/issues/{id} ──────────────────────────────────────
 
 func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -226,9 +224,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 // ── 5. Delete — DELETE /api/v1/crews/{crewId}/issues/{identifier} ───────────
 
 func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

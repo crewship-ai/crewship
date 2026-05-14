@@ -1,0 +1,546 @@
+/**
+ * Crew icon and gradient palette registries.
+ *
+ * Split from lib/entities.ts during the consolidation refactor — lib/entities.ts
+ * now re-exports these symbols so existing imports keep working.
+ */
+
+
+import {
+  Code, Shield, Megaphone, BarChart3, Users, Rocket, Brain, Palette,
+  Briefcase, Globe, Zap, Heart, Database, Lock, Bug, Network,
+  Bot, Package, Lightbulb, Wrench, Truck, GraduationCap,
+  Phone, Send, Bell, Bookmark, Calendar, Camera, Clipboard,
+  Cloud, Compass, CreditCard, Crown, Diamond, Flame, Gift,
+  Headphones, Home, Key, Layers, LayoutGrid, Mail, Map,
+  Monitor, Music, Newspaper, PenTool, Printer, Radio,
+  Scale, Search, Server, Settings, ShoppingCart, Star,
+  Target, Terminal, Umbrella, Video, Wand2, Wifi,
+  Anchor, Aperture, Archive, Award, Banknote, Battery,
+  Bike, Binary, Blocks, Bluetooth, BookOpen, Box,
+  Brush, Building, Building2, Cable, Clapperboard, Clock,
+  Cog, Container, Cookie, Cpu, Dice1, Disc,
+  DollarSign, Circle, Drum, Eye, Factory, Feather,
+  FileText, Fingerprint, Flag, Folder, Gamepad2, Gauge,
+  Globe2, Hand, Hash, HardDrive, Image, Infinity,
+  Joystick, Landmark, Languages, Leaf, LifeBuoy, Link,
+  Magnet, MessageSquare, Mic, Microscope, Mountain, PaintBucket,
+  Paperclip, Percent, Pill, Pizza, Plane, Plug,
+  Power, QrCode, Radar, Receipt, Repeat, Ruler,
+  Sailboat, Scan, Scissors, Share2, ShieldCheck, Shirt,
+  Signal, Siren, Skull, Smartphone, Sparkles, Speaker,
+  Stethoscope, Sun, Swords, Tag, Tent, ThumbsUp,
+  Timer, Tornado, Trophy, Tv, University, Unplug,
+  Upload, Utensils, Wallet, Watch, Webcam, Wind,
+  // Additional batch
+  Activity, Airplay, AlarmClock, Apple, Atom, Axe,
+  Baby, Backpack, Badge, BadgeCheck, Beaker, BedDouble,
+  Beer, BellRing, Bird, Blinds, Bone, BookMarked,
+  BrainCircuit, BrickWall, BriefcaseMedical, Cake, Calculator,
+  Car, Castle, Cat, CheckCircle, Cherry, Church,
+  Citrus, CloudRain, CloudSun, Clover, CodeXml, Coffee,
+  Coins, Component, Construction, Contact, Croissant, Crosshair,
+  Cuboid, Dog, DoorOpen, Dumbbell, Ear, Earth,
+  Eclipse, Egg, Eraser, Fan, Fence, FerrisWheel,
+  Film, Fish, Flashlight, FlaskConical, Flower,
+  Footprints, Forklift, Frame, Fuel, Gem, Ghost,
+  Glasses, Grape, Guitar, Hammer, Handshake, HardHat,
+  Hop, Hospital, Hotel, Hourglass, IceCreamCone, Inbox,
+  Lamp, LampDesk, Laptop, Lasso, LayoutDashboard, Library,
+  Ligature, ListMusic, Locate, Lollipop, Luggage,
+  MapPin, Martini, Medal, MessageCircle,
+  Milestone, MilkOff, Minus, Moon, MoreHorizontal, MousePointer,
+  Move, Navigation, Nfc, Nut, Orbit, PaintRoller,
+  Palmtree, PanelLeft, PartyPopper, PawPrint, PcCase, Pencil,
+  PiggyBank, Pin, PlaneTakeoff, Play, PlugZap, Podcast,
+  Popcorn, Presentation, PuzzleIcon, Rabbit, Rainbow, Rat,
+  Recycle, RefreshCw, Refrigerator, Replace, Ribbon,
+  Rotate3d, Route, Rss, SatelliteDish, Scaling, School,
+  ScreenShare, Scroll, Shapes, Shell, Ship, ShoppingBag,
+  Shovel, Shrub, Shuffle, Signature, Slice, Snail,
+  Snowflake, Sofa, SoupIcon, Space, Spade, Sprout,
+  SquareStack, Stamp, StarHalf, Store, Sunrise, Sunset,
+  SwissFranc, Sword, Syringe, Table, Tablet, Tangent,
+  Telescope, TestTube, TestTubes, Theater, Thermometer, Ticket,
+  TrafficCone, Train, TreeDeciduous, TreePine, TrendingUp, SquareKanban,
+  Triangle, Turtle, Type, UtensilsCrossed, Vault,
+  Vibrate, Voicemail, Volume2, Warehouse, Waves, Wheat,
+  Wine, Workflow, Worm,
+  type LucideIcon,
+} from "lucide-react"
+import { CREW_COLOR_DEFAULT } from "@/lib/colors"
+
+// ---------------------------------------------------------------------------
+// Generic resolver — shared lookup helper.
+// ---------------------------------------------------------------------------
+
+/**
+ * Look up an entity in a registry, returning the fallback when the id is
+ * missing. Centralises the `MAP[id] ?? DEFAULT` pattern so both the icon and
+ * palette resolvers stay one-liners.
+ */
+export function resolveEntity<T>(
+  id: string | null | undefined,
+  registry: Record<string, T>,
+  fallback: T,
+): T {
+  if (!id) return fallback
+  // Object.hasOwn guards against prototype-pollution lookups (e.g. "__proto__").
+  return Object.hasOwn(registry, id) ? registry[id] : fallback
+}
+
+// ---------------------------------------------------------------------------
+// Crew icons.
+// ---------------------------------------------------------------------------
+
+export interface CrewIconDef {
+  name: string
+  icon: LucideIcon
+  label: string
+}
+
+export const CREW_ICONS: CrewIconDef[] = [
+  { name: "code", icon: Code, label: "Code" },
+  { name: "shield", icon: Shield, label: "Shield" },
+  { name: "megaphone", icon: Megaphone, label: "Megaphone" },
+  { name: "chart", icon: BarChart3, label: "Chart" },
+  { name: "users", icon: Users, label: "Users" },
+  { name: "rocket", icon: Rocket, label: "Rocket" },
+  { name: "brain", icon: Brain, label: "Brain" },
+  { name: "palette", icon: Palette, label: "Palette" },
+  { name: "briefcase", icon: Briefcase, label: "Briefcase" },
+  { name: "globe", icon: Globe, label: "Globe" },
+  { name: "zap", icon: Zap, label: "Zap" },
+  { name: "heart", icon: Heart, label: "Heart" },
+  { name: "database", icon: Database, label: "Database" },
+  { name: "lock", icon: Lock, label: "Lock" },
+  { name: "bug", icon: Bug, label: "Bug" },
+  { name: "network", icon: Network, label: "Network" },
+  { name: "bot", icon: Bot, label: "Bot" },
+  { name: "package", icon: Package, label: "Package" },
+  { name: "lightbulb", icon: Lightbulb, label: "Lightbulb" },
+  { name: "wrench", icon: Wrench, label: "Wrench" },
+  { name: "truck", icon: Truck, label: "Truck" },
+  { name: "graduation", icon: GraduationCap, label: "Graduation" },
+  { name: "phone", icon: Phone, label: "Phone" },
+  { name: "send", icon: Send, label: "Send" },
+  { name: "bell", icon: Bell, label: "Bell" },
+  { name: "bookmark", icon: Bookmark, label: "Bookmark" },
+  { name: "calendar", icon: Calendar, label: "Calendar" },
+  { name: "camera", icon: Camera, label: "Camera" },
+  { name: "clipboard", icon: Clipboard, label: "Clipboard" },
+  { name: "cloud", icon: Cloud, label: "Cloud" },
+  { name: "compass", icon: Compass, label: "Compass" },
+  { name: "credit-card", icon: CreditCard, label: "Credit Card" },
+  { name: "crown", icon: Crown, label: "Crown" },
+  { name: "diamond", icon: Diamond, label: "Diamond" },
+  { name: "flame", icon: Flame, label: "Flame" },
+  { name: "gift", icon: Gift, label: "Gift" },
+  { name: "headphones", icon: Headphones, label: "Headphones" },
+  { name: "home", icon: Home, label: "Home" },
+  { name: "key", icon: Key, label: "Key" },
+  { name: "layers", icon: Layers, label: "Layers" },
+  { name: "grid", icon: LayoutGrid, label: "Grid" },
+  { name: "mail", icon: Mail, label: "Mail" },
+  { name: "map", icon: Map, label: "Map" },
+  { name: "monitor", icon: Monitor, label: "Monitor" },
+  { name: "music", icon: Music, label: "Music" },
+  { name: "newspaper", icon: Newspaper, label: "Newspaper" },
+  { name: "pen", icon: PenTool, label: "Pen" },
+  { name: "printer", icon: Printer, label: "Printer" },
+  { name: "radio", icon: Radio, label: "Radio" },
+  { name: "scale", icon: Scale, label: "Scale" },
+  { name: "search", icon: Search, label: "Search" },
+  { name: "server", icon: Server, label: "Server" },
+  { name: "settings", icon: Settings, label: "Settings" },
+  { name: "cart", icon: ShoppingCart, label: "Cart" },
+  { name: "star", icon: Star, label: "Star" },
+  { name: "target", icon: Target, label: "Target" },
+  { name: "terminal", icon: Terminal, label: "Terminal" },
+  { name: "umbrella", icon: Umbrella, label: "Umbrella" },
+  { name: "video", icon: Video, label: "Video" },
+  { name: "wand", icon: Wand2, label: "Wand" },
+  { name: "wifi", icon: Wifi, label: "Wifi" },
+  { name: "anchor", icon: Anchor, label: "Anchor" },
+  { name: "aperture", icon: Aperture, label: "Aperture" },
+  { name: "archive", icon: Archive, label: "Archive" },
+  { name: "award", icon: Award, label: "Award" },
+  { name: "banknote", icon: Banknote, label: "Banknote" },
+  { name: "battery", icon: Battery, label: "Battery" },
+  { name: "bike", icon: Bike, label: "Bike" },
+  { name: "binary", icon: Binary, label: "Binary" },
+  { name: "blocks", icon: Blocks, label: "Blocks" },
+  { name: "bluetooth", icon: Bluetooth, label: "Bluetooth" },
+  { name: "book-open", icon: BookOpen, label: "Book" },
+  { name: "box", icon: Box, label: "Box" },
+  { name: "brush", icon: Brush, label: "Brush" },
+  { name: "building", icon: Building, label: "Building" },
+  { name: "building-2", icon: Building2, label: "Office" },
+  { name: "cable", icon: Cable, label: "Cable" },
+  { name: "clapperboard", icon: Clapperboard, label: "Film" },
+  { name: "clock", icon: Clock, label: "Clock" },
+  { name: "cog", icon: Cog, label: "Cog" },
+  { name: "container", icon: Container, label: "Container" },
+  { name: "cookie", icon: Cookie, label: "Cookie" },
+  { name: "cpu", icon: Cpu, label: "CPU" },
+  { name: "dice", icon: Dice1, label: "Dice" },
+  { name: "disc", icon: Disc, label: "Disc" },
+  { name: "dollar", icon: DollarSign, label: "Dollar" },
+  { name: "dribbble", icon: Circle, label: "Dribbble" },
+  { name: "drum", icon: Drum, label: "Drum" },
+  { name: "eye", icon: Eye, label: "Eye" },
+  { name: "factory", icon: Factory, label: "Factory" },
+  { name: "feather", icon: Feather, label: "Feather" },
+  { name: "file-text", icon: FileText, label: "Document" },
+  { name: "fingerprint", icon: Fingerprint, label: "Fingerprint" },
+  { name: "flag", icon: Flag, label: "Flag" },
+  { name: "folder", icon: Folder, label: "Folder" },
+  { name: "gamepad", icon: Gamepad2, label: "Gamepad" },
+  { name: "gauge", icon: Gauge, label: "Gauge" },
+  { name: "globe-2", icon: Globe2, label: "Earth" },
+  { name: "hand", icon: Hand, label: "Hand" },
+  { name: "hash", icon: Hash, label: "Hash" },
+  { name: "hard-drive", icon: HardDrive, label: "Hard Drive" },
+  { name: "image", icon: Image, label: "Image" },
+  { name: "infinity", icon: Infinity, label: "Infinity" },
+  { name: "joystick", icon: Joystick, label: "Joystick" },
+  { name: "landmark", icon: Landmark, label: "Landmark" },
+  { name: "languages", icon: Languages, label: "Languages" },
+  { name: "leaf", icon: Leaf, label: "Leaf" },
+  { name: "life-buoy", icon: LifeBuoy, label: "Life Buoy" },
+  { name: "link", icon: Link, label: "Link" },
+  { name: "magnet", icon: Magnet, label: "Magnet" },
+  { name: "message", icon: MessageSquare, label: "Message" },
+  { name: "mic", icon: Mic, label: "Mic" },
+  { name: "microscope", icon: Microscope, label: "Microscope" },
+  { name: "mountain", icon: Mountain, label: "Mountain" },
+  { name: "paint-bucket", icon: PaintBucket, label: "Paint" },
+  { name: "paperclip", icon: Paperclip, label: "Paperclip" },
+  { name: "percent", icon: Percent, label: "Percent" },
+  { name: "pill", icon: Pill, label: "Pill" },
+  { name: "pizza", icon: Pizza, label: "Pizza" },
+  { name: "plane", icon: Plane, label: "Plane" },
+  { name: "plug", icon: Plug, label: "Plug" },
+  { name: "power", icon: Power, label: "Power" },
+  { name: "qr-code", icon: QrCode, label: "QR Code" },
+  { name: "radar", icon: Radar, label: "Radar" },
+  { name: "receipt", icon: Receipt, label: "Receipt" },
+  { name: "repeat", icon: Repeat, label: "Repeat" },
+  { name: "ruler", icon: Ruler, label: "Ruler" },
+  { name: "sailboat", icon: Sailboat, label: "Sailboat" },
+  { name: "scan", icon: Scan, label: "Scan" },
+  { name: "scissors", icon: Scissors, label: "Scissors" },
+  { name: "share", icon: Share2, label: "Share" },
+  { name: "shield-check", icon: ShieldCheck, label: "Verified" },
+  { name: "shirt", icon: Shirt, label: "Shirt" },
+  { name: "signal", icon: Signal, label: "Signal" },
+  { name: "siren", icon: Siren, label: "Siren" },
+  { name: "skull", icon: Skull, label: "Skull" },
+  { name: "smartphone", icon: Smartphone, label: "Phone" },
+  { name: "sparkles", icon: Sparkles, label: "Sparkles" },
+  { name: "speaker", icon: Speaker, label: "Speaker" },
+  { name: "stethoscope", icon: Stethoscope, label: "Stethoscope" },
+  { name: "sun", icon: Sun, label: "Sun" },
+  { name: "swords", icon: Swords, label: "Swords" },
+  { name: "tag", icon: Tag, label: "Tag" },
+  { name: "tent", icon: Tent, label: "Tent" },
+  { name: "thumbs-up", icon: ThumbsUp, label: "Thumbs Up" },
+  { name: "timer", icon: Timer, label: "Timer" },
+  { name: "tornado", icon: Tornado, label: "Tornado" },
+  { name: "trophy", icon: Trophy, label: "Trophy" },
+  { name: "tv", icon: Tv, label: "TV" },
+  { name: "university", icon: University, label: "University" },
+  { name: "unplug", icon: Unplug, label: "Unplug" },
+  { name: "upload", icon: Upload, label: "Upload" },
+  { name: "utensils", icon: Utensils, label: "Utensils" },
+  { name: "wallet", icon: Wallet, label: "Wallet" },
+  { name: "watch", icon: Watch, label: "Watch" },
+  { name: "webcam", icon: Webcam, label: "Webcam" },
+  { name: "wind", icon: Wind, label: "Wind" },
+  // Additional batch
+  { name: "activity", icon: Activity, label: "Activity" },
+  { name: "airplay", icon: Airplay, label: "Airplay" },
+  { name: "alarm", icon: AlarmClock, label: "Alarm" },
+  { name: "apple", icon: Apple, label: "Apple" },
+  { name: "atom", icon: Atom, label: "Atom" },
+  { name: "axe", icon: Axe, label: "Axe" },
+  { name: "baby", icon: Baby, label: "Baby" },
+  { name: "backpack", icon: Backpack, label: "Backpack" },
+  { name: "badge", icon: Badge, label: "Badge" },
+  { name: "badge-check", icon: BadgeCheck, label: "Verified" },
+  { name: "beaker", icon: Beaker, label: "Beaker" },
+  { name: "bed", icon: BedDouble, label: "Bed" },
+  { name: "beer", icon: Beer, label: "Beer" },
+  { name: "bell-ring", icon: BellRing, label: "Alert" },
+  { name: "bird", icon: Bird, label: "Bird" },
+  { name: "blinds", icon: Blinds, label: "Blinds" },
+  { name: "bone", icon: Bone, label: "Bone" },
+  { name: "book-marked", icon: BookMarked, label: "Saved" },
+  { name: "brain-circuit", icon: BrainCircuit, label: "AI Brain" },
+  { name: "brick-wall", icon: BrickWall, label: "Wall" },
+  { name: "medical", icon: BriefcaseMedical, label: "Medical" },
+  { name: "cake", icon: Cake, label: "Cake" },
+  { name: "calculator", icon: Calculator, label: "Calculator" },
+  { name: "car", icon: Car, label: "Car" },
+  { name: "castle", icon: Castle, label: "Castle" },
+  { name: "cat", icon: Cat, label: "Cat" },
+  { name: "check-circle", icon: CheckCircle, label: "Check" },
+  { name: "cherry", icon: Cherry, label: "Cherry" },
+  { name: "church", icon: Church, label: "Church" },
+  { name: "citrus", icon: Citrus, label: "Citrus" },
+  { name: "cloud-rain", icon: CloudRain, label: "Rain" },
+  { name: "cloud-sun", icon: CloudSun, label: "Weather" },
+  { name: "clover", icon: Clover, label: "Clover" },
+  { name: "code-xml", icon: CodeXml, label: "XML" },
+  { name: "coffee", icon: Coffee, label: "Coffee" },
+  { name: "coins", icon: Coins, label: "Coins" },
+  { name: "component", icon: Component, label: "Component" },
+  { name: "construction", icon: Construction, label: "Construction" },
+  { name: "contact", icon: Contact, label: "Contact" },
+  { name: "croissant", icon: Croissant, label: "Croissant" },
+  { name: "crosshair", icon: Crosshair, label: "Crosshair" },
+  { name: "cuboid", icon: Cuboid, label: "Cuboid" },
+  { name: "dog", icon: Dog, label: "Dog" },
+  { name: "door", icon: DoorOpen, label: "Door" },
+  { name: "dumbbell", icon: Dumbbell, label: "Fitness" },
+  { name: "ear", icon: Ear, label: "Ear" },
+  { name: "earth", icon: Earth, label: "Earth" },
+  { name: "eclipse", icon: Eclipse, label: "Eclipse" },
+  { name: "egg", icon: Egg, label: "Egg" },
+  { name: "eraser", icon: Eraser, label: "Eraser" },
+  { name: "fan", icon: Fan, label: "Fan" },
+  { name: "fence", icon: Fence, label: "Fence" },
+  { name: "ferris-wheel", icon: FerrisWheel, label: "Ferris Wheel" },
+  { name: "film", icon: Film, label: "Film" },
+  { name: "fish", icon: Fish, label: "Fish" },
+  { name: "flashlight", icon: Flashlight, label: "Flashlight" },
+  { name: "flask", icon: FlaskConical, label: "Flask" },
+  { name: "flower", icon: Flower, label: "Flower" },
+  { name: "footprints", icon: Footprints, label: "Footprints" },
+  { name: "forklift", icon: Forklift, label: "Forklift" },
+  { name: "frame", icon: Frame, label: "Frame" },
+  { name: "fuel", icon: Fuel, label: "Fuel" },
+  { name: "gem", icon: Gem, label: "Gem" },
+  { name: "ghost", icon: Ghost, label: "Ghost" },
+  { name: "glasses", icon: Glasses, label: "Glasses" },
+  { name: "grape", icon: Grape, label: "Grape" },
+  { name: "guitar", icon: Guitar, label: "Guitar" },
+  { name: "hammer", icon: Hammer, label: "Hammer" },
+  { name: "handshake", icon: Handshake, label: "Handshake" },
+  { name: "hard-hat", icon: HardHat, label: "Hard Hat" },
+  { name: "hop", icon: Hop, label: "Hop" },
+  { name: "hospital", icon: Hospital, label: "Hospital" },
+  { name: "hotel", icon: Hotel, label: "Hotel" },
+  { name: "hourglass", icon: Hourglass, label: "Hourglass" },
+  { name: "ice-cream", icon: IceCreamCone, label: "Ice Cream" },
+  { name: "inbox", icon: Inbox, label: "Inbox" },
+  { name: "lamp", icon: Lamp, label: "Lamp" },
+  { name: "lamp-desk", icon: LampDesk, label: "Desk Lamp" },
+  { name: "laptop", icon: Laptop, label: "Laptop" },
+  { name: "lasso", icon: Lasso, label: "Lasso" },
+  { name: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+  { name: "library", icon: Library, label: "Library" },
+  { name: "ligature", icon: Ligature, label: "Ligature" },
+  { name: "list-music", icon: ListMusic, label: "Playlist" },
+  { name: "locate", icon: Locate, label: "Locate" },
+  { name: "lollipop", icon: Lollipop, label: "Lollipop" },
+  { name: "luggage", icon: Luggage, label: "Luggage" },
+  { name: "map-pin", icon: MapPin, label: "Map Pin" },
+  { name: "martini", icon: Martini, label: "Martini" },
+  { name: "medal", icon: Medal, label: "Medal" },
+  { name: "milestone", icon: Milestone, label: "Milestone" },
+  { name: "moon", icon: Moon, label: "Moon" },
+  { name: "navigation", icon: Navigation, label: "Navigation" },
+  { name: "nfc", icon: Nfc, label: "NFC" },
+  { name: "nut", icon: Nut, label: "Nut" },
+  { name: "orbit", icon: Orbit, label: "Orbit" },
+  { name: "paint-roller", icon: PaintRoller, label: "Paint Roller" },
+  { name: "palm-tree", icon: Palmtree, label: "Palm Tree" },
+  { name: "party", icon: PartyPopper, label: "Party" },
+  { name: "paw", icon: PawPrint, label: "Paw" },
+  { name: "pc", icon: PcCase, label: "PC" },
+  { name: "pencil", icon: Pencil, label: "Pencil" },
+  { name: "piggy-bank", icon: PiggyBank, label: "Piggy Bank" },
+  { name: "pin", icon: Pin, label: "Pin" },
+  { name: "takeoff", icon: PlaneTakeoff, label: "Takeoff" },
+  { name: "play", icon: Play, label: "Play" },
+  { name: "plug-zap", icon: PlugZap, label: "Power Plug" },
+  { name: "podcast", icon: Podcast, label: "Podcast" },
+  { name: "popcorn", icon: Popcorn, label: "Popcorn" },
+  { name: "presentation", icon: Presentation, label: "Presentation" },
+  { name: "puzzle", icon: PuzzleIcon, label: "Puzzle" },
+  { name: "rabbit", icon: Rabbit, label: "Rabbit" },
+  { name: "rainbow", icon: Rainbow, label: "Rainbow" },
+  { name: "rat", icon: Rat, label: "Rat" },
+  { name: "recycle", icon: Recycle, label: "Recycle" },
+  { name: "refresh", icon: RefreshCw, label: "Refresh" },
+  { name: "refrigerator", icon: Refrigerator, label: "Fridge" },
+  { name: "ribbon", icon: Ribbon, label: "Ribbon" },
+  { name: "rotate-3d", icon: Rotate3d, label: "3D Rotate" },
+  { name: "route", icon: Route, label: "Route" },
+  { name: "rss", icon: Rss, label: "RSS" },
+  { name: "satellite", icon: SatelliteDish, label: "Satellite" },
+  { name: "scaling", icon: Scaling, label: "Scaling" },
+  { name: "school", icon: School, label: "School" },
+  { name: "screen-share", icon: ScreenShare, label: "Screen Share" },
+  { name: "scroll", icon: Scroll, label: "Scroll" },
+  { name: "shapes", icon: Shapes, label: "Shapes" },
+  { name: "shell", icon: Shell, label: "Shell" },
+  { name: "ship", icon: Ship, label: "Ship" },
+  { name: "shopping-bag", icon: ShoppingBag, label: "Shopping Bag" },
+  { name: "shovel", icon: Shovel, label: "Shovel" },
+  { name: "shrub", icon: Shrub, label: "Shrub" },
+  { name: "shuffle", icon: Shuffle, label: "Shuffle" },
+  { name: "signature", icon: Signature, label: "Signature" },
+  { name: "snail", icon: Snail, label: "Snail" },
+  { name: "snowflake", icon: Snowflake, label: "Snowflake" },
+  { name: "sofa", icon: Sofa, label: "Sofa" },
+  { name: "soup", icon: SoupIcon, label: "Soup" },
+  { name: "spade", icon: Spade, label: "Spade" },
+  { name: "sprout", icon: Sprout, label: "Sprout" },
+  { name: "stamp", icon: Stamp, label: "Stamp" },
+  { name: "store", icon: Store, label: "Store" },
+  { name: "sunrise", icon: Sunrise, label: "Sunrise" },
+  { name: "sword", icon: Sword, label: "Sword" },
+  { name: "syringe", icon: Syringe, label: "Syringe" },
+  { name: "table", icon: Table, label: "Table" },
+  { name: "tablet", icon: Tablet, label: "Tablet" },
+  { name: "telescope", icon: Telescope, label: "Telescope" },
+  { name: "test-tube", icon: TestTube, label: "Test Tube" },
+  { name: "theater", icon: Theater, label: "Theater" },
+  { name: "thermometer", icon: Thermometer, label: "Thermometer" },
+  { name: "ticket", icon: Ticket, label: "Ticket" },
+  { name: "traffic-cone", icon: TrafficCone, label: "Traffic Cone" },
+  { name: "train", icon: Train, label: "Train" },
+  { name: "tree", icon: TreeDeciduous, label: "Tree" },
+  { name: "pine", icon: TreePine, label: "Pine" },
+  { name: "trending", icon: TrendingUp, label: "Trending" },
+  { name: "turtle", icon: Turtle, label: "Turtle" },
+  { name: "type", icon: Type, label: "Typography" },
+  { name: "vault", icon: Vault, label: "Vault" },
+  { name: "voicemail", icon: Voicemail, label: "Voicemail" },
+  { name: "volume", icon: Volume2, label: "Volume" },
+  { name: "warehouse", icon: Warehouse, label: "Warehouse" },
+  { name: "waves", icon: Waves, label: "Waves" },
+  { name: "wheat", icon: Wheat, label: "Wheat" },
+  { name: "wine", icon: Wine, label: "Wine" },
+  { name: "workflow", icon: Workflow, label: "Workflow" },
+  { name: "worm", icon: Worm, label: "Worm" },
+  { name: "message-circle", icon: MessageCircle, label: "Chat" },
+  { name: "milk-off", icon: MilkOff, label: "Dairy Free" },
+  { name: "minus", icon: Minus, label: "Minus" },
+  { name: "more", icon: MoreHorizontal, label: "More" },
+  { name: "mouse-pointer", icon: MousePointer, label: "Cursor" },
+  { name: "move", icon: Move, label: "Move" },
+  { name: "panel", icon: PanelLeft, label: "Panel" },
+  { name: "replace", icon: Replace, label: "Replace" },
+  { name: "trello", icon: SquareKanban, label: "Board" },
+  { name: "triangle", icon: Triangle, label: "Triangle" },
+  { name: "vibrate", icon: Vibrate, label: "Vibrate" },
+  { name: "slice", icon: Slice, label: "Slice" },
+  { name: "space", icon: Space, label: "Space" },
+  { name: "star-half", icon: StarHalf, label: "Half Star" },
+  { name: "sunset", icon: Sunset, label: "Sunset" },
+  { name: "tangent", icon: Tangent, label: "Tangent" },
+  { name: "test-tubes", icon: TestTubes, label: "Test Tubes" },
+  { name: "square-stack", icon: SquareStack, label: "Stack" },
+  { name: "swiss-franc", icon: SwissFranc, label: "Swiss Franc" },
+  { name: "utensils-crossed", icon: UtensilsCrossed, label: "Dining" },
+]
+
+const ALL_CREW_ICON_NAMES: string[] = CREW_ICONS.map((i) => i.name)
+
+const iconByName: Record<string, CrewIconDef> = {}
+for (const i of CREW_ICONS) iconByName[i.name] = i
+
+export function getCrewIconDef(name: string): CrewIconDef {
+  return resolveEntity(name, iconByName, CREW_ICONS[0])
+}
+
+export interface GradientPalette {
+  id: string
+  from: string
+  to: string
+  text: string
+  dot: string // solid color for small crew badges
+}
+
+export const GRADIENT_PALETTES: GradientPalette[] = [
+  { id: "blue", from: "from-blue-500/15", to: "to-indigo-500/15", text: "text-blue-600 dark:text-blue-400", dot: "#5b8def" },
+  { id: "emerald", from: "from-emerald-500/15", to: "to-teal-500/15", text: "text-emerald-600 dark:text-emerald-400", dot: "#34d399" },
+  { id: "violet", from: "from-violet-500/15", to: "to-purple-500/15", text: "text-violet-600 dark:text-violet-400", dot: "#8b5cf6" },
+  { id: "amber", from: "from-amber-500/15", to: "to-orange-500/15", text: "text-amber-600 dark:text-amber-400", dot: "#f59e0b" },
+  { id: "rose", from: "from-rose-500/15", to: "to-pink-500/15", text: "text-rose-600 dark:text-rose-400", dot: "#f43f5e" },
+  { id: "cyan", from: "from-cyan-500/15", to: "to-sky-500/15", text: "text-cyan-600 dark:text-cyan-400", dot: "#22d3ee" },
+  { id: "lime", from: "from-lime-500/15", to: "to-green-500/15", text: "text-lime-600 dark:text-lime-400", dot: "#84cc16" },
+  { id: "fuchsia", from: "from-fuchsia-500/15", to: "to-pink-500/15", text: "text-fuchsia-600 dark:text-fuchsia-400", dot: "#d946ef" },
+]
+
+const paletteById: Record<string, GradientPalette> = {}
+for (const p of GRADIENT_PALETTES) paletteById[p.id] = p
+
+export function getGradientPalette(colorId: string | null | undefined): GradientPalette {
+  return resolveEntity(colorId, paletteById, GRADIENT_PALETTES[0])
+}
+
+/**
+ * Resolve a crew dot color. Specialised wrapper — has hex passthrough /
+ * prefix-on-bare-hex behaviour beyond a plain registry lookup, so it doesn't
+ * fit the generic `resolveEntity` shape cleanly.
+ */
+export function getCrewDotColor(color: string | null | undefined): string {
+  if (!color) return CREW_COLOR_DEFAULT
+  const palette = paletteById[color]
+  if (palette) return palette.dot
+  if (color.startsWith("#")) return color
+  return `#${color}`
+}
+
+const CATEGORY_MAP: Record<string, string[]> = {
+  business: ["briefcase", "chart", "credit-card", "scale", "crown", "diamond", "cart", "building", "building-2", "banknote", "dollar", "receipt", "wallet", "landmark", "percent", "store", "piggy-bank", "coins", "presentation", "badge-check", "handshake", "stamp", "signature", "warehouse"],
+  engineering: ["code", "terminal", "server", "bug", "monitor", "wrench", "settings", "cpu", "cog", "binary", "cable", "plug", "hard-drive", "container", "factory", "code-xml", "component", "pc", "laptop", "plug-zap", "workflow", "construction", "hammer", "nut"],
+  development: ["code", "lightbulb", "layers", "grid", "wand", "terminal", "bot", "blocks", "binary", "bug", "sparkles", "hash", "link", "qr-code", "brain-circuit", "code-xml", "puzzle", "component", "shapes", "dashboard", "workflow"],
+  design: ["palette", "pen", "camera", "diamond", "layers", "wand", "star", "brush", "paint-bucket", "aperture", "image", "ruler", "scissors", "feather", "dribbble", "frame", "paint-roller", "eraser", "ligature", "type", "pencil", "shapes"],
+  operations: ["package", "truck", "clipboard", "compass", "map", "target", "settings", "box", "container", "gauge", "timer", "repeat", "factory", "cog", "forklift", "traffic-cone", "hard-hat", "construction", "warehouse", "route", "fuel"],
+  marketing: ["megaphone", "star", "globe", "newspaper", "send", "target", "flame", "sparkles", "share", "tag", "flag", "trophy", "award", "percent", "trending", "party", "ribbon", "badge-check", "podcast", "rss"],
+  security: ["shield", "lock", "key", "bug", "search", "fingerprint", "shield-check", "eye", "scan", "radar", "siren", "skull", "vault", "crosshair", "flashlight", "glasses"],
+  communication: ["mail", "phone", "send", "bell", "megaphone", "headphones", "radio", "message", "mic", "signal", "bluetooth", "smartphone", "video", "webcam", "podcast", "voicemail", "bell-ring", "inbox", "message-circle", "rss", "satellite", "screen-share"],
+  data: ["database", "chart", "server", "cloud", "search", "layers", "hard-drive", "binary", "archive", "folder", "file-text", "hash", "table", "scroll", "scaling", "refresh", "orbit"],
+  science: ["brain", "lightbulb", "flame", "compass", "scale", "microscope", "pill", "stethoscope", "leaf", "tornado", "wind", "sun", "mountain", "atom", "flask", "test-tube", "telescope", "beaker", "brain-circuit", "thermometer", "eclipse", "orbit", "sprout"],
+  education: ["graduation", "bookmark", "lightbulb", "pen", "clipboard", "book-open", "university", "languages", "ruler", "globe-2", "school", "library", "book-marked", "scroll", "presentation", "calculator"],
+  finance: ["credit-card", "chart", "briefcase", "scale", "diamond", "banknote", "dollar", "wallet", "receipt", "percent", "landmark", "building", "piggy-bank", "coins", "store", "trending", "vault"],
+  support: ["phone", "heart", "headphones", "umbrella", "bell", "gift", "life-buoy", "hand", "thumbs-up", "message", "stethoscope", "hospital", "medical", "syringe", "contact"],
+  creative: ["palette", "brush", "camera", "music", "video", "mic", "clapperboard", "drum", "speaker", "feather", "pen", "aperture", "film", "guitar", "list-music", "theater", "popcorn", "play", "frame", "flower"],
+  travel: ["plane", "globe", "compass", "map", "anchor", "sailboat", "bike", "truck", "mountain", "tent", "sun", "globe-2", "car", "train", "ship", "luggage", "backpack", "map-pin", "navigation", "palm-tree", "takeoff", "route", "earth", "hotel"],
+  animals: ["bird", "cat", "dog", "fish", "rabbit", "rat", "turtle", "snail", "worm", "paw", "bone", "shell", "bug"],
+  food: ["coffee", "pizza", "beer", "wine", "cake", "cherry", "egg", "croissant", "popcorn", "apple", "grape", "citrus", "ice-cream", "lollipop", "martini", "cookie", "soup", "hop", "wheat"],
+}
+
+export const CREW_ICON_CATEGORIES = Object.keys(CATEGORY_MAP)
+
+export function searchCrewIcons(query: string): string[] {
+  if (!query.trim()) return ALL_CREW_ICON_NAMES
+
+  // Trim before lowercasing so " code " matches "code" — the icon picker
+  // input doesn't strip whitespace before passing the query in.
+  const q = query.trim().toLowerCase()
+
+  const categoryMatch = CATEGORY_MAP[q]
+  if (categoryMatch) {
+    return categoryMatch.filter((i) => i in iconByName)
+  }
+
+  const fuzzy = ALL_CREW_ICON_NAMES.filter((name) => {
+    const def = iconByName[name]
+    return name.includes(q) || def?.label.toLowerCase().includes(q)
+  })
+  if (fuzzy.length > 0) return fuzzy
+
+  for (const [cat, catIcons] of Object.entries(CATEGORY_MAP)) {
+    if (cat.includes(q)) {
+      return catIcons.filter((i) => i in iconByName)
+    }
+  }
+
+  return ALL_CREW_ICON_NAMES
+}

@@ -170,7 +170,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			// store is reachable again.
 			if m.sessions == nil {
 				m.logger.Error("auth middleware: sessions store not configured")
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 			sess, err := m.sessions.Get(r.Context(), claims.Sid)
@@ -180,7 +180,7 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 					return
 				}
 				m.logger.Error("session lookup failed", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 			if !sess.Active(timeNow()) {
@@ -227,7 +227,7 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 			workspaceID = r.PathValue("workspaceId")
 		}
 		if workspaceID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id is required"})
+			replyError(w, http.StatusBadRequest, "workspace_id is required")
 			return
 		}
 
@@ -237,7 +237,7 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 			workspaceID, user.ID,
 		).Scan(&role)
 		if err != nil {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Not a member of this workspace"})
+			replyError(w, http.StatusForbidden, "Not a member of this workspace")
 			return
 		}
 
@@ -288,7 +288,7 @@ func internalWsCtx(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wsID := r.URL.Query().Get("workspace_id")
 		if wsID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id query parameter required"})
+			replyError(w, http.StatusBadRequest, "workspace_id query parameter required")
 			return
 		}
 		ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)

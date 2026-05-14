@@ -27,11 +27,11 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -45,7 +45,7 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	`, agentID)
 	if err != nil {
 		h.logger.Error("list agent credentials", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -57,14 +57,14 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 			&c.CredType, &c.CredProvider, &c.CredStatus,
 			&c.EnvVarName, &c.Priority, &c.CreatedAt); err != nil {
 			h.logger.Error("scan agent credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (agent credentials)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if result == nil {
@@ -87,24 +87,24 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	foundAgent, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !foundAgent {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
 	var req addAgentCredentialRequest
 	if err := readJSON(r, &req); err != nil || req.CredentialID == "" || req.EnvVarName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id and env_var_name are required"})
+		replyError(w, http.StatusBadRequest, "credential_id and env_var_name are required")
 		return
 	}
 
@@ -112,11 +112,11 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	foundCred, err := credentialExists(r.Context(), h.db, req.CredentialID, workspaceID)
 	if err != nil {
 		h.logger.Error("check credential exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !foundCred {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		replyError(w, http.StatusNotFound, "Credential not found")
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, now)
 	if err != nil {
 		h.logger.Error("add agent credential", "error", err)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Credential already assigned to agent"})
+		replyError(w, http.StatusConflict, "Credential already assigned to agent")
 		return
 	}
 
@@ -144,7 +144,7 @@ func (h *AgentHandler) RemoveCredential(w http.ResponseWriter, r *http.Request) 
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -155,12 +155,12 @@ func (h *AgentHandler) RemoveCredential(w http.ResponseWriter, r *http.Request) 
 		assignmentID, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("remove agent credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Assignment not found"})
+		replyError(w, http.StatusNotFound, "Assignment not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})

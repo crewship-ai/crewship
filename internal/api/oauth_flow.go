@@ -23,7 +23,7 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -32,11 +32,11 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 		RedirectURI  string `json:"redirect_uri"`
 	}
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if req.CredentialID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id is required"})
+		replyError(w, http.StatusBadRequest, "credential_id is required")
 		return
 	}
 
@@ -44,15 +44,15 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
+			replyError(w, http.StatusNotFound, "OAuth credential not found")
 		} else {
 			h.logger.Error("load OAuth credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load credential"})
+			replyError(w, http.StatusInternalServerError, "Failed to load credential")
 		}
 		return
 	}
 	if cred.ClientID == "" || cred.AuthURL == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential missing oauth_client_id or oauth_auth_url"})
+		replyError(w, http.StatusBadRequest, "Credential missing oauth_client_id or oauth_auth_url")
 		return
 	}
 
@@ -60,7 +60,7 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	state, err := generateOAuthState()
 	if err != nil {
 		h.logger.Error("generate OAuth state", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state token"})
+		replyError(w, http.StatusInternalServerError, "Failed to generate state token")
 		return
 	}
 
@@ -84,14 +84,14 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	codeVerifier, codeChallenge, err := generatePKCE()
 	if err != nil {
 		h.logger.Error("generate PKCE", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate PKCE"})
+		replyError(w, http.StatusInternalServerError, "Failed to generate PKCE")
 		return
 	}
 
 	// Store state + PKCE verifier for CSRF validation and token exchange
 	if err := h.storeStateWithPKCE(r.Context(), state, req.CredentialID, workspaceID, redirectURI, codeVerifier); err != nil {
 		h.logger.Error("store OAuth state", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store OAuth state"})
+		replyError(w, http.StatusInternalServerError, "Failed to store OAuth state")
 		return
 	}
 
@@ -200,7 +200,7 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -212,7 +212,7 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		State        string `json:"state"`
 	}
 	if err := readJSON(r, &req); err != nil || req.CredentialID == "" || req.Code == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id and code are required"})
+		replyError(w, http.StatusBadRequest, "credential_id and code are required")
 		return
 	}
 
@@ -227,19 +227,19 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 			"DELETE FROM oauth_states WHERE state = ? RETURNING code_verifier, redirect_uri, credential_id", req.State).
 			Scan(&storedVerifier, &storedRedirectURI, &storedCredentialID)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired OAuth state"})
+			replyError(w, http.StatusBadRequest, "Invalid or expired OAuth state")
 			return
 		}
 		// Validate that the state belongs to this credential
 		if storedCredentialID != req.CredentialID {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state does not match credential"})
+			replyError(w, http.StatusBadRequest, "OAuth state does not match credential")
 			return
 		}
 		// V-14: Decrypt stored PKCE verifier
 		if storedVerifier != "" {
 			decrypted, decErr := encryption.Decrypt(storedVerifier)
 			if decErr != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decrypt state"})
+				replyError(w, http.StatusInternalServerError, "Failed to decrypt state")
 				return
 			}
 			storedVerifier = decrypted
@@ -254,10 +254,10 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			replyError(w, http.StatusNotFound, "Credential not found")
 		} else {
 			h.logger.Error("load OAuth credential in exchange", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load credential"})
+			replyError(w, http.StatusInternalServerError, "Failed to load credential")
 		}
 		return
 	}
@@ -266,14 +266,14 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, redirectURI, codeVerifier)
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed"})
+		replyError(w, http.StatusBadGateway, "Token exchange failed")
 		return
 	}
 
 	// Encrypt and store tokens
 	if err := h.storeOAuthTokens(r.Context(), req.CredentialID, tokenResp); err != nil {
 		h.logger.Error("store OAuth tokens from exchange", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store tokens"})
+		replyError(w, http.StatusInternalServerError, "Failed to store tokens")
 		return
 	}
 
@@ -290,7 +290,7 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -298,18 +298,18 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 		CredentialID string `json:"credential_id"`
 	}
 	if err := readJSON(r, &req); err != nil || req.CredentialID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id is required"})
+		replyError(w, http.StatusBadRequest, "credential_id is required")
 		return
 	}
 
 	// Load credential OAuth config
 	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
+		replyError(w, http.StatusNotFound, "OAuth credential not found")
 		return
 	}
 	if cred.ClientID == "" || cred.AuthURL == "" || cred.TokenURL == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential missing OAuth configuration"})
+		replyError(w, http.StatusBadRequest, "Credential missing OAuth configuration")
 		return
 	}
 
@@ -317,7 +317,7 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		h.logger.Error("find free port for OAuth loopback", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to start loopback server"})
+		replyError(w, http.StatusInternalServerError, "Failed to start loopback server")
 		return
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
@@ -327,7 +327,7 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	state, err := generateOAuthState()
 	if err != nil {
 		listener.Close()
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
+		replyError(w, http.StatusInternalServerError, "Failed to generate state")
 		return
 	}
 
@@ -335,7 +335,7 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	codeVerifier, codeChallenge, err := generatePKCE()
 	if err != nil {
 		listener.Close()
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate PKCE"})
+		replyError(w, http.StatusInternalServerError, "Failed to generate PKCE")
 		return
 	}
 

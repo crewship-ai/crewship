@@ -94,9 +94,7 @@ func (h *TriageHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 // CreateRule creates a new triage rule with pattern matching and action configuration.
 // POST /api/v1/triage/rules
 func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -189,9 +187,7 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 // UpdateRule modifies an existing triage rule.
 // PATCH /api/v1/triage/rules/{ruleId}
 func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -328,9 +324,7 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 // DeleteRule removes a triage rule.
 // DELETE /api/v1/triage/rules/{ruleId}
 func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "manage") {
 		return
 	}
 
@@ -365,9 +359,7 @@ func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 // Process evaluates triage rules against an issue and applies the matching actions.
 // POST /api/v1/triage/process
 func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

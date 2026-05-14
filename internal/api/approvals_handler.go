@@ -33,7 +33,7 @@ func NewApprovalsHandler(db *sql.DB, logger *slog.Logger, j journal.Emitter) *Ap
 func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	status := harbormaster.Status(r.URL.Query().Get("status"))
@@ -55,7 +55,7 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := harbormaster.List(r.Context(), h.db, workspaceID, status, limit)
 	if err != nil {
 		h.logger.Error("approvals list", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "status": status, "count": len(rows)})
@@ -66,18 +66,18 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	id := r.PathValue("id")
 	row, err := harbormaster.Get(r.Context(), h.db, workspaceID, id)
 	if err == harbormaster.ErrNotFound {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		replyError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("approvals get", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get failed"})
+		replyError(w, http.StatusInternalServerError, "get failed")
 		return
 	}
 	if row == nil {
@@ -86,7 +86,7 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		// the driver didn't complain). Surface as 404 so the UI
 		// renders the right empty state instead of a successful null
 		// response.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		replyError(w, http.StatusNotFound, "not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, row)
@@ -102,17 +102,17 @@ func (h *ApprovalsHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "auth required"})
+		replyError(w, http.StatusUnauthorized, "auth required")
 		return
 	}
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "approval decisions require OWNER or ADMIN role"})
+		replyError(w, http.StatusForbidden, "approval decisions require OWNER or ADMIN role")
 		return
 	}
 	id := r.PathValue("id")
@@ -121,12 +121,12 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		Comment string `json:"comment"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad json"})
+		replyError(w, http.StatusBadRequest, "bad json")
 		return
 	}
 	status := harbormaster.Status(body.Status)
 	if status != harbormaster.StatusApproved && status != harbormaster.StatusDenied {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "status must be approved or denied"})
+		replyError(w, http.StatusBadRequest, "status must be approved or denied")
 		return
 	}
 	err := harbormaster.Decide(r.Context(), h.db, h.journal, workspaceID, id, status, user.ID, body.Comment)
@@ -134,14 +134,14 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	case nil:
 		// ok
 	case harbormaster.ErrNotFound:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		replyError(w, http.StatusNotFound, "not found")
 		return
 	case harbormaster.ErrNotPending:
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "already decided"})
+		replyError(w, http.StatusConflict, "already decided")
 		return
 	default:
 		h.logger.Error("approvals decide", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "decide failed"})
+		replyError(w, http.StatusInternalServerError, "decide failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": string(status), "decided_by": user.ID})
@@ -158,29 +158,29 @@ func (h *ApprovalsHandler) Decide(w http.ResponseWriter, r *http.Request) {
 func (h *ApprovalsHandler) ResetAutoTuning(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "reset requires OWNER or ADMIN"})
+		replyError(w, http.StatusForbidden, "reset requires OWNER or ADMIN")
 		return
 	}
 	var body struct {
 		Tool string `json:"tool"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.Tool == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool required"})
+		replyError(w, http.StatusBadRequest, "tool required")
 		return
 	}
 	n, err := harbormaster.ResetAutoTuning(r.Context(), h.db, workspaceID, body.Tool)
 	if err != nil {
 		h.logger.Error("approvals reset auto-tuning", "err", err, "tool", body.Tool)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reset failed"})
+		replyError(w, http.StatusInternalServerError, "reset failed")
 		return
 	}
 

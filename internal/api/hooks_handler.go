@@ -66,7 +66,7 @@ type hookRow struct {
 func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	crewID := r.URL.Query().Get("crew_id")
@@ -79,11 +79,11 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 		ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
 		if err != nil {
 			h.logger.Error("hooks list: crew lookup failed", "err", err, "crew_id", crewID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "crew lookup failed"})
+			replyError(w, http.StatusInternalServerError, "crew lookup failed")
 			return
 		}
 		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
 	}
@@ -105,7 +105,7 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("hooks list", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
 	defer rows.Close()
@@ -137,7 +137,7 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 			&updatedAt,
 		); err != nil {
 			h.logger.Error("hooks list scan", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "scan failed"})
+			replyError(w, http.StatusInternalServerError, "scan failed")
 			return
 		}
 		hk.CrewID = crewNS.String
@@ -175,7 +175,7 @@ func (h *HooksHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("hooks list rows", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "iterate failed"})
+		replyError(w, http.StatusInternalServerError, "iterate failed")
 		return
 	}
 
@@ -203,12 +203,12 @@ func (h *HooksHandler) Disable(w http.ResponseWriter, r *http.Request) {
 func (h *HooksHandler) setEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "toggling hooks requires OWNER or ADMIN role"})
+		replyError(w, http.StatusForbidden, "toggling hooks requires OWNER or ADMIN role")
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -218,7 +218,7 @@ func (h *HooksHandler) setEnabled(w http.ResponseWriter, r *http.Request, enable
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		replyError(w, http.StatusBadRequest, "id required")
 		return
 	}
 
@@ -228,21 +228,21 @@ func (h *HooksHandler) setEnabled(w http.ResponseWriter, r *http.Request, enable
 	existing, err := hooks.Get(r.Context(), h.db, workspaceID, id)
 	if err != nil {
 		h.logger.Error("hooks get", "err", err, "id", id)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	if existing == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "hook not found"})
+		replyError(w, http.StatusNotFound, "hook not found")
 		return
 	}
 
 	if err := hooks.SetEnabled(r.Context(), h.db, workspaceID, id, enabled); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "hook not found"})
+			replyError(w, http.StatusNotFound, "hook not found")
 			return
 		}
 		h.logger.Error("hooks set enabled", "err", err, "id", id)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "toggle failed"})
+		replyError(w, http.StatusInternalServerError, "toggle failed")
 		return
 	}
 

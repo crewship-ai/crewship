@@ -20,11 +20,11 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		Reason      string  `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.AgentID == "" || body.CrewID == "" || body.Confidence < 0 || body.Confidence > 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id and crew_id required, confidence must be 0-1"})
+		replyError(w, http.StatusBadRequest, "agent_id and crew_id required, confidence must be 0-1")
 		return
 	}
 
@@ -42,11 +42,11 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		body.AgentID, body.CrewID).Scan(&taskID, &missionID, &resolvedWsID, &resolvedChatID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active task found for agent"})
+			replyError(w, http.StatusNotFound, "no active task found for agent")
 			return
 		}
 		h.logger.Error("lookup active task for confidence report", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		replyError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -54,7 +54,7 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		`UPDATE mission_tasks SET confidence = ? WHERE id = ?`,
 		body.Confidence, taskID); err != nil {
 		h.logger.Error("update task confidence", "error", err, "task_id", taskID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		replyError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		`SELECT c.escalation_config FROM crews c JOIN missions m ON m.crew_id = c.id WHERE m.id = ?`,
 		missionID).Scan(&configJSON); err != nil && err != sql.ErrNoRows {
 		h.logger.Error("load escalation config for confidence", "error", err, "mission_id", missionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load escalation config"})
+		replyError(w, http.StatusInternalServerError, "failed to load escalation config")
 		return
 	}
 

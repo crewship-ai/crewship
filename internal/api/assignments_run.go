@@ -35,7 +35,7 @@ type createAssignmentBody struct {
 func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var body createAssignmentBody
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if body.TargetSlug == "" || body.Task == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
@@ -50,11 +50,11 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `SELECT agent_id FROM chats WHERE id = ?`, body.ChatID).Scan(&assignedByID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
+			replyError(w, http.StatusNotFound, "chat not found")
 			return
 		}
 		h.logger.Error("lookup chat for assignment", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -73,14 +73,14 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("lookup assigner crew for connection check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if assignerCrewID != body.CrewID {
 		connected, connErr := AreCrewsConnected(r.Context(), h.db, assignerCrewID, body.CrewID)
 		if connErr != nil {
 			h.logger.Error("check crew connection for assignment", "error", connErr)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if !connected {
@@ -106,11 +106,11 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "target agent not found"})
+			replyError(w, http.StatusNotFound, "target agent not found")
 			return
 		}
 		h.logger.Error("lookup target agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	creds, err := h.loadAgentCredentials(r.Context(), target.ID)
 	if err != nil {
 		h.logger.Error("load agent credentials", "agent_id", target.ID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -131,7 +131,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	`, assignmentID, body.WorkspaceID, body.ChatID, assignedByID, target.ID, body.Task, body.ChatID, now)
 	if err != nil {
 		h.logger.Error("create assignment", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

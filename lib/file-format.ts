@@ -33,7 +33,7 @@ export function getLang(name: string): string {
 const PREVIEWABLE_EXTENSIONS = new Set([
   "txt", "md", "mdx", "py", "js", "jsx", "ts", "tsx", "go", "rs", "rb",
   "sh", "bash", "zsh", "fish", "bat", "ps1",
-  "json", "yaml", "yml", "toml", "xml", "csv", "ini", "cfg",
+  "json", "yaml", "yml", "toml", "xml", "csv", "ini", "cfg", "log",
   "html", "css", "scss", "less", "svg",
   "sql", "graphql", "prisma",
   "gitignore", "gitattributes", "editorconfig", "prettierrc",

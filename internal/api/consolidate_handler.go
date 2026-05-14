@@ -81,12 +81,12 @@ func (h *ConsolidateHandler) SetMemoryRoot(root string) {
 func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "consolidation requires OWNER or ADMIN role"})
+		replyError(w, http.StatusForbidden, "consolidation requires OWNER or ADMIN role")
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -101,7 +101,7 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			replyError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 	}
@@ -126,11 +126,11 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 		live, err := crewLiveInWorkspace(r.Context(), h.db, body.CrewID, workspaceID)
 		if err != nil {
 			h.logger.Warn("consolidate run: crew existence check failed", "err", err, "crew_id", body.CrewID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to validate crew"})
+			replyError(w, http.StatusInternalServerError, "failed to validate crew")
 			return
 		}
 		if !live {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
 	}
@@ -171,7 +171,7 @@ func (h *ConsolidateHandler) Run(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	if _, ok := h.running[workspaceID]; ok {
 		h.mu.Unlock()
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "already running"})
+		replyError(w, http.StatusConflict, "already running")
 		return
 	}
 	h.running[workspaceID] = struct{}{}

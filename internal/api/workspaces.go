@@ -92,7 +92,7 @@ type workspaceResponse struct {
 func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -109,7 +109,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	`, user.ID)
 	if err != nil {
 		h.logger.Error("list workspaces", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -121,14 +121,14 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole,
 			&ws.CrewCount, &ws.AgentCount, &ws.MemberCount); err != nil {
 			h.logger.Error("scan workspace", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		result = append(result, ws)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (workspaces)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -155,11 +155,11 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Workspace not found"})
+			replyError(w, http.StatusNotFound, "Workspace not found")
 			return
 		}
 		h.logger.Error("get workspace", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	ws.CurrentUserRole = &role

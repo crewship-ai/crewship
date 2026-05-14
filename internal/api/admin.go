@@ -22,7 +22,7 @@ func NewAdminHandler(db *sql.DB, logger *slog.Logger) *AdminHandler {
 func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: OWNER only"})
+		replyError(w, http.StatusForbidden, "Forbidden: OWNER only")
 		return
 	}
 
@@ -60,7 +60,7 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	for _, q := range queries {
 		if err := h.db.QueryRowContext(r.Context(), q.sql, q.args...).Scan(q.dest); err != nil {
 			h.logger.Error("stats query", "sql", q.sql, "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -73,7 +73,7 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: OWNER only"})
+		replyError(w, http.StatusForbidden, "Forbidden: OWNER only")
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	`, workspaceID)
 	if err != nil {
 		h.logger.Error("list users", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -116,7 +116,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL, &u.CreatedAt,
 			&wsID, &wsName, &wsSlug, &role); err != nil {
 			h.logger.Error("scan user", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if wsID.Valid {
@@ -133,7 +133,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (users)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if result == nil {
@@ -147,7 +147,7 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: OWNER only"})
+		replyError(w, http.StatusForbidden, "Forbidden: OWNER only")
 		return
 	}
 
@@ -164,7 +164,7 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	`, wsID)
 	if err != nil {
 		h.logger.Error("list workspaces (admin)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -187,14 +187,14 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			&ws.CreatedAt, &ws.UpdatedAt,
 			&ws.MemberCount, &ws.AgentCount, &ws.CrewCount); err != nil {
 			h.logger.Error("scan workspace (admin)", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		result = append(result, ws)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (workspaces)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if result == nil {

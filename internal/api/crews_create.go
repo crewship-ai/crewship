@@ -36,39 +36,39 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	if h.license != nil {
 		if err := h.license.CheckCrewLimit(r.Context(), h.db, workspaceID); err != nil {
 			if license.IsLimitError(err) {
-				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
 			h.logger.Error("check crew limit", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 
 	var req createCrewRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.Name == "" || len(req.Name) < 2 || len(req.Name) > 100 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must be 2-100 characters"})
+		replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
 		return
 	}
 	if req.Slug == "" || len(req.Slug) < 2 || len(req.Slug) > 50 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+		replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
 		return
 	}
 	// V-17: Validate slug format to prevent injection via container names / file paths
 	if !validSlugFormat(req.Slug) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, and hyphens"})
+		replyError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, hyphens, and underscores")
 		return
 	}
 
@@ -76,12 +76,12 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL", workspaceID, req.Slug).Scan(&existingID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew slug already taken in this workspace"})
+		replyError(w, http.StatusConflict, "Crew slug already taken in this workspace")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check crew slug", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -116,7 +116,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.NetworkMode != nil && *req.NetworkMode != "" {
 		mode := strings.ToLower(*req.NetworkMode)
 		if mode != "free" && mode != "restricted" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "network_mode must be 'free' or 'restricted'"})
+			replyError(w, http.StatusBadRequest, "network_mode must be 'free' or 'restricted'")
 			return
 		}
 		networkMode = mode
@@ -129,7 +129,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		for _, d := range req.AllowedDomains {
 			h := normalizeDomain(d)
 			if h == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid domain: %q", d)})
+				replyError(w, http.StatusBadRequest, fmt.Sprintf("invalid domain: %q", d))
 				return
 			}
 			normalized = append(normalized, h)
@@ -137,7 +137,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		domainsJSON, err := json.Marshal(normalized)
 		if err != nil {
 			h.logger.Error("marshal allowed_domains", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		s := string(domainsJSON)
@@ -149,22 +149,22 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Validate devcontainer_config and mise_config size and syntax.
 	if req.DevcontainerConfig != nil && len(*req.DevcontainerConfig) > 102400 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "devcontainer_config exceeds 100KB limit"})
+		replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
 		return
 	}
 	if req.MiseConfig != nil && len(*req.MiseConfig) > 10240 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mise_config exceeds 10KB limit"})
+		replyError(w, http.StatusBadRequest, "mise_config exceeds 10KB limit")
 		return
 	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
 		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid devcontainer_config: " + err.Error()})
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
 			return
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mise_config: " + err.Error()})
+			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
 			return
 		}
 	}
@@ -202,7 +202,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, now, now)
 	if err != nil {
 		h.logger.Error("insert crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

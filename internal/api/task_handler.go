@@ -12,9 +12,7 @@ import (
 
 // CreateTask handles POST /api/v1/crews/{crewId}/missions/{missionId}/tasks
 func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -312,9 +310,7 @@ func (h *MissionHandler) applyTaskMetadataFields(ctx context.Context, tx *sql.Tx
 
 // UpdateTask handles PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}
 func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

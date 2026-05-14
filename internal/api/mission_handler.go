@@ -213,9 +213,7 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Update handles PATCH /api/v1/crews/{crewId}/missions/{missionId}
 
 func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

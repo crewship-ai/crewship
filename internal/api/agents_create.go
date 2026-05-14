@@ -38,27 +38,27 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	var req createAgentRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.Name == "" || len(req.Name) < 2 || len(req.Name) > 100 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must be 2-100 characters"})
+		replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
 		return
 	}
 	if req.Slug == "" || len(req.Slug) < 2 || len(req.Slug) > 50 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+		replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
 		return
 	}
 	// V-17: Validate slug format to prevent injection via container names / file paths
 	if !validSlugFormat(req.Slug) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, and hyphens"})
+		replyError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, and hyphens")
 		return
 	}
 
@@ -66,13 +66,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.AgentRole = "AGENT"
 	}
 	if !validAgentRoles[req.AgentRole] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT or LEAD"})
+		replyError(w, http.StatusBadRequest, "agent_role must be AGENT or LEAD")
 		return
 	}
 
 	// LEAD requires crew_id
 	if req.AgentRole == "LEAD" && (req.CrewID == nil || *req.CrewID == "") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "LEAD role requires crew_id"})
+		replyError(w, http.StatusBadRequest, "LEAD role requires crew_id")
 		return
 	}
 
@@ -80,11 +80,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if h.license != nil && req.CrewID != nil && *req.CrewID != "" {
 		if err := h.license.CheckAgentLimit(r.Context(), h.db, *req.CrewID); err != nil {
 			if license.IsLimitError(err) {
-				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				replyError(w, http.StatusPaymentRequired, err.Error())
 				return
 			}
 			h.logger.Error("check agent limit", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -96,12 +96,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL",
 			*req.CrewID).Scan(&existingLeadID)
 		if err == nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew already has a lead agent"})
+			replyError(w, http.StatusConflict, "Crew already has a lead agent")
 			return
 		}
 		if err != sql.ErrNoRows {
 			h.logger.Error("check existing lead", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -109,7 +109,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Validate lead_mode
 	if req.LeadMode != nil && *req.LeadMode != "" {
 		if !validLeadModes[*req.LeadMode] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lead_mode must be 'active' or 'passive'"})
+			replyError(w, http.StatusBadRequest, "lead_mode must be 'active' or 'passive'")
 			return
 		}
 	}
@@ -118,18 +118,18 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.CLIAdapter = "CLAUDE_CODE"
 	}
 	if !validCLIAdapters[req.CLIAdapter] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID"})
+		replyError(w, http.StatusBadRequest, "cli_adapter must be CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI, CURSOR_CLI, or FACTORY_DROID")
 		return
 	}
 	if req.LLMProvider != nil && *req.LLMProvider != "" && !validLLMProviders[*req.LLMProvider] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA"})
+		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA")
 		return
 	}
 	if req.ToolProfile == "" {
 		req.ToolProfile = "CODING"
 	}
 	if !validToolProfiles[req.ToolProfile] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "tool_profile must be MINIMAL, CODING, or FULL"})
+		replyError(w, http.StatusBadRequest, "tool_profile must be MINIMAL, CODING, or FULL")
 		return
 	}
 	if req.TimeoutSeconds == 0 {
@@ -140,12 +140,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL", workspaceID, req.Slug).Scan(&existingID)
 	if err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Agent slug already taken in this workspace"})
+		replyError(w, http.StatusConflict, "Agent slug already taken in this workspace")
 		return
 	}
 	if err != sql.ErrNoRows {
 		h.logger.Error("check agent slug", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -182,7 +182,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		now, now)
 	if err != nil {
 		h.logger.Error("insert agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

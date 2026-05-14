@@ -23,7 +23,7 @@ func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Req
 		 WHERE c.workspace_id = ? AND e.status = 'PENDING' AND c.deleted_at IS NULL`,
 		workspaceID).Scan(&count)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"count": count})
@@ -43,7 +43,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		ChatID      string `json:"chat_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if body.FromSlug == "" || body.Reason == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
@@ -60,11 +60,11 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	`, body.FromSlug, body.CrewID).Scan(&fromAgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "from agent not found"})
+			replyError(w, http.StatusNotFound, "from agent not found")
 			return
 		}
 		h.logger.Error("lookup from agent for escalation", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -81,18 +81,18 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		escalationType = "TEXT"
 	}
 	if escalationType != "TEXT" && escalationType != "CREDENTIAL" && escalationType != "LINK" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be TEXT, CREDENTIAL, or LINK"})
+		replyError(w, http.StatusBadRequest, "type must be TEXT, CREDENTIAL, or LINK")
 		return
 	}
 
 	if escalationType == "LINK" {
 		if body.Metadata == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata (https URL) required for LINK type"})
+			replyError(w, http.StatusBadRequest, "metadata (https URL) required for LINK type")
 			return
 		}
 		u, parseErr := url.ParseRequestURI(body.Metadata)
 		if parseErr != nil || u.Scheme != "https" || u.Host == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata must be a valid https URL"})
+			replyError(w, http.StatusBadRequest, "metadata must be a valid https URL")
 			return
 		}
 	}
@@ -108,7 +108,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, now)
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -193,7 +193,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	role := RoleFromContext(r.Context())
 	// Require at least MANAGER to resolve escalations (data-modifying operation)
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -203,11 +203,11 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		RedirectTo string `json:"redirect_to"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if body.Resolution == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "resolution required"})
+		replyError(w, http.StatusBadRequest, "resolution required")
 		return
 	}
 
@@ -216,11 +216,11 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		body.Action = "approve"
 	}
 	if body.Action != "approve" && body.Action != "reject" && body.Action != "redirect" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be approve, reject, or redirect"})
+		replyError(w, http.StatusBadRequest, "action must be approve, reject, or redirect")
 		return
 	}
 	if body.Action == "redirect" && body.RedirectTo == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "redirect_to required when action is redirect"})
+		replyError(w, http.StatusBadRequest, "redirect_to required when action is redirect")
 		return
 	}
 	if body.Action != "redirect" {
@@ -242,7 +242,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			SELECT COUNT(*) FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL
 		`, body.RedirectTo, crewID).Scan(&exists); scanErr != nil {
 			h.logger.Error("resolve escalation redirect lookup", "error", scanErr)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if exists == 0 {
@@ -254,15 +254,15 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "escalation not found"})
+			replyError(w, http.StatusNotFound, "escalation not found")
 			return
 		}
 		h.logger.Error("resolve escalation lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if status != "PENDING" {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
+		replyError(w, http.StatusConflict, "escalation already resolved")
 		return
 	}
 
@@ -274,7 +274,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		enc, encErr := encryption.Encrypt(body.Resolution)
 		if encErr != nil {
 			h.logger.Error("encrypt credential resolution", "error", encErr)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		storedResolution = enc
@@ -291,17 +291,17 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	`, storedResolution, body.Action, redirectToVal, now, escalationID, workspaceID)
 	if err != nil {
 		h.logger.Error("resolve escalation update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
 		h.logger.Error("resolve escalation rows affected", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if n == 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
+		replyError(w, http.StatusConflict, "escalation already resolved")
 		return
 	}
 
@@ -423,7 +423,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	`, crewID, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("list escalations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -438,7 +438,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.FromName, &item.FromSlug,
 		); err != nil {
 			h.logger.Error("scan escalation", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		// Never expose plaintext credential values to the list response
@@ -450,7 +450,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

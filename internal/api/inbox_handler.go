@@ -94,7 +94,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if workspaceID == "" || user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 
@@ -125,7 +125,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	if state != "" && state != "all" {
 		if state != "unread" && state != "read" && state != "resolved" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid state"})
+			replyError(w, http.StatusBadRequest, "invalid state")
 			return
 		}
 		q.WriteString(" AND state = ?")
@@ -141,7 +141,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), q.String(), args...)
 	if err != nil {
 		h.logger.Error("inbox list", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
 	defer rows.Close()
@@ -199,7 +199,7 @@ func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if workspaceID == "" || user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	visClause, visArgs := inboxVisibilityClause(user.ID, role)
@@ -209,7 +209,7 @@ func (h *InboxHandler) UnreadCount(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = ?`+visClause+` AND state = 'unread'`,
 		args...).Scan(&n); err != nil {
 		h.logger.Warn("inbox unread count", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "count failed"})
+		replyError(w, http.StatusInternalServerError, "count failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"unread_count": n})
@@ -225,12 +225,12 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if workspaceID == "" || user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "auth required"})
+		replyError(w, http.StatusUnauthorized, "auth required")
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		replyError(w, http.StatusBadRequest, "id required")
 		return
 	}
 
@@ -239,18 +239,18 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 		ResolvedAction string `json:"resolved_action,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		replyError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if body.State != "unread" && body.State != "read" && body.State != "resolved" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state must be unread|read|resolved"})
+		replyError(w, http.StatusBadRequest, "state must be unread|read|resolved")
 		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "tx failed"})
+		replyError(w, http.StatusInternalServerError, "tx failed")
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -267,12 +267,12 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 		`SELECT id, kind FROM inbox_items WHERE id = ? AND workspace_id = ?`+visClause,
 		lookupArgs...).Scan(&existing, &kind)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		replyError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("inbox patch lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 
@@ -330,12 +330,12 @@ func (h *InboxHandler) PatchState(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("inbox patch state", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update failed"})
+		replyError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit failed"})
+		replyError(w, http.StatusInternalServerError, "commit failed")
 		return
 	}
 

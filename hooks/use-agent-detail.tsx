@@ -10,6 +10,7 @@ import {
 } from "react"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useAgentFetch } from "@/hooks/use-agent-fetch"
 
 interface AgentCrew {
   name: string
@@ -73,41 +74,42 @@ export function AgentDetailProvider({
 }) {
   const { workspaceId } = useWorkspace()
   const [agent, setAgent] = useState<AgentDetail | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
-  useEffect(() => {
-    if (!workspaceId) return
-
-    let cancelled = false
-    setLoading(true)
-
-    async function fetchAgent() {
+  const { data: fetched, loading, error: fetchError } = useAgentFetch<AgentDetail>(
+    async (signal) => {
+      // Network-layer failures (DNS, refused connection, offline) collapse
+      // to a single canonical user message; only HTTP non-2xx surfaces the
+      // server's own error string.
+      let res: Response
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: "Failed to load agent" }))
-          if (!cancelled) setError(typeof data.error === "string" ? data.error : "Failed to load agent")
-          return
-        }
-        const data: AgentDetail = await res.json()
-        if (!cancelled) {
-          setAgent(data)
-          setError(null)
-        }
-      } catch {
-        if (!cancelled) setError("Network error. Please try again.")
-      } finally {
-        if (!cancelled) setLoading(false)
+        res = await fetch(
+          `/api/v1/agents/${agentId}?workspace_id=${workspaceId}`,
+          { signal },
+        )
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") throw e
+        throw new Error("Network error. Please try again.")
       }
-    }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to load agent" }))
+        throw new Error(typeof data.error === "string" ? data.error : "Failed to load agent")
+      }
+      return res.json() as Promise<AgentDetail>
+    },
+    [agentId, workspaceId, refreshKey],
+    { enabled: !!workspaceId, logLabel: "useAgentDetail" },
+  )
 
-    fetchAgent()
-    return () => { cancelled = true }
-  }, [agentId, workspaceId, refreshKey])
+  // Bridge useAgentFetch's read-only data into the locally mutable agent
+  // state — context consumers expose setAgent for optimistic updates.
+  useEffect(() => {
+    if (fetched) setAgent(fetched)
+  }, [fetched])
+
+  const error = fetchError instanceof Error ? fetchError.message : null
 
   // Real-time: auto-refresh agent detail when status or runs change (filtered by agentId)
   useRealtimeEvent("agent.status", useCallback((event) => {

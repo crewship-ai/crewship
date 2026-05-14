@@ -11,9 +11,7 @@ import (
 // ── 17. BulkUpdate — POST /api/v1/issues/bulk-update ──────────────────────
 
 func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

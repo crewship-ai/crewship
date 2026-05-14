@@ -13,7 +13,7 @@ import (
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id is required"})
+		replyError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
 
@@ -56,7 +56,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		h.logger.Error("list agents", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -75,7 +75,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.CreatedAt, &a.UpdatedAt,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle); err != nil {
 			h.logger.Error("scan agent", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		a.MemoryEnabled = memEnabled == 1
@@ -87,7 +87,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (agents)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -139,7 +139,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		} {
 			if err := loadCounts(step.bucket, step.query, step.assign); err != nil {
 				h.logger.Error("batch count", "bucket", step.bucket, "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 		}
@@ -158,7 +158,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	if agentID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agentId is required"})
+		replyError(w, http.StatusBadRequest, "agentId is required")
 		return
 	}
 
@@ -193,11 +193,11 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
 		h.logger.Error("get agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	a.MemoryEnabled = memEnabled == 1
@@ -218,7 +218,7 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -228,12 +228,12 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		now, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("delete agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	affected, _ := res.RowsAffected()
 	if affected == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -287,7 +287,7 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 		cutoff, cutoff, wsID)
 	if err != nil {
 		h.logger.Error("agent load query", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -299,14 +299,14 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 			&e.ActiveTasks, &e.PendingTasks, &e.CompletedToday,
 			&e.TokensUsedToday, &e.TokenBudget); err != nil {
 			h.logger.Error("scan agent load", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		result = append(result, e)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (agent load)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

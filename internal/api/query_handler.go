@@ -86,7 +86,7 @@ type createQueryBody struct {
 func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var body createQueryBody
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if body.TargetSlug == "" || body.Question == "" || body.CrewID == "" || body.WorkspaceID == "" || body.ChatID == "" {
@@ -124,11 +124,11 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "target agent not found"})
+			replyError(w, http.StatusNotFound, "target agent not found")
 			return
 		}
 		h.logger.Error("lookup target agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -136,7 +136,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	creds, err := h.loadAgentCredentials(r.Context(), target.ID)
 	if err != nil {
 		h.logger.Error("load agent credentials", "agent_id", target.ID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	`, convID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, target.ID, body.Question, now)
 	if err != nil {
 		h.logger.Error("create peer_conversation", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	if h.orch == nil {
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "", "orchestrator not available", startTime)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "orchestrator not available"})
+		replyError(w, http.StatusServiceUnavailable, "orchestrator not available")
 		return
 	}
 
@@ -239,7 +239,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
 			fmt.Sprintf("container error: %v", err), startTime)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container error"})
+		replyError(w, http.StatusInternalServerError, "container error")
 		return
 	}
 
@@ -513,7 +513,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	`, crewID, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("list peer conversations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -528,7 +528,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 			&item.FromName, &item.FromSlug, &item.ToName, &item.ToSlug,
 		); err != nil {
 			h.logger.Error("scan peer conversation", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		item.Escalated = escalatedInt != 0
@@ -536,7 +536,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

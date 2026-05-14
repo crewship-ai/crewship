@@ -34,7 +34,7 @@ var installLinks = map[string]string{
 func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 

@@ -38,11 +38,11 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -56,7 +56,7 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	`, agentID)
 	if err != nil {
 		h.logger.Error("list agent skills", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -70,7 +70,7 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 			&s.Skill.Description, &s.Skill.Category, &s.Skill.Source,
 			&s.Skill.Icon, &s.Skill.Version); err != nil {
 			h.logger.Error("scan agent skill", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		s.Enabled = enabled == 1
@@ -78,7 +78,7 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (agent skills)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if result == nil {
@@ -100,24 +100,24 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
 	var req addAgentSkillRequest
 	if err := readJSON(r, &req); err != nil || req.SkillID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill_id is required"})
+		replyError(w, http.StatusBadRequest, "skill_id is required")
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 			// rather than returning a misleading "ok".
 		}
 		h.logger.Error("add agent skill", "error", err)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Skill already assigned to agent"})
+		replyError(w, http.StatusConflict, "Skill already assigned to agent")
 		return
 	}
 
@@ -194,18 +194,18 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -214,12 +214,12 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 		agentID, skillID)
 	if err != nil {
 		h.logger.Error("remove agent skill", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Skill not assigned to agent"})
+		replyError(w, http.StatusNotFound, "Skill not assigned to agent")
 		return
 	}
 

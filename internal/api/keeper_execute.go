@@ -51,7 +51,7 @@ type keeperExecuteBody struct {
 func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	var body keeperExecuteBody
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 
@@ -129,19 +129,19 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		&agentName, &crewName, &agentWorkspaceID, &agentCrewID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "requesting agent not found"})
+			replyError(w, http.StatusUnauthorized, "requesting agent not found")
 			return
 		}
 		h.logger.Error("keeper execute: lookup agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if agentWorkspaceID != body.WorkspaceID {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "workspace boundary violation"})
+		replyError(w, http.StatusForbidden, "workspace boundary violation")
 		return
 	}
 	if agentCrewID.Valid && agentCrewID.String != body.RequestingCrewID {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "crew boundary violation"})
+		replyError(w, http.StatusForbidden, "crew boundary violation")
 		return
 	}
 
@@ -155,11 +155,11 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		body.CredentialID, body.WorkspaceID).Scan(&credName, &secLevel)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential not found"})
+			replyError(w, http.StatusNotFound, "credential not found")
 			return
 		}
 		h.logger.Error("keeper execute: lookup credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 

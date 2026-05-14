@@ -59,9 +59,7 @@ func (h *IssueHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 // ── 13. CreateRelation — POST /api/v1/crews/{crewId}/issues/{identifier}/relations
 
 func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -130,9 +128,7 @@ func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 // ── 14. DeleteRelation — DELETE /api/v1/relations/{relationId}
 
 func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

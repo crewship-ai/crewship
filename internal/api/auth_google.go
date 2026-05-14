@@ -52,7 +52,7 @@ func (h *GoogleAuthHandler) Enabled() bool {
 // Redirect initiates the Google OAuth flow.
 func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	if !h.Enabled() {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Google sign-in not configured"})
+		replyError(w, http.StatusNotFound, "Google sign-in not configured")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 		state, redirect)
 	if err != nil {
 		h.logger.Error("store oauth state", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -90,7 +90,7 @@ type googleUserInfo struct {
 // Callback handles the Google OAuth callback.
 func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	if !h.Enabled() {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Google sign-in not configured"})
+		replyError(w, http.StatusNotFound, "Google sign-in not configured")
 		return
 	}
 
@@ -98,7 +98,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 
 	if state == "" || code == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing state or code"})
+		replyError(w, http.StatusBadRequest, "Missing state or code")
 		return
 	}
 
@@ -109,7 +109,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		state).Scan(&redirectURI, &createdAt)
 	if err != nil {
 		h.logger.Warn("invalid oauth state", "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired state"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired state")
 		return
 	}
 
@@ -117,11 +117,11 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	t, parseErr := time.Parse(time.RFC3339, createdAt)
 	if parseErr != nil {
 		h.logger.Warn("invalid oauth state timestamp", "error", parseErr)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid state"})
+		replyError(w, http.StatusBadRequest, "Invalid state")
 		return
 	}
 	if time.Since(t) > 15*time.Minute {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state expired"})
+		replyError(w, http.StatusBadRequest, "OAuth state expired")
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	token, err := h.oauthCfg.Exchange(r.Context(), code)
 	if err != nil {
 		h.logger.Error("oauth exchange failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to exchange authorization code"})
+		replyError(w, http.StatusBadRequest, "Failed to exchange authorization code")
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	resp, err := client.Get("https://www.googleapis.com/oauth2/v3/userinfo")
 	if err != nil {
 		h.logger.Error("fetch google userinfo", "error", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch user info from Google"})
+		replyError(w, http.StatusBadGateway, "Failed to fetch user info from Google")
 		return
 	}
 	defer resp.Body.Close()
@@ -146,7 +146,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	var userInfo googleUserInfo
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		h.logger.Error("decode google userinfo", "error", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to decode user info"})
+		replyError(w, http.StatusBadGateway, "Failed to decode user info")
 		return
 	}
 
@@ -154,7 +154,7 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	userID, err := h.findOrCreateUser(r, userInfo, token)
 	if err != nil {
 		h.logger.Error("find or create user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -163,13 +163,13 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	// as password sign-in.
 	if h.sessions == nil {
 		h.logger.Error("google oauth: sessions store not configured")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	sess, err := h.sessions.Create(r.Context(), userID, r.UserAgent(), clientIP(r), auth.RefreshTokenTTL)
 	if err != nil {
 		h.logger.Error("create session row", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	// If either Issue* call fails after Create, revoke the row so we
@@ -184,14 +184,14 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("issue access", "error", err)
 		revokeGhost("issue access failure")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	refreshTok, err := h.validator.IssueRefreshToken(userID, sess.ID)
 	if err != nil {
 		h.logger.Error("issue refresh", "error", err)
 		revokeGhost("issue refresh failure")
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

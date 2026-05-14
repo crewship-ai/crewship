@@ -97,7 +97,7 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 		ORDER BY ws.created_at DESC`, workspaceID)
 	if err != nil {
 		h.logger.Error("list workspace integrations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -118,7 +118,7 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("iterate workspace integrations", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if results == nil {
@@ -133,17 +133,17 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	var req createWorkspaceIntegrationRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		replyError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if req.DisplayName == "" {
@@ -153,15 +153,15 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 		req.Transport = "streamable-http"
 	}
 	if req.Transport != "streamable-http" && req.Transport != "stdio" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
+		replyError(w, http.StatusBadRequest, "transport must be 'streamable-http' or 'stdio'")
 		return
 	}
 	if req.Transport == "streamable-http" && (req.Endpoint == nil || *req.Endpoint == "") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+		replyError(w, http.StatusBadRequest, "endpoint is required for streamable-http transport")
 		return
 	}
 	if req.Transport == "stdio" && (req.Command == nil || *req.Command == "") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+		replyError(w, http.StatusBadRequest, "command is required for stdio transport")
 		return
 	}
 
@@ -176,7 +176,7 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 		req.Endpoint, req.Command, req.ArgsJSON, req.EnvJSON, req.ConfigJSON, req.Icon, now, now)
 	if err != nil {
 		h.logger.Error("create workspace integration", "error", err)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Integration with this name already exists"})
+		replyError(w, http.StatusConflict, "Integration with this name already exists")
 		return
 	}
 
@@ -213,7 +213,7 @@ func (h *IntegrationHandler) GetWorkspaceIntegration(w http.ResponseWriter, r *h
 		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt,
 		&s.AgentBindCount, &s.CrewServerCount)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+		replyError(w, http.StatusNotFound, "Integration not found")
 		return
 	}
 	s.Enabled = enabled == 1
@@ -226,14 +226,14 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	id := r.PathValue("integrationId")
 	var req updateIntegrationRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?",
 		id, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+		replyError(w, http.StatusNotFound, "Integration not found")
 		return
 	}
 
@@ -252,7 +252,7 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 	}
 	if req.Transport != nil {
 		if *req.Transport != "streamable-http" && *req.Transport != "stdio" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
+			replyError(w, http.StatusBadRequest, "transport must be 'streamable-http' or 'stdio'")
 			return
 		}
 		u.Set("transport", *req.Transport)
@@ -302,11 +302,11 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 		}
 
 		if *req.Transport == "streamable-http" && finalEndpoint == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+			replyError(w, http.StatusBadRequest, "endpoint is required for streamable-http transport")
 			return
 		}
 		if *req.Transport == "stdio" && finalCommand == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+			replyError(w, http.StatusBadRequest, "command is required for stdio transport")
 			return
 		}
 	}
@@ -314,7 +314,7 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 	query, args := u.Build("workspace_mcp_servers", "id = ? AND workspace_id = ?", id, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update workspace integration", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -334,7 +334,7 @@ func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -374,9 +374,9 @@ func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r
 	})
 	if err != nil {
 		if errors.Is(err, errIntegrationNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+			replyError(w, http.StatusNotFound, "Integration not found")
 		} else {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 		}
 		return
 	}

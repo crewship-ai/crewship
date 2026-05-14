@@ -55,14 +55,14 @@ func validPrefKey(k string) bool {
 func (h *UserPreferencesHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUser(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		replyError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	rows, err := h.db.QueryContext(r.Context(),
 		"SELECT pref_key, pref_value FROM user_preferences WHERE user_id = ?", userID)
 	if err != nil {
 		h.logger.Error("list user preferences", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer rows.Close()
@@ -71,7 +71,7 @@ func (h *UserPreferencesHandler) List(w http.ResponseWriter, r *http.Request) {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
 			h.logger.Error("scan user preference row", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			replyError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 		// Round-trip via RawMessage so the FE receives parsed JSON
@@ -80,7 +80,7 @@ func (h *UserPreferencesHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("iterate user preferences", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -89,12 +89,12 @@ func (h *UserPreferencesHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *UserPreferencesHandler) Set(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUser(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		replyError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	key := r.PathValue("key")
 	if !validPrefKey(key) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid key"})
+		replyError(w, http.StatusBadRequest, "invalid key")
 		return
 	}
 	// Read up to 16 KB — preferences are small UI settings, not blobs.
@@ -106,21 +106,21 @@ func (h *UserPreferencesHandler) Set(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "value too large (max 16 KB)"})
+			replyError(w, http.StatusRequestEntityTooLarge, "value too large (max 16 KB)")
 			return
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		replyError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	value := string(body)
 	if value == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "empty value"})
+		replyError(w, http.StatusBadRequest, "empty value")
 		return
 	}
 	// Validate the body is parseable JSON — protects callers reading
 	// the value back later.
 	if !json.Valid([]byte(value)) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "value must be valid JSON"})
+		replyError(w, http.StatusBadRequest, "value must be valid JSON")
 		return
 	}
 	id := generateCUID()
@@ -133,7 +133,7 @@ func (h *UserPreferencesHandler) Set(w http.ResponseWriter, r *http.Request) {
 		id, userID, key, value)
 	if err != nil {
 		h.logger.Error("set user preference", "err", err, "key", key)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -142,19 +142,19 @@ func (h *UserPreferencesHandler) Set(w http.ResponseWriter, r *http.Request) {
 func (h *UserPreferencesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	userID, ok := h.requireUser(r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		replyError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	key := r.PathValue("key")
 	if !validPrefKey(key) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid key"})
+		replyError(w, http.StatusBadRequest, "invalid key")
 		return
 	}
 	_, err := h.db.ExecContext(r.Context(),
 		"DELETE FROM user_preferences WHERE user_id = ? AND pref_key = ?", userID, key)
 	if err != nil {
 		h.logger.Error("delete user preference", "err", err, "key", key)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

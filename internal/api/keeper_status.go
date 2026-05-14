@@ -41,7 +41,7 @@ type keeperStatusResponse struct {
 func (h *KeeperStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 

@@ -60,7 +60,7 @@ func (h *MessageReactionsHandler) List(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	messageID := r.PathValue("messageId")
 	if !h.ensureChatVisible(r, chatID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
+		replyError(w, http.StatusNotFound, "chat not found")
 		return
 	}
 	var userID string
@@ -77,7 +77,7 @@ GROUP BY emoji
 ORDER BY cnt DESC, emoji ASC`, userID, chatID, messageID)
 	if err != nil {
 		h.logger.Error("list reactions", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	defer rows.Close()
@@ -87,7 +87,7 @@ ORDER BY cnt DESC, emoji ASC`, userID, chatID, messageID)
 		var mineCnt int
 		if err := rows.Scan(&rr.Emoji, &rr.Count, &mineCnt); err != nil {
 			h.logger.Error("list reactions scan", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+			replyError(w, http.StatusInternalServerError, "internal")
 			return
 		}
 		rr.Mine = mineCnt > 0
@@ -95,7 +95,7 @@ ORDER BY cnt DESC, emoji ASC`, userID, chatID, messageID)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("list reactions rows", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"reactions": out})
@@ -109,22 +109,22 @@ func (h *MessageReactionsHandler) Add(w http.ResponseWriter, r *http.Request) {
 	// 404 instead of the correct 401.
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		replyError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if !h.ensureChatVisible(r, chatID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
+		replyError(w, http.StatusNotFound, "chat not found")
 		return
 	}
 	var body struct {
 		Emoji string `json:"emoji"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Emoji == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "emoji required"})
+		replyError(w, http.StatusBadRequest, "emoji required")
 		return
 	}
 	if l := len([]rune(body.Emoji)); l == 0 || l > 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "emoji length invalid"})
+		replyError(w, http.StatusBadRequest, "emoji length invalid")
 		return
 	}
 	id := generateCUID()
@@ -135,7 +135,7 @@ func (h *MessageReactionsHandler) Add(w http.ResponseWriter, r *http.Request) {
 		id, chatID, messageID, body.Emoji, user.ID)
 	if err != nil {
 		h.logger.Error("add reaction", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -148,11 +148,11 @@ func (h *MessageReactionsHandler) Remove(w http.ResponseWriter, r *http.Request)
 	// Auth check first — see comment on Add().
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		replyError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if !h.ensureChatVisible(r, chatID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
+		replyError(w, http.StatusNotFound, "chat not found")
 		return
 	}
 	_, err := h.db.ExecContext(r.Context(),
@@ -160,7 +160,7 @@ func (h *MessageReactionsHandler) Remove(w http.ResponseWriter, r *http.Request)
 		chatID, messageID, emoji, user.ID)
 	if err != nil {
 		h.logger.Error("remove reaction", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		replyError(w, http.StatusInternalServerError, "internal")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

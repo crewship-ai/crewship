@@ -86,7 +86,7 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 				"remote_addr", r.RemoteAddr,
 				"token_present", token != "",
 				"user_agent", r.Header.Get("User-Agent"))
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+			replyError(w, http.StatusForbidden, "Forbidden")
 			return
 		}
 		next.ServeHTTP(w, r)

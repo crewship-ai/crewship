@@ -68,7 +68,7 @@ func (h *AgentHandler) CrewsStatus(w http.ResponseWriter, r *http.Request) {
 		`SELECT status, COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL GROUP BY status`,
 		workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()

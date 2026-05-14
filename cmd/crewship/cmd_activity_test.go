@@ -155,7 +155,7 @@ func TestActivityRunE_CUIDCrewSkipsResolution(t *testing.T) {
 	srv := httptest.NewServer(m.handler())
 	defer srv.Close()
 
-	cuid := "ccrewpqrsxyzabcdefgh" // 20 chars, starts with 'c', alphanumeric
+	cuid := "ccrewpqrsxyzabcdefghi" // 21 chars: 'c' + 20 alphanumeric, matches cuid2 minimum
 	cliCfg = &cli.CLIConfig{
 		Token:     "fake-token",
 		Workspace: "cabcdefghijklmnopqrs",

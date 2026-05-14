@@ -59,11 +59,11 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("agent exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -87,7 +87,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 		ORDER BY b.created_at DESC`, agentID)
 	if err != nil {
 		h.logger.Error("list agent bindings", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -107,7 +107,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("iterate agent bindings", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if results == nil {
@@ -122,7 +122,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -130,25 +130,25 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("agent exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
 	var req createAgentBindingRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if req.MCPServerID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_server_id is required"})
+		replyError(w, http.StatusBadRequest, "mcp_server_id is required")
 		return
 	}
 	if req.MCPServerScope != "workspace" && req.MCPServerScope != "crew" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_server_scope must be 'workspace' or 'crew'"})
+		replyError(w, http.StatusBadRequest, "mcp_server_scope must be 'workspace' or 'crew'")
 		return
 	}
 
@@ -159,11 +159,11 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 		if err := h.db.QueryRowContext(r.Context(),
 			"SELECT workspace_id FROM workspace_mcp_servers WHERE id = ?",
 			req.MCPServerID).Scan(&wsID); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Workspace integration not found"})
+			replyError(w, http.StatusBadRequest, "Workspace integration not found")
 			return
 		}
 		if wsID != workspaceID {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Integration belongs to a different workspace"})
+			replyError(w, http.StatusBadRequest, "Integration belongs to a different workspace")
 			return
 		}
 	case "crew":
@@ -172,11 +172,11 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 			SELECT c.workspace_id FROM crew_mcp_servers cs
 			JOIN crews c ON c.id = cs.crew_id
 			WHERE cs.id = ?`, req.MCPServerID).Scan(&crewWS); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Crew integration not found"})
+			replyError(w, http.StatusBadRequest, "Crew integration not found")
 			return
 		}
 		if crewWS != workspaceID {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Integration belongs to a different workspace"})
+			replyError(w, http.StatusBadRequest, "Integration belongs to a different workspace")
 			return
 		}
 	}
@@ -187,11 +187,11 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 		if err := h.db.QueryRowContext(r.Context(),
 			"SELECT workspace_id FROM credentials WHERE id = ? AND deleted_at IS NULL",
 			*req.CredentialID).Scan(&credWS); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential not found"})
+			replyError(w, http.StatusBadRequest, "Credential not found")
 			return
 		}
 		if credWS != workspaceID {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential belongs to a different workspace"})
+			replyError(w, http.StatusBadRequest, "Credential belongs to a different workspace")
 			return
 		}
 	}
@@ -208,7 +208,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 		credType = *req.CredType
 	}
 	if credType != "bearer" && credType != "api_key" && credType != "basic" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cred_type must be 'bearer', 'api_key', or 'basic'"})
+		replyError(w, http.StatusBadRequest, "cred_type must be 'bearer', 'api_key', or 'basic'")
 		return
 	}
 
@@ -220,7 +220,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 		req.CredentialID, credType, req.CredHeader, req.EnvVarName, enabled, req.ConfigOverride, now)
 	if err != nil {
 		h.logger.Error("create agent binding", "error", err)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Agent already has a binding for this integration"})
+		replyError(w, http.StatusConflict, "Agent already has a binding for this integration")
 		return
 	}
 
@@ -238,7 +238,7 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -247,7 +247,7 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 
 	var req updateAgentBindingRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -258,7 +258,7 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 		JOIN agents a ON a.id = b.agent_id
 		WHERE b.id = ? AND b.agent_id = ? AND a.workspace_id = ?`,
 		id, agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent binding not found"})
+		replyError(w, http.StatusNotFound, "Agent binding not found")
 		return
 	}
 
@@ -270,11 +270,11 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 			if err := h.db.QueryRowContext(r.Context(),
 				"SELECT workspace_id FROM credentials WHERE id = ? AND deleted_at IS NULL",
 				*req.CredentialID).Scan(&credWS); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential not found"})
+				replyError(w, http.StatusBadRequest, "Credential not found")
 				return
 			}
 			if credWS != workspaceID {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential belongs to a different workspace"})
+				replyError(w, http.StatusBadRequest, "Credential belongs to a different workspace")
 				return
 			}
 		}
@@ -289,7 +289,7 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 	}
 	if req.CredType != nil {
 		if *req.CredType != "bearer" && *req.CredType != "api_key" && *req.CredType != "basic" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cred_type must be 'bearer', 'api_key', or 'basic'"})
+			replyError(w, http.StatusBadRequest, "cred_type must be 'bearer', 'api_key', or 'basic'")
 			return
 		}
 		ub.Set("cred_type", *req.CredType)
@@ -309,14 +309,14 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 	}
 
 	if ub.Empty() {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
+		replyError(w, http.StatusBadRequest, "No fields to update")
 		return
 	}
 
 	query, args := ub.Build("agent_mcp_bindings", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update agent binding", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -329,7 +329,7 @@ func (h *IntegrationHandler) DeleteAgentBinding(w http.ResponseWriter, r *http.R
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -340,12 +340,12 @@ func (h *IntegrationHandler) DeleteAgentBinding(w http.ResponseWriter, r *http.R
 		DELETE FROM agent_mcp_bindings WHERE id = ? AND agent_id = ? AND agent_id IN
 		(SELECT id FROM agents WHERE workspace_id = ? AND deleted_at IS NULL)`, id, agentID, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent binding not found"})
+		replyError(w, http.StatusNotFound, "Agent binding not found")
 		return
 	}
 

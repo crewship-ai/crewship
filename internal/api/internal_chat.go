@@ -18,11 +18,11 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		Title       *string `json:"title"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if body.ChatID == "" || body.AgentID == "" || body.WorkspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "chat_id, agent_id, workspace_id required"})
+		replyError(w, http.StatusBadRequest, "chat_id, agent_id, workspace_id required")
 		return
 	}
 
@@ -39,7 +39,7 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		body.ChatID, body.AgentID, body.WorkspaceID, body.UserID, body.Title, now, now)
 	if err != nil {
 		h.logger.Error("create chat", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -55,11 +55,11 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), "SELECT agent_id FROM chats WHERE id = ?", chatID).Scan(&agentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
+			replyError(w, http.StatusNotFound, "Chat not found")
 			return
 		}
 		h.logger.Error("resolve chat lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -81,7 +81,7 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 		Delta int `json:"delta"`
 	}
 	if err := readJSON(r, &body); err != nil || body.Delta <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid delta"})
+		replyError(w, http.StatusBadRequest, "Invalid delta")
 		return
 	}
 	res, err := h.db.ExecContext(r.Context(),
@@ -89,7 +89,7 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 		body.Delta, chatID)
 	if err != nil {
 		h.logger.Error("increment message count", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	// A non-existent chat ID still returned 200 OK — silent no-op masking
@@ -99,11 +99,11 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 	n, err := res.RowsAffected()
 	if err != nil {
 		h.logger.Error("increment message count rows affected", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if n == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "chat not found"})
+		replyError(w, http.StatusNotFound, "chat not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": chatID})
@@ -117,7 +117,7 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 		Title string `json:"title"`
 	}
 	if err := readJSON(r, &body); err != nil || body.Title == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
+		replyError(w, http.StatusBadRequest, "title required")
 		return
 	}
 	res, err := h.db.ExecContext(r.Context(),
@@ -125,17 +125,17 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 		body.Title, chatID)
 	if err != nil {
 		h.logger.Error("update chat title", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
 		h.logger.Error("update chat title rows affected", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if n == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found or already titled"})
+		replyError(w, http.StatusNotFound, "Chat not found or already titled")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": chatID, "title": body.Title})

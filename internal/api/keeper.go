@@ -126,7 +126,7 @@ func (h *KeeperHandler) WithConversations(cr ConversationReader) *KeeperHandler 
 func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	requestID := r.PathValue("requestId")
 	if requestID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "requestId required"})
+		replyError(w, http.StatusBadRequest, "requestId required")
 		return
 	}
 
@@ -152,11 +152,11 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		&row.Intent, &row.Decision, &row.Reason, &row.RiskScore, &row.CreatedAt, &row.DecidedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "request not found"})
+			replyError(w, http.StatusNotFound, "request not found")
 			return
 		}
 		h.logger.Error("keeper: get request", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 

@@ -36,7 +36,7 @@ type mcpToolCallEntry struct {
 func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id is required"})
+		replyError(w, http.StatusBadRequest, "workspace_id is required")
 		return
 	}
 
@@ -71,7 +71,7 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list mcp tool calls", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -83,14 +83,14 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 			&e.MCPServerID, &e.MCPServerScope, &e.ToolName, &e.InputHash,
 			&e.Status, &e.DurationMS, &e.ErrorMessage, &e.CreatedAt); err != nil {
 			h.logger.Error("scan mcp tool call", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		results = append(results, e)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("iterate mcp tool calls", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if results == nil {

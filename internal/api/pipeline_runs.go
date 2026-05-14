@@ -33,7 +33,7 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	runID := r.PathValue("runId")
 	if runID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId required"})
+		replyError(w, http.StatusBadRequest, "runId required")
 		return
 	}
 
@@ -58,11 +58,11 @@ func (h *PipelineHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.runs.Cancel(runID); err != nil {
 		if errors.Is(err, pipeline.ErrRunNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+			replyError(w, http.StatusNotFound, "run not found")
 			return
 		}
 		h.logger.Warn("cancel pipeline run", "error", err, "run_id", runID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to cancel run"})
+		replyError(w, http.StatusInternalServerError, "failed to cancel run")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -89,7 +89,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	runID := r.PathValue("runId")
 	if runID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "runId required"})
+		replyError(w, http.StatusBadRequest, "runId required")
 		return
 	}
 
@@ -138,12 +138,12 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		&pipelineName, &issueIdentifier,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		replyError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("get pipeline run", "error", err, "run_id", runID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load run"})
+		replyError(w, http.StatusInternalServerError, "load run")
 		return
 	}
 
@@ -264,7 +264,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list pipeline runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list runs"})
+		replyError(w, http.StatusInternalServerError, "list runs")
 		return
 	}
 	defer rows.Close()

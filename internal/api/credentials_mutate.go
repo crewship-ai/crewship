@@ -48,7 +48,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// this. "manage" was historically too tight (OWNER+ADMIN only) and
 	// caused 403s for the Add flow even though the button rendered.
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	// Defence in depth: authed middleware should always populate user,
@@ -56,22 +56,22 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// path. Other call sites in this file already guard for nil; mirror
 	// the pattern here.
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	var req createCredentialRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.Name == "" || len(req.Name) < 1 || len(req.Name) > 255 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		replyError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if req.Value == "" && req.Type != "OAUTH2" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "value is required"})
+		replyError(w, http.StatusBadRequest, "value is required")
 		return
 	}
 	oauthPending := false
@@ -115,11 +115,11 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		crewFound, err := crewExists(r.Context(), h.db, cid, workspaceID)
 		if err != nil {
 			h.logger.Error("crew exists check", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if !crewFound {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+			replyError(w, http.StatusBadRequest, fmt.Sprintf("Invalid crew_id: %s", cid))
 			return
 		}
 	}
@@ -143,7 +143,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	encryptedValue, err := encryption.Encrypt(req.Value)
 	if err != nil {
 		h.logger.Error("encrypt credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
+		replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
 		return
 	}
 
@@ -155,7 +155,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -180,11 +180,11 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		tx.Rollback()
 		if strings.Contains(err.Error(), "UNIQUE") {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "Credential with this name already exists"})
+			replyError(w, http.StatusConflict, "Credential with this name already exists")
 			return
 		}
 		h.logger.Error("insert credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -196,7 +196,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				tx.Rollback()
 				h.logger.Error("encrypt OAuth client secret", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 		}
@@ -209,7 +209,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 			credID); err != nil {
 			tx.Rollback()
 			h.logger.Error("store OAuth fields", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -217,13 +217,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := h.setCrewIDs(r.Context(), tx, credID, crewIDs); err != nil {
 		tx.Rollback()
 		h.logger.Error("set credential crews", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -275,24 +275,24 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "update") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	credFound, err := credentialExists(r.Context(), h.db, credID, workspaceID)
 	if err != nil {
 		h.logger.Error("credential exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !credFound {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		replyError(w, http.StatusNotFound, "Credential not found")
 		return
 	}
 
 	var body map[string]interface{}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -324,11 +324,11 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ok, err := crewExists(r.Context(), h.db, cid, workspaceID)
 			if err != nil {
 				h.logger.Error("crew exists check", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 			if !ok {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+				replyError(w, http.StatusBadRequest, fmt.Sprintf("Invalid crew_id: %s", cid))
 				return
 			}
 		}
@@ -346,11 +346,11 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			crewFound, err := crewExists(r.Context(), h.db, crewIDStr, workspaceID)
 			if err != nil {
 				h.logger.Error("crew exists check", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 			if !crewFound {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
+				replyError(w, http.StatusBadRequest, "Invalid crew_id")
 				return
 			}
 		}
@@ -369,7 +369,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			encrypted, err := encryption.Encrypt(s)
 			if err != nil {
 				h.logger.Error("encrypt credential value", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
+				replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
 				return
 			}
 			ub.Set("encrypted_value", encrypted)
@@ -410,11 +410,11 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		case int:
 			n = v
 		default:
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "security_level must be 1, 2, or 3"})
+			replyError(w, http.StatusBadRequest, "security_level must be 1, 2, or 3")
 			return
 		}
 		if n < 1 || n > 3 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "security_level must be 1, 2, or 3"})
+			replyError(w, http.StatusBadRequest, "security_level must be 1, 2, or 3")
 			return
 		}
 		body["security_level"] = n
@@ -427,14 +427,14 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ub.Empty() && !updateCrewIDs {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
+		replyError(w, http.StatusBadRequest, "No fields to update")
 		return
 	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin tx (update credential)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -443,7 +443,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 			tx.Rollback()
 			h.logger.Error("update credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -452,14 +452,14 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if err := h.setCrewIDs(r.Context(), tx, credID, crewIDs); err != nil {
 			tx.Rollback()
 			h.logger.Error("update credential crews", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit credential update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
-  FileText, PanelLeftClose, PanelLeftOpen,
+  PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   CircleDot, FolderKanban, ScrollText,
@@ -23,11 +23,13 @@ import { OrchestrationActivity } from "@/components/features/orchestration/orche
 import { type DetailContext } from "@/components/features/orchestration/context-detail-panel"
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
-import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView } from "@/lib/types/mission"
+import type { Mission, MissionTask, IssueLabel, Project, SavedView } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
+import { useIssueDetail } from "@/hooks/use-issue-detail"
+import { useProjectDetail } from "@/hooks/use-project-detail"
 import { parseSavedViews, applySavedView } from "@/lib/saved-views"
 import { IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
 import { IssuesStatusChips } from "@/components/features/issues/issues-status-chips"
@@ -159,10 +161,7 @@ export function OrchestrationLayout({
     "board",
   )
   const [issueSearch, setIssueSearch] = useState("")
-  const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
-  const [issueComments, setIssueComments] = useState<IssueComment[]>([])
   const [projects, setProjects] = useState<Project[]>([])
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   // Project filter applied via saved views — does NOT open the detail panel.
   // `selectedProjectId` is for explicit project clicks (opens detail panel);
   // `filterProjectId` is only for filtering the issues list.
@@ -263,25 +262,6 @@ export function OrchestrationLayout({
     issueSearch,
   ])
 
-  // Derived data
-  // When an issue is selected, filter to just that mission so Graph/Timeline/Activity focus on it
-  const filteredMissions = useMemo(() => {
-    if (selectedIssue) {
-      const match = missions.find((m) => m.id === selectedIssue.id)
-      return match ? [match] : missions
-    }
-    if (selectedMissionId === "all") return missions
-    return missions.filter((m) => m.id === selectedMissionId)
-  }, [missions, selectedMissionId, selectedIssue])
-
-  const selectedMission = useMemo(() => {
-    if (selectedIssue) {
-      return missions.find((m) => m.id === selectedIssue.id) || null
-    }
-    if (selectedMissionId === "all") return null
-    return missions.find((m) => m.id === selectedMissionId) || null
-  }, [missions, selectedMissionId, selectedIssue])
-
   // Left panel filtered by selected mission
   const panelCrews = useMemo(() => {
     if (selectedMissionId === "all") return crews
@@ -342,23 +322,45 @@ export function OrchestrationLayout({
     fetchSavedViews()
   }, [fetchIssues, fetchIssueLabels, fetchProjects, fetchSavedViews])
 
-  const handleIssueSelect = useCallback(async (issue: Mission) => {
-    // Toggle: clicking the same issue again deselects it
-    if (selectedIssue?.id === issue.id) {
-      setSelectedIssue(null)
-      setIssueComments([])
-      return
+  const {
+    selectedIssue,
+    issueComments,
+    handleIssueSelect,
+    handleIssueClose,
+    handleIssueUpdated,
+  } = useIssueDetail({
+    workspaceId,
+    onIssueSelected: () => setDetailContext({ type: "none" }),
+    fetchIssues,
+    fetchProjects,
+  })
+
+  const {
+    selectedProjectId,
+    setSelectedProjectId,
+    selectedProject,
+    handleProjectClose,
+  } = useProjectDetail({ projects })
+
+  // Derived data — defined after useIssueDetail so the selectedIssue
+  // dependency resolves; when an issue is selected the Graph/Timeline/
+  // Activity tabs focus on its single mission.
+  const filteredMissions = useMemo(() => {
+    if (selectedIssue) {
+      const match = missions.find((m) => m.id === selectedIssue.id)
+      return match ? [match] : missions
     }
-    setSelectedIssue(issue)
-    setDetailContext({ type: "none" })
-    if (issue.crew_id && issue.identifier) {
-      try {
-        const res = await fetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (res.ok) setIssueComments(await res.json())
-        else setIssueComments([])
-      } catch { setIssueComments([]) }
+    if (selectedMissionId === "all") return missions
+    return missions.filter((m) => m.id === selectedMissionId)
+  }, [missions, selectedMissionId, selectedIssue])
+
+  const selectedMission = useMemo(() => {
+    if (selectedIssue) {
+      return missions.find((m) => m.id === selectedIssue.id) || null
     }
-  }, [workspaceId, selectedIssue?.id])
+    if (selectedMissionId === "all") return null
+    return missions.find((m) => m.id === selectedMissionId) || null
+  }, [missions, selectedMissionId, selectedIssue])
 
   // selectedIssue / selectedProject take over the middle pane (same
   // pattern as /routines). When set, the board/list is hidden and the
@@ -452,7 +454,6 @@ export function OrchestrationLayout({
     }
   }, [drawerOpen, drawerTab])
 
-  const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) || null : null
   // Routines tab manages its own right-side detail (RoutinesDetailPanel
   // inside RoutinesTab). Suppress the orchestration-level detail pane
   // there so an issue/task selected from a previous tab doesn't bleed
@@ -466,31 +467,6 @@ export function OrchestrationLayout({
     !issueDetailFullWidth &&
     !projectDetailFullWidth &&
     detailContext.type !== "none"
-
-  const handleIssueClose = useCallback(() => {
-    setSelectedIssue(null)
-    setIssueComments([])
-  }, [])
-
-  const handleIssueUpdated = useCallback(async () => {
-    await fetchIssues()
-    if (selectedIssue?.crew_id && selectedIssue?.identifier) {
-      try {
-        const res = await fetch(`/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`)
-        if (res.ok) {
-          const fresh = await res.json()
-          setSelectedIssue(fresh)
-          const commRes = await fetch(`/api/v1/crews/${encodeURIComponent(fresh.crew_id)}/issues/${encodeURIComponent(fresh.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
-          if (commRes.ok) setIssueComments(await commRes.json())
-        }
-      } catch {}
-    }
-    fetchProjects()
-  }, [fetchIssues, fetchProjects, selectedIssue?.crew_id, selectedIssue?.identifier, workspaceId])
-
-  const handleProjectClose = useCallback(() => {
-    setSelectedProjectId(null)
-  }, [])
 
   // Mobile back button: close whichever detail view is currently visible so that
   // showRightPanel ends up false and the overlay sheet actually dismisses.
@@ -509,14 +485,14 @@ export function OrchestrationLayout({
   useEffect(() => {
     const items: BreadcrumbItem[] = []
     if (selectedProject) {
-      items.push({ label: selectedProject.name, onClick: () => { setSelectedIssue(null); setIssueComments([]) } })
+      items.push({ label: selectedProject.name, onClick: handleIssueClose })
     }
     if (selectedIssue) {
       items.push({ label: selectedIssue.identifier || selectedIssue.title })
     }
     setBreadcrumbs(items)
     return () => setBreadcrumbs([])
-  }, [selectedProject, selectedIssue, setBreadcrumbs])
+  }, [selectedProject, selectedIssue, setBreadcrumbs, handleIssueClose])
 
   // Toolbar surfaces are mode-dependent:
   //   - issues: hide tab bar, show New Issue + New Project buttons
@@ -633,7 +609,7 @@ export function OrchestrationLayout({
                         onProjectSelect={(id) => {
                           const newId = id === selectedProjectId ? null : id
                           setSelectedProjectId(newId)
-                          if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                          if (newId) handleIssueClose()
                         }}
                         onIssueSelect={handleIssueSelect}
                         crews={panelCrews}
@@ -694,7 +670,7 @@ export function OrchestrationLayout({
                     onProjectSelect={(id) => {
                       const newId = id === selectedProjectId ? null : id
                       setSelectedProjectId(newId)
-                      setSelectedIssue(null); setIssueComments([])
+                      handleIssueClose()
                     }}
                     onIssueSelect={handleIssueSelect}
                     crews={panelCrews}
@@ -949,82 +925,75 @@ export function OrchestrationLayout({
         </div>
 
         {/* ---- Right panel ---- */}
-        {isMobile ? (
-          <AnimatePresence>
-            {showRightPanel && (
-              <motion.div
-                className="fixed inset-0 z-40 bg-card flex flex-col"
-                initial={{ x: "100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "100%" }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              >
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
-                  <button
-                    onClick={closeMobileDetail}
-                    className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
-                  >
-                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                  <RightPanelContent
-                    selectedIssue={selectedIssue}
-                    issueComments={issueComments}
-                    issueLabels={issueLabels}
-                    projects={projects}
-                    routines={pipelines}
-                    selectedProject={selectedProject}
-                    workspaceId={workspaceId}
-                    detailContext={detailContext}
-                    onIssueClose={handleIssueClose}
-                    onIssueUpdated={handleIssueUpdated}
-                    onProjectClose={handleProjectClose}
-                    onProjectUpdated={fetchProjects}
-                    onDetailClose={handleDetailClose}
-                    onTaskAction={handleTaskAction}
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        ) : (
-          <div className={cn(
-            "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
-            showRightPanel ? "w-full" : "w-0",
-          )}>
-            <AnimatePresence mode="wait">
+        {(() => {
+          // RightPanelContent is rendered identically in mobile and desktop
+          // layouts; bundling its props once avoids two duplicate 12-prop
+          // call sites.
+          const rightPanelProps = {
+            selectedIssue,
+            issueComments,
+            issueLabels,
+            projects,
+            routines: pipelines,
+            selectedProject,
+            workspaceId,
+            detailContext,
+            onIssueClose: handleIssueClose,
+            onIssueUpdated: handleIssueUpdated,
+            onProjectClose: handleProjectClose,
+            onProjectUpdated: fetchProjects,
+            onDetailClose: handleDetailClose,
+            onTaskAction: handleTaskAction,
+          } as const
+
+          return isMobile ? (
+            <AnimatePresence>
               {showRightPanel && (
                 <motion.div
-                  key={detailContext.type === "task" ? `task-${(detailContext as { task: MissionTask }).task.id}` : detailContext.type}
-                  initial={{ opacity: 0, x: 12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 12 }}
-                  transition={{ duration: 0.15, ease: "easeOut" }}
-                  className="h-full"
+                  className="fixed inset-0 z-40 bg-card flex flex-col"
+                  initial={{ x: "100%" }}
+                  animate={{ x: 0 }}
+                  exit={{ x: "100%" }}
+                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
                 >
-                  <RightPanelContent
-                    selectedIssue={selectedIssue}
-                    issueComments={issueComments}
-                    issueLabels={issueLabels}
-                    projects={projects}
-                    routines={pipelines}
-                    selectedProject={selectedProject}
-                    workspaceId={workspaceId}
-                    detailContext={detailContext}
-                    onIssueClose={handleIssueClose}
-                    onIssueUpdated={handleIssueUpdated}
-                    onProjectClose={handleProjectClose}
-                    onProjectUpdated={fetchProjects}
-                    onDetailClose={handleDetailClose}
-                    onTaskAction={handleTaskAction}
-                  />
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
+                    <button
+                      onClick={closeMobileDetail}
+                      aria-label="Back"
+                      className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                    >
+                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto">
+                    <RightPanelContent {...rightPanelProps} />
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
-        )}
+          ) : (
+            <div className={cn(
+              "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
+              showRightPanel ? "w-full" : "w-0",
+            )}>
+              <AnimatePresence mode="wait">
+                {showRightPanel && (
+                  <motion.div
+                    key={detailContext.type === "task" ? `task-${(detailContext as { task: MissionTask }).task.id}` : detailContext.type}
+                    initial={{ opacity: 0, x: 12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 12 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="h-full"
+                  >
+                    <RightPanelContent {...rightPanelProps} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )
+        })()}
 
         {/* ---- Bottom drawer ---- */}
         <motion.div
