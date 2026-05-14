@@ -192,7 +192,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		// safe and saves a "spurious whitespace" failure mode.
 		rec, err := age.ParseX25519Recipient(trimmedRecipient)
 		if err != nil {
-			replyError(w, http.StatusBadRequest, "invalid age1 recipient: " + err.Error())
+			replyError(w, http.StatusBadRequest, "invalid age1 recipient: "+err.Error())
 			return
 		}
 		recipients = []age.Recipient{rec}
@@ -210,7 +210,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	outputDir := req.OutputDir
 	if outputDir != "" {
 		if err := validateBackupPath(outputDir); err != nil {
-			replyError(w, http.StatusBadRequest, "invalid output_dir: " + err.Error())
+			replyError(w, http.StatusBadRequest, "invalid output_dir: "+err.Error())
 			return
 		}
 	}
@@ -336,7 +336,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	if id := strings.TrimSpace(req.Identity); id != "" {
 		parsed, err := age.ParseX25519Identity(id)
 		if err != nil {
-			replyError(w, http.StatusBadRequest, "invalid age identity: " + err.Error())
+			replyError(w, http.StatusBadRequest, "invalid age identity: "+err.Error())
 			return
 		}
 		identities = []age.Identity{parsed}

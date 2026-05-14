@@ -109,7 +109,7 @@ func (h *PortExposeHandler) RequestExpose(w http.ResponseWriter, r *http.Request
 	}
 	switch decision {
 	case ExposeDeny:
-		replyError(w, http.StatusForbidden, "denied by policy: " + reason)
+		replyError(w, http.StatusForbidden, "denied by policy: "+reason)
 		return
 	case ExposePending:
 		// Reserved for a future change. Surface a clear error so the sidecar

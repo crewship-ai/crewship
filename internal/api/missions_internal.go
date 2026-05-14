@@ -106,7 +106,7 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 			taskID, id, t.AssignedAgentID, t.Title, t.Description, status, t.TaskOrder, depsJSON, t.MaxIterations, now, now)
 		if err != nil {
 			h.logger.Error("create mission task", "error", err)
-			replyError(w, http.StatusInternalServerError, "failed to create task: " + t.Title)
+			replyError(w, http.StatusInternalServerError, "failed to create task: "+t.Title)
 			return
 		}
 	}

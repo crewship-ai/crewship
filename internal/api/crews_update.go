@@ -111,13 +111,13 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
 		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
-			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: " + err.Error())
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
 			return
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
-			replyError(w, http.StatusBadRequest, "invalid mise_config: " + err.Error())
+			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
 			return
 		}
 	}
@@ -166,7 +166,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 				MCPServers map[string]json.RawMessage `json:"mcpServers"`
 			}
 			if err := json.Unmarshal([]byte(*req.MCPConfigJSON), &mcpCheck); err != nil {
-				replyError(w, http.StatusBadRequest, "mcp_config_json is not valid JSON: " + err.Error())
+				replyError(w, http.StatusBadRequest, "mcp_config_json is not valid JSON: "+err.Error())
 				return
 			}
 			if mcpCheck.MCPServers == nil {
@@ -187,7 +187,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.EscalationConfig != "" {
 			var cfg orchestrator.EscalationConfig
 			if err := json.Unmarshal([]byte(*req.EscalationConfig), &cfg); err != nil {
-				replyError(w, http.StatusBadRequest, "escalation_config is not valid JSON: " + err.Error())
+				replyError(w, http.StatusBadRequest, "escalation_config is not valid JSON: "+err.Error())
 				return
 			}
 			for _, v := range []float64{cfg.AutoApproveThreshold, cfg.NotifyThreshold, cfg.RequireApprovalBelow} {

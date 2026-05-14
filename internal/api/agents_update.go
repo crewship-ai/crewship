@@ -166,7 +166,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 				MCPServers map[string]json.RawMessage `json:"mcpServers"`
 			}
 			if err := json.Unmarshal([]byte(mcpStr), &mcpCheck); err != nil {
-				replyError(w, http.StatusBadRequest, "mcp_config_json is not valid JSON: " + err.Error())
+				replyError(w, http.StatusBadRequest, "mcp_config_json is not valid JSON: "+err.Error())
 				return
 			}
 			if mcpCheck.MCPServers == nil {

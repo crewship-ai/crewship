@@ -158,13 +158,13 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
 		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
-			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: " + err.Error())
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
 			return
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
-			replyError(w, http.StatusBadRequest, "invalid mise_config: " + err.Error())
+			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
 			return
 		}
 	}
