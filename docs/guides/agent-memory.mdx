@@ -284,9 +284,9 @@ The orchestrator allocates a character budget (default 15,000 chars) across memo
 - Agent: 15,000 chars (full budget)
 </Accordion>
 
-## Sidecar API Endpoints
+## API reference
 
-All endpoints are accessible on `localhost:9119` inside the container.
+The memory subsystem is reachable on the agent's sidecar at `localhost:9119` inside the container. There is no public REST endpoint — these calls are intentionally container-local so an agent can only ever query its own tiers (and, via the lead's sidecar proxy, the crew tier it's a member of). The schemas below are the source of truth; for the database-side view of the underlying tables see [`/api-reference/journal`](/api-reference/journal) (journal-backed retrieval) and the SQLite migration log under [`internal/database/migrate.go`](https://github.com/crewship-ai/crewship/blob/main/internal/database/migrate.go) (v54/v55 introduced the importance + FTS5 columns these endpoints read).
 
 ### POST /memory/search
 
