@@ -170,13 +170,15 @@ The sidecar (`internal/sidecar/`) is an HTTP proxy running inside each crew cont
 | **free** (default) | Allow all outbound connections |
 | **restricted** | Only allow connections to allowlisted domains |
 
-Default allowed domains:
-- `api.anthropic.com`
-- `api.openai.com`
-- `generativelanguage.googleapis.com`
-- `api.factory.ai`
+Default allowed domains (from `internal/sidecar/allowlist.go` — each entry exists for a specific CLI):
 
-Unknown network modes default to **restricted** (fail closed).
+- **Anthropic** — `api.anthropic.com` (Claude Code API key + OAuth), `console.anthropic.com` (OAuth refresh callback)
+- **OpenAI / Codex** — `api.openai.com` (API key), `auth.openai.com` (ChatGPT-subscription login), `chatgpt.com` (subscription routing)
+- **Google / Gemini** — `generativelanguage.googleapis.com` (AI Studio path), `oauth2.googleapis.com` (OAuth), `accounts.google.com` (OAuth UI redirect)
+- **Cursor** — `api.cursor.sh` (auth/billing), `api2.cursor.sh` (model gateway, since 2026-Q1)
+- **Factory Droid** — `api.factory.ai` (legacy), `app.factory.ai` (CLI installer + API base)
+
+Unknown network modes default to **restricted** (fail closed). Keep this list in sync with `components/features/crews/crew-network-policy.tsx` on the frontend.
 
 ### Sidecar Endpoints (~36 handlers)
 

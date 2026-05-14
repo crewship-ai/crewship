@@ -67,9 +67,9 @@ http_headers = { "X-Custom" = "literal-value" }      # literal headers
 
 ## Common pitfalls
 
-### 1. Cursor `--approve-mcps`
+### 1. Cursor MCP is currently inert in `--print` mode
 
-Without it, MCP servers are LISTED in `cursor-agent mcp list` but NEVER INVOKED in `--print` mode (forum #143045 + #148397). Crewship's adapter adds the flag automatically when any MCP source is configured.
+`cursor-agent --print` does not invoke MCP servers at runtime even with `--approve-mcps` set — the binary lists registered servers via `cursor-agent mcp list` but never actually calls them in headless mode (forum #143045, #148397, confirmed against latest builds). The Crewship adapter reflects this honestly: `adapter_cursor.go` returns `SupportsMCP() == false`, which means the orchestrator skips `WriteMCPConfig` entirely — no `.cursor/mcp.json` is written and the `--approve-mcps` flag is suppressed despite being a known cmdline option. If a future Cursor release wires MCP into `--print`, flip `SupportsMCP` and the rest of the pipeline (config write, flag, table row above) lights up automatically.
 
 ### 2. Codex doesn't interpolate `${VAR}`
 

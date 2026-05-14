@@ -189,7 +189,7 @@ The SQL surface area each subcommand touches:
 
 | Subcommand | Tables written | Constraints enforced |
 |------------|---------------|----------------------|
-| `reset-password` | `users.password_hash`, `users.password_updated_at` | Email must exist (no implicit `INSERT`). |
+| `reset-password` | `users.hashed_password`, `users.failed_login_count`, `users.locked_until`, `users.last_failed_login_at`, `users.updated_at` | Email must exist (no implicit `INSERT`). Resetting also unlocks the account and clears the failed-login counter. |
 | `list-users` | *(read-only)* | None — just `SELECT email, role, created_at, last_login_at FROM users`. |
 | `promote` | `workspace_members.role` | Refuses to demote the last `OWNER` of a workspace; if `--workspace` omitted, user must belong to exactly one workspace. |
 
