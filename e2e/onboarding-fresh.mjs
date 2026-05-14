@@ -15,6 +15,18 @@
  * The script reports ✓/✗ for each check and exits non-zero on any
  * failure so CI / shell-chaining works. Designed to catch the
  * specific dead-ends called out in the failure-mode audit.
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * NOTE (2026-05-14): the canonical onboarding regression test now
+ * lives in `e2e/onboarding-wizard.spec.ts` and runs in the Playwright
+ * test runner under the e2e-devcontainer nightly workflow. This
+ * standalone script is preserved for ops use cases that don't want a
+ * full Playwright project installed — e.g. smoke-testing a deployed
+ * staging host from a Codespace or a build runner that only has
+ * Node + the playwright npm package. Coverage between the two is
+ * intended to stay aligned; if you add/remove checks here, mirror
+ * them in the spec.
+ * ─────────────────────────────────────────────────────────────────
  */
 import pkg from "playwright"
 const { chromium } = pkg

@@ -26,6 +26,14 @@ export default defineConfig({
     "**/visual.spec.ts",
     "**/mobile-crews.spec.ts",
     "**/a11y.spec.ts",
+    // onboarding-wizard.spec.ts needs a fresh, NEVER-bootstrapped DB
+    // and explicitly bypasses globalSetup's demo-user login. Running
+    // it under the main config would either skip silently (already
+    // bootstrapped) or false-fail globalSetup (no demo user on a
+    // fresh DB). Run via
+    //   pnpm exec playwright test --config=playwright.fresh.config.ts
+    // instead — wired into the e2e-devcontainer nightly workflow.
+    "**/onboarding-wizard.spec.ts",
   ],
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
