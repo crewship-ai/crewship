@@ -119,11 +119,23 @@ func seedWorkspace(t *testing.T, db *sql.DB) string {
 	// the `skills` table itself (no workspace_id column => filtered out).
 	// A customer who attached custom skills hits FK violation on restore;
 	// covered by a separate test below.
+	// Custom skill (source='CUSTOM' by default) — exercises the new
+	// transitive skills filter so the round-trip can prove user-created
+	// skills survive a restore. Bundled skills (skill_coding_01) are
+	// already in both source and target from SeedBundledSkills; the
+	// bundle's INSERT OR IGNORE will no-op against the pre-seeded
+	// target row, which is the correct production behavior.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO skills (id, name, slug, display_name, author_id) VALUES (?, ?, ?, ?, ?)`,
+		"sk_custom_e2e", "Custom E2E", "custom-e2e", "Custom E2E", "u_admin"); err != nil {
+		t.Fatalf("seed custom skill: %v", err)
+	}
+
 	bindings := []struct{ id, agentID, skillID string }{
 		{"as_1", "a_alice", "skill_coding_01"},
 		{"as_2", "a_alice", "skill_research_01"},
 		{"as_3", "a_bob", "skill_coding_01"},
-		{"as_4", "a_carol", "skill_research_01"},
+		{"as_4", "a_carol", "sk_custom_e2e"}, // custom — the round-trip critical path
 	}
 	for _, b := range bindings {
 		if _, err := db.ExecContext(ctx,
@@ -133,14 +145,41 @@ func seedWorkspace(t *testing.T, db *sql.DB) string {
 		}
 	}
 
-	// crew_members is intentionally NOT seeded here even though it's in
-	// BackupTables. The reason is another beta-blocker gap covered by
-	// its own test below: crew_members.user_id FKs into `users`, and
-	// `users` is excluded from the bundle on purpose ("per-instance
-	// identity" per the dbdump.go comment). On a fresh target every
-	// restored crew_members row therefore aborts with a deferred FK
-	// violation. Until that's resolved, the happy-path round-trip must
-	// not seed crew_members — otherwise it would always fail.
+	// crew_members — now safely round-trippable because `users` is in
+	// BackupTables. Previously this seed caused a deferred FK violation
+	// on every restore; the gap test that pinned that behavior is gone.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO crew_members (id, crew_id, user_id) VALUES (?, ?, ?)`,
+		"cm_alpha_admin", "c_alpha", "u_admin"); err != nil {
+		t.Fatalf("seed crew_member: %v", err)
+	}
+
+	// chats — exercises the renamed entry (was `agent_chats` in the
+	// pre-fix BackupTables, which silently dropped this data) plus the
+	// chats.created_by → users FK now satisfied by the users carry.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO chats (id, agent_id, workspace_id, created_by, title, status)
+		 VALUES (?, ?, ?, ?, ?, 'ACTIVE')`,
+		"ch_alice_1", "a_alice", workspaceID, "u_admin", "First chat"); err != nil {
+		t.Fatalf("seed chat: %v", err)
+	}
+
+	// journal_entries — the crew journal is documented as "canonical
+	// source of truth for every observable action in the platform" and
+	// was excluded from BackupTables pre-fix. Two entries cover the
+	// most common shapes (agent action, user action).
+	journal := []struct{ id, entryType, actorType, summary string }{
+		{"j_1", "agent.run.start", "agent", "Alice started a run"},
+		{"j_2", "user.note", "user", "Operator left a note"},
+	}
+	for _, j := range journal {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO journal_entries (id, workspace_id, crew_id, agent_id, entry_type, actor_type, summary)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			j.id, workspaceID, "c_alpha", "a_alice", j.entryType, j.actorType, j.summary); err != nil {
+			t.Fatalf("seed journal_entry %s: %v", j.id, err)
+		}
+	}
 
 	return workspaceID
 }
@@ -157,29 +196,50 @@ func snapshotWorkspaceScopedTables(t *testing.T, db *sql.DB, workspaceID string)
 	// Listed explicitly so the test fails clearly if the BackupTables
 	// list grows and the scopes shift; better than a silent diff.
 	//
-	// `skills` is intentionally OMITTED: backup.BackupTables filters it
-	// out (no workspace_id column) and a restore target re-seeds the
-	// bundled skills locally via cmd_start.SeedBundledSkills. The two
-	// `created_at` defaults are computed at independent insert times
-	// (datetime('now'), second precision) so comparing source vs.
-	// target hashes is semantically wrong AND flaky under any test
-	// runtime longer than one second. The agent_skills row IS in scope
-	// and is checked below; that covers the link customers care about.
+	// BUNDLED skills (source='BUNDLED') are intentionally EXCLUDED from
+	// the skills snapshot: SeedBundledSkills runs on both source and
+	// target as part of openMigratedDB, so their created_at/updated_at
+	// `datetime('now')` defaults are computed at independent insert
+	// times and drift by a second under any non-trivial test runtime.
+	// The bundle's INSERT OR IGNORE leaves the target's local row
+	// untouched, which is the correct production behavior. Custom
+	// skills (source='CUSTOM') DO round-trip via the bundle and are
+	// compared exactly.
 	queries := []struct{ table, sql string }{
 		{"workspaces", `SELECT * FROM workspaces WHERE id = ? ORDER BY id`},
 		{"crews", `SELECT * FROM crews WHERE workspace_id = ? ORDER BY id`},
 		{"agents", `SELECT * FROM agents WHERE workspace_id = ? ORDER BY id`},
+		{"users", `SELECT u.* FROM users u WHERE u.id IN (
+			SELECT user_id FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)
+			UNION SELECT created_by FROM chats WHERE workspace_id = ? AND created_by IS NOT NULL
+		) ORDER BY u.id`},
+		{"skills", `SELECT s.* FROM skills s
+		            JOIN agent_skills ask ON ask.skill_id = s.id
+		            JOIN agents a ON a.id = ask.agent_id
+		            WHERE a.workspace_id = ? AND s.source != 'BUNDLED'
+		            GROUP BY s.id ORDER BY s.id`},
 		{"agent_skills", `SELECT ask.* FROM agent_skills ask
 		                  JOIN agents a ON a.id = ask.agent_id
 		                  WHERE a.workspace_id = ? ORDER BY ask.id`},
-		// crew_members snapshot intentionally omitted — see the seed
-		// helper for the FK gap that keeps the round-trip from
-		// exercising it. Covered by its own gap test below.
+		{"crew_members", `SELECT cm.* FROM crew_members cm
+		                  JOIN crews c ON c.id = cm.crew_id
+		                  WHERE c.workspace_id = ? ORDER BY cm.id`},
+		{"chats", `SELECT * FROM chats WHERE workspace_id = ? ORDER BY id`},
+		{"journal_entries", `SELECT * FROM journal_entries WHERE workspace_id = ? ORDER BY id`},
 	}
 
 	out := map[string]tableSnapshot{}
 	for _, q := range queries {
-		rows, err := db.QueryContext(ctx, q.sql, workspaceID)
+		// Some scoping clauses (e.g. the users UNION) reference the
+		// workspace id more than once. Pass workspaceID as many times
+		// as there are positional placeholders in the SQL so callers
+		// can write the most natural form per table.
+		nArgs := strings.Count(q.sql, "?")
+		args := make([]any, nArgs)
+		for i := range args {
+			args[i] = workspaceID
+		}
+		rows, err := db.QueryContext(ctx, q.sql, args...)
 		if err != nil {
 			t.Fatalf("snapshot %s: %v", q.table, err)
 		}
@@ -492,131 +552,9 @@ func TestE2E_UpgradePath_BackfillHookFires(t *testing.T) {
 	}
 }
 
-// TestE2E_CustomSkill_RestoreFailsWithFKViolation documents the current
-// behavior of restoring a workspace whose agents reference a custom
-// (non-bundled) skill: the agent_skills rows restore, but the `skills`
-// table itself is NOT exported by backup (no workspace_id column), so
-// the target hits a deferred FK violation and aborts the whole restore.
-//
-// This is a beta-blocker but not in scope for this PR — capture the
-// behavior in a test so any future change to BackupTables that closes
-// the gap will FAIL this test and force an explicit decision. Flip the
-// assertion direction when the fix lands.
-func TestE2E_CustomSkill_RestoreFailsWithFKViolation(t *testing.T) {
-	ctx := context.Background()
-
-	source := openMigratedDB(t)
-	workspaceID := seedWorkspace(t, source)
-
-	// Attach a custom skill that lives only in this workspace. Production
-	// admins create these via the Skills UI; the FK target lives in the
-	// global `skills` table, and the M:N row in `agent_skills`.
-	if _, err := source.ExecContext(ctx,
-		`INSERT INTO skills (id, name, slug, display_name) VALUES (?, ?, ?, ?)`,
-		"sk_custom_e2e", "Custom E2E", "custom-e2e", "Custom"); err != nil {
-		t.Fatalf("seed custom skill: %v", err)
-	}
-	if _, err := source.ExecContext(ctx,
-		`INSERT INTO agent_skills (id, agent_id, skill_id) VALUES (?, ?, ?)`,
-		"as_custom", "a_alice", "sk_custom_e2e"); err != nil {
-		t.Fatalf("seed custom agent_skill: %v", err)
-	}
-
-	const passphrase = "custom-skill-gap-e2e-123"
-	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
-		Scope:       backup.ScopeWorkspace,
-		WorkspaceID: workspaceID,
-		OutputDir:   t.TempDir(),
-		Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
-		Passphrase:  passphrase,
-	})
-	if err != nil {
-		t.Fatalf("CreateBackup: %v", err)
-	}
-
-	target := openMigratedDB(t)
-	_, err = backup.RestoreBackup(ctx, target, backup.RestoreOptions{
-		Path:       createResult.Path,
-		Passphrase: passphrase,
-		Actor:      backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
-	})
-	if err == nil {
-		t.Fatal("expected restore to fail with FK violation while " +
-			"custom skills are excluded from BackupTables; got nil. " +
-			"If the backup runner has been updated to export skills, " +
-			"flip this assertion and add positive coverage in " +
-			"TestE2E_BackupRestoreRoundTrip.")
-	}
-	// Pin to the SPECIFIC failure mode so an unrelated regression
-	// (e.g. RestoreBackup starts returning a different error for an
-	// unrelated reason) doesn't quietly keep this test green and let
-	// a real custom-skill fix sneak through without flipping the
-	// assertion.
-	if !strings.Contains(err.Error(), "deferred FK violations") {
-		t.Errorf("expected deferred-FK-violation error, got: %v", err)
-	}
-}
-
-// TestE2E_CrewMembers_RestoreFailsWithoutUser documents the second
-// FK-gap class found while writing this test suite: crew_members is
-// in BackupTables, but its user_id column FKs into the `users` table,
-// which is intentionally excluded ("per-instance identity"). Result:
-// any workspace that contains crew_members rows hits a deferred FK
-// violation when restored onto a fresh target.
-//
-// In practice this is the canonical disaster-recovery scenario — fresh
-// host, fresh OS-level user list, restore from backup. Until users
-// (or a user-ID remap path) is in scope, EVERY tester who set up at
-// least one crew member loses the whole bundle on restore.
-//
-// Like the custom-skill test above: assertion pinned to the SPECIFIC
-// failure so a future fix flips it red and forces a positive coverage
-// addition to TestE2E_BackupRestoreRoundTrip.
-func TestE2E_CrewMembers_RestoreFailsWithoutUser(t *testing.T) {
-	ctx := context.Background()
-
-	source := openMigratedDB(t)
-	workspaceID := seedWorkspace(t, source)
-
-	// Attach the admin user to a crew. seedWorkspace already inserted
-	// the user row on the source; the bundle however does NOT carry
-	// users, so the target restores a crew_members row whose user_id
-	// FK points at a row that doesn't exist on the destination.
-	if _, err := source.ExecContext(ctx,
-		`INSERT INTO crew_members (id, crew_id, user_id) VALUES (?, ?, ?)`,
-		"cm_gap", "c_alpha", "u_admin"); err != nil {
-		t.Fatalf("seed crew_member: %v", err)
-	}
-
-	const passphrase = "crew-members-gap-e2e-123"
-	createResult, err := backup.CreateBackup(ctx, source, backup.CreateOptions{
-		Scope:       backup.ScopeWorkspace,
-		WorkspaceID: workspaceID,
-		OutputDir:   t.TempDir(),
-		Actor:       backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
-		Passphrase:  passphrase,
-	})
-	if err != nil {
-		t.Fatalf("CreateBackup: %v", err)
-	}
-
-	target := openMigratedDB(t)
-	_, err = backup.RestoreBackup(ctx, target, backup.RestoreOptions{
-		Path:       createResult.Path,
-		Passphrase: passphrase,
-		Actor:      backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"},
-	})
-	if err == nil {
-		t.Fatal("expected restore to fail with FK violation while " +
-			"`users` is excluded from BackupTables; got nil. " +
-			"If the backup runner has been updated to round-trip " +
-			"identities, flip this assertion and add positive " +
-			"coverage in TestE2E_BackupRestoreRoundTrip.")
-	}
-	if !strings.Contains(err.Error(), "deferred FK violations") {
-		t.Errorf("expected deferred-FK-violation error, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "crew_members") {
-		t.Errorf("expected FK error to mention crew_members, got: %v", err)
-	}
-}
+// The two gap-pinning tests (CustomSkill, CrewMembers) that used to
+// live here were inverted into positive coverage on the round-trip
+// once BackupTables started exporting `users` and `skills`. Asserting
+// failure when the underlying data path now succeeds would be a
+// permanent false alarm; the round-trip's per-table diff already
+// proves both classes round-trip cleanly.
