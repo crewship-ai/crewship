@@ -1,13 +1,57 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+// sidecarUseDebounce throttles sidecar-driven USE events so the audit
+// timeline doesn't fill with one row per poll cycle. The sidecar fetches
+// credentials whenever an agent is about to consume them; a 60s window
+// is long enough to merge bursts (one agent run usually fetches each
+// credential once at start, maybe again on rotate) and short enough to
+// catch independent runs.
+const sidecarUseDebounce = 60 * time.Second
+
+// maybeRecordSidecarUse emits an AuditEventUse for credID iff the most
+// recent USE event for the same credential is older than
+// sidecarUseDebounce. Errors are logged but never bubbled — audit
+// failure must not block the credential fetch the sidecar is doing.
+//
+// Closes the gap noted in F-3 of the credentials/scrubber pentest agent:
+// the audit timeline previously showed only manual Test/Rotate/Revoke,
+// not the actual sidecar-driven USE that's what an incident responder
+// most cares about ("when was this credential last touched?").
+func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger, credID string, ip string) {
+	if credID == "" {
+		return
+	}
+	var lastUsed sql.NullString
+	if err := db.QueryRowContext(ctx,
+		`SELECT last_used_at FROM credentials WHERE id = ?`, credID).Scan(&lastUsed); err != nil {
+		// Lookup failure shouldn't block the fetch. Log + record best-effort.
+		if logger != nil {
+			logger.Debug("sidecar use audit: lookup last_used_at", "credential_id", credID, "error", err)
+		}
+	} else if lastUsed.Valid {
+		if t, err := time.Parse(time.RFC3339, lastUsed.String); err == nil {
+			if time.Since(t) < sidecarUseDebounce {
+				return // debounced — recent enough
+			}
+		}
+	}
+	if err := RecordCredentialEvent(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"}); err != nil {
+		if logger != nil {
+			logger.Warn("sidecar use audit: record failed", "credential_id", credID, "error", err)
+		}
+	}
+}
 
 // ListCredentials returns active credentials for the sidecar, with decrypted values.
 // GET /api/v1/internal/credentials — called by sidecar to inject secrets into agent environments.
@@ -78,6 +122,11 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 				c.RefreshToken = &rt
 			}
 		}
+		// Best-effort USE audit. Empty IP is fine — internal callers are
+		// the sidecar (loopback) and the IP would always be 127.0.0.1
+		// which is no signal. Debounced to one row per credential per
+		// minute so a busy sidecar doesn't flood the timeline.
+		maybeRecordSidecarUse(r.Context(), h.db, h.logger, c.ID, "")
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
