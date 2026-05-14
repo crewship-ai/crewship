@@ -1116,6 +1116,24 @@ CREATE INDEX IF NOT EXISTS idx_journal_priority ON journal_entries(priority) WHE
 	// Factory Droid — adapter-agnostic) without copying a session
 	// token through their shell history. See migrate_consts_v86*.go.
 	{version: 86, name: "add_recovery_and_pairing", sql: migrationAddRecoveryAndPairing},
+	// v87 backfills composite (workspace_id, created_at DESC) indexes
+	// on the dominant workspace-scoped list endpoints. The pre-existing
+	// single-column workspace indexes cover the WHERE predicate but
+	// force a separate sort for the ORDER BY created_at DESC pagination
+	// the dashboard + every list view runs; v53's eval_runs index is
+	// the proven precedent. The partial WHERE deleted_at IS NULL keeps
+	// the index size proportional to live rows for soft-deletable
+	// tables (agents/crews/credentials/pipelines), matching the
+	// WHERE clauses that handlers already issue. chats has no
+	// deleted_at column, so its index is unconditional.
+	{version: 87, name: "add_workspace_created_indexes", sql: `
+CREATE INDEX IF NOT EXISTS idx_agents_ws_created ON agents(workspace_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_crews_ws_created ON crews(workspace_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_missions_ws_created ON missions(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chats_ws_created ON chats(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credentials_ws_created ON credentials(workspace_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_pipelines_ws_created ON pipelines(workspace_id, created_at DESC) WHERE deleted_at IS NULL;
+`},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
