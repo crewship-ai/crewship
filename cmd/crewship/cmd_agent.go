@@ -223,81 +223,6 @@ type agentDetailResponse struct {
 	} `json:"_count"`
 }
 
-func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
-	if looksLikeCUID(slugOrID) {
-		return slugOrID, nil
-	}
-
-	resp, err := client.Get("/api/v1/agents")
-	if err != nil {
-		return "", fmt.Errorf("resolve agent: %w", err)
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return "", err
-	}
-
-	var agents []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
-	}
-	if err := cli.ReadJSON(resp, &agents); err != nil {
-		return "", err
-	}
-
-	available := make([]string, 0, len(agents))
-	for _, a := range agents {
-		if a.Slug == slugOrID {
-			return a.ID, nil
-		}
-		if a.Slug != "" {
-			available = append(available, a.Slug)
-		}
-	}
-	// Suggest near-matches when the user almost certainly mistyped a slug.
-	// Without this, "crewship run vitkor" gives a flat "not found" with no
-	// hint that "viktor" exists. With ~10-30 agents per workspace the cost
-	// of computing Levenshtein over all candidates is negligible.
-	if len(available) == 0 {
-		return "", fmt.Errorf("agent not found: %s (no agents in this workspace)", slugOrID)
-	}
-	suggestions := nearestSlugs(slugOrID, available, 3)
-	if len(suggestions) > 0 {
-		return "", fmt.Errorf("agent not found: %s. Did you mean: %s?",
-			slugOrID, strings.Join(suggestions, ", "))
-	}
-	return "", fmt.Errorf("agent not found: %s. Available: %s",
-		slugOrID, strings.Join(truncateList(available, 8), ", "))
-}
-
-func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
-	if looksLikeCUID(slugOrID) {
-		return slugOrID, nil
-	}
-
-	resp, err := client.Get("/api/v1/crews")
-	if err != nil {
-		return "", fmt.Errorf("resolve crew: %w", err)
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return "", err
-	}
-
-	var crews []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
-	}
-	if err := cli.ReadJSON(resp, &crews); err != nil {
-		return "", err
-	}
-
-	for _, c := range crews {
-		if c.Slug == slugOrID {
-			return c.ID, nil
-		}
-	}
-	return "", fmt.Errorf("crew not found: %s", slugOrID)
-}
-
 // warnCoordinatorDeprecated emits a deprecation notice when the user
 // passes --role COORDINATOR on agent create/update. The role is still
 // accepted (back-compat with v1 templates that used COORDINATOR), but
@@ -310,14 +235,3 @@ func warnCoordinatorDeprecated(cmd *cobra.Command, _ []string) {
 	}
 }
 
-func looksLikeCUID(s string) bool {
-	if len(s) < 20 || s[0] != 'c' {
-		return false
-	}
-	for _, r := range s {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
-			return false
-		}
-	}
-	return true
-}
