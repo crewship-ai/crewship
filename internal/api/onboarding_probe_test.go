@@ -5,19 +5,20 @@ import (
 	"testing"
 )
 
-// CREWSHIP_E2E_SKIP_TOKEN_PROBE must short-circuit the probe so the
-// onboarding E2E suite can run in CI without a live Anthropic call.
-// If someone refactors probeAnthropicOAuthToken and moves the env
-// check below http.NewRequestWithContext, the suite quietly starts
-// depending on a real token + outbound network again. This pins the
-// contract.
+// skipTokenProbe is read once at package init from
+// CREWSHIP_E2E_SKIP_TOKEN_PROBE — flipping the package var directly
+// mirrors what server startup would have cached for any truthy value
+// and avoids leaking the dependence on init-time env state into the
+// test. Pins the contract that probeAnthropicOAuthToken returns nil
+// when the gate is set, so a refactor that moves the check below
+// http.NewRequestWithContext breaks the test instead of silently
+// starting to depend on a real Anthropic call.
 func TestProbeAnthropicOAuthTokenSkipGate(t *testing.T) {
-	for _, v := range []string{"1", "true"} {
-		t.Run("gate="+v, func(t *testing.T) {
-			t.Setenv("CREWSHIP_E2E_SKIP_TOKEN_PROBE", v)
-			if err := probeAnthropicOAuthToken(context.Background(), "sk-ant-oat-not-a-real-token"); err != nil {
-				t.Fatalf("expected nil with skip gate enabled, got %v", err)
-			}
-		})
+	orig := skipTokenProbe
+	t.Cleanup(func() { skipTokenProbe = orig })
+
+	skipTokenProbe = true
+	if err := probeAnthropicOAuthToken(context.Background(), "sk-ant-oat-not-a-real-token"); err != nil {
+		t.Fatalf("expected nil with skip gate enabled, got %v", err)
 	}
 }

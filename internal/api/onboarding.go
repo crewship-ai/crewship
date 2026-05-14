@@ -19,6 +19,33 @@ import (
 
 var dashRegex = regexp.MustCompile(`-+`)
 
+// skipTokenProbe short-circuits the live Anthropic probe in
+// probeAnthropicOAuthToken so the onboarding E2E suite can run in CI
+// without burning a real CLI token (and without making nightly runs
+// depend on api.anthropic.com being up). Read ONCE at package init
+// rather than per-call so:
+//
+//   - os.Getenv work doesn't repeat on every onboarding submit, and
+//   - accidental production use is loud + auditable (the init log
+//     below fires exactly once at server start, so any operator
+//     glance at the startup log sees the warning).
+//
+// Only "1" / "true" widen the gate — an accidental empty export
+// still keeps the probe live.
+var skipTokenProbe = func() bool {
+	v := os.Getenv("CREWSHIP_E2E_SKIP_TOKEN_PROBE")
+	return v == "1" || v == "true"
+}()
+
+func init() {
+	if skipTokenProbe {
+		slog.Warn(
+			"CREWSHIP_E2E_SKIP_TOKEN_PROBE is enabled — Anthropic token validation is bypassed. " +
+				"DO NOT set this in production.",
+		)
+	}
+}
+
 type llmProviderInfo struct {
 	provider   string
 	envVarName string
@@ -600,13 +627,7 @@ func validateOnboardingCredential(ctx context.Context, provider, value string) e
 // works. Other failures (network, 5xx) are treated as soft — we
 // log + accept rather than block onboarding on Anthropic flaking.
 func probeAnthropicOAuthToken(parent context.Context, token string) error {
-	// CREWSHIP_E2E_SKIP_TOKEN_PROBE short-circuits the live Anthropic
-	// call so the onboarding E2E suite can run in CI without burning a
-	// real CLI token (and without making nightly runs depend on
-	// api.anthropic.com being up). Only honoured for the truthy values
-	// "1" / "true" so an accidental empty-string export doesn't widen
-	// the gate. Never set this in production.
-	if v := os.Getenv("CREWSHIP_E2E_SKIP_TOKEN_PROBE"); v == "1" || v == "true" {
+	if skipTokenProbe {
 		return nil
 	}
 	const url = "https://api.anthropic.com/v1/messages"
