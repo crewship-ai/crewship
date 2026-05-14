@@ -133,7 +133,20 @@ func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	relID := r.PathValue("relationId")
-	res, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_relations WHERE id = ?`, relID)
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	// Pre-fix the DELETE was unscoped: any authenticated user could
+	// guess a relation ID and delete a relationship between two issues
+	// in any workspace. The fix is a join-bound delete — the relation
+	// only goes if BOTH endpoints live in the caller's workspace.
+	// CreateRelation already enforces same-workspace endpoints, so this
+	// rejects no legitimate request.
+	res, err := h.db.ExecContext(r.Context(), `
+		DELETE FROM mission_relations
+		WHERE id = ?
+		  AND source_id IN (SELECT id FROM missions WHERE workspace_id = ?)
+		  AND target_id IN (SELECT id FROM missions WHERE workspace_id = ?)`,
+		relID, wsID, wsID)
 	if err != nil {
 		h.logger.Error("delete relation", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -141,6 +154,9 @@ func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
+		// Don't distinguish "not found in this workspace" from "doesn't
+		// exist anywhere" — that would be a cross-workspace existence
+		// oracle.
 		writeProblem(w, r, http.StatusNotFound, "Relation not found")
 		return
 	}

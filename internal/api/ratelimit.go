@@ -12,11 +12,72 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// rateLimitDisabled is true when CREWSHIP_DISABLE_RATELIMIT parses as a truthy
-// boolean (typically in dev shells running E2E suites against a real backend).
-// When true the middleware is a pass-through. Fails closed: empty string or an
-// unparseable value keeps rate-limiting engaged.
-var rateLimitDisabled = parseBoolEnv("CREWSHIP_DISABLE_RATELIMIT")
+// rateLimitDisabled is true when the operator has explicitly toggled the
+// rate limiter off. Two env vars are honoured, with strict precedence:
+//
+//  1. CREWSHIP_RATELIMIT_DISABLED — the canonical, current name. If set
+//     (any value, even empty), it is authoritative.
+//  2. CREWSHIP_DISABLE_RATELIMIT — the legacy alias kept for one release
+//     to ease the rename. Only consulted when the canonical var is
+//     **not set at all**.
+//
+// CodeRabbit's R2 review caught the ambiguity in the previous OR-form:
+// a stale `CREWSHIP_DISABLE_RATELIMIT=true` left over from before the
+// rename would silently override an explicit
+// `CREWSHIP_RATELIMIT_DISABLED=false`, and would also trip the
+// MustNotDisableRateLimitInProd guard after the rename.
+//
+// In production (CREWSHIP_ENV=prod or production), this flag is ignored
+// regardless of which env var set it — the limiter always runs. See
+// MustNotDisableRateLimitInProd.
+var rateLimitDisabled = resolveRateLimitDisabled()
+
+func resolveRateLimitDisabled() bool {
+	if v, ok := lookupBoolEnv("CREWSHIP_RATELIMIT_DISABLED"); ok {
+		return v
+	}
+	v, _ := lookupBoolEnv("CREWSHIP_DISABLE_RATELIMIT")
+	return v
+}
+
+// trustedProxyCIDRs lists the CIDRs of reverse proxies whose
+// X-Forwarded-For/X-Real-IP headers we trust. Set via
+// CREWSHIP_TRUSTED_PROXY_CIDRS as a comma-separated list. When unset, only
+// loopback (127.0.0.0/8 and ::1/128) is trusted — that covers the common
+// case of a local nginx/Caddy on the same host. Anything else MUST be
+// explicit.
+//
+// The previous implementation read XFF from any client unconditionally,
+// which let an attacker present a fresh fake IP per request and get an
+// uncapped token bucket — bypassing credential-stuffing throttles, the
+// `/credentials/test` validation oracle, and the general API limit alike.
+var trustedProxyCIDRs = parseTrustedProxies(os.Getenv("CREWSHIP_TRUSTED_PROXY_CIDRS"))
+
+// lookupBoolEnv reads a boolean env var with three-state semantics:
+//   - (false, false) → variable is not set at all (unset)
+//   - (true,  true)  → variable is set to a truthy value
+//   - (false, true)  → variable is set to a falsy / unparseable value
+//
+// The "set" bit is what `resolveRateLimitDisabled` uses to give the
+// canonical name precedence over the legacy alias even when its value
+// is `false`. parseBoolEnv stays as a lossy two-state wrapper for any
+// other caller that doesn't care about the distinction.
+func lookupBoolEnv(name string) (bool, bool) {
+	raw, ok := os.LookupEnv(name)
+	if !ok {
+		return false, false
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		// Set but blank — treat as "not enabled", but still authoritative.
+		return false, true
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, true
+	}
+	return b, true
+}
 
 func parseBoolEnv(name string) bool {
 	v := strings.TrimSpace(os.Getenv(name))
@@ -28,6 +89,52 @@ func parseBoolEnv(name string) bool {
 		return false
 	}
 	return b
+}
+
+// parseTrustedProxies parses a comma-separated CIDR list. Defaults to
+// loopback when the env var is empty. Invalid entries are dropped with a
+// startup-time stderr message so operators notice typos but the server
+// still runs with the surviving entries (loopback as a floor).
+func parseTrustedProxies(raw string) []*net.IPNet {
+	loopback := mustCIDR("127.0.0.0/8")
+	loopbackV6 := mustCIDR("::1/128")
+	out := []*net.IPNet{loopback, loopbackV6}
+
+	if strings.TrimSpace(raw) == "" {
+		return out
+	}
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		// Accept bare IPs as /32 or /128 for ergonomics
+		if !strings.Contains(item, "/") {
+			ip := net.ParseIP(item)
+			if ip == nil {
+				continue
+			}
+			if ip.To4() != nil {
+				item += "/32"
+			} else {
+				item += "/128"
+			}
+		}
+		_, ipnet, err := net.ParseCIDR(item)
+		if err != nil {
+			continue
+		}
+		out = append(out, ipnet)
+	}
+	return out
+}
+
+func mustCIDR(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic("ratelimit: invalid hardcoded CIDR " + s + ": " + err.Error())
+	}
+	return n
 }
 
 // ipLimiter tracks a per-IP rate limiter and when it was last seen.
@@ -94,7 +201,7 @@ func (rl *RateLimiter) cleanup() {
 
 // Middleware returns an http.Handler that rate-limits requests by client IP.
 // When the limit is exceeded, it responds with 429 Too Many Requests.
-// When CREWSHIP_DISABLE_RATELIMIT is set the middleware is a no-op.
+// When CREWSHIP_RATELIMIT_DISABLED is set the middleware is a no-op.
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	if rateLimitDisabled {
 		return next
@@ -113,21 +220,89 @@ func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// extractIP returns the client IP from the request, preferring
-// X-Forwarded-For and X-Real-IP headers (trusted reverse proxy).
+// extractIP returns the client IP from the request. X-Forwarded-For and
+// X-Real-IP headers are honoured ONLY when the immediate hop (r.RemoteAddr)
+// is in the trusted-proxy CIDR list. Untrusted clients can set these
+// headers freely; treating them as authoritative would let any attacker
+// rotate fake IPs per request and pop their own fresh token bucket.
+//
+// Trust list defaults to loopback. Operators behind a non-local proxy must
+// set CREWSHIP_TRUSTED_PROXY_CIDRS=<proxy-ip-or-cidr,...>.
+//
+// When XFF is honoured, the chain is parsed *right to left*, skipping
+// trusted-proxy hops, returning the first untrusted IP. The naive
+// "leftmost entry is the client" reading from the previous fix breaks
+// when the immediate proxy *appends* to XFF instead of overwriting it
+// — nginx with `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
+// (the default in many helm charts) does exactly this. With overwrite
+// proxies, leftmost-vs-rightmost is the same value. With append proxies,
+// an attacker can pre-seed `X-Forwarded-For: 8.8.8.8` and the proxy
+// turns it into `8.8.8.8, <real-attacker-ip>` — leftmost reads back
+// the spoof, rightmost-after-skip reads the real client. CodeRabbit
+// caught this on the first PR pass.
 func extractIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// First entry is the original client
-		if comma := indexOf(xff, ','); comma != -1 {
-			xff = xff[:comma]
-		}
-		if ip := trimSpace(xff); ip != "" {
+	hop := remoteHopIP(r)
+
+	if isTrustedProxy(hop) {
+		if ip := clientIPFromXFF(r.Header.Get("X-Forwarded-For")); ip != "" {
 			return ip
 		}
+		if xri := strings.TrimSpace(r.Header.Get("X-Real-IP")); xri != "" {
+			if parsed := net.ParseIP(xri); parsed != nil && !isTrustedProxy(parsed.String()) {
+				return parsed.String()
+			}
+		}
 	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return trimSpace(xri)
+
+	return hop
+}
+
+// clientIPFromXFF parses an X-Forwarded-For chain right to left, skips
+// any entry that is itself a trusted proxy, and returns the first IP
+// that isn't. Returns "" if no untrusted entry exists (which means the
+// caller should fall back to r.RemoteAddr).
+//
+// Right-to-left order is RFC 7239 §5.3 — the rightmost entry is the
+// proxy hop closest to us, the leftmost is whatever the originator
+// chose to put there. Skipping trusted hops is what defeats the spoof:
+// a forged leftmost entry is silently ignored because the real proxy
+// hop sits to its right. With a single overwrite-style proxy the
+// behaviour matches the previous leftmost reading; with an append-style
+// proxy chain it correctly walks past the proxy IPs to the real client.
+func clientIPFromXFF(xff string) string {
+	if xff == "" {
+		return ""
 	}
+	parts := strings.Split(xff, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		raw := strings.TrimSpace(parts[i])
+		if raw == "" {
+			continue
+		}
+		// XFF entries can include a port in some proxy configurations
+		// ("1.2.3.4:54321"). net.ParseIP rejects those, so try
+		// SplitHostPort first; if it succeeds, use the host part.
+		host := raw
+		if h, _, err := net.SplitHostPort(raw); err == nil {
+			host = h
+		}
+		ip := net.ParseIP(host)
+		if ip == nil {
+			continue
+		}
+		if isTrustedProxy(ip.String()) {
+			continue
+		}
+		return ip.String()
+	}
+	return ""
+}
+
+// remoteHopIP extracts the connection-level peer IP from r.RemoteAddr,
+// stripping any port. Falls back to the raw value if SplitHostPort fails
+// (e.g. test fixtures that omit a port) so the limiter still buckets by
+// something stable rather than crashing.
+func remoteHopIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -135,22 +310,34 @@ func extractIP(r *http.Request) string {
 	return host
 }
 
-func indexOf(s string, b byte) int {
-	for i := range len(s) {
-		if s[i] == b {
-			return i
+func isTrustedProxy(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, cidr := range trustedProxyCIDRs {
+		if cidr.Contains(parsed) {
+			return true
 		}
 	}
-	return -1
+	return false
 }
 
-func trimSpace(s string) string {
-	start, end := 0, len(s)
-	for start < end && s[start] == ' ' {
-		start++
+// MustNotDisableRateLimitInProd panics during server boot if rate limiting
+// is disabled while running in a production environment. Operators get a
+// loud failure rather than discovering the gap from a credential-stuffing
+// incident. Called from cmd_start before listeners start accepting traffic.
+func MustNotDisableRateLimitInProd() {
+	if !rateLimitDisabled {
+		return
 	}
-	for end > start && s[end-1] == ' ' {
-		end--
+	env := strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_ENV")))
+	if env == "prod" || env == "production" {
+		panic("rate limiting is disabled (CREWSHIP_RATELIMIT_DISABLED) but CREWSHIP_ENV=" + env +
+			"; refusing to start. Unset the flag or change CREWSHIP_ENV to a non-prod value.")
 	}
-	return s[start:end]
 }
+
+// RateLimitDisabled reports whether rate limiting is currently bypassed.
+// Exposed for /api/health to surface the runtime state to scrapers.
+func RateLimitDisabled() bool { return rateLimitDisabled }

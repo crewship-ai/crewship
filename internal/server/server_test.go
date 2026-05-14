@@ -143,6 +143,11 @@ func TestReadyz(t *testing.T) {
 func TestMetrics(t *testing.T) {
 	s := newTestServer()
 	req := httptest.NewRequest("GET", "/metrics", nil)
+	// /metrics is now gated to loopback or token-bearing callers (F-003).
+	// The Go-level scrape path is loopback, which the default test
+	// fixture's RemoteAddr ("192.0.2.1:1234") isn't — set it explicitly so
+	// we exercise the Prometheus-from-localhost code path.
+	req.RemoteAddr = "127.0.0.1:55555"
 	w := httptest.NewRecorder()
 
 	s.mux.ServeHTTP(w, req)
@@ -167,6 +172,22 @@ func TestMetrics(t *testing.T) {
 		if !strings.Contains(output, m) {
 			t.Errorf("expected metric %s in output", m)
 		}
+	}
+}
+
+// TestMetrics_RemoteWithoutTokenIs404 is the regression guard for F-003 —
+// pre-fix any client could scrape; now non-loopback callers without
+// CREWSHIP_METRICS_TOKEN get 404 (404 not 401 to avoid confirming the
+// endpoint exists).
+func TestMetrics_RemoteWithoutTokenIs404(t *testing.T) {
+	t.Setenv("CREWSHIP_METRICS_TOKEN", "")
+	s := newTestServer()
+	req := httptest.NewRequest("GET", "/metrics", nil)
+	req.RemoteAddr = "203.0.113.50:55555" // public peer
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 from unauthorized scrape, got %d", w.Code)
 	}
 }
 

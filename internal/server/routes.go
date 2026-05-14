@@ -2,13 +2,16 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/llmproxy"
@@ -94,7 +97,58 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+// metricsAuthorized gates /metrics. The endpoint exposes hostname,
+// uptime, goroutine and memory counters, and live WS-connection counts —
+// useful to a Prometheus scraper, but also a side-channel for an
+// attacker timing a DoS or a deploy. Two ways to authorize:
+//
+//   - The connection peer is loopback (typical: localhost Prometheus or
+//     a node-local sidecar scrape — no token needed).
+//   - The request carries Authorization: Bearer <token> matching
+//     CREWSHIP_METRICS_TOKEN, compared in constant time.
+//
+// When CREWSHIP_METRICS_TOKEN is unset, only loopback is permitted. The
+// previous behaviour ("anyone can read") survived only because no PoC had
+// chained the leak into something more impactful — see F-003.
+func metricsAuthorized(r *http.Request) bool {
+	if isLoopbackPeer(r.RemoteAddr) {
+		return true
+	}
+	want := strings.TrimSpace(os.Getenv("CREWSHIP_METRICS_TOKEN"))
+	if want == "" {
+		return false
+	}
+	got := r.Header.Get("Authorization")
+	if !strings.HasPrefix(got, "Bearer ") {
+		return false
+	}
+	gotToken := strings.TrimPrefix(got, "Bearer ")
+	// Constant-time compare keeps timing side-channels off the table even
+	// though the win against a high-entropy token is tiny.
+	return subtle.ConstantTimeCompare([]byte(gotToken), []byte(want)) == 1
+}
+
+func isLoopbackPeer(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback()
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if !metricsAuthorized(r) {
+		// 404 rather than 401 to avoid confirming the endpoint exists to
+		// an unauthorized scanner. Prometheus scrapers configured for the
+		// authorized path won't notice the difference.
+		http.NotFound(w, r)
+		return
+	}
+
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 

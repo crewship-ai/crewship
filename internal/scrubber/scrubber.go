@@ -144,6 +144,18 @@ func (s *Scrubber) AddPattern(name, regex string) error {
 }
 
 // Scrub replaces all detected credential patterns with [REDACTED] markers.
+//
+// Input is normalised before pattern matching to defeat trivial obfuscation
+// — zero-width characters (U+200B/C/D/FEFF, BOM) inside an otherwise-valid
+// key form would otherwise let an attacker print "sk-ant-​abcd..." and slip
+// past the regex char class. The normalised string is what's pattern-
+// matched; the *output* is the normalised string with REDACTED markers
+// substituted so we don't accidentally re-emit the embedded zero-width
+// character downstream and re-create the bypass for the next sink.
+//
+// This is intentionally narrower than full Unicode normalisation —
+// zero-width-only is enough to close the documented bypass without risk
+// of mutating legitimate non-ASCII text in agent output.
 func (s *Scrubber) Scrub(input string) string {
 	if input == "" {
 		return ""
@@ -152,7 +164,7 @@ func (s *Scrubber) Scrub(input string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := input
+	result := stripZeroWidth(input)
 	for _, p := range s.patterns {
 		replacement := "[REDACTED]"
 		if p.name != "" {
@@ -167,6 +179,40 @@ func (s *Scrubber) Scrub(input string) string {
 		}
 	}
 	return result
+}
+
+// zeroWidthRunes is the small, fixed set of invisible characters we strip
+// before pattern matching. These are documented-as-zero-width in Unicode
+// and have no semantic meaning in key/token contexts — anything else
+// (BiDi marks, NBSP, etc.) is left alone to avoid unintended behaviour.
+var zeroWidthRunes = map[rune]struct{}{
+	'\u200B': {}, // ZERO WIDTH SPACE
+	'\u200C': {}, // ZERO WIDTH NON-JOINER
+	'\u200D': {}, // ZERO WIDTH JOINER
+	'\u2060': {}, // WORD JOINER
+	'\uFEFF': {}, // ZERO WIDTH NO-BREAK SPACE / BOM
+}
+
+func stripZeroWidth(s string) string {
+	// Fast path: nothing to strip.
+	hasZW := false
+	for _, r := range s {
+		if _, ok := zeroWidthRunes[r]; ok {
+			hasZW = true
+			break
+		}
+	}
+	if !hasZW {
+		return s
+	}
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		if _, skip := zeroWidthRunes[r]; skip {
+			continue
+		}
+		out = append(out, r)
+	}
+	return string(out)
 }
 
 var (
@@ -195,6 +241,8 @@ func (s *Scrubber) scrubGeneric(input string, re *regexp.Regexp) string {
 }
 
 // ContainsSecret returns true if the input contains any known credential pattern.
+// Like Scrub, this matches against the zero-width-stripped form so the
+// detector and the redactor agree on whether a string is sensitive.
 func (s *Scrubber) ContainsSecret(input string) bool {
 	if input == "" {
 		return false
@@ -203,8 +251,9 @@ func (s *Scrubber) ContainsSecret(input string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	normalized := stripZeroWidth(input)
 	for _, p := range s.patterns {
-		if p.re.MatchString(input) {
+		if p.re.MatchString(normalized) {
 			return true
 		}
 	}

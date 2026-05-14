@@ -90,6 +90,12 @@ func TestRegisterRoutes_AllPathsMounted(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
+			// /metrics is loopback-or-token gated post-F-003. The default
+			// httptest RemoteAddr (192.0.2.1) is non-loopback; pin it so
+			// this routes-mounted assertion still exercises the success
+			// path. Other endpoints aren't gated, so the override is
+			// harmless for them.
+			req.RemoteAddr = "127.0.0.1:55555"
 			w := httptest.NewRecorder()
 			s.mux.ServeHTTP(w, req)
 			if w.Code != tc.wantStatus {

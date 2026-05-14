@@ -196,7 +196,12 @@ func (r *Router) SetScheduler(su ScheduleUpdater) {
 // RouterOption is a functional option for configuring a Router.
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	SecurityHeaders(http.HandlerFunc(r.routeWithRateLimiting)).ServeHTTP(w, req)
+	// Order matters: SecurityHeaders runs outermost so headers go on every
+	// response (incl. 403s from the origin check); EnforceOrigin runs next
+	// so a cross-site state-changing request is rejected before it can
+	// even consume a rate-limit token (and before per-handler logic);
+	// rate limiting and routing follow.
+	SecurityHeaders(EnforceOrigin(http.HandlerFunc(r.routeWithRateLimiting))).ServeHTTP(w, req)
 }
 
 // Shutdown releases background resources the router owns — the port-expose

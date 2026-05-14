@@ -42,14 +42,55 @@ type Importer struct {
 }
 
 // NewImporter creates an Importer with a 30-second HTTP timeout.
-// The HTTP client validates redirect targets against SSRF checks.
+//
+// SSRF defense is layered:
+//   - ValidateImportURL is the cheap string-level reject (HTTPS-only, no
+//     literal localhost / private IP) and runs before any DNS lookup.
+//   - The Transport's DialContext goes a layer deeper: it inspects the
+//     resolved IP at connect time and refuses private/loopback/link-local
+//     ranges. This catches DNS aliases (localtest.me → 127.0.0.1),
+//     split-horizon DNS, and DNS rebinding — none of which the URL string
+//     alone can see.
+//   - CheckRedirect re-runs ValidateImportURL on every 3xx so an attacker
+//     can't bounce off a permissive host into an internal one.
+//
+// The dialer is rebuilt lazily on first use so tests that flip
+// SkipURLValidation after construction (the convention in skills_test.go)
+// get an unrestricted client. Production code never flips the flag.
 func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 	imp := &Importer{
 		db:     db,
 		logger: logger,
 	}
+	imp.rebuildClient()
+	return imp
+}
+
+// SetSkipURLValidation flips the test-only flag and rebuilds the http
+// client so the dial-time SSRF guard is also disabled. Production code
+// must never call this.
+func (imp *Importer) SetSkipURLValidation(v bool) {
+	imp.SkipURLValidation = v
+	imp.rebuildClient()
+}
+
+// rebuildClient constructs the http.Client with or without the SSRF
+// dial-time guard depending on SkipURLValidation. Called from NewImporter
+// and again from any code path that flips the flag.
+func (imp *Importer) rebuildClient() {
+	transport := &http.Transport{
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          16,
+		IdleConnTimeout:       90 * time.Second,
+	}
+	if !imp.SkipURLValidation {
+		transport.DialContext = safeDialContext()
+	}
 	imp.client = &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
@@ -60,7 +101,6 @@ func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 			return ValidateImportURL(req.Context(), req.URL.String())
 		},
 	}
-	return imp
 }
 
 // Import imports a skill from the given request and upserts it into the database.

@@ -240,6 +240,20 @@ func (h *PortExposeHandler) ServeExposed(w http.ResponseWriter, r *http.Request)
 	}
 	r.URL.RawPath = ""
 
+	// Strip headers that would leak the capability token to the upstream
+	// container and from there to anything the container talks to:
+	//   - Referer: an HTML page served from inside the container that loads
+	//     a third-party asset will include the full /exposed/{token}/...
+	//     URL in the Referer header on that outbound request — token leaks.
+	//   - Cookie: the caller's session cookie has nothing to do with the
+	//     exposed application; passing it in would let the container read
+	//     the user's authn state.
+	//   - Authorization: same reasoning — the container never needs the
+	//     caller's auth header.
+	r.Header.Del("Referer")
+	r.Header.Del("Cookie")
+	r.Header.Del("Authorization")
+
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.ErrorLog = slog.NewLogLogger(h.logger.Handler(), slog.LevelWarn)
 	proxy.ErrorHandler = func(rw http.ResponseWriter, rq *http.Request, err error) {

@@ -79,6 +79,34 @@ type FeatureMount struct {
 	Type   string `json:"type,omitempty"` // "bind" or "volume"
 }
 
+// allowedFeatureCapAdd is the whitelist of Linux capabilities a
+// devcontainer feature is permitted to request. Anything outside this
+// set is silently dropped — see UnmarshalJSON's privileged-strip block.
+//
+// NET_BIND_SERVICE is the only capability we currently recognise as a
+// legitimate feature need: it lets a non-root process bind to ports
+// below 1024 (common for features that run an HTTP server). Adding to
+// this set should require security review.
+var allowedFeatureCapAdd = map[string]struct{}{
+	"NET_BIND_SERVICE": {},
+}
+
+func filterAllowedCapAdd(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, c := range in {
+		if _, ok := allowedFeatureCapAdd[c]; ok {
+			out = append(out, c)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // InstallsAfter is retained for backward compatibility — the canonical
 // type is now []string (per devcontainer spec). Struct-form arrays in the
 // wild are normalized into string IDs at unmarshal time via
@@ -122,10 +150,19 @@ func (m *FeatureMetadata) UnmarshalJSON(data []byte) error {
 	m.Options = r.Options
 	m.ContainerEnv = r.ContainerEnv
 	m.Mounts = r.Mounts
-	m.Privileged = r.Privileged
+	// Strip Docker-host-elevation requests at parse time. Devcontainer
+	// features come from arbitrary OCI registries; a malicious feature
+	// declaring `"privileged": true` or `"capAdd": ["SYS_ADMIN"]` would
+	// otherwise bubble up to the container HostConfig and grant the
+	// agent enough capability to escape the sandbox. The whole point of
+	// running as UID 1001 with --cap-drop=ALL is undone if the feature
+	// can selectively re-add what it wants. Operators who genuinely
+	// need a privileged feature can apply it manually outside the
+	// devcontainer-feature pipeline.
+	m.Privileged = false
+	m.CapAdd = filterAllowedCapAdd(r.CapAdd)
+	m.SecurityOpt = nil // never honour security-opt overrides from features
 	m.Init = r.Init
-	m.CapAdd = r.CapAdd
-	m.SecurityOpt = r.SecurityOpt
 	m.OnCreateCommand = r.OnCreateCommand
 	m.PostCreateCommand = r.PostCreateCommand
 	m.PostStartCommand = r.PostStartCommand
