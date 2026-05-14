@@ -84,8 +84,8 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	cleanPath := filepath.Clean(filePath)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+	cleanPath, ok := normalizeRequestPath(filePath)
+	if !ok {
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
@@ -153,8 +153,8 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cleanPath := filepath.Clean(filePath)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+	cleanPath, ok := normalizeRequestPath(filePath)
+	if !ok {
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
@@ -245,8 +245,8 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
-	cleanPath := filepath.Clean(filePath)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+	cleanPath, ok := normalizeRequestPath(filePath)
+	if !ok {
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
@@ -296,8 +296,8 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
-	cleanPath := filepath.Clean(filePath)
-	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+	cleanPath, ok := normalizeRequestPath(filePath)
+	if !ok {
 		replyError(w, http.StatusBadRequest, "Invalid file path")
 		return
 	}
