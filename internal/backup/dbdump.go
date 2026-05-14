@@ -10,31 +10,66 @@ import (
 
 // BackupTables is the ordered list of tables exported in workspace /
 // crew scope bundles. The order matters for restore — children are
-// inserted after their parents so FK constraints hold.
+// inserted after their parents so FK constraints hold (`users` and
+// `skills` before the bridge rows that reference them).
 //
-// Out of scope for MVP:
-//   - users, workspace_members: membership is per-instance; restore
-//     does not re-hydrate external user identities.
+// What this list deliberately INCLUDES that an earlier draft did not:
+//
+//   - `users`: previously excluded as "per-instance identity," but
+//     crew_members.user_id and chats.created_by both FK into it. On
+//     a fresh restore target every crew_members row aborted with a
+//     deferred FK violation — the canonical disaster-recovery scenario.
+//     Workspace-scope filter narrows users to only those referenced by
+//     workspace data (no cross-workspace identity leak). Note: this
+//     bundles `hashed_password` for those users; admins downloading a
+//     bundle should already be trusted with that level of access.
+//   - `skills`: previously fell through to the default
+//     `workspace_id = ?` filter and got silently skipped (skills are
+//     globally namespaced). Now scoped transitively via agent_skills
+//     so user-created custom skills round-trip.
+//   - `chats`: previously listed under the wrong name (`agent_chats`,
+//     which is not an actual table). Production code reads from `chats`.
+//   - `agent_mcp_bindings`: previously listed as `mcp_bindings`. Same
+//     class of name-mismatch silent-skip. Credential-bound bindings
+//     will FK-fail on a fresh target because `credentials` is a
+//     separate instance-scope concern; that gap is tracked separately.
+//   - `journal_entries`: the crew journal is documented as "canonical
+//     source of truth for every observable action in the platform";
+//     omitting it from the bundle was real data loss. FTS5 triggers
+//     repopulate journal_entries_fts on INSERT so search keeps working
+//     post-restore.
+//
+// Removed (orphan entries the schema never created):
+// crew_integrations, memory_backups, workspace_memory, crew_memory.
+// Agent memory lives on the per-crew container filesystem (`/output`)
+// which is collected by the docker phase, not the DB dump.
+//
+// Still out of scope for MVP (deliberate, with reasons):
+//   - workspace_members: instance-level invitations / role assignments.
+//     Adding it without also adding a user-existence guarantee leaks
+//     across tenants; revisit when multi-tenant restore is in scope.
 //   - credentials, oauth_tokens: handled separately by instance backup
 //     (PR 4) and intentionally excluded from workspace bundles.
 //   - sessions, audit_logs: operational data that stays with the
 //     destination instance.
+//   - journal_embeddings, journal_entries_archived: BLOB vector data
+//     would corrupt under the current TEXT-only round-trip path
+//     (normalizeScan coerces []byte to string). Tracked as a runtime
+//     hardening follow-up before they can be safely added.
 //
 // Tables that may not exist in every schema revision are skipped at
 // runtime; the exporter logs the skip so operators can see it.
 var BackupTables = []string{
+	"users",
 	"workspaces",
 	"crews",
 	"agents",
 	"skills",
 	"agent_skills",
 	"crew_members",
-	"crew_integrations",
-	"mcp_bindings",
-	"agent_chats",
-	"memory_backups",
-	"workspace_memory",
-	"crew_memory",
+	"chats",
+	"agent_mcp_bindings",
+	"journal_entries",
 }
 
 // DBDump captures the exported rows from one or more tables. Keys are
@@ -98,29 +133,58 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	switch table {
 	case "workspaces":
 		return "id = ?", []any{workspaceID}, true
+	case "users":
+		// Users are global. Narrow to only the identities the workspace
+		// data actually FKs into so a workspace bundle does NOT leak
+		// every other user on a multi-workspace instance. The UNION
+		// gathers: crew membership owners, chat authors, and authors
+		// of custom skills attached to this workspace's agents.
+		// Joins via crews.workspace_id rather than agents.workspace_id
+		// because the agents schema isn't strictly required to carry
+		// workspace_id directly (production does; the minimal test
+		// schemas in this package don't).
+		return `id IN (
+			SELECT user_id FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)
+			UNION SELECT created_by FROM chats WHERE workspace_id = ? AND created_by IS NOT NULL
+			UNION SELECT s.author_id FROM skills s
+			  JOIN agent_skills ask ON ask.skill_id = s.id
+			  JOIN agents a ON a.id = ask.agent_id
+			  JOIN crews c ON c.id = a.crew_id
+			  WHERE c.workspace_id = ? AND s.author_id IS NOT NULL
+		)`, []any{workspaceID, workspaceID, workspaceID}, true
 	case "agents":
 		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "agent_chats":
-		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
+	case "skills":
+		// Skills are globally namespaced (no workspace_id column on the
+		// skills row in current production schema). Carry only the ones
+		// actually attached to an agent in this workspace — i.e.
+		// user-created custom skills the bundle would otherwise orphan
+		// when agent_skills tries to restore against a fresh target.
+		// Bundled skills (skill_coding_01 etc.) are re-seeded on every
+		// cmd_start boot and the INSERT OR IGNORE no-ops on the
+		// conflict. Joins via crews to stay portable across test
+		// schemas that omit agents.workspace_id.
+		return `id IN (
+			SELECT ask.skill_id FROM agent_skills ask
+			  JOIN agents a ON a.id = ask.agent_id
+			  JOIN crews c ON c.id = a.crew_id
+			  WHERE c.workspace_id = ?
+		)`, []any{workspaceID}, true
 	case "agent_skills":
-		// Skills are global (no workspace_id column on the skills row),
-		// but agent_skills attaches them to a specific agent. Scope by
-		// the agent's transitive workspace so a backup of workspace A
-		// only carries the assignments that actually live in A.
-		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
-	case "memory_backups":
 		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
 	case "crew_members":
 		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "crew_integrations":
-		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "mcp_bindings":
-		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
-	case "crew_memory":
-		// crew_memory is crew-scoped — traverse via the crews FK so
-		// DumpWorkspace does not silently miss rows the way the
-		// generic "workspace_id = ?" branch would.
-		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "chats":
+		// chats has a direct workspace_id column. The explicit case
+		// also documents this is the renamed `agent_chats` entry —
+		// kept in the switch (not the default) so readers can find it.
+		return "workspace_id = ?", []any{workspaceID}, false
+	case "agent_mcp_bindings":
+		// MCP bindings reference agents directly. The credential_id FK
+		// remains a gap (credentials are out of scope for workspace
+		// bundles); bindings WITH credential_id will FK-fail on restore
+		// against a fresh target. Tracked separately.
+		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
 	default:
 		// Generic case: table has a workspace_id column.
 		return "workspace_id = ?", []any{workspaceID}, false
@@ -152,6 +216,18 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		WorkspaceID: workspaceID,
 		Tables:      map[string][]map[string]any{},
 	}
+	// Inter-table dependencies for transitive scoping. If a filter uses
+	// a sub-query against another table that doesn't exist in the
+	// current schema (e.g. a minimal test DB without agent_skills, or
+	// a future schema where one of these gets dropped), the SELECT
+	// against the absent table would error. Skip the parent entry in
+	// that case — matches the "schema revision skip" pattern the
+	// existing tableExists check already implements for the table
+	// itself. The map values are the sub-query targets.
+	scopingDependencies := map[string][]string{
+		"users":  {"crew_members", "chats", "agent_skills", "skills"},
+		"skills": {"agent_skills"},
+	}
 	for _, table := range BackupTables {
 		exists, err := tableExists(ctx, tx, table)
 		if err != nil {
@@ -159,6 +235,22 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 		}
 		if !exists {
 			continue
+		}
+		if deps, ok := scopingDependencies[table]; ok {
+			depMissing := false
+			for _, dep := range deps {
+				depExists, err := tableExists(ctx, tx, dep)
+				if err != nil {
+					return nil, fmt.Errorf("backup: probe dep %s for %s: %w", dep, table, err)
+				}
+				if !depExists {
+					depMissing = true
+					break
+				}
+			}
+			if depMissing {
+				continue
+			}
 		}
 		where, args, _ := workspaceFilterSQL(table, workspaceID)
 		if where == "workspace_id = ?" {
@@ -242,18 +334,32 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		// crew dumps don't crash on a perfectly-valid global table.
 		requiresCol string
 	}
+	// Mirror the workspace-scope additions: chats / agent_mcp_bindings /
+	// journal_entries / users / skills (transitive-via-agent-skills).
+	// Same FK-parents-first ordering as BackupTables. crew_integrations,
+	// memory_backups, workspace_memory, crew_memory all removed because
+	// no migration creates them.
 	filters := []filter{
+		// Users that the crew's own data FKs into. Same UNION pattern as
+		// the workspace filter, narrowed to one crew so a crew-scope
+		// bundle does not leak users from sibling crews. requiresCol
+		// guards against a future schema where author_id is dropped.
+		{"users", `id IN (
+			SELECT user_id FROM crew_members WHERE crew_id = ?
+			UNION SELECT created_by FROM chats WHERE agent_id IN (SELECT id FROM agents WHERE crew_id = ?) AND created_by IS NOT NULL
+			UNION SELECT s.author_id FROM skills s
+			  JOIN agent_skills ask ON ask.skill_id = s.id
+			  WHERE ask.agent_id IN (SELECT id FROM agents WHERE crew_id = ?) AND s.author_id IS NOT NULL
+		)`, []any{crewID, crewID, crewID}, ""},
 		{"workspaces", "id = ?", []any{workspaceID}, ""},
 		{"crews", "id = ?", []any{crewID}, ""},
 		{"agents", "crew_id = ?", []any{crewID}, ""},
-		{"skills", "workspace_id = ?", []any{workspaceID}, "workspace_id"},
-		{"crew_members", "crew_id = ?", []any{crewID}, ""},
-		{"crew_integrations", "crew_id = ?", []any{crewID}, ""},
-		{"mcp_bindings", "crew_id = ?", []any{crewID}, ""},
-		{"agent_chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"skills", `id IN (SELECT skill_id FROM agent_skills WHERE agent_id IN (SELECT id FROM agents WHERE crew_id = ?))`, []any{crewID}, ""},
 		{"agent_skills", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
-		{"memory_backups", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
-		{"crew_memory", "crew_id = ?", []any{crewID}, ""},
+		{"crew_members", "crew_id = ?", []any{crewID}, ""},
+		{"chats", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"agent_mcp_bindings", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},
+		{"journal_entries", "crew_id = ?", []any{crewID}, ""},
 	}
 	for _, f := range filters {
 		exists, err := tableExists(ctx, tx, f.table)
@@ -303,6 +409,14 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 				row[c] = normalizeScan(raw[i])
 			}
 			out = append(out, row)
+		}
+		// Pre-existing bug surfaced by CodeRabbit during PR review:
+		// DumpCrew was the only loop here that did NOT check rows.Err()
+		// after iteration. A driver error mid-iteration would have
+		// silently truncated the dump.
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("backup: iterate %s: %w", f.table, err)
 		}
 		_ = rows.Close()
 		dump.Tables[f.table] = out

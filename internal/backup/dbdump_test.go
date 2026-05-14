@@ -25,6 +25,13 @@ func newDumpTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
+	// Minimal schema kept intentionally small but production-shaped:
+	// skills are globally namespaced (no workspace_id column, matching
+	// the real schema as of v0.1.0-beta.1). Workspace scoping for
+	// skills goes through agent_skills, which therefore has to exist
+	// here too — the dump's new dependency-skip logic uses agent_skills
+	// presence as the gate for the skills filter, and we want this test
+	// suite to exercise that filter rather than rely on the gate.
 	_, err = db.Exec(`
 		CREATE TABLE workspaces (
 			id TEXT PRIMARY KEY, name TEXT, slug TEXT, created_at TEXT
@@ -38,8 +45,12 @@ func newDumpTestDB(t *testing.T) *sql.DB {
 			name TEXT, created_at TEXT
 		);
 		CREATE TABLE skills (
-			id TEXT PRIMARY KEY, workspace_id TEXT REFERENCES workspaces(id),
-			name TEXT, body TEXT
+			id TEXT PRIMARY KEY, name TEXT, body TEXT
+		);
+		CREATE TABLE agent_skills (
+			id TEXT PRIMARY KEY,
+			agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+			skill_id TEXT REFERENCES skills(id) ON DELETE CASCADE
 		);
 
 		INSERT INTO workspaces (id, name, slug) VALUES
@@ -53,9 +64,12 @@ func newDumpTestDB(t *testing.T) *sql.DB {
 			('a_1', 'c_1_a', 'Alice'),
 			('a_2', 'c_1_b', 'Bob'),
 			('a_3', 'c_2_a', 'Ghost');
-		INSERT INTO skills (id, workspace_id, name, body) VALUES
-			('s_1', 'ws_1', 'git', 'git skill body'),
-			('s_2', 'ws_2', 'alien', 'do not leak');
+		INSERT INTO skills (id, name, body) VALUES
+			('s_1', 'git', 'git skill body'),
+			('s_2', 'alien', 'do not leak');
+		INSERT INTO agent_skills (id, agent_id, skill_id) VALUES
+			('as_1', 'a_1', 's_1'),
+			('as_2', 'a_3', 's_2');
 	`)
 	if err != nil {
 		t.Fatalf("schema: %v", err)
