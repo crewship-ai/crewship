@@ -24,9 +24,11 @@
 #   - SENTRY_AUTH_TOKEN env var, OR a populated ~/.sentryclirc (sentry-cli's
 #     own config — auto-read as a fallback). Create the token at:
 #     https://sentry.io/settings/account/api/auth-tokens/
-#     Scopes needed: project:read, project:write, alerts:write
-#     (org:read NOT required — actions target IssueOwners so no
-#     /members/me/ lookup is performed)
+#     Scopes needed: project:read, project:write, alerts:write,
+#     member:read (member:read is used by the team-resolution step
+#     in IssueOwners delivery — without it Sentry rejects the rule
+#     POST with a 403 even though we never call /members/me/ ourselves)
+#     (org:read NOT required)
 #   - jq, curl
 #
 # Usage:
@@ -96,11 +98,24 @@ done
 # code so we can surface the response body on 4xx/5xx. Plain
 # --fail-with-body suppresses the response on success which we want,
 # but on error it eats the stderr trail; this wrapper unifies both.
+#
+# Bounds the request: --max-time caps total wall-clock so a hung TCP
+# socket can't wedge the script (Sentry can stall under load); --retry
+# retries on transient 5xx and curl-level errors (timeout, conn-refused);
+# --retry-delay keeps it bounded so a retry storm doesn't make the
+# upstream worse.
+SENTRY_API_MAX_TIME="${SENTRY_API_MAX_TIME:-30}"
+SENTRY_API_RETRIES="${SENTRY_API_RETRIES:-3}"
+
 sentry_api() {
   local tmp
   tmp=$(mktemp)
   local status
   status=$(curl --silent --show-error \
+    --max-time "$SENTRY_API_MAX_TIME" \
+    --retry "$SENTRY_API_RETRIES" \
+    --retry-delay 2 \
+    --retry-connrefused \
     -o "$tmp" \
     -w '%{http_code}' \
     -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
@@ -115,6 +130,60 @@ sentry_api() {
   fi
   cat "$tmp"
   rm -f "$tmp"
+}
+
+# sentry_api_paginated walks Sentry's Link-header cursor pagination and
+# returns a single JSON array concatenating all pages. Without this, the
+# /rules/ listing only sees the first page (default 25 entries), so the
+# idempotency guarantee of this script breaks the moment a project
+# accumulates more than 25 rules — the script would happily POST a
+# duplicate of every rule whose name didn't appear on page 1.
+#
+# Sentry's pagination format (per docs): the Link response header carries
+# `<URL>; rel="next"; results="true"; cursor="..."` when more pages exist
+# and `results="false"` when there aren't. We extract the next URL and
+# follow it until results="false".
+sentry_api_paginated() {
+  local url="$1"
+  local out
+  out=$(mktemp)
+  echo "[]" > "$out"
+
+  while [ -n "$url" ]; do
+    local body headers status
+    body=$(mktemp)
+    headers=$(mktemp)
+    status=$(curl --silent --show-error \
+      --max-time "$SENTRY_API_MAX_TIME" \
+      --retry "$SENTRY_API_RETRIES" \
+      --retry-delay 2 \
+      --retry-connrefused \
+      -o "$body" \
+      -D "$headers" \
+      -w '%{http_code}' \
+      -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
+      -H "Content-Type: application/json" \
+      "$url")
+    if [ "$status" -ge 400 ]; then
+      echo "sentry API ${status}:" >&2
+      cat "$body" >&2
+      echo >&2
+      rm -f "$body" "$headers" "$out"
+      return 1
+    fi
+    # Merge this page's array into the accumulator.
+    jq -s 'add' "$out" "$body" > "${out}.new" && mv "${out}.new" "$out"
+    # Find the next page from Link: <URL>; rel="next"; results="true"
+    url=$(awk -F': ' 'tolower($1)=="link"{print substr($0, index($0,$2))}' "$headers" \
+          | tr ',' '\n' \
+          | awk '/rel="next"/ && /results="true"/ {
+              if (match($0, /<[^>]+>/)) { print substr($0, RSTART+1, RLENGTH-2); exit }
+            }')
+    rm -f "$body" "$headers"
+  done
+
+  cat "$out"
+  rm -f "$out"
 }
 
 echo "==> target: ${SENTRY_ORG}/${SENTRY_PROJECT} on ${SENTRY_HOST}"
@@ -149,7 +218,7 @@ fi
 # behaviour for a team later). Same delivery semantics, one fewer scope
 # the operator has to grant.
 echo "==> listing existing rules..."
-EXISTING=$(sentry_api "${API}/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/rules/")
+EXISTING=$(sentry_api_paginated "${API}/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/rules/")
 echo "    found $(echo "$EXISTING" | jq 'length') rule(s)"
 
 for name in "${RULES_OWNED[@]}"; do
@@ -234,7 +303,7 @@ JSON
 
 # ---------- 4. confirm ----------
 echo "==> verifying..."
-FINAL=$(sentry_api "${API}/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/rules/")
+FINAL=$(sentry_api_paginated "${API}/projects/${SENTRY_ORG}/${SENTRY_PROJECT}/rules/")
 echo "$FINAL" | jq -r '.[] | "    [\(.id)] \(.name)"'
 
 cat <<EOF
