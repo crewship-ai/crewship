@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -64,6 +65,24 @@ func Register(ctx context.Context, db *sql.DB, h Hook, allowedShell bool) (strin
 	)
 	if err != nil {
 		return "", fmt.Errorf("hooks: insert: %w", err)
+	}
+
+	// Lint shell hooks after successful insert so OWNER authors get a
+	// loud heads-up on the common $CREWSHIP_PAYLOAD-without-quotes
+	// gotcha. Non-blocking — the row is already persisted and a real UI
+	// path is expected to call LintShellCommand up front so the operator
+	// sees warnings before committing. The log line is the durable
+	// breadcrumb for the headless / API path.
+	if h.HandlerKind == HandlerKindShell {
+		if cmd, ok := h.HandlerConfig["command"].(string); ok {
+			for _, w := range LintShellCommand(cmd) {
+				slog.Default().Warn("hooks: shell command lint",
+					"hook_id", h.ID,
+					"workspace_id", h.WorkspaceID,
+					"warning", w,
+				)
+			}
+		}
 	}
 	return h.ID, nil
 }
