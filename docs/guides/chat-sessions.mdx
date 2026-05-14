@@ -14,6 +14,18 @@ A "session" in Crewship is intentionally durable. It's a `chats` row scoped to o
 
 This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase (`app/(chat)/chat/`) and the persistence layer lives in `internal/api/chat.go` + the Go migrations under `internal/database/migrate.go`; here we focus on what the platform persists and how the URL state composes with it.
 
+## When to use it
+
+Most chat surface usage is self-evident — "talk to the agent" — but the durable-session design unlocks several flows worth reaching for explicitly:
+
+- **Resume a multi-day conversation.** A session ID survives reloads and operator hand-off, so `/chat/<agent>?session=<chatId>` is the canonical "where we left off" URL. Bookmark it, paste it into Linear, share it on Slack — the recipient lands on the same transcript, the same right-panel state, and (with `&panel=files`) the same artefact tab.
+- **Reroll a bad agent response without abandoning context.** Hover-edit the user message and the conversation truncates from that point; the new edit sends as a fresh turn. The transcript before the edit is preserved as a [chat branch](#sessions) so the alternate timeline isn't lost — useful when you discover the original direction was right after all.
+- **Triage what an agent has been doing.** The Sessions sidebar groups by `chats.origin` (`web` / `cli` / `webhook` / `crew`) so you can see at a glance which conversations were started by the user vs by automation vs by a peer agent. Filter the sidebar to `webhook`-origin sessions if you want to audit what an integration has been driving through your agents.
+- **Watch an agent work in real time without opening the journal.** The right-panel **Files**, **Artifacts**, **Terminal**, and **Diff** tabs stream the live state of the agent's container while the chat is open. Faster than tailing logs, and the URL deep-links to a specific tab via `&panel=files` / `&panel=terminal`.
+- **Programmatic chat creation from CLI / webhook / cron.** `POST /api/v1/agents/{agentId}/chats` accepts an `origin` enum on the body and renders a coloured chip in the UI sidebar. Use `CLI` for `crewship run`-style invocations, `WEBHOOK` for trigger-handlers, `CRON` for scheduled routines, `AGENT` for peer-to-peer assignments — the chip helps a human operator scrolling the sidebar understand provenance at a glance.
+
+For one-off "ask the agent a question" use, just open `/chat/<agent>` and start typing — the session row gets created automatically on first send.
+
 ## Routes
 
 Two top-level routes serve chat:
