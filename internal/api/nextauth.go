@@ -598,7 +598,6 @@ func (h *NextAuthHandler) issueSession(r *http.Request, userID, name, email stri
 	return sess, access, refresh, nil
 }
 
-
 // clearAuthCookies expires both cookies. Called on signOut, refresh
 // failure, and detected stale cookies on /api/auth/session — the
 // browser shouldn't keep sending dead tokens for 30 days.
