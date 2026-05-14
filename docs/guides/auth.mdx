@@ -126,6 +126,76 @@ curl -X POST https://crewship.example.com/api/v1/auth/reset \
 
 If the mailer is `mailer.Disabled`, step 2 never happens — the user must go through host-level [Admin CLI](/guides/admin-cli) recovery instead.
 
+## Examples
+
+### Turning on Google SSO for an org
+
+The product manager wants the team to sign in with their `@example.com` Google accounts instead of Crewship-local passwords.
+
+```bash
+# 1. Create OAuth credentials in Google Cloud Console:
+#    - Application type: Web application
+#    - Authorized redirect URI:
+#      https://crewship.example.com/api/v1/auth/google/callback
+#    Copy the client ID + secret.
+
+# 2. Plumb the values into crewshipd's env:
+export GOOGLE_CLIENT_ID=783...apps.googleusercontent.com
+export GOOGLE_CLIENT_SECRET=GOCSPX-...
+export CREWSHIP_PUBLIC_URL=https://crewship.example.com
+
+# 3. Restart the server:
+sudo systemctl restart crewshipd
+```
+
+On the next page load the frontend hits `/api/v1/auth/google/status`, sees `{"enabled": true}`, and renders the "Sign in with Google" button. The first user to click it lands at `/auth/google/redirect` → Google consent screen → `/auth/google/callback`, which creates a Crewship user row tied to the Google identity and signs them in with a regular session cookie.
+
+If Google access ever needs to be turned off later, just unset either env var and restart — the routes unmount and the frontend re-reads `enabled: false` on the next status poll.
+
+### CI bootstrap with no mailer configured
+
+A Docker-based deployment pipeline must produce a logged-in-able admin account, but `RESEND_API_KEY` isn't available in the build environment.
+
+```bash
+# Migrate + bootstrap during image build:
+crewship migrate
+crewship admin reset-password \
+  --email=admin@example.com \
+  --password="$BOOTSTRAP_PASSWORD"
+crewship admin promote --email=admin@example.com --role=OWNER
+
+# The web flow's /forgot still returns 200 in this state but no email goes out.
+# Document the recovery procedure for ops:
+echo "If you forget the password, SSH to the host and run:" \
+     " crewship admin reset-password --email=admin@example.com"
+```
+
+This is the canonical "self-hosted without email" path — the `mailer.Disabled` fallback keeps `/forgot` non-enumerable, and the admin CLI gives the operator an out-of-band recovery channel that doesn't depend on Resend.
+
+### Pairing the CLI from a new machine
+
+A developer just installed `crewship` on a fresh laptop and wants to authenticate it against their team's server.
+
+```bash
+# 1. On the laptop, ask the CLI to start a pairing:
+crewship login --pair
+# Open this URL in your browser:
+#   https://crewship.example.com/settings/cli
+# Enter this code:  QXC5-W7M3
+
+# 2. The user opens the URL in the browser (where they're already
+#    session-authed), pastes the 8-char Crockford code, and clicks Confirm.
+#    Behind the scenes the browser POSTs /api/v1/auth/pair/redeem with the
+#    code; the server creates a fresh CLI token, marks the pairing row
+#    consumed, and the browser shows "Paired ✓".
+
+# 3. The CLI's open polling on /api/v1/auth/pair/poll observes status=consumed,
+#    receives the token, writes it to ~/.crewship/cli-config.yaml, and prints:
+# Logged in as developer@example.com.
+```
+
+The whole exchange takes under a minute and the developer never has to copy or type a long credential — see [CLI Pairing](/guides/cli-pairing) for the device-code flow details and security properties.
+
 ## Related
 
 - [Onboarding](/guides/onboarding) — the first-run flow that bootstraps the initial admin account.
