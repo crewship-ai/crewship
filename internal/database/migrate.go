@@ -1150,6 +1150,20 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Touch updated_at on every value mutation. The column DEFAULT only
+-- fires on INSERT; without this trigger an UPDATE that forgets to set
+-- updated_at would leave the stamp stale (CodeRabbit caught this on
+-- review). Today only crashreport.upsertSetting writes the table and it
+-- does set updated_at, but DB-level enforcement is the right place for
+-- the rule so a future caller can't drift.
+CREATE TRIGGER IF NOT EXISTS trg_app_settings_touch_updated_at
+AFTER UPDATE OF value ON app_settings
+FOR EACH ROW
+BEGIN
+    UPDATE app_settings
+       SET updated_at = datetime('now')
+     WHERE key = OLD.key;
+END;
 `},
 }
 

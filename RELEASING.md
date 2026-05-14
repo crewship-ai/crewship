@@ -270,10 +270,13 @@ for the pinning test.
 ## Branch protection
 
 `main` is protected; configure via `scripts/setup-branch-protection.sh`
-(run once with repo-admin gh credentials). Required checks: Frontend,
-Backend, Lint migrations, Security, E2E. One approval needed (use
-auto-approve for trivial dep bumps via Renovate). Force-push is
-disallowed; linear history is required.
+(run once with repo-admin gh credentials). Required checks (must match
+the names emitted in the workflow files exactly — see the setup script
+for the canonical list): **Frontend**, **Backend (Go)**, **Lint
+migrations**, **Security**, **End-to-end (devcontainer)**. One approval
+needed (use auto-approve for trivial dep bumps via Renovate).
+Force-push is disallowed; linear history is required;
+`enforce_admins=true` (admins can't bypass the gate).
 
 ## Cadence
 

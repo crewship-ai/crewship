@@ -143,11 +143,16 @@ jobs:
         id: tags
         run: |
           BASE="ghcr.io/${{ github.repository_owner }}/crewship"
+          # Always publish the full version tag (v1.2.3 / v1.2.3-beta.1).
+          # The majmin alias (v1.2) and the `latest` rolling tag are only
+          # emitted for stable releases — moving a stable-looking alias
+          # onto a beta/rc image would silently downgrade everyone pinned
+          # to v1.2 the next time they pulled. CodeRabbit caught this.
           {
             echo "list<<EOF"
             echo "${BASE}:${{ steps.meta.outputs.version }}"
-            echo "${BASE}:${{ steps.meta.outputs.majmin }}"
             if [ "${{ steps.meta.outputs.is_stable }}" = "true" ]; then
+              echo "${BASE}:${{ steps.meta.outputs.majmin }}"
               echo "${BASE}:latest"
             fi
             echo "EOF"

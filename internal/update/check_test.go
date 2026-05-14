@@ -203,11 +203,11 @@ func TestFetchLatest_404IsSoftError(t *testing.T) {
 
 func TestNormalizeVersion(t *testing.T) {
 	cases := map[string]string{
-		"0.1.0":         "v0.1.0",
-		"v0.1.0":        "v0.1.0",
-		"  v0.1.0  ":    "v0.1.0",
-		"0.1.0-beta.1":  "v0.1.0-beta.1",
-		"":              "",
+		"0.1.0":        "v0.1.0",
+		"v0.1.0":       "v0.1.0",
+		"  v0.1.0  ":   "v0.1.0",
+		"0.1.0-beta.1": "v0.1.0-beta.1",
+		"":             "",
 	}
 	for in, want := range cases {
 		if got := normalizeVersion(in); got != want {

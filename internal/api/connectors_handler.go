@@ -124,15 +124,6 @@ type InstallResponse struct {
 	OAuthURL      string `json:"oauth_url,omitempty"`
 }
 
-// notImplemented is the safe TDD-scaffold response: 501 with a small
-// hint rather than a panic. Returned by all four handler entry points
-// until the implementer fills in the bodies. Tests assert specific
-// behavior (200/201/404/etc.) so they fail loudly while production
-// requests get a controlled, non-crash response.
-func notImplemented(w http.ResponseWriter, name string) {
-	http.Error(w, "connectors: "+name+" not implemented", http.StatusNotImplemented)
-}
-
 // verifyHTTPClient handles the outbound HTTP request the Verify
 // endpoint issues against a provider. Bounded timeout keeps a slow
 // provider from holding a server worker indefinitely. Package-level

@@ -58,7 +58,7 @@ var telemetryOnCmd = &cobra.Command{
 	Use:   "on",
 	Short: "Opt in to anonymous crash reporting",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return setTelemetry(true)
+		return setTelemetry(cmd.Context(), true)
 	},
 }
 
@@ -66,7 +66,7 @@ var telemetryOffCmd = &cobra.Command{
 	Use:   "off",
 	Short: "Opt out of anonymous crash reporting",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return setTelemetry(false)
+		return setTelemetry(cmd.Context(), false)
 	},
 }
 
@@ -74,13 +74,13 @@ var telemetryStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show current telemetry consent state",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		db, err := openLocalDB()
+		db, err := openLocalDB(cmd.Context())
 		if err != nil {
 			return err
 		}
 		defer db.Close()
 
-		enabled, asked, installID, err := crashreport.Status(context.Background(), db.DB)
+		enabled, asked, installID, err := crashreport.Status(cmd.Context(), db.DB)
 		if err != nil {
 			return fmt.Errorf("read telemetry status: %w", err)
 		}
@@ -144,15 +144,18 @@ func init() {
 
 // setTelemetry is shared by `on` and `off`. It opens the local DB the same
 // way `crewship start` does so the consent state lives next to the data,
-// not in a separate config file the user has to keep in sync.
-func setTelemetry(enabled bool) error {
-	db, err := openLocalDB()
+// not in a separate config file the user has to keep in sync. ctx comes
+// from cmd.Context() so Ctrl-C / SIGTERM during the brief migrate+UPSERT
+// window actually aborts — pre-fix the helpers used context.Background()
+// and would keep running past cancellation. CodeRabbit caught this.
+func setTelemetry(ctx context.Context, enabled bool) error {
+	db, err := openLocalDB(ctx)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
-	on, installID, err := crashreport.SetOptIn(context.Background(), db.DB, enabled)
+	on, installID, err := crashreport.SetOptIn(ctx, db.DB, enabled)
 	if err != nil {
 		return fmt.Errorf("write telemetry setting: %w", err)
 	}
@@ -185,7 +188,7 @@ func setTelemetry(enabled bool) error {
 // "no such table: app_settings" because the v88 migration has never run.
 // On an already-migrated DB Migrate is a fast no-op (one COUNT per
 // migration row), so the extra cost on the warm path is negligible.
-func openLocalDB() (*database.DB, error) {
+func openLocalDB(ctx context.Context) (*database.DB, error) {
 	dataDir, err := database.DefaultDataDir()
 	if err != nil {
 		return nil, fmt.Errorf("resolve data directory: %w", err)
@@ -198,7 +201,7 @@ func openLocalDB() (*database.DB, error) {
 	// message we print ourselves; the per-migration INFO lines from
 	// Migrate would just be noise on a no-op call.
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db.DB, silent); err != nil {
+	if err := database.Migrate(ctx, db.DB, silent); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}

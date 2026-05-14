@@ -285,7 +285,6 @@ func ParseManifest(data []byte) (*Manifest, error) {
 //   - stdio           → MCP.Command set, MCP.Endpoint empty
 //   - streamable-http → MCP.Endpoint set, MCP.Command empty
 //   - Derived map is acyclic (no key references itself transitively)
-//
 func (m *Manifest) Validate() error {
 	if m == nil {
 		return ErrManifestEmpty
@@ -489,7 +488,6 @@ type ResolveContext struct {
 // ErrManifestPlaceholder so the caller can surface a clear error
 // before the MCP server tries to start with a literal "${field.host}"
 // in its argv.
-//
 func (m *Manifest) Resolve(s string, ctx ResolveContext) (string, error) {
 	return m.resolveWith(s, ctx, nil)
 }
@@ -576,7 +574,6 @@ func (m *Manifest) resolveDerived(key string, ctx ResolveContext, visiting map[s
 //
 // Returns ErrManifestMissingFieldVal if a required field has no value
 // in the input map.
-//
 func (m *Manifest) MaterializeMCP(fields map[string]string, instanceURL string) (*MCPConfig, error) {
 	// 1. Resolve effective field values: caller input + manifest
 	//    defaults. Required fields with no value (and no default) are

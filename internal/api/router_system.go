@@ -28,10 +28,20 @@ func (r *Router) registerSystemRoutes() {
 	setupH := NewSetupStatusHandler(r.db, r.logger, r.allowSignup)
 	r.mux.HandleFunc("GET /api/v1/system/setup-status", setupH.Status)
 
-	// System info (auth required)
+	// System info (auth required).
+	//
+	// Runtime info doesn't depend on r.version so we can capture once at
+	// registration time. The version handler however reads r.version,
+	// which cmd_start calls SetVersion() on AFTER router construction —
+	// capturing it here at register time would serve the empty/stale
+	// initial string for the entire process lifetime. Wrap in a closure
+	// so each request re-reads the current r.version value at call time.
+	// CodeRabbit caught this on review.
 	system := NewSystemHandler(r.logger, r.version)
 	r.mux.Handle("GET /api/v1/system/runtime", authed(http.HandlerFunc(system.Runtime)))
-	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(system.Version)))
+	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		NewSystemHandler(r.logger, r.version).Version(w, req)
+	})))
 
 	// License info (auth required)
 	licenseH := NewLicenseHandler(r.license)

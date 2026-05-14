@@ -88,14 +88,20 @@ func (f *fakeBackend) Flush(_ time.Duration) {
 
 // resetState resets package globals between tests since they leak across
 // subtests via the atomic state holder and SetBackend.
+//
+// We snapshot the backend BEFORE the test runs and restore that exact
+// reference in t.Cleanup — pre-fix the cleanup blanket-set
+// SetBackend(nil), which downgrades subsequent subtests to noopBackend
+// instead of whatever the init()-time real adapter installed. CodeRabbit
+// raised the "restore previous backend, don't force noop" note on
+// review.
 func resetState(t *testing.T) {
 	t.Helper()
+	prev := CurrentBackend()
 	state.store(nil)
 	t.Cleanup(func() {
 		state.store(nil)
-		// Restore the real Sentry backend default for downstream tests
-		// that don't override.
-		SetBackend(nil)
+		SetBackend(prev)
 	})
 }
 

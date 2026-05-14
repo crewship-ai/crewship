@@ -121,6 +121,15 @@ func SetBackend(b Backend) {
 	backend = b
 }
 
+// CurrentBackend returns the active backend. Exposed for tests that want
+// to save/restore the registered backend across a swap-and-cleanup
+// pattern, so test ordering doesn't break the next subtest that relies
+// on whatever the init()-time real adapter set up. CodeRabbit raised
+// this on review.
+func CurrentBackend() Backend {
+	return backend
+}
+
 // Init reads the consent state from the DB, generates an install ID,
 // and primes the configured backend.
 //
@@ -181,8 +190,15 @@ func Init(ctx context.Context, db *sql.DB, version string, logger *slog.Logger) 
 		return nil
 	}
 
+	// Guard the prefix slice: a hand-edited or corrupted install ID may
+	// be shorter than 8 chars; unconditional installID[:8] would panic
+	// at startup. CodeRabbit caught this on review.
+	prefix := installID
+	if len(prefix) > 8 {
+		prefix = prefix[:8]
+	}
 	logger.Info("crashreport enabled",
-		"install_id_prefix", installID[:8],
+		"install_id_prefix", prefix,
 		"version", version,
 		"endpoint", dsnEndpoint(resolvedDSN),
 	)

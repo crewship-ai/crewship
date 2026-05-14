@@ -50,11 +50,11 @@ const (
 // Newer is the only field a UI consumer needs to gate the banner on; the
 // rest power the message body.
 type Result struct {
-	Current  string `json:"current"`
-	Latest   string `json:"latest"`
-	Newer    bool   `json:"newer"`
-	URL      string `json:"url,omitempty"`
-	Notes    string `json:"notes,omitempty"`
+	Current   string    `json:"current"`
+	Latest    string    `json:"latest"`
+	Newer     bool      `json:"newer"`
+	URL       string    `json:"url,omitempty"`
+	Notes     string    `json:"notes,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
 }
 
