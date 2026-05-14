@@ -44,6 +44,47 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 | **Pinned session** | A session with a per-user pin flag set. Pinned sessions float to the top of the sidebar regardless of last-message timestamp. Useful for "the conversation I always come back to". |
 | **`workspace_files`** | The durable, workspace-scoped blob index (migration v57). The Files right-panel reads from this view; mid-edit files live there until the agent's next commit. |
 
+## Usage
+
+The end-to-end loop from "I have an agent" to "we had a productive conversation about it" is five steps. Each step has a dedicated section below with the full surface area; this is the orientation walk-through.
+
+### 1. Open the chat
+
+```text
+https://crewship.example.com/chat/viktor
+```
+
+Drops you into Viktor's most recent session. To start fresh, click **New session** in the sidebar. To jump to a specific past conversation, paste the deep-link URL `?session=<chatId>`. To approach from the canvas instead, use `/crews?crew=<slug>&agent=viktor` — see [Routes](#routes).
+
+### 2. Send a message
+
+Type into the composer and hit **Enter**. The agent's response streams back via WebSocket; the presence chip in the footer shows `thinking` while the model is generating. Useful composer tricks (full detail in [Composer](#composer)):
+
+- `/` to open the slash palette for structured commands (`/eval`, `/checkpoint`, `/skill <name>`).
+- Drag, paste, or click-upload an image / file — capped at 25 MB, surfaced to the agent under `/output/<agentSlug>/attachments/…`.
+- Pick a different model from the dropdown next to **Send** for *this turn only* (handy for switching to Opus mid-conversation for a hard step).
+
+### 3. Watch the agent work
+
+While the agent is acting, flip the right panel to the relevant tab — see [Right panel](#right-panel) for the full tab map:
+
+- **F1 / Files** — live working tree under `/workspace`.
+- **F2 / Artifacts** — generated reports, screenshots, downloads.
+- **F3 / Diff** — live diff vs. the workspace's last commit, while the agent is mid-edit.
+- **F4 / Terminal** — read-only tmux attach (OWNER/ADMIN can flip to read-write).
+
+Each tab is its own URL query param (`&panel=files`, etc.), so you can share the exact view you're staring at.
+
+### 4. React or reroll
+
+Hover an assistant message to surface the **reactions** strip (👍 👎 ❤️ 🤔 🚀). Reactions are workspace-shared and surface back to the agent on the next turn so it can adjust. Hover a user message instead to surface **Edit** — editing rewrites that turn and truncates the conversation, but the old branch lives on in `chat_branches` and can be revisited later via the branch picker. See [Edit-and-resend](#edit-and-resend).
+
+### 5. Resume later
+
+Just copy the URL. The session ID is in `?session=<chatId>`, the right-panel state is in `&panel=…`. Bookmark, paste into Linear, share over Slack — anyone with read access on the agent lands on exactly the same view (their reactions are scoped to *them*, the session itself is shared). Pin the session in the sidebar if it's a long-running thread you want to surface above the timestamp-sorted list.
+
+For non-UI surfaces — CLI-initiated chats, webhook-driven chats, scheduled chats — see the [API reference](#api-reference) below; the `origin` field on the create payload stamps the right sidebar chip so an operator scrolling the list can tell at a glance which conversations came from automation.
+
 ## Routes
 
 Two top-level routes serve chat:
