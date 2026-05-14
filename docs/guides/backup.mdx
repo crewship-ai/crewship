@@ -295,7 +295,7 @@ The backup surface is CLI-first — every operation is reachable via `crewship b
 | `POST` | `/api/v1/backups` | Create a bundle. **Auth + OWNER/ADMIN.** Same trust gate as the CLI; concurrent calls hit the [advisory lock](#lock-semantics) and the second returns 409. |
 | `GET`  | `/api/v1/backups` | List bundles on disk for the current workspace. |
 | `GET`  | `/api/v1/backups/{filename}/manifest` | Plaintext manifest only — equivalent to `crewship backup inspect`. No passphrase required. |
-| `POST` | `/api/v1/backups/{filename}/verify` | End-to-end SHA-256 + AGE decrypt check. No DB writes. |
+| `POST` | `/api/v1/backups/{filename}/verify` | SHA-256 integrity check of the sealed bytes against the manifest. **Does not decrypt** — no passphrase required. No DB writes. |
 | `POST` | `/api/v1/backups/{filename}/restore` | Restore. Body accepts `dry_run`, `as_workspace`, `as_crew`. **Holds the lock for the whole call.** |
 | `DELETE` | `/api/v1/backups/{filename}` | Delete a bundle. Idempotent — 404 is not an error in scripted use. |
 | `POST` | `/api/v1/backups/rotate` | Retention sweep. Body accepts `keep_last`, `keep_days`, `dry_run`. |

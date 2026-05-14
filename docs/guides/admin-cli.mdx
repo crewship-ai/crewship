@@ -144,12 +144,14 @@ FROM crewship-ai/crewship:latest
 # Apply migrations so the schema exists
 RUN crewship migrate
 
-# Seed the OWNER account using a build-arg secret
+# Seed the OWNER account. The password is mounted as a BuildKit secret so it
+# never lands in image layers or metadata; the email is a plain ARG because
+# email addresses aren't sensitive.
 ARG BOOTSTRAP_EMAIL
-ARG BOOTSTRAP_PASSWORD
-RUN crewship admin reset-password \
+RUN --mount=type=secret,id=bootstrap_password \
+    crewship admin reset-password \
       --email="$BOOTSTRAP_EMAIL" \
-      --password="$BOOTSTRAP_PASSWORD" \
+      --password="$(cat /run/secrets/bootstrap_password)" \
   && crewship admin promote \
       --email="$BOOTSTRAP_EMAIL" \
       --role=OWNER
@@ -157,7 +159,9 @@ RUN crewship admin reset-password \
 CMD ["crewship", "start"]
 ```
 
-The HTTP API isn't running during `RUN` steps — `crewship admin` is the only path that can produce a logged-in-able user before the server boots for the first time. Pair with `--secret` BuildKit mounts so the password doesn't bake into the image layer.
+Build the image with `docker buildx build --secret id=bootstrap_password,src=./bootstrap.pw …` — the secret file is mounted only for the duration of that one `RUN` step and never becomes part of any image layer. Never use plain `ARG BOOTSTRAP_PASSWORD`: build args land in image history and are recoverable via `docker history <image>` for anyone who pulls the resulting image.
+
+The HTTP API isn't running during `RUN` steps — `crewship admin` is the only path that can produce a logged-in-able user before the server boots for the first time.
 
 ### Restoring `OWNER` after a botched demotion
 

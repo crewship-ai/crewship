@@ -52,7 +52,7 @@ Skip checkpoints for **short, single-step missions** (the journal IS the bookmar
 
 ## Usage
 
-The `crewship checkpoint` command group covers the four operations end-to-end. Each subcommand maps 1:1 to the HTTP endpoint documented under [Endpoints summary](#endpoints-summary). The most common loop is bookmark → inspect → fork.
+The `crewship checkpoint` command group covers the four operations end-to-end. Each subcommand maps 1:1 to the HTTP endpoint documented under [API reference](#api-reference). The most common loop is bookmark → inspect → fork.
 
 ### 1. Create a checkpoint at the current cursor
 
@@ -109,7 +109,7 @@ crewship checkpoint delete chk_01HABC --yes
 
 `--yes` skips the interactive prompt for scripted use. Forks that reference the deleted checkpoint via `fork_of` get their pointer NULLed — the forked *missions* survive, only the genealogy back-pointer is lost.
 
-The same operations are reachable over HTTP — see the [Endpoints summary](#endpoints-summary) below for the path/body shape, and `internal/api/cartographer.go` for the handler source of truth.
+The same operations are reachable over HTTP — see the [API reference](#api-reference) below for the path/body shape, and `internal/api/cartographer.go` for the handler source of truth.
 
 ## Examples
 
