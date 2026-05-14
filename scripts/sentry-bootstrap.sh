@@ -277,7 +277,12 @@ set_github_secret() {
   local repo=$1
   local name=$2
   local value=$3
-  echo -n "$value" | gh secret set "$name" --repo "$repo" --body - >/dev/null
+  # `printf '%s'` over `echo -n`: `-n` is non-POSIX, and dash (Debian's
+  # /bin/sh) prints `-n` literally instead of suppressing the trailing
+  # newline. `gh secret set` would then store a value with `-n ` prefix
+  # and a trailing newline — both invisible until the secret silently
+  # fails to authenticate against the upstream service.
+  printf '%s' "$value" | gh secret set "$name" --repo "$repo" --body - >/dev/null
 }
 
 # ---------- main loop ----------
