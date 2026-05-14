@@ -410,6 +410,14 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 			}
 			out = append(out, row)
 		}
+		// Pre-existing bug surfaced by CodeRabbit during PR review:
+		// DumpCrew was the only loop here that did NOT check rows.Err()
+		// after iteration. A driver error mid-iteration would have
+		// silently truncated the dump.
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("backup: iterate %s: %w", f.table, err)
+		}
 		_ = rows.Close()
 		dump.Tables[f.table] = out
 	}

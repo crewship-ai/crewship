@@ -209,9 +209,20 @@ func snapshotWorkspaceScopedTables(t *testing.T, db *sql.DB, workspaceID string)
 		{"workspaces", `SELECT * FROM workspaces WHERE id = ? ORDER BY id`},
 		{"crews", `SELECT * FROM crews WHERE workspace_id = ? ORDER BY id`},
 		{"agents", `SELECT * FROM agents WHERE workspace_id = ? ORDER BY id`},
+		// Mirrors workspaceFilterSQL's users branch verbatim — including
+		// the skills.author_id UNION leg. CodeRabbit caught the earlier
+		// two-branch version: a custom skill whose author was NOT also
+		// in crew_members or chats.created_by would land in the bundle
+		// (the production filter carries it) but be invisible to this
+		// snapshot, masking a real row-count drift.
 		{"users", `SELECT u.* FROM users u WHERE u.id IN (
 			SELECT user_id FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)
 			UNION SELECT created_by FROM chats WHERE workspace_id = ? AND created_by IS NOT NULL
+			UNION SELECT s.author_id FROM skills s
+			  JOIN agent_skills ask ON ask.skill_id = s.id
+			  JOIN agents a ON a.id = ask.agent_id
+			  JOIN crews c ON c.id = a.crew_id
+			  WHERE c.workspace_id = ? AND s.author_id IS NOT NULL
 		) ORDER BY u.id`},
 		{"skills", `SELECT s.* FROM skills s
 		            JOIN agent_skills ask ON ask.skill_id = s.id
