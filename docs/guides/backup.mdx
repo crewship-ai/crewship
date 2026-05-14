@@ -14,6 +14,18 @@ The architectural choice that shapes everything else is "one bundle, one file". 
 
 Restores are intentionally cautious. `--dry-run` walks the entire restore plan — schema diff, row counts, blob deltas — and prints what *would* happen without writing a single byte to the destination database. Advisory locking (`backup_locks` table, per-workspace) prevents two concurrent `restore` runs from corrupting each other, and the lock file records the host + PID so `crewship backup status` can tell you who's holding it. If a host crashes mid-restore, `crewship backup unlock` is the manual recovery — admin-only with a confirmation prompt, because clearing a real lock from another live process is how you trash a workspace.
 
+## When to use it
+
+Backups are cheap to make and expensive to wish you'd made. The five canonical reasons to run `crewship backup create`:
+
+- **Before any destructive admin write.** Before `crewship admin reset-password`, before a database migration on a binary upgrade, before a large schema-changing PR lands in prod — capture the current state first. The bundle is the one-command rollback if anything goes wrong.
+- **Disaster recovery / hot spare.** Schedule a nightly `crewship backup create --scope=workspace --passphrase-file …` cron and ship the bundle to a separate host. If the primary disk dies, restoring onto a fresh binary is one `crewship backup restore` away — no replication agent, no streaming WAL, no extra moving parts.
+- **Workspace migration to another host.** Moving a workspace from a dev VM to a prod host (or between two prod hosts) is exactly what bundles are for. Create on the source, scp the file, `crewship backup restore --as-workspace <new-slug>` on the destination, then provision crews. The `--as-workspace` rename avoids the "two `acme` workspaces colliding" hazard.
+- **Legal hold or compliance archive.** Customer leaves; you need to keep their workspace state on cold storage for N years. One AGE-encrypted `.tar.zst` is a forever-readable artefact — no live database, no service required. `inspect` later proves the bundle's contents without decrypting.
+- **Forensic snapshot before incident response.** Suspected compromise of an admin account, or a "what was the state when X happened" investigation. `backup create` + immediate offsite copy preserves the audit trail before anyone (you, the attacker, the well-meaning oncall) starts changing things.
+
+Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them from seed scripts anyway) and **single-agent throwaways** with no user-visible state worth preserving — the bundle metadata cost is real (~few MB minimum) and not every workspace earns it.
+
 ## Subcommands at a glance
 
 | Command | Purpose |
