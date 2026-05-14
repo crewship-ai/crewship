@@ -95,6 +95,42 @@ The [Consolidation worker](/guides/consolidate) runs nightly: recurring observat
 
 For development without a running server, the [`crewship memory`](#cli-development--debugging) CLI lets you reindex and search on-disk memory directly — useful for poking at a backup or a frozen container.
 
+## Examples
+
+### A research-assistant agent that remembers user preferences
+
+You spin up `researcher`, ask it five PR reviews. Over the course of a week the agent picks up that you write tight commit messages and prefer the changelog updated in the same PR rather than later. On day one it appends:
+
+```bash
+echo "## User preferences\n- Prefers terse commit subjects (≤70 chars)\n- Wants CHANGELOG entries in same PR, not follow-up" \
+  >> ~/.memory/AGENT.md
+```
+
+On day eight, you ask for a review of an unrelated PR. The orchestrator's `BuildMemoryBlock` injects `AGENT.md` into the system prompt before the LLM ever sees your message, so the agent's first review comment already says "I noticed the CHANGELOG entry is missing from this PR" without having to be told.
+
+### A crew lead recording an architectural decision once
+
+Your `backend` crew decides Postgres 16 is the new baseline. The lead writes it once:
+
+```bash
+echo "## Decision (2026-05-14): PostgreSQL 16 for all new DBs\n- driver: pgx v5\n- migrations: internal/database/migrate.go\n- ADR-007 in repo for full context" \
+  >> /crew/shared/.memory/CREW.md
+```
+
+Every other agent in the crew (`migrations`, `api`, `tests`) reads that line on their next session via the crew-tier system-prompt block — the lead doesn't have to update three system prompts, and a new agent joining the crew picks up the same context for free.
+
+### Bounded subject expertise via `topics/`
+
+A `support` crew handles deployment, billing, and security questions. Rather than letting `CREW.md` grow into a sprawling FAQ, the lead carves it up:
+
+```bash
+/crew/shared/.memory/topics/deployment.md   # 4kB on Kubernetes + Helm conventions
+/crew/shared/.memory/topics/billing.md      # 2kB on Stripe webhook handling
+/crew/shared/.memory/topics/security.md     # 6kB on Keeper credential policies
+```
+
+When a question lands that mentions "deployment", hybrid retrieval ranks `topics/deployment.md` chunks at the top — the agent gets the right slice and not all 12kB at once. `CREW.md` stays small and editorial; the long-tail expertise lives in dedicated topic files that grow without bloating the budget.
+
 ## Memory Tiers
 
 ```
