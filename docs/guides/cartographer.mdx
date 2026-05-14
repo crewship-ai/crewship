@@ -6,12 +6,165 @@ icon: "map"
 
 # Cartographer
 
-Cartographer pins named bookmarks into the mission journal -- **checkpoints**. Each checkpoint stores a JSON state snapshot plus a **journal cursor** (the ID of the last entry at the time the checkpoint was made). From a checkpoint you can:
+## Overview
 
-- **List** -- see all bookmarks in a mission.
-- **Restore** (advisory) -- get the checkpoint plus the list of journal entries that have diverged since. No mission state is mutated.
-- **Fork** -- spawn a new mission anchored at the checkpoint's cursor. This is the concrete "go back and try a different path" operation.
-- **Delete** -- remove a checkpoint (forks that reference it via `fork_of` are orphaned, not cascaded).
+Cartographer pins named bookmarks into the mission journal — **checkpoints**. Each checkpoint stores a JSON state snapshot plus a **journal cursor** (the ID of the last entry at the time the checkpoint was made). The two together let an operator answer "where were we at 14:32?" and "what happened since?" — first by reading the snapshot, then by replaying the journal entries past the cursor.
+
+Crucially, restore is *advisory*: it produces a report (`checkpoint + divergence`), not a database mutation. Cartographer never rewrites a mission's history — that's the [Crew Journal](/guides/crew-journal)'s job, and journals are append-only by design. When the operator actually wants to "go back and try a different path", the right operation is `fork`: spawn a fresh mission whose journal starts from the parent's checkpoint cursor. The new mission has its own ID, its own row, its own audit timeline; the original mission keeps running (or stays paused) without contamination. This is the same model Git's branch-from-commit takes — Cartographer is the mission-level equivalent, and the `fork_of` column on the new mission's row is the equivalent of a parent SHA pointer.
+
+The subsystem itself is small: a single table (`checkpoints`), one handler file (`internal/api/cartographer.go`), and a thin CLI wrapper. There's no scheduler, no background worker, no extra ports — checkpoints are written by explicit operator action and read on demand. The four operations are **List** (enumerate bookmarks for a mission), **Restore** (advisory diff against the journal), **Fork** (spawn the new mission anchored at the cursor), and **Delete** (drop a checkpoint; forks that reference it via `fork_of` are orphaned, not cascaded). Workspace-scope and crew-scope access checks ride on the same RBAC the rest of the API uses.
+
+From a checkpoint you can:
+
+- **List** — see all bookmarks in a mission.
+- **Restore** (advisory) — get the checkpoint plus the list of journal entries that have diverged since. No mission state is mutated.
+- **Fork** — spawn a new mission anchored at the checkpoint's cursor. This is the concrete "go back and try a different path" operation.
+- **Delete** — remove a checkpoint (forks that reference it via `fork_of` are orphaned, not cascaded).
+
+## When to use it
+
+Checkpoints are cheap to mint and cheap to ignore — favour creating one whenever there's a meaningful state worth being able to compare or branch from later. The canonical triggers:
+
+- **Right before a risky agent step.** About to let the agent run a `terraform apply` or a destructive migration? `crewship checkpoint create --mission MIS-42 --label "pre-apply"` first. If the step goes sideways, `restore` produces a diff against where things were, and `fork` lets you retry from clean state in a parallel mission.
+- **A/B experimentation on prompts or tooling.** A mission has reached a sensible decision point and you want to try two different strategies (different system prompts, different tool sets). Checkpoint the current state, then `fork` once per variant — each fork gets its own mission ID, its own journal, and its own audit timeline.
+- **Mid-mission debugging — "what changed since 14:32?"** When an operator asks why a mission's behaviour drifted, the `restore` divergence list is the answer: it enumerates exactly which journal entries posted after the checkpoint was taken. Beats grepping the timeline.
+- **Long-running missions where you want milestone bookmarks.** A mission running across several hours of agent work benefits from a periodic checkpoint at each "task complete" boundary. Future operators (or future-you) can jump to a specific stage without scrolling the whole journal.
+- **Post-incident investigation.** Suspected misbehaviour? Checkpoint *immediately* — the snapshot freezes the visible state and the cursor pins what the agent saw up to that instant. Subsequent investigation can fork from the checkpoint into a sandbox mission for safe replay without disturbing the real one.
+
+Skip checkpoints for **short, single-step missions** (the journal IS the bookmark — one entry to inspect), **transient missions in development** that you'll delete anyway, and **missions that have done no work yet** — Create returns 409 Conflict if the mission has no journal entries to anchor against, by design.
+
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Checkpoint** | One row in the `checkpoints` table — `(id, mission_id, label, journal_cursor, state, fork_of, …)`. Cheap to mint (the snapshot is a single `INSERT`); persisted until explicitly deleted. The user-facing object every other operation hangs off. |
+| **Journal cursor** | The `journal_cursor` column. Holds the **entry ID** (not timestamp) of the last journal entry visible when the checkpoint was captured. Used as an anchor — everything posted after this ID is "drift" by definition. |
+| **State snapshot** | The `state` column. Plaintext JSON capturing mission status, agent positions, pending tool calls, and anything else the orchestrator's `Capture` walks out of the journal. Plaintext is deliberate — checkpoints are operational metadata, not credentials, and queryable JSON beats opaque blobs. |
+| **Mission** | The parent that owns the checkpoint via `mission_id`. Workspace and crew scope are inherited from the mission row, so checkpoints can't escape their tenancy by accident. |
+| **`Capture()`** | The internal function (`cartographer.Capture(ctx, db, missionID)`) that walks the mission's journal entries and produces `(snapshot, cursor)`. Pure function — no side effects, idempotent given the same input journal. |
+| **Advisory restore** | `POST /checkpoints/{id}/restore` returns `(checkpoint, divergence_list)` without mutating anything. The mission keeps running. The UI shows the diff and lets the operator decide whether to fork. |
+| **Divergence list** | The `warn_divergence` field on a restore response — an enumeration of journal entry types (`mission.status_change`, `exec.command`, …) that posted after the checkpoint's cursor. Long list = the mission has moved on; consider a fork rather than trying to reconcile. |
+| **Fork** | `POST /checkpoints/{id}/fork`. Atomically: creates a fresh mission with a new `mission_id`, captures a new checkpoint in that mission at the *source* checkpoint's cursor, sets `fork_of` on the new checkpoint to the source, and writes a `fork.created` journal entry to the new mission. |
+| **`fork_of`** | The parent-pointer column on a forked checkpoint. The mission-level analogue of a Git parent SHA. `ON DELETE SET NULL` — deleting the ancestor checkpoint orphans the child rather than cascading destruction of forked missions. |
+| **Orphaned fork** | A forked checkpoint whose `fork_of` was set to NULL because the ancestor got deleted. The forked mission itself is unaffected — it has its own ID, its own journal, its own work. Only the genealogy pointer is lost. |
+| **Workspace isolation** | Enforced at the handler (mission must belong to the caller's workspace) AND at the package layer (`cartographer.Get` / `Delete` re-check). Cross-tenant IDs return 404 with the same shape as "not found" — by design, to prevent enumeration. |
+| **Journal entry types** | Three checkpoint-emitted types: `checkpoint.created` (info, on Create), `checkpoint.restored` (info, on advisory Restore — divergence list in payload), `fork.created` (notice, on Fork — written to the *new* mission's journal, not the parent's). |
+
+## Usage
+
+The `crewship checkpoint` command group covers the four operations end-to-end. Each subcommand maps 1:1 to the HTTP endpoint documented under [API reference](#api-reference). The most common loop is bookmark → inspect → fork.
+
+### 1. Create a checkpoint at the current cursor
+
+```bash
+crewship checkpoint create --mission MIS-42 --label "green build"
+# ✓ Created chk_01HXYZ… at cursor j_a1b2c3d4e5f60718 (mission MIS-42)
+```
+
+The label is optional but recommended — it's what the UI shows in the bookmark rail. If `--mission` has no journal entries yet, the call returns 409 (`mission has no journal entries to anchor a checkpoint`); run the mission at least one step first.
+
+### 2. List bookmarks (newest-first)
+
+```bash
+crewship checkpoint list --mission MIS-42
+# ID                LABEL          CURSOR              CREATED_AT
+# chk_01HXYZ…       green build    j_a1b2c3d4…         2026-05-14T14:32:18Z
+# chk_01HABC…       pre-deploy     j_9f8e7d6c5…        2026-05-14T11:05:02Z
+```
+
+Pagination is `--limit` (1–200, default 50). The CLI hits `GET /api/v1/missions/{missionId}/checkpoints` and renders the response as a tab-aligned table.
+
+### 3. Restore (advisory — does not mutate the mission)
+
+```bash
+crewship checkpoint restore chk_01HXYZ
+# checkpoint:  chk_01HXYZ "green build"
+# anchored at: j_a1b2c3d4e5f60718
+# divergence (5 entries posted since):
+#   mission.status_change at j_xyz…
+#   exec.command at j_abc…
+#   exec.command at j_def…
+#   tool.invoke at j_ghi…
+#   waitpoint.created at j_jkl…
+```
+
+This reads `(checkpoint, divergence_list)` from the server and prints it. The mission keeps running — no state is rewound. Use the output to decide whether to keep going or fork.
+
+### 4. Fork into a new mission
+
+```bash
+crewship checkpoint fork chk_01HXYZ --label "experiment-tailwind-v4"
+# ✓ Forked into MIS-43 (new checkpoint chk_01HQRS, fork_of=chk_01HXYZ)
+# Open: https://crewship.example.com/missions/MIS-43
+```
+
+The new mission has its own journal and runs independently. The original mission is untouched — you can keep both side-by-side if you want to compare strategies, or pause the original and continue in the fork.
+
+### 5. Delete an obsolete checkpoint
+
+```bash
+crewship checkpoint delete chk_01HABC --yes
+# ✓ Deleted chk_01HABC; orphaned 1 fork's fork_of pointer (no missions removed)
+```
+
+`--yes` skips the interactive prompt for scripted use. Forks that reference the deleted checkpoint via `fork_of` get their pointer NULLed — the forked *missions* survive, only the genealogy back-pointer is lost.
+
+The same operations are reachable over HTTP — see the [API reference](#api-reference) below for the path/body shape, and `internal/api/cartographer.go` for the handler source of truth.
+
+## Examples
+
+### Pre-deploy bookmark, fork on regression
+
+The mission `MIS-42` reaches a green build of the staging branch. Before letting the agent attempt the production deploy step, you bookmark:
+
+```bash
+crewship checkpoint create --mission MIS-42 --label "green-staging"
+# ✓ Created chk_green at cursor j_…
+```
+
+The agent runs `deploy-prod`. Logs go red — the deploy hit an unrecognized AWS region and the agent is now stuck retrying. You don't want to roll the mission backward (the agent's context already knows the failure), but you do want a clean parallel attempt:
+
+```bash
+crewship checkpoint fork chk_green --label "deploy-retry-eu-west"
+# ✓ Forked into MIS-43 (fork_of=chk_green)
+```
+
+`MIS-43` opens at the green-staging cursor. You hand it a fresh hint ("use eu-west-1 explicitly") and let it retry. `MIS-42` keeps running its diagnostic in parallel — useful for the postmortem.
+
+### A/B prompt experimentation
+
+You've reached a decision point in `MIS-88`: should the agent draft the blog post in a casual or formal tone? Rather than picking one, checkpoint and fork twice:
+
+```bash
+crewship checkpoint create --mission MIS-88 --label "pre-tone-choice"
+# ✓ Created chk_tone at cursor j_…
+
+crewship checkpoint fork chk_tone --label "casual-draft"
+# ✓ Forked into MIS-89
+
+crewship checkpoint fork chk_tone --label "formal-draft"
+# ✓ Forked into MIS-90
+```
+
+`MIS-89` and `MIS-90` each get their own journal and their own agent runs from the same starting point. Once both drafts exist, compare side-by-side in the UI; pick the winner; the loser's mission row stays around as evidence of the alternative explored.
+
+### Post-incident forensic snapshot
+
+An operator notices the agent in `MIS-101` just sent a suspicious tool call. Snapshot *immediately* — before anything else changes:
+
+```bash
+crewship checkpoint create --mission MIS-101 --label "incident-2026-05-14T03:18Z"
+# ✓ Created chk_incident at cursor j_a1b2c3…
+```
+
+The mission keeps running (or you pause it via the UI) — the checkpoint already captures the state for investigation. For safe replay, fork into a sandbox mission rather than poking at the live one:
+
+```bash
+crewship checkpoint fork chk_incident --label "incident-investigation"
+# ✓ Forked into MIS-102
+```
+
+`MIS-102` is the investigation playground. Replay the suspicious tool call there with extra logging, try variants, prove the bug — none of it touches `MIS-101`, whose timeline must stay pristine for the audit log. When the postmortem closes, both missions get linked from the incident document via their IDs; the `fork_of` pointer on `MIS-102`'s checkpoint proves the parentage.
 
 ## Schema
 
@@ -70,20 +223,29 @@ The UI redirects the operator into the new mission. The old mission is untouched
 - `cartographer.Capture(ctx, db, missionID)` walks the journal for that mission and produces `(snapshot, cursor)`.
 - If the mission has no journal entries, Create returns **409 Conflict** (`mission has no journal entries to anchor a checkpoint`) -- a checkpoint without anchor can't diverge.
 
-## Endpoints summary
+## API reference
+
+Full request/response schemas live at [`/api-reference/checkpoints`](/api-reference/checkpoints). The handler source is `internal/api/cartographer.go` — small enough to read end-to-end. The endpoints, grouped by mission-scope vs. checkpoint-scope:
+
+### Mission-scoped (mission ID in path)
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/missions/{missionId}/checkpoints` | List newest-first (limit 1-200, default 50). |
-| POST | `/api/v1/missions/{missionId}/checkpoints` | Create checkpoint at current cursor. |
-| GET | `/api/v1/checkpoints/{id}` | Full checkpoint detail. |
-| POST | `/api/v1/checkpoints/{id}/restore` | Advisory -- returns divergence list. |
-| POST | `/api/v1/checkpoints/{id}/fork` | Spawn new mission + fork checkpoint. |
-| DELETE | `/api/v1/checkpoints/{id}` | Delete. Orphans `fork_of` children (no cascade). |
+| `GET` | `/api/v1/missions/{missionId}/checkpoints` | List newest-first. Query params: `limit` (1–200, default 50), `cursor` for keyset pagination. |
+| `POST` | `/api/v1/missions/{missionId}/checkpoints` | Create checkpoint at current cursor. Body: `{"label": "…"}` (optional). Returns 409 if mission has no journal entries. |
 
-Workspace isolation is enforced at the handler (mission must belong to caller's workspace) AND at the package (`cartographer.Get/Delete` re-check workspace). Cross-tenant IDs return 404 with the same shape as "not found".
+### Checkpoint-scoped (checkpoint ID in path)
 
-See [Checkpoints API](/api-reference/checkpoints) for request/response schemas.
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/checkpoints/{id}` | Full checkpoint detail — snapshot, cursor, fork_of, created_by/at. |
+| `POST` | `/api/v1/checkpoints/{id}/restore` | Advisory. Returns `(checkpoint, journal_cursor, warn_divergence[])`. **Never mutates.** |
+| `POST` | `/api/v1/checkpoints/{id}/fork` | Spawn new mission + fork checkpoint. Body: `{"label": "…"}` (optional). Returns `{new_mission_id, new_checkpoint_id}`. |
+| `DELETE` | `/api/v1/checkpoints/{id}` | Delete checkpoint. Orphans children (sets their `fork_of` to NULL); does NOT cascade to forked missions. |
+
+Workspace isolation is enforced at the handler (mission must belong to the caller's workspace) AND at the package (`cartographer.Get` / `Delete` re-check workspace). Cross-tenant IDs return 404 with the same shape as "not found" — the same response a missing ID would produce — by design, to prevent existence enumeration.
+
+The CLI binary (`crewship checkpoint …`) maps 1:1 onto these endpoints; see [Usage](#usage) for invocations and `/cli/checkpoint` for full flag reference.
 
 ## CLI
 
@@ -105,13 +267,22 @@ Full flags: [`crewship checkpoint`](/cli/checkpoint).
 | Restore | `checkpoint.restored` | `info` (advisory; divergence list in payload) |
 | Fork | `fork.created` | `notice` |
 
-## Gotchas
+## Common pitfalls
 
-- **Orphaned forks.** Deleting a checkpoint that other checkpoints `fork_of` reference sets those references to NULL; it does not delete the forked missions. This is deliberate -- the fork is a real mission with its own work, deleting the ancestor should not destroy it.
-- **`journal_cursor` is an entry ID, not a timestamp.** Pagination over the journal uses compound `(ts, id)`; cartographer uses just `id` because the cursor is an anchor, not a cursor for a range.
-- **Divergence is informational.** If the warn_divergence list is long, the snapshot may no longer reflect the real current state of the mission's external side-effects (committed code, created containers, sent messages). Fork, don't try to restore.
+- **Restore is advisory — never a rewind.** The endpoint name is misleading if you read it literally: `restore` returns a diff, not a time-machine. Crewship deliberately doesn't unwind sidecar state, container filesystems, or external side effects (commits pushed, messages sent, containers created) that fired after the checkpoint — partial rewind has no safe general form. If you actually want to "go back", **fork**; the divergence list tells you whether you should.
+- **Orphaned forks are deliberate.** Deleting a checkpoint that other checkpoints reference via `fork_of` sets those pointers to NULL — it does NOT cascade to the forked missions. A fork is a real mission with its own work; deleting the ancestor checkpoint should never destroy descendant work product. If you want the forked missions gone too, delete them explicitly first.
+- **`journal_cursor` is an entry ID, not a timestamp.** Pagination over the journal uses compound `(ts, id)`; cartographer uses just `id` because the cursor is an anchor, not a range pointer. Trying to "find the checkpoint nearest 14:32" via the cursor field is a category error — query the journal for the entry ID at that timestamp first, then use that to anchor.
+- **A divergence list that's grown long is a signal to fork, not investigate.** Once `warn_divergence` is more than a handful of entries, the snapshot's state probably no longer reflects the live mission's external reality. The checkpoint is still useful as a starting point for a fork; trying to use it as a baseline for "what should the mission look like now" gets unreliable fast.
+- **Cannot checkpoint a mission with no journal entries.** `Create` returns 409 (`mission has no journal entries to anchor a checkpoint`) if you try. The first journal entry must exist before a checkpoint can pin to anything — run the mission for at least one step first.
+- **Cross-tenant checkpoint IDs return 404, not 403.** A checkpoint ID from another workspace produces the same response as a non-existent ID — by design, to prevent existence enumeration. If you genuinely thought you owned a checkpoint and got 404, double-check the workspace context the CLI / API call is running under (the `CREWSHIP_WORKSPACE` env var or the session cookie's workspace claim).
+- **Forks live in the source workspace + crew.** A fork doesn't escape to a parent workspace or unrelated crew — it's a sibling mission in the same scope. If you need cross-workspace promotion (e.g., "this experiment graduated, copy to prod"), that's a separate workflow involving [Backup & Restore](/guides/backup) `--as-workspace`, not a fork.
+- **The state JSON is plaintext on disk.** Checkpoints are operational metadata, not secrets — but the `state` column captures whatever the mission's orchestrator saw at the time. Don't pin mission state mid-tool-call if the tool's arguments include credentials; the credential strings would land in the checkpoint snapshot. Use [Keeper](/guides/keeper)-backed credentials so tool inputs only ever reference IDs, not raw values.
 
 ## Related
 
-- [Crew Journal](/guides/crew-journal) -- checkpoints anchor to the canonical event stream.
-- [`crewship checkpoint`](/cli/checkpoint) CLI, [Checkpoints API](/api-reference/checkpoints).
+- [Crew Journal](/guides/crew-journal) — the canonical append-only event stream that checkpoints anchor into via `journal_cursor`. Read this first to understand what "the cursor points at" actually means.
+- [Orchestration](/guides/orchestration) — the mission lifecycle (start → run → pause → complete) that checkpoints bookmark; fork creates a fresh mission lifecycle, not a thread on the existing one.
+- [Activity](/guides/activity) — the live operator surface that surfaces checkpoint creation and fork events on the canvas as they happen.
+- [Keeper](/guides/keeper) — the credential vault to use for tool inputs so the plaintext `state` column never captures raw secrets.
+- [Backup & Restore](/guides/backup) — for the "promote this fork to a different workspace" workflow that checkpoints/forks alone don't cover.
+- [`crewship checkpoint`](/cli/checkpoint) CLI reference and [Checkpoints API](/api-reference/checkpoints) for full HTTP schemas.
