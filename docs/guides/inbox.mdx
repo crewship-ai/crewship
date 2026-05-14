@@ -65,15 +65,14 @@ When a row is resolved, the detail panel dims, the action row replaces itself wi
 
 ## Realtime
 
-The list is refreshed by three WebSocket events on the workspace channel:
+The list is refreshed by two WebSocket events on the workspace channel:
 
 | Event | Source | Effect |
 |-------|--------|--------|
 | `inbox.updated` | `inbox_handler.go` after any PATCH | Re-fetches the current filter |
 | `escalation.created` | `escalation_handler.go` on POST | Re-fetches so a new escalation lights the list instantly |
-| `pipeline.waitpoint.created` | The pipeline runtime when a `wait` step parks | Same — the row appears the moment the gate hits |
 
-The `useInbox` hook (`hooks/use-inbox.ts`) listens to all three and re-issues the same workspace-scoped GET on each. No polling; the bell badge uses `useInboxUnreadCount` which adds a 30-second poll alongside the same realtime listeners as a belt-and-braces fallback.
+The `useInbox` hook (`hooks/use-inbox.ts`) listens to both and re-issues the same workspace-scoped GET on each. There is no dedicated event for waitpoint creation; the bell badge uses `useInboxUnreadCount` which adds a 30-second poll alongside the same realtime listeners, and that poll is what surfaces a newly-parked waitpoint within the next tick.
 
 <Note>
 The badge debounces correctly across tabs: an approve from your laptop clears the bell on your phone within a few hundred milliseconds because both subscribe to the same `inbox.updated` workspace event.
@@ -126,7 +125,7 @@ Inbox items are user-scoped via three target fields on the row:
 
 `inboxVisibilityClause` in `internal/api/inbox_handler.go` enforces the predicate on every read endpoint (`List`, `UnreadCount`, `PatchState`). Admins do **not** automatically see other users' targeted items — least privilege wins over convenience, the same way Linear's own Inbox works.
 
-If you genuinely need a workspace-wide view of who has what pending — say, to audit whether a payroll-grade routine has been sitting on someone's bell all weekend — that's what the journal is for. The journal records `pipeline.waitpoint.created` + `pipeline.run.failed` + `escalation.created` events with full sender / target context, and is not user-scoped.
+If you genuinely need a workspace-wide view of who has what pending — say, to audit whether a payroll-grade routine has been sitting on someone's bell all weekend — query the `inbox_items` table directly (via `crewship inbox list --state all` workspace-wide) or the `pipeline_waitpoints` table for the gate side. The journal records `pipeline.run.failed` + `pipeline.step.validation_failed` + `escalation.created` for related signals, but waitpoint creation itself lives on the `pipeline_waitpoints` row, not in the journal stream.
 
 ## What this replaces
 

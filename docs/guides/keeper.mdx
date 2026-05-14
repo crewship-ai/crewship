@@ -46,7 +46,8 @@ Credentials are classified into four security levels:
 For L1 credentials, Keeper skips the LLM entirely when:
 1. The security level is L1
 2. The intent string has at least 10 non-whitespace characters
-3. The request is NOT a `/keeper/execute` request
+3. The intent contains at least 3 **distinct** non-whitespace characters (blocks trivial filler like `"aaaaaaaaaa"`)
+4. The request is NOT a `/keeper/execute` request
 
 ```go
 // internal/keeper/gatekeeper/gatekeeper.go
@@ -54,7 +55,8 @@ const minIntentLength = 10
 
 if req.Command == "" &&
     req.SecurityLevel == keeper.SecurityLevelL1 &&
-    len(strings.TrimSpace(req.Request.Intent)) >= minIntentLength {
+    len(intent) >= minIntentLength &&
+    hasMinDistinctChars(intent, 3) {
     return GatekeeperResponse{Decision: "ALLOW", Reason: "L1 auto-approved", RiskScore: 1}, nil
 }
 ```

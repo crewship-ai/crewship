@@ -55,6 +55,13 @@ Defined in `internal/journal/types.go`. Every type is a stable string -- renames
 | Checkpointing | `checkpoint.created`, `checkpoint.restored`, `fork.created` |
 | Eval | `eval.run_started`, `eval.metric`, `eval.regression_detected` |
 | Hooks | `hook.fired`, `hook.blocked` |
+| Pipeline | `pipeline.run.started/completed/failed`, `pipeline.step.started/completed/failed/validation_failed`, `pipeline.dry_run` |
+| Credentials | `credential.auto_assign_failed`, `credential.auto_assign_empty` |
+| Skills | `skill.imported`, `skill.deleted`, `skill.assigned`, `skill.unassigned` |
+| Audit | `audit.entity_created/updated/deleted/restored` (mirrors `audit_logs`) |
+| Provisioning | `provisioning.queued/building/complete/failed` (crew runtime container build) |
+| Chat | `chat.user_message`, `chat.agent_response` (user↔agent turns) |
+| Agent error | `agent.error` (panic recoveries + stream-handling failures) |
 | System | `system.compaction`, `system.migration`, `system.hook_toggled`, `system.consolidation_triggered/completed` |
 
 #### `run.*` — agent run lifecycle
