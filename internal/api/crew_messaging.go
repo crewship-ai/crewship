@@ -55,24 +55,24 @@ type messageResponse struct {
 func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	var req sendMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.FromCrewID == "" || req.ToCrewID == "" || req.Content == "" || req.WorkspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from_crew_id, to_crew_id, workspace_id, and content are required"})
+		replyError(w, http.StatusBadRequest, "from_crew_id, to_crew_id, workspace_id, and content are required")
 		return
 	}
 
 	if len(req.Content) > 1<<20 { // 1MB max message size
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content too large (max 1MB)"})
+		replyError(w, http.StatusBadRequest, "content too large (max 1MB)")
 		return
 	}
 
 	// Verify the from_crew actually belongs to the claimed workspace.
 	actualWSID := h.resolveWorkspaceID(r.Context(), req.FromCrewID)
 	if actualWSID == "" || actualWSID != req.WorkspaceID {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "crew does not belong to the specified workspace"})
+		replyError(w, http.StatusForbidden, "crew does not belong to the specified workspace")
 		return
 	}
 
@@ -80,11 +80,11 @@ func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Reques
 	allowed, err := h.canCommunicate(r, req.FromCrewID, req.ToCrewID)
 	if err != nil {
 		h.logger.Error("check crew connection", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if !allowed {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "no active connection from source to target crew"})
+		replyError(w, http.StatusForbidden, "no active connection from source to target crew")
 		return
 	}
 
@@ -103,7 +103,7 @@ func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Reques
 		id, req.WorkspaceID, req.FromCrewID, req.ToCrewID, req.FromAgentID, req.Content, metadataStr, now)
 	if err != nil {
 		h.logger.Error("insert crew message", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store message"})
+		replyError(w, http.StatusInternalServerError, "failed to store message")
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Reques
 func (h *CrewMessagingHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	crewID := r.URL.Query().Get("crew_id")
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id is required"})
+		replyError(w, http.StatusBadRequest, "crew_id is required")
 		return
 	}
 
@@ -183,7 +183,7 @@ func (h *CrewMessagingHandler) ListMessages(w http.ResponseWriter, r *http.Reque
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list crew messages", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer rows.Close()
@@ -226,7 +226,7 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	requesterCrewID := r.URL.Query().Get("requester_crew_id")
 
 	if targetCrewID == "" || filePath == "" || requesterCrewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId, path, and requester_crew_id are required"})
+		replyError(w, http.StatusBadRequest, "crewId, path, and requester_crew_id are required")
 		return
 	}
 
@@ -234,11 +234,11 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	allowed, err := h.canCommunicate(r, requesterCrewID, targetCrewID)
 	if err != nil {
 		h.logger.Error("check crew connection for file read", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if !allowed {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "no active connection to target crew"})
+		replyError(w, http.StatusForbidden, "no active connection to target crew")
 		return
 	}
 
@@ -262,11 +262,11 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	info, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+			replyError(w, http.StatusNotFound, "file not found")
 			return
 		}
 		h.logger.Error("stat crew file", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -275,7 +275,7 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 		entries, err := os.ReadDir(absPath)
 		if err != nil {
 			h.logger.Error("read crew directory", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			replyError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
 		type fileEntry struct {
@@ -303,14 +303,14 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 
 	// Limit file size to 10MB for streaming
 	if info.Size() > 10<<20 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file too large (max 10MB)"})
+		replyError(w, http.StatusBadRequest, "file too large (max 10MB)")
 		return
 	}
 
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		h.logger.Error("read crew file", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -334,7 +334,7 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form or file too large (max 10MB)"})
+		replyError(w, http.StatusBadRequest, "invalid multipart form or file too large (max 10MB)")
 		return
 	}
 
@@ -342,7 +342,7 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	destPath := r.FormValue("path")
 
 	if targetCrewID == "" || requesterCrewID == "" || destPath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId, requester_crew_id, and path are required"})
+		replyError(w, http.StatusBadRequest, "crewId, requester_crew_id, and path are required")
 		return
 	}
 
@@ -351,11 +351,11 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	allowed, err := h.canCommunicate(r, requesterCrewID, targetCrewID)
 	if err != nil {
 		h.logger.Error("check crew connection for file write", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if !allowed {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "no active connection to target crew"})
+		replyError(w, http.StatusForbidden, "no active connection to target crew")
 		return
 	}
 
@@ -364,7 +364,7 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file field is required"})
+		replyError(w, http.StatusBadRequest, "file field is required")
 		return
 	}
 	defer file.Close()
@@ -383,7 +383,7 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	dst, err := os.Create(absPath)
 	if err != nil {
 		h.logger.Error("create file", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer dst.Close()
@@ -391,7 +391,7 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	written, err := io.Copy(dst, file)
 	if err != nil {
 		h.logger.Error("write file", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+		replyError(w, http.StatusInternalServerError, "write failed")
 		return
 	}
 

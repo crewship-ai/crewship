@@ -34,7 +34,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -43,21 +43,21 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("crew exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 
 	var req createCrewIntegrationRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if req.Name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		replyError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if req.DisplayName == "" {
@@ -67,15 +67,15 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 		req.Transport = "streamable-http"
 	}
 	if req.Transport != "streamable-http" && req.Transport != "stdio" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
+		replyError(w, http.StatusBadRequest, "transport must be 'streamable-http' or 'stdio'")
 		return
 	}
 	if req.Transport == "streamable-http" && (req.Endpoint == nil || *req.Endpoint == "") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+		replyError(w, http.StatusBadRequest, "endpoint is required for streamable-http transport")
 		return
 	}
 	if req.Transport == "stdio" && (req.Command == nil || *req.Command == "") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+		replyError(w, http.StatusBadRequest, "command is required for stdio transport")
 		return
 	}
 
@@ -85,11 +85,11 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 		if err := h.db.QueryRowContext(r.Context(),
 			"SELECT workspace_id FROM workspace_mcp_servers WHERE id = ?",
 			*req.WorkspaceMCPServerID).Scan(&wsServerWS); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Referenced workspace integration not found"})
+			replyError(w, http.StatusBadRequest, "Referenced workspace integration not found")
 			return
 		}
 		if wsServerWS != workspaceID {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Workspace integration belongs to a different workspace"})
+			replyError(w, http.StatusBadRequest, "Workspace integration belongs to a different workspace")
 			return
 		}
 	}
@@ -105,7 +105,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 		req.Endpoint, req.Command, req.ArgsJSON, req.EnvJSON, req.ConfigJSON, req.Icon, now, now)
 	if err != nil {
 		h.logger.Error("create crew integration", "error", err)
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Integration with this name already exists in this crew"})
+		replyError(w, http.StatusConflict, "Integration with this name already exists in this crew")
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 
 	var req updateIntegrationRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		WHERE cs.id = ? AND cs.crew_id = ? AND c.workspace_id = ?
 			AND cs.deleted_at IS NULL AND c.deleted_at IS NULL`,
 		id, crewID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
+		replyError(w, http.StatusNotFound, "Crew integration not found")
 		return
 	}
 
@@ -160,7 +160,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	}
 	if req.Transport != nil {
 		if *req.Transport != "streamable-http" && *req.Transport != "stdio" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
+			replyError(w, http.StatusBadRequest, "transport must be 'streamable-http' or 'stdio'")
 			return
 		}
 		u.Set("transport", *req.Transport)
@@ -210,11 +210,11 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		}
 
 		if *req.Transport == "streamable-http" && finalEndpoint == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+			replyError(w, http.StatusBadRequest, "endpoint is required for streamable-http transport")
 			return
 		}
 		if *req.Transport == "stdio" && finalCommand == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+			replyError(w, http.StatusBadRequest, "command is required for stdio transport")
 			return
 		}
 	}
@@ -222,7 +222,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	query, args := u.Build("crew_mcp_servers", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update crew integration", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
 		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount); err != nil {
 		h.logger.Error("fetch updated crew integration", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	s.Enabled = enabled == 1
@@ -256,7 +256,7 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -265,7 +265,7 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -296,7 +296,7 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'crew'", id); err != nil {
 		tx.Rollback()
 		h.logger.Error("delete agent bindings for crew server", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -322,17 +322,17 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		(SELECT id FROM crews WHERE workspace_id = ?)`, id, crewID, workspaceID)
 	if err != nil {
 		tx.Rollback()
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		tx.Rollback()
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
+		replyError(w, http.StatusNotFound, "Crew integration not found")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

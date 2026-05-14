@@ -45,20 +45,20 @@ func NewJournalHandler(db *sql.DB, logger *slog.Logger, j journal.Emitter) *Jour
 func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 
 	q, err := parseJournalQuery(r, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	entries, next, err := journal.List(r.Context(), h.db, q)
 	if err != nil {
 		h.logger.Error("journal list failed", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "journal list failed"})
+		replyError(w, http.StatusInternalServerError, "journal list failed")
 		return
 	}
 
@@ -79,12 +79,12 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	q, err := parseJournalQuery(r, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// `q.Limit` is left at the default; the seed loop and poll loop
@@ -93,7 +93,7 @@ func (h *JournalHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming not supported"})
+		replyError(w, http.StatusInternalServerError, "streaming not supported")
 		return
 	}
 
@@ -410,23 +410,23 @@ func parseJournalQuery(r *http.Request, workspaceID string) (journal.Query, erro
 func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	entryID := r.PathValue("id")
 	if entryID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "entry id required"})
+		replyError(w, http.StatusBadRequest, "entry id required")
 		return
 	}
 
 	entry, err := journal.Get(r.Context(), h.db, workspaceID, entryID)
 	if err != nil {
 		h.logger.Error("journal get failed", "err", err, "entry_id", entryID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "journal get failed"})
+		replyError(w, http.StatusInternalServerError, "journal get failed")
 		return
 	}
 	if entry == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		replyError(w, http.StatusNotFound, "entry not found")
 		return
 	}
 	// Reuse the list serializer so single-entry shape stays identical to
@@ -443,7 +443,7 @@ func (h *JournalHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	// Strip pagination params from the request URL before parsing so a
@@ -466,14 +466,14 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 
 	q, err := parseJournalQuery(stripped, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	n, err := journal.Count(r.Context(), h.db, q)
 	if err != nil {
 		h.logger.Error("journal count failed", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "journal count failed"})
+		replyError(w, http.StatusInternalServerError, "journal count failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"total": n})
@@ -491,17 +491,17 @@ func (h *JournalHandler) Count(w http.ResponseWriter, r *http.Request) {
 func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "priority edit requires OWNER or ADMIN"})
+		replyError(w, http.StatusForbidden, "priority edit requires OWNER or ADMIN")
 		return
 	}
 	entryID := r.PathValue("id")
 	if entryID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "entry id required"})
+		replyError(w, http.StatusBadRequest, "entry id required")
 		return
 	}
 
@@ -510,7 +510,7 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 		Reason   string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	prio := journal.Priority(body.Priority)
@@ -527,11 +527,11 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 	existing, err := journal.Get(r.Context(), h.db, workspaceID, entryID)
 	if err != nil {
 		h.logger.Error("journal priority: get", "err", err, "entry_id", entryID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
 	if existing == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		replyError(w, http.StatusNotFound, "entry not found")
 		return
 	}
 
@@ -543,12 +543,12 @@ func (h *JournalHandler) SetPriority(w http.ResponseWriter, r *http.Request) {
 		string(prio), entryID, workspaceID)
 	if err != nil {
 		h.logger.Error("journal priority: update", "err", err, "entry_id", entryID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update failed"})
+		replyError(w, http.StatusInternalServerError, "update failed")
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "entry not found"})
+		replyError(w, http.StatusNotFound, "entry not found")
 		return
 	}
 

@@ -67,9 +67,7 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 // ── 11. CreateComment — POST /api/v1/crews/{crewId}/issues/{identifier}/comments
 
 func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

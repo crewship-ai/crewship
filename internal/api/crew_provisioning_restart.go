@@ -80,7 +80,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "update") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if h.docker == nil {
@@ -91,7 +91,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	}
 	crewID := r.PathValue("crewId")
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew ID is required"})
+		replyError(w, http.StatusBadRequest, "crew ID is required")
 		return
 	}
 
@@ -101,19 +101,19 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 		crewID, workspaceID,
 	).Scan(&slug)
 	if err == sql.ErrNoRows {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		replyError(w, http.StatusNotFound, "crew not found")
 		return
 	}
 	if err != nil {
 		h.logger.Error("query crew for restart", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	containerID, err := h.findCrewContainer(r.Context(), slug)
 	if err != nil {
 		h.logger.Error("list containers for restart", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if containerID == "" {
@@ -126,7 +126,7 @@ func (h *ProvisioningHandler) RestartCrewAgents(w http.ResponseWriter, r *http.R
 	// EnsureCrewRuntime which re-creates from the current cached_image.
 	if err := h.docker.ContainerRemove(r.Context(), containerID, container.RemoveOptions{Force: true}); err != nil {
 		h.logger.Error("remove crew container", "container_id", containerID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, "Failed to remove crew container")
 		return
 	}
 

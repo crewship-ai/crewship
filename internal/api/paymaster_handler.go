@@ -33,14 +33,14 @@ func NewPaymasterHandler(db *sql.DB, logger *slog.Logger) *PaymasterHandler {
 func (h *PaymasterHandler) SpendByCrew(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SpendByCrew(r.Context(), h.db, workspaceID, since, until)
 	if err != nil {
 		h.logger.Error("paymaster spend-by-crew", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		replyError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})
@@ -51,12 +51,12 @@ func (h *PaymasterHandler) SpendByCrew(w http.ResponseWriter, r *http.Request) {
 func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	crewID := r.PathValue("crewId")
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
+		replyError(w, http.StatusBadRequest, "crew_id required")
 		return
 	}
 	// Workspace isolation: paymaster.SpendByAgent filters by crew_id
@@ -69,18 +69,18 @@ func (h *PaymasterHandler) SpendByAgent(w http.ResponseWriter, r *http.Request) 
 	ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("paymaster spend-by-agent: crew lookup failed", "err", err, "crew_id", crewID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "crew lookup failed"})
+		replyError(w, http.StatusInternalServerError, "crew lookup failed")
 		return
 	}
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		replyError(w, http.StatusNotFound, "crew not found")
 		return
 	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SpendByAgent(r.Context(), h.db, crewID, since, until)
 	if err != nil {
 		h.logger.Error("paymaster spend-by-agent", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		replyError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "crew_id": crewID})
@@ -121,12 +121,12 @@ func missionBelongsToWorkspace(ctx context.Context, db *sql.DB, missionID, works
 func (h *PaymasterHandler) SpendByMission(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	missionID := r.PathValue("missionId")
 	if missionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
+		replyError(w, http.StatusBadRequest, "mission_id required")
 		return
 	}
 	// Same workspace-isolation check as SpendByAgent above —
@@ -136,17 +136,17 @@ func (h *PaymasterHandler) SpendByMission(w http.ResponseWriter, r *http.Request
 	ok, err := missionBelongsToWorkspace(r.Context(), h.db, missionID, workspaceID)
 	if err != nil {
 		h.logger.Error("paymaster spend-by-mission: mission lookup failed", "err", err, "mission_id", missionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		replyError(w, http.StatusInternalServerError, "mission lookup failed")
 		return
 	}
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
+		replyError(w, http.StatusNotFound, "mission not found")
 		return
 	}
 	row, err := paymaster.SpendByMission(r.Context(), h.db, missionID)
 	if err != nil {
 		h.logger.Error("paymaster spend-by-mission", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		replyError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"row": row, "mission_id": missionID})
@@ -157,7 +157,7 @@ func (h *PaymasterHandler) SpendByMission(w http.ResponseWriter, r *http.Request
 func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	since, _ := parseWindow(r)
@@ -170,7 +170,7 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 	rows, err := paymaster.TopSpenders(r.Context(), h.db, workspaceID, limit, since)
 	if err != nil {
 		h.logger.Error("paymaster top-spenders", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		replyError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "limit": limit, "since": since})
@@ -191,14 +191,14 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SubscriptionUsageByPlan(r.Context(), h.db, workspaceID, since, until)
 	if err != nil {
 		h.logger.Error("paymaster subscription-usage", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query failed"})
+		replyError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})

@@ -116,7 +116,7 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 		MCPURL string `json:"mcp_url"`
 	}
 	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_url is required"})
+		replyError(w, http.StatusBadRequest, "mcp_url is required")
 		return
 	}
 
@@ -136,7 +136,7 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Warn("OAuth discovery failed", "error", err)
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Could not discover OAuth endpoints for this issuer"})
+		replyError(w, http.StatusNotFound, "Could not discover OAuth endpoints for this issuer")
 		return
 	}
 
@@ -161,7 +161,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -171,7 +171,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		ProviderHint string `json:"provider_hint"`
 	}
 	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_url is required"})
+		replyError(w, http.StatusBadRequest, "mcp_url is required")
 		return
 	}
 	if req.ServerName == "" {
@@ -264,7 +264,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		var err error
 		encSecret, err = encryption.Encrypt(clientSecret)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt client secret"})
+			replyError(w, http.StatusInternalServerError, "Failed to encrypt client secret")
 			return
 		}
 	}
@@ -276,26 +276,26 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes, user.ID); err != nil {
 		h.logger.Error("create auto-connect credential", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create credential"})
+		replyError(w, http.StatusInternalServerError, "Failed to create credential")
 		return
 	}
 
 	// Step 5: Store CSRF state + PKCE
 	state, err := generateOAuthState()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
+		replyError(w, http.StatusInternalServerError, "Failed to generate state")
 		return
 	}
 
 	codeVerifier, codeChallenge, err := generatePKCE()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate PKCE"})
+		replyError(w, http.StatusInternalServerError, "Failed to generate PKCE")
 		return
 	}
 
 	if err := h.storeStateWithPKCE(r.Context(), state, credID, workspaceID, redirectURI, codeVerifier); err != nil {
 		h.logger.Error("store OAuth state", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store state"})
+		replyError(w, http.StatusInternalServerError, "Failed to store state")
 		return
 	}
 

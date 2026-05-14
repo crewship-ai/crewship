@@ -17,7 +17,7 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 
@@ -49,7 +49,8 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	cat, err := backup.ListCatalog(ctx, h.db, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup list catalog", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to list backup catalog")
 		return
 	}
 	if len(cat) > 0 {
@@ -75,12 +76,14 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	// list without a manual backfill step.
 	dir, err := backup.DefaultBackupsDir()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup default-dir resolve", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to resolve backup directory")
 		return
 	}
 	entries, err := backup.ListBackups(ctx, dir)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup list disk", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to list backups on disk")
 		return
 	}
 	filtered := entries[:0]
@@ -114,16 +117,16 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
+		replyError(w, http.StatusBadRequest, "path query param required")
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
@@ -131,12 +134,17 @@ func (h *BackupHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		// belongs to a different workspace. Return 404 rather than
 		// 403 so we don't confirm the existence of a bundle the
 		// caller is not meant to see.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	m, err := backup.Inspect(ctx, path)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		// Inspect can fail because the file is gone (the realistic case
+		// after validateBackupPath passed) or because the bundle is
+		// malformed. Either way the caller doesn't need the raw error
+		// — surface "not found" and keep the detail in logs.
+		h.logger.Warn("backup inspect", "error", err)
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -149,11 +157,11 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace context required"})
+		replyError(w, http.StatusBadRequest, "workspace context required")
 		return
 	}
 
@@ -169,7 +177,8 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 	out.WorkspaceID = workspaceID
 	held, err := backup.IsLockHeld(ctx, h.db, workspaceID, time.Now())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup lock status", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to query backup lock status")
 		return
 	}
 	out.Held = held
@@ -196,25 +205,26 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
+		replyError(w, http.StatusBadRequest, "path query param required")
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	res, err := backup.Verify(ctx, path)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup verify", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to verify backup")
 		return
 	}
 	errStr := ""
@@ -238,11 +248,11 @@ func (h *BackupHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	if !backup.IsInstanceOwner(user.Email) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instance owner required"})
+		replyError(w, http.StatusForbidden, "instance owner required")
 		return
 	}
 	writeJSON(w, http.StatusOK, backup.Snapshot())

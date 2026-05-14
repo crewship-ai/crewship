@@ -52,12 +52,12 @@ func (h *EvalHandler) SetJournal(j journal.Emitter) {
 func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "eval requires OWNER or ADMIN role"})
+		replyError(w, http.StatusForbidden, "eval requires OWNER or ADMIN role")
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -71,28 +71,28 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		Seed      int64  `json:"seed"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.MissionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
+		replyError(w, http.StatusBadRequest, "mission_id required")
 		return
 	}
 	ok, err := missionBelongsToWorkspace(r.Context(), h.db, body.MissionID, workspaceID)
 	if err != nil {
 		h.logger.Error("eval replay: mission lookup failed", "err", err, "mission_id", body.MissionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		replyError(w, http.StatusInternalServerError, "mission lookup failed")
 		return
 	}
 	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
+		replyError(w, http.StatusNotFound, "mission not found")
 		return
 	}
 
 	token, err := newEvalToken()
 	if err != nil {
 		h.logger.Error("eval replay: token generation failed", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		replyError(w, http.StatusInternalServerError, "token generation failed")
 		return
 	}
 	runID := "er_" + token
@@ -106,7 +106,7 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := quartermaster.InsertReplayRun(r.Context(), h.db, rec); err != nil {
 		h.logger.Error("eval replay insert", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "insert failed"})
+		replyError(w, http.StatusInternalServerError, "insert failed")
 		return
 	}
 
@@ -171,12 +171,12 @@ func (h *EvalHandler) Replay(w http.ResponseWriter, r *http.Request) {
 func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" && role != "ADMIN" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "eval requires OWNER or ADMIN role"})
+		replyError(w, http.StatusForbidden, "eval requires OWNER or ADMIN role")
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -190,11 +190,11 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 		CandidateMissionID string `json:"candidate_mission_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if body.BaselineMissionID == "" || body.CandidateMissionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "baseline_mission_id and candidate_mission_id required"})
+		replyError(w, http.StatusBadRequest, "baseline_mission_id and candidate_mission_id required")
 		return
 	}
 	// Check each mission independently — a partial spoof (valid
@@ -203,24 +203,24 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 	baseOK, err := missionBelongsToWorkspace(r.Context(), h.db, body.BaselineMissionID, workspaceID)
 	if err != nil {
 		h.logger.Error("eval regression: baseline lookup failed", "err", err, "mission_id", body.BaselineMissionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		replyError(w, http.StatusInternalServerError, "mission lookup failed")
 		return
 	}
 	candOK, err := missionBelongsToWorkspace(r.Context(), h.db, body.CandidateMissionID, workspaceID)
 	if err != nil {
 		h.logger.Error("eval regression: candidate lookup failed", "err", err, "mission_id", body.CandidateMissionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mission lookup failed"})
+		replyError(w, http.StatusInternalServerError, "mission lookup failed")
 		return
 	}
 	if !baseOK || !candOK {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
+		replyError(w, http.StatusNotFound, "mission not found")
 		return
 	}
 
 	token, err := newEvalToken()
 	if err != nil {
 		h.logger.Error("eval regression: token generation failed", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "token generation failed"})
+		replyError(w, http.StatusInternalServerError, "token generation failed")
 		return
 	}
 	runID := "er_" + token
@@ -234,7 +234,7 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := quartermaster.InsertRegressionRun(r.Context(), h.db, rec); err != nil {
 		h.logger.Error("eval regression insert", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "insert failed"})
+		replyError(w, http.StatusInternalServerError, "insert failed")
 		return
 	}
 
@@ -288,7 +288,7 @@ func (h *EvalHandler) Regression(w http.ResponseWriter, r *http.Request) {
 func (h *EvalHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	limit := 50
@@ -300,7 +300,7 @@ func (h *EvalHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	runs, err := quartermaster.ListRuns(r.Context(), h.db, workspaceID, limit)
 	if err != nil {
 		h.logger.Error("eval list runs", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

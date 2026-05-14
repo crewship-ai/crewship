@@ -93,7 +93,10 @@ describe("useAgentDetail", () => {
     const { result } = renderHook(() => useAgentDetail(), { wrapper: wrap("agent-1") })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(mockFetch).toHaveBeenCalledWith("/api/v1/agents/agent-1?workspace_id=ws-1")
+    expect(mockFetch).toHaveBeenCalledWith(
+      "/api/v1/agents/agent-1?workspace_id=ws-1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
     expect(result.current.agent?.slug).toBe("lucie")
     expect(result.current.error).toBeNull()
   })

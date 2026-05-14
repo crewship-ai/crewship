@@ -282,7 +282,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 	// forensic data, not for VIEWER/MEMBER eyes. Anyone who can update
 	// credentials can read their audit; below that, 403.
 	if !canRole(role, "update") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -295,11 +295,11 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		credentialID, workspaceID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			replyError(w, http.StatusNotFound, "Credential not found")
 			return
 		}
 		h.logger.Error("audit: check credential exists", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -319,7 +319,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 		LIMIT ?`, credentialID, limit)
 	if err != nil {
 		h.logger.Error("query credential audit", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -339,7 +339,7 @@ func (h *CredentialHandler) AuditTimeline(w http.ResponseWriter, r *http.Request
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (credential audit)", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

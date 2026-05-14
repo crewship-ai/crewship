@@ -55,7 +55,7 @@ func (h *SessionsHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.sessions.ListActiveForUser(r.Context(), user.ID)
 	if err != nil {
 		h.logger.Error("list sessions", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -84,23 +84,23 @@ func (h *SessionsHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session id required"})
+		replyError(w, http.StatusBadRequest, "session id required")
 		return
 	}
 
 	sess, err := h.sessions.Get(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, sessions.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			replyError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		h.logger.Error("get session for revoke", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if sess.UserID != user.ID {
 		// Ownership check. Don't leak existence — same response as 404.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		replyError(w, http.StatusNotFound, "session not found")
 		return
 	}
 
@@ -112,11 +112,11 @@ func (h *SessionsHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		// either way; surface the same opaque 404 the missing-row
 		// branch above uses so callers don't need to distinguish.
 		if errors.Is(err, sessions.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			replyError(w, http.StatusNotFound, "session not found")
 			return
 		}
 		h.logger.Error("revoke session", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

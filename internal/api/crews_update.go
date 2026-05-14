@@ -44,12 +44,12 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		replyError(w, http.StatusBadRequest, "crewId is required")
 		return
 	}
 
@@ -57,30 +57,30 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
 		h.logger.Error("get crew for update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 
 	var req updateCrewRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
 	if req.Name != nil && (len(*req.Name) < 2 || len(*req.Name) > 100) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name must be 2-100 characters"})
+		replyError(w, http.StatusBadRequest, "name must be 2-100 characters")
 		return
 	}
 	if req.Slug != nil && (len(*req.Slug) < 2 || len(*req.Slug) > 50) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+		replyError(w, http.StatusBadRequest, "slug must be 2-50 characters")
 		return
 	}
 	if req.Slug != nil && !validSlugFormat(*req.Slug) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, underscores, and hyphens"})
+		replyError(w, http.StatusBadRequest, "slug must contain only lowercase letters, numbers, underscores, and hyphens")
 		return
 	}
 
@@ -90,34 +90,34 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			"SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND id != ? AND deleted_at IS NULL",
 			workspaceID, *req.Slug, crewID).Scan(&slugOwnerID)
 		if err == nil {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew slug already taken in this workspace"})
+			replyError(w, http.StatusConflict, "Crew slug already taken in this workspace")
 			return
 		}
 		if err != sql.ErrNoRows {
 			h.logger.Error("check crew slug", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 
 	// Validate devcontainer_config and mise_config size and syntax.
 	if req.DevcontainerConfig != nil && len(*req.DevcontainerConfig) > 102400 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "devcontainer_config exceeds 100KB limit"})
+		replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
 		return
 	}
 	if req.MiseConfig != nil && len(*req.MiseConfig) > 10240 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mise_config exceeds 10KB limit"})
+		replyError(w, http.StatusBadRequest, "mise_config exceeds 10KB limit")
 		return
 	}
 	if req.DevcontainerConfig != nil && *req.DevcontainerConfig != "" {
 		if _, err := devcontainer.ParseBytes([]byte(*req.DevcontainerConfig)); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid devcontainer_config: " + err.Error()})
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+err.Error())
 			return
 		}
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if _, err := devcontainer.ParseMiseConfig(*req.MiseConfig); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid mise_config: " + err.Error()})
+			replyError(w, http.StatusBadRequest, "invalid mise_config: "+err.Error())
 			return
 		}
 	}
@@ -151,7 +151,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ContainerTTLHours != nil {
 		if *req.ContainerTTLHours < 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "container_ttl_hours cannot be negative"})
+			replyError(w, http.StatusBadRequest, "container_ttl_hours cannot be negative")
 			return
 		}
 		if *req.ContainerTTLHours == 0 {
@@ -166,11 +166,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 				MCPServers map[string]json.RawMessage `json:"mcpServers"`
 			}
 			if err := json.Unmarshal([]byte(*req.MCPConfigJSON), &mcpCheck); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_config_json is not valid JSON: " + err.Error()})
+				replyError(w, http.StatusBadRequest, "mcp_config_json is not valid JSON: "+err.Error())
 				return
 			}
 			if mcpCheck.MCPServers == nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_config_json must contain a \"mcpServers\" object"})
+				replyError(w, http.StatusBadRequest, "mcp_config_json must contain a \"mcpServers\" object")
 				return
 			}
 		}
@@ -187,17 +187,17 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.EscalationConfig != "" {
 			var cfg orchestrator.EscalationConfig
 			if err := json.Unmarshal([]byte(*req.EscalationConfig), &cfg); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "escalation_config is not valid JSON: " + err.Error()})
+				replyError(w, http.StatusBadRequest, "escalation_config is not valid JSON: "+err.Error())
 				return
 			}
 			for _, v := range []float64{cfg.AutoApproveThreshold, cfg.NotifyThreshold, cfg.RequireApprovalBelow} {
 				if v < 0 || v > 1 {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "escalation_config thresholds must be between 0 and 1"})
+					replyError(w, http.StatusBadRequest, "escalation_config thresholds must be between 0 and 1")
 					return
 				}
 			}
 			if cfg.AutoApproveThreshold > 0 && cfg.RequireApprovalBelow > 0 && cfg.AutoApproveThreshold <= cfg.RequireApprovalBelow {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "auto_approve_threshold must be greater than require_approval_below"})
+				replyError(w, http.StatusBadRequest, "auto_approve_threshold must be greater than require_approval_below")
 				return
 			}
 		}
@@ -254,7 +254,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.NetworkMode != nil {
 		mode := strings.ToLower(*req.NetworkMode)
 		if mode != "free" && mode != "restricted" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "network_mode must be 'free' or 'restricted'"})
+			replyError(w, http.StatusBadRequest, "network_mode must be 'free' or 'restricted'")
 			return
 		}
 		ub.Set("network_mode", mode)
@@ -279,7 +279,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			for _, d := range *req.AllowedDomains {
 				h := normalizeDomain(d)
 				if h == "" {
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid domain: %q", d)})
+					replyError(w, http.StatusBadRequest, fmt.Sprintf("invalid domain: %q", d))
 					return
 				}
 				normalized = append(normalized, h)
@@ -287,7 +287,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			domainsJSON, err := json.Marshal(normalized)
 			if err != nil {
 				h.logger.Error("marshal allowed_domains", "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 			ub.Set("allowed_domains", string(domainsJSON))
@@ -298,7 +298,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	_, err = h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("update crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -323,7 +323,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

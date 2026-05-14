@@ -76,7 +76,7 @@ type pairStartResponse struct {
 func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -94,7 +94,7 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 	code, err := generatePairingCode(8)
 	if err != nil {
 		h.logger.Error("cli pair: generate code", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -107,7 +107,7 @@ func (h *CliPairHandler) Start(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
 		id, user.ID, code, nullableHint(hint), now.Format(time.RFC3339), expires.Format(time.RFC3339)); err != nil {
 		h.logger.Error("cli pair: insert", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -130,13 +130,13 @@ type pairPollResponse struct {
 func (h *CliPairHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	code := normalizePairingCode(r.URL.Query().Get("code"))
 	if code == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "code is required"})
+		replyError(w, http.StatusBadRequest, "code is required")
 		return
 	}
 
@@ -154,7 +154,7 @@ func (h *CliPairHandler) Poll(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("cli pair: poll lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -200,12 +200,12 @@ type pairRedeemResponse struct {
 func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	var req pairRedeemRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	code := normalizePairingCode(req.Code)
 	if code == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "code is required"})
+		replyError(w, http.StatusBadRequest, "code is required")
 		return
 	}
 	hint := sanitizeAdapterHint(req.AdapterHint)
@@ -213,7 +213,7 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("cli pair redeem: begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer tx.Rollback() //nolint:errcheck
@@ -225,21 +225,21 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRowContext(r.Context(), `
 		SELECT user_id, status, expires_at FROM cli_pairings WHERE code = ?`, code).Scan(&userID, &status, &expiresStr)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired code"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired code")
 		return
 	}
 	if err != nil {
 		h.logger.Error("cli pair redeem: lookup", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if status != "pending" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired code"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired code")
 		return
 	}
 	expires, err := time.Parse(time.RFC3339, expiresStr)
 	if err != nil || time.Now().UTC().After(expires) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired code"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired code")
 		return
 	}
 
@@ -247,7 +247,7 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 	tokenBytes := make([]byte, 20)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		h.logger.Error("cli pair redeem: rand", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	cliToken := cliTokenPrefix + hex.EncodeToString(tokenBytes)
@@ -273,12 +273,12 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		now, nullableHint(hint), code)
 	if err != nil {
 		h.logger.Error("cli pair redeem: mark consumed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	affected, _ := updRes.RowsAffected()
 	if affected != 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired code"})
+		replyError(w, http.StatusBadRequest, "Invalid or expired code")
 		return
 	}
 
@@ -287,20 +287,20 @@ func (h *CliPairHandler) Redeem(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?)`,
 		tokenID, userID, tokenName, tokenHashHex, now); err != nil {
 		h.logger.Error("cli pair redeem: insert cli_token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	var email string
 	if err := tx.QueryRowContext(r.Context(), "SELECT email FROM users WHERE id = ?", userID).Scan(&email); err != nil {
 		h.logger.Error("cli pair redeem: lookup user", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("cli pair redeem: commit", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

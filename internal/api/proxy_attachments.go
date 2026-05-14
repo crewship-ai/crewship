@@ -32,11 +32,11 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if agentID == "" || chatID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agentId and chatId required"})
+		replyError(w, http.StatusBadRequest, "agentId and chatId required")
 		return
 	}
 
@@ -46,7 +46,7 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&slug, &crewID); err != nil || !crewID.Valid {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -55,11 +55,11 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	var ownerAgent string
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT agent_id FROM chats WHERE id = ? AND workspace_id = ?", chatID, workspaceID).Scan(&ownerAgent); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
+		replyError(w, http.StatusNotFound, "Chat not found")
 		return
 	}
 	if ownerAgent != agentID {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "chat not scoped to this agent"})
+		replyError(w, http.StatusForbidden, "chat not scoped to this agent")
 		return
 	}
 
@@ -70,7 +70,7 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	const maxBytes = 25 << 20
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := r.ParseMultipartForm(maxBytes); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form or file too large (max 25MB)"})
+		replyError(w, http.StatusBadRequest, "invalid multipart form or file too large (max 25MB)")
 		return
 	}
 	// ParseMultipartForm spills uploads near the size limit to disk —
@@ -83,7 +83,7 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	}()
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file field is required"})
+		replyError(w, http.StatusBadRequest, "file field is required")
 		return
 	}
 	defer file.Close()
@@ -93,11 +93,11 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	// most filesystems (255 bytes).
 	filename := filepath.Base(header.Filename)
 	if filename == "" || filename == "." || filename == ".." || strings.ContainsAny(filename, "/\\") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		replyError(w, http.StatusBadRequest, "invalid filename")
 		return
 	}
 	if len(filename) > 255 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "filename too long"})
+		replyError(w, http.StatusBadRequest, "filename too long")
 		return
 	}
 
@@ -113,13 +113,13 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 	// memory pressure stays bounded.
 	body, err := io.ReadAll(file)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read upload body"})
+		replyError(w, http.StatusBadRequest, "read upload body")
 		return
 	}
 	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(fullPath))
 	resp, err := h.ipcPut(r.Context(), ipcPath, bytes.NewReader(body))
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to save attachment"})
+		replyError(w, http.StatusBadGateway, "Failed to save attachment")
 		return
 	}
 	defer resp.Body.Close()

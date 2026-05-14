@@ -25,15 +25,16 @@ func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil || workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	if err := backup.ForceReleaseLock(ctx, h.db, workspaceID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup force-release-lock", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to release backup lock")
 		return
 	}
 	WriteAuditLog(ctx, h.db, h.journal, "backup.unlock", "backup", workspaceID, user.ID, workspaceID, nil)
@@ -59,16 +60,16 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil || workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	var req rotateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	// Reject negatives explicitly. 0 disables a rule (documented);
@@ -76,21 +77,23 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// positive" gate with a positive counterpart and then fed the
 	// negative into Rotate, producing undefined behaviour.
 	if req.KeepLast < 0 || req.KeepDays < 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "keep_last and keep_days must be >= 0 (0 disables the rule)"})
+		replyError(w, http.StatusBadRequest, "keep_last and keep_days must be >= 0 (0 disables the rule)")
 		return
 	}
 	if req.KeepLast == 0 && req.KeepDays == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one of keep_last or keep_days must be positive"})
+		replyError(w, http.StatusBadRequest, "at least one of keep_last or keep_days must be positive")
 		return
 	}
 	dir, err := backup.DefaultBackupsDir()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup default-dir resolve", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to resolve backup directory")
 		return
 	}
 	deleted, err := backup.Rotate(ctx, dir, workspaceID, req.KeepLast, req.KeepDays, req.DryRun)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup rotate", "workspace_id", workspaceID, "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to rotate backups")
 		return
 	}
 	if !req.DryRun {
@@ -124,28 +127,29 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
+		replyError(w, http.StatusBadRequest, "path query param required")
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	if err := backup.Delete(ctx, path); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup delete", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to delete backup")
 		return
 	}
 	// Drop the catalog row too so the admin UI list view refreshes
@@ -170,31 +174,36 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path query param required"})
+		replyError(w, http.StatusBadRequest, "path query param required")
 		return
 	}
 	if err := validateBackupPath(path); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !bundleBelongsToWorkspace(ctx, path, workspaceID) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup not found"})
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		// 404 here, not 500, so we leak less. Path was validated above; the
+		// only realistic failure now is "deleted between validation and open"
+		// or a permission glitch — both fine to report as not-found.
+		h.logger.Warn("backup download open", "error", err)
+		replyError(w, http.StatusNotFound, "backup not found")
 		return
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		h.logger.Error("backup stat", "error", err)
+		replyError(w, http.StatusInternalServerError, "Failed to stat backup file")
 		return
 	}
 	// Bundle bytes contain sensitive workspace contents (even encrypted,
@@ -241,11 +250,11 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "admin role required"})
+		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+		replyError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 	if h.dockerOps == nil {
@@ -257,12 +266,12 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 
 	var req selfTestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		replyError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	crewID := strings.TrimSpace(req.CrewID)
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
+		replyError(w, http.StatusBadRequest, "crew_id required")
 		return
 	}
 
@@ -275,11 +284,11 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	`, crewID, workspaceID).Scan(&crewSlug)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
 		h.logger.Error("backup self-test: lookup crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -294,7 +303,7 @@ func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("backup self-test: pipeline", "crew_id", crewID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		replyError(w, http.StatusInternalServerError, "Self-test pipeline failed")
 		return
 	}
 	// Happy and content-mismatch paths both return 200 with the result

@@ -31,7 +31,7 @@ func (h *PortExposeHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	crewID := r.PathValue("crewId")
 	if crewID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId required"})
+		replyError(w, http.StatusBadRequest, "crewId required")
 		return
 	}
 
@@ -64,7 +64,7 @@ func (h *PortExposeHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		h.logger.Error("port_expose: list query", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -76,7 +76,7 @@ func (h *PortExposeHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&it.ID, &it.AgentID, &it.AgentSlug, &it.ContainerPort,
 			&description, &it.Status, &it.ExpiresAt, &revokedAt, &revokedReason, &it.CreatedAt); err != nil {
 			h.logger.Error("port_expose: list scan", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if description.Valid {
@@ -94,7 +94,7 @@ func (h *PortExposeHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("port_expose: list rows err", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -115,13 +115,13 @@ func (h *PortExposeHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	crewID := r.PathValue("crewId")
 	exposeID := r.PathValue("id")
 	if crewID == "" || exposeID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId and id required"})
+		replyError(w, http.StatusBadRequest, "crewId and id required")
 		return
 	}
 
@@ -129,7 +129,7 @@ func (h *PortExposeHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	// Body is optional — ignore decode error on empty payloads.
 	_ = readJSON(r, &body)
 	if len(body.Reason) > 500 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "reason too long (max 500)"})
+		replyError(w, http.StatusBadRequest, "reason too long (max 500)")
 		return
 	}
 
@@ -147,12 +147,12 @@ func (h *PortExposeHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	`, now, reasonVal, exposeID, workspaceID, crewID)
 	if err != nil {
 		h.logger.Error("port_expose: revoke update", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "exposure not found or already revoked/expired"})
+		replyError(w, http.StatusConflict, "exposure not found or already revoked/expired")
 		return
 	}
 

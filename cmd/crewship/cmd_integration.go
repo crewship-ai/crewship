@@ -591,29 +591,6 @@ func toggleIntegration(nameOrID string, enabled bool) error {
 	return nil
 }
 
-func resolveIntegrationID(client *cli.Client, nameOrID string) (string, error) {
-	resp, err := client.Get("/api/v1/integrations")
-	if err != nil {
-		return "", err
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return "", err
-	}
-	var items []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	}
-	if err := cli.ReadJSON(resp, &items); err != nil {
-		return "", err
-	}
-	for _, item := range items {
-		if item.ID == nameOrID || item.Name == nameOrID {
-			return item.ID, nil
-		}
-	}
-	return "", fmt.Errorf("integration %q not found", nameOrID)
-}
-
 func registerIntegrationWorkspaceFlags() {
 	intgAddCmd.Flags().String("name", "", "Integration name (slug)")
 	intgAddCmd.Flags().String("display", "", "Display name")

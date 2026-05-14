@@ -206,6 +206,12 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// replyError writes a JSON error response with the canonical {"error": msg} shape.
+// Wraps the previously repeated writeJSON(w, status, map[string]string{"error": ...}) idiom.
+func replyError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
 // readJSON decodes the request body (up to 1 MB) into v.
 func readJSON(r *http.Request, v interface{}) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
@@ -213,6 +219,29 @@ func readJSON(r *http.Request, v interface{}) error {
 		return err
 	}
 	return json.Unmarshal(body, v)
+}
+
+// requireRole checks the request's actor role against canRole. On failure it
+// writes a 403 problem response (matching writeProblem's RFC 7807 shape) and
+// returns false; callers should "return" immediately when this returns false.
+//
+// The previously repeated pattern was:
+//
+//	role := RoleFromContext(r.Context())
+//	if !canRole(role, "create") {
+//	    writeProblem(w, r, http.StatusForbidden, "Forbidden")
+//	    return
+//	}
+//
+// and now collapses to:
+//
+//	if !requireRole(w, r, "create") { return }
+func requireRole(w http.ResponseWriter, r *http.Request, actions ...string) bool {
+	if !canRole(RoleFromContext(r.Context()), actions...) {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return false
+	}
+	return true
 }
 
 // updateBuilder accumulates SET clauses for dynamic UPDATE queries.

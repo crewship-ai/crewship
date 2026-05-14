@@ -74,12 +74,12 @@ type pagination struct {
 func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "run id required"})
+		replyError(w, http.StatusBadRequest, "run id required")
 		return
 	}
 
@@ -94,7 +94,7 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Error("get run: list", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	var found *journal.RunAggregated
@@ -120,7 +120,7 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 			})
 			if err != nil {
 				h.logger.Error("get run: deep page", "error", err, "offset", offset)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
 			}
 			if len(page) == 0 {
@@ -135,12 +135,12 @@ func (h *RunHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if found == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		replyError(w, http.StatusNotFound, "run not found")
 		return
 	}
 	enriched := h.enrichRuns(r.Context(), workspaceID, []journal.RunAggregated{*found})
 	if len(enriched) == 0 {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "enrich failed"})
+		replyError(w, http.StatusInternalServerError, "enrich failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, enriched[0])
@@ -159,7 +159,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		// the caller's mistake is missing context — return 401 to match
 		// every other read handler in this package and to avoid leaking
 		// internal failure modes.
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 
@@ -198,7 +198,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	aggregated, total, err := journal.ListRuns(r.Context(), h.db, q)
 	if err != nil {
 		h.logger.Error("list runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -209,7 +209,7 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	stats, err := journal.RunStats(r.Context(), h.db, workspaceID)
 	if err != nil {
 		h.logger.Error("count run stats", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

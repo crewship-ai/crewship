@@ -43,19 +43,19 @@ type keeperLogEntry struct {
 func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	// Require ADMIN+ to view Keeper security logs
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: ADMIN or OWNER only"})
+		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
 
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace context required"})
+		replyError(w, http.StatusBadRequest, "workspace context required")
 		return
 	}
 
@@ -88,7 +88,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 		LIMIT ? OFFSET ?`, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("keeper log: query failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		replyError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	defer rows.Close()

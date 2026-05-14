@@ -11,9 +11,7 @@ import (
 // ── Review — POST /api/v1/crews/{crewId}/issues/{identifier}/review ────────
 
 func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -169,9 +167,7 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 // ── 15. Start — POST /api/v1/crews/{crewId}/issues/{identifier}/start ──────
 
 func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -300,9 +296,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 // ── 16. Stop — POST /api/v1/crews/{crewId}/issues/{identifier}/stop ────────
 
 func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

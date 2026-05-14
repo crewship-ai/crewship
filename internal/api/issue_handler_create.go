@@ -13,9 +13,7 @@ import (
 // ── Create — POST /api/v1/issues ────────────────────────────────────────────
 
 func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

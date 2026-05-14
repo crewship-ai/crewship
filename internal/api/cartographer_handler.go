@@ -53,12 +53,12 @@ func (h *CartographerHandler) SetJournal(j journal.Emitter) {
 func (h *CartographerHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	missionID := r.PathValue("missionId")
 	if missionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
+		replyError(w, http.StatusBadRequest, "mission_id required")
 		return
 	}
 	if _, _, ok := h.resolveMission(w, r, missionID, workspaceID); !ok {
@@ -75,7 +75,7 @@ func (h *CartographerHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := cartographer.List(r.Context(), h.db, workspaceID, missionID, limit)
 	if err != nil {
 		h.logger.Error("cartographer list failed", "err", err, "mission_id", missionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -91,7 +91,7 @@ func (h *CartographerHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	user := UserFromContext(r.Context())
@@ -101,7 +101,7 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	missionID := r.PathValue("missionId")
 	if missionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mission_id required"})
+		replyError(w, http.StatusBadRequest, "mission_id required")
 		return
 	}
 	_, crewID, ok := h.resolveMission(w, r, missionID, workspaceID)
@@ -116,7 +116,7 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// right now" gesture. Ignore EOF/invalid-JSON on empty bodies.
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			replyError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 	}
@@ -124,7 +124,7 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	snap, cursor, err := cartographer.Capture(r.Context(), h.db, missionID)
 	if err != nil {
 		h.logger.Error("cartographer capture failed", "err", err, "mission_id", missionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "capture failed"})
+		replyError(w, http.StatusInternalServerError, "capture failed")
 		return
 	}
 	if cursor == "" {
@@ -132,7 +132,7 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		// checkpoint — Restore would have nothing to diverge from.
 		// Surface this as a 409 so the UI can show a friendly "nothing
 		// to checkpoint yet" rather than a generic 500.
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "mission has no journal entries to anchor a checkpoint"})
+		replyError(w, http.StatusConflict, "mission has no journal entries to anchor a checkpoint")
 		return
 	}
 
@@ -148,7 +148,7 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	id, err := cartographer.Create(r.Context(), h.db, h.journal, cp)
 	if err != nil {
 		h.logger.Error("cartographer create failed", "err", err, "mission_id", missionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create failed"})
+		replyError(w, http.StatusInternalServerError, "create failed")
 		return
 	}
 
@@ -169,22 +169,22 @@ func (h *CartographerHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *CartographerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		replyError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	cp, err := cartographer.Get(r.Context(), h.db, workspaceID, id)
 	if err != nil {
 		if errors.Is(err, cartographer.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "checkpoint not found"})
+			replyError(w, http.StatusNotFound, "checkpoint not found")
 			return
 		}
 		h.logger.Error("cartographer get failed", "err", err, "id", id)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "get failed"})
+		replyError(w, http.StatusInternalServerError, "get failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, cp)
@@ -198,22 +198,22 @@ func (h *CartographerHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *CartographerHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		replyError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	result, err := cartographer.Restore(r.Context(), h.db, h.journal, workspaceID, id)
 	if err != nil {
 		if errors.Is(err, cartographer.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "checkpoint not found"})
+			replyError(w, http.StatusNotFound, "checkpoint not found")
 			return
 		}
 		h.logger.Error("cartographer restore failed", "err", err, "id", id)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "restore failed"})
+		replyError(w, http.StatusInternalServerError, "restore failed")
 		return
 	}
 	// Normalize the divergence slice so the UI always sees [] not null.
@@ -235,17 +235,17 @@ func (h *CartographerHandler) Restore(w http.ResponseWriter, r *http.Request) {
 func (h *CartographerHandler) Fork(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	user := UserFromContext(r.Context())
 	if user == nil || user.ID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authenticated user required"})
+		replyError(w, http.StatusUnauthorized, "authenticated user required")
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		replyError(w, http.StatusBadRequest, "id required")
 		return
 	}
 
@@ -254,7 +254,7 @@ func (h *CartographerHandler) Fork(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+			replyError(w, http.StatusBadRequest, "invalid JSON body")
 			return
 		}
 	}
@@ -262,11 +262,11 @@ func (h *CartographerHandler) Fork(w http.ResponseWriter, r *http.Request) {
 	newMissionID, newCheckpointID, err := cartographer.Fork(r.Context(), h.db, h.journal, workspaceID, id, body.Label, user.ID)
 	if err != nil {
 		if errors.Is(err, cartographer.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "checkpoint not found"})
+			replyError(w, http.StatusNotFound, "checkpoint not found")
 			return
 		}
 		h.logger.Error("cartographer fork failed", "err", err, "id", id)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "fork failed"})
+		replyError(w, http.StatusInternalServerError, "fork failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
@@ -282,21 +282,21 @@ func (h *CartographerHandler) Fork(w http.ResponseWriter, r *http.Request) {
 func (h *CartographerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	id := r.PathValue("id")
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		replyError(w, http.StatusBadRequest, "id required")
 		return
 	}
 	if err := cartographer.Delete(r.Context(), h.db, workspaceID, id); err != nil {
 		if errors.Is(err, cartographer.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "checkpoint not found"})
+			replyError(w, http.StatusNotFound, "checkpoint not found")
 			return
 		}
 		h.logger.Error("cartographer delete failed", "err", err, "id", id)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete failed"})
+		replyError(w, http.StatusInternalServerError, "delete failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -318,17 +318,17 @@ func (h *CartographerHandler) resolveMission(w http.ResponseWriter, r *http.Requ
 		`SELECT workspace_id, crew_id FROM missions WHERE id = ?`, missionID).Scan(&wsID, &crewID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
+			replyError(w, http.StatusNotFound, "mission not found")
 			return "", "", false
 		}
 		h.logger.Error("resolve mission failed", "err", err, "mission_id", missionID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup failed"})
+		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return "", "", false
 	}
 	if wsID != workspaceID {
 		// Same 404 shape as "mission not found" so we don't leak the
 		// existence of rows in other workspaces.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "mission not found"})
+		replyError(w, http.StatusNotFound, "mission not found")
 		return "", "", false
 	}
 	return wsID, crewID.String, true

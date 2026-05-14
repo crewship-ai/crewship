@@ -30,7 +30,7 @@ func NewMemoryHealthHandler(db *sql.DB, logger *slog.Logger) *MemoryHealthHandle
 func (h *MemoryHealthHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "workspace required"})
+		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
 	crewID := r.URL.Query().Get("crew_id")
@@ -38,18 +38,18 @@ func (h *MemoryHealthHandler) Get(w http.ResponseWriter, r *http.Request) {
 		ok, err := crewBelongsToWorkspace(r.Context(), h.db, crewID, workspaceID)
 		if err != nil {
 			h.logger.Error("memory health: crew lookup", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "crew lookup failed"})
+			replyError(w, http.StatusInternalServerError, "crew lookup failed")
 			return
 		}
 		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+			replyError(w, http.StatusNotFound, "crew not found")
 			return
 		}
 	}
 	snap, err := consolidate.ComputeHealth(r.Context(), h.db, workspaceID, crewID)
 	if err != nil {
 		h.logger.Error("memory health: compute", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "compute failed"})
+		replyError(w, http.StatusInternalServerError, "compute failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

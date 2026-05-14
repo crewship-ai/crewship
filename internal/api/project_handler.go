@@ -135,9 +135,7 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create provisions a new project in the workspace with the given name, slug, and metadata.
 // POST /api/v1/projects
 func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -265,9 +263,7 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Update modifies project properties such as name, description, status, and priority.
 // PATCH /api/v1/projects/{projectId}
 func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -391,9 +387,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete removes a project and unlinks all its associated issues.
 // DELETE /api/v1/projects/{projectId}
 func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "manage") {
 		return
 	}
 

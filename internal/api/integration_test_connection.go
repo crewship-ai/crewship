@@ -28,7 +28,7 @@ func (h *IntegrationHandler) loadAndTestConnection(w http.ResponseWriter, r *htt
 	var endpoint sql.NullString
 	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&transport, &endpoint)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+		replyError(w, http.StatusNotFound, "Integration not found")
 		return
 	}
 	result := testMCPConnection(r.Context(), transport, endpoint.String, h.logger)
@@ -59,7 +59,7 @@ func (h *IntegrationHandler) TestCrewIntegrationConnection(w http.ResponseWriter
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM crews WHERE id = ? AND workspace_id = ?",
 		crewID, workspaceID).Scan(&crewExists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		replyError(w, http.StatusNotFound, "Crew not found")
 		return
 	}
 

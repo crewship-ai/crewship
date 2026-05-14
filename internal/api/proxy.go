@@ -89,7 +89,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -99,11 +99,11 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		agentID, workspaceID).Scan(&agentName, &cliAdapter, &status, &crewID)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
 		h.logger.Error("get agent for debug", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -176,7 +176,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 		"SELECT crew_id, slug FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&crewID, &slug)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 	if !crewID.Valid {
@@ -209,18 +209,18 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("agent exists check", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -233,11 +233,11 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 		now, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("update agent status to STOPPED", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	if affected, _ := res.RowsAffected(); affected == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		replyError(w, http.StatusNotFound, "Agent not found")
 		return
 	}
 
@@ -259,7 +259,7 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Error("get chat workspace", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -268,7 +268,7 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		chatWSID, user.ID).Scan(&memberRole)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -284,7 +284,7 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	path := fmt.Sprintf("/chats/%s/messages?offset=%d&limit=%d", chatID, offset, limit)
 	resp, err := h.ipcGet(r.Context(), path)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch messages"})
+		replyError(w, http.StatusBadGateway, "Failed to fetch messages")
 		return
 	}
 	h.proxyJSON(w, resp)
@@ -301,7 +301,7 @@ func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&slug, &crewID)
 	if err != nil || !crewID.Valid {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found or not assigned to a crew"})
+		replyError(w, http.StatusNotFound, "Agent not found or not assigned to a crew")
 		return
 	}
 
@@ -311,7 +311,7 @@ func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch git log"})
+		replyError(w, http.StatusBadGateway, "Failed to fetch git log")
 		return
 	}
 	defer resp.Body.Close()

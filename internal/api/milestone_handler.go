@@ -110,9 +110,7 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create adds a new milestone to a project.
 // POST /api/v1/projects/{projectId}/milestones
 func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -197,9 +195,7 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Update modifies a milestone's name, description, target date, or status.
 // PATCH /api/v1/projects/{projectId}/milestones/{milestoneId}
 func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -294,9 +290,7 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete removes a milestone from a project.
 // DELETE /api/v1/projects/{projectId}/milestones/{milestoneId}
 func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "manage") {
 		return
 	}
 

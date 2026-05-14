@@ -30,7 +30,7 @@ func NewCLITokenHandler(db *sql.DB, logger *slog.Logger) *CLITokenHandler {
 func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -48,7 +48,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	b := make([]byte, 20)
 	if _, err := rand.Read(b); err != nil {
 		h.logger.Error("generate token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	token := cliTokenPrefix + hex.EncodeToString(b)
@@ -65,7 +65,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 		id, user.ID, body.Name, tokenHash, now)
 	if err != nil {
 		h.logger.Error("insert cli_token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -82,7 +82,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *CLITokenHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -98,7 +98,7 @@ func (h *CLITokenHandler) Validate(w http.ResponseWriter, r *http.Request) {
 func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -106,7 +106,7 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 		"SELECT id, name, created_at, last_used_at, revoked_at FROM cli_tokens WHERE user_id = ? ORDER BY created_at DESC", user.ID)
 	if err != nil {
 		h.logger.Error("list cli_tokens", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer rows.Close()
@@ -143,7 +143,7 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -155,13 +155,13 @@ func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		now, tokenID, user.ID)
 	if err != nil {
 		h.logger.Error("revoke cli_token", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Token not found"})
+		replyError(w, http.StatusNotFound, "Token not found")
 		return
 	}
 

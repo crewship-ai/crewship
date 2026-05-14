@@ -45,7 +45,7 @@ func (h *RecipeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	rec := recipes.FindBySlug(slug)
 	if rec == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recipe not found"})
+		replyError(w, http.StatusNotFound, "Recipe not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, rec)
@@ -101,7 +101,7 @@ func (h *RecipeHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	rec := recipes.FindBySlug(slug)
 	if rec == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recipe not found"})
+		replyError(w, http.StatusNotFound, "Recipe not found")
 		return
 	}
 
@@ -118,7 +118,7 @@ func (h *RecipeHandler) Preview(w http.ResponseWriter, r *http.Request) {
 			WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL`,
 			workspaceID, c.EnvVarName).Scan(&have); err != nil {
 			h.logger.Error("preview credential lookup", "error", err, "env_var", c.EnvVarName)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		if have > 0 {
@@ -131,7 +131,7 @@ func (h *RecipeHandler) Preview(w http.ResponseWriter, r *http.Request) {
 	resolvedSlug, available, err := resolveCrewSlug(r.Context(), h.db, workspaceID, rec.CrewSlug)
 	if err != nil {
 		h.logger.Error("resolve crew slug", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -155,24 +155,24 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	user := UserFromContext(r.Context())
 	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	slug := r.PathValue("slug")
 	rec := recipes.FindBySlug(slug)
 	if rec == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Recipe not found"})
+		replyError(w, http.StatusNotFound, "Recipe not found")
 		return
 	}
 
 	var req installRecipeRequest
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
@@ -186,7 +186,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ? AND deleted_at IS NULL`, workspaceID)
 	if err != nil {
 		h.logger.Error("preload credentials", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	for rows.Next() {
@@ -218,7 +218,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		h.logger.Error("begin install tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 	defer func() {
@@ -259,7 +259,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 			enc, err := encryption.Encrypt(raw)
 			if err != nil {
 				h.logger.Error("encrypt recipe credential", "error", err, "env_var", c.EnvVarName)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
+				replyError(w, http.StatusInternalServerError, "Failed to encrypt credential")
 				return
 			}
 			encOpt = enc
@@ -277,7 +277,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 			user.ID, now, now)
 		if err != nil {
 			h.logger.Error("insert recipe credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		// SELECT the canonical id — works whether we won the race
@@ -288,7 +288,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 			WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL`,
 			workspaceID, c.EnvVarName).Scan(&canonicalID); err != nil {
 			h.logger.Error("read canonical credential id", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		credIDByEnvVar[c.EnvVarName] = canonicalID
@@ -324,13 +324,13 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 		// Anything else is a hard failure.
 		if !strings.Contains(insertErr.Error(), "UNIQUE constraint failed") {
 			h.logger.Error("insert recipe crew", "error", insertErr)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if resolvedSlug == "" {
 		h.logger.Error("could not allocate crew slug after 100 attempts", "base", rec.CrewSlug)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Could not allocate crew slug"})
+		replyError(w, http.StatusInternalServerError, "Could not allocate crew slug")
 		return
 	}
 	resp.CrewID = crewID
@@ -362,7 +362,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 			nullableString(srv.Endpoint), nullableJSON(envJSON, "{}"),
 			nullableString(srv.Icon), now, now); err != nil {
 			h.logger.Error("insert recipe mcp server", "error", err, "name", srv.Name)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		resp.MCPServersAdded = append(resp.MCPServersAdded, srv.Name)
@@ -370,7 +370,7 @@ func (h *RecipeHandler) Install(w http.ResponseWriter, r *http.Request) {
 
 	if err := tx.Commit(); err != nil {
 		h.logger.Error("commit install tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

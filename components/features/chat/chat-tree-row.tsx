@@ -15,6 +15,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { isPreviewable } from "@/lib/file-format"
 
 export interface TreeNode {
   path: string; name: string; size: number; is_dir: boolean
@@ -66,13 +67,6 @@ export function getChatFileIcon(name: string, isDir: boolean, isOpen?: boolean) 
     case "zip": case "tar": case "gz": return <Box className="h-3.5 w-3.5 text-purple-400" />
     default: return <FileIcon className="h-3.5 w-3.5 text-gray-400" />
   }
-}
-
-const PREVIEWABLE_EXTS = new Set(["py","js","jsx","ts","tsx","json","yaml","yml","md","txt","sh","bash","html","css","xml","svg","go","rs","toml","sql","cfg","ini","log","csv"])
-
-export function isPreviewable(name: string): boolean {
-  const ext = name.split(".").pop()?.toLowerCase() ?? ""
-  return PREVIEWABLE_EXTS.has(ext)
 }
 
 export function getEditorLanguage(name: string): string {

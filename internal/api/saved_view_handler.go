@@ -88,9 +88,7 @@ func (h *SavedViewHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create saves a new issue view with the given name and filter configuration.
 // POST /api/v1/saved-views
 func (h *SavedViewHandler) Create(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -158,9 +156,7 @@ func (h *SavedViewHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Update modifies a saved view's name or filter configuration.
 // PATCH /api/v1/saved-views/{viewId}
 func (h *SavedViewHandler) Update(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

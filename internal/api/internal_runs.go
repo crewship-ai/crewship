@@ -23,11 +23,11 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		Metadata    json.RawMessage `json:"metadata"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 	if body.ID == "" || body.AgentID == "" || body.WorkspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id, agent_id, workspace_id required"})
+		replyError(w, http.StatusBadRequest, "id, agent_id, workspace_id required")
 		return
 	}
 	if body.TriggerType == "" {
@@ -63,7 +63,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			TraceID:     body.ID,
 		}); err != nil {
 			h.logger.Error("create run: emit run.started", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
@@ -118,7 +118,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		Metadata     json.RawMessage `json:"metadata"`
 	}
 	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
@@ -126,7 +126,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		"RUNNING": true, "COMPLETED": true, "FAILED": true, "CANCELLED": true, "TIMEOUT": true,
 	}
 	if !validStatuses[body.Status] {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid status"})
+		replyError(w, http.StatusBadRequest, "Invalid status")
 		return
 	}
 
@@ -150,11 +150,11 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		 LIMIT 1`, runID,
 	).Scan(&workspaceID, &agentID, &agentName); err != nil {
 		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+			replyError(w, http.StatusNotFound, "run not found")
 			return
 		}
 		h.logger.Error("update run: lookup", "error", err, "run_id", runID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -177,7 +177,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if err != nil && err != sql.ErrNoRows {
 		h.logger.Error("update run: terminal-exists check", "error", err, "run_id", runID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -211,7 +211,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		TraceID:     runID,
 	}); err != nil {
 		h.logger.Error("update run: emit terminal", "error", err, "run_id", runID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		replyError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
