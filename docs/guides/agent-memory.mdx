@@ -14,6 +14,18 @@ Memory is **local-first** with zero external dependencies. No embedding APIs, no
 
 The point of three tiers (instead of one big pile) is to keep the *who-owns-what* model clear. An agent can freely write to its own tier without affecting peers. The crew lead is the single writer for crew-shared memory, which means the FTS5 index has zero write contention and crew-wide context evolves under one editorial voice. And session memory is intentionally not persisted — context that's irrelevant the next time the agent is invoked stays out of the index, keeping retrieval fast as the deployment ages.
 
+## When to use it
+
+Turn memory on for any agent or crew whose value compounds across sessions. The system is opt-in (`memory_enabled=false` by default) precisely because the budget cost in the system prompt is real — only pay it where it earns its keep:
+
+- **An agent has long-running user-specific preferences.** Dark-mode preference, preferred PR style, favourite framework, "use PostgreSQL 16 for new DBs" — anything the user shouldn't have to repeat on every new chat. Persist to `AGENT.md` once, retrieve forever.
+- **A crew needs a single source of truth for conventions and decisions.** Architecture decisions, deployment rules, security policies, "we always use Tailwind, never inline styles" — the lead curates `CREW.md` and every member-agent reads it. Beats stuffing the same instructions into each agent's system prompt by hand.
+- **An agent is accumulating project context.** A code-review agent reading the same repo every day shouldn't relearn the module layout each session. Daily logs (`daily/2026-05-14.md`) capture session observations; FTS5 search surfaces them when the same module comes up again.
+- **A single-agent crew that should specialise over time.** Without crew peers the budget is 100% agent-tier — the agent essentially gets a persistent notebook. Useful for "my personal research assistant" or "the on-call bot that remembers last week's incidents."
+- **You're domain-mining knowledge with `topics/`.** When the crew has bounded subject areas (deployment, security, billing), populate `topics/<name>.md` files. Hybrid search ranks them above the daily noise on relevant queries.
+
+Skip memory if the agent is single-use, the conversation never references prior sessions, or the user actively *wants* a stateless interaction. The budget cost of an enabled-but-unused memory layer is non-zero — it eats characters that could carry richer per-turn context instead.
+
 ## Memory Tiers
 
 ```
