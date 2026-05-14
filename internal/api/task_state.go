@@ -12,9 +12,7 @@ import (
 // Restart resets a FAILED/CANCELLED/REVIEW/COMPLETED mission: resets non-completed tasks,
 // increments their iteration, and re-starts. Completed tasks stay completed (no re-run).
 func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -103,9 +101,7 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 // task(s) and their downstream dependents are reset; COMPLETED tasks stay.
 // The DAG engine is started automatically — no separate Start call needed.
 func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -345,9 +341,7 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 
 // Clone creates a deep copy of a mission with all its tasks, assigning new IDs.
 func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

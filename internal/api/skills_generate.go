@@ -92,9 +92,7 @@ You will receive the user's intent in the next message. Respond with the SKILL.m
 // minutes of polling. Same role as `skill import` to keep the surface
 // uniform.
 func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

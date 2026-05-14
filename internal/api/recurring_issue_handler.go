@@ -114,9 +114,7 @@ func (h *RecurringIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create adds a new recurring issue schedule with a cron expression.
 // POST /api/v1/recurring-issues
 func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -217,9 +215,7 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Update modifies a recurring issue schedule's properties.
 // PATCH /api/v1/recurring-issues/{recurringIssueId}
 func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -357,9 +353,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete removes a recurring issue schedule.
 // DELETE /api/v1/recurring-issues/{recurringIssueId}
 func (h *RecurringIssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "manage") {
 		return
 	}
 

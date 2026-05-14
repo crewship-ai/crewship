@@ -236,6 +236,29 @@ func decodeBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
 	return true
 }
 
+// requireRole checks the request's actor role against canRole. On failure it
+// writes a 403 problem response (matching writeProblem's RFC 7807 shape) and
+// returns false; callers should "return" immediately when this returns false.
+//
+// The previously repeated pattern was:
+//
+//	role := RoleFromContext(r.Context())
+//	if !canRole(role, "create") {
+//	    writeProblem(w, r, http.StatusForbidden, "Forbidden")
+//	    return
+//	}
+//
+// and now collapses to:
+//
+//	if !requireRole(w, r, "create") { return }
+func requireRole(w http.ResponseWriter, r *http.Request, actions ...string) bool {
+	if !canRole(RoleFromContext(r.Context()), actions...) {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return false
+	}
+	return true
+}
+
 // updateBuilder accumulates SET clauses for dynamic UPDATE queries.
 // Always includes "updated_at = ?" as the first clause.
 type updateBuilder struct {

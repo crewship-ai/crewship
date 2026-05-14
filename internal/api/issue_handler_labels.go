@@ -42,9 +42,7 @@ func (h *IssueHandler) ListLabels(w http.ResponseWriter, r *http.Request) {
 // ── 7. CreateLabel — POST /api/v1/labels ────────────────────────────────────
 
 func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -92,9 +90,7 @@ func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 // ── 8. UpdateLabel — PATCH /api/v1/labels/{labelId} ─────────────────────────
 
 func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -161,9 +157,7 @@ func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 // ── 9. DeleteLabel — DELETE /api/v1/labels/{labelId} ────────────────────────
 
 func (h *IssueHandler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "manage") {
 		return
 	}
 

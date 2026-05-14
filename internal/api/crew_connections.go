@@ -73,9 +73,7 @@ func (h *CrewConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Create handles POST /api/v1/crew-connections
 func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -141,9 +139,7 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/crew-connections/{connectionId}
 func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

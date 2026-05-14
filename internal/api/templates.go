@@ -110,9 +110,7 @@ func (h *TemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Create handles POST /api/v1/templates
 func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -185,9 +183,7 @@ func (h *TemplateHandler) checkTemplateModifiable(w http.ResponseWriter, r *http
 
 // Update handles PATCH /api/v1/templates/{templateId}
 func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
@@ -245,9 +241,7 @@ func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/templates/{templateId}
 func (h *TemplateHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 

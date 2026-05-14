@@ -104,9 +104,7 @@ func isClientFacingImportError(err error) bool {
 // orchestrator process makes outbound HTTPS calls on the operator's
 // behalf).
 func (h *SkillBulkImportHandler) Import(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
-		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+	if !requireRole(w, r, "create") {
 		return
 	}
 
