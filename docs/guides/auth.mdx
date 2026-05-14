@@ -196,6 +196,70 @@ crewship login --pair
 
 The whole exchange takes under a minute and the developer never has to copy or type a long credential — see [CLI Pairing](/guides/cli-pairing) for the device-code flow details and security properties.
 
+## API reference
+
+Every endpoint below lives in `internal/api/router_auth.go`. There's no dedicated `/api-reference/auth` page — the surface is small enough to inline, and the file is the source of truth.
+
+### Bootstrap & signup (public)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/bootstrap` | Create the first `OWNER` on a fresh database. Idempotent — 409 if any user exists. |
+| `POST` | `/api/v1/auth/signup` | Create a new user account. Subject to `allowSignup` flag at server startup; disabled by default for self-hosted installs. |
+| `GET`  | `/api/v1/ws-token` | Mint a short-lived WebSocket auth token for the current session. **Auth required.** |
+
+### Sign-in & sessions (mixed)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/auth/callback/credentials` | NextAuth-compatible credential sign-in. Sets the session cookie. |
+| `POST` | `/api/auth/signout` | Clears the session cookie and revokes the server-side row. |
+| `GET`  | `/api/auth/session` | NextAuth-compatible "who am I" probe. Returns user + expiry, or `null`. |
+| `GET`  | `/api/auth/csrf` | NextAuth CSRF token. Required by NextAuth client before credential POST. |
+| `GET`  | `/api/auth/providers` | Lists available providers (`credentials` + `google` if enabled). |
+| `POST` | `/api/auth/token/refresh` | Rotates the session token. Idempotent. |
+| `GET`  | `/api/v1/auth/sessions` | List the caller's own active sessions. **Auth required.** |
+| `POST` | `/api/v1/auth/sessions/{id}/revoke` | Revoke one of the caller's sessions. **Auth required.** |
+
+### Password recovery (public)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/auth/forgot` | Email a reset link. **Always returns 200** (non-enumeration). |
+| `POST` | `/api/v1/auth/reset` | Redeem a reset token. Atomically updates the password hash + invalidates all active sessions. |
+
+### CLI tokens & device pairing (mixed)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/v1/auth/cli-token` | Mint a new long-lived CLI token. **Auth required.** |
+| `GET`  | `/api/v1/auth/cli-token/validate` | Verify a CLI token presented as `Authorization: Bearer`. **Auth required.** |
+| `GET`  | `/api/v1/auth/cli-tokens` | List the caller's CLI tokens. **Auth required.** |
+| `DELETE` | `/api/v1/auth/cli-tokens/{tokenId}` | Revoke one of the caller's CLI tokens. **Auth required.** |
+| `POST` | `/api/v1/auth/pair/start` | Begin device-code pairing; returns code + `expires_at`. **Auth required.** |
+| `GET`  | `/api/v1/auth/pair/poll` | Poll for redemption. **Auth required.** |
+| `POST` | `/api/v1/auth/pair/redeem` | Redeem a pairing code, return CLI token. **Public by design** — the code IS the credential. |
+
+### Google OAuth (conditional)
+
+Routes mount only when `GOOGLE_CLIENT_ID` AND `GOOGLE_CLIENT_SECRET` are both set.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/v1/auth/google/redirect` | Begin OAuth flow; 302s to Google. |
+| `GET`  | `/api/v1/auth/google/callback` | OAuth callback; creates or updates the Crewship user, sets session cookie. |
+| `GET`  | `/api/v1/auth/google/status` | Returns `{"enabled": bool}`. Always mounted, even when OAuth is disabled, so the frontend can decide button rendering. |
+
+### Onboarding (auth-required, but workspace-less)
+
+Mounted alongside auth because the wizard runs *before* any workspace context exists.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/v1/onboarding/status` | Returns wizard progress. |
+| `POST` | `/api/v1/onboarding/setup` | Submit a single wizard step. |
+| `POST` | `/api/v1/onboarding/complete` | Mark onboarding complete and provision the first workspace + crew. |
+
 ## Related
 
 - [Onboarding](/guides/onboarding) — the first-run flow that bootstraps the initial admin account.
