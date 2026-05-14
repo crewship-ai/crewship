@@ -1,6 +1,6 @@
 ---
 title: "Install"
-description: "Three supported ways to install Crewship: Homebrew tap, signed curl|sh installer, or Docker Compose."
+description: "Three supported ways to install Crewship: Homebrew tap, signed curl | bash installer, or Docker Compose."
 icon: "down-to-bracket"
 ---
 
@@ -19,7 +19,7 @@ three below are first-class and tested on every release.
   <Card title="Homebrew" icon="apple" href="#homebrew">
     macOS and Linuxbrew — one command, auto-upgrades.
   </Card>
-  <Card title="curl | sh" icon="terminal" href="#curl--sh">
+  <Card title="curl | bash" icon="terminal" href="#curl--bash">
     OS-agnostic install script with SHA-256 + cosign verification.
   </Card>
   <Card title="Docker Compose" icon="docker" href="#docker-compose">
@@ -46,7 +46,7 @@ brew upgrade crewship
 Once installed, jump to the [quickstart](/quickstart) to bring the
 server up.
 
-## curl | sh
+## curl | bash
 
 The one-liner installer detects your OS and architecture, downloads
 the matching release archive from GitHub, verifies the SHA-256 against
@@ -55,7 +55,7 @@ verifies the keyless Sigstore signature against the expected GitHub
 Actions OIDC identity.
 
 ```bash
-curl -fsSL https://crewship.ai/install | sh
+curl -fsSL https://crewship.ai/install | bash
 ```
 
 Missing `cosign` produces a soft warning rather than a hard failure so
@@ -66,7 +66,7 @@ for full supply-chain verification.
 ### Pinning a version
 
 ```bash
-CREWSHIP_VERSION=v0.1.0-beta.1 curl -fsSL https://crewship.ai/install | sh
+CREWSHIP_VERSION=v0.1.0-beta.1 curl -fsSL https://crewship.ai/install | bash
 ```
 
 Omitting the variable picks the latest stable tag.
@@ -77,7 +77,7 @@ By default the script picks the first writable directory on your
 `PATH` (`/usr/local/bin`, `~/.local/bin`, `~/bin`, …). Override with:
 
 ```bash
-CREWSHIP_INSTALL_DIR=$HOME/.crewship/bin curl -fsSL https://crewship.ai/install | sh
+CREWSHIP_INSTALL_DIR=$HOME/.crewship/bin curl -fsSL https://crewship.ai/install | bash
 ```
 
 <Warning>

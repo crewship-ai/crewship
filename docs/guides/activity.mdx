@@ -93,7 +93,7 @@ Activity is a thin UI shell over two existing backend surfaces — it has no ded
 
 For waitpoint Approve / Deny, the canvas calls into the same `waitpointDecide` helper (`lib/api/waitpoints.ts`) that the Inbox uses; the underlying endpoint is documented under the [Harbormaster](/guides/harbormaster) guide.
 
-Realtime updates arrive over the workspace WebSocket channel (`/ws?workspace=<id>`). The events the page subscribes to, all broadcast by `internal/pipeline/runner.go`:
+Realtime updates arrive over the workspace WebSocket channel (`/ws?workspace=<id>`). The events the page subscribes to, all broadcast by `internal/pipeline/journal.go`:
 
 | Event | When it fires | What the canvas does |
 |-------|---------------|----------------------|
