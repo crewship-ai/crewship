@@ -85,6 +85,49 @@ Just copy the URL. The session ID is in `?session=<chatId>`, the right-panel sta
 
 For non-UI surfaces — CLI-initiated chats, webhook-driven chats, scheduled chats — see the [API reference](#api-reference) below; the `origin` field on the create payload stamps the right sidebar chip so an operator scrolling the list can tell at a glance which conversations came from automation.
 
+## Examples
+
+### Pair-debugging a failing test
+
+A test is red in CI and you want the agent's eyes on it. Open the agent and start a new session:
+
+```text
+https://crewship.example.com/chat/viktor
+```
+
+Drag the failing test's snapshot file into the composer — it lands at `/output/viktor/attachments/<chatId>/snapshot.txt` inside the container; the agent opens it via the **Files** tab (F1). As the agent edits the test, flip to **Diff** (F3) to watch the patch take shape against `HEAD`; when it wants to run the suite, switch to **Terminal** (F4) and watch the output stream live. Each tab is its own URL param (`&panel=files` / `&panel=diff` / `&panel=terminal`), so the link you share with a teammate drops them onto the exact view you're looking at.
+
+When the suite goes green, 👍 the assistant's final message — the reaction surfaces back to the agent on the next turn as positive signal and shows up in [Quartermaster](/guides/quartermaster) replays as coarse human feedback.
+
+### Webhook-driven issue triage
+
+A GitHub issue webhook fires; your trigger handler posts to Crewship:
+
+```bash
+curl -X POST https://crewship.example.com/api/v1/agents/triage-bot/chats \
+  -H "Authorization: Bearer $CREWSHIP_PAT" \
+  -d '{
+    "origin": "WEBHOOK",
+    "initial_message": "Triage GH issue #482: Login broken on mobile Safari. Repro steps inside.",
+    "metadata": {"github_issue": 482, "repo": "acme/web"}
+  }'
+# {"chat_id":"cht_xyz789","origin":"WEBHOOK","created_at":"…"}
+```
+
+The new session shows up in the agent's sidebar with a coloured `WEBHOOK` chip, so an operator scrolling the list can distinguish auto-triaged issues from human-initiated conversations at a glance. The agent processes the message, does its triage, posts a summary — and a human can take over the conversation by opening `?session=cht_xyz789` and replying directly.
+
+### Cross-operator escalation
+
+You're chatting with `viktor` about a production outage and realise this needs an SRE's eyes. Pin the session in the sidebar so you can come back to it, copy the URL with the right panel set to **Terminal**:
+
+```text
+/chat/viktor?session=cht_abc123&panel=terminal
+```
+
+Paste into the SRE channel on Slack with one line: "Live terminal on the agent's repro — viktor's pinned this for me." The SRE clicks, lands on the same canvas (same selected step in the trace, same terminal stream, same reaction state — though their own reactions are scoped to *them*). They reply in the chat; their messages join the same transcript, visible to both of you and to anyone else who opens the URL.
+
+When the incident closes, the session row survives — it stays as a permanent record of what was said, what was tried, and what fixed it. The webhook-triggered originals from step 2 and the human-driven escalation here live in the same `chats` table, distinguishable only by their `origin` chip in the sidebar.
+
 ## Routes
 
 Two top-level routes serve chat:
