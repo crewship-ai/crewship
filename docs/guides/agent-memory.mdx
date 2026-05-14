@@ -6,9 +6,13 @@ icon: "brain"
 
 # Memory System
 
-Crewship has a 3-tier memory hierarchy that gives agents persistent knowledge across sessions and shared context within crews.
+## Overview
 
-Memory is **local-first** with zero external dependencies. No embedding APIs, no vector databases, no cloud services. Search is powered by SQLite FTS5 (BM25 ranking), running sub-millisecond on thousands of chunks.
+Crewship has a 3-tier memory hierarchy that gives agents persistent knowledge across sessions and shared context within crews. Each agent has its own private memory the LLM can read and write, every crew has a lead-owned shared memory all members read, and an ephemeral session tier lives only in the live context window. The three tiers compose into a single retrieval call at agent-run time — the orchestrator picks chunks from whichever tier fits within the per-prompt budget, ranks them by relevance, and stitches them into the system prompt before the LLM ever sees the user's message.
+
+Memory is **local-first** with zero external dependencies. No embedding APIs, no vector databases, no cloud services. Retrieval is powered by SQLite FTS5 (BM25 ranking) running sub-millisecond on thousands of chunks, with the hybrid retrieval uplift from PRs #211/#212 layering dense scoring on top via RRF (reciprocal rank fusion) when an in-process embedding model is configured. The whole memory subsystem fits in `internal/memory/` plus the consolidation worker in `internal/consolidate/`, both running inside `crewshipd` — no extra container, no extra port.
+
+The point of three tiers (instead of one big pile) is to keep the *who-owns-what* model clear. An agent can freely write to its own tier without affecting peers. The crew lead is the single writer for crew-shared memory, which means the FTS5 index has zero write contention and crew-wide context evolves under one editorial voice. And session memory is intentionally not persisted — context that's irrelevant the next time the agent is invoked stays out of the index, keeping retrieval fast as the deployment ages.
 
 ## Memory Tiers
 
