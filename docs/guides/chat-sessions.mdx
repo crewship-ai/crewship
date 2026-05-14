@@ -283,8 +283,13 @@ These query params are stable. Do not link to the Next.js internal route segment
 
 ## Related
 
+- [Activity](/guides/activity) — the live canvas where the same agent's mission runs show up; the chat is one operator surface, Activity is the other.
+- [Watch Roster](/guides/watch-roster) — the source of truth for the composer presence chip (`online` / `thinking` / `blocked` / `offline`).
+- [Quartermaster](/guides/quartermaster) — replays consume message reactions as a coarse human-feedback signal (👍 / 👎 surfaces back to evals).
+- [Skills](/guides/skills) — slash-palette commands like `/skill <name>` route into the skills registry rather than being treated as chat messages.
+- [Hooks](/guides/hooks) — server-side handlers that fire on `chat.message.created` / `chat.reaction.added` and can drive automation off chat events.
+- [Files and output](/guides/files-and-output) — the `workspace_files` blob index that the Files right-panel reads from; same view the agent's container sees.
+- [Keeper](/guides/keeper) — credential injection for tools the agent invokes from inside a chat; keeps secrets out of message bodies.
 - [User preferences API](/api-reference/preferences) — composer settings (default model, slash-palette behaviour).
 - [Conversations API](/api-reference/conversations) — message reactions, attachments, crew messaging.
-- [Watch Roster](/guides/watch-roster) — presence chips.
-- [Webhooks](/api-reference/webhooks) — programmatic chat-session creation (`origin=webhook`).
-- [Quartermaster](/guides/quartermaster) — uses message reactions as eval signals.
+- [Webhooks](/api-reference/webhooks) — programmatic chat-session creation (`origin=WEBHOOK`).
