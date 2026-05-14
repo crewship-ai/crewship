@@ -108,7 +108,10 @@ jobs:
       packages: write
       id-token: write  # cosign keyless signing via GitHub OIDC
     steps:
+      # fetch-depth: 0 so `git log` can read the tag's commit timestamp.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
 
       - name: Set image metadata
         id: meta
@@ -119,6 +122,13 @@ jobs:
           # vX.Y series tag for users pinning to a major.minor line.
           MAJMIN=$(echo "$TAG" | sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/')
           echo "majmin=${MAJMIN}" >> "$GITHUB_OUTPUT"
+
+          # Commit timestamp of the tagged commit — not
+          # `github.event.repository.updated_at`, which reflects ANY recent
+          # repo push (docs, branches) and can drift between re-runs of the
+          # same tag. ISO-8601 with timezone keeps it sortable + cosign-friendly.
+          BUILD_DATE=$(git log -1 --format=%cI "$GITHUB_SHA")
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
 
           # `:latest` only on clean releases. Pre-release tags (v0.1.0-beta.1,
           # v0.1.0-rc.1) must not move `:latest` or `docker pull crewship:latest`
@@ -174,7 +184,7 @@ jobs:
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
-            DATE=${{ github.event.repository.updated_at }}
+            DATE=${{ steps.meta.outputs.build_date }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
           # GitHub Actions cache for buildx — survives across runs and cuts
           # repeated layer rebuilds (pnpm install, go mod download) to seconds.

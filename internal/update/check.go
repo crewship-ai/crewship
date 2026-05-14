@@ -140,6 +140,14 @@ func fetchLatest(ctx context.Context, url string) (tag, notes, htmlURL string, e
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "crewship-update-check")
+	// GitHub's unauthenticated API quota is 60 req/h *per IP*. Multiple
+	// Crewship instances behind a corporate NAT collectively exhaust that
+	// budget on simultaneous cold boots. Setting GITHUB_TOKEN (any PAT or
+	// fine-grained token with public-repo read scope) bumps the quota to
+	// 5000/h per token. Empty value preserves the unauthenticated path.
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

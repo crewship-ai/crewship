@@ -193,6 +193,59 @@ production data and a bad one is hard to undo. Guardrails:
    bundle into a newer schema, every migration between source and
    target gets a chance to populate any new columns.
 
+## Telemetry (crash reporting) — Sentry setup
+
+Crewship ships with opt-in Sentry-backed crash reporting wired through
+`internal/crashreport`. The binary is a no-op until BOTH a DSN is baked
+in via `-X .../crashreport.DSN=...` AND the operator's `telemetry_opt_in`
+row in `app_settings` is `"1"`.
+
+### One-time project setup
+
+1. Create a Sentry project (Platform: Go). Note its DSN.
+2. Add `SENTRY_DSN` to the repo's GitHub Actions secrets. The
+   `release.yml` and `nightly.yml` workflows pass it as a build-arg to
+   goreleaser and the Docker image build. Local `go build` and PRs
+   from forks leave the DSN empty, so they ship telemetry-disabled.
+3. **Configure server-side data-scrubbing rules in the Sentry UI.**
+   The client-side BeforeSend hook in `sentry_adapter.go` scrubs
+   request headers, query strings, request bodies, the User field,
+   and several context maps. It cannot reliably scrub free-form
+   strings that *we* generate, e.g.
+   `fmt.Errorf("auth failed for %s", userEmail)`. The only sound
+   defense for that class of leak is regex-based scrubbing at the
+   Sentry server.
+
+   Project Settings → Security & Privacy → Data Scrubbing → add:
+   - `@email-pattern`     — emails in messages, breadcrumbs, exception values
+   - `@password-pattern`  — Sentry built-in
+   - `@creditcard-pattern` — Sentry built-in
+   - Custom rule: `[Mask] [Message] [^Bearer\s+\S+]` — bearer tokens
+   - Custom rule: `[Mask] [Message] [^sk-[A-Za-z0-9]{20,}]` — OpenAI/Anthropic-style keys
+
+   These rules run inside Sentry before the event is persisted; if
+   the regex matches, the matched substring is replaced with
+   `[Filtered]`. Verify by raising a test error containing the
+   pattern and checking the resulting event in the UI.
+
+### What gets sent
+
+Stack traces, exception messages (subject to server-side scrubbing
+above), Crewship version + commit, OS name, an anonymous install ID
+(random 32-hex, generated on first opt-in, stable across
+opt-out/opt-in cycles).
+
+### What is never sent
+
+Workspace data, credential values, request bodies, Authorization
+or Cookie headers, query-string secrets, environment variables, the
+user's hostname (`ServerName` is overridden with the anonymous
+install ID), the Go module list, or any of the runtime/device/culture
+contexts that sentry-go's default integrations would normally attach.
+See `internal/crashreport/sentry_adapter.go::scrubEvent` for the
+client-side filter and `crashreport_test.go::TestScrubEvent_DropsLeakyContexts`
+for the pinning test.
+
 ## Branch protection
 
 `main` is protected; configure via `scripts/setup-branch-protection.sh`

@@ -11,7 +11,36 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/getsentry/sentry-go"
 )
+
+// newEventWithSensitiveData builds a maximally-populated Sentry event so
+// the scrubber test can verify every drop rule in one assertion pass.
+// New fields added to Sentry's Event type can be appended here when we
+// extend scrubEvent.
+func newEventWithSensitiveData() *sentry.Event {
+	return &sentry.Event{
+		Contexts: map[string]sentry.Context{
+			"device":                {"arch": "arm64", "num_cpu": 10},
+			"runtime":               {"name": "go", "version": "go1.26"},
+			"culture":               {"locale": "en_US"},
+			"environment_variables": {"DATABASE_URL": "postgres://user:pw@..."},
+			"os_user":               {"name": "pavelsrba"},
+			"os":                    {"name": "darwin"},
+		},
+		User: sentry.User{
+			ID:       "u-123",
+			Email:    "test@example.com",
+			Username: "pavel",
+		},
+		Modules: map[string]string{
+			"github.com/foo/bar": "v1.2.3",
+		},
+		Breadcrumbs: []*sentry.Breadcrumb{
+			{Message: "did a thing", Data: map[string]interface{}{"path": "/api/v1/secret"}},
+		},
+	}
+}
 
 func setupDB(t *testing.T) *database.DB {
 	t.Helper()
@@ -249,6 +278,39 @@ func TestShouldScrubHeader(t *testing.T) {
 	for _, h := range keep {
 		if ShouldScrubHeader(h) {
 			t.Errorf("ShouldScrubHeader(%q) = true, want false", h)
+		}
+	}
+}
+
+// TestScrubEvent_DropsLeakyContexts pins the scrub list against future
+// sentry-go upgrades. If a dep bump adds a new field under any of these
+// context keys, the test still passes because we drop them wholesale; if
+// someone removes one of the delete() calls in scrubEvent, this test
+// fails.
+func TestScrubEvent_DropsLeakyContexts(t *testing.T) {
+	event := newEventWithSensitiveData()
+	got := scrubEvent(event, nil)
+	if got == nil {
+		t.Fatal("scrubEvent returned nil for non-nil input")
+	}
+	for _, key := range []string{"device", "runtime", "culture", "environment_variables", "os_user"} {
+		if _, present := got.Contexts[key]; present {
+			t.Errorf("context %q must be dropped, still present", key)
+		}
+	}
+	// "os" context (GOOS name) IS retained — useful for triage and harmless.
+	if _, present := got.Contexts["os"]; !present {
+		t.Error(`"os" context should be preserved`)
+	}
+	if got.User.Email != "" || got.User.ID != "" || got.User.Username != "" {
+		t.Errorf("User field must be cleared, got %+v", got.User)
+	}
+	if len(got.Modules) != 0 {
+		t.Errorf("Modules must be cleared, got %d entries", len(got.Modules))
+	}
+	for i, bc := range got.Breadcrumbs {
+		if bc != nil && bc.Data != nil {
+			t.Errorf("breadcrumb[%d].Data must be cleared, got %+v", i, bc.Data)
 		}
 	}
 }

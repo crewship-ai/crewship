@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/crashreport"
@@ -123,10 +125,17 @@ func setTelemetry(enabled bool) error {
 }
 
 // openLocalDB opens the database at the same path `crewship start` uses
-// when no --db override is provided. The CLI sub-commands here don't run a
-// full server, so we open the file directly. Migrations are NOT applied
-// here — the `crewship telemetry` sub-commands assume the server has been
-// started at least once.
+// when no --db override is provided, and brings the schema up to date.
+//
+// Calling Migrate here matters for the CI-provisioning flow:
+//
+//	crewship telemetry on   # set consent before bringing the service up
+//	crewship start
+//
+// Without the Migrate call the first sub-command crashes with
+// "no such table: app_settings" because the v88 migration has never run.
+// On an already-migrated DB Migrate is a fast no-op (one COUNT per
+// migration row), so the extra cost on the warm path is negligible.
 func openLocalDB() (*database.DB, error) {
 	dataDir, err := database.DefaultDataDir()
 	if err != nil {
@@ -135,6 +144,14 @@ func openLocalDB() (*database.DB, error) {
 	db, err := database.Open(dataDir.DatabaseURL())
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
+	}
+	// silentLogger: the sub-command's user surface is the success/failure
+	// message we print ourselves; the per-migration INFO lines from
+	// Migrate would just be noise on a no-op call.
+	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := database.Migrate(context.Background(), db.DB, silent); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
 	return db, nil
 }

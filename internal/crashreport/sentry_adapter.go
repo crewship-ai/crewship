@@ -93,10 +93,38 @@ func scrubEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 	}
 	scrubRequest(event.Request)
 	event.User = sentry.User{} // never identify the user
-	// Sentry collects host env vars by default; we don't trust them not to
-	// contain DATABASE_URL with creds.
+
+	// Defense-in-depth: drop context maps that may grow new fields in
+	// future sentry-go versions. As of v0.46.2 the device/runtime/os
+	// contexts only contain harmless build metadata (GOARCH, NumCPU,
+	// runtime version), but pinning that assumption to the current
+	// version risks a quiet leak after a dep bump. The "os" context
+	// (just GOOS name) is allowed through because it's useful for
+	// triaging platform-specific crashes.
+	delete(event.Contexts, "device")
+	delete(event.Contexts, "runtime")
+	delete(event.Contexts, "culture")
 	delete(event.Contexts, "environment_variables")
 	delete(event.Contexts, "os_user")
+
+	// Sentry-go does not currently auto-populate Breadcrumbs unless the
+	// sentryhttp middleware is installed (we don't use it). If that
+	// changes — or a future code path starts calling AddBreadcrumb —
+	// these would otherwise carry request paths through verbatim.
+	// Scrub them now so the protection is in place if breadcrumbs ever
+	// get added: drop Data wholesale (free-form, can contain anything)
+	// and keep Message only.
+	for _, bc := range event.Breadcrumbs {
+		if bc != nil {
+			bc.Data = nil
+		}
+	}
+
+	// Modules integration ships the Go module list. Not strictly
+	// "personally identifying" but reveals the customer's exact toolchain
+	// inventory — turn it off; we get the same info from the Release tag.
+	event.Modules = nil
+
 	return event
 }
 
