@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -66,7 +65,13 @@ func TestCheckTelemetryStatus(t *testing.T) {
 	})
 
 	t.Run("enabled without DSN → WARN", func(t *testing.T) {
-		// Still opted-in from the prior subtest.
+		// Explicit setup: subtests must be order-independent so that
+		// running a single subtest with `-run` produces the same result
+		// as the full suite. CodeRabbit flagged the implicit "still
+		// opted-in from the prior subtest" coupling.
+		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
+			t.Fatalf("SetOptIn(true): %v", err)
+		}
 		got := checkTelemetryStatus(ctx, db.DB, "")
 		if got.status != "WARN" {
 			t.Errorf("status = %q, want WARN; detail=%q", got.status, got.detail)
@@ -97,29 +102,18 @@ func TestCheckDsnReachability(t *testing.T) {
 		}
 	})
 
-	t.Run("opted in + DSN reachable → PASS", func(t *testing.T) {
-		// Spin up a local TCP listener as a stand-in for the Sentry host.
-		// Tests must not assume internet access; a loopback dial is enough
-		// to exercise the success path.
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("listen: %v", err)
-		}
-		defer ln.Close()
-
-		// The check dials host:443. Override the path by handing it a DSN
-		// whose "host" component is exactly the listener address (which
-		// includes the port). The check appends :443; the helper parses
-		// the DSN host as the substring between '@' and '/'. We trick it
-		// by setting the DSN so dsnEndpointHost returns "127.0.0.1:PORT",
-		// and the dialer concatenates ":443" — which would NOT reach the
-		// listener. So this subtest instead asserts the FAIL path by
-		// pointing at a known-closed port and confirming WARN.
+	t.Run("opted in + DSN unreachable → WARN", func(t *testing.T) {
+		// The check dials host:443; we point it at a DNS name guaranteed
+		// not to resolve so the dialer fails fast. WARN (not FAIL) because
+		// Sentry being unreachable is not a Crewship health signal —
+		// it's an external service outage. CodeRabbit flagged the prior
+		// version: subtest title said "reachable → PASS" but the body
+		// asserted the unreachable path. Renamed to match what it
+		// actually tests, and removed the leftover net.Listen setup that
+		// the comment explained but the code never used.
 		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
 			t.Fatalf("SetOptIn: %v", err)
 		}
-		// Unreachable DSN host on a randomly-allocated port that nobody is
-		// listening on: WARN (not FAIL).
 		got := checkDsnReachability(ctx, db.DB, "https://k@127.0.0.1.unreachable.invalid/1")
 		if got.status != "WARN" {
 			t.Errorf("status = %q, want WARN for unreachable host; detail=%q", got.status, got.detail)
@@ -127,7 +121,11 @@ func TestCheckDsnReachability(t *testing.T) {
 	})
 
 	t.Run("opted in + empty DSN → INFO", func(t *testing.T) {
-		// SetOptIn(true) already set above.
+		// Same isolation rationale as TestCheckTelemetryStatus subtests:
+		// don't rely on prior subtest leaving opt-in=true.
+		if _, _, err := crashreport.SetOptIn(ctx, db.DB, true); err != nil {
+			t.Fatalf("SetOptIn(true): %v", err)
+		}
 		got := checkDsnReachability(ctx, db.DB, "")
 		if got.status != "INFO" {
 			t.Errorf("status = %q, want INFO; detail=%q", got.status, got.detail)

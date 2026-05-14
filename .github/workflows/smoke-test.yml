@@ -75,10 +75,18 @@ jobs:
       - name: Verify SHA-256 against checksums.txt
         # Mirrors scripts/install.sh:verify_checksum so the smoke test
         # catches checksum drift in the same way an end-user install would.
+        #
+        # The match is done by `awk -v a=... '$2==a'` rather than grep so
+        # special characters in archive names (the goreleaser default has
+        # underscores and dots; an unlucky future name could contain `+`
+        # or `.` that grep would interpret as regex metacharacters) match
+        # literally. The exact-second-field test also means a future
+        # checksums.txt with a filename containing the archive as a
+        # substring won't false-match.
         run: |
           set -euo pipefail
           ARCHIVE="${{ steps.archive.outputs.name }}"
-          EXPECTED=$(grep -E "  ${ARCHIVE}$" checksums.txt | awk '{print $1}' | head -n1)
+          EXPECTED=$(awk -v a="$ARCHIVE" '$2==a {print $1; exit}' checksums.txt)
           if [ -z "$EXPECTED" ]; then
             echo "::error::checksum for ${ARCHIVE} missing from checksums.txt"
             exit 1
