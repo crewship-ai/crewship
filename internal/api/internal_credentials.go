@@ -28,24 +28,50 @@ const sidecarUseDebounce = 60 * time.Second
 // the audit timeline previously showed only manual Test/Rotate/Revoke,
 // not the actual sidecar-driven USE that's what an incident responder
 // most cares about ("when was this credential last touched?").
+//
+// The debounce check is implemented as an atomic compare-and-swap
+// against the credentials.last_used_at column rather than a read-then-
+// decide pattern. Pre-fix two parallel sidecar polls within the
+// debounce window could both read the stale timestamp, both decide to
+// record, and emit two audit rows for what should have been one event.
+// CodeRabbit caught the race on the first review pass. The CAS
+// guarantees exactly one goroutine wins per debounce window — the
+// loser's UPDATE matches zero rows and bails before recording.
 func maybeRecordSidecarUse(ctx context.Context, db *sql.DB, logger *slog.Logger, credID string, ip string) {
 	if credID == "" {
 		return
 	}
-	var lastUsed sql.NullString
-	if err := db.QueryRowContext(ctx,
-		`SELECT last_used_at FROM credentials WHERE id = ?`, credID).Scan(&lastUsed); err != nil {
-		// Lookup failure shouldn't block the fetch. Log + record best-effort.
+
+	// CAS step: bump last_used_at iff the stored value is older than
+	// (now - debounce) — or NULL (never used). A successful UPDATE means
+	// we own the right to record. Concurrent callers see RowsAffected == 0
+	// and bail.
+	now := time.Now().UTC()
+	threshold := now.Add(-sidecarUseDebounce).Format(time.RFC3339)
+	nowRFC := now.Format(time.RFC3339)
+
+	res, err := db.ExecContext(ctx, `
+		UPDATE credentials
+		   SET last_used_at = ?
+		 WHERE id = ?
+		   AND (last_used_at IS NULL OR last_used_at < ?)`,
+		nowRFC, credID, threshold)
+	if err != nil {
+		// CAS failure (DB error, etc.) shouldn't block the fetch — log
+		// and skip. Worst case the audit row is missed for this poll;
+		// the next poll past the debounce will catch it.
 		if logger != nil {
-			logger.Debug("sidecar use audit: lookup last_used_at", "credential_id", credID, "error", err)
+			logger.Debug("sidecar use audit: CAS update failed", "credential_id", credID, "error", err)
 		}
-	} else if lastUsed.Valid {
-		if t, err := time.Parse(time.RFC3339, lastUsed.String); err == nil {
-			if time.Since(t) < sidecarUseDebounce {
-				return // debounced — recent enough
-			}
-		}
+		return
 	}
+	n, err := res.RowsAffected()
+	if err != nil || n == 0 {
+		// Lost the race (another goroutine just bumped it) or the row
+		// doesn't exist at all (already deleted). Either way: skip.
+		return
+	}
+
 	if err := RecordCredentialEvent(ctx, db, logger, credID, AuditEventUse, "" /* agent unknown at this layer */, ip, map[string]any{"source": "sidecar_fetch"}); err != nil {
 		if logger != nil {
 			logger.Warn("sidecar use audit: record failed", "credential_id", credID, "error", err)

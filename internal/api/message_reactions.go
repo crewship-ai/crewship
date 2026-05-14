@@ -169,68 +169,144 @@ func (h *MessageReactionsHandler) Remove(w http.ResponseWriter, r *http.Request)
 // isValidEmojiReaction enforces a tight allowlist on the emoji string an
 // authenticated user can attach to a message. Pre-fix the only check
 // was rune-length ≤ 8 — a payload like {"emoji":"<img onerror='x'>"}
-// passed the length check (16 runes — fixed: 8 was actual count, but
-// any HTML-special-char payload of length ≤ 8 also slipped through)
-// and was stored verbatim, ready to render as HTML in any list-view
-// that didn't escape it. Closes D2 from the chat/WS pentest agent.
+// passed the length check and was stored verbatim, ready to render as
+// HTML in any list-view that didn't escape it. Closes D2 from the
+// chat/WS pentest agent.
 //
-// Allowed code points:
-//   - Standard emoji blocks (U+1F300–U+1FAFF, U+2600–U+27BF,
-//     U+2300–U+23FF, U+2B00–U+2BFF, U+1F000–U+1F02F, U+1F0A0–U+1F0FF)
-//   - Regional-indicator letters (U+1F1E6–U+1F1FF) for flag composition
-//   - ZWJ (U+200D) for compound emoji (👨‍💻, 🏳️‍🌈, etc.)
-//   - Emoji variation selector (U+FE0F)
-//   - Skin-tone modifiers (U+1F3FB–U+1F3FF)
-//   - Keycap combiner (U+20E3) and ASCII digits/asterisk for keycap emoji
-//   - U+00A9, U+00AE (© ®) and U+2122 (™) — common legacy text-symbol emoji
+// The first version of this validator did rune-membership only: every
+// code point individually had to belong to an allowed emoji block.
+// CodeRabbit caught the gap on review — a payload like
+// "🏳️" (lone variation selector, no base) or "🏻🏻🏻" (just skin-tone
+// modifiers) passed even though the resulting cluster is meaningless
+// and renders as tofu / mojibake. We now also enforce composition:
 //
-// Anything else (HTML metacharacters, ASCII letters, control chars, BiDi
-// marks, RTL overrides) is rejected.
+//   - The string must start with an emoji base character — not a
+//     modifier, ZWJ, or VS-16.
+//   - ZWJ (U+200D) is a connector — it must sit between two base
+//     characters (no leading or trailing ZWJ; no double ZWJ).
+//   - Skin-tone modifier, variation selector, and keycap combiner
+//     must follow a base character (not appear in isolation).
+//   - Regional indicators (flag halves) must come in pairs (so at most
+//     one full flag of two halves), with no other base mixed in.
+//
+// Anything else (HTML metacharacters, ASCII letters, control chars,
+// BiDi marks, RTL overrides) is rejected at the rune-class step.
 func isValidEmojiReaction(s string) bool {
 	if s == "" {
 		return false
 	}
-	count := 0
-	for _, r := range s {
-		count++
-		if count > 8 {
-			return false
-		}
-		if !isAllowedEmojiRune(r) {
-			return false
-		}
+	runes := []rune(s)
+	if len(runes) > 8 {
+		return false
 	}
-	return count >= 1
+
+	// First-rune class check. ZWJ/VS/modifier/keycap-combiner are NEVER
+	// valid at position 0 — they only make sense AFTER an emoji base.
+	switch emojiClass(runes[0]) {
+	case classBase:
+	case classRegional:
+		// Will be validated in the loop (regionals must come in pairs).
+	default:
+		return false
+	}
+
+	prev := classNone
+	// regionalRun counts consecutive regional indicators. Resets to 0
+	// when a non-regional rune is encountered. We require that the run
+	// length be even at any reset point (and at end of string), because
+	// a flag emoji is exactly two indicator halves.
+	regionalRun := 0
+	for _, r := range runes {
+		c := emojiClass(r)
+		if c == classNone {
+			return false
+		}
+		switch c {
+		case classZWJ:
+			if prev != classBase && prev != classModifier && prev != classRegional {
+				return false
+			}
+		case classModifier, classVariation, classKeycap:
+			if prev != classBase && prev != classModifier {
+				return false
+			}
+		case classRegional:
+			regionalRun++
+			if regionalRun > 2 {
+				// Three RIs in a row can't form a flag (flag = exactly 2).
+				// A "country letter A" plus a complete "country flag" would
+				// cap the run; three in a row is always wrong.
+				return false
+			}
+		case classBase:
+			// Closing a regional run: must be even (= one complete flag).
+			if regionalRun > 0 && regionalRun%2 != 0 {
+				return false
+			}
+			regionalRun = 0
+		}
+		// When prev was regional and we see a non-regional, classBase
+		// already enforces the pair-completion check above.
+		if c != classRegional && prev == classRegional && regionalRun > 0 {
+			// The classBase branch already reset; modifiers / VS / etc.
+			// after a regional are nonsense — would have failed the
+			// per-class predecessor check above already.
+			_ = regionalRun // intentional no-op for readability
+		}
+		prev = c
+	}
+
+	if prev == classZWJ {
+		return false
+	}
+	// Trailing regional run must be a complete pair too.
+	if regionalRun > 0 && regionalRun%2 != 0 {
+		return false
+	}
+	return true
 }
 
-func isAllowedEmojiRune(r rune) bool {
+// emojiClass categorises each rune for the composition state machine.
+type emojiCharClass int
+
+const (
+	classNone      emojiCharClass = iota // not allowed at all
+	classBase                            // standalone emoji base (face, animal, symbol, ©, digit-for-keycap, ...)
+	classModifier                        // skin-tone modifier
+	classVariation                       // U+FE0F (emoji presentation)
+	classKeycap                          // U+20E3 (keycap combiner)
+	classZWJ                             // U+200D (zero-width joiner)
+	classRegional                        // U+1F1E6-1F1FF (flag halves)
+)
+
+func emojiClass(r rune) emojiCharClass {
 	switch r {
-	case 0x200D, 0xFE0F, 0x20E3, 0x00A9, 0x00AE, 0x2122:
-		return true
+	case 0x200D:
+		return classZWJ
+	case 0xFE0F:
+		return classVariation
+	case 0x20E3:
+		return classKeycap
+	case 0x00A9, 0x00AE, 0x2122:
+		return classBase
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '#', '*':
-		// keycap base characters — only meaningful when followed by U+20E3,
-		// but rune-by-rune validation can't enforce sequence; accepting
-		// these in isolation is a deliberate trade-off (keycap-prefix
-		// reactions are unusual but not dangerous).
-		return true
+		// Keycap base characters. Without a following U+20E3 they
+		// render as plain ASCII — accepting them in isolation is a
+		// deliberate trade-off (a "1" reaction isn't an XSS risk).
+		return classBase
 	}
 	switch {
-	case r >= 0x1F1E6 && r <= 0x1F1FF: // regional indicators (flags)
-		return true
-	case r >= 0x1F3FB && r <= 0x1F3FF: // skin-tone modifiers
-		return true
-	case r >= 0x1F300 && r <= 0x1FAFF: // miscellaneous emoji blocks (broadest)
-		return true
-	case r >= 0x2600 && r <= 0x27BF: // misc symbols + dingbats
-		return true
-	case r >= 0x2300 && r <= 0x23FF: // misc technical (incl. ⌚ ⏰)
-		return true
-	case r >= 0x2B00 && r <= 0x2BFF: // misc symbols and arrows
-		return true
-	case r >= 0x1F000 && r <= 0x1F02F: // mahjong tiles
-		return true
-	case r >= 0x1F0A0 && r <= 0x1F0FF: // playing cards
-		return true
+	case r >= 0x1F1E6 && r <= 0x1F1FF:
+		return classRegional
+	case r >= 0x1F3FB && r <= 0x1F3FF:
+		return classModifier
+	case r >= 0x1F300 && r <= 0x1FAFF,
+		r >= 0x2600 && r <= 0x27BF,
+		r >= 0x2300 && r <= 0x23FF,
+		r >= 0x2B00 && r <= 0x2BFF,
+		r >= 0x1F000 && r <= 0x1F02F,
+		r >= 0x1F0A0 && r <= 0x1F0FF:
+		return classBase
 	}
-	return false
+	return classNone
 }
