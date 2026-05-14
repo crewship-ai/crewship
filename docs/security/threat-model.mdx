@@ -37,24 +37,47 @@ We **do not** trust:
 
 ## Layer 1 — Container isolation
 
-Every agent runs in its own Linux container. The container:
+Every agent runs in its own Linux container. The defaults applied in
+`internal/provider/docker/docker_container.go`:
 
-- Runs as **non-root UID 1001** (`agent`), with the sidecar at UID 1002.
-- Drops **all Linux capabilities** (`--cap-drop=ALL`) — no
-  `SYS_ADMIN`, no `NET_RAW`, no `SETUID`.
-- Joins an **isolated Docker network** with no DNS resolution out of
-  the box; egress is only allowed where the operator has carved a hole.
-- Mounts the workspace directory read/write and `/output/<agent>/`
-  for any persistent files; nothing else is bind-mounted by default.
-- Has the Docker socket **explicitly absent**. The agent cannot launch
-  sibling containers, escape via a `docker.sock` mount, or
-  enumerate other agents on the host.
+- **UID 1001** (`agent`) for the agent process; UID 1002 for the
+  per-agent sidecar.
+- **`CapDrop: ["ALL"]`** as the starting capability set.
+- **`CapAdd: ["NET_RAW"]`** is added back so the agent can use `ping`
+  and other ICMP-shaped probes inside its sandbox. This is the one
+  capability that survives the drop.
+- **`no-new-privileges`** security opt + **read-only root filesystem**
+  + **PID limit** + **memory + CPU quotas** + tmpfs `/tmp` with a 500 MB
+  cap.
+- **No Docker socket bind-mounted** into the agent container. The
+  agent cannot launch sibling containers, mount the host docker.sock,
+  or enumerate peers.
+- Mounts: the workspace directory read/write and `/output/<agent>/`
+  for any persistent files; nothing else by default.
+- `NetworkMode` is **instance-wide**, set from the server config
+  (`p.cfg.Network`) — *not* per-agent. Operators who need per-agent
+  network isolation must build it at the host network layer (e.g.
+  per-crew Docker networks) rather than rely on the runtime default.
 
-Blast radius if the agent breaks out of the container runtime: it
-gets the host process namespace as UID 1001 with no capabilities and
-no Docker socket. This is the standard rootless-container failure
-mode, and the operator is expected to layer additional host hardening
-(SELinux, AppArmor, seccomp, kernel patching) on top.
+### Privileged-mode escape hatch
+
+A crew can be flagged `Privileged: true` in its security profile —
+needed for DinD or anything requiring `SYS_ADMIN`. When that flag is
+set the runtime **disables** `no-new-privileges` and **drops**
+`ReadonlyRootfs` because Docker rejects both under privileged mode.
+`CapDrop: ALL` still applies on paper, but with `Privileged=true` the
+container has full root-equivalent host access regardless. Treat a
+privileged crew as **outside this threat model** — its isolation
+guarantees are whatever the host runtime provides.
+
+### Blast radius if the agent escapes
+
+If a non-privileged agent breaks out of the container runtime it
+gets the host process namespace as UID 1001, with `CapDrop: ALL +
+NET_RAW` capabilities, no Docker socket, read-only root, and the
+quotas above. This is the standard rootless-container failure mode;
+operators are expected to layer host hardening (SELinux, AppArmor,
+seccomp, kernel patching) on top.
 
 Detail: [Container isolation](/security/container-isolation).
 
@@ -79,12 +102,17 @@ The agent never sees raw credentials. Instead:
 The agent therefore cannot:
 
 - Read API keys via `printenv`, `cat /proc/1/environ`, or any other
-  env-var introspection.
-- Reach any HTTP destination not in its allowlist (DNS resolution
-  inside the agent container is overridden to route through the
-  sidecar; raw IP egress is blocked at the network policy).
+  env-var introspection — credentials don't live in the agent's env.
+- Reach an HTTP destination not in its allowlist **as long as it uses
+  the `HTTP_PROXY` / `HTTPS_PROXY` env vars** that orchestrator
+  injects (`http://127.0.0.1:9119`). Well-behaved Go/Python/Node HTTP
+  clients honor this; clients that ignore proxy env vars (or that
+  open raw sockets) can bypass it. Hard egress filtering at the
+  network layer is the operator's responsibility — see
+  [Container isolation](/security/container-isolation) for hardening
+  options.
 - Exfiltrate credentials by tricking the LLM into echoing them — the
-  scrubber (Layer 4) drops anything that looks like a key in the
+  scrubber (Layer 3) drops anything that looks like a key in the
   agent's output before it lands in the journal or web UI.
 
 Detail: [Credentials guide](/guides/credentials) for the operator
@@ -108,15 +136,9 @@ scrubber owns **13+ credential-shaped patterns**:
 - Generic private-key blocks (`-----BEGIN ... PRIVATE KEY-----`)
 - … and the list grows as the maintainer encounters new shapes in the wild.
 
-A scrub hit replaces the matched substring with `[REDACTED:<type>]`
-and increments a metric. The metric is what surfaces in operator
-dashboards — a sudden spike usually means a misaligned agent is
-trying to echo a credential, and the operator can investigate from
-the journal.
-
-The scrubber is **fail-closed** — a panic during scrubbing produces
-no output rather than raw output. Tests pin every pattern to a
-golden file (`internal/scrubber/testdata/`).
+A scrub hit replaces the matched substring with a `[REDACTED:<type>]`
+marker. The operator can search journal entries for the marker to
+investigate which agent tried to echo what.
 
 ## Layer 4 — Keeper policy layer
 
@@ -163,23 +185,24 @@ Detail: [Keeper guide](/guides/keeper).
 ## Beta posture and known gaps
 
 Crewship v0.1 beta is the first public beta. The threat model above
-describes the **target** state. Gaps the maintainer is openly tracking:
+describes the **current implementation**, with these gaps:
 
-- **Egress filtering is allowlist-only**, not full L7 filtering. A
-  compromised agent on an allowed host can still send arbitrary
-  request bodies to that host.
-- **Scrubber patterns are conservative but not exhaustive.** New
-  credential shapes the maintainer hasn't seen yet won't match.
-  Report misses by opening a security issue.
+- **Egress is `HTTP_PROXY`-style, not network-enforced.** Agents that
+  bypass `HTTP_PROXY` or open raw sockets exit the allowlist
+  unchecked. Operators who need hard egress control must layer Docker
+  network policies (`--internal`, custom networks, egress firewall)
+  on top.
+- **`NET_RAW` is added back** so the agent can `ping`. Acceptable for
+  the convenience trade-off, but operators with stricter requirements
+  can drop it in their crew security profile.
+- **Privileged crews bypass most of Layer 1.** Anything flagged
+  `Privileged: true` is outside this threat model.
 - **Container-runtime isolation is the host's responsibility.** The
   default Docker config is _not_ rootless, and Apple Containers /
   Colima have different threat profiles than upstream Docker.
-- **Keeper rulesets ship empty.** The operator is responsible for
-  writing the rules that matter for their environment — there is no
-  "secure by default" Keeper policy yet.
-
-When a gap closes, the entry leaves this list and lands in the
-appropriate layer description above.
+- **Keeper rulesets ship empty.** Operators write the rules that
+  matter for their environment; there is no "secure by default"
+  policy yet.
 
 ## Reporting issues
 

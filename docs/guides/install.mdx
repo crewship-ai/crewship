@@ -175,13 +175,21 @@ crewship version           # SHA + build date
 crewship doctor            # runtime + data-dir + DB sanity check
 ```
 
-`crewship doctor` prints what it detected:
+`crewship doctor` runs the following checks (each `PASS` / `WARN` /
+`FAIL` with a one-line detail):
 
-- Container runtime (`docker` / `podman` / `colima` / …) and whether
-  the socket responds
-- Data directory location and write permissions
-- Database file present + readable
-- Whether [telemetry](/guides/telemetry) is on or off
+- Container runtime detected and socket responds
+- Data directory present (with `--fix` it gets created)
+- Data directory writable
+- Database migration version current
+- Sidecar binary present
+- `NEXTAUTH_SECRET` is set
+- Server reachable on its configured port
+
+`--fix` enables safe auto-repairs (currently: create the data
+directory if missing). To check whether crash-reporting telemetry is
+opted in, use `crewship telemetry status` instead — that's a separate
+command.
 
 Next stop: [quickstart](/quickstart) for the first run and admin user
 bootstrap. For development work (running the Go server + Next.js dev
