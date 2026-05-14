@@ -33,6 +33,23 @@ Checkpoints are cheap to mint and cheap to ignore — favour creating one whenev
 
 Skip checkpoints for **short, single-step missions** (the journal IS the bookmark — one entry to inspect), **transient missions in development** that you'll delete anyway, and **missions that have done no work yet** — Create returns 409 Conflict if the mission has no journal entries to anchor against, by design.
 
+## Key concepts
+
+| Term | What it means here |
+|------|-------------------|
+| **Checkpoint** | One row in the `checkpoints` table — `(id, mission_id, label, journal_cursor, state, fork_of, …)`. Cheap to mint (the snapshot is a single `INSERT`); persisted until explicitly deleted. The user-facing object every other operation hangs off. |
+| **Journal cursor** | The `journal_cursor` column. Holds the **entry ID** (not timestamp) of the last journal entry visible when the checkpoint was captured. Used as an anchor — everything posted after this ID is "drift" by definition. |
+| **State snapshot** | The `state` column. Plaintext JSON capturing mission status, agent positions, pending tool calls, and anything else the orchestrator's `Capture` walks out of the journal. Plaintext is deliberate — checkpoints are operational metadata, not credentials, and queryable JSON beats opaque blobs. |
+| **Mission** | The parent that owns the checkpoint via `mission_id`. Workspace and crew scope are inherited from the mission row, so checkpoints can't escape their tenancy by accident. |
+| **`Capture()`** | The internal function (`cartographer.Capture(ctx, db, missionID)`) that walks the mission's journal entries and produces `(snapshot, cursor)`. Pure function — no side effects, idempotent given the same input journal. |
+| **Advisory restore** | `POST /checkpoints/{id}/restore` returns `(checkpoint, divergence_list)` without mutating anything. The mission keeps running. The UI shows the diff and lets the operator decide whether to fork. |
+| **Divergence list** | The `warn_divergence` field on a restore response — an enumeration of journal entry types (`mission.status_change`, `exec.command`, …) that posted after the checkpoint's cursor. Long list = the mission has moved on; consider a fork rather than trying to reconcile. |
+| **Fork** | `POST /checkpoints/{id}/fork`. Atomically: creates a fresh mission with a new `mission_id`, captures a new checkpoint in that mission at the *source* checkpoint's cursor, sets `fork_of` on the new checkpoint to the source, and writes a `fork.created` journal entry to the new mission. |
+| **`fork_of`** | The parent-pointer column on a forked checkpoint. The mission-level analogue of a Git parent SHA. `ON DELETE SET NULL` — deleting the ancestor checkpoint orphans the child rather than cascading destruction of forked missions. |
+| **Orphaned fork** | A forked checkpoint whose `fork_of` was set to NULL because the ancestor got deleted. The forked mission itself is unaffected — it has its own ID, its own journal, its own work. Only the genealogy pointer is lost. |
+| **Workspace isolation** | Enforced at the handler (mission must belong to the caller's workspace) AND at the package layer (`cartographer.Get` / `Delete` re-check). Cross-tenant IDs return 404 with the same shape as "not found" — by design, to prevent enumeration. |
+| **Journal entry types** | Three checkpoint-emitted types: `checkpoint.created` (info, on Create), `checkpoint.restored` (info, on advisory Restore — divergence list in payload), `fork.created` (notice, on Fork — written to the *new* mission's journal, not the parent's). |
+
 ## Schema
 
 ```sql
