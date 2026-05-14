@@ -59,7 +59,13 @@ jobs:
           # time. Empty fallback means a PR build from a fork (no secret
           # access) produces a bundle with Sentry init no-op'd — the
           # same defense-in-depth as the Go side.
-          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          #
+          # SENTRY_DSN_FRONTEND (not SENTRY_DSN) routes the embedded
+          # web UI's events to the `crewship-frontend` Sentry project,
+          # not the Go-backend project. Per-platform projects let us
+          # quota-cap and tag separately; see scripts/sentry-bootstrap.sh
+          # for the project ↔ secret mapping.
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
           NEXT_PUBLIC_CREWSHIP_VERSION: ${{ steps.meta.outputs.version }}
 
       - name: Copy static export for embedding

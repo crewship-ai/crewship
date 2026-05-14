@@ -139,7 +139,12 @@ jobs:
           # the "beta" environment, keeping nightly noise out of the
           # production Sentry view while still surfacing it alongside
           # the beta-channel events maintainers actually watch.
-          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          #
+          # SENTRY_DSN_FRONTEND (not SENTRY_DSN) routes to the
+          # `crewship-frontend` Sentry project; see release.yml for
+          # the per-platform rationale and scripts/sentry-bootstrap.sh
+          # for the secret mapping.
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
           NEXT_PUBLIC_CREWSHIP_VERSION: nightly-${{ github.sha }}
 
       - name: Copy static export for embedding
