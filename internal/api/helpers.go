@@ -221,21 +221,6 @@ func readJSON(r *http.Request, v interface{}) error {
 	return json.Unmarshal(body, v)
 }
 
-// decodeBody reads + decodes the request body into v. On failure it writes a
-// 400 response with a canonical error shape and returns false; callers should
-// "return" immediately when this returns false.
-//
-// Use this for the very common "decode-or-400" handler entry pattern. For
-// handlers that need to render different error messages on decode failure,
-// fall through to json.NewDecoder + replyError directly.
-func decodeBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
-	if err := readJSON(r, v); err != nil {
-		replyError(w, http.StatusBadRequest, "invalid request body")
-		return false
-	}
-	return true
-}
-
 // requireRole checks the request's actor role against canRole. On failure it
 // writes a 403 problem response (matching writeProblem's RFC 7807 shape) and
 // returns false; callers should "return" immediately when this returns false.

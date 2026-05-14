@@ -234,4 +234,3 @@ func warnCoordinatorDeprecated(cmd *cobra.Command, _ []string) {
 		fmt.Fprintln(os.Stderr, "warning: COORDINATOR role is deprecated; use LEAD instead. Setting role anyway.")
 	}
 }
-
